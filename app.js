@@ -825,15 +825,22 @@ async function salvaModificaOrdine(id) {
 }
 
 // ── GIACENZE DEPOSITO AUTOMATICHE ────────────────────────────────
-async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data) {
-  // Aggiorna livello cisterna
-  const { data: cis } = await sb.from('cisterne').select('livello_attuale').eq('id', cisternaId).single();
+async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLitro) {
+  const { data: cis } = await sb.from('cisterne').select('*').eq('id', cisternaId).single();
   if (!cis) return;
-  const nuovoLivello = tipo === 'entrata'
-    ? Number(cis.livello_attuale) + Number(litri)
-    : Math.max(0, Number(cis.livello_attuale) - Number(litri));
-  await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisternaId);
-  // Registra movimento
+  let nuovoLivello, nuovoCostoMedio = Number(cis.costo_medio || 0);
+  if (tipo === 'entrata') {
+    nuovoLivello = Number(cis.livello_attuale) + Number(litri);
+    // Ricalcola costo medio ponderato
+    if (costoLitro && costoLitro > 0) {
+      const costoTotaleVecchio = Number(cis.livello_attuale) * Number(cis.costo_medio || 0);
+      const costoNuovo = Number(litri) * Number(costoLitro);
+      nuovoCostoMedio = (costoTotaleVecchio + costoNuovo) / nuovoLivello;
+    }
+  } else {
+    nuovoLivello = Math.max(0, Number(cis.livello_attuale) - Number(litri));
+  }
+  await sb.from('cisterne').update({ livello_attuale: nuovoLivello, costo_medio: nuovoCostoMedio, updated_at: new Date().toISOString() }).eq('id', cisternaId);
   await sb.from('movimenti_cisterne').insert([{ cisterna_id: cisternaId, ordine_id: ordineId, tipo, litri, data }]);
 }
 
@@ -886,7 +893,8 @@ async function confermaCaricoDeposito(ordineId) {
   // Aggiorna ordine con cisterna e stato confermato
   await sb.from('ordini').update({ cisterna_id: cisternaId, stato: 'confermato' }).eq('id', ordineId);
   // Aggiorna livello cisterna
-  await aggiornaCisterna(cisternaId, ordine.litri, 'entrata', ordineId, ordine.data);
+  const { data: ordPrezzo } = await sb.from('ordini').select('costo_litro').eq('id', ordineId).single();
+  await aggiornaCisterna(cisternaId, ordine.litri, 'entrata', ordineId, ordine.data, ordPrezzo?.costo_litro);
   toast('✅ Carico confermato! Cisterna aggiornata.');
   chiudiModalePermessi();
   caricaDeposito();
@@ -1050,13 +1058,15 @@ async function caricaCarichi() {
   const tbody = document.getElementById('tabella-carichi');
   if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun carico pianificato</td></tr>'; return; }
   tbody.innerHTML = data.map(c => {
-    const totLitri = c.carico_ordini ? c.carico_ordini.reduce((s, o) => s + Number(o.litri || 0), 0) : 0;
+    const totLitri = c.carico_ordini ? c.carico_ordini.reduce((s, o) => s + Number(o.ordini?.litri || 0), 0) : 0;
     const nConsegne = c.carico_ordini ? c.carico_ordini.length : 0;
+    const prodotti = c.carico_ordini ? [...new Set(c.carico_ordini.map(o=>o.ordini?.prodotto).filter(Boolean))].join(', ') : '—';
     return `<tr>
       <td>${c.data}</td>
       <td>${c.mezzo_targa || '—'}</td>
       <td>${c.autista || '—'}</td>
       <td style="font-family:var(--font-mono)">${fmtL(totLitri)}</td>
+      <td>${prodotti}</td>
       <td>${nConsegne} consegne</td>
       <td>${badgeStato(c.stato)}
         <button class="btn-edit" onclick="apriDettaglioCarico('${c.id}')">👁</button>
@@ -1077,6 +1087,20 @@ async function creaNuovoCarico() {
   // Raccoglie ordini selezionati
   const ordiniSel = Array.from(document.querySelectorAll('.ord-carico:checked')).map(c => c.value);
   if (!ordiniSel.length) { toast('⚠ Seleziona almeno un ordine'); return; }
+  
+  // Valida capienza camion
+  if (mezzoId) {
+    const { data: mezzo } = await sb.from('mezzi').select('capacita_totale,targa').eq('id', mezzoId).single();
+    if (mezzo) {
+      const { data: ordiniSelData } = await sb.from('ordini').select('litri').in('id', ordiniSel);
+      const totLitri = (ordiniSelData||[]).reduce((s,o) => s + Number(o.litri), 0);
+      if (totLitri > Number(mezzo.capacita_totale)) {
+        toast(`⚠ Portata superata! Totale ordini: ${fmtL(totLitri)} · Capienza ${mezzo.targa}: ${fmtL(mezzo.capacita_totale)}`);
+        return;
+      }
+    }
+  }
+  
   const { data: carico, error } = await sb.from('carichi').insert([{ data, mezzo_id: mezzoId || null, mezzo_targa: mezzoTarga, autista, trasportatore_id: trId2 || null, stato: 'programmato' }]).select().single();
   if (error) { toast('Errore: ' + error.message); return; }
   // Associa ordini al carico
