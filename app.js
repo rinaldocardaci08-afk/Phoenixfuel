@@ -321,7 +321,7 @@ async function caricaPrezzi() {
     <td style="font-family:var(--font-mono)">${r._isDeposito?'<span style="font-size:10px;color:var(--text-hint)">da inserire</span>':fmt(r.margine)}</td>
     <td style="font-family:var(--font-mono)">${fmt(prezzoNoIva(r))}</td>
     <td style="font-family:var(--font-mono)">${fmt(prezzoConIva(r))}</td>
-    <td>${best[r.data+'_'+r.prodotto]?.id===r.id?'<span class="badge green" style="font-size:9px">Best</span>':''} ${r._isDeposito?'<span class="badge teal" style="font-size:9px">Deposito</span>':'<button class="btn-danger" onclick="eliminaRecord('prezzi',''+r.id+'',caricaPrezzi)">×</button>'}</td>
+     <td id="td-act-${r.id}"></td>
   </tr>`).join('');
 }
 
