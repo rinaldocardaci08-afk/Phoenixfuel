@@ -312,17 +312,33 @@ async function caricaPrezzi() {
   if (!tuttiPrezzi.length) { tbody.innerHTML='<tr><td colspan="10" class="loading">Nessun prezzo trovato</td></tr>'; return; }
   const best={};
   tuttiPrezzi.forEach(r=>{ const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
-  tbody.innerHTML=tuttiPrezzi.map(r=>`<tr>
-    <td>${r.data}</td><td>${r.fornitore}</td>
-    <td>${r.basi_carico?r.basi_carico.nome:'—'}</td>
-    <td>${r.prodotto}${r._giacenza?` <span style="font-size:10px;color:var(--text-hint)">(${fmtL(r._giacenza)})</span>`:''}</td>
-    <td style="font-family:var(--font-mono)">${fmt(r.costo_litro)}</td>
-    <td style="font-family:var(--font-mono)">${r._isDeposito?'<span style="font-size:10px;color:var(--text-hint)">auto</span>':fmt(r.trasporto_litro)}</td>
-    <td style="font-family:var(--font-mono)">${r._isDeposito?'<span style="font-size:10px;color:var(--text-hint)">da inserire</span>':fmt(r.margine)}</td>
-    <td style="font-family:var(--font-mono)">${fmt(prezzoNoIva(r))}</td>
-    <td style="font-family:var(--font-mono)">${fmt(prezzoConIva(r))}</td>
-     <td id="td-act-${r.id}"></td>
-  </tr>`).join('');
+  // Render tabella prezzi senza template literal annidati
+  let htmlRighe = '';
+  tuttiPrezzi.forEach(r => {
+    const isBest = best[r.data+'_'+r.prodotto]?.id === r.id;
+    let azione = '';
+    if (r._isDeposito) {
+      azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<span class="badge teal" style="font-size:9px">Deposito</span>';
+    } else {
+      azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<button class="btn-danger" onclick="eliminaRecord(\'prezzi\',\'' + r.id + '\',caricaPrezzi)">x</button>';
+    }
+    const giacenzaHtml = r._giacenza ? ' <span style="font-size:10px;color:var(--text-hint)">(' + fmtL(r._giacenza) + ')</span>' : '';
+    const trasportoHtml = r._isDeposito ? '<span style="font-size:10px;color:var(--text-hint)">auto</span>' : fmt(r.trasporto_litro);
+    const margineHtml = r._isDeposito ? '<span style="font-size:10px;color:var(--text-hint)">da inserire</span>' : fmt(r.margine);
+    htmlRighe += '<tr>' +
+      '<td>' + r.data + '</td>' +
+      '<td>' + r.fornitore + '</td>' +
+      '<td>' + (r.basi_carico ? r.basi_carico.nome : '—') + '</td>' +
+      '<td>' + r.prodotto + giacenzaHtml + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + trasportoHtml + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + margineHtml + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td>' +
+      '<td>' + azione + '</td>' +
+      '</tr>';
+  });
+  tbody.innerHTML = htmlRighe;
 }
 
 // ── ORDINI ────────────────────────────────────────────────────────
