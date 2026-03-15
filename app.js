@@ -18,8 +18,19 @@ async function inizializza() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { window.location.href = 'login.html'; return; }
 
-  const { data: utente } = await sb.from('utenti').select('*').eq('email', session.user.email).single();
-  if (!utente || !utente.attivo) { await sb.auth.signOut(); window.location.href = 'login.html'; return; }
+  // Riprova fino a 3 volte se utente non trovato subito
+  let utente = null;
+  for (let i = 0; i < 3; i++) {
+    const { data } = await sb.from('utenti').select('*').eq('email', session.user.email).single();
+    if (data) { utente = data; break; }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  if (!utente) { 
+    console.error('Utente non trovato nel DB:', session.user.email);
+    document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif"><h2>Accesso non autorizzato</h2><p>Utente non trovato. <a href="login.html">Torna al login</a></p></div>';
+    return; 
+  }
+  if (!utente.attivo) { await sb.auth.signOut(); window.location.href = 'login.html'; return; }
 
   utenteCorrente = utente;
   document.getElementById('utente-nome').textContent = utente.nome;
