@@ -192,7 +192,6 @@ function aggiornaProdottiOrdine() {
 }
 
 async function caricaPrezzoPerOrdine() {
-  aggiornaProdottiOrdine();
   const fornitore = document.getElementById('ord-fornitore').value;
   const baseId = document.getElementById('ord-base').value;
   const prodotto = document.getElementById('ord-prodotto').value;
