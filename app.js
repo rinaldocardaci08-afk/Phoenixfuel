@@ -1059,8 +1059,6 @@ async function creaNuovoCarico() {
   const mezzoId = document.getElementById('car-mezzo').value;
   const mezzoTarga = document.getElementById('car-mezzo').options[document.getElementById('car-mezzo').selectedIndex]?.text || '';
   const autista = document.getElementById('car-autista').value;
-  // trasportatore handled above
-  const mezzoId = document.getElementById('car-mezzo').value;
   const trId2 = document.getElementById('car-trasportatore').value;
   if (!data) { toast('⚠ Inserisci la data'); return; }
   if (!mezzoId && !trId2) { toast('⚠ Seleziona un mezzo proprio o un trasportatore esterno'); return; }
