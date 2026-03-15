@@ -8,249 +8,277 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="logo">
-        <span class="logo-icon">🔥</span>
-        <div>
-          <div class="logo-title">PhoenixFuel</div>
-          <div class="logo-sub">Gestionale carburanti</div>
-        </div>
-      </div>
-      <nav class="nav">
-        <div class="nav-item active" onclick="setSection('dashboard', this)"><span class="nav-icon">▦</span> Dashboard</div>
-        <div class="nav-item" onclick="setSection('ordini', this)"><span class="nav-icon">📋</span> Ordini</div>
-        <div class="nav-item" onclick="setSection('prezzi', this)"><span class="nav-icon">💰</span> Prezzi giornalieri</div>
-        <div class="nav-item" onclick="setSection('giacenze', this)"><span class="nav-icon">🛢</span> Giacenze</div>
-        <div class="nav-item" onclick="setSection('consegne', this)"><span class="nav-icon">🚚</span> Consegne</div>
-        <div class="nav-item" onclick="setSection('vendite', this)"><span class="nav-icon">📊</span> Vendite</div>
-      </nav>
-      <div class="sidebar-footer">v1.0 — 2026</div>
-    </aside>
-
-    <div class="main">
-      <div class="topbar">
-        <span class="topbar-title" id="page-title">Dashboard</span>
-        <span class="topbar-date" id="topbar-date"></span>
-      </div>
-      <div class="content">
-
-        <!-- DASHBOARD -->
-        <div class="section active" id="s-dashboard">
-          <div class="grid4">
-            <div class="kpi"><div class="kpi-label">Fatturato oggi</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
-            <div class="kpi"><div class="kpi-label">Litri consegnati</div><div class="kpi-value" id="kpi-litri">—</div></div>
-            <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value" id="kpi-margine">—</div></div>
-            <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="kpi-ordini">—</div></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Ordini recenti</div>
-            <table>
-              <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th></tr></thead>
-              <tbody id="dashboard-ordini"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- ORDINI -->
-        <div class="section" id="s-ordini">
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Nuovo ordine</div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Data</label>
-                <input type="date" id="ord-data" onchange="caricaPrezzoPerOrdine()" />
-              </div>
-              <div class="form-group">
-                <label>Cliente</label>
-                <input type="text" id="ord-cliente" placeholder="Nome cliente" />
-              </div>
-              <div class="form-group">
-                <label>Fornitore</label>
-                <select id="ord-fornitore" onchange="caricaPrezzoPerOrdine()">
-                  <option value="">Seleziona...</option>
-                  <option>Eni</option>
-                  <option>Q8 Quasar</option>
-                  <option>Ludoil Vibo</option>
-                  <option>Eni Milazzo</option>
-                  <option>Deposito Vibo</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Prodotto</label>
-                <select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()">
-                  <option value="">Seleziona...</option>
-                  <option>Gasolio</option>
-                  <option>Gasolio Agricolo</option>
-                  <option>Benzina</option>
-                  <option>AdBlue</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Litri</label>
-                <input type="number" id="ord-litri" placeholder="0" oninput="aggiornaPrevOrdine()" />
-              </div>
-              <div class="form-group">
-                <label>Stato</label>
-                <select id="ord-stato">
-                  <option value="in attesa">In attesa</option>
-                  <option value="confermato">Confermato</option>
-                  <option value="programmato">Programmato</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Note</label>
-                <input type="text" id="ord-note" placeholder="Opzionale" />
-              </div>
-            </div>
-            <div class="form-preview" id="ord-preview">
-              <span>Costo/L: <strong id="prev-costo">—</strong></span>
-              <span>Trasporto/L: <strong id="prev-trasporto">—</strong></span>
-              <span>Margine/L: <strong id="prev-margine">—</strong></span>
-              <span>Prezzo/L IVA inc.: <strong id="prev-prezzo">—</strong></span>
-              <span>Totale ordine: <strong id="prev-totale">—</strong></span>
-            </div>
-            <button class="btn-primary" onclick="salvaOrdine()">Salva ordine</button>
-          </div>
-          <div class="card">
-            <div class="card-title">Elenco ordini</div>
-            <div style="overflow-x:auto">
-            <table>
-              <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Stato</th><th></th></tr></thead>
-              <tbody id="tabella-ordini"><tr><td colspan="11" class="loading">Caricamento...</td></tr></tbody>
-            </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- PREZZI -->
-        <div class="section" id="s-prezzi">
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Inserisci prezzo giornaliero</div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Data</label>
-                <input type="date" id="pr-data" />
-              </div>
-              <div class="form-group">
-                <label>Fornitore</label>
-                <select id="pr-fornitore">
-                  <option value="">Seleziona...</option>
-                  <option>Eni</option>
-                  <option>Q8 Quasar</option>
-                  <option>Ludoil Vibo</option>
-                  <option>Eni Milazzo</option>
-                  <option>Deposito Vibo</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Prodotto</label>
-                <select id="pr-prodotto">
-                  <option value="">Seleziona...</option>
-                  <option>Gasolio</option>
-                  <option>Gasolio Agricolo</option>
-                  <option>Benzina</option>
-                  <option>AdBlue</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Costo/L (€)</label>
-                <input type="number" id="pr-costo" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" />
-              </div>
-              <div class="form-group">
-                <label>Trasporto/L (€)</label>
-                <input type="number" id="pr-trasporto" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" />
-              </div>
-              <div class="form-group">
-                <label>Margine/L (€)</label>
-                <input type="number" id="pr-margine" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" />
-              </div>
-              <div class="form-group">
-                <label>IVA %</label>
-                <select id="pr-iva" onchange="aggiornaPrev()">
-                  <option value="22">22%</option>
-                  <option value="10">10%</option>
-                  <option value="4">4%</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-preview">
-              Prezzo IVA esclusa: <strong id="calc-noiva">€ —</strong> &nbsp;|&nbsp;
-              Prezzo IVA inclusa: <strong id="calc-iva">€ —</strong>
-            </div>
-            <button class="btn-primary" onclick="salvaPrezzo()">Salva prezzo</button>
-          </div>
-
-          <div class="card">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-              <span>Listino prezzi</span>
-              <div style="display:flex;gap:8px;align-items:center">
-                <label style="font-size:12px;color:var(--text-muted)">Filtra data:</label>
-                <input type="date" id="filtro-data-prezzi" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" onchange="caricaPrezzi()" />
-              </div>
-            </div>
-            <div style="overflow-x:auto">
-            <table>
-              <thead><tr><th>Data</th><th>Fornitore</th><th>Prodotto</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-              <tbody id="tabella-prezzi"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody>
-            </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- GIACENZE -->
-        <div class="section" id="s-giacenze">
-          <div class="grid2">
-            <div class="card">
-              <div class="card-title">Autotrazione — Deposito Vibo</div>
-              <div class="cisterne" id="cis-autotrazione"><div class="loading">Caricamento...</div></div>
-            </div>
-            <div class="card">
-              <div class="card-title">Agricolo — Deposito Vibo</div>
-              <div class="cisterne" id="cis-agricolo"><div class="loading">Caricamento...</div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- CONSEGNE -->
-        <div class="section" id="s-consegne">
-          <div class="grid4" style="margin-bottom:16px">
-            <div class="kpi"><div class="kpi-label">Ordini oggi</div><div class="kpi-value" id="tot-consegne">—</div></div>
-            <div class="kpi"><div class="kpi-label">Confermati</div><div class="kpi-value" id="tot-completate">—</div></div>
-            <div class="kpi"><div class="kpi-label">In attesa</div><div class="kpi-value" id="tot-inattesa">—</div></div>
-            <div class="kpi"><div class="kpi-label">Programmati</div><div class="kpi-value" id="tot-programmati">—</div></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Ordini del giorno</div>
-            <table>
-              <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Totale</th><th>Stato</th></tr></thead>
-              <tbody id="tabella-consegne"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- VENDITE -->
-        <div class="section" id="s-vendite">
-          <div class="grid4" style="margin-bottom:16px">
-            <div class="kpi"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="vend-fatturato">—</div></div>
-            <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="vend-litri">—</div></div>
-            <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="vend-margine">—</div></div>
-            <div class="kpi"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="vend-ordini">—</div></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Vendite per fornitore — mese corrente</div>
-            <table>
-              <thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
-              <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
+<div class="app">
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">🔥</span>
+      <div>
+        <div class="logo-title">PhoenixFuel</div>
+        <div class="logo-sub">Gestionale carburanti</div>
       </div>
     </div>
-  </div>
+    <nav class="nav">
+      <div class="nav-section-label">Operativo</div>
+      <div class="nav-item active" onclick="setSection('dashboard',this)"><span class="nav-icon">▦</span> Dashboard</div>
+      <div class="nav-item" onclick="setSection('ordini',this)"><span class="nav-icon">📋</span> Ordini</div>
+      <div class="nav-item" onclick="setSection('prezzi',this)"><span class="nav-icon">💰</span> Prezzi giornalieri</div>
+      <div class="nav-item" onclick="setSection('giacenze',this)"><span class="nav-icon">🛢</span> Giacenze</div>
+      <div class="nav-item" onclick="setSection('consegne',this)"><span class="nav-icon">🚚</span> Consegne</div>
+      <div class="nav-item" onclick="setSection('vendite',this)"><span class="nav-icon">📊</span> Vendite</div>
+      <div class="nav-section-label">Anagrafica</div>
+      <div class="nav-item" onclick="setSection('clienti',this)"><span class="nav-icon">👤</span> Clienti</div>
+      <div class="nav-item" onclick="setSection('fornitori',this)"><span class="nav-icon">🏭</span> Fornitori</div>
+      <div class="nav-item" onclick="setSection('basi',this)"><span class="nav-icon">📍</span> Basi di carico</div>
+    </nav>
+    <div class="sidebar-footer">v2.0 — 2026</div>
+  </aside>
 
-  <div id="toast" class="toast"></div>
-  <script src="app.js"></script>
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-title" id="page-title">Dashboard</span>
+      <span class="topbar-date" id="topbar-date"></span>
+    </div>
+    <div class="content">
+
+      <!-- DASHBOARD -->
+      <div class="section active" id="s-dashboard">
+        <div class="grid4">
+          <div class="kpi"><div class="kpi-label">Fatturato oggi</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
+          <div class="kpi"><div class="kpi-label">Litri consegnati</div><div class="kpi-value" id="kpi-litri">—</div></div>
+          <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value" id="kpi-margine">—</div></div>
+          <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="kpi-ordini">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Ordini recenti</div>
+          <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th></tr></thead>
+          <tbody id="dashboard-ordini"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- ORDINI -->
+      <div class="section" id="s-ordini">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Nuovo ordine</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Data</label><input type="date" id="ord-data" onchange="caricaPrezzoPerOrdine()" /></div>
+            <div class="form-group"><label>Tipo ordine</label>
+              <select id="ord-tipo" onchange="toggleTipoOrdine()">
+                <option value="cliente">Vendita a cliente</option>
+                <option value="deposito">Approvvigionamento deposito</option>
+              </select>
+            </div>
+            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente"><option value="">Seleziona...</option></select></div>
+            <div class="form-group"><label>Fornitore</label><select id="ord-fornitore" onchange="caricaPrezzoPerOrdine()"><option value="">Seleziona...</option></select></div>
+            <div class="form-group"><label>Base di carico</label><select id="ord-base"><option value="">Seleziona...</option></select></div>
+            <div class="form-group"><label>Prodotto</label>
+              <select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()">
+                <option value="">Seleziona...</option>
+                <option>Gasolio</option><option>Gasolio Agricolo</option><option>Benzina</option><option>AdBlue</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Litri</label><input type="number" id="ord-litri" placeholder="0" oninput="aggiornaPrevOrdine()" /></div>
+            <div class="form-group"><label>Trasportatore</label><input type="text" id="ord-trasportatore" placeholder="Nostro / Nome esterno" /></div>
+            <div class="form-group"><label>Giorni pagamento</label><select id="ord-gg"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
+            <div class="form-group"><label>Stato</label>
+              <select id="ord-stato">
+                <option value="in attesa">In attesa</option>
+                <option value="confermato">Confermato</option>
+                <option value="programmato">Programmato</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Note</label><input type="text" id="ord-note" placeholder="Opzionale" /></div>
+          </div>
+          <div class="form-preview" id="ord-preview">
+            <span>Costo/L: <strong id="prev-costo">—</strong></span>
+            <span>Trasporto/L: <strong id="prev-trasporto">—</strong></span>
+            <span>Margine/L: <strong id="prev-margine">—</strong></span>
+            <span>Prezzo/L IVA inc.: <strong id="prev-prezzo">—</strong></span>
+            <span>Totale ordine: <strong id="prev-totale">—</strong></span>
+            <span id="prev-fido-warn" style="color:#A32D2D;display:none">⚠ Fido insufficiente!</span>
+          </div>
+          <button class="btn-primary" onclick="salvaOrdine()">Salva ordine</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Elenco ordini</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
+          <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- PREZZI -->
+      <div class="section" id="s-prezzi">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Inserisci prezzo giornaliero</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Data</label><input type="date" id="pr-data" /></div>
+            <div class="form-group"><label>Fornitore</label><select id="pr-fornitore" onchange="caricaBasiPerFornitore()"><option value="">Seleziona...</option></select></div>
+            <div class="form-group"><label>Base di carico</label><select id="pr-base"><option value="">Seleziona...</option></select></div>
+            <div class="form-group"><label>Prodotto</label>
+              <select id="pr-prodotto">
+                <option value="">Seleziona...</option>
+                <option>Gasolio</option><option>Gasolio Agricolo</option><option>Benzina</option><option>AdBlue</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Costo/L (€)</label><input type="number" id="pr-costo" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
+            <div class="form-group"><label>Trasporto/L (€)</label><input type="number" id="pr-trasporto" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
+            <div class="form-group"><label>Margine/L (€)</label><input type="number" id="pr-margine" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
+            <div class="form-group"><label>IVA %</label>
+              <select id="pr-iva" onchange="aggiornaPrev()">
+                <option value="22">22%</option><option value="10">10%</option><option value="4">4%</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-preview">
+            Prezzo IVA esclusa: <strong id="calc-noiva">€ —</strong> &nbsp;|&nbsp; Prezzo IVA inclusa: <strong id="calc-iva">€ —</strong>
+          </div>
+          <button class="btn-primary" onclick="salvaPrezzo()">Salva prezzo</button>
+        </div>
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>Listino prezzi</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:12px;color:var(--text-muted)">Filtra data:</label>
+              <input type="date" id="filtro-data-prezzi" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" onchange="caricaPrezzi()" />
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base di carico</th><th>Prodotto</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+          <tbody id="tabella-prezzi"><tr><td colspan="10" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- GIACENZE -->
+      <div class="section" id="s-giacenze">
+        <div class="grid2">
+          <div class="card"><div class="card-title">Autotrazione — Deposito Vibo</div><div class="cisterne" id="cis-autotrazione"><div class="loading">Caricamento...</div></div></div>
+          <div class="card"><div class="card-title">Agricolo — Deposito Vibo</div><div class="cisterne" id="cis-agricolo"><div class="loading">Caricamento...</div></div></div>
+        </div>
+      </div>
+
+      <!-- CONSEGNE -->
+      <div class="section" id="s-consegne">
+        <div class="grid4" style="margin-bottom:16px">
+          <div class="kpi"><div class="kpi-label">Ordini oggi</div><div class="kpi-value" id="tot-consegne">—</div></div>
+          <div class="kpi"><div class="kpi-label">Confermati</div><div class="kpi-value" id="tot-completate">—</div></div>
+          <div class="kpi"><div class="kpi-label">In attesa</div><div class="kpi-value" id="tot-inattesa">—</div></div>
+          <div class="kpi"><div class="kpi-label">Programmati</div><div class="kpi-value" id="tot-programmati">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Ordini del giorno</div>
+          <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Totale</th><th>Stato</th></tr></thead>
+          <tbody id="tabella-consegne"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- VENDITE -->
+      <div class="section" id="s-vendite">
+        <div class="grid4" style="margin-bottom:16px">
+          <div class="kpi"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="vend-fatturato">—</div></div>
+          <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="vend-litri">—</div></div>
+          <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="vend-margine">—</div></div>
+          <div class="kpi"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="vend-ordini">—</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Vendite per fornitore — mese corrente</div>
+          <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+          <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- CLIENTI -->
+      <div class="section" id="s-clienti">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Nuovo cliente</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Nome / Ragione sociale</label><input type="text" id="cl-nome" placeholder="Es. Rossi Costruzioni srl" /></div>
+            <div class="form-group"><label>Tipo</label>
+              <select id="cl-tipo">
+                <option value="azienda">Azienda</option>
+                <option value="agricoltore">Agricoltore</option>
+                <option value="privato">Privato</option>
+                <option value="comune">Comune / Ente</option>
+                <option value="trasportatore">Trasportatore</option>
+              </select>
+            </div>
+            <div class="form-group"><label>P.IVA</label><input type="text" id="cl-piva" placeholder="IT00000000000" /></div>
+            <div class="form-group"><label>Codice fiscale</label><input type="text" id="cl-cf" /></div>
+            <div class="form-group"><label>Indirizzo</label><input type="text" id="cl-indirizzo" /></div>
+            <div class="form-group"><label>Città</label><input type="text" id="cl-citta" /></div>
+            <div class="form-group"><label>Provincia</label><input type="text" id="cl-provincia" placeholder="Es. VV" /></div>
+            <div class="form-group"><label>Telefono</label><input type="text" id="cl-telefono" /></div>
+            <div class="form-group"><label>Email</label><input type="email" id="cl-email" /></div>
+            <div class="form-group"><label>Fido massimo (€)</label><input type="number" id="cl-fido" placeholder="0" /></div>
+            <div class="form-group"><label>Giorni pagamento</label><select id="cl-gg"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
+            <div class="form-group"><label>Zona consegna</label><input type="text" id="cl-zona" placeholder="Es. Vibo Valentia" /></div>
+            <div class="form-group"><label>Prodotti abituali</label><input type="text" id="cl-prodotti" placeholder="Es. Gasolio, AdBlue" /></div>
+            <div class="form-group"><label>Note</label><input type="text" id="cl-note" /></div>
+          </div>
+          <button class="btn-primary" onclick="salvaCliente()">Salva cliente</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Elenco clienti</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Nome</th><th>Tipo</th><th>P.IVA</th><th>Città</th><th>Telefono</th><th>Fido max</th><th>Fido residuo</th><th>Gg pag.</th><th>Prodotti</th><th>Note</th><th></th></tr></thead>
+          <tbody id="tabella-clienti"><tr><td colspan="11" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- FORNITORI -->
+      <div class="section" id="s-fornitori">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Nuovo fornitore</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Nome</label><input type="text" id="fo-nome" placeholder="Es. Eni SpA" /></div>
+            <div class="form-group"><label>Ragione sociale</label><input type="text" id="fo-ragione" /></div>
+            <div class="form-group"><label>P.IVA</label><input type="text" id="fo-piva" /></div>
+            <div class="form-group"><label>Indirizzo</label><input type="text" id="fo-indirizzo" /></div>
+            <div class="form-group"><label>Città</label><input type="text" id="fo-citta" /></div>
+            <div class="form-group"><label>Telefono</label><input type="text" id="fo-telefono" /></div>
+            <div class="form-group"><label>Email</label><input type="email" id="fo-email" /></div>
+            <div class="form-group"><label>Contatto riferimento</label><input type="text" id="fo-contatto" /></div>
+            <div class="form-group"><label>Fido massimo (€)</label><input type="number" id="fo-fido" placeholder="0" /></div>
+            <div class="form-group"><label>Giorni pagamento</label><select id="fo-gg"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
+            <div class="form-group"><label>Note</label><input type="text" id="fo-note" /></div>
+          </div>
+          <button class="btn-primary" onclick="salvaFornitore()">Salva fornitore</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Elenco fornitori</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Nome</th><th>P.IVA</th><th>Città</th><th>Contatto</th><th>Telefono</th><th>Fido max</th><th>Fido usato</th><th>Fido residuo</th><th>Gg pag.</th><th>Basi carico</th><th>Note</th><th></th></tr></thead>
+          <tbody id="tabella-fornitori"><tr><td colspan="12" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- BASI DI CARICO -->
+      <div class="section" id="s-basi">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Nuova base di carico</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Nome base</label><input type="text" id="ba-nome" placeholder="Es. Deposito Vibo Valentia" /></div>
+            <div class="form-group"><label>Indirizzo</label><input type="text" id="ba-indirizzo" /></div>
+            <div class="form-group"><label>Città</label><input type="text" id="ba-citta" /></div>
+            <div class="form-group"><label>Provincia</label><input type="text" id="ba-provincia" placeholder="Es. VV" /></div>
+            <div class="form-group"><label>Note</label><input type="text" id="ba-note" /></div>
+          </div>
+          <button class="btn-primary" onclick="salvaBasi()">Salva base di carico</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Elenco basi di carico</div>
+          <table><thead><tr><th>Nome</th><th>Indirizzo</th><th>Città</th><th>Fornitori associati</th><th>Note</th><th></th></tr></thead>
+          <tbody id="tabella-basi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
 </body>
 </html>
