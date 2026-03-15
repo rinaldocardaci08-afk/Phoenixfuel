@@ -72,6 +72,8 @@ async function costruisciMenu(ruolo, utenteId) {
     voci.push({ id:'clienti', icon:'👤', label:'Clienti' });
     voci.push({ id:'fornitori', icon:'🏭', label:'Fornitori' });
     voci.push({ id:'basi', icon:'📍', label:'Basi di carico' });
+    voci.push({ section:'Logistica' });
+    voci.push({ id:'logistica', icon:'🚛', label:'Logistica' });
     voci.push({ section:'Impostazioni' });
     voci.push({ id:'utenti', icon:'🔑', label:'Utenti' });
   } else {
@@ -114,14 +116,14 @@ async function logout() {
 }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const titles = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', utenti:'Utenti', cliente:'I miei prezzi' };
+const titles = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = titles[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
 }
 
@@ -637,6 +639,7 @@ const SEZIONI_SISTEMA = [
   { id:'clienti', label:'Clienti', icon:'👤' },
   { id:'fornitori', label:'Fornitori', icon:'🏭' },
   { id:'basi', label:'Basi di carico', icon:'📍' },
+  { id:'logistica', label:'Logistica', icon:'🚛' },
 ];
 
 async function apriModalePermessi(utenteId, nomeUtente) {
@@ -889,4 +892,233 @@ async function confermaUscitaDeposito(ordineId) {
   toast('✅ Uscita registrata! Cisterna aggiornata.');
   caricaDeposito();
   caricaOrdini();
+}
+
+// ── LOGISTICA ─────────────────────────────────────────────────────
+// Aggiunge sezione logistica al menu se admin
+const SEZIONI_SISTEMA_EXT = [
+  ...( typeof SEZIONI_SISTEMA !== 'undefined' ? [] : []),
+  { id:'logistica', label:'Logistica', icon:'🚛' }
+];
+
+async function caricaLogistica() {
+  await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
+  // Popola select mezzi per pianificazione carico
+  const { data: mezzi } = await sb.from('mezzi').select('id,targa,capacita_totale').eq('attivo',true).order('targa');
+  const selM = document.getElementById('car-mezzo');
+  if (selM && mezzi) selM.innerHTML = '<option value="">Seleziona mezzo...</option>' + mezzi.map(m=>`<option value="${m.id}">${m.targa} (${fmtL(m.capacita_totale)})</option>`).join('');
+  // Popola select trasportatori per carico
+  const { data: trasps } = await sb.from('trasportatori').select('id,nome').eq('attivo',true).order('nome');
+  const selT = document.getElementById('car-trasportatore');
+  if (selT && trasps) selT.innerHTML = '<option value="">Nostro mezzo</option>' + trasps.map(t=>`<option value="${t.id}">${t.nome}</option>`).join('');
+  // Set today date
+  const carData = document.getElementById('car-data');
+  if (carData && !carData.value) carData.value = oggiISO;
+}
+
+// ── MEZZI PROPRI ─────────────────────────────────────────────────
+async function salvaMezzo() {
+  const targa = document.getElementById('mz-targa').value.trim().toUpperCase();
+  const descr = document.getElementById('mz-descr').value;
+  const cap = parseFloat(document.getElementById('mz-cap').value);
+  const autista = document.getElementById('mz-autista').value;
+  if (!targa || !cap) { toast('⚠ Inserisci targa e capacità'); return; }
+  const { data: mezzo, error } = await sb.from('mezzi').insert([{ targa, descrizione: descr, capacita_totale: cap, autista_default: autista }]).select().single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  // Salva scomparti
+  const scomparti = document.querySelectorAll('.scomparto-row');
+  if (scomparti.length) {
+    const rows = Array.from(scomparti).map(s => ({
+      mezzo_id: mezzo.id,
+      nome: s.querySelector('.sc-nome').value,
+      capacita: parseFloat(s.querySelector('.sc-cap').value) || 0,
+      prodotto_default: s.querySelector('.sc-prod').value
+    })).filter(r => r.nome && r.capacita > 0);
+    if (rows.length) await sb.from('scomparti_mezzo').insert(rows);
+  }
+  toast('✅ Mezzo salvato!');
+  caricaMezziPropri();
+}
+
+async function caricaMezziPropri() {
+  const { data } = await sb.from('mezzi').select('*, scomparti_mezzo(*)').order('targa');
+  const tbody = document.getElementById('tabella-mezzi');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun mezzo</td></tr>'; return; }
+  tbody.innerHTML = data.map(m => {
+    const scomparti = m.scomparti_mezzo ? m.scomparti_mezzo.map(s => `${s.nome} (${fmtL(s.capacita)}${s.prodotto_default ? ' · ' + s.prodotto_default : ''})`).join(', ') : '—';
+    return `<tr>
+      <td><strong>${m.targa}</strong></td>
+      <td>${m.descrizione || '—'}</td>
+      <td style="font-family:var(--font-mono)">${fmtL(m.capacita_totale)}</td>
+      <td>${m.autista_default || '—'}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${scomparti}</td>
+      <td><button class="btn-danger" onclick="eliminaRecord('mezzi','${m.id}',caricaMezziPropri)">×</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function aggiungiScomparto() {
+  const wrap = document.getElementById('scomparti-wrap');
+  const div = document.createElement('div');
+  div.className = 'scomparto-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px';
+  div.innerHTML = `
+    <div class="form-group"><label>Nome scomparto</label><input type="text" class="sc-nome" placeholder="Es. Scomp. 1" /></div>
+    <div class="form-group"><label>Capacità (L)</label><input type="number" class="sc-cap" placeholder="0" /></div>
+    <div class="form-group"><label>Prodotto default</label>
+      <select class="sc-prod">
+        <option value="">Qualsiasi</option>
+        <option>Gasolio Autotrazione</option><option>Gasolio Agricolo</option>
+        <option>HVO</option><option>Benzina</option><option>AdBlue</option>
+      </select>
+    </div>
+    <button class="btn-danger" onclick="this.parentElement.remove()" style="margin-bottom:2px">×</button>`;
+  wrap.appendChild(div);
+}
+
+// ── TRASPORTATORI ─────────────────────────────────────────────────
+async function salvaTrasportatore() {
+  const nome = document.getElementById('tr-nome').value.trim();
+  if (!nome) { toast('⚠ Inserisci il nome'); return; }
+  const record = { nome, piva: document.getElementById('tr-piva').value, telefono: document.getElementById('tr-tel').value, email: document.getElementById('tr-email').value, note: document.getElementById('tr-note').value };
+  const { data: tr, error } = await sb.from('trasportatori').insert([record]).select().single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✅ Trasportatore salvato!');
+  caricaTrasportatori();
+}
+
+async function caricaTrasportatori() {
+  const { data } = await sb.from('trasportatori').select('*, autisti(*), mezzi_trasportatori(*)').order('nome');
+  const tbody = document.getElementById('tabella-trasportatori');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessun trasportatore</td></tr>'; return; }
+  // Popola select trasportatore nel form autisti/mezzi esterni
+  const selTr = document.getElementById('at-trasportatore');
+  if (selTr) selTr.innerHTML = '<option value="">Seleziona...</option>' + data.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+  const selTrM = document.getElementById('me-trasportatore');
+  if (selTrM) selTrM.innerHTML = '<option value="">Seleziona...</option>' + data.map(t => `<option value="${t.id}">${t.nome}</option>`).join('');
+  tbody.innerHTML = data.map(t => {
+    const autisti = t.autisti ? t.autisti.map(a => a.nome).join(', ') : '—';
+    const mezzi = t.mezzi_trasportatori ? t.mezzi_trasportatori.map(m => m.targa).join(', ') : '—';
+    return `<tr>
+      <td><strong>${t.nome}</strong></td>
+      <td>${t.telefono || '—'}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${autisti}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${mezzi}</td>
+      <td><button class="btn-danger" onclick="eliminaRecord('trasportatori','${t.id}',caricaTrasportatori)">×</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function salvaAutista() {
+  const trId = document.getElementById('at-trasportatore').value;
+  const nome = document.getElementById('at-nome').value.trim();
+  if (!trId || !nome) { toast('⚠ Seleziona trasportatore e inserisci nome'); return; }
+  const { error } = await sb.from('autisti').insert([{ trasportatore_id: trId, nome, telefono: document.getElementById('at-tel').value, patente: document.getElementById('at-patente').value }]);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✅ Autista salvato!');
+  caricaTrasportatori();
+}
+
+async function salvaMezzoEsterno() {
+  const trId = document.getElementById('me-trasportatore').value;
+  const targa = document.getElementById('me-targa').value.trim().toUpperCase();
+  if (!trId || !targa) { toast('⚠ Seleziona trasportatore e inserisci targa'); return; }
+  const { error } = await sb.from('mezzi_trasportatori').insert([{ trasportatore_id: trId, targa, descrizione: document.getElementById('me-descr').value, capacita_totale: parseFloat(document.getElementById('me-cap').value) || 0 }]);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✅ Mezzo esterno salvato!');
+  caricaTrasportatori();
+}
+
+// ── PIANIFICAZIONE CARICHI ────────────────────────────────────────
+async function caricaCarichi() {
+  const { data } = await sb.from('carichi').select('*, carico_ordini(*, ordini(cliente, prodotto, litri))').order('data', { ascending: false }).limit(20);
+  const tbody = document.getElementById('tabella-carichi');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun carico pianificato</td></tr>'; return; }
+  tbody.innerHTML = data.map(c => {
+    const totLitri = c.carico_ordini ? c.carico_ordini.reduce((s, o) => s + Number(o.litri || 0), 0) : 0;
+    const nConsegne = c.carico_ordini ? c.carico_ordini.length : 0;
+    return `<tr>
+      <td>${c.data}</td>
+      <td>${c.mezzo_targa || '—'}</td>
+      <td>${c.autista || '—'}</td>
+      <td style="font-family:var(--font-mono)">${fmtL(totLitri)}</td>
+      <td>${nConsegne} consegne</td>
+      <td>${badgeStato(c.stato)}
+        <button class="btn-edit" onclick="apriDettaglioCarico('${c.id}')">👁</button>
+        <button class="btn-danger" onclick="eliminaRecord('carichi','${c.id}',caricaCarichi)">×</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function creaNuovoCarico() {
+  const data = document.getElementById('car-data').value;
+  const mezzoId = document.getElementById('car-mezzo').value;
+  const mezzoTarga = document.getElementById('car-mezzo').options[document.getElementById('car-mezzo').selectedIndex]?.text || '';
+  const autista = document.getElementById('car-autista').value;
+  const trId = document.getElementById('car-trasportatore').value || null;
+  if (!data) { toast('⚠ Inserisci la data'); return; }
+  // Raccoglie ordini selezionati
+  const ordiniSel = Array.from(document.querySelectorAll('.ord-carico:checked')).map(c => c.value);
+  if (!ordiniSel.length) { toast('⚠ Seleziona almeno un ordine'); return; }
+  const { data: carico, error } = await sb.from('carichi').insert([{ data, mezzo_id: mezzoId || null, mezzo_targa: mezzoTarga, autista, trasportatore_id: trId, stato: 'programmato' }]).select().single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  // Associa ordini al carico
+  const righe = ordiniSel.map((oId, i) => ({ carico_id: carico.id, ordine_id: oId, sequenza: i + 1 }));
+  await sb.from('carico_ordini').insert(righe);
+  // Aggiorna stato ordini a programmato
+  await Promise.all(ordiniSel.map(oId => sb.from('ordini').update({ stato: 'programmato' }).eq('id', oId)));
+  toast('✅ Carico creato!');
+  caricaCarichi();
+  caricaOrdiniPerCarico();
+}
+
+async function caricaOrdiniPerCarico() {
+  const data = document.getElementById('car-data').value;
+  if (!data) return;
+  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).eq('tipo_ordine', 'cliente').neq('stato', 'annullato').order('cliente');
+  const wrap = document.getElementById('ordini-per-carico');
+  if (!ordini || !ordini.length) { wrap.innerHTML = '<div class="loading">Nessun ordine per questa data</div>'; return; }
+  // Calcola litri totali selezionati
+  wrap.innerHTML = ordini.map(o => `
+    <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px">
+      <input type="checkbox" class="ord-carico" value="${o.id}" onchange="aggiornaTotaleCarico()" />
+      <div style="flex:1">
+        <div style="font-weight:500">${o.cliente}</div>
+        <div style="color:var(--text-muted)">${o.prodotto} · ${fmtL(o.litri)}</div>
+      </div>
+      <span class="badge ${o.stato==='confermato'?'green':'amber'}">${o.stato}</span>
+    </label>`).join('');
+}
+
+function aggiornaTotaleCarico() {
+  const checked = Array.from(document.querySelectorAll('.ord-carico:checked'));
+  // Non abbiamo i litri qui facilmente, ma mostriamo il conteggio
+  document.getElementById('car-tot-ordini').textContent = checked.length + ' ordini selezionati';
+}
+
+async function apriDettaglioCarico(caricoId) {
+  const { data: carico } = await sb.from('carichi').select('*, carico_ordini(sequenza, litri, ordini(cliente, prodotto, litri, note))').eq('id', caricoId).single();
+  if (!carico) return;
+  const ordini = carico.carico_ordini ? [...carico.carico_ordini].sort((a,b) => a.sequenza - b.sequenza) : [];
+  const el = document.getElementById('modal-permessi-content');
+  el.innerHTML = `
+    <div style="font-size:15px;font-weight:500;margin-bottom:4px">🚛 Dettaglio carico — ${carico.data}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Mezzo: ${carico.mezzo_targa||'—'} · Autista: ${carico.autista||'—'}</div>
+    <table style="width:100%;font-size:12px;margin-bottom:16px">
+      <thead><tr><th>#</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Note</th></tr></thead>
+      <tbody>
+        ${ordini.map(o => `<tr>
+          <td>${o.sequenza}</td>
+          <td>${o.ordini?.cliente||'—'}</td>
+          <td>${o.ordini?.prodotto||'—'}</td>
+          <td style="font-family:var(--font-mono)">${fmtL(o.ordini?.litri||0)}</td>
+          <td style="font-size:11px;color:var(--text-muted)">${o.ordini?.note||'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="flex:1" onclick="chiudiModalePermessi()">Chiudi</button>
+    </div>`;
+  document.getElementById('modal-permessi').style.display = 'flex';
 }
