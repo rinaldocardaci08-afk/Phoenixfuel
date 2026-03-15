@@ -283,10 +283,11 @@
             </div>
             <div class="form-group" id="grp-ut-cliente" style="display:none"><label>Cliente associato</label><select id="ut-cliente"><option value="">Seleziona...</option></select></div>
           </div>
-          <button class="btn-primary" onclick="salvaUtente()">Crea utente</button>
+          <div id="grp-ut-permessi" style="margin-bottom:14px"></div>
+          <button class="btn-primary" onclick="salvaUtenteNuovo()">Crea utente</button>
         </div>
         <div class="card"><div class="card-title">Elenco utenti</div>
-          <table><thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Cliente</th><th>Stato</th><th></th></tr></thead>
+          <table><thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Cliente</th><th>Stato</th><th>Permessi</th><th></th></tr></thead>
           <tbody id="tabella-utenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
         </div>
       </div>
@@ -345,6 +346,12 @@
   </div>
 </div>
 
+<!-- MODAL PERMESSI -->
+<div id="modal-permessi" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;">
+  <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:90%;max-width:500px;position:relative;">
+    <div id="modal-permessi-content"></div>
+  </div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

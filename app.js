@@ -36,7 +36,7 @@ async function inizializza() {
   document.getElementById('utente-nome').textContent = utente.nome;
   document.getElementById('utente-ruolo').textContent = utente.ruolo;
 
-  costruisciMenu(utente.ruolo);
+  await costruisciMenu(utente.ruolo, utente.id);
 
   if (utente.ruolo === 'cliente') {
     setSection('cliente', document.querySelector('.nav-item'));
@@ -54,18 +54,13 @@ async function inizializza() {
   }
 }
 
-function costruisciMenu(ruolo) {
+async function costruisciMenu(ruolo, utenteId) {
   const nav = document.getElementById('nav-menu');
   const voci = [];
 
   if (ruolo === 'cliente') {
     voci.push({ id:'cliente', icon:'👤', label:'I miei prezzi' });
-  } else if (ruolo === 'logistica') {
-    voci.push({ id:'consegne', icon:'🚚', label:'Consegne' });
-  } else if (ruolo === 'contabilita') {
-    voci.push({ id:'vendite', icon:'📊', label:'Vendite' });
-  } else {
-    // operatore e admin
+  } else if (ruolo === 'admin') {
     voci.push({ section:'Operativo' });
     voci.push({ id:'dashboard', icon:'▦', label:'Dashboard' });
     voci.push({ id:'ordini', icon:'📋', label:'Ordini' });
@@ -77,10 +72,31 @@ function costruisciMenu(ruolo) {
     voci.push({ id:'clienti', icon:'👤', label:'Clienti' });
     voci.push({ id:'fornitori', icon:'🏭', label:'Fornitori' });
     voci.push({ id:'basi', icon:'📍', label:'Basi di carico' });
-    if (ruolo === 'admin') {
-      voci.push({ section:'Impostazioni' });
-      voci.push({ id:'utenti', icon:'🔑', label:'Utenti' });
-    }
+    voci.push({ section:'Impostazioni' });
+    voci.push({ id:'utenti', icon:'🔑', label:'Utenti' });
+  } else {
+    // Carica permessi personalizzati
+    const { data: permessi } = await sb.from('permessi').select('*').eq('utente_id', utenteId).eq('abilitato', true);
+    const abilitati = new Set((permessi||[]).map(p => p.sezione));
+    const tutteSezioni = [
+      { id:'dashboard', icon:'▦', label:'Dashboard', section:'Operativo' },
+      { id:'ordini', icon:'📋', label:'Ordini' },
+      { id:'prezzi', icon:'💰', label:'Prezzi giornalieri' },
+      { id:'deposito', icon:'🏗', label:'Deposito' },
+      { id:'consegne', icon:'🚚', label:'Consegne' },
+      { id:'vendite', icon:'📊', label:'Vendite' },
+      { id:'clienti', icon:'👤', label:'Clienti', section:'Anagrafica' },
+      { id:'fornitori', icon:'🏭', label:'Fornitori' },
+      { id:'basi', icon:'📍', label:'Basi di carico' },
+    ];
+    let lastSection = null;
+    tutteSezioni.forEach(s => {
+      if (abilitati.has(s.id)) {
+        if (s.section && s.section !== lastSection) { voci.push({ section: s.section }); lastSection = s.section; }
+        voci.push({ id: s.id, icon: s.icon, label: s.label });
+      }
+    });
+    if (!voci.length) voci.push({ id:'dashboard', icon:'▦', label:'Dashboard' });
   }
 
   nav.innerHTML = voci.map(v => {
@@ -88,7 +104,6 @@ function costruisciMenu(ruolo) {
     return `<div class="nav-item" onclick="setSection('${v.id}',this)"><span class="nav-icon">${v.icon}</span> ${v.label}</div>`;
   }).join('');
 
-  // Attiva prima voce
   const prima = nav.querySelector('.nav-item');
   if (prima) prima.classList.add('active');
 }
@@ -106,7 +121,7 @@ function setSection(id, el) {
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = titles[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, utenti:caricaUtenti, cliente:caricaAreaCliente };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente };
   if (loaders[id]) loaders[id]();
 }
 
@@ -604,3 +619,81 @@ async function caricaDashboard() {
 
 // ── AVVIO ─────────────────────────────────────────────────────────
 inizializza();
+
+// ── PERMESSI ──────────────────────────────────────────────────────
+const SEZIONI_SISTEMA = [
+  { id:'dashboard', label:'Dashboard', icon:'▦' },
+  { id:'ordini', label:'Ordini', icon:'📋' },
+  { id:'prezzi', label:'Prezzi giornalieri', icon:'💰' },
+  { id:'deposito', label:'Deposito', icon:'🏗' },
+  { id:'consegne', label:'Consegne', icon:'🚚' },
+  { id:'vendite', label:'Vendite', icon:'📊' },
+  { id:'clienti', label:'Clienti', icon:'👤' },
+  { id:'fornitori', label:'Fornitori', icon:'🏭' },
+  { id:'basi', label:'Basi di carico', icon:'📍' },
+];
+
+async function apriModalePermessi(utenteId, nomeUtente) {
+  const { data: permessiEsistenti } = await sb.from('permessi').select('*').eq('utente_id', utenteId);
+  const map = {};
+  (permessiEsistenti||[]).forEach(p => map[p.sezione] = p.abilitato);
+  const el = document.getElementById('modal-permessi-content');
+  el.innerHTML = `
+    <div style="font-size:15px;font-weight:500;margin-bottom:16px">🔑 Permessi per ${nomeUtente}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
+      ${SEZIONI_SISTEMA.map(s => `
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" value="${s.id}" ${map[s.id] ? 'checked' : ''} onchange="aggiornaPermesso('${utenteId}','${s.id}',this.checked)" />
+          <span>${s.icon} ${s.label}</span>
+        </label>`).join('')}
+    </div>
+    <button class="btn-primary" style="width:100%" onclick="chiudiModalePermessi()">Chiudi</button>`;
+  document.getElementById('modal-permessi').style.display = 'flex';
+}
+
+async function aggiornaPermesso(utenteId, sezione, abilitato) {
+  await sb.from('permessi').upsert({ utente_id: utenteId, sezione, abilitato }, { onConflict: 'utente_id,sezione' });
+  toast(abilitato ? `✅ ${sezione} abilitata` : `🔒 ${sezione} disabilitata`);
+}
+
+function chiudiModalePermessi() {
+  document.getElementById('modal-permessi').style.display = 'none';
+}
+
+async function salvaUtenteNuovo() {
+  const nome = document.getElementById('ut-nome').value.trim();
+  const email = document.getElementById('ut-email').value.trim();
+  const ruolo = document.getElementById('ut-ruolo').value;
+  const clienteId = document.getElementById('ut-cliente').value || null;
+  if (!nome || !email) { toast('⚠ Compila nome ed email'); return; }
+  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{ email, nome, ruolo, cliente_id: ruolo === 'cliente' ? clienteId : null }]).select().single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  // Salva permessi se non cliente
+  if (ruolo !== 'cliente' && ruolo !== 'admin') {
+    const checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
+    const permessi = Array.from(checks).map(c => ({ utente_id: nuovoUtente.id, sezione: c.value, abilitato: c.checked }));
+    if (permessi.length) await sb.from('permessi').insert(permessi);
+  }
+  toast('✅ Utente salvato! Vai su Supabase → Auth per creare le credenziali di accesso.');
+  caricaUtentiCompleto();
+}
+
+async function caricaUtentiCompleto() {
+  await caricaSelectClienti('ut-cliente');
+  // Popola checkbox permessi nel form
+  const grp = document.getElementById('grp-ut-permessi');
+  if (grp) grp.innerHTML = '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;margin-top:12px">Sezioni accessibili</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+    SEZIONI_SISTEMA.map(s => `<label class="check-label"><input type="checkbox" value="${s.id}" checked /> ${s.icon} ${s.label}</label>`).join('') + '</div>';
+  const { data } = await sb.from('utenti').select('*, clienti(nome)').order('nome');
+  const tbody = document.getElementById('tabella-utenti');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun utente</td></tr>'; return; }
+  tbody.innerHTML = data.map(r => `<tr>
+    <td><strong>${r.nome}</strong></td>
+    <td style="font-size:11px;color:var(--text-muted)">${r.email}</td>
+    <td>${badgeRuolo(r.ruolo)}</td>
+    <td style="font-size:11px;color:var(--text-muted)">${r.clienti?.nome || '—'}</td>
+    <td>${r.attivo ? '<span class="badge green">Attivo</span>' : '<span class="badge red">Disattivo</span>'}</td>
+    <td>${r.ruolo !== 'admin' && r.ruolo !== 'cliente' ? `<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi('${r.id}','${r.nome}')">🔑 Permessi</button>` : '—'}</td>
+    <td><button class="btn-danger" onclick="eliminaRecord('utenti','${r.id}',caricaUtentiCompleto)">×</button></td>
+  </tr>`).join('');
+}
