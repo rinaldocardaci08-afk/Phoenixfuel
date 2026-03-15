@@ -385,7 +385,13 @@ async function caricaOrdini() {
   if (!data||!data.length) { tbody.innerHTML='<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
   tbody.innerHTML=data.map(r=>{
     const pL=prezzoConIva(r),tot=pL*r.litri;
-    return `<tr><td>${r.data}</td><td>${badgeStato(r.tipo_ordine||'cliente')}</td><td>${r.cliente}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${r.basi_carico?r.basi_carico.nome:'—'}</td><td class="editable" onclick="editaCella(this,'ordini','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td><td class="editable" onclick="editaCella(this,'ordini','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td><td style="font-family:var(--font-mono)">${fmt(pL)}</td><td style="font-family:var(--font-mono)">${fmtE(tot)}</td><td style="font-size:11px;color:var(--text-hint)">${r.data_scadenza||'—'}</td><td>${badgeStato(r.stato)}</td><td><button class="btn-edit" onclick="apriModaleOrdine('${r.id}')">✏️</button><button class="btn-danger" onclick="eliminaRecord('ordini','${r.id}',caricaOrdini)">×</button></td></tr>`;
+    // Pulsante cisterna per approvvigionamento deposito non ancora confermato
+    const btnCisterna = r.tipo_ordine==='deposito' && r.stato!=='confermato'
+      ? `<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna('${r.id}')">🛢 Carica</button>`
+      : r.fornitore==='Deposito' && r.stato!=='confermato'
+      ? `<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito('${r.id}')">📤 Scarica</button>`
+      : '';
+    return `<tr><td>${r.data}</td><td>${badgeStato(r.tipo_ordine||'cliente')}</td><td>${r.cliente}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${r.basi_carico?r.basi_carico.nome:'—'}</td><td class="editable" onclick="editaCella(this,'ordini','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td><td class="editable" onclick="editaCella(this,'ordini','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td><td style="font-family:var(--font-mono)">${fmt(pL)}</td><td style="font-family:var(--font-mono)">${fmtE(tot)}</td><td style="font-size:11px;color:var(--text-hint)">${r.data_scadenza||'—'}</td><td>${badgeStato(r.stato)}</td><td>${btnCisterna} <button class="btn-edit" onclick="apriModaleOrdine('${r.id}')">✏️</button><button class="btn-danger" onclick="eliminaRecord('ordini','${r.id}',caricaOrdini)">×</button></td></tr>`;
   }).join('');
 }
 
@@ -796,5 +802,91 @@ async function salvaModificaOrdine(id) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('✅ Ordine aggiornato!');
   chiudiModalePermessi();
+  caricaOrdini();
+}
+
+// ── GIACENZE DEPOSITO AUTOMATICHE ────────────────────────────────
+async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data) {
+  // Aggiorna livello cisterna
+  const { data: cis } = await sb.from('cisterne').select('livello_attuale').eq('id', cisternaId).single();
+  if (!cis) return;
+  const nuovoLivello = tipo === 'entrata'
+    ? Number(cis.livello_attuale) + Number(litri)
+    : Math.max(0, Number(cis.livello_attuale) - Number(litri));
+  await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisternaId);
+  // Registra movimento
+  await sb.from('movimenti_cisterne').insert([{ cisterna_id: cisternaId, ordine_id: ordineId, tipo, litri, data }]);
+}
+
+async function apriModaleAssegnaCisterna(ordineId) {
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) return;
+  // Trova cisterne compatibili con il prodotto
+  const prodottoMap = {
+    'Gasolio Autotrazione': 'autotrazione',
+    'Gasolio Agricolo': 'agricolo',
+    'HVO': 'hvo',
+    'Benzina': 'benzina',
+    'AdBlue': 'autotrazione'
+  };
+  const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('nome');
+  
+  const el = document.getElementById('modal-permessi-content');
+  el.innerHTML = `
+    <div style="font-size:15px;font-weight:500;margin-bottom:16px">🛢 Assegna cisterna — ${ordine.prodotto}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">
+      Ordine: <strong>${ordine.cliente}</strong> · ${fmtL(ordine.litri)} · ${ordine.data}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      ${cisterne ? cisterne.map(c => {
+        const pct = Math.round((c.livello_attuale / c.capacita_max) * 100);
+        const disponibile = c.capacita_max - c.livello_attuale;
+        const sufficiente = disponibile >= ordine.litri;
+        return `<label style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;opacity:${sufficiente?1:0.5}">
+          <input type="radio" name="cisterna" value="${c.id}" ${sufficiente?'':'disabled'} />
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500">${c.nome}</div>
+            <div style="font-size:11px;color:var(--text-muted)">Livello: ${fmtL(c.livello_attuale)} / ${fmtL(c.capacita_max)} (${pct}%) · Disponibile: ${fmtL(disponibile)}</div>
+            <div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px"><div style="height:100%;width:${pct}%;background:${pct<30?'#E24B4A':pct<60?'#BA7517':'#639922'};border-radius:2px"></div></div>
+          </div>
+          ${!sufficiente?'<span style="font-size:10px;color:#A32D2D">Capienza insufficiente</span>':''}
+        </label>`;
+      }).join('') : '<div class="loading">Nessuna cisterna trovata</div>'}
+    </div>
+    <button class="btn-primary" style="width:100%" onclick="confermaCaricoDeposito('${ordineId}')">Conferma carico cisterna</button>`;
+  document.getElementById('modal-permessi').style.display = 'flex';
+}
+
+async function confermaCaricoDeposito(ordineId) {
+  const selected = document.querySelector('input[name="cisterna"]:checked');
+  if (!selected) { toast('⚠ Seleziona una cisterna'); return; }
+  const cisternaId = selected.value;
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) return;
+  // Aggiorna ordine con cisterna e stato confermato
+  await sb.from('ordini').update({ cisterna_id: cisternaId, stato: 'confermato' }).eq('id', ordineId);
+  // Aggiorna livello cisterna
+  await aggiornaCisterna(cisternaId, ordine.litri, 'entrata', ordineId, ordine.data);
+  toast('✅ Carico confermato! Cisterna aggiornata.');
+  chiudiModalePermessi();
+  caricaDeposito();
+  caricaOrdini();
+}
+
+async function confermaUscitaDeposito(ordineId) {
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) return;
+  // Trova cisterna del prodotto con più litri disponibili
+  const prodottoMap = { 'Gasolio Autotrazione':'autotrazione', 'Gasolio Agricolo':'agricolo', 'HVO':'hvo', 'Benzina':'benzina', 'AdBlue':'autotrazione' };
+  const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('livello_attuale', { ascending: false });
+  if (!cisterne || !cisterne.length) { toast('⚠ Nessuna cisterna trovata'); return; }
+  const cis = cisterne[0];
+  if (cis.livello_attuale < ordine.litri) { toast('⚠ Giacenza insufficiente nel deposito!'); return; }
+  await aggiornaCisterna(cis.id, ordine.litri, 'uscita', ordineId, ordine.data);
+  await sb.from('ordini').update({ stato: 'confermato' }).eq('id', ordineId);
+  toast('✅ Uscita registrata! Cisterna aggiornata.');
+  caricaDeposito();
   caricaOrdini();
 }
