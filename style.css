@@ -92,3 +92,21 @@ td { padding: 9px 10px 9px 0; color: var(--text); border-top: 0.5px solid var(--
 .cis-pct { font-size: 10px; font-weight: 500; color: #fff; }
 .cis-val { font-size: 11px; color: var(--text-hint); width: 72px; text-align: right; font-family: var(--font-mono); }
 .alert-box { margin-top: 12px; padding-top: 10px; border-top: 0.5px solid var(--border); font-size: 11px; color: #A32D2D; background: #FCEBEB; padding: 5px 10px; border-radius: 6px; }
+
+/* FORM */
+.form-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; margin-bottom: 16px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group label { font-size: 11px; color: var(--text-hint); text-transform: uppercase; letter-spacing: 0.5px; }
+.form-group input, .form-group select { padding: 8px 10px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-family: var(--font); background: var(--bg); color: var(--text); outline: none; transition: border 0.12s; }
+.form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+.form-preview { display: flex; gap: 16px; background: var(--bg-kpi); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; }
+.preview-item { display: flex; flex-direction: column; gap: 3px; }
+.preview-item span { font-size: 11px; color: var(--text-hint); }
+.preview-item strong { font-size: 16px; font-family: var(--font-mono); color: var(--text); }
+.form-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.btn-primary { padding: 8px 20px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: 13px; font-family: var(--font); cursor: pointer; font-weight: 500; }
+.btn-primary:hover { background: #c04d26; }
+.btn-secondary { padding: 8px 20px; background: transparent; color: var(--text-muted); border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 13px; font-family: var(--font); cursor: pointer; }
+.btn-secondary:hover { background: var(--bg-kpi); }
+.btn-del { background: none; border: none; cursor: pointer; color: var(--text-hint); font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+.btn-del:hover { background: #FCEBEB; color: #A32D2D; }
