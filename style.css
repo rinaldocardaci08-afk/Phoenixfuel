@@ -81,6 +81,8 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
 .btn-primary:hover { opacity: 0.88; }
 .btn-danger { background: none; border: none; color: #A32D2D; font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .btn-danger:hover { background: #FCEBEB; }
+.btn-edit { background: none; border: none; font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.btn-edit:hover { background: var(--bg-kpi); }
 .check-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; background: var(--bg-kpi); padding: 5px 10px; border-radius: 6px; }
 .check-label input { cursor: pointer; }
 
