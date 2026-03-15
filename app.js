@@ -245,7 +245,10 @@ async function salvaPrezzo() {
   const margine = parseFloat(document.getElementById('pr-margine').value)||0;
   const data = document.getElementById('pr-data').value;
   const prodotto = document.getElementById('pr-prodotto').value;
+  const mezzoId = document.getElementById('car-mezzo').value;
+  const trId2 = document.getElementById('car-trasportatore').value;
   if (!data) { toast('⚠ Inserisci la data'); return; }
+  if (!mezzoId && !trId2) { toast('⚠ Seleziona un mezzo proprio o un trasportatore esterno'); return; }
   if (!fornitoreNome||fornitoreNome==='Seleziona...') { toast('⚠ Seleziona un fornitore'); return; }
   if (!prodotto) { toast('⚠ Seleziona un prodotto'); return; }
   if (isNaN(costo)||costo<=0) { toast('⚠ Inserisci il costo per litro'); return; }
@@ -1056,12 +1059,15 @@ async function creaNuovoCarico() {
   const mezzoId = document.getElementById('car-mezzo').value;
   const mezzoTarga = document.getElementById('car-mezzo').options[document.getElementById('car-mezzo').selectedIndex]?.text || '';
   const autista = document.getElementById('car-autista').value;
-  const trId = document.getElementById('car-trasportatore').value || null;
+  // trasportatore handled above
+  const mezzoId = document.getElementById('car-mezzo').value;
+  const trId2 = document.getElementById('car-trasportatore').value;
   if (!data) { toast('⚠ Inserisci la data'); return; }
+  if (!mezzoId && !trId2) { toast('⚠ Seleziona un mezzo proprio o un trasportatore esterno'); return; }
   // Raccoglie ordini selezionati
   const ordiniSel = Array.from(document.querySelectorAll('.ord-carico:checked')).map(c => c.value);
   if (!ordiniSel.length) { toast('⚠ Seleziona almeno un ordine'); return; }
-  const { data: carico, error } = await sb.from('carichi').insert([{ data, mezzo_id: mezzoId || null, mezzo_targa: mezzoTarga, autista, trasportatore_id: trId, stato: 'programmato' }]).select().single();
+  const { data: carico, error } = await sb.from('carichi').insert([{ data, mezzo_id: mezzoId || null, mezzo_targa: mezzoTarga, autista, trasportatore_id: trId2 || null, stato: 'programmato' }]).select().single();
   if (error) { toast('Errore: ' + error.message); return; }
   // Associa ordini al carico
   const righe = ordiniSel.map((oId, i) => ({ carico_id: carico.id, ordine_id: oId, sequenza: i + 1 }));
@@ -1078,7 +1084,7 @@ async function caricaOrdiniPerCarico() {
   if (!dataEl) return;
   const data = dataEl.value;
   if (!data) { document.getElementById('ordini-per-carico').innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
-  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).in('tipo_ordine', ['cliente','deposito']).neq('stato', 'annullato').order('cliente');
+  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).in('tipo_ordine', ['cliente','deposito']).not('stato', 'in', '("annullato","programmato","confermato")').order('cliente');
   const wrap = document.getElementById('ordini-per-carico');
   if (!ordini || !ordini.length) { wrap.innerHTML = '<div class="loading">Nessun ordine per questa data</div>'; return; }
   // Calcola litri totali selezionati
