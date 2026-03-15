@@ -279,19 +279,49 @@ async function caricaPrezzi() {
   if (filtroData) query = query.eq('data', filtroData);
   const { data } = await query;
   const tbody = document.getElementById('tabella-prezzi');
-  if (!data||!data.length) { tbody.innerHTML='<tr><td colspan="10" class="loading">Nessun prezzo trovato</td></tr>'; return; }
+  
+  // Calcola prezzi PhoenixFuel da costo medio cisterne
+  const { data: cisterne } = await sb.from('cisterne').select('*');
+  const { data: baseDeposito } = await sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle();
+  let righeDeposito = [];
+  if (cisterne && baseDeposito) {
+    const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
+    prodotti.forEach(prodotto => {
+      const cis = cisterne.filter(c=>c.prodotto===prodotto);
+      const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
+      if (totLitri > 0) {
+        const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
+        righeDeposito.push({
+          id: 'phoenix_'+prodotto,
+          data: filtroData || oggiISO,
+          fornitore: 'PhoenixFuel',
+          basi_carico: { nome: baseDeposito.nome },
+          prodotto,
+          costo_litro: costoMedio,
+          trasporto_litro: 0,
+          margine: 0,
+          iva: prodotto==='Gasolio Agricolo'?10:22,
+          _giacenza: totLitri,
+          _isDeposito: true
+        });
+      }
+    });
+  }
+  
+  const tuttiPrezzi = [...righeDeposito, ...(data||[])];
+  if (!tuttiPrezzi.length) { tbody.innerHTML='<tr><td colspan="10" class="loading">Nessun prezzo trovato</td></tr>'; return; }
   const best={};
-  data.forEach(r=>{ const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
-  tbody.innerHTML=data.map(r=>`<tr>
+  tuttiPrezzi.forEach(r=>{ const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
+  tbody.innerHTML=tuttiPrezzi.map(r=>`<tr>
     <td>${r.data}</td><td>${r.fornitore}</td>
     <td>${r.basi_carico?r.basi_carico.nome:'—'}</td>
-    <td>${r.prodotto}</td>
+    <td>${r.prodotto}${r._giacenza?` <span style="font-size:10px;color:var(--text-hint)">(${fmtL(r._giacenza)})</span>`:''}</td>
     <td style="font-family:var(--font-mono)">${fmt(r.costo_litro)}</td>
-    <td class="editable" onclick="editaCella(this,'prezzi','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td>
-    <td class="editable" onclick="editaCella(this,'prezzi','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td>
+    <td style="font-family:var(--font-mono)">${r._isDeposito?'<span style="font-size:10px;color:var(--text-hint)">auto</span>':fmt(r.trasporto_litro)}</td>
+    <td style="font-family:var(--font-mono)">${r._isDeposito?'<span style="font-size:10px;color:var(--text-hint)">da inserire</span>':fmt(r.margine)}</td>
     <td style="font-family:var(--font-mono)">${fmt(prezzoNoIva(r))}</td>
     <td style="font-family:var(--font-mono)">${fmt(prezzoConIva(r))}</td>
-    <td>${best[r.data+'_'+r.prodotto]?.id===r.id?'<span class="badge green" style="font-size:9px">Best</span>':''} <button class="btn-danger" onclick="eliminaRecord('prezzi','${r.id}',caricaPrezzi)">×</button></td>
+    <td>${best[r.data+'_'+r.prodotto]?.id===r.id?'<span class="badge green" style="font-size:9px">Best</span>':''} ${r._isDeposito?'<span class="badge teal" style="font-size:9px">Deposito</span>':'<button class="btn-danger" onclick="eliminaRecord('prezzi',''+r.id+'',caricaPrezzi)">×</button>'}</td>
   </tr>`).join('');
 }
 
@@ -403,10 +433,13 @@ async function caricaOrdini() {
   tbody.innerHTML=data.map(r=>{
     const pL=prezzoConIva(r),tot=pL*r.litri;
     // Pulsante cisterna per approvvigionamento deposito non ancora confermato
-    const isDeposito = r.fornitore && r.fornitore.toLowerCase().includes('deposito') && r.fornitore.toLowerCase().includes('phoenix');
-    const btnCisterna = r.tipo_ordine==='deposito' && r.stato!=='confermato'
+    // Approvvigionamento deposito (entrata) → pulsante Carica cisterna
+    const isApprov = r.tipo_ordine === 'deposito' && r.stato !== 'confermato';
+    // Uscita deposito → fornitore PhoenixFuel o base contiene phoenix
+    const isUscitaDeposito = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && r.tipo_ordine !== 'deposito' && r.stato !== 'confermato';
+    const btnCisterna = isApprov
       ? `<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna('${r.id}')">🛢 Carica</button>`
-      : isDeposito && r.stato!=='confermato'
+      : isUscitaDeposito
       ? `<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito('${r.id}')">📤 Scarica</button>`
       : '';
     return `<tr><td>${r.data}</td><td>${badgeStato(r.tipo_ordine||'cliente')}</td><td>${r.cliente}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${r.basi_carico?r.basi_carico.nome:'—'}</td><td class="editable" onclick="editaCella(this,'ordini','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td><td class="editable" onclick="editaCella(this,'ordini','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td><td style="font-family:var(--font-mono)">${fmt(pL)}</td><td style="font-family:var(--font-mono)">${fmtE(tot)}</td><td style="font-size:11px;color:var(--text-hint)">${r.data_scadenza||'—'}</td><td>${badgeStato(r.stato)}</td><td>${btnCisterna} <button class="btn-edit" onclick="apriModaleOrdine('${r.id}')">✏️</button><button class="btn-danger" onclick="eliminaRecord('ordini','${r.id}',caricaOrdini)">×</button></td></tr>`;
@@ -452,7 +485,7 @@ async function caricaDeposito() {
   document.getElementById('dep-totale').textContent=fmtL(totaleStoccato);
   document.getElementById('dep-pct').textContent=Math.round((totaleStoccato/280000)*100)+'%';
   document.getElementById('dep-allerta').textContent=allerte;
-  const { data:mov } = await sb.from('ordini').select('*').or('tipo_ordine.eq.deposito,cliente.eq.Deposito').order('created_at',{ascending:false}).limit(10);
+  const { data:mov } = await sb.from('ordini').select('*').or('tipo_ordine.eq.deposito,fornitore.ilike.%phoenix%').order('created_at',{ascending:false}).limit(10);
   const tbody=document.getElementById('dep-movimenti');
   tbody.innerHTML=mov&&mov.length?mov.map(r=>`<tr><td>${r.data}</td><td>${r.tipo_ordine==='deposito'?'<span class="badge teal">Entrata</span>':'<span class="badge amber">Uscita</span>'}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${badgeStato(r.stato)}</td></tr>`).join(''):'<tr><td colspan="6" class="loading">Nessun movimento</td></tr>';
 }
