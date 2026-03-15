@@ -385,7 +385,7 @@ async function caricaOrdini() {
   if (!data||!data.length) { tbody.innerHTML='<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
   tbody.innerHTML=data.map(r=>{
     const pL=prezzoConIva(r),tot=pL*r.litri;
-    return `<tr><td>${r.data}</td><td>${badgeStato(r.tipo_ordine||'cliente')}</td><td>${r.cliente}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${r.basi_carico?r.basi_carico.nome:'—'}</td><td class="editable" onclick="editaCella(this,'ordini','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td><td class="editable" onclick="editaCella(this,'ordini','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td><td style="font-family:var(--font-mono)">${fmt(pL)}</td><td style="font-family:var(--font-mono)">${fmtE(tot)}</td><td style="font-size:11px;color:var(--text-hint)">${r.data_scadenza||'—'}</td><td>${badgeStato(r.stato)}</td><td><button class="btn-danger" onclick="eliminaRecord('ordini','${r.id}',caricaOrdini)">×</button></td></tr>`;
+    return `<tr><td>${r.data}</td><td>${badgeStato(r.tipo_ordine||'cliente')}</td><td>${r.cliente}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${r.basi_carico?r.basi_carico.nome:'—'}</td><td class="editable" onclick="editaCella(this,'ordini','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td><td class="editable" onclick="editaCella(this,'ordini','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td><td style="font-family:var(--font-mono)">${fmt(pL)}</td><td style="font-family:var(--font-mono)">${fmtE(tot)}</td><td style="font-size:11px;color:var(--text-hint)">${r.data_scadenza||'—'}</td><td>${badgeStato(r.stato)}</td><td><button class="btn-edit" onclick="apriModaleOrdine('${r.id}')">✏️</button><button class="btn-danger" onclick="eliminaRecord('ordini','${r.id}',caricaOrdini)">×</button></td></tr>`;
   }).join('');
 }
 
@@ -733,4 +733,68 @@ async function invitaUtente() {
     toast('✅ Invito inviato a ' + email + '!');
   }
   caricaUtentiCompleto();
+}
+
+// ── MODIFICA ORDINE ───────────────────────────────────────────────
+async function apriModaleOrdine(id) {
+  const { data: r } = await sb.from('ordini').select('*').eq('id', id).single();
+  if (!r) return;
+  const el = document.getElementById('modal-permessi-content');
+  el.innerHTML = `
+    <div style="font-size:15px;font-weight:500;margin-bottom:16px">✏️ Modifica ordine</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Stato</label>
+        <select id="mod-stato">
+          <option value="in attesa" ${r.stato==='in attesa'?'selected':''}>In attesa</option>
+          <option value="confermato" ${r.stato==='confermato'?'selected':''}>Confermato</option>
+          <option value="programmato" ${r.stato==='programmato'?'selected':''}>Programmato</option>
+          <option value="annullato" ${r.stato==='annullato'?'selected':''}>Annullato</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="${r.litri}" /></div>
+      <div class="form-group"><label>Trasporto/L (€)</label><input type="number" id="mod-trasporto" step="0.0001" value="${r.trasporto_litro}" /></div>
+      <div class="form-group"><label>Margine/L (€)</label><input type="number" id="mod-margine" step="0.0001" value="${r.margine}" /></div>
+      <div class="form-group"><label>Trasportatore</label><input type="text" id="mod-trasportatore" value="${r.trasportatore||''}" /></div>
+      <div class="form-group"><label>Giorni pagamento</label>
+        <select id="mod-gg">
+          <option value="30" ${r.giorni_pagamento==30?'selected':''}>30 gg</option>
+          <option value="45" ${r.giorni_pagamento==45?'selected':''}>45 gg</option>
+          <option value="60" ${r.giorni_pagamento==60?'selected':''}>60 gg</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1"><label>Note</label><input type="text" id="mod-note" value="${r.note||''}" /></div>
+    </div>
+    <div class="form-preview" style="margin-bottom:14px">
+      <span>Fornitore: <strong>${r.fornitore}</strong></span>
+      <span>Prodotto: <strong>${r.prodotto}</strong></span>
+      <span>Cliente: <strong>${r.cliente}</strong></span>
+      <span>Data: <strong>${r.data}</strong></span>
+    </div>
+    <button class="btn-primary" style="width:100%" onclick="salvaModificaOrdine('${id}')">Salva modifiche</button>`;
+  document.getElementById('modal-permessi').style.display = 'flex';
+}
+
+async function salvaModificaOrdine(id) {
+  const litri = parseFloat(document.getElementById('mod-litri').value);
+  const trasporto = parseFloat(document.getElementById('mod-trasporto').value);
+  const margine = parseFloat(document.getElementById('mod-margine').value);
+  const ggPag = parseInt(document.getElementById('mod-gg').value);
+  // Ricalcola scadenza
+  const { data: ordine } = await sb.from('ordini').select('data').eq('id', id).single();
+  const dataScad = new Date(ordine.data);
+  dataScad.setDate(dataScad.getDate() + ggPag);
+  const { error } = await sb.from('ordini').update({
+    stato: document.getElementById('mod-stato').value,
+    litri,
+    trasporto_litro: trasporto,
+    margine,
+    trasportatore: document.getElementById('mod-trasportatore').value,
+    giorni_pagamento: ggPag,
+    data_scadenza: dataScad.toISOString().split('T')[0],
+    note: document.getElementById('mod-note').value
+  }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✅ Ordine aggiornato!');
+  chiudiModalePermessi();
+  caricaOrdini();
 }
