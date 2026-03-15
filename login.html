@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhoenixFuel — Accesso</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="login-body">
+  <div class="login-wrap">
+    <div class="login-logo">
+      <span style="font-size:36px">🔥</span>
+      <div class="login-title">PhoenixFuel</div>
+      <div class="login-sub">Gestionale carburanti</div>
+    </div>
+    <div class="login-card">
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="nome@esempio.it" />
+      </div>
+      <div class="form-group" style="margin-bottom:20px">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="••••••••" />
+      </div>
+      <button class="btn-primary" style="width:100%" onclick="accedi()">Accedi</button>
+      <div id="login-error" style="margin-top:12px;font-size:12px;color:#A32D2D;display:none"></div>
+    </div>
+  </div>
+  <script>
+    const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // Se già loggato vai direttamente
+    sb.auth.getSession().then(({ data }) => {
+      if (data.session) window.location.href = 'index.html';
+    });
+
+    async function accedi() {
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      errEl.style.display = 'none';
+      if (!email || !password) { errEl.textContent = 'Inserisci email e password'; errEl.style.display = 'block'; return; }
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { errEl.textContent = 'Credenziali non valide'; errEl.style.display = 'block'; return; }
+      window.location.href = 'index.html';
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Enter') accedi(); });
+  </script>
+</body>
+</html>
