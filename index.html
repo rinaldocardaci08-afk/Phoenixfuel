@@ -117,6 +117,23 @@
 
       <!-- PREZZI -->
       <div class="section" id="s-prezzi">
+
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>Listino prezzi</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:12px;color:var(--text-muted)">Filtra data:</label>
+              <input type="date" id="filtro-data-prezzi" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" onchange="caricaPrezzi()" />
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Prodotto</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+          <tbody id="tabella-prezzi"><tr><td colspan="10" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+      </div>
+
+
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Inserisci prezzo giornaliero</div>
           <div class="form-grid">
@@ -139,6 +156,7 @@
           <button class="btn-primary" onclick="salvaPrezzo()">Salva prezzo</button>
         </div>
 
+
         <!-- Prezzi cliente -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Inserisci prezzo personalizzato cliente</div>
@@ -159,19 +177,7 @@
           <button class="btn-primary" onclick="salvaPrezzoCliente()">Salva prezzo cliente</button>
         </div>
 
-        <div class="card">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-            <span>Listino prezzi</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <label style="font-size:12px;color:var(--text-muted)">Filtra data:</label>
-              <input type="date" id="filtro-data-prezzi" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" onchange="caricaPrezzi()" />
-            </div>
-          </div>
-          <div style="overflow-x:auto">
-          <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Prodotto</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-          <tbody id="tabella-prezzi"><tr><td colspan="10" class="loading">Caricamento...</td></tr></tbody></table>
-          </div>
-        </div>
+
       </div>
 
       <!-- DEPOSITO -->

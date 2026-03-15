@@ -388,9 +388,10 @@ async function caricaOrdini() {
   tbody.innerHTML=data.map(r=>{
     const pL=prezzoConIva(r),tot=pL*r.litri;
     // Pulsante cisterna per approvvigionamento deposito non ancora confermato
+    const isDeposito = r.fornitore && r.fornitore.toLowerCase().includes('deposito') && r.fornitore.toLowerCase().includes('phoenix');
     const btnCisterna = r.tipo_ordine==='deposito' && r.stato!=='confermato'
       ? `<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna('${r.id}')">🛢 Carica</button>`
-      : r.fornitore==='Deposito' && r.stato!=='confermato'
+      : isDeposito && r.stato!=='confermato'
       ? `<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito('${r.id}')">📤 Scarica</button>`
       : '';
     return `<tr><td>${r.data}</td><td>${badgeStato(r.tipo_ordine||'cliente')}</td><td>${r.cliente}</td><td>${r.prodotto}</td><td style="font-family:var(--font-mono)">${fmtL(r.litri)}</td><td>${r.fornitore}</td><td>${r.basi_carico?r.basi_carico.nome:'—'}</td><td class="editable" onclick="editaCella(this,'ordini','trasporto_litro','${r.id}',${r.trasporto_litro})" style="font-family:var(--font-mono)">${fmt(r.trasporto_litro)}</td><td class="editable" onclick="editaCella(this,'ordini','margine','${r.id}',${r.margine})" style="font-family:var(--font-mono)">${fmt(r.margine)}</td><td style="font-family:var(--font-mono)">${fmt(pL)}</td><td style="font-family:var(--font-mono)">${fmtE(tot)}</td><td style="font-size:11px;color:var(--text-hint)">${r.data_scadenza||'—'}</td><td>${badgeStato(r.stato)}</td><td>${btnCisterna} <button class="btn-edit" onclick="apriModaleOrdine('${r.id}')">✏️</button><button class="btn-danger" onclick="eliminaRecord('ordini','${r.id}',caricaOrdini)">×</button></td></tr>`;
@@ -880,15 +881,14 @@ async function confermaCaricoDeposito(ordineId) {
 async function confermaUscitaDeposito(ordineId) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
-  // Trova cisterna del prodotto con più litri disponibili
   const prodottoMap = { 'Gasolio Autotrazione':'autotrazione', 'Gasolio Agricolo':'agricolo', 'HVO':'hvo', 'Benzina':'benzina', 'AdBlue':'autotrazione' };
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('livello_attuale', { ascending: false });
-  if (!cisterne || !cisterne.length) { toast('⚠ Nessuna cisterna trovata'); return; }
+  if (!cisterne || !cisterne.length) { toast('⚠ Nessuna cisterna trovata per questo prodotto'); return; }
   const cis = cisterne[0];
-  if (cis.livello_attuale < ordine.litri) { toast('⚠ Giacenza insufficiente nel deposito!'); return; }
+  if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('⚠ Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
   await aggiornaCisterna(cis.id, ordine.litri, 'uscita', ordineId, ordine.data);
-  await sb.from('ordini').update({ stato: 'confermato' }).eq('id', ordineId);
+  await sb.from('ordini').update({ stato: 'confermato', cisterna_id: cis.id }).eq('id', ordineId);
   toast('✅ Uscita registrata! Cisterna aggiornata.');
   caricaDeposito();
   caricaOrdini();
@@ -1074,9 +1074,11 @@ async function creaNuovoCarico() {
 }
 
 async function caricaOrdiniPerCarico() {
-  const data = document.getElementById('car-data').value;
-  if (!data) return;
-  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).eq('tipo_ordine', 'cliente').neq('stato', 'annullato').order('cliente');
+  const dataEl = document.getElementById('car-data');
+  if (!dataEl) return;
+  const data = dataEl.value;
+  if (!data) { document.getElementById('ordini-per-carico').innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
+  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).in('tipo_ordine', ['cliente','deposito']).neq('stato', 'annullato').order('cliente');
   const wrap = document.getElementById('ordini-per-carico');
   if (!ordini || !ordini.length) { wrap.innerHTML = '<div class="loading">Nessun ordine per questa data</div>'; return; }
   // Calcola litri totali selezionati
@@ -1121,4 +1123,45 @@ async function apriDettaglioCarico(caricoId) {
       <button class="btn-primary" style="flex:1" onclick="chiudiModalePermessi()">Chiudi</button>
     </div>`;
   document.getElementById('modal-permessi').style.display = 'flex';
+}
+
+// ── MODIFICA CISTERNA ─────────────────────────────────────────────
+async function apriModaleCisterna(id) {
+  const { data: c } = await sb.from('cisterne').select('*').eq('id', id).single();
+  if (!c) return;
+  const el = document.getElementById('modal-permessi-content');
+  el.innerHTML = `
+    <div style="font-size:15px;font-weight:500;margin-bottom:16px">🛢 Modifica cisterna — ${c.nome}</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Nome</label><input type="text" id="cis-nome" value="${c.nome}" /></div>
+      <div class="form-group"><label>Livello attuale (L)</label><input type="number" id="cis-livello" value="${c.livello_attuale}" /></div>
+      <div class="form-group"><label>Capacità massima (L)</label><input type="number" id="cis-cap" value="${c.capacita_max}" /></div>
+      <div class="form-group"><label>Tipo</label>
+        <select id="cis-tipo">
+          <option value="autotrazione" ${c.tipo==='autotrazione'?'selected':''}>Autotrazione</option>
+          <option value="agricolo" ${c.tipo==='agricolo'?'selected':''}>Agricolo</option>
+          <option value="hvo" ${c.tipo==='hvo'?'selected':''}>HVO</option>
+          <option value="benzina" ${c.tipo==='benzina'?'selected':''}>Benzina</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%" onclick="salvaModificaCisterna('${id}')">Salva</button>`;
+  document.getElementById('modal-permessi').style.display = 'flex';
+}
+
+async function salvaModificaCisterna(id) {
+  const livello = parseFloat(document.getElementById('cis-livello').value);
+  const cap = parseFloat(document.getElementById('cis-cap').value);
+  if (livello > cap) { toast('⚠ Il livello non può superare la capacità'); return; }
+  const { error } = await sb.from('cisterne').update({
+    nome: document.getElementById('cis-nome').value,
+    livello_attuale: livello,
+    capacita_max: cap,
+    tipo: document.getElementById('cis-tipo').value,
+    updated_at: new Date().toISOString()
+  }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✅ Cisterna aggiornata!');
+  chiudiModalePermessi();
+  caricaDeposito();
 }
