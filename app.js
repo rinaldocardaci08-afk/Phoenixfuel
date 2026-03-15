@@ -377,9 +377,21 @@ async function salvaOrdine() {
   const dataOrdine=new Date(document.getElementById('ord-data').value);
   const dataScad=new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
   const record={ data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:prezzoCorrente.trasporto_litro, margine:prezzoCorrente.margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, trasportatore:document.getElementById('ord-trasportatore').value, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
-  const { error } = await sb.from('ordini').insert([record]);
+  const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
-  toast('✅ Ordine salvato!');
+  
+  // Se la base di carico è il deposito interno, scarica automaticamente la cisterna
+  if (prezzoCorrente.base_carico_id) {
+    const { data: base } = await sb.from('basi_carico').select('nome').eq('id', prezzoCorrente.base_carico_id).single();
+    if (base && base.nome.toLowerCase().includes('deposito') && base.nome.toLowerCase().includes('phoenix')) {
+      await confermaUscitaDeposito(nuovoOrdine.id);
+      toast('✅ Ordine salvato e giacenza deposito aggiornata!');
+    } else {
+      toast('✅ Ordine salvato!');
+    }
+  } else {
+    toast('✅ Ordine salvato!');
+  }
   caricaOrdini(); caricaDashboard();
 }
 
@@ -1082,11 +1094,14 @@ async function caricaOrdiniPerCarico() {
   if (!dataEl) return;
   const data = dataEl.value;
   if (!data) { document.getElementById('ordini-per-carico').innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
-  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).in('tipo_ordine', ['cliente','deposito']).not('stato', 'in', '("annullato","programmato","confermato")').order('cliente');
+  // Ordini confermati o in attesa che non sono già in un carico
+  const { data: ordiniInCarico } = await sb.from('carico_ordini').select('ordine_id');
+  const idsInCarico = new Set((ordiniInCarico||[]).map(o=>o.ordine_id));
+  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).eq('tipo_ordine', 'cliente').neq('stato', 'annullato').order('cliente');
+  const ordiniFiltrati = (ordini||[]).filter(o => !idsInCarico.has(o.id));
   const wrap = document.getElementById('ordini-per-carico');
-  if (!ordini || !ordini.length) { wrap.innerHTML = '<div class="loading">Nessun ordine per questa data</div>'; return; }
-  // Calcola litri totali selezionati
-  wrap.innerHTML = ordini.map(o => `
+  if (!ordiniFiltrati || !ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
+  wrap.innerHTML = ordiniFiltrati.map(o => `
     <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px">
       <input type="checkbox" class="ord-carico" value="${o.id}" onchange="aggiornaTotaleCarico()" />
       <div style="flex:1">
