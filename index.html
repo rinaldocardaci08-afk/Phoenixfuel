@@ -69,7 +69,7 @@
             </div>
             <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente"><option value="">Seleziona...</option></select></div>
             <div class="form-group"><label>Fornitore</label><select id="ord-fornitore" onchange="aggiornaBasiOrdine()"><option value="">— Prima seleziona data —</option></select></div>
-            <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
+            <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label>Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona base —</option></select></div>
             <div class="form-group"><label>Litri</label><input type="number" id="ord-litri" placeholder="0" oninput="aggiornaPrevOrdine()" /></div>
             <div class="form-group"><label>Trasportatore</label><input type="text" id="ord-trasportatore" placeholder="Nostro / Nome esterno" /></div>

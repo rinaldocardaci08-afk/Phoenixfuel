@@ -174,11 +174,11 @@ function aggiornaBasiOrdine() {
   const selBase = document.getElementById('ord-base');
   if (basi.length) {
     selBase.innerHTML = '<option value="">Seleziona base...</option>' + basi.map(b=>`<option value="${b.id}">${b.nome}</option>`).join('');
+    document.getElementById('ord-prodotto').innerHTML = '<option value="">— Prima seleziona base —</option>';
   } else {
     selBase.innerHTML = '<option value="">Nessuna base specificata</option>';
     aggiornaProdottiOrdine();
   }
-  document.getElementById('ord-prodotto').innerHTML = '<option value="">— Prima seleziona base —</option>';
   prezzoCorrente = null;
 }
 
