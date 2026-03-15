@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhoenixFuel — Gestionale Carburanti</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="logo-icon">🔥</span>
+        <div>
+          <div class="logo-title">PhoenixFuel</div>
+          <div class="logo-sub">Gestionale carburanti</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <div class="nav-item active" onclick="setSection('dashboard', this)"><span class="nav-icon">▦</span> Dashboard</div>
+        <div class="nav-item" onclick="setSection('ordini', this)"><span class="nav-icon">📋</span> Ordini</div>
+        <div class="nav-item" onclick="setSection('prezzi', this)"><span class="nav-icon">💰</span> Prezzi giornalieri</div>
+        <div class="nav-item" onclick="setSection('giacenze', this)"><span class="nav-icon">🛢</span> Giacenze</div>
+        <div class="nav-item" onclick="setSection('consegne', this)"><span class="nav-icon">🚚</span> Consegne</div>
+        <div class="nav-item" onclick="setSection('vendite', this)"><span class="nav-icon">📊</span> Vendite</div>
+      </nav>
+      <div class="sidebar-footer">v1.0 — 2026</div>
+    </aside>
+
+    <div class="main">
+      <div class="topbar">
+        <span class="topbar-title" id="page-title">Dashboard</span>
+        <span class="topbar-date" id="topbar-date"></span>
+      </div>
+      <div class="content">
+
+        <!-- DASHBOARD -->
+        <div class="section active" id="s-dashboard">
+          <div class="grid4">
+            <div class="kpi"><div class="kpi-label">Fatturato oggi</div><div class="kpi-value">€ 48.320</div><div class="kpi-delta up">↑ 12% vs ieri</div></div>
+            <div class="kpi"><div class="kpi-label">Litri consegnati</div><div class="kpi-value">32.400 L</div><div class="kpi-delta up">↑ 8%</div></div>
+            <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value">€ 0,038/L</div><div class="kpi-delta down">↓ 2%</div></div>
+            <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value">14</div><div class="kpi-delta up">↑ 3 vs ieri</div></div>
+          </div>
+          <div class="grid2">
+            <div class="card">
+              <div class="card-title">Vendite ultimi 6 mesi (kL)</div>
+              <div class="chart-bars">
+                <div class="bar-col"><div class="bar-rect" style="height:55px"></div><div class="bar-lbl">Ott</div></div>
+                <div class="bar-col"><div class="bar-rect" style="height:65px"></div><div class="bar-lbl">Nov</div></div>
+                <div class="bar-col"><div class="bar-rect" style="height:72px"></div><div class="bar-lbl">Dic</div></div>
+                <div class="bar-col"><div class="bar-rect" style="height:48px"></div><div class="bar-lbl">Gen</div></div>
+                <div class="bar-col"><div class="bar-rect" style="height:60px"></div><div class="bar-lbl">Feb</div></div>
+                <div class="bar-col"><div class="bar-rect" style="height:80px"></div><div class="bar-lbl">Mar</div></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Ordini per fornitore</div>
+              <div class="progress-wrap"><div class="progress-label"><span>Eni</span><span>38%</span></div><div class="progress-bar"><div class="progress-fill" style="width:38%;background:#D85A30"></div></div></div>
+              <div class="progress-wrap"><div class="progress-label"><span>Q8 Quasar</span><span>25%</span></div><div class="progress-bar"><div class="progress-fill" style="width:25%;background:#378ADD"></div></div></div>
+              <div class="progress-wrap"><div class="progress-label"><span>Ludoil Vibo</span><span>18%</span></div><div class="progress-bar"><div class="progress-fill" style="width:18%;background:#639922"></div></div></div>
+              <div class="progress-wrap"><div class="progress-label"><span>Deposito Vibo</span><span>12%</span></div><div class="progress-bar"><div class="progress-fill" style="width:12%;background:#BA7517"></div></div></div>
+              <div class="progress-wrap"><div class="progress-label"><span>Eni Milazzo</span><span>7%</span></div><div class="progress-bar"><div class="progress-fill" style="width:7%;background:#E24B4A"></div></div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Spedizioni del giorno</div>
+            <table>
+              <thead><tr><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Autista</th><th>Ora</th><th>Stato</th></tr></thead>
+              <tbody>
+                <tr><td>Costruzioni Rossi</td><td>Gasolio</td><td>8.000</td><td>M. Fazio</td><td>07:30</td><td><span class="badge green">Consegnato</span></td></tr>
+                <tr><td>Agr. Serrano</td><td>Gasolio Agr.</td><td>5.000</td><td>G. Testa</td><td>09:00</td><td><span class="badge green">Consegnato</span></td></tr>
+                <tr><td>Autonoleggio Sud</td><td>Benzina</td><td>3.000</td><td>M. Fazio</td><td>11:30</td><td><span class="badge amber">In corso</span></td></tr>
+                <tr><td>Coop. Oliveti</td><td>AdBlue</td><td>1.500</td><td>G. Testa</td><td>14:00</td><td><span class="badge blue">Programmato</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ORDINI -->
+        <div class="section" id="s-ordini">
+          <div class="card">
+            <div class="card-title">Gestione ordini</div>
+            <table>
+              <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L</th><th>Trasporto</th><th>Margine</th><th>IVA</th><th>Stato</th></tr></thead>
+              <tbody>
+                <tr><td>15/03</td><td>Costruzioni Rossi</td><td>Gasolio</td><td>8.000</td><td>€1,42</td><td>€180</td><td>€0,038</td><td>22%</td><td><span class="badge green">Confermato</span></td></tr>
+                <tr><td>15/03</td><td>Agr. Serrano</td><td>Gasolio Agr.</td><td>5.000</td><td>€1,18</td><td>€140</td><td>€0,031</td><td>10%</td><td><span class="badge green">Confermato</span></td></tr>
+                <tr><td>15/03</td><td>Autonoleggio Sud</td><td>Benzina</td><td>3.000</td><td>€1,75</td><td>€120</td><td>€0,042</td><td>22%</td><td><span class="badge amber">In attesa</span></td></tr>
+                <tr><td>14/03</td><td>Coop. Oliveti</td><td>AdBlue</td><td>1.500</td><td>€0,48</td><td>€80</td><td>€0,022</td><td>22%</td><td><span class="badge blue">Programmato</span></td></tr>
+                <tr><td>14/03</td><td>Trasporti Bruni</td><td>Gasolio</td><td>10.000</td><td>€1,40</td><td>€210</td><td>€0,035</td><td>22%</td><td><span class="badge green">Confermato</span></td></tr>
+                <tr><td>13/03</td><td>Comune di Vibo</td><td>Gasolio</td><td>2.000</td><td>€1,38</td><td>€90</td><td>€0,028</td><td>22%</td><td><span class="badge red">Annullato</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- PREZZI -->
+        <div class="section" id="s-prezzi">
+          <div class="card">
+            <div class="card-title">Prezzi giornalieri fornitori</div>
+            <table>
+              <thead><tr><th>Fornitore</th><th>Prodotto</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+              <tbody>
+                <tr><td>Eni</td><td>Gasolio</td><td>€1,358</td><td>€0,024</td><td>€0,038</td><td>€1,420</td><td>€1,732</td><td><span class="badge green">Best</span></td></tr>
+                <tr><td>Q8 Quasar</td><td>Gasolio</td><td>€1,362</td><td>€0,022</td><td>€0,038</td><td>€1,422</td><td>€1,735</td><td></td></tr>
+                <tr><td>Ludoil Vibo</td><td>Gasolio</td><td>€1,371</td><td>€0,019</td><td>€0,038</td><td>€1,428</td><td>€1,742</td><td></td></tr>
+                <tr><td>Eni Milazzo</td><td>Gasolio</td><td>€1,365</td><td>€0,028</td><td>€0,038</td><td>€1,431</td><td>€1,746</td><td></td></tr>
+                <tr><td>Deposito Vibo</td><td>Gasolio</td><td>€1,380</td><td>€0,012</td><td>€0,038</td><td>€1,430</td><td>€1,745</td><td></td></tr>
+                <tr><td>Eni</td><td>Benzina</td><td>€1,685</td><td>€0,024</td><td>€0,041</td><td>€1,750</td><td>€2,135</td><td><span class="badge green">Best</span></td></tr>
+                <tr><td>Deposito Vibo</td><td>AdBlue</td><td>€0,415</td><td>€0,012</td><td>€0,022</td><td>€0,449</td><td>€0,548</td><td><span class="badge green">Best</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- GIACENZE -->
+        <div class="section" id="s-giacenze">
+          <div class="grid2">
+            <div class="card">
+              <div class="card-title">Autotrazione — Deposito Vibo</div>
+              <div class="cisterne">
+                <div class="cis-row"><span class="cis-label">Gasolio cis. 1</span><div class="cis-bar"><div class="cis-fill" style="width:72%;background:#D85A30"><span class="cis-pct">72%</span></div></div><span class="cis-val">36.000 L</span></div>
+                <div class="cis-row"><span class="cis-label">Gasolio cis. 2</span><div class="cis-bar"><div class="cis-fill" style="width:45%;background:#D85A30"><span class="cis-pct">45%</span></div></div><span class="cis-val">22.500 L</span></div>
+                <div class="cis-row"><span class="cis-label">Benzina</span><div class="cis-bar"><div class="cis-fill" style="width:28%;background:#378ADD"><span class="cis-pct">28%</span></div></div><span class="cis-val">8.400 L</span></div>
+                <div class="cis-row"><span class="cis-label">AdBlue</span><div class="cis-bar"><div class="cis-fill" style="width:61%;background:#639922"><span class="cis-pct">61%</span></div></div><span class="cis-val">12.200 L</span></div>
+              </div>
+              <div class="alert-box">⚠ Benzina sotto soglia (30%)</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Agricolo — Deposito Vibo</div>
+              <div class="cisterne">
+                <div class="cis-row"><span class="cis-label">Gasolio agr. 1</span><div class="cis-bar"><div class="cis-fill" style="width:83%;background:#639922"><span class="cis-pct">83%</span></div></div><span class="cis-val">41.500 L</span></div>
+                <div class="cis-row"><span class="cis-label">Gasolio agr. 2</span><div class="cis-bar"><div class="cis-fill" style="width:55%;background:#639922"><span class="cis-pct">55%</span></div></div><span class="cis-val">27.500 L</span></div>
+                <div class="cis-row"><span class="cis-label">Gasolio agr. 3</span><div class="cis-bar"><div class="cis-fill" style="width:22%;background:#BA7517"><span class="cis-pct">22%</span></div></div><span class="cis-val">5.500 L</span></div>
+              </div>
+              <div class="alert-box">⚠ Cis. 3 sotto soglia (30%)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONSEGNE -->
+        <div class="section" id="s-consegne">
+          <div class="grid4" style="margin-bottom:16px">
+            <div class="kpi"><div class="kpi-label">Mezzi attivi</div><div class="kpi-value">3</div></div>
+            <div class="kpi"><div class="kpi-label">Consegne oggi</div><div class="kpi-value">8</div></div>
+            <div class="kpi"><div class="kpi-label">Completate</div><div class="kpi-value">5</div></div>
+            <div class="kpi"><div class="kpi-label">In corso / prog.</div><div class="kpi-value">3</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Logistica consegne</div>
+            <table>
+              <thead><tr><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Autista</th><th>Targa</th><th>Orario</th><th>Note</th><th>Stato</th></tr></thead>
+              <tbody>
+                <tr><td>Costruzioni Rossi</td><td>Gasolio</td><td>8.000</td><td>M. Fazio</td><td>CS 384 AC</td><td>07:30</td><td>—</td><td><span class="badge green">Consegnato</span></td></tr>
+                <tr><td>Agr. Serrano</td><td>Agr.</td><td>5.000</td><td>G. Testa</td><td>VV 211 BX</td><td>09:00</td><td>Accesso sterrato</td><td><span class="badge green">Consegnato</span></td></tr>
+                <tr><td>Trasporti Bruni</td><td>Gasolio</td><td>10.000</td><td>F. Piro</td><td>CS 512 DL</td><td>10:00</td><td>—</td><td><span class="badge green">Consegnato</span></td></tr>
+                <tr><td>Comune di Serra</td><td>Gasolio</td><td>3.000</td><td>M. Fazio</td><td>CS 384 AC</td><td>11:30</td><td>—</td><td><span class="badge amber">In corso</span></td></tr>
+                <tr><td>Autonoleggio Sud</td><td>Benzina</td><td>3.000</td><td>G. Testa</td><td>VV 211 BX</td><td>13:00</td><td>—</td><td><span class="badge blue">Programmato</span></td></tr>
+                <tr><td>Coop. Oliveti</td><td>AdBlue</td><td>1.500</td><td>F. Piro</td><td>CS 512 DL</td><td>14:30</td><td>Cisterna piccola</td><td><span class="badge blue">Programmato</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- VENDITE -->
+        <div class="section" id="s-vendite">
+          <div class="grid4" style="margin-bottom:16px">
+            <div class="kpi"><div class="kpi-label">Fatturato mese</div><div class="kpi-value">€ 312.480</div></div>
+            <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value">218.000 L</div></div>
+            <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value">€ 8.284</div></div>
+            <div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">27</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Vendite per fornitore — marzo 2026</div>
+            <table>
+              <thead><tr><th>Fornitore</th><th>Litri</th><th>% totale</th><th>Fatturato</th><th>Margine</th></tr></thead>
+              <tbody>
+                <tr><td>Eni</td><td>82.000</td><td>38%</td><td>€118.240</td><td>€3.116</td></tr>
+                <tr><td>Q8 Quasar</td><td>54.500</td><td>25%</td><td>€77.490</td><td>€2.071</td></tr>
+                <tr><td>Ludoil Vibo</td><td>39.240</td><td>18%</td><td>€56.062</td><td>€1.491</td></tr>
+                <tr><td>Deposito Vibo</td><td>26.160</td><td>12%</td><td>€36.624</td><td>€994</td></tr>
+                <tr><td>Eni Milazzo</td><td>16.100</td><td>7%</td><td>€24.064</td><td>€612</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
