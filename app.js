@@ -697,3 +697,40 @@ async function caricaUtentiCompleto() {
     <td><button class="btn-danger" onclick="eliminaRecord('utenti','${r.id}',caricaUtentiCompleto)">×</button></td>
   </tr>`).join('');
 }
+
+// ── INVITO UTENTE ─────────────────────────────────────────────────
+async function invitaUtente() {
+  const email = document.getElementById('ut-email').value.trim();
+  const nome = document.getElementById('ut-nome').value.trim();
+  const ruolo = document.getElementById('ut-ruolo').value;
+  const clienteId = document.getElementById('ut-cliente').value || null;
+  if (!nome || !email) { toast('⚠ Inserisci nome ed email'); return; }
+
+  // Salva in tabella utenti
+  const { data: nuovoUtente, error } = await sb.from('utenti')
+    .insert([{ email, nome, ruolo, cliente_id: ruolo === 'cliente' ? clienteId : null }])
+    .select().single();
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Salva permessi
+  if (ruolo !== 'cliente' && ruolo !== 'admin') {
+    const checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
+    const permessi = Array.from(checks).map(c => ({ utente_id: nuovoUtente.id, sezione: c.value, abilitato: c.checked }));
+    if (permessi.length) await sb.from('permessi').insert(permessi);
+  }
+
+  // Manda email di invito
+  const { error: inviteError } = await sb.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: 'https://phoenixfuel.onrender.com/setpassword.html'
+    }
+  });
+
+  if (inviteError) {
+    toast('Utente creato ma invio email fallito: ' + inviteError.message);
+  } else {
+    toast('✅ Invito inviato a ' + email + '!');
+  }
+  caricaUtentiCompleto();
+}
