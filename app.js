@@ -1057,3 +1057,4 @@ async function caricaDashboard() {
 
 // ── AVVIO ─────────────────────────────────────────────────────────
 inizializza();
+"// v2.1" 
