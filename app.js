@@ -338,6 +338,7 @@ async function caricaPrezzi() {
 
 // ── ORDINI ────────────────────────────────────────────────────────
 let prezzoCorrente=null, prezziDelGiorno=[];
+let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false;
 
 function toggleTipoOrdine() {
   document.getElementById('grp-cliente').style.display = document.getElementById('ord-tipo').value==='cliente' ? '' : 'none';
@@ -345,12 +346,19 @@ function toggleTipoOrdine() {
 
 async function aggiornaSelezioniOrdine() {
   const data = document.getElementById('ord-data')?.value; if (!data) return;
-  const { data: prezzi } = await sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', data);
-  prezziDelGiorno = prezzi||[];
+
+  // Esegui query in parallelo
+  const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
+    sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', data),
+    _cacheCisterne ? Promise.resolve({data:_cacheCisterne}) : sb.from('cisterne').select('*'),
+    _cacheBaseDepositoLoaded ? Promise.resolve({data:_cacheBaseDeposito}) : sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
+  ]);
+
+  prezziDelGiorno = prezziRes.data || [];
+  const cisterne = cisterneRes.data; _cacheCisterne = cisterne;
+  const baseDeposito = baseDepRes.data; _cacheBaseDeposito = baseDeposito; _cacheBaseDepositoLoaded = true;
 
   // Aggiunge PhoenixFuel sempre disponibile con costo medio deposito
-  const { data: cisterne } = await sb.from('cisterne').select('*');
-  const { data: baseDeposito } = await sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle();
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
     prodotti.forEach(prodotto => {
@@ -369,7 +377,15 @@ async function aggiornaSelezioniOrdine() {
   document.getElementById('ord-base').innerHTML = '<option value="">— Prima seleziona fornitore —</option>';
   document.getElementById('ord-prodotto').innerHTML = '<option value="">— Prima seleziona fornitore —</option>';
   prezzoCorrente = null;
-  await caricaSelectClienti('ord-cliente');
+  // Reset campi custom
+  document.getElementById('ord-trasporto-custom').value = '';
+  document.getElementById('ord-margine-custom').value = '';
+  document.getElementById('ord-prezzo-netto').value = '';
+  document.getElementById('fido-cliente-info').style.display = 'none';
+  document.getElementById('prev-fido-warn').style.display = 'none';
+  fidoClienteCorrente = null;
+  // Carica clienti solo se cache vuota
+  if (!cacheClienti.length) await caricaSelectClienti('ord-cliente');
 }
 
 function aggiornaBasiOrdine() {
