@@ -915,11 +915,17 @@ async function caricaOrdiniPerCarico() {
     const { data: ordiniInCarico } = await sb.from('carico_ordini').select('ordine_id').in('carico_id', idsCarichi);
     idsInCarico = new Set((ordiniInCarico||[]).map(o=>o.ordine_id));
   }
-  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).eq('tipo_ordine','cliente').neq('stato','annullato').order('cliente');
-  const ordiniFiltrati = (ordini||[]).filter(o => !idsInCarico.has(o.id));
+  // Mostra ordini confermati, in attesa e programmati (non annullati) per la data selezionata
+  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente');
+  // Filtra: solo tipo cliente (o senza tipo), e non già assegnati a un carico
+  const ordiniFiltrati = (ordini||[]).filter(o => {
+    if (idsInCarico.has(o.id)) return false;
+    if (o.tipo_ordine === 'deposito') return false;
+    return true;
+  });
   const wrap = document.getElementById('ordini-per-carico');
   if (!ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
-  wrap.innerHTML = ordiniFiltrati.map(o => '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + '</div></div>' + badgeStato(o.stato) + '</label>').join('');
+  wrap.innerHTML = ordiniFiltrati.map(o => '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + ' · ' + badgeStato(o.stato) + '</div></div></label>').join('');
   aggiornaTotaleOrdiniCarico();
 }
 
