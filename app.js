@@ -1067,12 +1067,54 @@ async function creaNuovoCarico() {
       if (totLitri > Number(mezzo.capacita_totale)) { toast('Portata superata! Totale: ' + fmtL(totLitri) + ' Capienza: ' + fmtL(mezzo.capacita_totale)); return; }
     }
   }
+  // Crea il carico
   const { data: carico, error } = await sb.from('carichi').insert([{data, mezzo_id:mezzoId||null, mezzo_targa:mezzoTarga, autista, trasportatore_id:trId, stato:'programmato'}]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   const righe = ordiniSel.map((oId,i) => ({carico_id:carico.id,ordine_id:oId,sequenza:i+1}));
   await sb.from('carico_ordini').insert(righe);
   await Promise.all(ordiniSel.map(oId => sb.from('ordini').update({stato:'programmato'}).eq('id',oId)));
-  toast('Carico creato!');
+
+  // Controlla se ci sono ordini dal deposito PhoenixFuel da scaricare
+  const { data: ordiniCarico } = await sb.from('ordini').select('*').in('id', ordiniSel);
+  const ordiniDeposito = (ordiniCarico||[]).filter(o => o.fornitore && o.fornitore.toLowerCase().includes('phoenix'));
+  if (ordiniDeposito.length > 0) {
+    const totLitriDep = ordiniDeposito.reduce((s,o) => s + Number(o.litri), 0);
+    const prodottiDep = [...new Set(ordiniDeposito.map(o => o.prodotto))].join(', ');
+    // Mostra modale di conferma scarico deposito
+    let htmlModal = '<div style="font-size:15px;font-weight:500;margin-bottom:8px">🏗 Scarico deposito automatico</div>';
+    htmlModal += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Ci sono <strong>' + ordiniDeposito.length + ' ordini</strong> dal deposito PhoenixFuel per un totale di <strong>' + fmtL(totLitriDep) + '</strong> (' + prodottiDep + ').</div>';
+    htmlModal += '<div style="font-size:13px;margin-bottom:16px">Vuoi scaricare automaticamente le cisterne del deposito?</div>';
+    htmlModal += '<div style="display:flex;gap:8px">';
+    htmlModal += '<button class="btn-primary" style="flex:1" onclick="eseguiScaricaDeposito(\'' + ordiniDeposito.map(o=>o.id).join(',') + '\')">✅ Sì, scarica deposito</button>';
+    htmlModal += '<button onclick="chiudiModalePermessi();toast(\'Carico creato! Ricorda di scaricare il deposito manualmente.\')" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">No, lo faccio dopo</button>';
+    htmlModal += '</div>';
+    apriModal(htmlModal);
+  } else {
+    toast('Carico creato!');
+  }
+
+  caricaCarichi();
+  caricaOrdiniPerCarico();
+}
+
+async function eseguiScaricaDeposito(ordiniIdsStr) {
+  const ids = ordiniIdsStr.split(',');
+  let scaricati = 0, errori = 0;
+  for (const id of ids) {
+    try {
+      await confermaUscitaDeposito(id);
+      scaricati++;
+    } catch(e) {
+      console.error('Errore scarico ordine ' + id, e);
+      errori++;
+    }
+  }
+  chiudiModalePermessi();
+  if (errori > 0) {
+    toast('Scaricati ' + scaricati + ' ordini. ' + errori + ' errori — controlla il deposito.');
+  } else {
+    toast('Carico creato e deposito scaricato! (' + scaricati + ' ordini)');
+  }
   caricaCarichi();
   caricaOrdiniPerCarico();
 }
