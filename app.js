@@ -931,8 +931,27 @@ async function apriModaleCliente(id=null) {
 async function caricaClienti() {
   const { data } = await sb.from('clienti').select('*').order('nome');
   const tbody = document.getElementById('tabella-clienti');
-  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="10" class="loading">Nessun cliente</td></tr>'; return; }
-  tbody.innerHTML = data.map(r => '<tr><td><strong>' + r.nome + '</strong></td><td><span class="badge blue">' + (r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + (r.piva||'—') + '</td><td>' + (r.citta||'—') + '</td><td>' + (r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(r.fido_massimo):'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + (r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>').join('');
+  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="12" class="loading">Nessun cliente</td></tr>'; return; }
+
+  // Calcola fido per ogni cliente
+  const rows = await Promise.all(data.map(async r => {
+    let fidoUsatoHtml = '—', fidoResiduoHtml = '—';
+    const fidoMax = Number(r.fido_massimo || 0);
+    if (fidoMax > 0) {
+      const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', r.nome).neq('stato','annullato');
+      let usato = 0;
+      (ordini||[]).forEach(o => {
+        const scad = new Date(o.data);
+        scad.setDate(scad.getDate() + (o.giorni_pagamento || r.giorni_pagamento || 30));
+        if (scad > oggi) usato += prezzoConIva(o) * Number(o.litri);
+      });
+      const residuo = fidoMax - usato;
+      fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
+      fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
+    }
+    return '<tr><td><strong>' + r.nome + '</strong></td><td><span class="badge blue">' + (r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + (r.piva||'—') + '</td><td>' + (r.citta||'—') + '</td><td>' + (r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + (r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+  }));
+  tbody.innerHTML = rows.join('');
 }
 
 // ── FORNITORI ─────────────────────────────────────────────────────
