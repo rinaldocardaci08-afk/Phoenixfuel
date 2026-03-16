@@ -533,8 +533,9 @@ async function apriModaleCisterna(id) {
   html += '<div class="form-group"><label>Nome</label><input type="text" id="cis-nome" value="' + c.nome + '" /></div>';
   html += '<div class="form-group"><label>Livello attuale (L)</label><input type="number" id="cis-livello" value="' + c.livello_attuale + '" /></div>';
   html += '<div class="form-group"><label>Capacita massima (L)</label><input type="number" id="cis-cap" value="' + c.capacita_max + '" /></div>';
-  html += '<div class="form-group"><label>Tipo</label><select id="cis-tipo">';
-  ['autotrazione','agricolo','hvo','benzina'].forEach(t => { html += '<option value="' + t + '"' + (c.tipo===t?' selected':'') + '>' + t + '</option>'; });
+  html += '<div class="form-group"><label>Prodotto</label><select id="cis-prodotto">';
+  const prodOpts = {'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina'};
+  Object.entries(prodOpts).forEach(([prod,tipo]) => { html += '<option value="' + prod + '"' + (c.prodotto===prod?' selected':'') + '>' + prod + '</option>'; });
   html += '</select></div></div>';
   html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1" onclick="salvaModificaCisterna(\'' + id + '\')">Salva</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
   apriModal(html);
@@ -544,7 +545,10 @@ async function salvaModificaCisterna(id) {
   const livello = parseFloat(document.getElementById('cis-livello').value);
   const cap = parseFloat(document.getElementById('cis-cap').value);
   if (livello > cap) { toast('Il livello non puo superare la capacita'); return; }
-  const { error } = await sb.from('cisterne').update({ nome:document.getElementById('cis-nome').value, livello_attuale:livello, capacita_max:cap, tipo:document.getElementById('cis-tipo').value, updated_at:new Date().toISOString() }).eq('id', id);
+  const prodotto = document.getElementById('cis-prodotto').value;
+  const tipoMap = {'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina'};
+  const tipo = tipoMap[prodotto] || 'autotrazione';
+  const { error } = await sb.from('cisterne').update({ nome:document.getElementById('cis-nome').value, livello_attuale:livello, capacita_max:cap, tipo, prodotto, updated_at:new Date().toISOString() }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   toast('Cisterna aggiornata!');
   chiudiModalePermessi();
