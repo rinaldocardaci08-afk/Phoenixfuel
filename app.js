@@ -408,25 +408,59 @@ async function caricaPrezzoPerOrdine() {
     // Pre-popola i campi custom con i valori da listino
     const trInput = document.getElementById('ord-trasporto-custom');
     const mgInput = document.getElementById('ord-margine-custom');
-    if (trInput && !trInput.value) trInput.value = match.trasporto_litro;
-    if (mgInput && !mgInput.value) mgInput.value = match.margine;
+    const pnInput = document.getElementById('ord-prezzo-netto');
+    trInput.value = match.trasporto_litro;
+    mgInput.value = match.margine;
+    // Calcola prezzo netto = costo + trasporto + margine
+    const noIva = Number(match.costo_litro) + Number(match.trasporto_litro) + Number(match.margine);
+    pnInput.value = noIva.toFixed(4);
     aggiornaPrevOrdine();
   } else {
     prezzoCorrente = null;
-    ['prev-costo','prev-trasporto','prev-margine','prev-prezzo','prev-totale'].forEach(id => document.getElementById(id).textContent = '—');
+    ['prev-costo','prev-trasporto','prev-margine','prev-prezzo-netto','prev-prezzo','prev-totale'].forEach(id => document.getElementById(id).textContent = '—');
   }
+}
+
+// Aggiorna da margine → calcola prezzo netto
+function aggiornaPrevDaMargine() {
+  if (!prezzoCorrente) return;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+  aggiornaPrevOrdine();
+}
+
+// Aggiorna da trasporto → calcola prezzo netto
+function aggiornaPrevDaTrasporto() {
+  if (!prezzoCorrente) return;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+  aggiornaPrevOrdine();
+}
+
+// Aggiorna da prezzo netto → calcola margine
+function aggiornaPrevDaPrezzo() {
+  if (!prezzoCorrente) return;
+  const prezzoNetto = parseFloat(document.getElementById('ord-prezzo-netto').value) || 0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = prezzoNetto - Number(prezzoCorrente.costo_litro) - trasporto;
+  document.getElementById('ord-margine-custom').value = margine.toFixed(4);
+  aggiornaPrevOrdine();
 }
 
 function aggiornaPrevOrdine() {
   if (!prezzoCorrente) return;
   const litri = parseFloat(document.getElementById('ord-litri').value)||0;
-  // Usa valori custom se compilati, altrimenti quelli da listino
-  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || prezzoCorrente.trasporto_litro || 0;
-  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || prezzoCorrente.margine || 0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
   const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
   const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
   document.getElementById('prev-trasporto').textContent = fmt(trasporto);
   document.getElementById('prev-margine').textContent = fmt(margine);
+  document.getElementById('prev-prezzo-netto').textContent = fmt(noIva);
   document.getElementById('prev-prezzo').textContent = fmt(conIva);
   document.getElementById('prev-totale').textContent = fmtE(conIva * litri);
 }
@@ -439,16 +473,17 @@ async function salvaOrdine() {
   const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'Deposito';
   if (tipo==='cliente'&&!clienteId) { toast('Seleziona un cliente'); return; }
   if (!litri) { toast('Inserisci i litri'); return; }
-  // Usa trasporto e margine custom se compilati
-  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || prezzoCorrente.trasporto_litro || 0;
-  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || prezzoCorrente.margine || 0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  if (margine <= 0 && tipo === 'cliente') {
+    if (!confirm('Il margine è zero o negativo. Vuoi procedere comunque?')) return;
+  }
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, trasportatore:document.getElementById('ord-trasportatore').value, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, trasportatore:'', giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
-  // Se fornitore PhoenixFuel scarica automaticamente il deposito
   if (prezzoCorrente._isDeposito && tipo !== 'deposito') {
     await confermaUscitaDeposito(nuovoOrdine.id);
     toast('Ordine salvato e deposito aggiornato!');
@@ -458,6 +493,7 @@ async function salvaOrdine() {
   // Reset campi custom
   document.getElementById('ord-trasporto-custom').value = '';
   document.getElementById('ord-margine-custom').value = '';
+  document.getElementById('ord-prezzo-netto').value = '';
   caricaOrdini(); caricaDashboard();
 }
 

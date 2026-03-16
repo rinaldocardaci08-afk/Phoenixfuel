@@ -85,9 +85,9 @@
             <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label>Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona base —</option></select></div>
             <div class="form-group"><label>Litri</label><input type="number" id="ord-litri" placeholder="0" oninput="aggiornaPrevOrdine()" /></div>
-            <div class="form-group"><label>Trasporto/L (€)</label><input type="number" id="ord-trasporto-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevOrdine()" /></div>
-            <div class="form-group"><label>Margine/L (€)</label><input type="number" id="ord-margine-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevOrdine()" /></div>
-            <div class="form-group"><label>Trasportatore</label><input type="text" id="ord-trasportatore" placeholder="Nostro / Nome esterno" /></div>
+            <div class="form-group"><label>Trasporto/L (€)</label><input type="number" id="ord-trasporto-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevDaTrasporto()" /></div>
+            <div class="form-group"><label>Margine/L (€)</label><input type="number" id="ord-margine-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevDaMargine()" /></div>
+            <div class="form-group"><label>Prezzo/L netto (€)</label><input type="number" id="ord-prezzo-netto" step="0.0001" placeholder="Calc. automatico" oninput="aggiornaPrevDaPrezzo()" /></div>
             <div class="form-group"><label>Giorni pagamento</label><select id="ord-gg"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
             <div class="form-group"><label>Stato</label>
               <select id="ord-stato">
@@ -102,6 +102,7 @@
             <span>Costo/L: <strong id="prev-costo">—</strong></span>
             <span>Trasporto/L: <strong id="prev-trasporto">—</strong></span>
             <span>Margine/L: <strong id="prev-margine">—</strong></span>
+            <span>Prezzo/L netto: <strong id="prev-prezzo-netto">—</strong></span>
             <span>Prezzo/L IVA inc.: <strong id="prev-prezzo">—</strong></span>
             <span>Totale ordine: <strong id="prev-totale">—</strong></span>
             <span id="prev-fido-warn" style="color:#A32D2D;display:none">⚠ Fido insufficiente!</span>
