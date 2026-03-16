@@ -574,7 +574,7 @@ async function eliminaRecord(tabella, id, callback) {
 
 // ── DEPOSITO ─────────────────────────────────────────────────────
 const DEP_CONFIG = {
-  autotrazione:{colore:'#D85A30',elId:'dep-autotrazione',totId:'dep-total-autotrazione'},
+  autotrazione:{colore:'#D4A017',elId:'dep-autotrazione',totId:'dep-total-autotrazione'},
   agricolo:{colore:'#639922',elId:'dep-agricolo',totId:'dep-total-agricolo'},
   hvo:{colore:'#3B6D11',elId:'dep-hvo',totId:'dep-total-hvo'},
   benzina:{colore:'#378ADD',elId:'dep-benzina',totId:'dep-total-benzina'}
@@ -1217,6 +1217,14 @@ async function caricaUtentiCompleto() {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
+// Colori prodotto (Gasolio Autotrazione = giallo)
+const COLORI_DASH = {
+  'Gasolio Autotrazione': { bg:'#FDF3D0', color:'#7A5D00', bar:'#D4A017', dot:'#D4A017' },
+  'Benzina':              { bg:'#E6F1FB', color:'#0C447C', bar:'#378ADD', dot:'#378ADD' },
+  'Gasolio Agricolo':     { bg:'#EAF3DE', color:'#27500A', bar:'#639922', dot:'#639922' },
+  'HVO':                  { bg:'#E1F5EE', color:'#085041', bar:'#3B6D11', dot:'#3B6D11' }
+};
+
 async function caricaDashboard() {
   const{data}=await sb.from('ordini').select('*').eq('data',oggiISO);
   if (!data) return;
@@ -1229,6 +1237,41 @@ async function caricaDashboard() {
   const{data:rec}=await sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5);
   const tbody=document.getElementById('dashboard-ordini');
   tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+r.cliente+'</td><td>'+r.prodotto+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
+  // Giacenza deposito
+  await caricaGiacenzaDashboard();
+}
+
+async function caricaGiacenzaDashboard() {
+  const { data: cisterne } = await sb.from('cisterne').select('*');
+  const wrap = document.getElementById('dash-giacenza');
+  if (!wrap) return;
+  if (!cisterne || !cisterne.length) { wrap.innerHTML = '<div class="loading">Nessuna cisterna configurata</div>'; return; }
+  const prodottiOrdine = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
+  const perProdotto = {};
+  cisterne.forEach(c => {
+    const prod = c.prodotto || 'Altro';
+    if (!perProdotto[prod]) perProdotto[prod] = { livello:0, capacita:0 };
+    perProdotto[prod].livello += Number(c.livello_attuale || 0);
+    perProdotto[prod].capacita += Number(c.capacita_max || 0);
+  });
+  let html = '';
+  prodottiOrdine.forEach(prod => {
+    const d = perProdotto[prod];
+    if (!d) return;
+    const pct = d.capacita > 0 ? Math.round((d.livello / d.capacita) * 100) : 0;
+    const col = COLORI_DASH[prod] || { bg:'var(--bg-kpi)', color:'var(--text)', bar:'#888', dot:'#888' };
+    const barColor = pct < 20 ? '#E24B4A' : pct < 40 ? '#BA7517' : col.bar;
+    html += '<div style="background:' + col.bg + ';border-radius:var(--radius);padding:14px 16px">';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:8px;height:8px;border-radius:50%;background:' + col.dot + '"></div><span style="font-size:10px;color:' + col.color + ';text-transform:uppercase;letter-spacing:0.6px;font-weight:500">' + prod + '</span></div>';
+    html += '<div style="font-size:20px;font-weight:500;font-family:var(--font-mono);color:' + col.color + '">' + fmtL(d.livello) + '</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">';
+    html += '<div style="flex:1;height:6px;background:rgba(0,0,0,0.08);border-radius:3px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:3px"></div></div>';
+    html += '<span style="font-size:11px;color:' + col.color + ';font-weight:500">' + pct + '%</span>';
+    html += '</div>';
+    html += '<div style="font-size:10px;color:' + col.color + ';opacity:0.7;margin-top:4px">Cap. ' + fmtL(d.capacita) + '</div>';
+    html += '</div>';
+  });
+  wrap.innerHTML = html;
 }
 
 // ── AVVIO ─────────────────────────────────────────────────────────

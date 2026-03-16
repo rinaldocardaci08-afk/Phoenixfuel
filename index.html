@@ -41,6 +41,15 @@
           <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value" id="kpi-margine">—</div></div>
           <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="kpi-ordini">—</div></div>
         </div>
+
+        <!-- GIACENZA DEPOSITO -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Giacenza deposito</div>
+          <div class="grid4" id="dash-giacenza">
+            <div class="loading">Caricamento...</div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-title">Ordini recenti</div>
           <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th></tr></thead>
@@ -132,7 +141,7 @@
 
           <!-- Gasolio Autotrazione -->
           <div style="margin-bottom:16px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#D85A30"></div><span style="font-size:13px;font-weight:500">Gasolio Autotrazione</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#D4A017"></div><span style="font-size:13px;font-weight:500">Gasolio Autotrazione</span></div>
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
             <tbody id="tabella-prezzi-autotrazione"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
@@ -218,7 +227,7 @@
           <div class="kpi"><div class="kpi-label">Riempimento %</div><div class="kpi-value" id="dep-pct">—</div></div>
           <div class="kpi"><div class="kpi-label">Cisterne in allerta</div><div class="kpi-value" id="dep-allerta">—</div></div>
         </div>
-        <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#D85A30"></div><div><div class="dep-product-title">Gasolio Autotrazione</div><div class="dep-product-sub">3 cisterne · 150.000 L</div></div><div class="dep-product-total" id="dep-total-autotrazione">—</div></div><div class="dep-cisterne-grid" id="dep-autotrazione"></div></div>
+        <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#D4A017"></div><div><div class="dep-product-title">Gasolio Autotrazione</div><div class="dep-product-sub">3 cisterne · 150.000 L</div></div><div class="dep-product-total" id="dep-total-autotrazione">—</div></div><div class="dep-cisterne-grid" id="dep-autotrazione"></div></div>
         <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#639922"></div><div><div class="dep-product-title">Gasolio Agricolo</div><div class="dep-product-sub">2 cisterne · 40.000 L</div></div><div class="dep-product-total" id="dep-total-agricolo">—</div></div><div class="dep-cisterne-grid" id="dep-agricolo"></div></div>
         <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#3B6D11"></div><div><div class="dep-product-title">HVO</div><div class="dep-product-sub">2 cisterne · 40.000 L</div></div><div class="dep-product-total" id="dep-total-hvo">—</div></div><div class="dep-cisterne-grid" id="dep-hvo"></div></div>
         <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#378ADD"></div><div><div class="dep-product-title">Benzina</div><div class="dep-product-sub">1 cisterna · 50.000 L</div></div><div class="dep-product-total" id="dep-total-benzina">—</div></div><div class="dep-cisterne-grid" id="dep-benzina"></div></div>
