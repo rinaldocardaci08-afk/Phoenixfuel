@@ -672,7 +672,7 @@ async function apriModaleOrdine(id) {
   if (docs && docs.length) {
     html += '<div style="margin-bottom:10px">';
     docs.forEach(d => {
-      const url = SUPABASE_URL + '/storage/v1/object/public/documenti/' + d.percorso_storage;
+      const url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
       const tipoLabel = d.tipo === 'das' ? '<span class="badge amber">DAS</span>' : d.tipo === 'conferma' ? '<span class="badge blue">Conferma</span>' : '<span class="badge gray">' + d.tipo + '</span>';
       html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-kpi);border-radius:6px;margin-bottom:4px;font-size:12px">';
       html += tipoLabel + ' ';
@@ -726,7 +726,7 @@ async function uploadDocumento(ordineId) {
   toast('Caricamento in corso...');
 
   // Upload su Supabase Storage
-  const { error: errUpload } = await sb.storage.from('documenti').upload(percorso, file, { contentType: 'application/pdf' });
+  const { error: errUpload } = await sb.storage.from('Das').upload(percorso, file, { contentType: 'application/pdf' });
   if (errUpload) { toast('Errore upload: ' + errUpload.message); return; }
 
   // Salva riferimento nel database
@@ -746,7 +746,7 @@ async function uploadDocumento(ordineId) {
 async function eliminaDocumento(docId, percorso, ordineId) {
   if (!confirm('Eliminare questo documento?')) return;
   // Elimina da storage
-  await sb.storage.from('documenti').remove([percorso]);
+  await sb.storage.from('Das').remove([percorso]);
   // Elimina dal database
   await sb.from('documenti_ordine').delete().eq('id', docId);
   toast('Documento eliminato');
