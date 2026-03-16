@@ -818,7 +818,10 @@ async function caricaLogistica() {
   await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
   const { data: mezzi } = await sb.from('mezzi').select('id,targa,capacita_totale').eq('attivo',true).order('targa');
   const selM = document.getElementById('car-mezzo');
-  if (selM && mezzi) selM.innerHTML = '<option value="">Seleziona mezzo...</option>' + mezzi.map(m => '<option value="' + m.id + '">' + m.targa + ' (' + fmtL(m.capacita_totale) + ')</option>').join('');
+  if (selM && mezzi) {
+    selM.innerHTML = '<option value="" data-cap="0">Seleziona mezzo...</option>' + mezzi.map(m => '<option value="' + m.id + '" data-cap="' + m.capacita_totale + '">' + m.targa + ' (' + fmtL(m.capacita_totale) + ')</option>').join('');
+    selM.onchange = function() { aggiornaTotaleOrdiniCarico(); };
+  }
   const { data: trasps } = await sb.from('trasportatori').select('id,nome').eq('attivo',true).order('nome');
   const selT = document.getElementById('car-trasportatore');
   if (selT && trasps) selT.innerHTML = '<option value="">Nostro mezzo</option>' + trasps.map(t => '<option value="' + t.id + '">' + t.nome + '</option>').join('');
@@ -904,18 +907,37 @@ async function caricaOrdiniPerCarico() {
   if (!dataEl) return;
   const data = dataEl.value;
   if (!data) { document.getElementById('ordini-per-carico').innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
-  const { data: ordiniInCarico } = await sb.from('carico_ordini').select('ordine_id');
-  const idsInCarico = new Set((ordiniInCarico||[]).map(o=>o.ordine_id));
+  // Recupera ordini già assegnati a carichi non annullati
+  const { data: carichiAttivi } = await sb.from('carichi').select('id').neq('stato','annullato');
+  const idsCarichi = (carichiAttivi||[]).map(c=>c.id);
+  let idsInCarico = new Set();
+  if (idsCarichi.length) {
+    const { data: ordiniInCarico } = await sb.from('carico_ordini').select('ordine_id').in('carico_id', idsCarichi);
+    idsInCarico = new Set((ordiniInCarico||[]).map(o=>o.ordine_id));
+  }
   const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).eq('tipo_ordine','cliente').neq('stato','annullato').order('cliente');
   const ordiniFiltrati = (ordini||[]).filter(o => !idsInCarico.has(o.id));
   const wrap = document.getElementById('ordini-per-carico');
   if (!ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
-  wrap.innerHTML = ordiniFiltrati.map(o => '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + '</div></div>' + badgeStato(o.stato) + '</label>').join('');
+  wrap.innerHTML = ordiniFiltrati.map(o => '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + '</div></div>' + badgeStato(o.stato) + '</label>').join('');
+  aggiornaTotaleOrdiniCarico();
 }
 
 function aggiornaTotaleOrdiniCarico() {
-  const checked = document.querySelectorAll('.ord-carico:checked').length;
-  document.getElementById('car-tot-ordini').textContent = checked + ' ordini selezionati';
+  const checks = document.querySelectorAll('.ord-carico:checked');
+  let totLitri = 0;
+  checks.forEach(c => { totLitri += Number(c.dataset.litri || 0); });
+  const mezzoSel = document.getElementById('car-mezzo');
+  const capText = mezzoSel.selectedOptions[0]?.dataset?.cap;
+  const cap = capText ? Number(capText) : 0;
+  let html = checks.length + ' ordini · <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong>';
+  if (cap > 0) {
+    const pct = Math.round((totLitri / cap) * 100);
+    const colore = totLitri > cap ? '#A32D2D' : pct > 85 ? '#BA7517' : '#639922';
+    html += ' / ' + fmtL(cap) + ' <span style="color:' + colore + ';font-weight:500">(' + pct + '%)</span>';
+    if (totLitri > cap) html += ' <span style="color:#A32D2D;font-weight:500">⚠ Capienza superata!</span>';
+  }
+  document.getElementById('car-tot-ordini').innerHTML = html;
 }
 
 async function creaNuovoCarico() {
