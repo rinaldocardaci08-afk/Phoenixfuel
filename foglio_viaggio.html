@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <title>Foglio Viaggio — PhoenixFuel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
@@ -11,7 +12,6 @@
 
   /* HEADER */
   .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 10px; }
-  .header-title { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
   .header-logo { max-height: 50px; }
   .header-date { font-size: 13px; font-weight: bold; }
 
@@ -33,6 +33,7 @@
   .consegna-addr-row { display: grid; grid-template-columns: 2fr 60px 60px 1fr 1fr; padding: 4px 6px; gap: 4px; }
   .consegna-addr-row span { font-size: 11px; }
   .note-row { padding: 3px 6px; font-size: 10px; color: #555; border-top: 1px dashed #ddd; }
+  .seq-badge { display: inline-block; background: #3a7abf; color: #fff; border-radius: 50%; width: 18px; height: 18px; text-align: center; line-height: 18px; font-size: 9px; font-weight: bold; margin-right: 4px; }
 
   /* PAGINA 2 */
   .p2-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 6px; }
@@ -40,32 +41,50 @@
   .orari-field { display: flex; align-items: center; gap: 8px; }
   .orari-label { font-size: 10px; color: #3a7abf; font-weight: bold; white-space: nowrap; }
   .orari-box { border: 1px solid #3a7abf; min-width: 80px; height: 20px; display: inline-block; }
-  .truck-svg { width: 100%; margin: 10px 0; }
+
+  /* GRAFICA CAMION */
+  .truck-graphic { margin: 10px 0; }
+  .truck-svg { width: 100%; }
+
+  /* LEGENDA */
+  .legenda { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; font-size: 10px; }
+  .legenda-item { display: flex; align-items: center; gap: 4px; }
+  .legenda-dot { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #999; }
+
+  /* TOTALI */
   .totali-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin: 10px 0; }
   .totale-box { border: 1px solid #3a7abf; padding: 4px 8px; }
   .totale-label { font-size: 9px; color: #3a7abf; font-weight: bold; }
   .totale-val { font-size: 14px; font-weight: bold; color: #3a7abf; }
+
+  /* RIENTRO */
   .rientro-section { margin-top: 14px; }
   .rientro-label { color: #c00; font-weight: bold; font-size: 11px; text-decoration: underline; margin-bottom: 6px; }
   .rientro-field { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .rientro-field-label { font-size: 10px; color: #3a7abf; font-weight: bold; width: 140px; }
   .rientro-field-box { border: 1px solid #3a7abf; flex: 1; height: 22px; }
-  .print-btn { position: fixed; bottom: 20px; right: 20px; background: #D85A30; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+
+  .print-btn { position: fixed; bottom: 20px; right: 20px; background: #D85A30; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; z-index: 100; }
+  .error-box { background: #FCEBEB; border: 1px solid #E24B4A; padding: 16px; border-radius: 8px; color: #791F1F; margin: 20px auto; max-width: 500px; text-align: center; }
+  .loading-box { text-align: center; padding: 40px; color: #999; font-size: 14px; }
 </style>
 </head>
 <body>
 
 <button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
 
+<div id="loading" class="loading-box">Caricamento foglio viaggio...</div>
+<div id="error-container"></div>
+
 <!-- ═══ PAGINA 1 ═══ -->
-<div class="page" id="page1">
+<div class="page" id="page1" style="display:none">
 
   <div class="header">
     <div>
       <div style="font-size:14px;font-weight:bold;color:#3a7abf">Foglio Viaggio</div>
     </div>
     <div style="text-align:center">
-      <div class="header-date" id="hdr-data">14/03/2026</div>
+      <div class="header-date" id="hdr-data">—</div>
     </div>
     <div style="text-align:right">
       <img src="logo_png.jpeg" class="header-logo" onerror="this.style.display='none';document.getElementById('logo-text').style.display='block'" />
@@ -75,7 +94,7 @@
 
   <!-- Info camion -->
   <div class="truck-info">
-    <div class="truck-cell"><span class="truck-label">IdOrdi</span><span class="truck-value" id="id-ordine">—</span></div>
+    <div class="truck-cell"><span class="truck-label">Id Carico</span><span class="truck-value" id="id-ordine">—</span></div>
     <div class="truck-cell"><span class="truck-label">Camion:</span><span class="truck-value" id="camion">—</span></div>
     <div class="truck-cell"><span class="truck-label">Targa:</span><span class="truck-value" id="targa">—</span></div>
     <div class="truck-cell"><span class="truck-label">Rimorchio:</span><span class="truck-value" id="rimorchio">—</span></div>
@@ -86,17 +105,18 @@
   <!-- Consegne -->
   <div id="consegne-container"></div>
 
-  <div style="margin-top:8px;font-size:9px;color:#aaa;text-align:right" id="footer-p1">PhoenixFuel — generato il <span id="gen-date"></span></div>
+  <div style="margin-top:8px;font-size:9px;color:#aaa;text-align:right">PhoenixFuel — generato il <span id="gen-date"></span></div>
 </div>
 
 <!-- ═══ PAGINA 2 ═══ -->
-<div class="page" id="page2">
+<div class="page" id="page2" style="display:none">
 
   <div class="p2-header">
     <div>
-      <div style="font-size:10px;color:#3a7abf;font-weight:bold">Data_Consegna</div>
-      <div style="font-size:14px;font-weight:bold" id="hdr-data2">14/03/2026</div>
+      <div style="font-size:10px;color:#3a7abf;font-weight:bold">Data Consegna</div>
+      <div style="font-size:14px;font-weight:bold" id="hdr-data2">—</div>
     </div>
+    <div style="text-align:center;font-size:12px;font-weight:bold;color:#3a7abf" id="hdr-targa2">—</div>
     <div style="text-align:right">
       <img src="logo_png.jpeg" style="max-height:45px" onerror="this.style.display='none';document.getElementById('logo-text2').style.display='block'" />
       <div id="logo-text2" style="display:none;font-size:18px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>
@@ -111,45 +131,11 @@
     <div class="orari-field"><span class="orari-label">Litri Totali Contatore Fine:</span><span class="orari-box"></span></div>
   </div>
 
-  <!-- Grafica camion -->
-  <svg class="truck-svg" viewBox="0 0 700 140" xmlns="http://www.w3.org/2000/svg">
-    <!-- Rimorchio -->
-    <rect x="10" y="30" width="360" height="70" rx="4" fill="#e8e8e8" stroke="#999" stroke-width="1.5"/>
-    <rect x="10" y="30" width="360" height="70" rx="4" fill="none" stroke="#555" stroke-width="2"/>
-    <!-- Scomparti rimorchio -->
-    <line x1="82" y1="30" x2="82" y2="100" stroke="#999" stroke-width="1"/>
-    <line x1="154" y1="30" x2="154" y2="100" stroke="#999" stroke-width="1"/>
-    <line x1="226" y1="30" x2="226" y2="100" stroke="#999" stroke-width="1"/>
-    <line x1="298" y1="30" x2="298" y2="100" stroke="#999" stroke-width="1"/>
-    <!-- Ruote rimorchio -->
-    <circle cx="80" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="80" cy="110" r="7" fill="#888"/>
-    <circle cx="150" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="150" cy="110" r="7" fill="#888"/>
-    <circle cx="300" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="300" cy="110" r="7" fill="#888"/>
-    <circle cx="340" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="340" cy="110" r="7" fill="#888"/>
-    <!-- Gancio -->
-    <rect x="368" y="85" width="20" height="8" fill="#777" rx="2"/>
-    <!-- Trattore -->
-    <rect x="388" y="20" width="280" height="80" rx="6" fill="#cc2222" stroke="#991111" stroke-width="2"/>
-    <!-- Cabina -->
-    <rect x="560" y="10" width="108" height="90" rx="8" fill="#dd3333" stroke="#991111" stroke-width="2"/>
-    <!-- Parabrezza -->
-    <rect x="572" y="18" width="84" height="45" rx="4" fill="#aad4f0" stroke="#999" stroke-width="1"/>
-    <!-- Fari -->
-    <circle cx="665" cy="75" r="6" fill="#fff9aa" stroke="#ccc" stroke-width="1"/>
-    <!-- Ruote trattore -->
-    <circle cx="450" cy="110" r="18" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="450" cy="110" r="8" fill="#888"/>
-    <circle cx="510" cy="110" r="18" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="510" cy="110" r="8" fill="#888"/>
-    <circle cx="620" cy="110" r="18" fill="#333" stroke="#111" stroke-width="2"/>
-    <circle cx="620" cy="110" r="8" fill="#888"/>
-    <!-- Numero litri sul cassone -->
-    <text x="390" y="72" font-size="22" font-weight="bold" fill="#3a7abf" font-family="Arial" id="svg-litri">0</text>
-  </svg>
+  <!-- Grafica camion dinamica -->
+  <div class="truck-graphic" id="truck-graphic-container"></div>
+
+  <!-- Legenda prodotti -->
+  <div class="legenda" id="legenda-prodotti"></div>
 
   <!-- Totali -->
   <div class="totali-grid">
@@ -170,68 +156,144 @@
 </div>
 
 <script>
-// Dati passati come parametro URL: ?carico_id=XXX
-// In modalità standalone usa dati demo
-const params = new URLSearchParams(window.location.search);
-
 const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+const params = new URLSearchParams(window.location.search);
 const oggi = new Date().toLocaleDateString('it-IT');
 document.getElementById('gen-date').textContent = oggi;
 document.getElementById('gen-date2').textContent = oggi;
 
-async function caricaDati() {
-  const caricoId = params.get('carico_id');
-  if (!caricoId) { mostraDemoData(); return; }
+// Colori per prodotto - 3 livelli di intensità
+const COLORI_PRODOTTO = {
+  'Gasolio Autotrazione': { pieno: '#D85A30', medio: '#E8844A', basso: '#F4B88A', label: 'Gasolio Autotraz.' },
+  'Gasolio Agricolo':     { pieno: '#639922', medio: '#8BBF44', basso: '#B8D98A', label: 'Gasolio Agricolo' },
+  'Benzina':              { pieno: '#378ADD', medio: '#5FA8E8', basso: '#99CCF4', label: 'Benzina' },
+  'HVO':                  { pieno: '#3B6D11', medio: '#5A9E22', basso: '#8FCF55', label: 'HVO' },
+  'AdBlue':               { pieno: '#6B5FCC', medio: '#8E85D9', basso: '#BAB4E8', label: 'AdBlue' }
+};
 
-  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-  const { data: carico } = await sb.from('carichi')
-    .select('*, carico_ordini(sequenza, ordini(id, cliente, prodotto, litri, fornitore, indirizzo, citta, provincia, cap, telefono, note))')
-    .eq('id', caricoId).single();
-
-  if (!carico) { mostraDemoData(); return; }
-
-  const dataFmt = new Date(carico.data).toLocaleDateString('it-IT');
-  document.getElementById('hdr-data').textContent = dataFmt;
-  document.getElementById('hdr-data2').textContent = dataFmt;
-  document.getElementById('id-ordine').textContent = carico.id.substring(0,8).toUpperCase();
-  document.getElementById('camion').textContent = carico.mezzo_targa || '—';
-  document.getElementById('targa').textContent = carico.mezzo_targa || '—';
-  document.getElementById('rimorchio').textContent = '—';
-  document.getElementById('autista').textContent = carico.autista || '—';
-  document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
-
-  const ordini = carico.carico_ordini
-    ? [...carico.carico_ordini].sort((a,b) => a.sequenza - b.sequenza)
-    : [];
-
-  renderConsegne(ordini.map(o => o.ordini).filter(Boolean));
+function getColore(prodotto, percentuale) {
+  const colori = COLORI_PRODOTTO[prodotto] || { pieno: '#999', medio: '#bbb', basso: '#ddd' };
+  if (percentuale >= 66) return colori.pieno;
+  if (percentuale >= 33) return colori.medio;
+  return colori.basso;
 }
 
+function fmtL(n) { return Number(n).toLocaleString('it-IT'); }
+
+// ── GRAFICA CAMION SVG DINAMICA ──────────────────────────────────
+function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale) {
+  const nScomp = scomparti.length || 1;
+
+  // Dimensioni
+  const svgW = 700, svgH = 160;
+  const rimX = 10, rimY = 20;
+  const rimW = Math.min(420, 50 + nScomp * 65);
+  const rimH = 80;
+  const trX = rimX + rimW + 8;
+  const trW = svgW - trX - 10;
+  const cabX = trX + trW - 110;
+  const wY = rimY + rimH + 16;
+
+  let svg = `<svg class="truck-svg" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">`;
+
+  // ── RIMORCHIO sfondo ──
+  svg += `<rect x="${rimX}" y="${rimY}" width="${rimW}" height="${rimH}" rx="6" fill="#e8e8e8" stroke="#888" stroke-width="2"/>`;
+
+  // ── SCOMPARTI ──
+  const sW = (rimW - 8) / nScomp;
+  scomparti.forEach((sc, i) => {
+    const x = rimX + 4 + i * sW;
+    const w = sW - 2;
+    const cap = Number(sc.capacita) || 1;
+    const litri = ordiniPerScomparto[sc.id] || 0;
+    const pct = Math.min(100, Math.round((litri / cap) * 100));
+    const prod = sc.prodotto_assegnato || sc.prodotto_default || 'Gasolio Autotrazione';
+    const col = getColore(prod, pct);
+
+    // Sfondo
+    svg += `<rect x="${x}" y="${rimY+3}" width="${w}" height="${rimH-6}" rx="2" fill="#f5f5f5" stroke="#ccc" stroke-width="0.5"/>`;
+
+    // Riempimento dal basso
+    if (pct > 0) {
+      const fH = Math.round(((rimH-6) * pct) / 100);
+      const fY = rimY + 3 + (rimH - 6 - fH);
+      svg += `<rect x="${x}" y="${fY}" width="${w}" height="${fH}" rx="2" fill="${col}" opacity="0.85"/>`;
+    }
+
+    // Bordo
+    svg += `<rect x="${x}" y="${rimY+3}" width="${w}" height="${rimH-6}" rx="2" fill="none" stroke="#aaa" stroke-width="1"/>`;
+
+    // Testo
+    const tx = x + w/2;
+    const txtCol = pct > 55 ? '#fff' : '#333';
+    const txtColSub = pct > 55 ? '#eee' : '#999';
+    svg += `<text x="${tx}" y="${rimY+rimH/2-8}" text-anchor="middle" font-size="8" font-weight="bold" fill="#333" font-family="Arial">${sc.nome}</text>`;
+    svg += `<text x="${tx}" y="${rimY+rimH/2+5}" text-anchor="middle" font-size="10" font-weight="bold" fill="${txtCol}" font-family="Arial">${fmtL(litri)} L</text>`;
+    svg += `<text x="${tx}" y="${rimY+rimH/2+17}" text-anchor="middle" font-size="7" fill="${txtColSub}" font-family="Arial">${pct}%</text>`;
+
+    // Separatore
+    if (i < nScomp-1) svg += `<line x1="${x+w+1}" y1="${rimY+6}" x2="${x+w+1}" y2="${rimY+rimH-6}" stroke="#999" stroke-width="1.5"/>`;
+  });
+
+  // Bordo rimorchio
+  svg += `<rect x="${rimX}" y="${rimY}" width="${rimW}" height="${rimH}" rx="6" fill="none" stroke="#666" stroke-width="2"/>`;
+
+  // Gancio
+  svg += `<rect x="${rimX+rimW}" y="${rimY+rimH-18}" width="12" height="8" fill="#777" rx="2"/>`;
+
+  // Trattore
+  svg += `<rect x="${trX}" y="${rimY-8}" width="${trW}" height="${rimH+8}" rx="6" fill="#cc2222" stroke="#991111" stroke-width="2"/>`;
+  svg += `<rect x="${cabX}" y="${rimY-16}" width="110" height="${rimH+16}" rx="8" fill="#dd3333" stroke="#991111" stroke-width="2"/>`;
+  svg += `<rect x="${cabX+12}" y="${rimY-10}" width="84" height="45" rx="4" fill="#aad4f0" stroke="#999" stroke-width="1"/>`;
+  svg += `<circle cx="${cabX+104}" cy="${rimY+rimH-20}" r="6" fill="#fff9aa" stroke="#ccc" stroke-width="1"/>`;
+
+  // Ruote rimorchio
+  [rimX+50, rimX+90, rimX+rimW-80, rimX+rimW-40].forEach(cx => {
+    svg += `<circle cx="${cx}" cy="${wY}" r="16" fill="#333" stroke="#111" stroke-width="2"/>`;
+    svg += `<circle cx="${cx}" cy="${wY}" r="7" fill="#888"/>`;
+  });
+
+  // Ruote trattore
+  [trX+40, trX+80, cabX+50].forEach(cx => {
+    svg += `<circle cx="${cx}" cy="${wY}" r="18" fill="#333" stroke="#111" stroke-width="2"/>`;
+    svg += `<circle cx="${cx}" cy="${wY}" r="8" fill="#888"/>`;
+  });
+
+  // Litri totali sul trattore
+  const tot = Object.values(ordiniPerScomparto).reduce((s,v) => s+v, 0);
+  svg += `<text x="${trX+10}" y="${rimY+rimH/2+4}" font-size="20" font-weight="bold" fill="#fff" font-family="Arial">${fmtL(tot)} L</text>`;
+
+  svg += '</svg>';
+  return svg;
+}
+
+// ── RENDER CONSEGNE ──────────────────────────────────────────────
 function renderConsegne(ordini) {
   const cont = document.getElementById('consegne-container');
-  let totLitri = 0, totBenzina = 0, totGasolio = 0;
+  let totLitri=0, totBenz=0, totGas=0;
 
-  cont.innerHTML = ordini.map(o => {
-    const litri = Number(o.litri || 0);
+  cont.innerHTML = ordini.map((o, idx) => {
+    const litri = Number(o.litri||0);
     totLitri += litri;
-    if ((o.prodotto||'').toLowerCase().includes('benzina')) totBenzina += litri;
-    else totGasolio += litri;
+    if ((o.prodotto||'').toLowerCase().includes('benzina')) totBenz += litri;
+    else totGas += litri;
 
     return `<div class="consegna">
       <div class="consegna-header">
-        <span>Cliente</span><span>Quantita</span><span>Prodotto</span><span>Fornitore</span><span>Importo Titolo</span>
+        <span>Cliente</span><span>Quantità</span><span>Prodotto</span><span>Fornitore</span><span>Seq.</span>
       </div>
       <div class="consegna-row1">
         <span>${o.cliente||'—'}</span>
-        <span>${litri.toLocaleString('it-IT')}</span>
+        <span>${fmtL(litri)} L</span>
         <span>${o.prodotto||'—'}</span>
         <span>${o.fornitore||'—'}</span>
-        <span style="text-align:right">€ 0,00</span>
+        <span><span class="seq-badge">${idx+1}</span></span>
       </div>
       <div class="consegna-addr-header">
-        <span>Indirizzo</span><span>CAP</span><span>Prov</span><span>Citta:</span><span>Tel:</span>
+        <span>Indirizzo</span><span>CAP</span><span>Prov</span><span>Città</span><span>Tel</span>
       </div>
       <div class="consegna-addr-row">
         <span>${o.indirizzo||'—'}</span>
@@ -240,41 +302,148 @@ function renderConsegne(ordini) {
         <span>${o.citta||'—'}</span>
         <span>${o.telefono||'—'}</span>
       </div>
-      ${o.note ? '<div class="note-row">Note: ' + o.note + '</div>' : ''}
+      ${o.note ? '<div class="note-row">Note: '+o.note+'</div>' : ''}
     </div>`;
   }).join('');
 
   document.getElementById('tot-consegne').textContent = ordini.length;
-  document.getElementById('tot-litri').textContent = totLitri.toLocaleString('it-IT');
-  document.getElementById('tot-benzina').textContent = totBenzina.toLocaleString('it-IT');
-  document.getElementById('tot-gasolio').textContent = totGasolio.toLocaleString('it-IT');
-  document.getElementById('svg-litri').textContent = totLitri.toLocaleString('it-IT');
+  document.getElementById('tot-litri').textContent = fmtL(totLitri);
+  document.getElementById('tot-benzina').textContent = fmtL(totBenz);
+  document.getElementById('tot-gasolio').textContent = fmtL(totGas);
 }
 
-function mostraDemoData() {
-  document.getElementById('hdr-data').textContent = '14/03/2026';
-  document.getElementById('hdr-data2').textContent = '14/03/2026';
-  document.getElementById('id-ordine').textContent = '2819';
-  document.getElementById('camion').textContent = 'GJ263ZE';
-  document.getElementById('targa').textContent = 'GJ263ZE';
-  document.getElementById('autista').textContent = 'Gabriele Marturano';
-  document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
-  renderConsegne([
-    { cliente:'Lo Giacco Group Srls', litri:1000, prodotto:'Gasolio', fornitore:'Deposito Vibo', indirizzo:'Zona Industriuale Porto Salvo', cap:'89900', provincia:'VV', citta:'Porto Salvo', telefono:'', note:'' },
-    { cliente:'Stiltrasporti Distribuzione & Logistica Srl', litri:5000, prodotto:'Gasolio', fornitore:'Deposito Vibo', indirizzo:'Zona Industriale Papa Benedetto XVI snc', cap:'88046', provincia:'CZ', citta:'Lamezia Terme', telefono:'3357108064', note:'' },
-    { cliente:'Stil.Tra.Com.Srl Societa Unipersonale', litri:5000, prodotto:'Gasolio', fornitore:'Deposito Vibo', indirizzo:'Zona Industriale Papa Benedetto XVI', cap:'88046', provincia:'CZ', citta:'Lamezia Terme', telefono:'', note:'' },
-  ]);
+// ── LEGENDA ──────────────────────────────────────────────────────
+function generaLegenda(prodottiUsati) {
+  const el = document.getElementById('legenda-prodotti');
+  const unici = [...new Set(prodottiUsati)];
+  let html = unici.map(p => {
+    const c = COLORI_PRODOTTO[p] || { pieno:'#999', label:p };
+    return `<div class="legenda-item"><div class="legenda-dot" style="background:${c.pieno}"></div><span>${c.label||p}</span></div>`;
+  }).join('');
+  html += `<span style="margin-left:12px;color:#999">|</span>`;
+  html += `<div class="legenda-item"><span style="font-size:9px;color:#666">Colore intenso = pieno &gt;66% · Medio = 33-66% · Chiaro = &lt;33%</span></div>`;
+  el.innerHTML = html;
 }
 
-// Carica supabase se disponibile
-if (params.get('carico_id')) {
-  const script = document.createElement('script');
-  script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-  script.onload = caricaDati;
-  document.head.appendChild(script);
-} else {
-  mostraDemoData();
+// ── CARICAMENTO DATI ─────────────────────────────────────────────
+async function caricaDati() {
+  const caricoId = params.get('carico_id');
+  if (!caricoId) {
+    mostraErrore('Nessun carico specificato. Apri questo foglio dalla sezione Logistica.');
+    return;
+  }
+
+  try {
+    // Carica carico con ordini
+    const { data: carico, error: errC } = await sb.from('carichi')
+      .select('*, carico_ordini(sequenza, ordini(id, cliente, prodotto, litri, fornitore, indirizzo, citta, provincia, cap, telefono, note))')
+      .eq('id', caricoId).single();
+
+    if (errC || !carico) {
+      mostraErrore('Carico non trovato. ID: ' + caricoId);
+      console.error('Errore:', errC);
+      return;
+    }
+
+    // Carica scomparti del mezzo
+    let scomparti = [];
+    if (carico.mezzo_id) {
+      const { data: sc } = await sb.from('scomparti_mezzo').select('*').eq('mezzo_id', carico.mezzo_id).order('nome');
+      scomparti = sc || [];
+    }
+
+    // Carica mezzo
+    let mezzo = null;
+    if (carico.mezzo_id) {
+      const { data: m } = await sb.from('mezzi').select('*').eq('id', carico.mezzo_id).single();
+      mezzo = m;
+    }
+
+    // Ordini per sequenza
+    const ordiniRaw = carico.carico_ordini ? [...carico.carico_ordini].sort((a,b) => a.sequenza - b.sequenza) : [];
+    const ordini = ordiniRaw.map(o => o.ordini).filter(Boolean);
+
+    // ── PAGINA 1 ──
+    const dataFmt = new Date(carico.data).toLocaleDateString('it-IT');
+    document.getElementById('hdr-data').textContent = dataFmt;
+    document.getElementById('hdr-data2').textContent = dataFmt;
+    document.getElementById('hdr-targa2').textContent = carico.mezzo_targa || '—';
+    document.getElementById('id-ordine').textContent = carico.id.substring(0,8).toUpperCase();
+    document.getElementById('camion').textContent = mezzo ? (mezzo.descrizione || mezzo.targa) : (carico.mezzo_targa || '—');
+    document.getElementById('targa').textContent = carico.mezzo_targa || '—';
+    document.getElementById('rimorchio').textContent = '—';
+    document.getElementById('autista').textContent = carico.autista || '—';
+    document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
+
+    renderConsegne(ordini);
+
+    // ── PAGINA 2 — GRAFICA CAMION ──
+    const ordiniPerScomparto = {};
+    const prodottiUsati = [];
+
+    if (scomparti.length > 0) {
+      // Distribuisci ordini negli scomparti reali
+      scomparti.forEach(sc => { ordiniPerScomparto[sc.id] = 0; });
+
+      ordini.forEach(o => {
+        const prod = o.prodotto || '';
+        prodottiUsati.push(prod);
+        // Cerca scomparto compatibile per prodotto
+        let target = scomparti.find(sc => sc.prodotto_default === prod && (ordiniPerScomparto[sc.id]||0) < Number(sc.capacita));
+        if (!target) target = scomparti.find(sc => !sc.prodotto_default && (ordiniPerScomparto[sc.id]||0) < Number(sc.capacita));
+        if (!target) target = scomparti.find(sc => (ordiniPerScomparto[sc.id]||0) < Number(sc.capacita));
+        if (!target) target = scomparti[scomparti.length-1]; // fallback ultimo scomparto
+        if (target) {
+          ordiniPerScomparto[target.id] = (ordiniPerScomparto[target.id]||0) + Number(o.litri);
+          target.prodotto_assegnato = target.prodotto_assegnato || prod;
+        }
+      });
+
+      document.getElementById('truck-graphic-container').innerHTML = generaCamionSVG(scomparti, ordiniPerScomparto, mezzo ? mezzo.capacita_totale : 0);
+    } else {
+      // Senza scomparti: crea virtuali per prodotto
+      const perProd = {};
+      ordini.forEach(o => {
+        const p = o.prodotto || 'Altro';
+        perProd[p] = (perProd[p]||0) + Number(o.litri);
+        prodottiUsati.push(p);
+      });
+
+      const totL = ordini.reduce((s,o) => s+Number(o.litri), 0);
+      const capT = mezzo ? Number(mezzo.capacita_totale) : totL;
+      const scVirt = Object.entries(perProd).map(([prod, litri], i) => ({
+        id: 'v_'+i,
+        nome: prod.length > 14 ? prod.substring(0,14)+'.' : prod,
+        capacita: Math.round(capT * (litri/totL)) || litri,
+        prodotto_default: prod,
+        prodotto_assegnato: prod
+      }));
+
+      const ordV = {};
+      scVirt.forEach(sc => { ordV[sc.id] = perProd[sc.prodotto_default]||0; });
+
+      document.getElementById('truck-graphic-container').innerHTML = generaCamionSVG(scVirt, ordV, capT);
+    }
+
+    generaLegenda(prodottiUsati);
+
+    // Mostra pagine
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('page1').style.display = 'block';
+    document.getElementById('page2').style.display = 'block';
+
+  } catch (err) {
+    console.error('Errore:', err);
+    mostraErrore('Errore nel caricamento: ' + err.message);
+  }
 }
+
+function mostraErrore(msg) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('error-container').innerHTML = `<div class="error-box">⚠️ ${msg}</div>`;
+}
+
+caricaDati();
 </script>
 </body>
 </html>
