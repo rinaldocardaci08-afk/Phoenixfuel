@@ -268,28 +268,72 @@ async function caricaPrezzi() {
   }
 
   const tuttiPrezzi = [...righeDeposito, ...(data||[])];
-  const tbody = document.getElementById('tabella-prezzi');
-  if (!tuttiPrezzi.length) { tbody.innerHTML = '<tr><td colspan="10" class="loading">Nessun prezzo trovato</td></tr>'; return; }
-
   const best = {};
   tuttiPrezzi.forEach(r => { const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
 
-  let html = '';
+  // Mappa prodotto → id tabella
+  const tabMap = {
+    'Gasolio Autotrazione': 'tabella-prezzi-autotrazione',
+    'Benzina': 'tabella-prezzi-benzina',
+    'Gasolio Agricolo': 'tabella-prezzi-agricolo',
+    'HVO': 'tabella-prezzi-hvo'
+  };
+
+  // Raggruppa per prodotto
+  const perProdotto = {};
+  Object.keys(tabMap).forEach(p => { perProdotto[p] = []; });
   tuttiPrezzi.forEach(r => {
-    const isBest = best[r.data+'_'+r.prodotto]?.id === r.id;
-    const basNome = r.basi_carico ? r.basi_carico.nome : '—';
-    const giacenzaHtml = r._giacenza ? ' <span style="font-size:10px;color:var(--text-hint)">(' + fmtL(r._giacenza) + ')</span>' : '';
-    const trasportoHtml = r._isDeposito ? '<span style="font-size:10px;color:var(--text-hint)">auto</span>' : fmt(r.trasporto_litro);
-    const margineHtml = r._isDeposito ? '<span style="font-size:10px;color:var(--text-hint)">da inserire</span>' : fmt(r.margine);
-    let azione = '';
-    if (r._isDeposito) {
-      azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<span class="badge teal" style="font-size:9px">Deposito</span>';
-    } else {
-      azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<button class="btn-danger" onclick="eliminaRecord(\'prezzi\',\'' + r.id + '\',caricaPrezzi)">x</button>';
+    const key = Object.keys(tabMap).find(k => r.prodotto === k);
+    if (key) perProdotto[key].push(r);
+    else {
+      // Prodotti non mappati vanno in autotrazione come fallback
+      perProdotto['Gasolio Autotrazione'].push(r);
     }
-    html += '<tr><td>' + r.data + '</td><td>' + r.fornitore + '</td><td>' + basNome + '</td><td>' + r.prodotto + giacenzaHtml + '</td><td style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td><td style="font-family:var(--font-mono)">' + trasportoHtml + '</td><td style="font-family:var(--font-mono)">' + margineHtml + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
   });
-  tbody.innerHTML = html;
+
+  // Renderizza ogni tabella
+  Object.entries(tabMap).forEach(([prodotto, tbId]) => {
+    const tbody = document.getElementById(tbId);
+    if (!tbody) return;
+    const righe = perProdotto[prodotto];
+    if (!righe || !righe.length) { tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun prezzo</td></tr>'; return; }
+
+    let html = '';
+    righe.forEach(r => {
+      const isBest = best[r.data+'_'+r.prodotto]?.id === r.id;
+      const basNome = r.basi_carico ? r.basi_carico.nome : '—';
+      const giacenzaHtml = r._giacenza ? ' <span style="font-size:10px;color:var(--text-hint)">(' + fmtL(r._giacenza) + ')</span>' : '';
+
+      // Trasporto e margine con modifica inline (solo per prezzi non deposito)
+      let trasportoHtml, margineHtml;
+      if (r._isDeposito) {
+        trasportoHtml = '<span style="font-size:10px;color:var(--text-hint)">auto</span>';
+        margineHtml = '<span style="font-size:10px;color:var(--text-hint)">da inserire</span>';
+      } else {
+        trasportoHtml = fmt(r.trasporto_litro);
+        margineHtml = fmt(r.margine);
+      }
+
+      // Azioni
+      let azione = '';
+      if (r._isDeposito) {
+        azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<span class="badge teal" style="font-size:9px">Deposito</span>';
+      } else {
+        azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<button class="btn-danger" onclick="eliminaRecord(\'prezzi\',\'' + r.id + '\',caricaPrezzi)">x</button>';
+      }
+
+      // TD con modifica inline per trasporto e margine (non deposito)
+      const tdTrasporto = r._isDeposito
+        ? '<td style="font-family:var(--font-mono)">' + trasportoHtml + '</td>'
+        : '<td class="editable" onclick="editaCella(this,\'prezzi\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + trasportoHtml + '</td>';
+      const tdMargine = r._isDeposito
+        ? '<td style="font-family:var(--font-mono)">' + margineHtml + '</td>'
+        : '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + margineHtml + '</td>';
+
+      html += '<tr><td>' + r.data + '</td><td>' + r.fornitore + giacenzaHtml + '</td><td>' + basNome + '</td><td style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>' + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+    });
+    tbody.innerHTML = html;
+  });
 }
 
 // ── ORDINI ────────────────────────────────────────────────────────
@@ -361,8 +405,11 @@ async function caricaPrezzoPerOrdine() {
   if (match) {
     prezzoCorrente = match;
     document.getElementById('prev-costo').textContent = fmt(match.costo_litro);
-    document.getElementById('prev-trasporto').textContent = fmt(match.trasporto_litro);
-    document.getElementById('prev-margine').textContent = fmt(match.margine);
+    // Pre-popola i campi custom con i valori da listino
+    const trInput = document.getElementById('ord-trasporto-custom');
+    const mgInput = document.getElementById('ord-margine-custom');
+    if (trInput && !trInput.value) trInput.value = match.trasporto_litro;
+    if (mgInput && !mgInput.value) mgInput.value = match.margine;
     aggiornaPrevOrdine();
   } else {
     prezzoCorrente = null;
@@ -373,9 +420,15 @@ async function caricaPrezzoPerOrdine() {
 function aggiornaPrevOrdine() {
   if (!prezzoCorrente) return;
   const litri = parseFloat(document.getElementById('ord-litri').value)||0;
-  const pL = prezzoConIva(prezzoCorrente);
-  document.getElementById('prev-prezzo').textContent = fmt(pL);
-  document.getElementById('prev-totale').textContent = fmtE(pL*litri);
+  // Usa valori custom se compilati, altrimenti quelli da listino
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || prezzoCorrente.trasporto_litro || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || prezzoCorrente.margine || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
+  document.getElementById('prev-trasporto').textContent = fmt(trasporto);
+  document.getElementById('prev-margine').textContent = fmt(margine);
+  document.getElementById('prev-prezzo').textContent = fmt(conIva);
+  document.getElementById('prev-totale').textContent = fmtE(conIva * litri);
 }
 
 async function salvaOrdine() {
@@ -386,10 +439,13 @@ async function salvaOrdine() {
   const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'Deposito';
   if (tipo==='cliente'&&!clienteId) { toast('Seleziona un cliente'); return; }
   if (!litri) { toast('Inserisci i litri'); return; }
+  // Usa trasporto e margine custom se compilati
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || prezzoCorrente.trasporto_litro || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || prezzoCorrente.margine || 0;
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:prezzoCorrente.trasporto_litro, margine:prezzoCorrente.margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, trasportatore:document.getElementById('ord-trasportatore').value, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, trasportatore:document.getElementById('ord-trasportatore').value, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   // Se fornitore PhoenixFuel scarica automaticamente il deposito
@@ -399,6 +455,9 @@ async function salvaOrdine() {
   } else {
     toast('Ordine salvato!');
   }
+  // Reset campi custom
+  document.getElementById('ord-trasporto-custom').value = '';
+  document.getElementById('ord-margine-custom').value = '';
   caricaOrdini(); caricaDashboard();
 }
 

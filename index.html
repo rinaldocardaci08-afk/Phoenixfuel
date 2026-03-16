@@ -85,6 +85,8 @@
             <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label>Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona base —</option></select></div>
             <div class="form-group"><label>Litri</label><input type="number" id="ord-litri" placeholder="0" oninput="aggiornaPrevOrdine()" /></div>
+            <div class="form-group"><label>Trasporto/L (€)</label><input type="number" id="ord-trasporto-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevOrdine()" /></div>
+            <div class="form-group"><label>Margine/L (€)</label><input type="number" id="ord-margine-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevOrdine()" /></div>
             <div class="form-group"><label>Trasportatore</label><input type="text" id="ord-trasportatore" placeholder="Nostro / Nome esterno" /></div>
             <div class="form-group"><label>Giorni pagamento</label><select id="ord-gg"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
             <div class="form-group"><label>Stato</label>
@@ -126,9 +128,41 @@
               <input type="date" id="filtro-data-prezzi" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" onchange="caricaPrezzi()" />
             </div>
           </div>
-          <div style="overflow-x:auto">
-          <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Prodotto</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-          <tbody id="tabella-prezzi"><tr><td colspan="10" class="loading">Caricamento...</td></tr></tbody></table>
+
+          <!-- Gasolio Autotrazione -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#D85A30"></div><span style="font-size:13px;font-weight:500">Gasolio Autotrazione</span></div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+            <tbody id="tabella-prezzi-autotrazione"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+
+          <!-- Benzina -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#378ADD"></div><span style="font-size:13px;font-weight:500">Benzina</span></div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+            <tbody id="tabella-prezzi-benzina"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+
+          <!-- Gasolio Agricolo -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#639922"></div><span style="font-size:13px;font-weight:500">Gasolio Agricolo</span></div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+            <tbody id="tabella-prezzi-agricolo"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+
+          <!-- HVO -->
+          <div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#3B6D11"></div><span style="font-size:13px;font-weight:500">HVO</span></div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
+            <tbody id="tabella-prezzi-hvo"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
           </div>
         </div>
 
