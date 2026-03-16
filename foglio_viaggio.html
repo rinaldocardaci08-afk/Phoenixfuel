@@ -334,34 +334,57 @@ async function caricaDati() {
   }
 
   try {
-    // Carica carico con ordini
+    // 1. Carica il carico
     const { data: carico, error: errC } = await sb.from('carichi')
-      .select('*, carico_ordini(sequenza, ordini(id, cliente, prodotto, litri, fornitore, indirizzo, citta, provincia, cap, telefono, note))')
+      .select('*')
       .eq('id', caricoId).single();
 
     if (errC || !carico) {
-      mostraErrore('Carico non trovato. ID: ' + caricoId);
-      console.error('Errore:', errC);
+      mostraErrore('Carico non trovato. ID: ' + caricoId + (errC ? ' — ' + errC.message : ''));
+      console.error('Errore carico:', errC);
       return;
     }
 
-    // Carica scomparti del mezzo
+    // 2. Carica le righe carico_ordini
+    const { data: caricoOrdini, error: errCO } = await sb.from('carico_ordini')
+      .select('*')
+      .eq('carico_id', caricoId)
+      .order('sequenza');
+
+    if (errCO) {
+      console.error('Errore carico_ordini:', errCO);
+    }
+
+    // 3. Carica gli ordini collegati
+    const ordineIds = (caricoOrdini || []).map(co => co.ordine_id).filter(Boolean);
+    let ordini = [];
+    if (ordineIds.length > 0) {
+      const { data: ordiniData, error: errO } = await sb.from('ordini')
+        .select('*')
+        .in('id', ordineIds);
+      if (errO) console.error('Errore ordini:', errO);
+      // Ordina per sequenza
+      const ordiniMap = {};
+      (ordiniData || []).forEach(o => { ordiniMap[o.id] = o; });
+      ordini = (caricoOrdini || [])
+        .sort((a, b) => a.sequenza - b.sequenza)
+        .map(co => ordiniMap[co.ordine_id])
+        .filter(Boolean);
+    }
+
+    // 4. Carica scomparti del mezzo
     let scomparti = [];
     if (carico.mezzo_id) {
       const { data: sc } = await sb.from('scomparti_mezzo').select('*').eq('mezzo_id', carico.mezzo_id).order('nome');
       scomparti = sc || [];
     }
 
-    // Carica mezzo
+    // 5. Carica mezzo
     let mezzo = null;
     if (carico.mezzo_id) {
       const { data: m } = await sb.from('mezzi').select('*').eq('id', carico.mezzo_id).single();
       mezzo = m;
     }
-
-    // Ordini per sequenza
-    const ordiniRaw = carico.carico_ordini ? [...carico.carico_ordini].sort((a,b) => a.sequenza - b.sequenza) : [];
-    const ordini = ordiniRaw.map(o => o.ordini).filter(Boolean);
 
     // ── PAGINA 1 ──
     const dataFmt = new Date(carico.data).toLocaleDateString('it-IT');
