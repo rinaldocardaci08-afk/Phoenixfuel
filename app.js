@@ -450,7 +450,7 @@ async function caricaOrdini() {
     const pL=prezzoConIva(r),tot=pL*r.litri;
     // Pulsante cisterna per approvvigionamento deposito non ancora confermato
     // Approvvigionamento deposito (entrata) → pulsante Carica cisterna
-    const isApprov = r.tipo_ordine === 'deposito' && r.stato !== 'confermato';
+    const isApprov = r.tipo_ordine === 'deposito' && r.stato !== 'confermato' && r.stato !== 'annullato';
     // Uscita deposito → fornitore PhoenixFuel o base contiene phoenix
     const isUscitaDeposito = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && r.tipo_ordine !== 'deposito' && r.stato !== 'confermato';
     const btnCisterna = isApprov
@@ -721,13 +721,13 @@ async function apriModalePermessi(utenteId, nomeUtente) {
           <span>${s.icon} ${s.label}</span>
         </label>`).join('')}
     </div>
-    <button class="btn-primary" style="width:100%" onclick="chiudiModalePermessi()">Chiudi</button>`;
+    <button class="btn-primary" style="width:100%" onclick="chiudiModalePermessi()">Chiudi</button>\`;
   document.getElementById('modal-permessi').style.display = 'flex';
 }
 
 async function aggiornaPermesso(utenteId, sezione, abilitato) {
   await sb.from('permessi').upsert({ utente_id: utenteId, sezione, abilitato }, { onConflict: 'utente_id,sezione' });
-  toast(abilitato ? `✅ ${sezione} abilitata` : `🔒 ${sezione} disabilitata`);
+  toast(abilitato ? ('Abilitata: ' + sezione) : ('Disabilitata: ' + sezione));
 }
 
 function chiudiModalePermessi() {
@@ -756,8 +756,7 @@ async function caricaUtentiCompleto() {
   await caricaSelectClienti('ut-cliente');
   // Popola checkbox permessi nel form
   const grp = document.getElementById('grp-ut-permessi');
-  if (grp) grp.innerHTML = '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;margin-top:12px">Sezioni accessibili</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
-    SEZIONI_SISTEMA.map(s => `<label class="check-label"><input type="checkbox" value="${s.id}" checked /> ${s.icon} ${s.label}</label>`).join('') + '</div>';
+  if (grp) grp.innerHTML = '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Sezioni accessibili</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' + SEZIONI_SISTEMA.map(s => '<label class="check-label"><input type="checkbox" value="' + s.id + '" checked /> ' + s.icon + ' ' + s.label + '</label>').join('') + '</div>';
   const { data } = await sb.from('utenti').select('*, clienti(nome)').order('nome');
   const tbody = document.getElementById('tabella-utenti');
   if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun utente</td></tr>'; return; }
@@ -844,7 +843,10 @@ async function apriModaleOrdine(id) {
       <span>Cliente: <strong>${r.cliente}</strong></span>
       <span>Data: <strong>${r.data}</strong></span>
     </div>
-    <button class="btn-primary" style="width:100%" onclick="salvaModificaOrdine('${id}')">Salva modifiche</button>`;
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="flex:1" onclick="salvaModificaOrdine('${id}')">Salva modifiche</button>
+      <button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:13px">Annulla</button>
+    </div>\`;
   document.getElementById('modal-permessi').style.display = 'flex';
 }
 
@@ -896,55 +898,117 @@ async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLi
 async function apriModaleAssegnaCisterna(ordineId) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
-  // Trova cisterne compatibili con il prodotto
-  const prodottoMap = {
-    'Gasolio Autotrazione': 'autotrazione',
-    'Gasolio Agricolo': 'agricolo',
-    'HVO': 'hvo',
-    'Benzina': 'benzina',
-    'AdBlue': 'autotrazione'
-  };
+  const prodottoMap = { 'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina','AdBlue':'autotrazione' };
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('nome');
+  if (!cisterne || !cisterne.length) { toast('⚠ Nessuna cisterna trovata per questo prodotto'); return; }
+
+  // Distribuzione automatica ottimale
+  let litriRimanenti = Number(ordine.litri);
+  const distribuzione = {};
+  // Prima riempi le cisterne con meno spazio (ottimizza utilizzo)
+  const cisterneOrdinatePerSpazio = [...cisterne]
+    .map(c => ({ ...c, spazio: Number(c.capacita_max) - Number(c.livello_attuale) }))
+    .filter(c => c.spazio > 0)
+    .sort((a, b) => a.spazio - b.spazio);
   
+  cisterneOrdinatePerSpazio.forEach(c => {
+    if (litriRimanenti <= 0) return;
+    const qtaAssegnata = Math.min(litriRimanenti, c.spazio);
+    distribuzione[c.id] = qtaAssegnata;
+    litriRimanenti -= qtaAssegnata;
+  });
+
   const el = document.getElementById('modal-permessi-content');
-  el.innerHTML = `
-    <div style="font-size:15px;font-weight:500;margin-bottom:16px">🛢 Assegna cisterna — ${ordine.prodotto}</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">
-      Ordine: <strong>${ordine.cliente}</strong> · ${fmtL(ordine.litri)} · ${ordine.data}
-    </div>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
-      ${cisterne ? cisterne.map(c => {
-        const pct = Math.round((c.livello_attuale / c.capacita_max) * 100);
-        const disponibile = c.capacita_max - c.livello_attuale;
-        const sufficiente = disponibile >= ordine.litri;
-        return `<label style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;opacity:${sufficiente?1:0.5}">
-          <input type="radio" name="cisterna" value="${c.id}" ${sufficiente?'':'disabled'} />
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:500">${c.nome}</div>
-            <div style="font-size:11px;color:var(--text-muted)">Livello: ${fmtL(c.livello_attuale)} / ${fmtL(c.capacita_max)} (${pct}%) · Disponibile: ${fmtL(disponibile)}</div>
-            <div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px"><div style="height:100%;width:${pct}%;background:${pct<30?'#E24B4A':pct<60?'#BA7517':'#639922'};border-radius:2px"></div></div>
-          </div>
-          ${!sufficiente?'<span style="font-size:10px;color:#A32D2D">Capienza insufficiente</span>':''}
-        </label>`;
-      }).join('') : '<div class="loading">Nessuna cisterna trovata</div>'}
-    </div>
-    <button class="btn-primary" style="width:100%" onclick="confermaCaricoDeposito('${ordineId}')">Conferma carico cisterna</button>`;
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">🛢 Distribuzione carico — ' + ordine.prodotto + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Totale da caricare: <strong>' + fmtL(ordine.litri) + '</strong></div>';
+  
+  if (litriRimanenti > 0) {
+    html += '<div class="alert-box" style="margin-bottom:12px">⚠ Spazio insufficiente nelle cisterne! Mancano ' + fmtL(litriRimanenti) + '</div>';
+  }
+
+  html += '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">';
+  cisterne.forEach(c => {
+    const pct = Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100);
+    const spazio = Number(c.capacita_max) - Number(c.livello_attuale);
+    const qtaSuggerita = distribuzione[c.id] || 0;
+    html += '<div style="padding:12px;background:var(--bg-kpi);border-radius:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+      '<span style="font-size:13px;font-weight:500">' + c.nome + '</span>' +
+      '<span style="font-size:11px;color:var(--text-muted)">Spazio: ' + fmtL(spazio) + '</span>' +
+      '</div>' +
+      '<div style="height:4px;background:var(--border);border-radius:2px;margin-bottom:8px">' +
+      '<div style="height:100%;width:' + pct + '%;background:' + (pct<30?'#E24B4A':pct<60?'#BA7517':'#639922') + ';border-radius:2px"></div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+      '<label style="font-size:11px;color:var(--text-muted);white-space:nowrap">Litri da caricare:</label>' +
+      '<input type="number" id="cis-qty-' + c.id + '" value="' + qtaSuggerita + '" min="0" max="' + spazio + '" ' +
+      'style="flex:1;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" ' +
+      'oninput="aggiornaTotaleCarico2(\'' + ordineId + '\',' + ordine.litri + ')" />' +
+      '<span style="font-size:11px;color:var(--text-muted)">max ' + fmtL(spazio) + '</span>' +
+      '</div>' +
+      '</div>';
+  });
+  html += '</div>';
+  html += '<div style="background:var(--bg-kpi);padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:12px;display:flex;gap:16px">' +
+    '<span>Totale ordine: <strong>' + fmtL(ordine.litri) + '</strong></span>' +
+    '<span>Assegnato: <strong id="tot-assegnato">—</strong></span>' +
+    '<span id="msg-diff" style="color:#A32D2D"></span>' +
+    '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:4px">' +
+    '<button class="btn-primary" style="flex:1" onclick="confermaCaricoDeposito(\'' + ordineId + '\')">✅ Conferma carico</button>' +
+    '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:13px">Annulla</button>' +
+    '</div>';
+  
+  el.innerHTML = html;
   document.getElementById('modal-permessi').style.display = 'flex';
+  aggiornaTotaleCarico2(ordineId, ordine.litri);
+  window._cisterneCarico = cisterne;
+}
+
+function aggiornaTotaleCarico2(ordineId, totaleOrdine) {
+  const cisterne = window._cisterneCarico || [];
+  let totAssegnato = 0;
+  cisterne.forEach(c => {
+    const input = document.getElementById('cis-qty-' + c.id);
+    if (input) totAssegnato += parseFloat(input.value) || 0;
+  });
+  const elTot = document.getElementById('tot-assegnato');
+  const elMsg = document.getElementById('msg-diff');
+  if (elTot) elTot.textContent = fmtL(totAssegnato);
+  if (elMsg) {
+    const diff = totaleOrdine - totAssegnato;
+    elMsg.textContent = diff > 0 ? '⚠ Mancano ' + fmtL(diff) : diff < 0 ? '⚠ Eccesso ' + fmtL(Math.abs(diff)) : '✅ OK';
+    elMsg.style.color = diff === 0 ? '#3B6D11' : '#A32D2D';
+  }
 }
 
 async function confermaCaricoDeposito(ordineId) {
-  const selected = document.querySelector('input[name="cisterna"]:checked');
-  if (!selected) { toast('⚠ Seleziona una cisterna'); return; }
-  const cisternaId = selected.value;
+  const cisterne = window._cisterneCarico || [];
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
-  // Aggiorna ordine con cisterna e stato confermato
-  await sb.from('ordini').update({ cisterna_id: cisternaId, stato: 'confermato' }).eq('id', ordineId);
-  // Aggiorna livello cisterna
-  const { data: ordPrezzo } = await sb.from('ordini').select('costo_litro').eq('id', ordineId).single();
-  await aggiornaCisterna(cisternaId, ordine.litri, 'entrata', ordineId, ordine.data, ordPrezzo?.costo_litro);
-  toast('✅ Carico confermato! Cisterna aggiornata.');
+  
+  // Verifica che il totale assegnato corrisponda all'ordine
+  let totAssegnato = 0;
+  cisterne.forEach(c => {
+    const input = document.getElementById('cis-qty-' + c.id);
+    if (input) totAssegnato += parseFloat(input.value) || 0;
+  });
+  
+  const diff = Math.abs(Number(ordine.litri) - totAssegnato);
+  if (diff > 1) { toast('⚠ Il totale assegnato (' + fmtL(totAssegnato) + ') non corrisponde all\'ordine (' + fmtL(ordine.litri) + ')'); return; }
+
+  // Aggiorna ogni cisterna
+  for (const c of cisterne) {
+    const input = document.getElementById('cis-qty-' + c.id);
+    const qta = parseFloat(input?.value) || 0;
+    if (qta > 0) {
+      await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, ordine.costo_litro);
+    }
+  }
+  
+  await sb.from('ordini').update({ stato: 'confermato' }).eq('id', ordineId);
+  toast('✅ Carico confermato! Cisterne aggiornate.');
   chiudiModalePermessi();
   caricaDeposito();
   caricaOrdini();
