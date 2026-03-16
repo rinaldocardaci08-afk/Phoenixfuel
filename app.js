@@ -463,6 +463,89 @@ function aggiornaPrevOrdine() {
   document.getElementById('prev-prezzo-netto').textContent = fmt(noIva);
   document.getElementById('prev-prezzo').textContent = fmt(conIva);
   document.getElementById('prev-totale').textContent = fmtE(conIva * litri);
+  // Aggiorna avviso fido in tempo reale
+  aggiornaAvvisoFido();
+}
+
+// ── FIDO CLIENTE ─────────────────────────────────────────────────
+let fidoClienteCorrente = null;
+
+async function controllaFidoCliente() {
+  const clienteId = document.getElementById('ord-cliente').value;
+  const infoDiv = document.getElementById('fido-cliente-info');
+  fidoClienteCorrente = null;
+  if (!clienteId) { infoDiv.style.display = 'none'; return; }
+
+  // Carica dati cliente
+  const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
+  if (!cliente || !cliente.fido_massimo || Number(cliente.fido_massimo) <= 0) {
+    infoDiv.style.display = 'none';
+    return;
+  }
+
+  const fidoMax = Number(cliente.fido_massimo);
+  const ggPag = cliente.giorni_pagamento || 30;
+
+  // Calcola fido utilizzato (ordini non scaduti)
+  const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', cliente.nome).neq('stato','annullato');
+  let fidoUsato = 0;
+  (ordini||[]).forEach(o => {
+    const scad = new Date(o.data);
+    scad.setDate(scad.getDate() + (o.giorni_pagamento || ggPag));
+    if (scad > oggi) fidoUsato += prezzoConIva(o) * Number(o.litri);
+  });
+
+  const fidoResiduo = fidoMax - fidoUsato;
+  const pctUsato = Math.round((fidoUsato / fidoMax) * 100);
+
+  fidoClienteCorrente = { nome: cliente.nome, fidoMax, fidoUsato, fidoResiduo, pctUsato };
+
+  // Mostra info fido
+  let bgColor, textColor, icon;
+  if (pctUsato >= 100) {
+    bgColor = '#FCEBEB'; textColor = '#791F1F'; icon = '🔴';
+  } else if (pctUsato >= 90) {
+    bgColor = '#FAEEDA'; textColor = '#633806'; icon = '🟡';
+  } else {
+    bgColor = '#EAF3DE'; textColor = '#27500A'; icon = '🟢';
+  }
+
+  infoDiv.style.display = 'block';
+  infoDiv.style.background = bgColor;
+  infoDiv.style.color = textColor;
+  infoDiv.innerHTML = icon + ' <strong>Fido ' + cliente.nome + ':</strong> ' +
+    'Massimo: <strong>' + fmtE(fidoMax) + '</strong> · ' +
+    'Utilizzato: <strong>' + fmtE(fidoUsato) + '</strong> (' + pctUsato + '%) · ' +
+    'Residuo: <strong>' + fmtE(fidoResiduo) + '</strong>';
+
+  aggiornaAvvisoFido();
+}
+
+function aggiornaAvvisoFido() {
+  const warnEl = document.getElementById('prev-fido-warn');
+  if (!fidoClienteCorrente || !prezzoCorrente) { warnEl.style.display = 'none'; return; }
+
+  const litri = parseFloat(document.getElementById('ord-litri').value) || 0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
+  const totaleOrdine = conIva * litri;
+
+  const nuovoUsato = fidoClienteCorrente.fidoUsato + totaleOrdine;
+  const nuovaPct = Math.round((nuovoUsato / fidoClienteCorrente.fidoMax) * 100);
+
+  if (nuovoUsato > fidoClienteCorrente.fidoMax) {
+    warnEl.style.display = 'inline';
+    warnEl.style.color = '#A32D2D';
+    warnEl.innerHTML = '🔴 FIDO SUPERATO! Dopo questo ordine: ' + fmtE(nuovoUsato) + ' / ' + fmtE(fidoClienteCorrente.fidoMax) + ' (' + nuovaPct + '%)';
+  } else if (nuovaPct >= 90) {
+    warnEl.style.display = 'inline';
+    warnEl.style.color = '#BA7517';
+    warnEl.innerHTML = '🟡 Attenzione fido al ' + nuovaPct + '% dopo questo ordine (' + fmtE(nuovoUsato) + ' / ' + fmtE(fidoClienteCorrente.fidoMax) + ')';
+  } else {
+    warnEl.style.display = 'none';
+  }
 }
 
 async function salvaOrdine() {
@@ -478,6 +561,27 @@ async function salvaOrdine() {
   if (margine <= 0 && tipo === 'cliente') {
     if (!confirm('Il margine è zero o negativo. Vuoi procedere comunque?')) return;
   }
+
+  // Controllo fido cliente
+  if (fidoClienteCorrente && tipo === 'cliente') {
+    const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+    const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
+    const totaleOrdine = conIva * litri;
+    const nuovoUsato = fidoClienteCorrente.fidoUsato + totaleOrdine;
+
+    if (nuovoUsato > fidoClienteCorrente.fidoMax) {
+      const superamento = nuovoUsato - fidoClienteCorrente.fidoMax;
+      if (!confirm('⚠ ATTENZIONE: questo ordine supera il fido del cliente di ' + fmtE(superamento) + '!\n\n' +
+        'Fido massimo: ' + fmtE(fidoClienteCorrente.fidoMax) + '\n' +
+        'Già utilizzato: ' + fmtE(fidoClienteCorrente.fidoUsato) + '\n' +
+        'Questo ordine: ' + fmtE(totaleOrdine) + '\n' +
+        'Nuovo totale: ' + fmtE(nuovoUsato) + '\n\n' +
+        'Vuoi procedere comunque?')) return;
+    } else if (Math.round((nuovoUsato / fidoClienteCorrente.fidoMax) * 100) >= 90) {
+      toast('⚠ Fido cliente al ' + Math.round((nuovoUsato / fidoClienteCorrente.fidoMax) * 100) + '% dopo questo ordine');
+    }
+  }
+
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
@@ -490,10 +594,13 @@ async function salvaOrdine() {
   } else {
     toast('Ordine salvato!');
   }
-  // Reset campi custom
+  // Reset
   document.getElementById('ord-trasporto-custom').value = '';
   document.getElementById('ord-margine-custom').value = '';
   document.getElementById('ord-prezzo-netto').value = '';
+  document.getElementById('fido-cliente-info').style.display = 'none';
+  document.getElementById('prev-fido-warn').style.display = 'none';
+  fidoClienteCorrente = null;
   caricaOrdini(); caricaDashboard();
 }
 

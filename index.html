@@ -89,7 +89,7 @@
                 <option value="deposito">Approvvigionamento deposito</option>
               </select>
             </div>
-            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente"><option value="">Seleziona...</option></select></div>
+            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente" onchange="controllaFidoCliente()"><option value="">Seleziona...</option></select></div>
             <div class="form-group"><label>Fornitore</label><select id="ord-fornitore" onchange="aggiornaBasiOrdine()"><option value="">— Prima seleziona data —</option></select></div>
             <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label>Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona base —</option></select></div>
@@ -114,8 +114,9 @@
             <span>Prezzo/L netto: <strong id="prev-prezzo-netto">—</strong></span>
             <span>Prezzo/L IVA inc.: <strong id="prev-prezzo">—</strong></span>
             <span>Totale ordine: <strong id="prev-totale">—</strong></span>
-            <span id="prev-fido-warn" style="color:#A32D2D;display:none">⚠ Fido insufficiente!</span>
+            <span id="prev-fido-warn" style="display:none"></span>
           </div>
+          <div id="fido-cliente-info" style="display:none;margin-bottom:14px;padding:10px 14px;border-radius:var(--radius);font-size:12px"></div>
           <button class="btn-primary" onclick="salvaOrdine()">Salva ordine</button>
         </div>
         <div class="card">
