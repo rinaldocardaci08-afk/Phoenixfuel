@@ -906,27 +906,34 @@ async function caricaOrdiniPerCarico() {
   const dataEl = document.getElementById('car-data');
   if (!dataEl) return;
   const data = dataEl.value;
-  if (!data) { document.getElementById('ordini-per-carico').innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
-  // Recupera ordini già assegnati a carichi non annullati
-  const { data: carichiAttivi } = await sb.from('carichi').select('id').neq('stato','annullato');
-  const idsCarichi = (carichiAttivi||[]).map(c=>c.id);
-  let idsInCarico = new Set();
-  if (idsCarichi.length) {
-    const { data: ordiniInCarico } = await sb.from('carico_ordini').select('ordine_id').in('carico_id', idsCarichi);
-    idsInCarico = new Set((ordiniInCarico||[]).map(o=>o.ordine_id));
-  }
-  // Mostra ordini confermati, in attesa e programmati (non annullati) per la data selezionata
-  const { data: ordini } = await sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente');
-  // Filtra: solo tipo cliente (o senza tipo), e non già assegnati a un carico
-  const ordiniFiltrati = (ordini||[]).filter(o => {
-    if (idsInCarico.has(o.id)) return false;
-    if (o.tipo_ordine === 'deposito') return false;
-    return true;
-  });
   const wrap = document.getElementById('ordini-per-carico');
-  if (!ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
-  wrap.innerHTML = ordiniFiltrati.map(o => '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + ' · ' + badgeStato(o.stato) + '</div></div></label>').join('');
-  aggiornaTotaleOrdiniCarico();
+  if (!data) { wrap.innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
+  try {
+    // Recupera tutti gli ordine_id già assegnati a qualsiasi carico
+    const { data: tuttiAssegnati } = await sb.from('carico_ordini').select('ordine_id');
+    const idsInCarico = new Set((tuttiAssegnati||[]).map(o=>o.ordine_id));
+
+    // Carica ordini della data selezionata (esclusi annullati)
+    const { data: ordini, error } = await sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente');
+    if (error) { console.error('Errore ordini:', error); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
+
+    // Filtra: escludi depositi e ordini già assegnati a un carico
+    const ordiniFiltrati = (ordini||[]).filter(o => {
+      if (idsInCarico.has(o.id)) return false;
+      if (o.tipo_ordine === 'deposito') return false;
+      return true;
+    });
+
+    if (!ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
+    wrap.innerHTML = ordiniFiltrati.map(o => {
+      const badge = badgeStato(o.stato);
+      return '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + '</div></div>' + badge + '</label>';
+    }).join('');
+    aggiornaTotaleOrdiniCarico();
+  } catch(err) {
+    console.error('Errore caricaOrdiniPerCarico:', err);
+    wrap.innerHTML = '<div class="loading">Errore: ' + err.message + '</div>';
+  }
 }
 
 function aggiornaTotaleOrdiniCarico() {
