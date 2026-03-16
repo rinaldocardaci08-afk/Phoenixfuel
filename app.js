@@ -262,7 +262,8 @@ async function caricaPrezzi() {
       const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
       if (totLitri > 0) {
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
-        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:0, margine:0, iva:prodotto==='Gasolio Agricolo'?10:22, _giacenza:totLitri, _isDeposito:true });
+        const ovr = _depositoOverrides[prodotto] || {};
+        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodotto==='Gasolio Agricolo'?10:22, _giacenza:totLitri, _isDeposito:true });
       }
     });
   }
@@ -304,16 +305,6 @@ async function caricaPrezzi() {
       const basNome = r.basi_carico ? r.basi_carico.nome : '—';
       const giacenzaHtml = r._giacenza ? ' <span style="font-size:10px;color:var(--text-hint)">(' + fmtL(r._giacenza) + ')</span>' : '';
 
-      // Trasporto e margine con modifica inline (solo per prezzi non deposito)
-      let trasportoHtml, margineHtml;
-      if (r._isDeposito) {
-        trasportoHtml = '<span style="font-size:10px;color:var(--text-hint)">auto</span>';
-        margineHtml = '<span style="font-size:10px;color:var(--text-hint)">da inserire</span>';
-      } else {
-        trasportoHtml = fmt(r.trasporto_litro);
-        margineHtml = fmt(r.margine);
-      }
-
       // Azioni
       let azione = '';
       if (r._isDeposito) {
@@ -322,18 +313,97 @@ async function caricaPrezzi() {
         azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<button class="btn-danger" onclick="eliminaRecord(\'prezzi\',\'' + r.id + '\',caricaPrezzi)">x</button>';
       }
 
-      // TD con modifica inline per trasporto e margine (non deposito)
-      const tdTrasporto = r._isDeposito
-        ? '<td style="font-family:var(--font-mono)">' + trasportoHtml + '</td>'
-        : '<td class="editable" onclick="editaCella(this,\'prezzi\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + trasportoHtml + '</td>';
-      const tdMargine = r._isDeposito
-        ? '<td style="font-family:var(--font-mono)">' + margineHtml + '</td>'
-        : '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + margineHtml + '</td>';
+      // Costo - editabile per tutti, con logica speciale per deposito
+      let tdCosto;
+      if (r._isDeposito) {
+        tdCosto = '<td class="editable" onclick="editaCostoDeposito(this,\'' + r.prodotto + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>';
+      } else {
+        tdCosto = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'costo_litro\',\'' + r.id + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>';
+      }
 
-      html += '<tr><td>' + r.data + '</td><td>' + r.fornitore + giacenzaHtml + '</td><td>' + basNome + '</td><td style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>' + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+      // Trasporto - editabile per tutti
+      let tdTrasporto;
+      if (r._isDeposito) {
+        tdTrasporto = '<td class="editable" onclick="editaDepositoValore(this,\'trasporto\',\'' + r.prodotto + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td>';
+      } else {
+        tdTrasporto = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td>';
+      }
+
+      // Margine - editabile per tutti
+      let tdMargine;
+      if (r._isDeposito) {
+        tdMargine = '<td class="editable" onclick="editaDepositoValore(this,\'margine\',\'' + r.prodotto + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
+      } else {
+        tdMargine = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
+      }
+
+      html += '<tr><td>' + r.data + '</td><td>' + r.fornitore + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
     });
     tbody.innerHTML = html;
   });
+}
+
+// Valori deposito temporanei (per calcolo prezzi nella tabella)
+let _depositoOverrides = {};
+
+function editaDepositoValore(td, campo, prodotto, valAttuale) {
+  const input = document.createElement('input');
+  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=valAttuale;
+  td.innerHTML=''; td.appendChild(input); input.focus();
+  input.onblur = () => {
+    const nv = parseFloat(input.value);
+    if (!isNaN(nv)) {
+      if (!_depositoOverrides[prodotto]) _depositoOverrides[prodotto] = {};
+      _depositoOverrides[prodotto][campo] = nv;
+      toast(campo + ' deposito ' + prodotto + ' impostato a ' + fmt(nv));
+    }
+    caricaPrezzi();
+  };
+  input.onkeydown = e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape') caricaPrezzi(); };
+}
+
+async function editaCostoDeposito(td, prodotto, valAttuale) {
+  const input = document.createElement('input');
+  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=valAttuale;
+  td.innerHTML=''; td.appendChild(input); input.focus();
+  input.onblur = async () => {
+    const nv = parseFloat(input.value);
+    if (isNaN(nv) || nv === valAttuale) { caricaPrezzi(); return; }
+
+    // Mostra modale conferma modifica costo medio deposito
+    let html = '<div style="font-size:15px;font-weight:500;margin-bottom:8px">Modifica costo medio deposito</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Stai modificando il costo medio di <strong>' + prodotto + '</strong> da <strong>' + fmt(valAttuale) + '</strong> a <strong>' + fmt(nv) + '</strong>.</div>';
+    html += '<div style="background:#FAEEDA;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#633806">';
+    html += '⚠ Questa modifica aggiornerà il <strong>costo medio ponderato</strong> di tutte le cisterne di ' + prodotto + ' nel deposito. Il nuovo valore verrà usato come base per il calcolo dei prezzi futuri.</div>';
+    html += '<div class="form-grid" style="margin-bottom:14px">';
+    html += '<div class="form-group"><label>Nuovo costo medio/L</label><input type="number" id="dep-nuovo-costo" step="0.0001" value="' + nv.toFixed(4) + '" /></div>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:8px">';
+    html += '<button class="btn-primary" style="flex:1" onclick="confermaCostoDeposito(\'' + prodotto + '\')">Conferma modifica</button>';
+    html += '<button onclick="chiudiModalePermessi();caricaPrezzi()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+    html += '</div>';
+    apriModal(html);
+  };
+  input.onkeydown = e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape') caricaPrezzi(); };
+}
+
+async function confermaCostoDeposito(prodotto) {
+  const nuovoCosto = parseFloat(document.getElementById('dep-nuovo-costo').value);
+  if (isNaN(nuovoCosto) || nuovoCosto <= 0) { toast('Inserisci un costo valido'); return; }
+
+  // Aggiorna costo_medio di tutte le cisterne di quel prodotto
+  const prodottoMap = { 'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina' };
+  const tipo = prodottoMap[prodotto] || 'autotrazione';
+
+  const { error } = await sb.from('cisterne').update({ costo_medio: nuovoCosto, updated_at: new Date().toISOString() }).eq('tipo', tipo);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Invalida cache cisterne
+  _cacheCisterne = null;
+
+  toast('Costo medio ' + prodotto + ' aggiornato a ' + fmt(nuovoCosto));
+  chiudiModalePermessi();
+  caricaPrezzi();
 }
 
 // ── ORDINI ────────────────────────────────────────────────────────
