@@ -644,6 +644,10 @@ async function caricaOrdini() {
 async function apriModaleOrdine(id) {
   const { data: r } = await sb.from('ordini').select('*').eq('id', id).single();
   if (!r) return;
+
+  // Carica documenti esistenti
+  const { data: docs } = await sb.from('documenti_ordine').select('*').eq('ordine_id', id).order('created_at',{ascending:false});
+
   let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica ordine</div>';
   html += '<div class="form-grid">';
   html += '<div class="form-group"><label>Stato</label><select id="mod-stato">';
@@ -659,7 +663,37 @@ async function apriModaleOrdine(id) {
   html += '<div class="form-group" style="grid-column:1/-1"><label>Note</label><input type="text" id="mod-note" value="' + (r.note||'') + '" /></div>';
   html += '</div>';
   html += '<div class="form-preview"><span>Fornitore: <strong>' + r.fornitore + '</strong></span><span>Prodotto: <strong>' + r.prodotto + '</strong></span><span>Cliente: <strong>' + r.cliente + '</strong></span></div>';
-  html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1" onclick="salvaModificaOrdine(\'' + id + '\')">Salva</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
+
+  // Sezione documenti
+  html += '<div style="margin-top:16px;border-top:0.5px solid var(--border);padding-top:14px">';
+  html += '<div style="font-size:13px;font-weight:500;margin-bottom:10px">Documenti allegati</div>';
+
+  // Lista documenti esistenti
+  if (docs && docs.length) {
+    html += '<div style="margin-bottom:10px">';
+    docs.forEach(d => {
+      const url = SUPABASE_URL + '/storage/v1/object/public/documenti/' + d.percorso_storage;
+      const tipoLabel = d.tipo === 'das' ? '<span class="badge amber">DAS</span>' : d.tipo === 'conferma' ? '<span class="badge blue">Conferma</span>' : '<span class="badge gray">' + d.tipo + '</span>';
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-kpi);border-radius:6px;margin-bottom:4px;font-size:12px">';
+      html += tipoLabel + ' ';
+      html += '<a href="' + url + '" target="_blank" style="flex:1;color:var(--accent);text-decoration:none">' + d.nome_file + '</a>';
+      html += '<span style="font-size:10px;color:var(--text-hint)">' + new Date(d.created_at).toLocaleDateString('it-IT') + '</span>';
+      html += '<button class="btn-danger" style="font-size:12px" onclick="eliminaDocumento(\'' + d.id + '\',\'' + d.percorso_storage + '\',\'' + id + '\')">x</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:10px">Nessun documento allegato</div>';
+  }
+
+  // Upload nuovo documento
+  html += '<div style="display:flex;gap:8px;align-items:end">';
+  html += '<div class="form-group" style="flex:1"><label>Carica documento (PDF)</label><input type="file" id="doc-file" accept=".pdf" style="font-size:12px" /></div>';
+  html += '<div class="form-group"><label>Tipo</label><select id="doc-tipo" style="font-size:12px"><option value="das">DAS</option><option value="conferma">Conferma</option><option value="fattura">Fattura</option><option value="altro">Altro</option></select></div>';
+  html += '<button class="btn-primary" style="padding:8px 14px;font-size:12px;margin-bottom:5px" onclick="uploadDocumento(\'' + id + '\')">Carica</button>';
+  html += '</div></div>';
+
+  html += '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn-primary" style="flex:1" onclick="salvaModificaOrdine(\'' + id + '\')">Salva modifiche</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
   apriModal(html);
 }
 
@@ -675,6 +709,48 @@ async function salvaModificaOrdine(id) {
   toast('Ordine aggiornato!');
   chiudiModalePermessi();
   caricaOrdini();
+}
+
+// ── DOCUMENTI ORDINE ─────────────────────────────────────────────
+async function uploadDocumento(ordineId) {
+  const fileInput = document.getElementById('doc-file');
+  const tipo = document.getElementById('doc-tipo').value;
+  if (!fileInput.files.length) { toast('Seleziona un file PDF'); return; }
+  const file = fileInput.files[0];
+  if (file.type !== 'application/pdf') { toast('Solo file PDF ammessi'); return; }
+  if (file.size > 10 * 1024 * 1024) { toast('File troppo grande (max 10MB)'); return; }
+
+  const nomeFile = file.name;
+  const percorso = ordineId + '/' + Date.now() + '_' + nomeFile.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  toast('Caricamento in corso...');
+
+  // Upload su Supabase Storage
+  const { error: errUpload } = await sb.storage.from('documenti').upload(percorso, file, { contentType: 'application/pdf' });
+  if (errUpload) { toast('Errore upload: ' + errUpload.message); return; }
+
+  // Salva riferimento nel database
+  const { error: errDb } = await sb.from('documenti_ordine').insert([{
+    ordine_id: ordineId,
+    nome_file: nomeFile,
+    tipo: tipo,
+    percorso_storage: percorso
+  }]);
+  if (errDb) { toast('Errore salvataggio: ' + errDb.message); return; }
+
+  toast('Documento caricato!');
+  // Riapri la modale per vedere il documento aggiunto
+  apriModaleOrdine(ordineId);
+}
+
+async function eliminaDocumento(docId, percorso, ordineId) {
+  if (!confirm('Eliminare questo documento?')) return;
+  // Elimina da storage
+  await sb.storage.from('documenti').remove([percorso]);
+  // Elimina dal database
+  await sb.from('documenti_ordine').delete().eq('id', docId);
+  toast('Documento eliminato');
+  apriModaleOrdine(ordineId);
 }
 
 // ── MODIFICA INLINE ───────────────────────────────────────────────
