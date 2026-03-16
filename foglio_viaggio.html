@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<title>Foglio Viaggio — PhoenixFuel</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
+  .page { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
+  @media print { .page { margin: 0; page-break-after: always; } .no-print { display: none; } }
+
+  /* HEADER */
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 10px; }
+  .header-title { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
+  .header-logo { max-height: 50px; }
+  .header-date { font-size: 13px; font-weight: bold; }
+
+  /* INFO CAMION */
+  .truck-info { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; border: 1px solid #ccc; margin-bottom: 10px; }
+  .truck-cell { padding: 4px 6px; border-right: 1px solid #ccc; }
+  .truck-cell:last-child { border-right: none; }
+  .truck-label { font-size: 9px; color: #3a7abf; font-weight: bold; display: block; }
+  .truck-value { font-size: 11px; font-weight: bold; }
+
+  /* CONSEGNA */
+  .consegna { border: 1px solid #ccc; margin-bottom: 8px; }
+  .consegna-header { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; background: #d0e4f7; padding: 3px 6px; gap: 4px; }
+  .consegna-header span { font-size: 9px; font-weight: bold; color: #3a7abf; }
+  .consegna-row1 { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; padding: 4px 6px; gap: 4px; border-bottom: 1px solid #eee; }
+  .consegna-row1 span { font-size: 12px; font-weight: bold; }
+  .consegna-addr-header { display: grid; grid-template-columns: 2fr 60px 60px 1fr 1fr; background: #d0e4f7; padding: 2px 6px; gap: 4px; }
+  .consegna-addr-header span { font-size: 9px; font-weight: bold; color: #3a7abf; }
+  .consegna-addr-row { display: grid; grid-template-columns: 2fr 60px 60px 1fr 1fr; padding: 4px 6px; gap: 4px; }
+  .consegna-addr-row span { font-size: 11px; }
+  .note-row { padding: 3px 6px; font-size: 10px; color: #555; border-top: 1px dashed #ddd; }
+
+  /* PAGINA 2 */
+  .p2-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 6px; }
+  .orari-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .orari-field { display: flex; align-items: center; gap: 8px; }
+  .orari-label { font-size: 10px; color: #3a7abf; font-weight: bold; white-space: nowrap; }
+  .orari-box { border: 1px solid #3a7abf; min-width: 80px; height: 20px; display: inline-block; }
+  .truck-svg { width: 100%; margin: 10px 0; }
+  .totali-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin: 10px 0; }
+  .totale-box { border: 1px solid #3a7abf; padding: 4px 8px; }
+  .totale-label { font-size: 9px; color: #3a7abf; font-weight: bold; }
+  .totale-val { font-size: 14px; font-weight: bold; color: #3a7abf; }
+  .rientro-section { margin-top: 14px; }
+  .rientro-label { color: #c00; font-weight: bold; font-size: 11px; text-decoration: underline; margin-bottom: 6px; }
+  .rientro-field { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .rientro-field-label { font-size: 10px; color: #3a7abf; font-weight: bold; width: 140px; }
+  .rientro-field-box { border: 1px solid #3a7abf; flex: 1; height: 22px; }
+  .print-btn { position: fixed; bottom: 20px; right: 20px; background: #D85A30; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+
+<!-- ═══ PAGINA 1 ═══ -->
+<div class="page" id="page1">
+
+  <div class="header">
+    <div>
+      <div style="font-size:14px;font-weight:bold;color:#3a7abf">Foglio Viaggio</div>
+    </div>
+    <div style="text-align:center">
+      <div class="header-date" id="hdr-data">14/03/2026</div>
+    </div>
+    <div style="text-align:right">
+      <img src="logo.png" class="header-logo" onerror="this.style.display='none';document.getElementById('logo-text').style.display='block'" />
+      <div id="logo-text" style="display:none;font-size:18px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>
+    </div>
+  </div>
+
+  <!-- Info camion -->
+  <div class="truck-info">
+    <div class="truck-cell"><span class="truck-label">IdOrdi</span><span class="truck-value" id="id-ordine">—</span></div>
+    <div class="truck-cell"><span class="truck-label">Camion:</span><span class="truck-value" id="camion">—</span></div>
+    <div class="truck-cell"><span class="truck-label">Targa:</span><span class="truck-value" id="targa">—</span></div>
+    <div class="truck-cell"><span class="truck-label">Rimorchio:</span><span class="truck-value" id="rimorchio">—</span></div>
+    <div class="truck-cell"><span class="truck-label">Autista:</span><span class="truck-value" id="autista">—</span></div>
+    <div class="truck-cell"><span class="truck-label">Vettore:</span><span class="truck-value" id="vettore">—</span></div>
+  </div>
+
+  <!-- Consegne -->
+  <div id="consegne-container"></div>
+
+  <div style="margin-top:8px;font-size:9px;color:#aaa;text-align:right" id="footer-p1">PhoenixFuel — generato il <span id="gen-date"></span></div>
+</div>
+
+<!-- ═══ PAGINA 2 ═══ -->
+<div class="page" id="page2">
+
+  <div class="p2-header">
+    <div>
+      <div style="font-size:10px;color:#3a7abf;font-weight:bold">Data_Consegna</div>
+      <div style="font-size:14px;font-weight:bold" id="hdr-data2">14/03/2026</div>
+    </div>
+    <div style="text-align:right">
+      <img src="logo.png" style="max-height:45px" onerror="this.style.display='none';document.getElementById('logo-text2').style.display='block'" />
+      <div id="logo-text2" style="display:none;font-size:18px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>
+    </div>
+  </div>
+
+  <!-- Orari e contatori -->
+  <div class="orari-grid">
+    <div class="orari-field"><span class="orari-label">Orario Inizio Viaggio:</span><span class="orari-box"></span></div>
+    <div class="orari-field"><span class="orari-label">Litri Totali Contatore Inizio:</span><span class="orari-box"></span></div>
+    <div class="orari-field"><span class="orari-label">Orario Fine Viaggio:</span><span class="orari-box"></span></div>
+    <div class="orari-field"><span class="orari-label">Litri Totali Contatore Fine:</span><span class="orari-box"></span></div>
+  </div>
+
+  <!-- Grafica camion -->
+  <svg class="truck-svg" viewBox="0 0 700 140" xmlns="http://www.w3.org/2000/svg">
+    <!-- Rimorchio -->
+    <rect x="10" y="30" width="360" height="70" rx="4" fill="#e8e8e8" stroke="#999" stroke-width="1.5"/>
+    <rect x="10" y="30" width="360" height="70" rx="4" fill="none" stroke="#555" stroke-width="2"/>
+    <!-- Scomparti rimorchio -->
+    <line x1="82" y1="30" x2="82" y2="100" stroke="#999" stroke-width="1"/>
+    <line x1="154" y1="30" x2="154" y2="100" stroke="#999" stroke-width="1"/>
+    <line x1="226" y1="30" x2="226" y2="100" stroke="#999" stroke-width="1"/>
+    <line x1="298" y1="30" x2="298" y2="100" stroke="#999" stroke-width="1"/>
+    <!-- Ruote rimorchio -->
+    <circle cx="80" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="80" cy="110" r="7" fill="#888"/>
+    <circle cx="150" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="150" cy="110" r="7" fill="#888"/>
+    <circle cx="300" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="300" cy="110" r="7" fill="#888"/>
+    <circle cx="340" cy="110" r="16" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="340" cy="110" r="7" fill="#888"/>
+    <!-- Gancio -->
+    <rect x="368" y="85" width="20" height="8" fill="#777" rx="2"/>
+    <!-- Trattore -->
+    <rect x="388" y="20" width="280" height="80" rx="6" fill="#cc2222" stroke="#991111" stroke-width="2"/>
+    <!-- Cabina -->
+    <rect x="560" y="10" width="108" height="90" rx="8" fill="#dd3333" stroke="#991111" stroke-width="2"/>
+    <!-- Parabrezza -->
+    <rect x="572" y="18" width="84" height="45" rx="4" fill="#aad4f0" stroke="#999" stroke-width="1"/>
+    <!-- Fari -->
+    <circle cx="665" cy="75" r="6" fill="#fff9aa" stroke="#ccc" stroke-width="1"/>
+    <!-- Ruote trattore -->
+    <circle cx="450" cy="110" r="18" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="450" cy="110" r="8" fill="#888"/>
+    <circle cx="510" cy="110" r="18" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="510" cy="110" r="8" fill="#888"/>
+    <circle cx="620" cy="110" r="18" fill="#333" stroke="#111" stroke-width="2"/>
+    <circle cx="620" cy="110" r="8" fill="#888"/>
+    <!-- Numero litri sul cassone -->
+    <text x="390" y="72" font-size="22" font-weight="bold" fill="#3a7abf" font-family="Arial" id="svg-litri">0</text>
+  </svg>
+
+  <!-- Totali -->
+  <div class="totali-grid">
+    <div class="totale-box"><div class="totale-label">Totale Consegne:</div><div class="totale-val" id="tot-consegne">0</div></div>
+    <div class="totale-box"><div class="totale-label">Litri Totali Caricati:</div><div class="totale-val" id="tot-litri">0</div></div>
+    <div class="totale-box"><div class="totale-label">Totale Benzina:</div><div class="totale-val" id="tot-benzina">0</div></div>
+    <div class="totale-box"><div class="totale-label">Totale Gasolio:</div><div class="totale-val" id="tot-gasolio">0</div></div>
+  </div>
+
+  <!-- Rientro -->
+  <div class="rientro-section">
+    <div class="rientro-label">RIENTRO A VUOTO:</div>
+    <div class="rientro-field"><div class="rientro-field-label">LUOGO DI PARTENZA</div><div class="rientro-field-box"></div></div>
+    <div class="rientro-field"><div class="rientro-field-label">LUOGO DI DESTINAZIONE</div><div class="rientro-field-box"></div></div>
+  </div>
+
+  <div style="margin-top:16px;font-size:9px;color:#aaa;text-align:right">PhoenixFuel — <span id="gen-date2"></span> — Pagina 2 di 2</div>
+</div>
+
+<script>
+// Dati passati come parametro URL: ?carico_id=XXX
+// In modalità standalone usa dati demo
+const params = new URLSearchParams(window.location.search);
+
+const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+
+const oggi = new Date().toLocaleDateString('it-IT');
+document.getElementById('gen-date').textContent = oggi;
+document.getElementById('gen-date2').textContent = oggi;
+
+async function caricaDati() {
+  const caricoId = params.get('carico_id');
+  if (!caricoId) { mostraDemoData(); return; }
+
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data: carico } = await sb.from('carichi')
+    .select('*, carico_ordini(sequenza, ordini(id, cliente, prodotto, litri, fornitore, indirizzo, citta, provincia, cap, telefono, note))')
+    .eq('id', caricoId).single();
+
+  if (!carico) { mostraDemoData(); return; }
+
+  const dataFmt = new Date(carico.data).toLocaleDateString('it-IT');
+  document.getElementById('hdr-data').textContent = dataFmt;
+  document.getElementById('hdr-data2').textContent = dataFmt;
+  document.getElementById('id-ordine').textContent = carico.id.substring(0,8).toUpperCase();
+  document.getElementById('camion').textContent = carico.mezzo_targa || '—';
+  document.getElementById('targa').textContent = carico.mezzo_targa || '—';
+  document.getElementById('rimorchio').textContent = '—';
+  document.getElementById('autista').textContent = carico.autista || '—';
+  document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
+
+  const ordini = carico.carico_ordini
+    ? [...carico.carico_ordini].sort((a,b) => a.sequenza - b.sequenza)
+    : [];
+
+  renderConsegne(ordini.map(o => o.ordini).filter(Boolean));
+}
+
+function renderConsegne(ordini) {
+  const cont = document.getElementById('consegne-container');
+  let totLitri = 0, totBenzina = 0, totGasolio = 0;
+
+  cont.innerHTML = ordini.map(o => {
+    const litri = Number(o.litri || 0);
+    totLitri += litri;
+    if ((o.prodotto||'').toLowerCase().includes('benzina')) totBenzina += litri;
+    else totGasolio += litri;
+
+    return `<div class="consegna">
+      <div class="consegna-header">
+        <span>Cliente</span><span>Quantita</span><span>Prodotto</span><span>Fornitore</span><span>Importo Titolo</span>
+      </div>
+      <div class="consegna-row1">
+        <span>${o.cliente||'—'}</span>
+        <span>${litri.toLocaleString('it-IT')}</span>
+        <span>${o.prodotto||'—'}</span>
+        <span>${o.fornitore||'—'}</span>
+        <span style="text-align:right">€ 0,00</span>
+      </div>
+      <div class="consegna-addr-header">
+        <span>Indirizzo</span><span>CAP</span><span>Prov</span><span>Citta:</span><span>Tel:</span>
+      </div>
+      <div class="consegna-addr-row">
+        <span>${o.indirizzo||'—'}</span>
+        <span>${o.cap||'—'}</span>
+        <span>${o.provincia||'—'}</span>
+        <span>${o.citta||'—'}</span>
+        <span>${o.telefono||'—'}</span>
+      </div>
+      ${o.note ? '<div class="note-row">Note: ' + o.note + '</div>' : ''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('tot-consegne').textContent = ordini.length;
+  document.getElementById('tot-litri').textContent = totLitri.toLocaleString('it-IT');
+  document.getElementById('tot-benzina').textContent = totBenzina.toLocaleString('it-IT');
+  document.getElementById('tot-gasolio').textContent = totGasolio.toLocaleString('it-IT');
+  document.getElementById('svg-litri').textContent = totLitri.toLocaleString('it-IT');
+}
+
+function mostraDemoData() {
+  document.getElementById('hdr-data').textContent = '14/03/2026';
+  document.getElementById('hdr-data2').textContent = '14/03/2026';
+  document.getElementById('id-ordine').textContent = '2819';
+  document.getElementById('camion').textContent = 'GJ263ZE';
+  document.getElementById('targa').textContent = 'GJ263ZE';
+  document.getElementById('autista').textContent = 'Gabriele Marturano';
+  document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
+  renderConsegne([
+    { cliente:'Lo Giacco Group Srls', litri:1000, prodotto:'Gasolio', fornitore:'Deposito Vibo', indirizzo:'Zona Industriuale Porto Salvo', cap:'89900', provincia:'VV', citta:'Porto Salvo', telefono:'', note:'' },
+    { cliente:'Stiltrasporti Distribuzione & Logistica Srl', litri:5000, prodotto:'Gasolio', fornitore:'Deposito Vibo', indirizzo:'Zona Industriale Papa Benedetto XVI snc', cap:'88046', provincia:'CZ', citta:'Lamezia Terme', telefono:'3357108064', note:'' },
+    { cliente:'Stil.Tra.Com.Srl Societa Unipersonale', litri:5000, prodotto:'Gasolio', fornitore:'Deposito Vibo', indirizzo:'Zona Industriale Papa Benedetto XVI', cap:'88046', provincia:'CZ', citta:'Lamezia Terme', telefono:'', note:'' },
+  ]);
+}
+
+// Carica supabase se disponibile
+if (params.get('carico_id')) {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+  script.onload = caricaDati;
+  document.head.appendChild(script);
+} else {
+  mostraDemoData();
+}
+</script>
+</body>
+</html>
