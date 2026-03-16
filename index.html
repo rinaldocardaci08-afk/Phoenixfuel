@@ -135,6 +135,7 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Listino prezzi</span>
             <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoPDF()">📊 Genera listino PDF</button>
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Filtra data:</label>
               <input type="date" id="filtro-data-prezzi" style="font-size:15px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500" onchange="caricaPrezzi()" />
             </div>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<title>Listino Prezzi — PhoenixFuel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
+  .page { width: 210mm; min-height: 297mm; padding: 12mm; margin: 0 auto; }
+  @media print { .page { margin: 0; } .no-print { display: none; } }
+
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #D4A017; padding-bottom: 10px; margin-bottom: 16px; }
+  .header-logo { max-height: 55px; }
+  .header-right { text-align: right; }
+  .header-right .title { font-size: 20px; font-weight: bold; color: #D4A017; }
+  .header-right .sub { font-size: 11px; color: #666; margin-top: 3px; }
+
+  .product-section { margin-bottom: 18px; page-break-inside: avoid; }
+  .product-header { padding: 8px 14px; border-radius: 6px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+  .product-name { font-size: 16px; font-weight: bold; color: #fff; }
+  .product-info { font-size: 11px; color: rgba(255,255,255,0.85); }
+
+  .price-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+  .price-table th { padding: 6px 10px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; border: 1px solid #ddd; background: #f5f5f5; color: #555; }
+  .price-table td { padding: 8px 10px; text-align: center; border: 1px solid #ddd; font-size: 12px; }
+  .price-table .label-col { text-align: left; font-weight: bold; font-size: 11px; color: #333; background: #fafafa; width: 140px; }
+  .price-table .margin-row td { font-weight: bold; }
+  .price-table .netto-row td { font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; }
+  .price-table .iva-row td { font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold; }
+
+  .bg-yellow { background: #D4A017; }
+  .bg-green { background: #639922; }
+  .bg-blue { background: #378ADD; }
+  .bg-darkgreen { background: #3B6D11; }
+
+  .margin-dilaz { background: #e8f0fe; }
+  .margin-30gg { background: #e8f4e8; }
+  .margin-contanti { background: #fff3e0; }
+  .margin-colon { background: #fce4ec; }
+
+  .costo-box { display: inline-block; background: #FDF3D0; border: 1px solid #D4A017; border-radius: 4px; padding: 4px 10px; font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold; color: #7A5D00; }
+
+  .footer { text-align: center; font-size: 9px; color: #aaa; border-top: 1px solid #e8e8e8; padding-top: 8px; margin-top: 16px; }
+
+  .print-btn { position: fixed; bottom: 20px; right: 20px; background: #D4A017; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; z-index: 100; }
+
+  /* FORM configurazione */
+  .config-panel { background: #f9f9f7; border: 1px solid #e8e8e8; border-radius: 10px; padding: 20px; margin: 20px auto; max-width: 700px; }
+  .config-title { font-size: 16px; font-weight: bold; margin-bottom: 14px; color: #333; }
+  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .config-group { display: flex; flex-direction: column; gap: 4px; }
+  .config-group label { font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.4px; }
+  .config-group input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: 'Courier New', monospace; }
+  .config-btn { background: #D4A017; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: bold; width: 100%; }
+  .config-btn:hover { opacity: 0.9; }
+</style>
+</head>
+<body>
+
+<!-- CONFIGURAZIONE -->
+<div class="config-panel no-print" id="config-panel">
+  <div class="config-title">Genera Listino Prezzi</div>
+  <div class="config-grid">
+    <div class="config-group">
+      <label>Costo Gasolio Autotrazione (€/L)</label>
+      <input type="number" id="cfg-gasolio" step="0.0001" placeholder="es. 1.6887" />
+    </div>
+    <div class="config-group">
+      <label>Costo Benzina (€/L)</label>
+      <input type="number" id="cfg-benzina" step="0.0001" placeholder="es. 1.4752" />
+    </div>
+    <div class="config-group">
+      <label>Costo Gasolio Agricolo (€/L)</label>
+      <input type="number" id="cfg-agricolo" step="0.0001" placeholder="es. 1.1200" />
+    </div>
+    <div class="config-group">
+      <label>Costo HVO (€/L)</label>
+      <input type="number" id="cfg-hvo" step="0.0001" placeholder="es. 1.8500" />
+    </div>
+    <div class="config-group">
+      <label>Trasporto (€/L) — opzionale</label>
+      <input type="number" id="cfg-trasporto" step="0.0001" value="0" />
+    </div>
+    <div class="config-group">
+      <label>Data listino</label>
+      <input type="date" id="cfg-data" />
+    </div>
+  </div>
+  <button class="config-btn" onclick="generaListino()">Genera listino PDF</button>
+</div>
+
+<!-- PAGINA PDF -->
+<div id="listino-output" style="display:none">
+  <button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+  <button class="no-print" onclick="document.getElementById('config-panel').style.display='block';document.getElementById('listino-output').style.display='none'" style="position:fixed;bottom:20px;left:20px;background:#666;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:13px;cursor:pointer;z-index:100">← Modifica</button>
+
+  <div class="page">
+    <div class="header">
+      <div>
+        <img src="logo_png.jpeg" class="header-logo" onerror="this.style.display='none';document.getElementById('logo-text').style.display='block'" />
+        <div id="logo-text" style="display:none;font-size:18px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>
+      </div>
+      <div class="header-right">
+        <div class="title">LISTINO PREZZI</div>
+        <div class="sub" id="listino-data">—</div>
+        <div class="sub">Prezzi €/Litro — IVA inclusa ed esclusa</div>
+      </div>
+    </div>
+
+    <div id="listino-body"></div>
+
+    <div class="footer">
+      PhoenixFuel Srl — Listino generato il <span id="gen-date"></span> — I prezzi possono variare senza preavviso
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+document.getElementById('cfg-data').value = new Date().toISOString().split('T')[0];
+document.getElementById('gen-date').textContent = new Date().toLocaleDateString('it-IT');
+
+const MARGINI = [
+  { label: 'Pagamento Dilazionato', key: 'dilaz', valore: 0.060, cssClass: 'margin-dilaz' },
+  { label: 'Pagamento 30gg', key: '30gg', valore: 0.040, cssClass: 'margin-30gg' },
+  { label: 'Pagamento Contanti', key: 'contanti', valore: 0.020, cssClass: 'margin-contanti' },
+  { label: 'Pagamento Colonnine', key: 'colon', valore: 0.015, cssClass: 'margin-colon' }
+];
+
+const PRODOTTI = [
+  { id: 'gasolio', nome: 'Gasolio Autotrazione', iva: 22, colore: 'bg-yellow', inputId: 'cfg-gasolio' },
+  { id: 'benzina', nome: 'Benzina', iva: 22, colore: 'bg-blue', inputId: 'cfg-benzina' },
+  { id: 'agricolo', nome: 'Gasolio Agricolo', iva: 10, colore: 'bg-green', inputId: 'cfg-agricolo' },
+  { id: 'hvo', nome: 'HVO', iva: 22, colore: 'bg-darkgreen', inputId: 'cfg-hvo' }
+];
+
+function fmt(n) { return Number(n).toFixed(4).replace('.', ',') + ' €'; }
+function fmt3(n) { return Number(n).toFixed(3).replace('.', ',') + ' €'; }
+
+// Prova a caricare costi dal deposito
+async function caricaCostiDeposito() {
+  try {
+    const { data: cisterne } = await sb.from('cisterne').select('*');
+    if (!cisterne) return;
+    const prodMap = {
+      'Gasolio Autotrazione': 'cfg-gasolio',
+      'Benzina': 'cfg-benzina',
+      'Gasolio Agricolo': 'cfg-agricolo',
+      'HVO': 'cfg-hvo'
+    };
+    Object.entries(prodMap).forEach(([prodotto, inputId]) => {
+      const cis = cisterne.filter(c => c.prodotto === prodotto && Number(c.livello_attuale) > 0);
+      if (cis.length) {
+        const totL = cis.reduce((s, c) => s + Number(c.livello_attuale), 0);
+        const costoMedio = cis.reduce((s, c) => s + (Number(c.costo_medio || 0) * Number(c.livello_attuale)), 0) / totL;
+        const el = document.getElementById(inputId);
+        if (el && !el.value) el.value = costoMedio.toFixed(4);
+      }
+    });
+  } catch (e) { console.log('Costi deposito non disponibili'); }
+}
+caricaCostiDeposito();
+
+function generaListino() {
+  const trasporto = parseFloat(document.getElementById('cfg-trasporto').value) || 0;
+  const dataListino = document.getElementById('cfg-data').value;
+  document.getElementById('listino-data').textContent = 'Data: ' + new Date(dataListino).toLocaleDateString('it-IT');
+
+  let html = '';
+
+  PRODOTTI.forEach(prod => {
+    const costo = parseFloat(document.getElementById(prod.inputId).value);
+    if (!costo || costo <= 0) return; // Salta prodotti senza costo
+
+    const costoBase = costo + trasporto;
+
+    html += '<div class="product-section">';
+    html += '<div class="product-header ' + prod.colore + '">';
+    html += '<div class="product-name">' + prod.nome + '</div>';
+    html += '<div class="product-info">IVA ' + prod.iva + '%</div>';
+    html += '</div>';
+
+    // Info costo
+    html += '<div style="margin-bottom:8px;display:flex;align-items:center;gap:12px">';
+    html += '<span class="costo-box">' + fmt(costo) + '</span>';
+    if (trasporto > 0) {
+      html += '<span style="font-size:11px;color:#666">Trasporto: ' + fmt(trasporto) + '</span>';
+      html += '<span class="costo-box" style="background:#e8f0fe;border-color:#378ADD;color:#0C447C">' + fmt(costoBase) + '</span>';
+    }
+    html += '</div>';
+
+    // Tabella
+    html += '<table class="price-table">';
+    html += '<thead><tr><th class="label-col"></th>';
+    MARGINI.forEach(m => { html += '<th>' + m.label + '</th>'; });
+    html += '</tr></thead><tbody>';
+
+    // Riga marginalità
+    html += '<tr class="margin-row"><td class="label-col">Marginalità</td>';
+    MARGINI.forEach(m => {
+      html += '<td class="' + m.cssClass + '" style="font-size:13px;font-weight:bold">' + fmt(m.valore) + '</td>';
+    });
+    html += '</tr>';
+
+    // Riga prezzo senza IVA
+    html += '<tr class="netto-row"><td class="label-col">Prezzo senza IVA</td>';
+    MARGINI.forEach(m => {
+      const prezzoNetto = costoBase + m.valore;
+      html += '<td>' + fmt3(prezzoNetto) + '</td>';
+    });
+    html += '</tr>';
+
+    // Riga prezzo IVA inclusa
+    html += '<tr class="iva-row"><td class="label-col">Prezzo IVA inclusa</td>';
+    MARGINI.forEach(m => {
+      const prezzoNetto = costoBase + m.valore;
+      const prezzoIva = prezzoNetto * (1 + prod.iva / 100);
+      html += '<td style="font-size:14px;font-weight:bold;color:#1a1a18">' + fmt3(prezzoIva) + '</td>';
+    });
+    html += '</tr>';
+
+    html += '</tbody></table></div>';
+  });
+
+  if (!html) { alert('Inserisci almeno un costo prodotto'); return; }
+
+  document.getElementById('listino-body').innerHTML = html;
+  document.getElementById('config-panel').style.display = 'none';
+  document.getElementById('listino-output').style.display = 'block';
+}
+
+// Controlla se arriviamo con parametri URL precompilati
+const params = new URLSearchParams(window.location.search);
+if (params.get('auto') === '1') {
+  setTimeout(() => {
+    if (params.get('gasolio')) document.getElementById('cfg-gasolio').value = params.get('gasolio');
+    if (params.get('benzina')) document.getElementById('cfg-benzina').value = params.get('benzina');
+    if (params.get('agricolo')) document.getElementById('cfg-agricolo').value = params.get('agricolo');
+    if (params.get('hvo')) document.getElementById('cfg-hvo').value = params.get('hvo');
+    if (params.get('trasporto')) document.getElementById('cfg-trasporto').value = params.get('trasporto');
+  }, 500);
+}
+</script>
+</body>
+</html>

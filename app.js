@@ -1609,6 +1609,10 @@ function apriConfermaOrdine(ordineId) {
   window.open('conferma_ordine.html?ordine_id=' + ordineId, '_blank');
 }
 
+function apriListinoPDF() {
+  window.open('listino_pdf.html', '_blank');
+}
+
 async function apriDettaglioCarico(caricoId) {
   const { data: carico } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordini(cliente,prodotto,litri,note))').eq('id', caricoId).single();
   if (!carico) return;
