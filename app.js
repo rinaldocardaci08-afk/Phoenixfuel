@@ -502,10 +502,11 @@ async function controllaFidoCliente() {
   const fidoMax = Number(cliente.fido_massimo);
   const ggPag = cliente.giorni_pagamento || 30;
 
-  // Calcola fido utilizzato (ordini non scaduti)
+  // Calcola fido utilizzato (ordini non scaduti e non pagati)
   const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', cliente.nome).neq('stato','annullato');
   let fidoUsato = 0;
   (ordini||[]).forEach(o => {
+    if (o.pagato) return; // Ordine già pagato, non conta nel fido
     const scad = new Date(o.data);
     scad.setDate(scad.getDate() + (o.giorni_pagamento || ggPag));
     if (scad > oggi) fidoUsato += prezzoConIva(o) * Number(o.litri);
@@ -965,9 +966,111 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + r.nome + '</strong></td><td><span class="badge blue">' + (r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + (r.piva||'—') + '</td><td>' + (r.citta||'—') + '</td><td>' + (r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + (r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + r.nome + '</strong></td><td><span class="badge blue">' + (r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + (r.piva||'—') + '</td><td>' + (r.citta||'—') + '</td><td>' + (r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + (r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + r.nome.replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
+}
+
+// ── SCHEDA CLIENTE CON GESTIONE PAGAMENTI ────────────────────────
+async function apriSchedaCliente(clienteId, clienteNome) {
+  const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
+  if (!cliente) { toast('Cliente non trovato'); return; }
+
+  const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', clienteNome).neq('stato','annullato').order('data',{ascending:false});
+
+  const fidoMax = Number(cliente.fido_massimo || 0);
+  let fidoUsato = 0;
+  (ordini||[]).forEach(o => {
+    if (o.pagato) return; // Se pagato non conta nel fido
+    const scad = new Date(o.data);
+    scad.setDate(scad.getDate() + (o.giorni_pagamento || cliente.giorni_pagamento || 30));
+    if (scad > oggi) fidoUsato += prezzoConIva(o) * Number(o.litri);
+  });
+  const fidoResiduo = fidoMax - fidoUsato;
+  const pctFido = fidoMax > 0 ? Math.round((fidoUsato / fidoMax) * 100) : 0;
+
+  let html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">';
+  html += '<div><div style="font-size:18px;font-weight:500">' + clienteNome + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + (cliente.tipo||'azienda') + ' · ' + (cliente.citta||'—') + ' · P.IVA: ' + (cliente.piva||'—') + '</div></div>';
+  if (fidoMax > 0) {
+    const fidoColor = pctFido >= 90 ? '#A32D2D' : pctFido >= 60 ? '#BA7517' : '#639922';
+    html += '<div style="text-align:right"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase">Fido</div>';
+    html += '<div style="font-size:16px;font-weight:500;font-family:var(--font-mono);color:' + fidoColor + '">' + fmtE(fidoResiduo) + ' <span style="font-size:11px;color:var(--text-muted)">/ ' + fmtE(fidoMax) + '</span></div>';
+    html += '<div style="height:4px;width:120px;background:var(--bg-kpi);border-radius:2px;margin-top:4px"><div style="height:100%;width:' + Math.min(100,pctFido) + '%;background:' + fidoColor + ';border-radius:2px"></div></div></div>';
+  }
+  html += '</div>';
+
+  // Tabella ordini con gestione pagamenti
+  html += '<div style="max-height:400px;overflow-y:auto">';
+  html += '<table style="width:100%;font-size:12px"><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Pagato</th><th>Data pag.</th><th></th></tr></thead><tbody>';
+
+  if (!ordini || !ordini.length) {
+    html += '<tr><td colspan="9" class="loading">Nessun ordine</td></tr>';
+  } else {
+    ordini.forEach(o => {
+      const tot = prezzoConIva(o) * Number(o.litri);
+      const scadData = o.data_scadenza || '—';
+      const isPagato = o.pagato === true;
+      const isScaduto = !isPagato && o.data_scadenza && new Date(o.data_scadenza) < oggi;
+      const rowStyle = isPagato ? 'opacity:0.5' : isScaduto ? 'background:#FCEBEB' : '';
+
+      html += '<tr style="' + rowStyle + '">';
+      html += '<td>' + o.data + '</td>';
+      html += '<td>' + o.prodotto + '</td>';
+      html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
+      html += '<td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(o)) + '</td>';
+      html += '<td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td>';
+      html += '<td>' + scadData + (isScaduto ? ' <span style="color:#A32D2D;font-size:10px;font-weight:500">SCADUTO</span>' : '') + '</td>';
+      html += '<td><input type="checkbox" ' + (isPagato ? 'checked' : '') + ' onchange="togglePagamento(\'' + o.id + '\',this.checked,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" /></td>';
+      html += '<td>';
+      if (isPagato && o.data_pagamento) {
+        html += '<span style="font-size:11px;color:#639922">' + o.data_pagamento + '</span>';
+      } else if (!isPagato) {
+        html += '<input type="date" style="font-size:11px;padding:2px 4px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg)" value="' + (o.data_pagamento||'') + '" onchange="impostaDataPagamento(\'' + o.id + '\',this.value,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" />';
+      }
+      html += '</td>';
+      html += '<td style="font-size:10px;color:var(--text-muted)">' + (o.note_pagamento||'') + '</td>';
+      html += '</tr>';
+    });
+  }
+
+  html += '</tbody></table></div>';
+
+  // Riepilogo
+  const totOrdini = (ordini||[]).length;
+  const totPagati = (ordini||[]).filter(o => o.pagato).length;
+  const totDaPagare = (ordini||[]).filter(o => !o.pagato).length;
+  const totScaduti = (ordini||[]).filter(o => !o.pagato && o.data_scadenza && new Date(o.data_scadenza) < oggi).length;
+  html += '<div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:var(--text-muted)">';
+  html += '<span>Totale ordini: <strong>' + totOrdini + '</strong></span>';
+  html += '<span style="color:#639922">Pagati: <strong>' + totPagati + '</strong></span>';
+  html += '<span>Da pagare: <strong>' + totDaPagare + '</strong></span>';
+  if (totScaduti > 0) html += '<span style="color:#A32D2D">Scaduti: <strong>' + totScaduti + '</strong></span>';
+  html += '</div>';
+
+  html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
+  apriModal(html);
+}
+
+async function togglePagamento(ordineId, pagato, clienteId, clienteNome) {
+  const update = { pagato };
+  if (pagato) {
+    update.data_pagamento = new Date().toISOString().split('T')[0];
+  } else {
+    update.data_pagamento = null;
+  }
+  const { error } = await sb.from('ordini').update(update).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(pagato ? 'Ordine segnato come pagato' : 'Pagamento rimosso');
+  apriSchedaCliente(clienteId, clienteNome);
+}
+
+async function impostaDataPagamento(ordineId, data, clienteId, clienteNome) {
+  if (!data) return;
+  const { error } = await sb.from('ordini').update({ data_pagamento: data, pagato: true }).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Data pagamento impostata — ordine segnato come pagato');
+  apriSchedaCliente(clienteId, clienteNome);
 }
 
 // ── FORNITORI ─────────────────────────────────────────────────────
