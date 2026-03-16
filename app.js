@@ -1013,7 +1013,7 @@ async function invitaUtente() {
     if (permessi.length) await sb.from('permessi').insert(permessi);
   }
   const { error: inviteError } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo:'https://phoenixfuel.onrender.com/setpassword.html' } });
-  toast(inviteError ? 'Utente creato, invio email fallito' : 'Invito inviato a ' + email);
+  toast('Utente creato! Vai su Supabase → Autenticazione → Utenti per impostare la password.');
   caricaUtentiCompleto();
 }
 
