@@ -965,18 +965,97 @@ async function confermaUscitaDeposito(ordineId) {
 
 // ── CONSEGNE ─────────────────────────────────────────────────────
 async function caricaConsegne() {
-  const { data } = await sb.from('ordini').select('*').eq('data',oggiISO).order('created_at');
+  // Imposta data filtro a oggi se non impostata
+  const filtroEl = document.getElementById('filtro-data-consegne');
+  if (!filtroEl.value) filtroEl.value = oggiISO;
+  const dataFiltro = filtroEl.value;
+
+  const { data } = await sb.from('ordini').select('*').eq('data', dataFiltro).neq('stato','annullato').order('cliente');
   const tbody = document.getElementById('tabella-consegne');
+
   if (!data||!data.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine oggi</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine per questa data</td></tr>';
     ['tot-consegne','tot-completate','tot-inattesa','tot-programmati'].forEach(id => document.getElementById(id).textContent='0');
+  } else {
+    document.getElementById('tot-consegne').textContent = data.filter(r=>r.tipo_ordine!=='deposito').length;
+    document.getElementById('tot-completate').textContent = data.filter(r=>r.stato==='confermato').length;
+    document.getElementById('tot-inattesa').textContent = data.filter(r=>r.stato==='in attesa').length;
+    document.getElementById('tot-programmati').textContent = data.filter(r=>r.stato==='programmato').length;
+
+    // Carica documenti per tutti gli ordini
+    const ordineIds = data.map(r=>r.id);
+    const { data: allDocs } = await sb.from('documenti_ordine').select('*').in('ordine_id', ordineIds);
+    const docsMap = {};
+    (allDocs||[]).forEach(d => { if(!docsMap[d.ordine_id]) docsMap[d.ordine_id]=[]; docsMap[d.ordine_id].push(d); });
+
+    tbody.innerHTML = data.filter(r=>r.tipo_ordine!=='deposito').map(r => {
+      const tot = prezzoConIva(r) * Number(r.litri);
+      const docs = docsMap[r.id] || [];
+
+      // Documenti badges
+      let docsHtml = '';
+      if (docs.length) {
+        docsHtml = docs.map(d => {
+          const url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
+          const badge = d.tipo === 'das' ? 'amber' : d.tipo === 'conferma' ? 'blue' : 'gray';
+          return '<a href="' + url + '" target="_blank" style="text-decoration:none"><span class="badge ' + badge + '" style="font-size:9px;cursor:pointer">' + d.tipo.toUpperCase() + '</span></a>';
+        }).join(' ');
+      } else {
+        docsHtml = '<span style="font-size:10px;color:var(--text-hint)">—</span>';
+      }
+
+      // Azioni
+      let azioniHtml = '';
+      azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
+      azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
+
+      return '<tr><td><strong>' + r.cliente + '</strong></td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
+    }).join('');
+  }
+
+  // Ordini non processati (in attesa, qualsiasi data passata o oggi)
+  await caricaNonProcessati();
+}
+
+async function caricaNonProcessati() {
+  const { data: ordini } = await sb.from('ordini').select('*').eq('stato', 'in attesa').lte('data', oggiISO).order('data',{ascending:true}).order('cliente');
+  const tbody = document.getElementById('tabella-non-processati');
+  if (!ordini || !ordini.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun ordine in attesa</td></tr>';
     return;
   }
-  document.getElementById('tot-consegne').textContent = data.length;
-  document.getElementById('tot-completate').textContent = data.filter(r=>r.stato==='confermato').length;
-  document.getElementById('tot-inattesa').textContent = data.filter(r=>r.stato==='in attesa').length;
-  document.getElementById('tot-programmati').textContent = data.filter(r=>r.stato==='programmato').length;
-  tbody.innerHTML = data.map(r => '<tr><td>' + r.data + '</td><td>' + r.cliente + '</td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + r.fornitore + '</td><td style="font-family:var(--font-mono)">' + fmtE(prezzoConIva(r)*r.litri) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+  tbody.innerHTML = ordini.map(r => {
+    const tot = prezzoConIva(r) * Number(r.litri);
+    const isPassato = r.data < oggiISO;
+    const rowStyle = isPassato ? 'background:#FCEBEB' : '';
+    return '<tr style="' + rowStyle + '"><td>' + r.data + (isPassato ? ' <span style="font-size:9px;color:#A32D2D;font-weight:500">SCADUTO</span>' : '') + '</td><td><strong>' + r.cliente + '</strong></td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="white-space:nowrap">' +
+      '<button class="btn-edit" title="Riprogramma data" onclick="riprogrammaOrdine(\'' + r.id + '\')">📅</button>' +
+      '<button class="btn-danger" title="Annulla ordine" onclick="annullaOrdine(\'' + r.id + '\')">x</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+async function riprogrammaOrdine(ordineId) {
+  const nuovaData = prompt('Inserisci la nuova data di consegna (formato: AAAA-MM-GG):');
+  if (!nuovaData) return;
+  // Valida formato data
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nuovaData)) { toast('Formato data non valido. Usa AAAA-MM-GG'); return; }
+  const { data: ordine } = await sb.from('ordini').select('giorni_pagamento').eq('id', ordineId).single();
+  const ggPag = ordine ? ordine.giorni_pagamento || 30 : 30;
+  const dataScad = new Date(nuovaData);
+  dataScad.setDate(dataScad.getDate() + ggPag);
+  const { error } = await sb.from('ordini').update({ data: nuovaData, data_scadenza: dataScad.toISOString().split('T')[0] }).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Ordine riprogrammato al ' + nuovaData);
+  caricaConsegne();
+}
+
+async function annullaOrdine(ordineId) {
+  if (!confirm('Sei sicuro di voler annullare questo ordine? L\'operazione non è reversibile.')) return;
+  const { error } = await sb.from('ordini').update({ stato: 'annullato' }).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Ordine annullato');
+  caricaConsegne();
 }
 
 // ── VENDITE ───────────────────────────────────────────────────────

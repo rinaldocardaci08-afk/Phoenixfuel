@@ -243,9 +243,31 @@
           <div class="kpi"><div class="kpi-label">In attesa</div><div class="kpi-value" id="tot-inattesa">—</div></div>
           <div class="kpi"><div class="kpi-label">Programmati</div><div class="kpi-value" id="tot-programmati">—</div></div>
         </div>
-        <div class="card"><div class="card-title">Ordini del giorno</div>
-          <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Totale</th><th>Stato</th></tr></thead>
+
+        <!-- Filtro data -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>Gestione consegne</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:13px;color:var(--text-muted);font-weight:500">Data:</label>
+              <input type="date" id="filtro-data-consegne" style="font-size:15px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500" onchange="caricaConsegne()" />
+            </div>
+          </div>
+
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th><th>Documenti</th><th>Azioni</th></tr></thead>
           <tbody id="tabella-consegne"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+
+        <!-- Ordini non processati -->
+        <div class="card">
+          <div class="card-title" style="color:#A32D2D">Ordini non processati (in attesa)</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Ordini in attesa che possono essere cancellati o riprogrammati ad altra data</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Azioni</th></tr></thead>
+          <tbody id="tabella-non-processati"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
         </div>
       </div>
 
