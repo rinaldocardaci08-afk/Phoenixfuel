@@ -120,7 +120,20 @@
           <button class="btn-primary" onclick="salvaOrdine()">Salva ordine</button>
         </div>
         <div class="card">
-          <div class="card-title">Elenco ordini</div>
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Elenco ordini</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="search-ordini" placeholder="Cerca cliente..." oninput="filtraOrdini()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:180px" />
+              <select id="filtro-prodotto-ordini" onchange="filtraOrdini()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti i prodotti</option><option>Gasolio Autotrazione</option><option>Benzina</option><option>Gasolio Agricolo</option><option>HVO</option>
+              </select>
+              <select id="filtro-stato-ordini" onchange="filtraOrdini()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti gli stati</option><option value="in attesa">In attesa</option><option value="confermato">Confermato</option><option value="programmato">Programmato</option><option value="annullato">Annullato</option>
+              </select>
+              <input type="date" id="filtro-da-ordini" onchange="filtraOrdini()" title="Da data" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <input type="date" id="filtro-a-ordini" onchange="filtraOrdini()" title="A data" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+            </div>
+          </div>
           <div style="overflow-x:auto">
           <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
           <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>
@@ -275,14 +288,33 @@
       <!-- VENDITE -->
       <div class="section" id="s-vendite">
         <div class="grid4" style="margin-bottom:16px">
-          <div class="kpi"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="vend-fatturato">—</div></div>
-          <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="vend-litri">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato periodo</div><div class="kpi-value" id="vend-fatturato">—</div></div>
+          <div class="kpi"><div class="kpi-label">Litri periodo</div><div class="kpi-value" id="vend-litri">—</div></div>
           <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="vend-margine">—</div></div>
-          <div class="kpi"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="vend-ordini">—</div></div>
+          <div class="kpi"><div class="kpi-label">Ordini periodo</div><div class="kpi-value" id="vend-ordini">—</div></div>
         </div>
-        <div class="card"><div class="card-title">Vendite per fornitore — mese corrente</div>
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Analisi vendite</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
+              <input type="date" id="vend-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVendite()" />
+              <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
+              <input type="date" id="vend-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVendite()" />
+              <select id="vend-prodotto" onchange="caricaVendite()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti i prodotti</option><option>Gasolio Autotrazione</option><option>Benzina</option><option>Gasolio Agricolo</option><option>HVO</option>
+              </select>
+            </div>
+          </div>
           <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
           <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
+
+          <!-- Vendite per cliente -->
+          <div style="margin-top:16px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:10px">Vendite per cliente</div>
+            <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Ordini</th></tr></thead>
+            <tbody id="tabella-vendite-clienti"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
         </div>
       </div>
 
@@ -291,7 +323,10 @@
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco clienti</span>
-            <button class="btn-primary" onclick="apriModaleCliente()">+ Nuovo cliente</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="search-clienti" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraClienti()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
+              <button class="btn-primary" onclick="apriModaleCliente()">+ Nuovo cliente</button>
+            </div>
           </div>
           <div style="overflow-x:auto">
           <table><thead><tr><th>Nome</th><th>Tipo</th><th>P.IVA</th><th>Città</th><th>Telefono</th><th>Fido max</th><th>Fido usato</th><th>Fido residuo</th><th>Gg pag.</th><th>Prodotti</th><th>Note</th><th></th></tr></thead>
@@ -305,7 +340,10 @@
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco fornitori</span>
-            <button class="btn-primary" onclick="apriModaleFornitore()">+ Nuovo fornitore</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="search-fornitori" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraFornitori()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
+              <button class="btn-primary" onclick="apriModaleFornitore()">+ Nuovo fornitore</button>
+            </div>
           </div>
           <div style="overflow-x:auto">
           <table><thead><tr><th>Nome</th><th>P.IVA</th><th>Città</th><th>Contatto</th><th>Telefono</th><th>Fido max</th><th>Fido usato</th><th>Fido residuo</th><th>Gg pag.</th><th>Basi carico</th><th>Note</th><th></th></tr></thead>

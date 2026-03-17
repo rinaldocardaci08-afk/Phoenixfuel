@@ -756,6 +756,33 @@ async function caricaOrdini() {
   tbody.innerHTML = html;
 }
 
+// Dati ordini per filtro client-side
+let _ordiniCache = [];
+
+function filtraOrdini() {
+  const q = (document.getElementById('search-ordini').value||'').toLowerCase();
+  const prodotto = document.getElementById('filtro-prodotto-ordini').value;
+  const stato = document.getElementById('filtro-stato-ordini').value;
+  const da = document.getElementById('filtro-da-ordini').value;
+  const a = document.getElementById('filtro-a-ordini').value;
+  const righe = document.querySelectorAll('#tabella-ordini tr');
+  righe.forEach(tr => {
+    const celle = tr.querySelectorAll('td');
+    if (!celle.length) return;
+    const dataOrd = celle[0]?.textContent || '';
+    const cliente = celle[2]?.textContent?.toLowerCase() || '';
+    const prod = celle[3]?.textContent || '';
+    const st = celle[12]?.textContent || '';
+    let vis = true;
+    if (q && !cliente.includes(q)) vis = false;
+    if (prodotto && prod !== prodotto) vis = false;
+    if (stato && st !== stato) vis = false;
+    if (da && dataOrd < da) vis = false;
+    if (a && dataOrd > a) vis = false;
+    tr.style.display = vis ? '' : 'none';
+  });
+}
+
 // ── MODIFICA ORDINE ───────────────────────────────────────────────
 async function apriModaleOrdine(id) {
   const { data: r } = await sb.from('ordini').select('*').eq('id', id).single();
@@ -1176,18 +1203,54 @@ async function annullaOrdine(ordineId) {
 
 // ── VENDITE ───────────────────────────────────────────────────────
 async function caricaVendite() {
-  const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
-  const { data } = await sb.from('ordini').select('*').gte('data',inizio);
+  // Imposta date default se non impostate
+  const daEl = document.getElementById('vend-da');
+  const aEl = document.getElementById('vend-a');
+  if (!daEl.value) daEl.value = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
+  if (!aEl.value) aEl.value = oggiISO;
+  const da = daEl.value;
+  const a = aEl.value;
+  const filtroProd = document.getElementById('vend-prodotto').value;
+
+  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
+  if (filtroProd) query = query.eq('prodotto', filtroProd);
+  const { data } = await query;
   if (!data) return;
-  let fatturato=0,litri=0,margine=0; const pf={};
-  data.forEach(r => { const tot=prezzoConIva(r)*r.litri,marg=Number(r.margine)*Number(r.litri); fatturato+=tot; litri+=Number(r.litri); margine+=marg; if(!pf[r.fornitore]) pf[r.fornitore]={litri:0,fatturato:0,margine:0}; pf[r.fornitore].litri+=Number(r.litri); pf[r.fornitore].fatturato+=tot; pf[r.fornitore].margine+=marg; });
+
+  let fatturato=0, litri=0, margine=0;
+  const pf={}, pc={};
+  data.forEach(r => {
+    const tot = prezzoConIva(r) * r.litri;
+    const marg = Number(r.margine) * Number(r.litri);
+    fatturato += tot; litri += Number(r.litri); margine += marg;
+    // Per fornitore
+    if (!pf[r.fornitore]) pf[r.fornitore] = {litri:0, fatturato:0, margine:0};
+    pf[r.fornitore].litri += Number(r.litri);
+    pf[r.fornitore].fatturato += tot;
+    pf[r.fornitore].margine += marg;
+    // Per cliente
+    const cl = r.cliente || 'Sconosciuto';
+    if (!pc[cl]) pc[cl] = {litri:0, fatturato:0, margine:0, ordini:0};
+    pc[cl].litri += Number(r.litri);
+    pc[cl].fatturato += tot;
+    pc[cl].margine += marg;
+    pc[cl].ordini++;
+  });
+
   document.getElementById('vend-fatturato').textContent = fmtE(fatturato);
   document.getElementById('vend-litri').textContent = fmtL(litri);
   document.getElementById('vend-margine').textContent = fmtE(margine);
   document.getElementById('vend-ordini').textContent = data.length;
+
+  // Tabella per fornitore
   const tbody = document.getElementById('tabella-vendite');
-  const righe = Object.entries(pf).sort((a,b)=>b[1].fatturato-a[1].fatturato);
-  tbody.innerHTML = righe.length ? righe.map(([f,v]) => '<tr><td>' + f + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="4" class="loading">Nessun dato</td></tr>';
+  const righeF = Object.entries(pf).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="4" class="loading">Nessun dato</td></tr>';
+
+  // Tabella per cliente
+  const tbCl = document.getElementById('tabella-vendite-clienti');
+  const righeCl = Object.entries(pc).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
 }
 
 // ── CLIENTI ───────────────────────────────────────────────────────
@@ -1241,6 +1304,15 @@ async function caricaClienti() {
     return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
+}
+
+function filtraClienti() {
+  const q = (document.getElementById('search-clienti').value||'').toLowerCase();
+  const righe = document.querySelectorAll('#tabella-clienti tr');
+  righe.forEach(tr => {
+    const testo = tr.textContent.toLowerCase();
+    tr.style.display = !q || testo.includes(q) ? '' : 'none';
+  });
 }
 
 // ── SCHEDA CLIENTE CON GESTIONE PAGAMENTI ────────────────────────
@@ -1407,6 +1479,15 @@ async function caricaFornitori() {
     return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(r.fido_massimo):'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(usato):'—') + '</td><td>' + (r.fido_massimo>0?fidoBar(usato,r.fido_massimo)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
+}
+
+function filtraFornitori() {
+  const q = (document.getElementById('search-fornitori').value||'').toLowerCase();
+  const righe = document.querySelectorAll('#tabella-fornitori tr');
+  righe.forEach(tr => {
+    const testo = tr.textContent.toLowerCase();
+    tr.style.display = !q || testo.includes(q) ? '' : 'none';
+  });
 }
 
 // ── BASI DI CARICO ────────────────────────────────────────────────
