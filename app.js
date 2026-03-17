@@ -106,6 +106,17 @@ function setSection(id, el) {
   document.getElementById('page-title').textContent = TITLES[id] || id;
   const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
+  // Chiudi sidebar su mobile
+  if (window.innerWidth <= 768) {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.querySelector('.sidebar-overlay').classList.remove('show');
+  }
+}
+
+// ── SIDEBAR MOBILE ───────────────────────────────────────────────
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.sidebar-overlay').classList.toggle('show');
 }
 
 // ── TOAST ─────────────────────────────────────────────────────────
@@ -1882,3 +1893,8 @@ async function caricaGiacenzaDashboard() {
 
 // ── AVVIO ─────────────────────────────────────────────────────────
 inizializza();
+
+// ── PWA SERVICE WORKER ───────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}

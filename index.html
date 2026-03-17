@@ -2,13 +2,20 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>PhoenixFuel — Gestionale Carburanti</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#D4A017" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PhoenixFuel" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="app">
+  <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
   <aside class="sidebar">
     <div class="logo">
       <span class="logo-icon">🔥</span>
@@ -28,7 +35,10 @@
 
   <div class="main">
     <div class="topbar">
-      <span class="topbar-title" id="page-title">Dashboard</span>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="hamburger no-desktop" onclick="toggleSidebar()">☰</button>
+        <span class="topbar-title" id="page-title">Dashboard</span>
+      </div>
       <span class="topbar-date" id="topbar-date"></span>
     </div>
     <div class="content">
