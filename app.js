@@ -1418,7 +1418,10 @@ async function apriSchedaCliente(clienteId, clienteNome) {
       html += '<td>';
       if (isPagato && o.data_pagamento) {
         html += '<span style="font-size:11px;color:#639922">' + o.data_pagamento + '</span>';
-      } else if (!isPagato) {
+      } else if (!isPagato && o.data_pagamento && o.data_pagamento > oggiISO) {
+        html += '<span style="font-size:11px;color:#378ADD">' + o.data_pagamento + '</span> <span style="font-size:9px;color:#378ADD;font-weight:500">PROGRAMMATO</span>';
+        html += '<br/><input type="date" style="font-size:10px;padding:1px 3px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg);margin-top:2px" value="' + o.data_pagamento + '" onchange="impostaDataPagamento(\'' + o.id + '\',this.value,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" />';
+      } else {
         html += '<input type="date" style="font-size:11px;padding:2px 4px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg)" value="' + (o.data_pagamento||'') + '" onchange="impostaDataPagamento(\'' + o.id + '\',this.value,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" />';
       }
       html += '</td>';
@@ -1460,9 +1463,14 @@ async function togglePagamento(ordineId, pagato, clienteId, clienteNome) {
 
 async function impostaDataPagamento(ordineId, data, clienteId, clienteNome) {
   if (!data) return;
-  const { error } = await sb.from('ordini').update({ data_pagamento: data, pagato: true }).eq('id', ordineId);
+  const isPagato = data <= oggiISO; // Pagato solo se data è oggi o passata
+  const { error } = await sb.from('ordini').update({ data_pagamento: data, pagato: isPagato }).eq('id', ordineId);
   if (error) { toast('Errore: ' + error.message); return; }
-  toast('Data pagamento impostata — ordine segnato come pagato');
+  if (isPagato) {
+    toast('Ordine segnato come pagato');
+  } else {
+    toast('Pagamento programmato per il ' + new Date(data).toLocaleDateString('it-IT'));
+  }
   apriSchedaCliente(clienteId, clienteNome);
 }
 
