@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Vendite Mensili — PhoenixFuel</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 12px; color: #000; background: #f5f4f0; }
@@ -222,9 +223,46 @@ async function generaReport() {
   html += '<td class="mono" style="color:#639922;font-size:12px">' + fmtE(margineTotale) + '</td>';
   html += '</tr></tbody></table>';
 
+  // Grafici
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">';
+  html += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:14px"><div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#333">Litri venduti per mese</div><canvas id="chart-litri-mese" height="200"></canvas></div>';
+  html += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:14px"><div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#333">Fatturato netto per mese</div><canvas id="chart-fatt-mese" height="200"></canvas></div>';
+  html += '</div>';
+
   html += '<div class="report-footer">PhoenixFuel Srl — Report generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
 
   document.getElementById('report-page').innerHTML = html;
+
+  // Renderizza grafici dopo che il DOM è pronto
+  const labelsMesi = [];
+  const dataLitri = [];
+  const dataFatt = [];
+  for (let m = 1; m <= 12; m++) {
+    labelsMesi.push(MESI[m-1].substring(0,3));
+    dataLitri.push(Math.round(mesi[m].litri));
+    dataFatt.push(Math.round(mesi[m].fattNetto * 100) / 100);
+  }
+
+  const ctxL = document.getElementById('chart-litri-mese');
+  if (ctxL) {
+    new Chart(ctxL.getContext('2d'), {
+      type:'bar', data:{
+        labels:labelsMesi,
+        datasets:[{ label:'Litri', data:dataLitri, backgroundColor:'#6B5FCC', borderRadius:6 }]
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}}} }
+    });
+  }
+
+  const ctxF = document.getElementById('chart-fatt-mese');
+  if (ctxF) {
+    new Chart(ctxF.getContext('2d'), {
+      type:'bar', data:{
+        labels:labelsMesi,
+        datasets:[{ label:'Fatturato €', data:dataFatt, backgroundColor:'#D4A017', borderRadius:6 }]
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+    });
+  }
+
   document.getElementById('filtri-panel').style.display = 'none';
   document.getElementById('report-container').style.display = 'block';
 }
