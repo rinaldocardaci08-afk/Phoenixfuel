@@ -173,10 +173,16 @@ async function caricaDati() {
     const { data: ordine, error: errO } = await sb.from('ordini').select('*').eq('id', ordineId).single();
     if (errO || !ordine) { mostraErrore('Ordine non trovato. ID: ' + ordineId); return; }
 
-    // Cerca dati cliente
+    // Cerca dati cliente - prima per cliente_id, poi per nome
     let cliente = null;
-    const { data: clienti } = await sb.from('clienti').select('*').eq('nome', ordine.cliente).limit(1);
-    if (clienti && clienti.length) cliente = clienti[0];
+    if (ordine.cliente_id) {
+      const { data: clById } = await sb.from('clienti').select('*').eq('id', ordine.cliente_id).single();
+      if (clById) cliente = clById;
+    }
+    if (!cliente) {
+      const { data: clienti } = await sb.from('clienti').select('*').eq('nome', ordine.cliente).limit(1);
+      if (clienti && clienti.length) cliente = clienti[0];
+    }
 
     // Numero documento (prime 8 cifre ID)
     document.getElementById('doc-numero').textContent = 'N. ' + ordine.id.substring(0,8).toUpperCase();

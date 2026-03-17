@@ -215,7 +215,7 @@ async function caricaAreaCliente() {
       return '<tr><td>' + p.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmt(noiva) + '</td><td style="font-family:var(--font-mono)">' + fmt(coniva) + '</td><td>' + p.iva + '%</td><td>' + (p.note||'—') + '</td></tr>';
     }).join('');
   }
-  const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', utenteCorrente.nome).order('data',{ascending:false});
+  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + utenteCorrente.nome).order('data',{ascending:false});
   const tbStorico = document.getElementById('cl-storico');
   if (!ordini||!ordini.length) {
     tbStorico.innerHTML = '<tr><td colspan="6" class="loading">Nessun acquisto</td></tr>';
@@ -385,8 +385,10 @@ async function caricaPrezzi() {
   });
 }
 
-// Valori deposito temporanei (per calcolo prezzi nella tabella)
+// Valori deposito (trasporto/margine) — persistenti
 let _depositoOverrides = {};
+try { _depositoOverrides = JSON.parse(localStorage.getItem('phoenix_dep_overrides') || '{}'); } catch(e) {}
+function _salvaDepOverrides() { try { localStorage.setItem('phoenix_dep_overrides', JSON.stringify(_depositoOverrides)); } catch(e) {} }
 
 function editaDepositoValore(td, campo, prodotto, valAttuale) {
   const input = document.createElement('input');
@@ -397,7 +399,8 @@ function editaDepositoValore(td, campo, prodotto, valAttuale) {
     if (!isNaN(nv)) {
       if (!_depositoOverrides[prodotto]) _depositoOverrides[prodotto] = {};
       _depositoOverrides[prodotto][campo] = nv;
-      toast(campo + ' deposito ' + prodotto + ' impostato a ' + fmt(nv));
+      _salvaDepOverrides();
+      toast(campo + ' deposito ' + esc(prodotto) + ' impostato a ' + fmt(nv));
     }
     caricaPrezzi();
   };
@@ -614,8 +617,8 @@ async function controllaFidoCliente() {
   const fidoMax = Number(cliente.fido_massimo);
   const ggPag = cliente.giorni_pagamento || 30;
 
-  // Calcola fido utilizzato (ordini non scaduti e non pagati)
-  const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', cliente.nome).neq('stato','annullato');
+  // Calcola fido utilizzato (ordini non scaduti e non pagati) - cerca per cliente_id, fallback su nome
+  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cliente.nome).neq('stato','annullato');
   let fidoUsato = 0;
   (ordini||[]).forEach(o => {
     if (o.pagato) return; // Ordine già pagato, non conta nel fido
@@ -715,7 +718,7 @@ async function salvaOrdine() {
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, trasportatore:'', giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   if (prezzoCorrente._isDeposito && tipo !== 'deposito') {
@@ -1223,9 +1226,10 @@ async function caricaClienti() {
     let fidoUsatoHtml = '—', fidoResiduoHtml = '—';
     const fidoMax = Number(r.fido_massimo || 0);
     if (fidoMax > 0) {
-      const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', r.nome).neq('stato','annullato');
+      const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + r.id + ',cliente.eq.' + r.nome).neq('stato','annullato');
       let usato = 0;
       (ordini||[]).forEach(o => {
+        if (o.pagato) return;
         const scad = new Date(o.data);
         scad.setDate(scad.getDate() + (o.giorni_pagamento || r.giorni_pagamento || 30));
         if (scad > oggi) usato += prezzoConIva(o) * Number(o.litri);
@@ -1244,7 +1248,7 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
   if (!cliente) { toast('Cliente non trovato'); return; }
 
-  const { data: ordini } = await sb.from('ordini').select('*').eq('cliente', clienteNome).neq('stato','annullato').order('data',{ascending:false});
+  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).neq('stato','annullato').order('data',{ascending:false});
 
   const fidoMax = Number(cliente.fido_massimo || 0);
   let fidoUsato = 0;
@@ -1258,8 +1262,8 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   const pctFido = fidoMax > 0 ? Math.round((fidoUsato / fidoMax) * 100) : 0;
 
   let html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">';
-  html += '<div><div style="font-size:18px;font-weight:500">' + clienteNome + '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + (cliente.tipo||'azienda') + ' · ' + (cliente.citta||'—') + ' · P.IVA: ' + (cliente.piva||'—') + '</div></div>';
+  html += '<div><div style="font-size:18px;font-weight:500">' + esc(clienteNome) + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(cliente.tipo||'azienda') + ' · ' + esc(cliente.citta||'—') + ' · P.IVA: ' + esc(cliente.piva||'—') + '</div></div>';
   if (fidoMax > 0) {
     const fidoColor = pctFido >= 90 ? '#A32D2D' : pctFido >= 60 ? '#BA7517' : '#639922';
     html += '<div style="text-align:right"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase">Fido</div>';
