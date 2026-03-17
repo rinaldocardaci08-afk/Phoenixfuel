@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Vendite Mensili — PhoenixFuel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #000; background: #f5f4f0; }
+
+  .filtri-panel { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 24px; margin: 20px auto; max-width: 700px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .filtri-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .filtri-title { font-size: 20px; font-weight: bold; color: #6B5FCC; }
+  .filtri-logo { max-height: 50px; }
+  .filtri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .filtri-group { display: flex; flex-direction: column; gap: 5px; }
+  .filtri-group label { font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.4px; }
+  .filtri-group select { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: #fafaf8; }
+  .check-wrap { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; background: #fafaf8; border: 1px solid #ddd; border-radius: 8px; }
+  .check-label { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 6px 12px; }
+  .filtri-btn { background: #6B5FCC; color: #fff; border: none; padding: 12px 28px; border-radius: 8px; font-size: 15px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 12px; }
+
+  .report-container { display: none; }
+  .page { width: 297mm; min-height: 210mm; padding: 12mm; margin: 10px auto; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  @media print { .no-print { display: none !important; } .page { margin: 0; box-shadow: none; } body { background: #fff; } @page { size: landscape; } }
+
+  .report-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #6B5FCC; padding-bottom: 10px; margin-bottom: 14px; }
+  .report-title { font-size: 20px; font-weight: bold; color: #6B5FCC; }
+  .report-sub { font-size: 11px; color: #666; margin-top: 3px; }
+  .report-logo { max-height: 50px; }
+  .company-box { background: #1a1a18; color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 16px; font-weight: bold; }
+
+  .totali-row { display: grid; grid-template-columns: 80px 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 1px; background: #6B5FCC; border-radius: 8px; overflow: hidden; margin-bottom: 8px; padding: 0; }
+  .totali-row .t-cell { background: #EEEDFE; padding: 10px 8px; text-align: center; }
+  .totali-row .t-cell.t-label { background: #6B5FCC; color: #fff; font-weight: bold; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+  .totali-row .t-val { font-family: 'Courier New', monospace; font-weight: bold; font-size: 13px; }
+  .totali-row .t-head { font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; color: #666; margin-bottom: 2px; }
+
+  .margine-extra { display: flex; justify-content: flex-end; margin-bottom: 14px; gap: 12px; }
+  .margine-box { background: #EEEDFE; border: 1px solid #C5C0F0; border-radius: 8px; padding: 8px 16px; text-align: center; }
+  .margine-box .m-label { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.4px; }
+  .margine-box .m-val { font-size: 16px; font-weight: bold; font-family: 'Courier New', monospace; color: #26215C; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
+  th { background: #6B5FCC; color: #fff; padding: 8px 6px; text-align: center; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; border: 1px solid #5A4FBB; }
+  td { padding: 8px 6px; border: 1px solid #ddd; text-align: center; }
+  td.mono { font-family: 'Courier New', monospace; font-weight: bold; }
+  td.mese-col { font-weight: bold; font-size: 13px; background: #fafaf8; }
+  tr:nth-child(even) td { background: #fafaff; }
+  tr.totale-row { background: #EEEDFE !important; }
+  tr.totale-row td { border-top: 2px solid #6B5FCC; font-weight: bold; background: #EEEDFE !important; }
+
+  .report-footer { text-align: center; font-size: 9px; color: #aaa; border-top: 1px solid #e8e8e8; padding-top: 8px; margin-top: 14px; }
+  .toolbar { position: fixed; bottom: 20px; right: 20px; display: flex; gap: 8px; z-index: 100; }
+  .toolbar button { border: none; padding: 10px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: bold; }
+  .btn-print { background: #6B5FCC; color: #fff; }
+  .btn-back { background: #666; color: #fff; }
+  .filtri-info { font-size: 11px; color: #666; margin-bottom: 12px; }
+  .filtri-info strong { color: #1a1a18; }
+</style>
+</head>
+<body>
+
+<!-- FILTRI -->
+<div class="filtri-panel no-print" id="filtri-panel">
+  <div class="filtri-header">
+    <div class="filtri-title">Vendite Mensili Annuali</div>
+    <img src="logo_png.jpeg" class="filtri-logo" onerror="this.style.display='none'" />
+  </div>
+  <div class="filtri-grid">
+    <div class="filtri-group">
+      <label>Anno</label>
+      <select id="f-anno"></select>
+    </div>
+    <div class="filtri-group">
+      <label>Prodotti</label>
+      <div class="check-wrap" id="f-prodotti">
+        <label class="check-label"><input type="checkbox" class="f-prod-check" value="Gasolio Autotrazione" checked /> Gasolio Autotrazione</label>
+        <label class="check-label"><input type="checkbox" class="f-prod-check" value="Benzina" checked /> Benzina</label>
+        <label class="check-label"><input type="checkbox" class="f-prod-check" value="Gasolio Agricolo" checked /> Gasolio Agricolo</label>
+        <label class="check-label"><input type="checkbox" class="f-prod-check" value="HVO" checked /> HVO</label>
+      </div>
+    </div>
+  </div>
+  <button class="filtri-btn" onclick="generaReport()">Genera Report</button>
+</div>
+
+<!-- REPORT -->
+<div class="report-container" id="report-container">
+  <div class="toolbar no-print">
+    <button class="btn-back" onclick="tornaFiltri()">← Modifica</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+  </div>
+  <div class="page" id="report-page"></div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function fmtN(n) {
+  const v = Number(n);
+  const dec = Math.abs(v % 1) < 0.005 ? 0 : 2;
+  return v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+}
+function fmtE(n) { return '€ ' + fmtN(n); }
+function fmtL(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
+// Popola anni
+const annoCorrente = new Date().getFullYear();
+const selAnno = document.getElementById('f-anno');
+for (let y = annoCorrente; y >= annoCorrente - 10; y--) {
+  selAnno.innerHTML += '<option value="'+y+'">'+y+'</option>';
+}
+
+async function generaReport() {
+  const anno = document.getElementById('f-anno').value;
+  const prodotti = Array.from(document.querySelectorAll('.f-prod-check:checked')).map(cb => cb.value);
+  if (!prodotti.length) { alert('Seleziona almeno un prodotto'); return; }
+
+  const da = anno + '-01-01';
+  const a = anno + '-12-31';
+
+  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
+  if (prodotti.length < 4) query = query.in('prodotto', prodotti);
+  const { data: ordini } = await query;
+  if (!ordini || !ordini.length) { alert('Nessun dato per ' + anno); return; }
+
+  // Calcola per mese
+  const mesi = {};
+  for (let m = 1; m <= 12; m++) mesi[m] = { litri:0, fattNetto:0, fattIva:0, costoAcquisto:0, costoTrasporto:0 };
+
+  ordini.forEach(r => {
+    const mese = parseInt(r.data.split('-')[1]);
+    const litri = Number(r.litri);
+    const costo = Number(r.costo_litro);
+    const trasporto = Number(r.trasporto_litro);
+    const margine = Number(r.margine);
+    const iva = Number(r.iva) / 100;
+
+    const prezzoNetto = costo + trasporto + margine; // prezzo netto per litro
+    const fattNetto = prezzoNetto * litri;
+    const fattIva = fattNetto * (1 + iva);
+    const costoAcq = costo * litri;
+    const costoTrasp = trasporto * litri;
+
+    mesi[mese].litri += litri;
+    mesi[mese].fattNetto += fattNetto;
+    mesi[mese].fattIva += fattIva;
+    mesi[mese].costoAcquisto += costoAcq;
+    mesi[mese].costoTrasporto += costoTrasp;
+  });
+
+  // Totali annuali
+  let totLitri=0, totFattNetto=0, totFattIva=0, totCostoAcq=0, totCostoTrasp=0;
+  Object.values(mesi).forEach(m => {
+    totLitri += m.litri; totFattNetto += m.fattNetto; totFattIva += m.fattIva;
+    totCostoAcq += m.costoAcquisto; totCostoTrasp += m.costoTrasporto;
+  });
+  const margineTotale = totFattNetto - totCostoAcq; // Fatturato netto - Costo acquisto
+  const primoMargine = totFattNetto - totCostoAcq - totCostoTrasp; // Fatturato netto - Costo acquisto - Trasporto
+
+  // Genera HTML report
+  let html = '';
+  html += '<div class="report-header">';
+  html += '<div><div class="report-title">Totale Vendite Mensili Carburanti ' + anno + '</div>';
+  html += '<div class="report-sub">Prodotti: ' + prodotti.join(', ') + '</div></div>';
+  html += '<div style="display:flex;align-items:center;gap:12px"><img src="logo_png.jpeg" class="report-logo" onerror="this.style.display=\'none\'" /><div class="company-box">Phoenix Fuel Srl</div></div>';
+  html += '</div>';
+
+  // Totali annuali
+  html += '<div class="totali-row">';
+  html += '<div class="t-cell t-label">' + anno + '</div>';
+  html += '<div class="t-cell"><div class="t-head">Litri</div><div class="t-val">' + fmtL(totLitri) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Fatturato netto</div><div class="t-val">' + fmtE(totFattNetto) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Totale IVA inclusa</div><div class="t-val">' + fmtE(totFattIva) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Costo acquisto</div><div class="t-val" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Costo trasporto</div><div class="t-val">' + fmtE(totCostoTrasp) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Margine Totale</div><div class="t-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
+  html += '</div>';
+
+  // Margini extra
+  html += '<div class="margine-extra">';
+  html += '<div class="margine-box"><div class="m-label">Primo Margine (Fatt. - Acquisto - Trasporto)</div><div class="m-val">' + fmtE(primoMargine) + '</div></div>';
+  html += '<div class="margine-box"><div class="m-label">Margine Totale (Fatt. - Acquisto)</div><div class="m-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
+  html += '</div>';
+
+  // Tabella mesi
+  html += '<table>';
+  html += '<thead><tr><th>Mese</th><th>Litri</th><th>Fatturato netto</th><th>Totale IVA inclusa</th><th>Costo acquisto</th><th>Costo trasporto</th><th>Primo Margine</th><th>Margine Totale</th></tr></thead>';
+  html += '<tbody>';
+  for (let m = 1; m <= 12; m++) {
+    const d = mesi[m];
+    const pm = d.fattNetto - d.costoAcquisto - d.costoTrasporto;
+    const mt = d.fattNetto - d.costoAcquisto;
+    const hasData = d.litri > 0;
+    html += '<tr' + (!hasData ? ' style="opacity:0.4"' : '') + '>';
+    html += '<td class="mese-col">' + m + '</td>';
+    html += '<td class="mono">' + fmtL(d.litri) + '</td>';
+    html += '<td class="mono">' + fmtE(d.fattNetto) + '</td>';
+    html += '<td class="mono">' + fmtE(d.fattIva) + '</td>';
+    html += '<td class="mono" style="color:#A32D2D">' + fmtE(d.costoAcquisto) + '</td>';
+    html += '<td class="mono">' + fmtE(d.costoTrasporto) + '</td>';
+    html += '<td class="mono" style="color:#6B5FCC">' + fmtE(pm) + '</td>';
+    html += '<td class="mono" style="color:#639922;font-size:12px">' + fmtE(mt) + '</td>';
+    html += '</tr>';
+  }
+  // Riga totali
+  html += '<tr class="totale-row">';
+  html += '<td class="mese-col">TOTALE</td>';
+  html += '<td class="mono">' + fmtL(totLitri) + '</td>';
+  html += '<td class="mono">' + fmtE(totFattNetto) + '</td>';
+  html += '<td class="mono">' + fmtE(totFattIva) + '</td>';
+  html += '<td class="mono" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</td>';
+  html += '<td class="mono">' + fmtE(totCostoTrasp) + '</td>';
+  html += '<td class="mono" style="color:#6B5FCC">' + fmtE(primoMargine) + '</td>';
+  html += '<td class="mono" style="color:#639922;font-size:12px">' + fmtE(margineTotale) + '</td>';
+  html += '</tr></tbody></table>';
+
+  html += '<div class="report-footer">PhoenixFuel Srl — Report generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
+
+  document.getElementById('report-page').innerHTML = html;
+  document.getElementById('filtri-panel').style.display = 'none';
+  document.getElementById('report-container').style.display = 'block';
+}
+
+function tornaFiltri() {
+  document.getElementById('filtri-panel').style.display = 'block';
+  document.getElementById('report-container').style.display = 'none';
+}
+</script>
+</body>
+</html>
