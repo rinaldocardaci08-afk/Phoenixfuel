@@ -1270,11 +1270,11 @@ async function caricaVendite() {
   const ctxVF = document.getElementById('chart-vend-fornitori');
   if (ctxVF && righeF.length) {
     if (window._chartVendForn) window._chartVendForn.destroy();
-    window._chartVendForn = new Chart(ctxVF, {
+    window._chartVendForn = new Chart(ctxVF.getContext('2d'), {
       type:'bar', data:{
         labels:righeF.map(([f])=>f.length>18?f.substring(0,18)+'…':f),
         datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
-      }, options:{ indexAxis:'horizontal', responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
     });
   }
 
@@ -1283,11 +1283,11 @@ async function caricaVendite() {
   const top10 = righeCl.slice(0,10);
   if (ctxVC && top10.length) {
     if (window._chartVendCl) window._chartVendCl.destroy();
-    window._chartVendCl = new Chart(ctxVC, {
+    window._chartVendCl = new Chart(ctxVC.getContext('2d'), {
       type:'bar', data:{
         labels:top10.map(([c])=>c.length>15?c.substring(0,15)+'…':c),
         datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
-      }, options:{ indexAxis:'horizontal', responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
     });
   }
 }
@@ -1946,7 +1946,7 @@ async function caricaGraficiDashboard() {
   const ctx1 = document.getElementById('chart-fatturato');
   if (ctx1) {
     if (_chartFatturato) _chartFatturato.destroy();
-    _chartFatturato = new Chart(ctx1, {
+    _chartFatturato = new Chart(ctx1.getContext('2d'), {
       type:'bar', data:{
         labels:labels7,
         datasets:[{ label:'Fatturato €', data:giorni.map(g=>Math.round(fattPerGiorno[g]*100)/100), backgroundColor:'#D4A017', borderRadius:6 }]
@@ -1964,7 +1964,7 @@ async function caricaGraficiDashboard() {
   const ctx2 = document.getElementById('chart-prodotti');
   if (ctx2) {
     if (_chartProdotti) _chartProdotti.destroy();
-    _chartProdotti = new Chart(ctx2, {
+    _chartProdotti = new Chart(ctx2.getContext('2d'), {
       type:'doughnut', data:{
         labels:prodLabels,
         datasets:[{ data:prodLabels.map(p=>perProd[p]), backgroundColor:prodLabels.map(p=>prodColori[p]||'#888') }]
@@ -1987,7 +1987,7 @@ async function caricaGraficiDashboard() {
   const ctx3 = document.getElementById('chart-margine');
   if (ctx3) {
     if (_chartMargine) _chartMargine.destroy();
-    _chartMargine = new Chart(ctx3, {
+    _chartMargine = new Chart(ctx3.getContext('2d'), {
       type:'line', data:{
         labels:labels30,
         datasets:[{ label:'Margine €', data:giorni30.map(g=>Math.round(marg30[g]*100)/100), borderColor:'#639922', backgroundColor:'rgba(99,153,34,0.1)', fill:true, tension:0.3, pointRadius:2 }]
