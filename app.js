@@ -630,19 +630,38 @@ async function controllaFidoCliente() {
 
   // Carica dati cliente
   const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
-  if (!cliente || !cliente.fido_massimo || Number(cliente.fido_massimo) <= 0) {
-    infoDiv.style.display = 'none';
-    return;
+  if (!cliente) { infoDiv.style.display = 'none'; return; }
+
+  // Carica ordini passati del cliente per fido e media margine
+  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cliente.nome).neq('stato','annullato');
+
+  // Calcola media margine dalle vendite precedenti
+  const ordiniConMargine = (ordini||[]).filter(o => Number(o.margine) > 0 && o.tipo_ordine !== 'deposito');
+  if (ordiniConMargine.length > 0) {
+    const sommaMargini = ordiniConMargine.reduce((s, o) => s + Number(o.margine), 0);
+    const mediaMargine = sommaMargini / ordiniConMargine.length;
+    const margineInput = document.getElementById('ord-margine-custom');
+    // Pre-popola solo se il campo è vuoto o zero
+    if (!margineInput.value || parseFloat(margineInput.value) === 0) {
+      margineInput.value = mediaMargine.toFixed(4);
+      // Ricalcola prezzo netto
+      if (prezzoCorrente) {
+        const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+        const noIva = Number(prezzoCorrente.costo_litro) + trasporto + mediaMargine;
+        document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+        aggiornaPrevOrdine();
+      }
+    }
   }
 
-  const fidoMax = Number(cliente.fido_massimo);
-  const ggPag = cliente.giorni_pagamento || 30;
+  // Fido
+  const fidoMax = Number(cliente.fido_massimo || 0);
+  if (fidoMax <= 0) { infoDiv.style.display = 'none'; return; }
 
-  // Calcola fido utilizzato (ordini non scaduti e non pagati) - cerca per cliente_id, fallback su nome
-  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cliente.nome).neq('stato','annullato');
+  const ggPag = cliente.giorni_pagamento || 30;
   let fidoUsato = 0;
   (ordini||[]).forEach(o => {
-    if (o.pagato) return; // Ordine già pagato, non conta nel fido
+    if (o.pagato) return;
     const scad = new Date(o.data);
     scad.setDate(scad.getDate() + (o.giorni_pagamento || ggPag));
     if (scad > oggi) fidoUsato += prezzoConIva(o) * Number(o.litri);
