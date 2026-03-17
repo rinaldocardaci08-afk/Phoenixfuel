@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Report Vendite — PhoenixFuel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #000; background: #f5f4f0; }
+
+  /* FILTRI */
+  .filtri-panel { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 24px; margin: 20px auto; max-width: 800px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .filtri-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .filtri-title { font-size: 20px; font-weight: bold; color: #D4A017; }
+  .filtri-logo { max-height: 50px; }
+  .filtri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .filtri-group { display: flex; flex-direction: column; gap: 5px; }
+  .filtri-group label { font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.4px; }
+  .filtri-group select, .filtri-group input { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: #fafaf8; color: #1a1a18; }
+  .filtri-btn { background: #D4A017; color: #fff; border: none; padding: 12px 28px; border-radius: 8px; font-size: 15px; cursor: pointer; font-weight: bold; width: 100%; }
+  .filtri-btn:hover { opacity: 0.9; }
+
+  /* REPORT */
+  .report-container { display: none; }
+  .page { width: 210mm; min-height: 297mm; padding: 12mm; margin: 10px auto; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  @media print { 
+    .no-print { display: none !important; } 
+    .page { margin: 0; box-shadow: none; page-break-after: always; }
+    body { background: #fff; }
+  }
+
+  .report-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #D4A017; padding-bottom: 10px; margin-bottom: 14px; }
+  .report-title { font-size: 20px; font-weight: bold; color: #D4A017; }
+  .report-sub { font-size: 11px; color: #666; margin-top: 3px; }
+  .report-logo { max-height: 50px; }
+
+  .report-filtri-info { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 11px; color: #555; display: flex; flex-wrap: wrap; gap: 16px; }
+  .report-filtri-info strong { color: #1a1a18; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .kpi-box { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px; text-align: center; }
+  .kpi-label { font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .kpi-val { font-size: 18px; font-weight: bold; font-family: 'Courier New', monospace; color: #1a1a18; }
+
+  .section-title { font-size: 12px; font-weight: bold; color: #D4A017; text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 8px; border-bottom: 1px solid #e8e8e8; padding-bottom: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
+  th { background: #f5f5f5; padding: 6px 8px; text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; color: #666; border: 1px solid #ddd; }
+  td { padding: 6px 8px; border: 1px solid #eee; }
+  td.mono { font-family: 'Courier New', monospace; font-weight: bold; text-align: right; }
+  tr.totale { background: #FDF3D0; font-weight: bold; }
+  tr.totale td { border-top: 2px solid #D4A017; }
+
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .chart-box { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px; }
+  .chart-title { font-size: 11px; font-weight: bold; color: #333; margin-bottom: 8px; }
+
+  .report-footer { text-align: center; font-size: 9px; color: #aaa; border-top: 1px solid #e8e8e8; padding-top: 8px; margin-top: 14px; }
+
+  .toolbar { position: fixed; bottom: 20px; right: 20px; display: flex; gap: 8px; z-index: 100; }
+  .toolbar button { border: none; padding: 10px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: bold; }
+  .btn-print { background: #D4A017; color: #fff; }
+  .btn-back { background: #666; color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- PANNELLO FILTRI -->
+<div class="filtri-panel no-print" id="filtri-panel">
+  <div class="filtri-header">
+    <div class="filtri-title">Report Vendite</div>
+    <img src="logo_png.jpeg" class="filtri-logo" onerror="this.style.display='none'" />
+  </div>
+  <div class="filtri-grid">
+    <div class="filtri-group">
+      <label>Fornitore</label>
+      <select id="f-fornitore"><option value="">Tutti i fornitori</option></select>
+    </div>
+    <div class="filtri-group">
+      <label>Prodotto</label>
+      <select id="f-prodotto">
+        <option value="">Tutti i prodotti</option>
+        <option>Gasolio Autotrazione</option><option>Benzina</option>
+        <option>Gasolio Agricolo</option><option>HVO</option>
+      </select>
+    </div>
+    <div class="filtri-group">
+      <label>Cliente</label>
+      <select id="f-cliente"><option value="">Tutti i clienti</option></select>
+    </div>
+    <div class="filtri-group">
+      <label>Stato</label>
+      <select id="f-stato">
+        <option value="">Tutti gli stati</option>
+        <option value="confermato">Confermato</option>
+        <option value="programmato">Programmato</option>
+        <option value="in attesa">In attesa</option>
+      </select>
+    </div>
+    <div class="filtri-group">
+      <label>Data Inizio</label>
+      <input type="date" id="f-da" />
+    </div>
+    <div class="filtri-group">
+      <label>Data Fine</label>
+      <input type="date" id="f-a" />
+    </div>
+  </div>
+  <button class="filtri-btn" onclick="generaReport()">Genera Report</button>
+</div>
+
+<!-- REPORT OUTPUT -->
+<div class="report-container" id="report-container">
+  <div class="toolbar no-print">
+    <button class="btn-back" onclick="tornaFiltri()">← Modifica filtri</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+  </div>
+
+  <div class="page">
+    <div class="report-header">
+      <div>
+        <div class="report-title">REPORT VENDITE</div>
+        <div class="report-sub" id="r-periodo">—</div>
+        <div class="report-sub">PhoenixFuel Srl</div>
+      </div>
+      <img src="logo_png.jpeg" class="report-logo" onerror="this.style.display='none'" />
+    </div>
+
+    <!-- Filtri applicati -->
+    <div class="report-filtri-info" id="r-filtri"></div>
+
+    <!-- KPI -->
+    <div class="kpi-grid">
+      <div class="kpi-box"><div class="kpi-label">Fatturato</div><div class="kpi-val" id="r-fatturato">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">Litri</div><div class="kpi-val" id="r-litri">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">Margine totale</div><div class="kpi-val" id="r-margine">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">N. Ordini</div><div class="kpi-val" id="r-ordini">—</div></div>
+    </div>
+
+    <!-- Grafici -->
+    <div class="charts-grid">
+      <div class="chart-box"><div class="chart-title">Vendite per giorno</div><canvas id="r-chart-giorno" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Margine per giorno</div><canvas id="r-chart-margine" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Top 10 clienti</div><canvas id="r-chart-clienti" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Vendite per prodotto</div><canvas id="r-chart-prodotti" height="180"></canvas></div>
+    </div>
+
+    <!-- Tabella ordini -->
+    <div class="section-title">Dettaglio ordini</div>
+    <table>
+      <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L</th><th>Totale</th><th>Costo Tot.</th><th>Trasporto</th><th>Margine</th><th>Fornitore</th><th>Stato</th></tr></thead>
+      <tbody id="r-tabella"></tbody>
+    </table>
+
+    <!-- Tabella clienti -->
+    <div class="section-title">Riepilogo per cliente</div>
+    <table>
+      <thead><tr><th>Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+      <tbody id="r-tab-clienti"></tbody>
+    </table>
+
+    <!-- Tabella fornitori -->
+    <div class="section-title">Riepilogo per fornitore</div>
+    <table>
+      <thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+      <tbody id="r-tab-fornitori"></tbody>
+    </table>
+
+    <div class="report-footer">
+      PhoenixFuel Srl — Report generato il <span id="r-gen-date"></span> — Documento interno
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const oggi = new Date().toISOString().split('T')[0];
+document.getElementById('f-da').value = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+document.getElementById('f-a').value = oggi;
+document.getElementById('r-gen-date').textContent = new Date().toLocaleDateString('it-IT');
+
+function fmt(n) { return '€ ' + Number(n).toFixed(4); }
+function fmtE(n) { return '€ ' + Number(n).toFixed(2); }
+function fmtL(n) { return Number(n).toLocaleString('it-IT'); }
+function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function prezzoNoIva(r) { return Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine); }
+function prezzoConIva(r) { return prezzoNoIva(r)*(1+Number(r.iva)/100); }
+
+// Carica filtri
+async function caricaFiltri() {
+  const { data: fornitori } = await sb.from('fornitori').select('nome').eq('attivo',true).order('nome');
+  const selF = document.getElementById('f-fornitore');
+  (fornitori||[]).forEach(f => { selF.innerHTML += '<option value="'+esc(f.nome)+'">'+esc(f.nome)+'</option>'; });
+
+  const { data: clienti } = await sb.from('clienti').select('nome').eq('attivo',true).order('nome');
+  const selC = document.getElementById('f-cliente');
+  (clienti||[]).forEach(c => { selC.innerHTML += '<option value="'+esc(c.nome)+'">'+esc(c.nome)+'</option>'; });
+}
+caricaFiltri();
+
+let _charts = {};
+function destroyCharts() { Object.values(_charts).forEach(c => c.destroy()); _charts = {}; }
+
+const COLORI = ['#D4A017','#378ADD','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A','#085041','#791F1F'];
+
+async function generaReport() {
+  const da = document.getElementById('f-da').value;
+  const a = document.getElementById('f-a').value;
+  const fornitore = document.getElementById('f-fornitore').value;
+  const prodotto = document.getElementById('f-prodotto').value;
+  const cliente = document.getElementById('f-cliente').value;
+  const stato = document.getElementById('f-stato').value;
+
+  if (!da || !a) { alert('Seleziona le date'); return; }
+
+  // Query
+  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
+  if (fornitore) query = query.eq('fornitore', fornitore);
+  if (prodotto) query = query.eq('prodotto', prodotto);
+  if (cliente) query = query.eq('cliente', cliente);
+  if (stato) query = query.eq('stato', stato);
+  
+  const { data: ordini } = await query.order('data').order('cliente');
+  if (!ordini || !ordini.length) { alert('Nessun ordine trovato per i filtri selezionati'); return; }
+
+  // Periodo
+  document.getElementById('r-periodo').textContent = 'Periodo: ' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT');
+
+  // Filtri applicati
+  let filtriHtml = '<span>Periodo: <strong>' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT') + '</strong></span>';
+  if (fornitore) filtriHtml += '<span>Fornitore: <strong>' + esc(fornitore) + '</strong></span>';
+  if (prodotto) filtriHtml += '<span>Prodotto: <strong>' + esc(prodotto) + '</strong></span>';
+  if (cliente) filtriHtml += '<span>Cliente: <strong>' + esc(cliente) + '</strong></span>';
+  if (stato) filtriHtml += '<span>Stato: <strong>' + esc(stato) + '</strong></span>';
+  document.getElementById('r-filtri').innerHTML = filtriHtml;
+
+  // Calcoli
+  let fatturato=0, litri=0, margine=0;
+  const perGiorno={}, perCliente={}, perFornitore={}, perProdotto={};
+
+  ordini.forEach(r => {
+    const tot = prezzoConIva(r) * Number(r.litri);
+    const marg = Number(r.margine) * Number(r.litri);
+    fatturato += tot; litri += Number(r.litri); margine += marg;
+
+    // Per giorno
+    if (!perGiorno[r.data]) perGiorno[r.data] = { fatturato:0, margine:0 };
+    perGiorno[r.data].fatturato += tot;
+    perGiorno[r.data].margine += marg;
+
+    // Per cliente
+    const cl = r.cliente||'—';
+    if (!perCliente[cl]) perCliente[cl] = { ordini:0, litri:0, fatturato:0, margine:0 };
+    perCliente[cl].ordini++; perCliente[cl].litri += Number(r.litri);
+    perCliente[cl].fatturato += tot; perCliente[cl].margine += marg;
+
+    // Per fornitore
+    const fo = r.fornitore||'—';
+    if (!perFornitore[fo]) perFornitore[fo] = { ordini:0, litri:0, fatturato:0, margine:0 };
+    perFornitore[fo].ordini++; perFornitore[fo].litri += Number(r.litri);
+    perFornitore[fo].fatturato += tot; perFornitore[fo].margine += marg;
+
+    // Per prodotto
+    const pr = r.prodotto||'—';
+    if (!perProdotto[pr]) perProdotto[pr] = { litri:0, fatturato:0 };
+    perProdotto[pr].litri += Number(r.litri); perProdotto[pr].fatturato += tot;
+  });
+
+  // KPI
+  document.getElementById('r-fatturato').textContent = fmtE(fatturato);
+  document.getElementById('r-litri').textContent = fmtL(litri) + ' L';
+  document.getElementById('r-margine').textContent = fmtE(margine);
+  document.getElementById('r-ordini').textContent = ordini.length;
+
+  // Tabella ordini
+  let totLitri=0, totFatt=0, totCosto=0, totTrasp=0, totMarg=0;
+  document.getElementById('r-tabella').innerHTML = ordini.map(r => {
+    const pL = prezzoConIva(r);
+    const tot = pL * Number(r.litri);
+    const costoTot = Number(r.costo_litro) * Number(r.litri);
+    const traspTot = Number(r.trasporto_litro) * Number(r.litri);
+    const margTot = Number(r.margine) * Number(r.litri);
+    totLitri += Number(r.litri); totFatt += tot; totCosto += costoTot; totTrasp += traspTot; totMarg += margTot;
+    return '<tr><td>' + r.data + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(pL) + '</td><td class="mono">' + fmtE(tot) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td><td class="mono">' + fmtE(margTot) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(r.stato) + '</td></tr>';
+  }).join('') + '<tr class="totale"><td colspan="3"><strong>TOTALI</strong></td><td class="mono">' + fmtL(totLitri) + '</td><td></td><td class="mono">' + fmtE(totFatt) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmtE(totTrasp) + '</td><td class="mono">' + fmtE(totMarg) + '</td><td colspan="2"></td></tr>';
+
+  // Tabella clienti
+  const clArr = Object.entries(perCliente).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  document.getElementById('r-tab-clienti').innerHTML = clArr.map(([c,v]) =>
+    '<tr><td><strong>' + esc(c) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.fatturato) + '</td><td class="mono">' + fmtE(v.margine) + '</td></tr>'
+  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(litri) + '</td><td class="mono">' + fmtE(fatturato) + '</td><td class="mono">' + fmtE(margine) + '</td></tr>';
+
+  // Tabella fornitori
+  const foArr = Object.entries(perFornitore).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  document.getElementById('r-tab-fornitori').innerHTML = foArr.map(([f,v]) =>
+    '<tr><td><strong>' + esc(f) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.fatturato) + '</td><td class="mono">' + fmtE(v.margine) + '</td></tr>'
+  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(litri) + '</td><td class="mono">' + fmtE(fatturato) + '</td><td class="mono">' + fmtE(margine) + '</td></tr>';
+
+  // GRAFICI
+  destroyCharts();
+
+  // Vendite per giorno
+  const giorniArr = Object.keys(perGiorno).sort();
+  const labelsG = giorniArr.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
+  _charts.giorno = new Chart(document.getElementById('r-chart-giorno').getContext('2d'), {
+    type:'bar', data:{ labels:labelsG, datasets:[{ label:'€', data:giorniArr.map(g=>Math.round(perGiorno[g].fatturato*100)/100), backgroundColor:'#D4A017', borderRadius:4 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}},x:{ticks:{font:{size:9}}}} }
+  });
+
+  // Margine per giorno
+  _charts.margine = new Chart(document.getElementById('r-chart-margine').getContext('2d'), {
+    type:'line', data:{ labels:labelsG, datasets:[{ label:'€', data:giorniArr.map(g=>Math.round(perGiorno[g].margine*100)/100), borderColor:'#639922', backgroundColor:'rgba(99,153,34,0.1)', fill:true, tension:0.3, pointRadius:2 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}},x:{ticks:{font:{size:9}}}} }
+  });
+
+  // Top 10 clienti
+  const top10 = clArr.slice(0,10);
+  _charts.clienti = new Chart(document.getElementById('r-chart-clienti').getContext('2d'), {
+    type:'bar', data:{ labels:top10.map(([c])=>c.length>15?c.substring(0,15)+'…':c), datasets:[{ label:'€', data:top10.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:top10.map((_,i)=>COLORI[i%COLORI.length]), borderRadius:4 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}}} }
+  });
+
+  // Per prodotto
+  const prArr = Object.entries(perProdotto);
+  const prodColori = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#3B6D11' };
+  _charts.prodotti = new Chart(document.getElementById('r-chart-prodotti').getContext('2d'), {
+    type:'doughnut', data:{ labels:prArr.map(([p])=>p), datasets:[{ data:prArr.map(([,v])=>v.fatturato), backgroundColor:prArr.map(([p])=>prodColori[p]||'#888') }] },
+    options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:10}}}} }
+  });
+
+  // Mostra report
+  document.getElementById('filtri-panel').style.display = 'none';
+  document.getElementById('report-container').style.display = 'block';
+}
+
+function tornaFiltri() {
+  document.getElementById('filtri-panel').style.display = 'block';
+  document.getElementById('report-container').style.display = 'none';
+}
+</script>
+</body>
+</html>
