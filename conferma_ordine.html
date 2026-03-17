@@ -160,9 +160,9 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const params = new URLSearchParams(window.location.search);
 document.getElementById('gen-date').textContent = new Date().toLocaleDateString('it-IT');
 
-function fmt(n) { return '€ ' + Number(n).toFixed(4); }
-function fmtE(n) { return '€ ' + Number(n).toFixed(2); }
-function fmtL(n) { return Number(n).toLocaleString('it-IT'); }
+function fmt(n) { const v=Number(n); return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }); }
+function fmtE(n) { const v=Number(n); const dec=v%1===0?0:2; return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }); }
+function fmtL(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
 
 async function caricaDati() {
   const ordineId = params.get('ordine_id');

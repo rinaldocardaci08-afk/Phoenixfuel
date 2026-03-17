@@ -136,9 +136,19 @@ document.getElementById('modal-overlay').addEventListener('click', function(e) {
 function chiudiModal() { chiudiModalePermessi(); }
 
 // ── UTILITÀ ───────────────────────────────────────────────────────
-function fmt(n) { return '€ ' + Number(n).toFixed(4); }
-function fmtE(n) { return '€ ' + Number(n).toFixed(2); }
-function fmtL(n) { return Number(n).toLocaleString('it-IT') + ' L'; }
+function fmt(n) {
+  const v = Number(n);
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+}
+function fmtE(n) {
+  const v = Number(n);
+  const dec = v % 1 === 0 ? 0 : 2;
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+}
+function fmtL(n) {
+  const v = Number(n);
+  return v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' L';
+}
 function badgeStato(stato) {
   const map = { 'confermato':'green','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal' };
   return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(stato) + '</span>';
@@ -1782,6 +1792,10 @@ function apriListinoPDF() {
 
 function apriReportVendite() {
   window.open('report_vendite.html', '_blank');
+}
+
+function apriReportAcquisti() {
+  window.open('report_acquisti.html', '_blank');
 }
 
 async function apriDettaglioCarico(caricoId) {

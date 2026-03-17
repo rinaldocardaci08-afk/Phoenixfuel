@@ -138,8 +138,8 @@ const PRODOTTI = [
   { id: 'hvo', nome: 'HVO', iva: 22, colore: 'bg-darkgreen', inputId: 'cfg-hvo' }
 ];
 
-function fmt(n) { return Number(n).toFixed(4).replace('.', ',') + ' €'; }
-function fmt3(n) { return Number(n).toFixed(3).replace('.', ',') + ' €'; }
+function fmt(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }) + ' €'; }
+function fmt3(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' €'; }
 
 // Prova a caricare costi dal deposito
 async function caricaCostiDeposito() {

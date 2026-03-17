@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Report Acquisti — PhoenixFuel</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #000; background: #f5f4f0; }
+
+  .filtri-panel { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 24px; margin: 20px auto; max-width: 800px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .filtri-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .filtri-title { font-size: 20px; font-weight: bold; color: #378ADD; }
+  .filtri-logo { max-height: 50px; }
+  .filtri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .filtri-group { display: flex; flex-direction: column; gap: 5px; }
+  .filtri-group label { font-size: 11px; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 0.4px; }
+  .filtri-group select, .filtri-group input { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: #fafaf8; color: #1a1a18; }
+  .filtri-btn { background: #378ADD; color: #fff; border: none; padding: 12px 28px; border-radius: 8px; font-size: 15px; cursor: pointer; font-weight: bold; width: 100%; }
+  .filtri-btn:hover { opacity: 0.9; }
+  .filtri-note { font-size: 11px; color: #999; margin-top: 8px; text-align: center; }
+
+  .report-container { display: none; }
+  .page { width: 210mm; min-height: 297mm; padding: 12mm; margin: 10px auto; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  @media print { .no-print { display: none !important; } .page { margin: 0; box-shadow: none; page-break-after: always; } body { background: #fff; } }
+
+  .report-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #378ADD; padding-bottom: 10px; margin-bottom: 14px; }
+  .report-title { font-size: 20px; font-weight: bold; color: #378ADD; }
+  .report-sub { font-size: 11px; color: #666; margin-top: 3px; }
+  .report-logo { max-height: 50px; }
+
+  .report-filtri-info { background: #E6F1FB; border: 1px solid #B8D4F0; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 11px; color: #0C447C; display: flex; flex-wrap: wrap; gap: 16px; }
+  .report-filtri-info strong { color: #1a1a18; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .kpi-box { background: #E6F1FB; border: 1px solid #B8D4F0; border-radius: 8px; padding: 12px; text-align: center; }
+  .kpi-label { font-size: 9px; color: #0C447C; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .kpi-val { font-size: 18px; font-weight: bold; font-family: 'Courier New', monospace; color: #1a1a18; }
+
+  .section-title { font-size: 12px; font-weight: bold; color: #378ADD; text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 8px; border-bottom: 1px solid #e8e8e8; padding-bottom: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
+  th { background: #E6F1FB; padding: 6px 8px; text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; color: #0C447C; border: 1px solid #ddd; }
+  td { padding: 6px 8px; border: 1px solid #eee; }
+  td.mono { font-family: 'Courier New', monospace; font-weight: bold; text-align: right; }
+  tr.totale { background: #E6F1FB; font-weight: bold; }
+  tr.totale td { border-top: 2px solid #378ADD; }
+
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .chart-box { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px; }
+  .chart-title { font-size: 11px; font-weight: bold; color: #333; margin-bottom: 8px; }
+
+  /* Confronto costi medi */
+  .confronto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .confronto-card { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 8px; padding: 14px; }
+  .confronto-nome { font-size: 13px; font-weight: bold; margin-bottom: 8px; }
+  .confronto-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; border-bottom: 1px solid #f0f0f0; }
+  .confronto-row:last-child { border-bottom: none; }
+  .confronto-val { font-family: 'Courier New', monospace; font-weight: bold; }
+
+  .report-footer { text-align: center; font-size: 9px; color: #aaa; border-top: 1px solid #e8e8e8; padding-top: 8px; margin-top: 14px; }
+  .toolbar { position: fixed; bottom: 20px; right: 20px; display: flex; gap: 8px; z-index: 100; }
+  .toolbar button { border: none; padding: 10px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: bold; }
+  .btn-print { background: #378ADD; color: #fff; }
+  .btn-back { background: #666; color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- PANNELLO FILTRI -->
+<div class="filtri-panel no-print" id="filtri-panel">
+  <div class="filtri-header">
+    <div class="filtri-title">Report Acquisti Fornitori</div>
+    <img src="logo_png.jpeg" class="filtri-logo" onerror="this.style.display='none'" />
+  </div>
+  <div class="filtri-grid">
+    <div class="filtri-group" style="grid-column:1/-1">
+      <label>Fornitori</label>
+      <div id="f-fornitore-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:#fafaf8;border:1px solid #ddd;border-radius:8px;max-height:140px;overflow-y:auto">
+        <span style="color:#999;font-size:12px">Caricamento...</span>
+      </div>
+    </div>
+    <div class="filtri-group">
+      <label>Prodotto</label>
+      <select id="f-prodotto">
+        <option value="">Tutti i prodotti</option>
+        <option>Gasolio Autotrazione</option><option>Benzina</option>
+        <option>Gasolio Agricolo</option><option>HVO</option>
+      </select>
+    </div>
+    <div class="filtri-group">
+      <label>Date</label>
+      <div style="display:flex;gap:8px">
+        <input type="date" id="f-da" style="flex:1" />
+        <input type="date" id="f-a" style="flex:1" />
+      </div>
+    </div>
+  </div>
+  <button class="filtri-btn" onclick="generaReport()" style="margin-top:12px">Genera Report Acquisti</button>
+</div>
+
+<!-- REPORT OUTPUT -->
+<div class="report-container" id="report-container">
+  <div class="toolbar no-print">
+    <button class="btn-back" onclick="tornaFiltri()">← Modifica filtri</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+  </div>
+
+  <div class="page">
+    <div class="report-header">
+      <div>
+        <div class="report-title">REPORT ACQUISTI</div>
+        <div class="report-sub" id="r-periodo">—</div>
+        <div class="report-sub">PhoenixFuel Srl</div>
+      </div>
+      <img src="logo_png.jpeg" class="report-logo" onerror="this.style.display='none'" />
+    </div>
+
+    <div class="report-filtri-info" id="r-filtri"></div>
+
+    <!-- KPI -->
+    <div class="kpi-grid">
+      <div class="kpi-box"><div class="kpi-label">Totale acquisti</div><div class="kpi-val" id="r-totale">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">Litri acquistati</div><div class="kpi-val" id="r-litri">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">Costo medio/L</div><div class="kpi-val" id="r-costomedio">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">N. Ordini</div><div class="kpi-val" id="r-ordini">—</div></div>
+    </div>
+
+    <!-- Confronto costi medi per fornitore -->
+    <div class="section-title">Confronto costi medi per fornitore</div>
+    <div id="r-confronto" class="confronto-grid"></div>
+
+    <!-- Tabelle -->
+    <div class="section-title">Dettaglio acquisti</div>
+    <table>
+      <thead><tr><th>Data</th><th>Fornitore</th><th>Base carico</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale costo</th><th>Trasporto tot.</th></tr></thead>
+      <tbody id="r-tabella"></tbody>
+    </table>
+
+    <div class="section-title">Riepilogo per fornitore</div>
+    <table>
+      <thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Costo totale</th><th>Costo medio/L</th><th>Trasporto tot.</th></tr></thead>
+      <tbody id="r-tab-fornitori"></tbody>
+    </table>
+
+    <div class="section-title">Riepilogo per prodotto</div>
+    <table>
+      <thead><tr><th>Prodotto</th><th>Litri</th><th>Costo totale</th><th>Costo medio/L</th></tr></thead>
+      <tbody id="r-tab-prodotti"></tbody>
+    </table>
+
+    <!-- Grafici -->
+    <div class="charts-grid" style="margin-top:16px">
+      <div class="chart-box"><div class="chart-title">Acquisti per giorno</div><canvas id="r-chart-giorno" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Costo medio per fornitore</div><canvas id="r-chart-costi" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Litri per fornitore</div><canvas id="r-chart-litri" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Acquisti per prodotto</div><canvas id="r-chart-prodotti" height="180"></canvas></div>
+    </div>
+
+    <div class="report-footer">
+      PhoenixFuel Srl — Report generato il <span id="r-gen-date"></span> — Documento interno
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const oggi = new Date().toISOString().split('T')[0];
+document.getElementById('f-da').value = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+document.getElementById('f-a').value = oggi;
+document.getElementById('r-gen-date').textContent = new Date().toLocaleDateString('it-IT');
+
+function fmt(n) {
+  const v = Number(n);
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+}
+function fmtE(n) {
+  const v = Number(n);
+  const dec = v % 1 === 0 ? 0 : 2;
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+}
+function fmtL(n) {
+  const v = Number(n);
+  const dec = v % 1 === 0 ? 0 : 0;
+  return v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 0 });
+}
+function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+const COLORI = ['#378ADD','#D4A017','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A','#085041','#791F1F'];
+const COLORI_PROD = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#3B6D11' };
+
+async function caricaFiltri() {
+  const { data: fornitori } = await sb.from('fornitori').select('nome').eq('attivo',true).order('nome');
+  const wrap = document.getElementById('f-fornitore-checks');
+  if (!fornitori || !fornitori.length) { wrap.innerHTML = '<span style="color:#999;font-size:12px">Nessun fornitore</span>'; return; }
+  wrap.innerHTML = fornitori.map(f =>
+    '<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;background:#fff;border:1px solid #ddd;border-radius:6px;padding:5px 10px"><input type="checkbox" class="f-forn-check" value="'+esc(f.nome)+'" /> '+esc(f.nome)+'</label>'
+  ).join('');
+}
+caricaFiltri();
+
+let _charts = {};
+function destroyCharts() { Object.values(_charts).forEach(c => c.destroy()); _charts = {}; }
+
+async function generaReport() {
+  const da = document.getElementById('f-da').value;
+  const a = document.getElementById('f-a').value;
+  const prodotto = document.getElementById('f-prodotto').value;
+  const fornitori = Array.from(document.querySelectorAll('.f-forn-check:checked')).map(cb => cb.value);
+
+  if (!da || !a) { alert('Seleziona le date'); return; }
+
+  // Query - solo ordini di tipo deposito (acquisti da fornitori per il deposito)
+  // OPPURE tutti gli ordini se vogliamo vedere anche le vendite dirette
+  // Per il report acquisti prendiamo TUTTI gli ordini non annullati
+  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato');
+  if (prodotto) query = query.eq('prodotto', prodotto);
+  if (fornitori.length) query = query.in('fornitore', fornitori);
+
+  const { data: ordini } = await query.order('data').order('fornitore');
+  if (!ordini || !ordini.length) { alert('Nessun ordine trovato'); return; }
+
+  // Periodo
+  document.getElementById('r-periodo').textContent = 'Periodo: ' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT');
+
+  // Filtri info
+  let filtriHtml = '<span>Periodo: <strong>' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT') + '</strong></span>';
+  if (fornitori.length) filtriHtml += '<span>Fornitori: <strong>' + fornitori.map(f=>esc(f)).join(', ') + '</strong></span>';
+  if (prodotto) filtriHtml += '<span>Prodotto: <strong>' + esc(prodotto) + '</strong></span>';
+  document.getElementById('r-filtri').innerHTML = filtriHtml;
+
+  // Calcoli
+  let totCosto=0, totLitri=0, totTrasp=0;
+  const perGiorno={}, perFornitore={}, perProdotto={};
+
+  ordini.forEach(r => {
+    const costoTot = Number(r.costo_litro) * Number(r.litri);
+    const traspTot = Number(r.trasporto_litro) * Number(r.litri);
+    const litri = Number(r.litri);
+    totCosto += costoTot; totLitri += litri; totTrasp += traspTot;
+
+    // Per giorno
+    if (!perGiorno[r.data]) perGiorno[r.data] = { costo:0, litri:0 };
+    perGiorno[r.data].costo += costoTot; perGiorno[r.data].litri += litri;
+
+    // Per fornitore
+    const fo = r.fornitore||'—';
+    if (!perFornitore[fo]) perFornitore[fo] = { ordini:0, litri:0, costo:0, trasporto:0 };
+    perFornitore[fo].ordini++; perFornitore[fo].litri += litri;
+    perFornitore[fo].costo += costoTot; perFornitore[fo].trasporto += traspTot;
+
+    // Per prodotto
+    const pr = r.prodotto||'—';
+    if (!perProdotto[pr]) perProdotto[pr] = { litri:0, costo:0 };
+    perProdotto[pr].litri += litri; perProdotto[pr].costo += costoTot;
+  });
+
+  const costoMedioGlob = totLitri > 0 ? totCosto / totLitri : 0;
+
+  // KPI
+  document.getElementById('r-totale').textContent = fmtE(totCosto);
+  document.getElementById('r-litri').textContent = fmtL(totLitri) + ' L';
+  document.getElementById('r-costomedio').textContent = fmt(costoMedioGlob);
+  document.getElementById('r-ordini').textContent = ordini.length;
+
+  // Confronto costi medi per fornitore (card)
+  const foArr = Object.entries(perFornitore).sort((a,b) => b[1].costo - a[1].costo);
+  let confHtml = '';
+  foArr.forEach(([fo, v], i) => {
+    const costoMedio = v.litri > 0 ? v.costo / v.litri : 0;
+    const col = COLORI[i % COLORI.length];
+    // Dettaglio per prodotto di questo fornitore
+    const prodForn = {};
+    ordini.filter(r => r.fornitore === fo).forEach(r => {
+      const pr = r.prodotto||'—';
+      if (!prodForn[pr]) prodForn[pr] = { litri:0, costo:0 };
+      prodForn[pr].litri += Number(r.litri);
+      prodForn[pr].costo += Number(r.costo_litro) * Number(r.litri);
+    });
+    confHtml += '<div class="confronto-card" style="border-left:4px solid '+col+'">';
+    confHtml += '<div class="confronto-nome" style="color:'+col+'">' + esc(fo) + '</div>';
+    confHtml += '<div class="confronto-row"><span>Costo medio globale:</span><span class="confronto-val">' + fmt(costoMedio) + '</span></div>';
+    confHtml += '<div class="confronto-row"><span>Totale acquistato:</span><span class="confronto-val">' + fmtE(v.costo) + '</span></div>';
+    confHtml += '<div class="confronto-row"><span>Litri totali:</span><span class="confronto-val">' + fmtL(v.litri) + ' L</span></div>';
+    // Per prodotto
+    Object.entries(prodForn).forEach(([pr, pv]) => {
+      const cm = pv.litri > 0 ? pv.costo / pv.litri : 0;
+      confHtml += '<div class="confronto-row" style="padding-left:8px;font-size:10px;color:#666"><span>' + esc(pr) + ':</span><span class="confronto-val" style="font-size:10px">' + fmt(cm) + '</span></div>';
+    });
+    confHtml += '</div>';
+  });
+  document.getElementById('r-confronto').innerHTML = confHtml;
+
+  // Tabella dettaglio
+  let tLitri=0, tCosto=0, tTrasp=0;
+  document.getElementById('r-tabella').innerHTML = ordini.map(r => {
+    const costoTot = Number(r.costo_litro) * Number(r.litri);
+    const traspTot = Number(r.trasporto_litro) * Number(r.litri);
+    tLitri += Number(r.litri); tCosto += costoTot; tTrasp += traspTot;
+    return '<tr><td>' + r.data + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(r.base_carico_id ? '—' : '—') + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(r.costo_litro) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td></tr>';
+  }).join('') + '<tr class="totale"><td colspan="4"><strong>TOTALI</strong></td><td class="mono">' + fmtL(tLitri) + '</td><td class="mono">' + fmt(tLitri>0?tCosto/tLitri:0) + '</td><td class="mono">' + fmtE(tCosto) + '</td><td class="mono">' + fmtE(tTrasp) + '</td></tr>';
+
+  // Tabella fornitori
+  document.getElementById('r-tab-fornitori').innerHTML = foArr.map(([f,v]) =>
+    '<tr><td><strong>' + esc(f) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.costo) + '</td><td class="mono">' + fmt(v.litri>0?v.costo/v.litri:0) + '</td><td class="mono">' + fmtE(v.trasporto) + '</td></tr>'
+  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(totLitri) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmt(costoMedioGlob) + '</td><td class="mono">' + fmtE(totTrasp) + '</td></tr>';
+
+  // Tabella prodotti
+  const prArr = Object.entries(perProdotto).sort((a,b) => b[1].costo - a[1].costo);
+  document.getElementById('r-tab-prodotti').innerHTML = prArr.map(([p,v]) =>
+    '<tr><td><strong>' + esc(p) + '</strong></td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.costo) + '</td><td class="mono">' + fmt(v.litri>0?v.costo/v.litri:0) + '</td></tr>'
+  ).join('');
+
+  // GRAFICI
+  destroyCharts();
+
+  // Acquisti per giorno
+  const giorniArr = Object.keys(perGiorno).sort();
+  const labelsG = giorniArr.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
+  _charts.giorno = new Chart(document.getElementById('r-chart-giorno').getContext('2d'), {
+    type:'bar', data:{ labels:labelsG, datasets:[{ label:'€', data:giorniArr.map(g=>Math.round(perGiorno[g].costo*100)/100), backgroundColor:'#378ADD', borderRadius:4 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}},x:{ticks:{font:{size:9}}}} }
+  });
+
+  // Costo medio per fornitore
+  _charts.costi = new Chart(document.getElementById('r-chart-costi').getContext('2d'), {
+    type:'bar', data:{ labels:foArr.map(([f])=>f.length>15?f.substring(0,15)+'…':f), datasets:[{ label:'€/L', data:foArr.map(([,v])=>v.litri>0?Math.round((v.costo/v.litri)*10000)/10000:0), backgroundColor:foArr.map((_,i)=>COLORI[i%COLORI.length]), borderRadius:4 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}}} }
+  });
+
+  // Litri per fornitore
+  _charts.litri = new Chart(document.getElementById('r-chart-litri').getContext('2d'), {
+    type:'doughnut', data:{ labels:foArr.map(([f])=>f), datasets:[{ data:foArr.map(([,v])=>v.litri), backgroundColor:foArr.map((_,i)=>COLORI[i%COLORI.length]) }] },
+    options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:10}}}} }
+  });
+
+  // Per prodotto
+  _charts.prodotti = new Chart(document.getElementById('r-chart-prodotti').getContext('2d'), {
+    type:'doughnut', data:{ labels:prArr.map(([p])=>p), datasets:[{ data:prArr.map(([,v])=>v.costo), backgroundColor:prArr.map(([p])=>COLORI_PROD[p]||'#888') }] },
+    options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:10}}}} }
+  });
+
+  document.getElementById('filtri-panel').style.display = 'none';
+  document.getElementById('report-container').style.display = 'block';
+}
+
+function tornaFiltri() {
+  document.getElementById('filtri-panel').style.display = 'block';
+  document.getElementById('report-container').style.display = 'none';
+}
+</script>
+</body>
+</html>

@@ -175,9 +175,19 @@ document.getElementById('f-da').value = new Date(new Date().getFullYear(), new D
 document.getElementById('f-a').value = oggi;
 document.getElementById('r-gen-date').textContent = new Date().toLocaleDateString('it-IT');
 
-function fmt(n) { return '€ ' + Number(n).toFixed(4); }
-function fmtE(n) { return '€ ' + Number(n).toFixed(2); }
-function fmtL(n) { return Number(n).toLocaleString('it-IT'); }
+function fmt(n) {
+  const v = Number(n);
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+}
+function fmtE(n) {
+  const v = Number(n);
+  const dec = v % 1 === 0 ? 0 : 2;
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+}
+function fmtL(n) {
+  const v = Number(n);
+  return v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function prezzoNoIva(r) { return Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine); }
 function prezzoConIva(r) { return prezzoNoIva(r)*(1+Number(r.iva)/100); }
