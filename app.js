@@ -130,14 +130,56 @@ function fmtE(n) { return '€ ' + Number(n).toFixed(2); }
 function fmtL(n) { return Number(n).toLocaleString('it-IT') + ' L'; }
 function badgeStato(stato) {
   const map = { 'confermato':'green','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal' };
-  return '<span class="badge ' + (map[stato]||'amber') + '">' + stato + '</span>';
+  return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(stato) + '</span>';
 }
 function badgeRuolo(ruolo) {
   const map = { 'admin':'purple','operatore':'blue','contabilita':'green','logistica':'amber','cliente':'gray' };
-  return '<span class="badge ' + (map[ruolo]||'gray') + '">' + ruolo + '</span>';
+  return '<span class="badge ' + (map[esc(ruolo)]||'gray') + '">' + esc(ruolo) + '</span>';
 }
 function prezzoNoIva(r) { return Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine); }
 function prezzoConIva(r) { return prezzoNoIva(r)*(1+Number(r.iva)/100); }
+
+// ── SANITIZZAZIONE XSS ──────────────────────────────────────────
+function esc(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── VALIDAZIONE ──────────────────────────────────────────────────
+function validaNumero(val, min, max, nome) {
+  const n = parseFloat(val);
+  if (isNaN(n)) { toast(nome + ': inserisci un numero valido'); return null; }
+  if (min !== undefined && n < min) { toast(nome + ': il valore minimo è ' + min); return null; }
+  if (max !== undefined && n > max) { toast(nome + ': il valore massimo è ' + max); return null; }
+  return n;
+}
+function validaTesto(val, nome, obbligatorio) {
+  const s = (val||'').trim();
+  if (obbligatorio && !s) { toast(nome + ': campo obbligatorio'); return null; }
+  return s;
+}
+
+// ── API WRAPPER CON GESTIONE ERRORI ──────────────────────────────
+let _apiInCorso = false;
+async function apiCall(fn, msgErrore) {
+  if (_apiInCorso) return null;
+  _apiInCorso = true;
+  try {
+    const result = await fn();
+    if (result && result.error) {
+      console.error(msgErrore || 'Errore API:', result.error);
+      toast('Errore: ' + (result.error.message || 'Operazione fallita'));
+      return null;
+    }
+    return result;
+  } catch(err) {
+    console.error(msgErrore || 'Errore:', err);
+    toast('Errore di connessione. Riprova.');
+    return null;
+  } finally {
+    _apiInCorso = false;
+  }
+}
 
 // ── CACHE ─────────────────────────────────────────────────────────
 let cacheClienti=[], cacheFornitori=[];
@@ -637,13 +679,14 @@ function aggiornaAvvisoFido() {
 
 async function salvaOrdine() {
   if (!prezzoCorrente) { toast('Seleziona data/fornitore/prodotto disponibili'); return; }
-  const litri = parseFloat(document.getElementById('ord-litri').value);
+  const litri = validaNumero(document.getElementById('ord-litri').value, 1, 100000, 'Litri');
+  if (litri === null) return;
   const tipo = document.getElementById('ord-tipo').value;
   const clienteId = document.getElementById('ord-cliente').value;
   const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'Deposito';
   if (tipo==='cliente'&&!clienteId) { toast('Seleziona un cliente'); return; }
-  if (!litri) { toast('Inserisci i litri'); return; }
-  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const trasporto = validaNumero(document.getElementById('ord-trasporto-custom').value || '0', 0, 1, 'Trasporto');
+  if (trasporto === null) return;
   const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
   if (margine <= 0 && tipo === 'cliente') {
     if (!confirm('Il margine è zero o negativo. Vuoi procedere comunque?')) return;
@@ -705,7 +748,7 @@ async function caricaOrdini() {
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + r.cliente + '</td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + r.fornitore + '</td><td>' + basNome + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
   });
   tbody.innerHTML = html;
 }
@@ -887,7 +930,7 @@ async function caricaDeposito() {
   const { data: mov } = await sb.from('ordini').select('*').or('tipo_ordine.eq.deposito,fornitore.ilike.%phoenix%').order('created_at',{ascending:false}).limit(10);
   const tbody = document.getElementById('dep-movimenti');
   if (!mov||!mov.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>'; return; }
-  tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (r.tipo_ordine==='deposito'?'<span class="badge teal">Entrata</span>':'<span class="badge amber">Uscita</span>') + '</td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + r.fornitore + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+  tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (r.tipo_ordine==='deposito'?'<span class="badge teal">Entrata</span>':'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
 }
 
 async function apriModaleCisterna(id) {
@@ -1079,7 +1122,7 @@ async function caricaConsegne() {
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
 
-      return '<tr><td><strong>' + r.cliente + '</strong></td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
+      return '<tr><td><strong>' + esc(r.cliente) + '</strong></td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
   }
 
@@ -1098,7 +1141,7 @@ async function caricaNonProcessati() {
     const tot = prezzoConIva(r) * Number(r.litri);
     const isPassato = r.data < oggiISO;
     const rowStyle = isPassato ? 'background:#FCEBEB' : '';
-    return '<tr style="' + rowStyle + '"><td>' + r.data + (isPassato ? ' <span style="font-size:9px;color:#A32D2D;font-weight:500">SCADUTO</span>' : '') + '</td><td><strong>' + r.cliente + '</strong></td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="white-space:nowrap">' +
+    return '<tr style="' + rowStyle + '"><td>' + r.data + (isPassato ? ' <span style="font-size:9px;color:#A32D2D;font-weight:500">SCADUTO</span>' : '') + '</td><td><strong>' + esc(r.cliente) + '</strong></td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="white-space:nowrap">' +
       '<button class="btn-edit" title="Riprogramma data" onclick="riprogrammaOrdine(\'' + r.id + '\')">📅</button>' +
       '<button class="btn-danger" title="Annulla ordine" onclick="annullaOrdine(\'' + r.id + '\')">x</button>' +
       '</td></tr>';
@@ -1191,7 +1234,7 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + r.nome + '</strong></td><td><span class="badge blue">' + (r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + (r.piva||'—') + '</td><td>' + (r.citta||'—') + '</td><td>' + (r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + (r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + r.nome.replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
 }
@@ -1357,7 +1400,7 @@ async function caricaFornitori() {
   const rows = await Promise.all(data.map(async r => {
     const{usato,residuo}=await calcolaFido(r.nome,r.fido_massimo,r.giorni_pagamento);
     const basi=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.basi_carico?.nome).filter(Boolean).join(', '):'—';
-    return '<tr><td><strong>' + r.nome + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + (r.piva||'—') + '</td><td>' + (r.citta||'—') + '</td><td>' + (r.contatto||'—') + '</td><td>' + (r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(r.fido_massimo):'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(usato):'—') + '</td><td>' + (r.fido_massimo>0?fidoBar(usato,r.fido_massimo)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + basi + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(r.fido_massimo):'—') + '</td><td style="font-family:var(--font-mono)">' + (r.fido_massimo>0?fmtE(usato):'—') + '</td><td>' + (r.fido_massimo>0?fidoBar(usato,r.fido_massimo)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
 }
@@ -1691,7 +1734,7 @@ async function caricaUtentiCompleto() {
   const{data}=await sb.from('utenti').select('*, clienti(nome)').order('nome');
   const tbody=document.getElementById('tabella-utenti');
   if (!data||!data.length){tbody.innerHTML='<tr><td colspan="7" class="loading">Nessun utente</td></tr>';return;}
-  tbody.innerHTML=data.map(r => '<tr><td><strong>' + r.nome + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + r.email + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + r.nome + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>').join('');
+  tbody.innerHTML=data.map(r => '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>').join('');
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────
@@ -1714,7 +1757,7 @@ async function caricaDashboard() {
   document.getElementById('kpi-ordini').textContent=data.length;
   const{data:rec}=await sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5);
   const tbody=document.getElementById('dashboard-ordini');
-  tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+r.cliente+'</td><td>'+r.prodotto+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
+  tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
   // Giacenza deposito
   await caricaGiacenzaDashboard();
 }
