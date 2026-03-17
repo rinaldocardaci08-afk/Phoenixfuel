@@ -1262,6 +1262,34 @@ async function caricaVendite() {
   const tbCl = document.getElementById('tabella-vendite-clienti');
   const righeCl = Object.entries(pc).sort((a,b) => b[1].fatturato - a[1].fatturato);
   tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
+
+  // Grafici vendite
+  const coloriGrafico = ['#D4A017','#378ADD','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A'];
+
+  // Grafico fornitori
+  const ctxVF = document.getElementById('chart-vend-fornitori');
+  if (ctxVF && righeF.length) {
+    if (window._chartVendForn) window._chartVendForn.destroy();
+    window._chartVendForn = new Chart(ctxVF, {
+      type:'bar', data:{
+        labels:righeF.map(([f])=>f.length>18?f.substring(0,18)+'…':f),
+        datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
+      }, options:{ indexAxis:'horizontal', responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+    });
+  }
+
+  // Grafico clienti top 10
+  const ctxVC = document.getElementById('chart-vend-clienti');
+  const top10 = righeCl.slice(0,10);
+  if (ctxVC && top10.length) {
+    if (window._chartVendCl) window._chartVendCl.destroy();
+    window._chartVendCl = new Chart(ctxVC, {
+      type:'bar', data:{
+        labels:top10.map(([c])=>c.length>15?c.substring(0,15)+'…':c),
+        datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
+      }, options:{ indexAxis:'horizontal', responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+    });
+  }
 }
 
 // ── CLIENTI ───────────────────────────────────────────────────────
@@ -1856,6 +1884,7 @@ async function caricaDashboard() {
   tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
   // Giacenza deposito
   await caricaGiacenzaDashboard();
+  await caricaGraficiDashboard();
 }
 
 async function caricaGiacenzaDashboard() {
@@ -1889,6 +1918,82 @@ async function caricaGiacenzaDashboard() {
     html += '</div>';
   });
   wrap.innerHTML = html;
+}
+
+// ── GRAFICI DASHBOARD ────────────────────────────────────────────
+let _chartFatturato=null, _chartProdotti=null, _chartMargine=null;
+
+async function caricaGraficiDashboard() {
+  // Fatturato ultimi 7 giorni
+  const giorni = [];
+  for (let i=6; i>=0; i--) {
+    const d = new Date(oggi); d.setDate(d.getDate()-i);
+    giorni.push(d.toISOString().split('T')[0]);
+  }
+  const { data: ord7 } = await sb.from('ordini').select('*').gte('data', giorni[0]).lte('data', giorni[6]).neq('stato','annullato').neq('tipo_ordine','deposito');
+
+  const fattPerGiorno = {};
+  const margPerGiorno = {};
+  giorni.forEach(g => { fattPerGiorno[g]=0; margPerGiorno[g]=0; });
+  (ord7||[]).forEach(r => {
+    if (fattPerGiorno[r.data] !== undefined) {
+      fattPerGiorno[r.data] += prezzoConIva(r) * Number(r.litri);
+      margPerGiorno[r.data] += Number(r.margine) * Number(r.litri);
+    }
+  });
+
+  const labels7 = giorni.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
+  const ctx1 = document.getElementById('chart-fatturato');
+  if (ctx1) {
+    if (_chartFatturato) _chartFatturato.destroy();
+    _chartFatturato = new Chart(ctx1, {
+      type:'bar', data:{
+        labels:labels7,
+        datasets:[{ label:'Fatturato €', data:giorni.map(g=>Math.round(fattPerGiorno[g]*100)/100), backgroundColor:'#D4A017', borderRadius:6 }]
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+    });
+  }
+
+  // Litri per prodotto (mese corrente)
+  const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
+  const { data: ordMese } = await sb.from('ordini').select('*').gte('data', inizio).neq('stato','annullato').neq('tipo_ordine','deposito');
+  const perProd = {};
+  (ordMese||[]).forEach(r => { perProd[r.prodotto] = (perProd[r.prodotto]||0) + Number(r.litri); });
+  const prodColori = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#3B6D11' };
+  const prodLabels = Object.keys(perProd);
+  const ctx2 = document.getElementById('chart-prodotti');
+  if (ctx2) {
+    if (_chartProdotti) _chartProdotti.destroy();
+    _chartProdotti = new Chart(ctx2, {
+      type:'doughnut', data:{
+        labels:prodLabels,
+        datasets:[{ data:prodLabels.map(p=>perProd[p]), backgroundColor:prodLabels.map(p=>prodColori[p]||'#888') }]
+      }, options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+    });
+  }
+
+  // Margine ultimi 30 giorni
+  const giorni30 = [];
+  for (let i=29; i>=0; i--) {
+    const d = new Date(oggi); d.setDate(d.getDate()-i);
+    giorni30.push(d.toISOString().split('T')[0]);
+  }
+  const { data: ord30 } = await sb.from('ordini').select('*').gte('data', giorni30[0]).neq('stato','annullato').neq('tipo_ordine','deposito');
+  const marg30 = {};
+  giorni30.forEach(g => { marg30[g]=0; });
+  (ord30||[]).forEach(r => { if (marg30[r.data]!==undefined) marg30[r.data] += Number(r.margine)*Number(r.litri); });
+
+  const labels30 = giorni30.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
+  const ctx3 = document.getElementById('chart-margine');
+  if (ctx3) {
+    if (_chartMargine) _chartMargine.destroy();
+    _chartMargine = new Chart(ctx3, {
+      type:'line', data:{
+        labels:labels30,
+        datasets:[{ label:'Margine €', data:giorni30.map(g=>Math.round(marg30[g]*100)/100), borderColor:'#639922', backgroundColor:'rgba(99,153,34,0.1)', fill:true, tension:0.3, pointRadius:2 }]
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v}},x:{ticks:{maxTicksLimit:10,font:{size:10}}}} }
+    });
+  }
 }
 
 // ── AVVIO ─────────────────────────────────────────────────────────

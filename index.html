@@ -12,6 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="PhoenixFuel" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body>
 <div class="app">
@@ -58,6 +59,23 @@
           <div class="grid4" id="dash-giacenza">
             <div class="loading">Caricamento...</div>
           </div>
+        </div>
+
+        <!-- GRAFICI DASHBOARD -->
+        <div class="grid2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-title">Fatturato ultimi 7 giorni</div>
+            <canvas id="chart-fatturato" height="200"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-title">Litri per prodotto (mese)</div>
+            <canvas id="chart-prodotti" height="200"></canvas>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Andamento margine ultimi 30 giorni</div>
+          <canvas id="chart-margine" height="160"></canvas>
         </div>
 
         <div class="card">
@@ -324,6 +342,12 @@
             <div style="font-size:13px;font-weight:500;margin-bottom:10px">Vendite per cliente</div>
             <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Ordini</th></tr></thead>
             <tbody id="tabella-vendite-clienti"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+
+          <!-- Grafici vendite -->
+          <div class="grid2" style="margin-top:16px">
+            <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato per fornitore</div><canvas id="chart-vend-fornitori" height="220"></canvas></div>
+            <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato per cliente (top 10)</div><canvas id="chart-vend-clienti" height="220"></canvas></div>
           </div>
         </div>
       </div>
