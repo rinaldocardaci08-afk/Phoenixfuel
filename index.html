@@ -61,6 +61,9 @@
           </div>
         </div>
 
+        <!-- NOTIFICHE -->
+        <div id="dash-notifiche" style="display:none;margin-bottom:16px"></div>
+
         <!-- GRAFICI DASHBOARD -->
         <div class="grid2" style="margin-bottom:16px">
           <div class="card">
@@ -68,14 +71,20 @@
             <canvas id="chart-fatturato" height="200"></canvas>
           </div>
           <div class="card">
-            <div class="card-title">Litri per prodotto (mese)</div>
+            <div class="card-title">Litri per prodotto — mese corrente</div>
             <canvas id="chart-prodotti" height="200"></canvas>
           </div>
         </div>
 
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Andamento margine ultimi 30 giorni</div>
-          <canvas id="chart-margine" height="160"></canvas>
+        <div class="grid2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-title">Vendite giornaliere — mese corrente (€)</div>
+            <canvas id="chart-vendite-mese" height="200"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-title">Andamento margine ultimi 30 giorni</div>
+            <canvas id="chart-margine" height="200"></canvas>
+          </div>
         </div>
 
         <div class="card">

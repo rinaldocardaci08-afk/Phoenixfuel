@@ -1966,7 +1966,7 @@ async function caricaGiacenzaDashboard() {
 }
 
 // ── GRAFICI DASHBOARD ────────────────────────────────────────────
-let _chartFatturato=null, _chartProdotti=null, _chartMargine=null;
+let _chartFatturato=null, _chartProdotti=null, _chartMargine=null, _chartVenditeMese=null;
 
 async function caricaGraficiDashboard() {
   // Fatturato ultimi 7 giorni
@@ -1978,12 +1978,10 @@ async function caricaGraficiDashboard() {
   const { data: ord7 } = await sb.from('ordini').select('*').gte('data', giorni[0]).lte('data', giorni[6]).neq('stato','annullato').neq('tipo_ordine','deposito');
 
   const fattPerGiorno = {};
-  const margPerGiorno = {};
-  giorni.forEach(g => { fattPerGiorno[g]=0; margPerGiorno[g]=0; });
+  giorni.forEach(g => { fattPerGiorno[g]=0; });
   (ord7||[]).forEach(r => {
     if (fattPerGiorno[r.data] !== undefined) {
       fattPerGiorno[r.data] += prezzoConIva(r) * Number(r.litri);
-      margPerGiorno[r.data] += Number(r.margine) * Number(r.litri);
     }
   });
 
@@ -1999,21 +1997,48 @@ async function caricaGraficiDashboard() {
     });
   }
 
-  // Litri per prodotto (mese corrente)
+  // Dati mese corrente
   const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
   const { data: ordMese } = await sb.from('ordini').select('*').gte('data', inizio).neq('stato','annullato').neq('tipo_ordine','deposito');
+
+  // Litri per prodotto (mese) — ISTOGRAMMA
   const perProd = {};
-  (ordMese||[]).forEach(r => { perProd[r.prodotto] = (perProd[r.prodotto]||0) + Number(r.litri); });
   const prodColori = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#3B6D11' };
+  (ordMese||[]).forEach(r => { perProd[r.prodotto] = (perProd[r.prodotto]||0) + Number(r.litri); });
   const prodLabels = Object.keys(perProd);
   const ctx2 = document.getElementById('chart-prodotti');
   if (ctx2) {
     if (_chartProdotti) _chartProdotti.destroy();
     _chartProdotti = new Chart(ctx2.getContext('2d'), {
-      type:'doughnut', data:{
+      type:'bar', data:{
         labels:prodLabels,
-        datasets:[{ data:prodLabels.map(p=>perProd[p]), backgroundColor:prodLabels.map(p=>prodColori[p]||'#888') }]
-      }, options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+        datasets:[{ label:'Litri', data:prodLabels.map(p=>Math.round(perProd[p])), backgroundColor:prodLabels.map(p=>prodColori[p]||'#888'), borderRadius:6 }]
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}}} }
+    });
+  }
+
+  // Vendite giornaliere mese corrente
+  const giorniMese = [];
+  const primoGiorno = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+  for (let d = new Date(primoGiorno); d <= oggi; d.setDate(d.getDate()+1)) {
+    giorniMese.push(d.toISOString().split('T')[0]);
+  }
+  const vendPerGiorno = {};
+  giorniMese.forEach(g => { vendPerGiorno[g] = 0; });
+  (ordMese||[]).forEach(r => {
+    if (vendPerGiorno[r.data] !== undefined) {
+      vendPerGiorno[r.data] += prezzoConIva(r) * Number(r.litri);
+    }
+  });
+  const labelsM = giorniMese.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
+  const ctx4 = document.getElementById('chart-vendite-mese');
+  if (ctx4) {
+    if (_chartVenditeMese) _chartVenditeMese.destroy();
+    _chartVenditeMese = new Chart(ctx4.getContext('2d'), {
+      type:'bar', data:{
+        labels:labelsM,
+        datasets:[{ label:'Vendite €', data:giorniMese.map(g=>Math.round(vendPerGiorno[g]*100)/100), backgroundColor:'#D85A30', borderRadius:4 }]
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
     });
   }
 
@@ -2039,6 +2064,34 @@ async function caricaGraficiDashboard() {
       }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v}},x:{ticks:{maxTicksLimit:10,font:{size:10}}}} }
     });
   }
+
+  // NOTIFICHE — ordini in attesa da più di 3 giorni
+  await caricaNotificheDashboard();
+}
+
+async function caricaNotificheDashboard() {
+  const treGiorniFa = new Date(oggi);
+  treGiorniFa.setDate(treGiorniFa.getDate() - 3);
+  const limiteData = treGiorniFa.toISOString().split('T')[0];
+
+  const { data: ordiniVecchi } = await sb.from('ordini').select('*').eq('stato','in attesa').lte('data', limiteData).order('data');
+  const wrap = document.getElementById('dash-notifiche');
+  if (!ordiniVecchi || !ordiniVecchi.length) { wrap.style.display = 'none'; return; }
+
+  wrap.style.display = 'block';
+  let html = '<div class="card" style="border-left:4px solid #E24B4A;background:#FFF8F8">';
+  html += '<div class="card-title" style="color:#A32D2D;display:flex;align-items:center;gap:8px">⚠️ Ordini in attesa da più di 3 giorni <span class="badge red">' + ordiniVecchi.length + '</span></div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Giorni</th><th>Azioni</th></tr></thead><tbody>';
+  ordiniVecchi.forEach(r => {
+    const tot = prezzoConIva(r) * Number(r.litri);
+    const giorniPassati = Math.floor((oggi - new Date(r.data)) / (1000*60*60*24));
+    html += '<tr><td>' + r.data + '</td><td><strong>' + esc(r.cliente) + '</strong></td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td>';
+    html += '<td><span class="badge red">' + giorniPassati + ' gg</span></td>';
+    html += '<td><button class="btn-edit" title="Riprogramma" onclick="riprogrammaOrdine(\'' + r.id + '\')">📅</button>';
+    html += '<button class="btn-danger" title="Annulla" onclick="annullaOrdine(\'' + r.id + '\')">x</button></td></tr>';
+  });
+  html += '</tbody></table></div></div>';
+  wrap.innerHTML = html;
 }
 
 // ── AVVIO ─────────────────────────────────────────────────────────
