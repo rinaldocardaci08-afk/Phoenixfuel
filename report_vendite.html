@@ -91,15 +91,6 @@
       <select id="f-cliente"><option value="">Tutti i clienti</option></select>
     </div>
     <div class="filtri-group">
-      <label>Stato</label>
-      <select id="f-stato">
-        <option value="">Tutti gli stati</option>
-        <option value="confermato">Confermato</option>
-        <option value="programmato">Programmato</option>
-        <option value="in attesa">In attesa</option>
-      </select>
-    </div>
-    <div class="filtri-group">
       <label>Data Inizio</label>
       <input type="date" id="f-da" />
     </div>
@@ -139,18 +130,10 @@
       <div class="kpi-box"><div class="kpi-label">N. Ordini</div><div class="kpi-val" id="r-ordini">—</div></div>
     </div>
 
-    <!-- Grafici -->
-    <div class="charts-grid">
-      <div class="chart-box"><div class="chart-title">Vendite per giorno</div><canvas id="r-chart-giorno" height="180"></canvas></div>
-      <div class="chart-box"><div class="chart-title">Margine per giorno</div><canvas id="r-chart-margine" height="180"></canvas></div>
-      <div class="chart-box"><div class="chart-title">Top 10 clienti</div><canvas id="r-chart-clienti" height="180"></canvas></div>
-      <div class="chart-box"><div class="chart-title">Vendite per prodotto</div><canvas id="r-chart-prodotti" height="180"></canvas></div>
-    </div>
-
     <!-- Tabella ordini -->
     <div class="section-title">Dettaglio ordini</div>
     <table>
-      <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L</th><th>Totale</th><th>Costo Tot.</th><th>Trasporto</th><th>Margine</th><th>Fornitore</th><th>Stato</th></tr></thead>
+      <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L</th><th>Totale</th><th>Costo Tot.</th><th>Trasporto</th><th>Margine</th><th>Fornitore</th></tr></thead>
       <tbody id="r-tabella"></tbody>
     </table>
 
@@ -167,6 +150,14 @@
       <thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
       <tbody id="r-tab-fornitori"></tbody>
     </table>
+
+    <!-- Grafici -->
+    <div class="charts-grid" style="margin-top:16px">
+      <div class="chart-box"><div class="chart-title">Vendite per giorno</div><canvas id="r-chart-giorno" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Margine per giorno</div><canvas id="r-chart-margine" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Top 10 clienti</div><canvas id="r-chart-clienti" height="180"></canvas></div>
+      <div class="chart-box"><div class="chart-title">Vendite per prodotto</div><canvas id="r-chart-prodotti" height="180"></canvas></div>
+    </div>
 
     <div class="report-footer">
       PhoenixFuel Srl — Report generato il <span id="r-gen-date"></span> — Documento interno
@@ -214,7 +205,6 @@ async function generaReport() {
   const fornitore = document.getElementById('f-fornitore').value;
   const prodotto = document.getElementById('f-prodotto').value;
   const cliente = document.getElementById('f-cliente').value;
-  const stato = document.getElementById('f-stato').value;
 
   if (!da || !a) { alert('Seleziona le date'); return; }
 
@@ -223,7 +213,6 @@ async function generaReport() {
   if (fornitore) query = query.eq('fornitore', fornitore);
   if (prodotto) query = query.eq('prodotto', prodotto);
   if (cliente) query = query.eq('cliente', cliente);
-  if (stato) query = query.eq('stato', stato);
   
   const { data: ordini } = await query.order('data').order('cliente');
   if (!ordini || !ordini.length) { alert('Nessun ordine trovato per i filtri selezionati'); return; }
@@ -236,7 +225,6 @@ async function generaReport() {
   if (fornitore) filtriHtml += '<span>Fornitore: <strong>' + esc(fornitore) + '</strong></span>';
   if (prodotto) filtriHtml += '<span>Prodotto: <strong>' + esc(prodotto) + '</strong></span>';
   if (cliente) filtriHtml += '<span>Cliente: <strong>' + esc(cliente) + '</strong></span>';
-  if (stato) filtriHtml += '<span>Stato: <strong>' + esc(stato) + '</strong></span>';
   document.getElementById('r-filtri').innerHTML = filtriHtml;
 
   // Calcoli
@@ -286,8 +274,8 @@ async function generaReport() {
     const traspTot = Number(r.trasporto_litro) * Number(r.litri);
     const margTot = Number(r.margine) * Number(r.litri);
     totLitri += Number(r.litri); totFatt += tot; totCosto += costoTot; totTrasp += traspTot; totMarg += margTot;
-    return '<tr><td>' + r.data + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(pL) + '</td><td class="mono">' + fmtE(tot) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td><td class="mono">' + fmtE(margTot) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(r.stato) + '</td></tr>';
-  }).join('') + '<tr class="totale"><td colspan="3"><strong>TOTALI</strong></td><td class="mono">' + fmtL(totLitri) + '</td><td></td><td class="mono">' + fmtE(totFatt) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmtE(totTrasp) + '</td><td class="mono">' + fmtE(totMarg) + '</td><td colspan="2"></td></tr>';
+    return '<tr><td>' + r.data + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(pL) + '</td><td class="mono">' + fmtE(tot) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td><td class="mono">' + fmtE(margTot) + '</td><td>' + esc(r.fornitore) + '</td></tr>';
+  }).join('') + '<tr class="totale"><td colspan="3"><strong>TOTALI</strong></td><td class="mono">' + fmtL(totLitri) + '</td><td></td><td class="mono">' + fmtE(totFatt) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmtE(totTrasp) + '</td><td class="mono">' + fmtE(totMarg) + '</td><td></td></tr>';
 
   // Tabella clienti
   const clArr = Object.entries(perCliente).sort((a,b) => b[1].fatturato - a[1].fatturato);
