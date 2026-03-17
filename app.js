@@ -557,14 +557,29 @@ async function caricaPrezzoPerOrdine() {
   if (match) {
     prezzoCorrente = match;
     document.getElementById('prev-costo').textContent = fmt(match.costo_litro);
-    // Pre-popola i campi custom con i valori da listino
     const trInput = document.getElementById('ord-trasporto-custom');
     const mgInput = document.getElementById('ord-margine-custom');
     const pnInput = document.getElementById('ord-prezzo-netto');
     trInput.value = match.trasporto_litro;
-    mgInput.value = match.margine;
+
+    // Calcola media margine per questo prodotto dal cliente selezionato
+    let margineDaUsare = Number(match.margine);
+    const clienteId = document.getElementById('ord-cliente').value;
+    if (clienteId) {
+      const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
+      if (clienteNome) {
+        const { data: ordPrec } = await sb.from('ordini').select('margine,prodotto').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').neq('tipo_ordine','deposito');
+        const conMargine = (ordPrec||[]).filter(o => Number(o.margine) > 0);
+        if (conMargine.length > 0) {
+          const media = conMargine.reduce((s, o) => s + Number(o.margine), 0) / conMargine.length;
+          margineDaUsare = media;
+        }
+      }
+    }
+
+    mgInput.value = margineDaUsare.toFixed(4);
     // Calcola prezzo netto = costo + trasporto + margine
-    const noIva = Number(match.costo_litro) + Number(match.trasporto_litro) + Number(match.margine);
+    const noIva = Number(match.costo_litro) + Number(match.trasporto_litro) + margineDaUsare;
     pnInput.value = noIva.toFixed(4);
     aggiornaPrevOrdine();
   } else {
@@ -632,31 +647,12 @@ async function controllaFidoCliente() {
   const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
   if (!cliente) { infoDiv.style.display = 'none'; return; }
 
-  // Carica ordini passati del cliente per fido e media margine
-  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cliente.nome).neq('stato','annullato');
-
-  // Calcola media margine dalle vendite precedenti
-  const ordiniConMargine = (ordini||[]).filter(o => Number(o.margine) > 0 && o.tipo_ordine !== 'deposito');
-  if (ordiniConMargine.length > 0) {
-    const sommaMargini = ordiniConMargine.reduce((s, o) => s + Number(o.margine), 0);
-    const mediaMargine = sommaMargini / ordiniConMargine.length;
-    const margineInput = document.getElementById('ord-margine-custom');
-    // Pre-popola solo se il campo è vuoto o zero
-    if (!margineInput.value || parseFloat(margineInput.value) === 0) {
-      margineInput.value = mediaMargine.toFixed(4);
-      // Ricalcola prezzo netto
-      if (prezzoCorrente) {
-        const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
-        const noIva = Number(prezzoCorrente.costo_litro) + trasporto + mediaMargine;
-        document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
-        aggiornaPrevOrdine();
-      }
-    }
-  }
-
   // Fido
   const fidoMax = Number(cliente.fido_massimo || 0);
   if (fidoMax <= 0) { infoDiv.style.display = 'none'; return; }
+
+  // Carica ordini passati del cliente per fido
+  const { data: ordini } = await sb.from('ordini').select('*').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cliente.nome).neq('stato','annullato');
 
   const ggPag = cliente.giorni_pagamento || 30;
   let fidoUsato = 0;
