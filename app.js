@@ -2190,6 +2190,10 @@ function apriReportAcquisti() {
   window.open('report_acquisti.html', '_blank');
 }
 
+function apriReportAcquistiMensile() {
+  window.open('report_acquisti_mensile.html', '_blank');
+}
+
 function apriReportMensile() {
   window.open('report_mensile.html', '_blank');
 }
