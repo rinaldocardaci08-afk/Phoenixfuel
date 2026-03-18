@@ -843,15 +843,23 @@ async function apriModaleOrdine(id) {
   ['in attesa','confermato','programmato','annullato'].forEach(s => { html += '<option value="' + s + '"' + (r.stato===s?' selected':'') + '>' + s + '</option>'; });
   html += '</select></div>';
   html += '<div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="' + r.litri + '" /></div>';
-  html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.0001" value="' + r.trasporto_litro + '" /></div>';
-  html += '<div class="form-group"><label>Margine/L</label><input type="number" id="mod-margine" step="0.0001" value="' + r.margine + '" /></div>';
-  html += '<div class="form-group"><label>Trasportatore</label><input type="text" id="mod-trasportatore" value="' + (r.trasportatore||'') + '" /></div>';
+  html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.0001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.0001" value="' + r.trasporto_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Margine/L</label><input type="number" id="mod-margine" step="0.0001" value="' + r.margine + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Prezzo netto/L</label><input type="number" id="mod-prezzo-netto" step="0.0001" value="' + (Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine)).toFixed(4) + '" onchange="aggiornaMargineDaPrezzo()" /></div>';
   html += '<div class="form-group"><label>Giorni pagamento</label><select id="mod-gg">';
   [30,45,60].forEach(g => { html += '<option value="' + g + '"' + (r.giorni_pagamento==g?' selected':'') + '>' + g + ' gg</option>'; });
   html += '</select></div>';
-  html += '<div class="form-group" style="grid-column:1/-1"><label>Note</label><input type="text" id="mod-note" value="' + (r.note||'') + '" /></div>';
+  html += '<div class="form-group"><label>IVA %</label><select id="mod-iva"><option value="22"' + (r.iva==22?' selected':'') + '>22%</option><option value="10"' + (r.iva==10?' selected':'') + '>10%</option><option value="4"' + (r.iva==4?' selected':'') + '>4%</option></select></div>';
+  html += '<div class="form-group" style="grid-column:1/-1"><label>Note</label><input type="text" id="mod-note" value="' + esc(r.note||'') + '" /></div>';
   html += '</div>';
-  html += '<div class="form-preview"><span>Fornitore: <strong>' + r.fornitore + '</strong></span><span>Prodotto: <strong>' + r.prodotto + '</strong></span><span>Cliente: <strong>' + r.cliente + '</strong></span></div>';
+
+  // Preview prezzo
+  const prezzoNetto = Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine);
+  const prezzoIva = prezzoNetto * (1 + Number(r.iva)/100);
+  const totale = prezzoIva * Number(r.litri);
+  html += '<div class="form-preview" id="mod-preview"><span>Costo: <strong>' + fmt(r.costo_litro) + '</strong></span><span>Prezzo netto: <strong>' + fmt(prezzoNetto) + '</strong></span><span>Prezzo IVA: <strong>' + fmt(prezzoIva) + '</strong></span><span>Totale: <strong>' + fmtE(totale) + '</strong></span></div>';
+  html += '<div class="form-preview"><span>Fornitore: <strong>' + esc(r.fornitore) + '</strong></span><span>Prodotto: <strong>' + esc(r.prodotto) + '</strong></span><span>Cliente: <strong>' + esc(r.cliente) + '</strong></span></div>';
 
   // Sezione documenti
   html += '<div style="margin-top:16px;border-top:0.5px solid var(--border);padding-top:14px">';
@@ -888,16 +896,43 @@ async function apriModaleOrdine(id) {
 
 async function salvaModificaOrdine(id) {
   const litri = parseFloat(document.getElementById('mod-litri').value);
+  const costo = parseFloat(document.getElementById('mod-costo').value);
   const trasporto = parseFloat(document.getElementById('mod-trasporto').value);
   const margine = parseFloat(document.getElementById('mod-margine').value);
+  const iva = parseInt(document.getElementById('mod-iva').value);
   const ggPag = parseInt(document.getElementById('mod-gg').value);
   const { data: ordine } = await sb.from('ordini').select('data').eq('id', id).single();
   const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
-  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, trasporto_litro:trasporto, margine, trasportatore:document.getElementById('mod-trasportatore').value, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value }).eq('id', id);
+  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   toast('Ordine aggiornato!');
   chiudiModalePermessi();
   caricaOrdini();
+}
+
+// Aggiorna preview nella modale modifica
+function aggiornaPreviewModifica() {
+  const costo = parseFloat(document.getElementById('mod-costo').value) || 0;
+  const trasporto = parseFloat(document.getElementById('mod-trasporto').value) || 0;
+  const margine = parseFloat(document.getElementById('mod-margine').value) || 0;
+  const iva = parseInt(document.getElementById('mod-iva')?.value || 22);
+  const litri = parseFloat(document.getElementById('mod-litri').value) || 0;
+  const prezzoNetto = costo + trasporto + margine;
+  const prezzoIva = prezzoNetto * (1 + iva/100);
+  const totale = prezzoIva * litri;
+  document.getElementById('mod-prezzo-netto').value = prezzoNetto.toFixed(4);
+  const prev = document.getElementById('mod-preview');
+  if (prev) prev.innerHTML = '<span>Costo: <strong>' + fmt(costo) + '</strong></span><span>Prezzo netto: <strong>' + fmt(prezzoNetto) + '</strong></span><span>Prezzo IVA: <strong>' + fmt(prezzoIva) + '</strong></span><span>Totale: <strong>' + fmtE(totale) + '</strong></span>';
+}
+
+// Calcola margine dal prezzo netto inserito
+function aggiornaMargineDaPrezzo() {
+  const costo = parseFloat(document.getElementById('mod-costo').value) || 0;
+  const trasporto = parseFloat(document.getElementById('mod-trasporto').value) || 0;
+  const prezzoNetto = parseFloat(document.getElementById('mod-prezzo-netto').value) || 0;
+  const margine = prezzoNetto - costo - trasporto;
+  document.getElementById('mod-margine').value = margine.toFixed(4);
+  aggiornaPreviewModifica();
 }
 
 // ── DOCUMENTI ORDINE ─────────────────────────────────────────────
