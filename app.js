@@ -1922,18 +1922,32 @@ async function aggiornaPermesso(utenteId, sezione, abilitato) {
 async function invitaUtente() {
   const nome = document.getElementById('ut-nome').value.trim();
   const email = document.getElementById('ut-email').value.trim();
+  const password = document.getElementById('ut-password').value;
   const ruolo = document.getElementById('ut-ruolo').value;
   const clienteId = document.getElementById('ut-cliente').value || null;
   if (!nome||!email) { toast('Compila nome ed email'); return; }
-  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{email,nome,ruolo,cliente_id:ruolo==='cliente'?clienteId:null}]).select().single();
-  if (error) { toast('Errore: '+error.message); return; }
+  if (!password || password.length < 6) { toast('La password deve avere almeno 6 caratteri'); return; }
+
+  // 1. Crea utente su Supabase Auth
+  const { data: authData, error: authError } = await sb.auth.signUp({ email, password });
+  if (authError) { toast('Errore creazione accesso: ' + authError.message); return; }
+
+  // 2. Crea record nella tabella utenti
+  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{email, nome, ruolo, cliente_id:ruolo==='cliente'?clienteId:null, attivo:true}]).select().single();
+  if (error) { toast('Errore salvataggio utente: ' + error.message); return; }
+
+  // 3. Salva permessi
   if (ruolo !== 'cliente' && ruolo !== 'admin') {
     const checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
     const permessi = Array.from(checks).map(c=>({utente_id:nuovoUtente.id,sezione:c.value,abilitato:c.checked}));
     if (permessi.length) await sb.from('permessi').insert(permessi);
   }
-  const { error: inviteError } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo:'https://phoenixfuel.onrender.com/setpassword.html' } });
-  toast('Utente creato! Vai su Supabase → Autenticazione → Utenti per impostare la password.');
+
+  toast('Utente ' + nome + ' creato con successo! Può accedere con email e password.');
+  // Reset form
+  document.getElementById('ut-nome').value = '';
+  document.getElementById('ut-email').value = '';
+  document.getElementById('ut-password').value = '';
   caricaUtentiCompleto();
 }
 
