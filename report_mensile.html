@@ -75,6 +75,12 @@
       <select id="f-anno"></select>
     </div>
     <div class="filtri-group">
+      <label>Cliente (opzionale)</label>
+      <select id="f-cliente" style="padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fafaf8">
+        <option value="">Tutti i clienti</option>
+      </select>
+    </div>
+    <div class="filtri-group" style="grid-column:1/-1">
       <label>Prodotti</label>
       <div class="check-wrap" id="f-prodotti">
         <label class="check-label"><input type="checkbox" class="f-prod-check" value="Gasolio Autotrazione" checked /> Gasolio Autotrazione</label>
@@ -119,8 +125,21 @@ for (let y = annoCorrente; y >= annoCorrente - 10; y--) {
   selAnno.innerHTML += '<option value="'+y+'">'+y+'</option>';
 }
 
+// Popola clienti
+async function caricaClientiReport() {
+  const { data } = await sb.from('clienti').select('id,nome').or('attivo.eq.true,attivo.is.null').order('nome');
+  const sel = document.getElementById('f-cliente');
+  if (data) {
+    data.forEach(function(c) {
+      sel.innerHTML += '<option value="' + esc(c.nome) + '">' + esc(c.nome) + '</option>';
+    });
+  }
+}
+caricaClientiReport();
+
 async function generaReport() {
   const anno = document.getElementById('f-anno').value;
+  const clienteFiltro = document.getElementById('f-cliente').value;
   const prodotti = Array.from(document.querySelectorAll('.f-prod-check:checked')).map(cb => cb.value);
   if (!prodotti.length) { alert('Seleziona almeno un prodotto'); return; }
 
@@ -134,6 +153,7 @@ async function generaReport() {
   while (true) {
     let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
     if (prodotti.length < 4) q = q.in('prodotto', prodotti);
+    if (clienteFiltro) q = q.eq('cliente', clienteFiltro);
     const { data: batch } = await q.order('data').range(from, from + pageSize - 1);
     if (!batch || !batch.length) break;
     allOrdini = allOrdini.concat(batch);
@@ -141,7 +161,7 @@ async function generaReport() {
     from += pageSize;
   }
   const ordini = allOrdini;
-  if (!ordini.length) { alert('Nessun dato per ' + anno); return; }
+  if (!ordini.length) { alert('Nessun dato per ' + anno + (clienteFiltro ? ' — ' + clienteFiltro : '')); return; }
 
   // Calcola per mese
   const mesi = {};
@@ -181,7 +201,7 @@ async function generaReport() {
   let html = '';
   html += '<div class="report-header">';
   html += '<div><div class="report-title">Totale Vendite Mensili Carburanti ' + anno + '</div>';
-  html += '<div class="report-sub">Prodotti: ' + prodotti.join(', ') + '</div></div>';
+  html += '<div class="report-sub">Prodotti: ' + prodotti.join(', ') + (clienteFiltro ? ' — Cliente: <strong>' + esc(clienteFiltro) + '</strong>' : ' — Tutti i clienti') + '</div></div>';
   html += '<div style="display:flex;align-items:center;gap:12px"><img src="logo_png.jpeg" class="report-logo" onerror="this.style.display=\'none\'" /><div class="company-box">Phoenix Fuel Srl</div></div>';
   html += '</div>';
 

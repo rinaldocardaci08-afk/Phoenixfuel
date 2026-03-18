@@ -1335,6 +1335,13 @@ async function annullaOrdine(ordineId) {
 
 // ── VENDITE ───────────────────────────────────────────────────────
 async function caricaVendite() {
+  // Popola dropdown clienti (solo la prima volta)
+  const selCliente = document.getElementById('vend-cliente');
+  if (selCliente && selCliente.options.length <= 1) {
+    const { data: cl } = await sb.from('clienti').select('nome').or('attivo.eq.true,attivo.is.null').order('nome');
+    if (cl) cl.forEach(function(c) { selCliente.innerHTML += '<option value="' + esc(c.nome) + '">' + esc(c.nome) + '</option>'; });
+  }
+
   // Imposta date default se non impostate
   const daEl = document.getElementById('vend-da');
   const aEl = document.getElementById('vend-a');
@@ -1343,9 +1350,11 @@ async function caricaVendite() {
   const da = daEl.value;
   const a = aEl.value;
   const filtroProd = document.getElementById('vend-prodotto').value;
+  const filtroCliente = selCliente ? selCliente.value : '';
 
   let baseQuery = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
   if (filtroProd) baseQuery = baseQuery.eq('prodotto', filtroProd);
+  if (filtroCliente) baseQuery = baseQuery.eq('cliente', filtroCliente);
   let allData = [];
   let from = 0;
   while (true) {
