@@ -123,8 +123,9 @@
     <div class="report-filtri-info" id="r-filtri"></div>
 
     <!-- KPI -->
-    <div class="kpi-grid">
-      <div class="kpi-box"><div class="kpi-label">Fatturato</div><div class="kpi-val" id="r-fatturato">—</div></div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr)">
+      <div class="kpi-box"><div class="kpi-label">Fatturato netto</div><div class="kpi-val" id="r-fatt-netto">—</div></div>
+      <div class="kpi-box"><div class="kpi-label">Fatturato IVA incl.</div><div class="kpi-val" id="r-fatt-iva">—</div></div>
       <div class="kpi-box"><div class="kpi-label">Litri</div><div class="kpi-val" id="r-litri">—</div></div>
       <div class="kpi-box"><div class="kpi-label">Margine totale</div><div class="kpi-val" id="r-margine">—</div></div>
       <div class="kpi-box"><div class="kpi-label">N. Ordini</div><div class="kpi-val" id="r-ordini">—</div></div>
@@ -133,21 +134,21 @@
     <!-- Tabella ordini -->
     <div class="section-title">Dettaglio ordini</div>
     <table>
-      <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L</th><th>Totale</th><th>Costo Tot.</th><th>Trasporto</th><th>Margine</th><th>Fornitore</th></tr></thead>
+      <thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L netto</th><th>Tot. netto</th><th>IVA</th><th>Tot. IVA incl.</th><th>Costo Tot.</th><th>Trasporto</th><th>Margine</th><th>Fornitore</th></tr></thead>
       <tbody id="r-tabella"></tbody>
     </table>
 
     <!-- Tabella clienti -->
     <div class="section-title">Riepilogo per cliente</div>
     <table>
-      <thead><tr><th>Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+      <thead><tr><th>Cliente</th><th>Ordini</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th></tr></thead>
       <tbody id="r-tab-clienti"></tbody>
     </table>
 
     <!-- Tabella fornitori -->
     <div class="section-title">Riepilogo per fornitore</div>
     <table>
-      <thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+      <thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th></tr></thead>
       <tbody id="r-tab-fornitori"></tbody>
     </table>
 
@@ -246,66 +247,73 @@ async function generaReport() {
   document.getElementById('r-filtri').innerHTML = filtriHtml;
 
   // Calcoli
-  let fatturato=0, litri=0, margine=0;
+  let fattNetto=0, fattIva=0, litri=0, margine=0;
   const perGiorno={}, perCliente={}, perFornitore={}, perProdotto={};
 
   ordini.forEach(r => {
-    const tot = prezzoConIva(r) * Number(r.litri);
-    const marg = Number(r.margine) * Number(r.litri);
-    fatturato += tot; litri += Number(r.litri); margine += marg;
+    const l = Number(r.litri);
+    const netto = prezzoNoIva(r) * l;
+    const iva = prezzoConIva(r) * l;
+    const marg = Number(r.margine) * l;
+    fattNetto += netto; fattIva += iva; litri += l; margine += marg;
 
     // Per giorno
-    if (!perGiorno[r.data]) perGiorno[r.data] = { fatturato:0, margine:0 };
-    perGiorno[r.data].fatturato += tot;
+    if (!perGiorno[r.data]) perGiorno[r.data] = { fattNetto:0, fattIva:0, margine:0 };
+    perGiorno[r.data].fattNetto += netto;
+    perGiorno[r.data].fattIva += iva;
     perGiorno[r.data].margine += marg;
 
     // Per cliente
     const cl = r.cliente||'—';
-    if (!perCliente[cl]) perCliente[cl] = { ordini:0, litri:0, fatturato:0, margine:0 };
-    perCliente[cl].ordini++; perCliente[cl].litri += Number(r.litri);
-    perCliente[cl].fatturato += tot; perCliente[cl].margine += marg;
+    if (!perCliente[cl]) perCliente[cl] = { ordini:0, litri:0, fattNetto:0, fattIva:0, margine:0 };
+    perCliente[cl].ordini++; perCliente[cl].litri += l;
+    perCliente[cl].fattNetto += netto; perCliente[cl].fattIva += iva; perCliente[cl].margine += marg;
 
     // Per fornitore
     const fo = r.fornitore||'—';
-    if (!perFornitore[fo]) perFornitore[fo] = { ordini:0, litri:0, fatturato:0, margine:0 };
-    perFornitore[fo].ordini++; perFornitore[fo].litri += Number(r.litri);
-    perFornitore[fo].fatturato += tot; perFornitore[fo].margine += marg;
+    if (!perFornitore[fo]) perFornitore[fo] = { ordini:0, litri:0, fattNetto:0, fattIva:0, margine:0 };
+    perFornitore[fo].ordini++; perFornitore[fo].litri += l;
+    perFornitore[fo].fattNetto += netto; perFornitore[fo].fattIva += iva; perFornitore[fo].margine += marg;
 
     // Per prodotto
     const pr = r.prodotto||'—';
-    if (!perProdotto[pr]) perProdotto[pr] = { litri:0, fatturato:0 };
-    perProdotto[pr].litri += Number(r.litri); perProdotto[pr].fatturato += tot;
+    if (!perProdotto[pr]) perProdotto[pr] = { litri:0, fattNetto:0, fattIva:0 };
+    perProdotto[pr].litri += l; perProdotto[pr].fattNetto += netto; perProdotto[pr].fattIva += iva;
   });
 
   // KPI
-  document.getElementById('r-fatturato').textContent = fmtE(fatturato);
+  document.getElementById('r-fatt-netto').textContent = fmtE(fattNetto);
+  document.getElementById('r-fatt-iva').textContent = fmtE(fattIva);
   document.getElementById('r-litri').textContent = fmtL(litri) + ' L';
   document.getElementById('r-margine').textContent = fmtE(margine);
   document.getElementById('r-ordini').textContent = ordini.length;
 
-  // Tabella ordini
-  let totLitri=0, totFatt=0, totCosto=0, totTrasp=0, totMarg=0;
+  // Tabella ordini dettaglio
+  let totLitri=0, totNetto=0, totIvaT=0, totCosto=0, totTrasp=0, totMarg=0;
   document.getElementById('r-tabella').innerHTML = ordini.map(r => {
-    const pL = prezzoConIva(r);
-    const tot = pL * Number(r.litri);
-    const costoTot = Number(r.costo_litro) * Number(r.litri);
-    const traspTot = Number(r.trasporto_litro) * Number(r.litri);
-    const margTot = Number(r.margine) * Number(r.litri);
-    totLitri += Number(r.litri); totFatt += tot; totCosto += costoTot; totTrasp += traspTot; totMarg += margTot;
-    return '<tr><td>' + r.data + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(pL) + '</td><td class="mono">' + fmtE(tot) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td><td class="mono">' + fmtE(margTot) + '</td><td>' + esc(r.fornitore) + '</td></tr>';
-  }).join('') + '<tr class="totale"><td colspan="3"><strong>TOTALI</strong></td><td class="mono">' + fmtL(totLitri) + '</td><td></td><td class="mono">' + fmtE(totFatt) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmtE(totTrasp) + '</td><td class="mono">' + fmtE(totMarg) + '</td><td></td></tr>';
+    const l = Number(r.litri);
+    const pNetto = prezzoNoIva(r);
+    const pIva = prezzoConIva(r);
+    const netto = pNetto * l;
+    const iva = pIva * l;
+    const costoTot = Number(r.costo_litro) * l;
+    const traspTot = Number(r.trasporto_litro) * l;
+    const margTot = Number(r.margine) * l;
+    totLitri += l; totNetto += netto; totIvaT += iva; totCosto += costoTot; totTrasp += traspTot; totMarg += margTot;
+    return '<tr><td>' + r.data + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(pNetto) + '</td><td class="mono">' + fmtE(netto) + '</td><td>' + r.iva + '%</td><td class="mono" style="font-weight:bold">' + fmtE(iva) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td><td class="mono">' + fmtE(margTot) + '</td><td>' + esc(r.fornitore) + '</td></tr>';
+  }).join('') + '<tr class="totale"><td colspan="3"><strong>TOTALI</strong></td><td class="mono">' + fmtL(totLitri) + '</td><td></td><td class="mono">' + fmtE(totNetto) + '</td><td></td><td class="mono" style="font-weight:bold">' + fmtE(totIvaT) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmtE(totTrasp) + '</td><td class="mono">' + fmtE(totMarg) + '</td><td></td></tr>';
 
   // Tabella clienti
-  const clArr = Object.entries(perCliente).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  const clArr = Object.entries(perCliente).sort((a,b) => b[1].fattIva - a[1].fattIva);
   document.getElementById('r-tab-clienti').innerHTML = clArr.map(([c,v]) =>
-    '<tr><td><strong>' + esc(c) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.fatturato) + '</td><td class="mono">' + fmtE(v.margine) + '</td></tr>'
-  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(litri) + '</td><td class="mono">' + fmtE(fatturato) + '</td><td class="mono">' + fmtE(margine) + '</td></tr>';
+    '<tr><td><strong>' + esc(c) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.fattNetto) + '</td><td class="mono">' + fmtE(v.fattIva) + '</td><td class="mono">' + fmtE(v.margine) + '</td></tr>'
+  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(litri) + '</td><td class="mono">' + fmtE(fattNetto) + '</td><td class="mono">' + fmtE(fattIva) + '</td><td class="mono">' + fmtE(margine) + '</td></tr>';
 
   // Tabella fornitori
-  const foArr = Object.entries(perFornitore).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  const foArr = Object.entries(perFornitore).sort((a,b) => b[1].fattIva - a[1].fattIva);
   document.getElementById('r-tab-fornitori').innerHTML = foArr.map(([f,v]) =>
-    '<tr><td><strong>' + esc(f) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.fatturato) + '</td><td class="mono">' + fmtE(v.margine) + '</td></tr>'
-  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(litri) + '</td><td class="mono">' + fmtE(fatturato) + '</td><td class="mono">' + fmtE(margine) + '</td></tr>';
+    '<tr><td><strong>' + esc(f) + '</strong></td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.fattNetto) + '</td><td class="mono">' + fmtE(v.fattIva) + '</td><td class="mono">' + fmtE(v.margine) + '</td></tr>'
+  ).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(litri) + '</td><td class="mono">' + fmtE(fattNetto) + '</td><td class="mono">' + fmtE(fattIva) + '</td><td class="mono">' + fmtE(margine) + '</td></tr>';
 
   // GRAFICI
   destroyCharts();
@@ -314,7 +322,7 @@ async function generaReport() {
   const giorniArr = Object.keys(perGiorno).sort();
   const labelsG = giorniArr.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
   _charts.giorno = new Chart(document.getElementById('r-chart-giorno').getContext('2d'), {
-    type:'bar', data:{ labels:labelsG, datasets:[{ label:'€', data:giorniArr.map(g=>Math.round(perGiorno[g].fatturato*100)/100), backgroundColor:'#D4A017', borderRadius:4 }] },
+    type:'bar', data:{ labels:labelsG, datasets:[{ label:'€', data:giorniArr.map(g=>Math.round(perGiorno[g].fattIva*100)/100), backgroundColor:'#D4A017', borderRadius:4 }] },
     options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}},x:{ticks:{font:{size:9}}}} }
   });
 

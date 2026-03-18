@@ -333,10 +333,16 @@
       <!-- VENDITE -->
       <div class="section" id="s-vendite">
         <div class="grid4" style="margin-bottom:16px">
-          <div class="kpi"><div class="kpi-label">Fatturato periodo</div><div class="kpi-value" id="vend-fatturato">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato netto (no IVA)</div><div class="kpi-value" id="vend-fatturato-netto">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato IVA inclusa</div><div class="kpi-value" id="vend-fatturato-iva">—</div></div>
           <div class="kpi"><div class="kpi-label">Litri periodo</div><div class="kpi-value" id="vend-litri">—</div></div>
           <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="vend-margine">—</div></div>
+        </div>
+        <div class="grid4" style="margin-bottom:16px">
           <div class="kpi"><div class="kpi-label">Ordini periodo</div><div class="kpi-value" id="vend-ordini">—</div></div>
+          <div class="kpi"><div class="kpi-label">Costo acquisto</div><div class="kpi-value" id="vend-costo" style="color:#A32D2D">—</div></div>
+          <div class="kpi"><div class="kpi-label">Costo trasporto</div><div class="kpi-value" id="vend-trasporto">—</div></div>
+          <div class="kpi"><div class="kpi-label">Primo margine</div><div class="kpi-value" id="vend-primo-margine" style="color:#639922">—</div></div>
         </div>
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -356,14 +362,14 @@
               </select>
             </div>
           </div>
-          <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
-          <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th></tr></thead>
+          <tbody id="tabella-vendite"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
 
           <!-- Vendite per cliente -->
           <div style="margin-top:16px">
             <div style="font-size:13px;font-weight:500;margin-bottom:10px">Vendite per cliente</div>
-            <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Ordini</th></tr></thead>
-            <tbody id="tabella-vendite-clienti"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+            <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th><th>Ordini</th></tr></thead>
+            <tbody id="tabella-vendite-clienti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
 
           <!-- Grafici vendite -->

@@ -1466,40 +1466,52 @@ async function caricaVendite() {
   const data = allData;
   if (!data.length) return;
 
-  let fatturato=0, litri=0, margine=0;
+  let fattNetto=0, fattIva=0, litri=0, margine=0, costoAcq=0, costoTrasp=0;
   const pf={}, pc={};
   data.forEach(r => {
-    const tot = prezzoConIva(r) * r.litri;
-    const marg = Number(r.margine) * Number(r.litri);
-    fatturato += tot; litri += Number(r.litri); margine += marg;
+    const l = Number(r.litri);
+    const netto = prezzoNoIva(r) * l;
+    const iva = prezzoConIva(r) * l;
+    const marg = Number(r.margine) * l;
+    const cAcq = Number(r.costo_litro) * l;
+    const cTra = Number(r.trasporto_litro) * l;
+    fattNetto += netto; fattIva += iva; litri += l; margine += marg; costoAcq += cAcq; costoTrasp += cTra;
     // Per fornitore
-    if (!pf[r.fornitore]) pf[r.fornitore] = {litri:0, fatturato:0, margine:0};
-    pf[r.fornitore].litri += Number(r.litri);
-    pf[r.fornitore].fatturato += tot;
+    if (!pf[r.fornitore]) pf[r.fornitore] = {litri:0, fattNetto:0, fattIva:0, margine:0};
+    pf[r.fornitore].litri += l;
+    pf[r.fornitore].fattNetto += netto;
+    pf[r.fornitore].fattIva += iva;
     pf[r.fornitore].margine += marg;
     // Per cliente
     const cl = r.cliente || 'Sconosciuto';
-    if (!pc[cl]) pc[cl] = {litri:0, fatturato:0, margine:0, ordini:0};
-    pc[cl].litri += Number(r.litri);
-    pc[cl].fatturato += tot;
+    if (!pc[cl]) pc[cl] = {litri:0, fattNetto:0, fattIva:0, margine:0, ordini:0};
+    pc[cl].litri += l;
+    pc[cl].fattNetto += netto;
+    pc[cl].fattIva += iva;
     pc[cl].margine += marg;
     pc[cl].ordini++;
   });
 
-  document.getElementById('vend-fatturato').textContent = fmtE(fatturato);
+  const primoMargine = fattNetto - costoAcq - costoTrasp;
+
+  document.getElementById('vend-fatturato-netto').textContent = fmtE(fattNetto);
+  document.getElementById('vend-fatturato-iva').textContent = fmtE(fattIva);
   document.getElementById('vend-litri').textContent = fmtL(litri);
   document.getElementById('vend-margine').textContent = fmtE(margine);
   document.getElementById('vend-ordini').textContent = data.length;
+  document.getElementById('vend-costo').textContent = fmtE(costoAcq);
+  document.getElementById('vend-trasporto').textContent = fmtE(costoTrasp);
+  document.getElementById('vend-primo-margine').textContent = fmtE(primoMargine);
 
   // Tabella per fornitore
   const tbody = document.getElementById('tabella-vendite');
-  const righeF = Object.entries(pf).sort((a,b) => b[1].fatturato - a[1].fatturato);
-  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="4" class="loading">Nessun dato</td></tr>';
+  const righeF = Object.entries(pf).sort((a,b) => b[1].fattIva - a[1].fattIva);
+  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattNetto) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattIva) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
 
   // Tabella per cliente
   const tbCl = document.getElementById('tabella-vendite-clienti');
-  const righeCl = Object.entries(pc).sort((a,b) => b[1].fatturato - a[1].fatturato);
-  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
+  const righeCl = Object.entries(pc).sort((a,b) => b[1].fattIva - a[1].fattIva);
+  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattNetto) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattIva) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="6" class="loading">Nessun dato</td></tr>';
 
   // Grafici vendite
   const coloriGrafico = ['#D4A017','#378ADD','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A'];
@@ -1511,7 +1523,7 @@ async function caricaVendite() {
     window._chartVendForn = new Chart(ctxVF.getContext('2d'), {
       type:'bar', data:{
         labels:righeF.map(([f])=>f.length>18?f.substring(0,18)+'…':f),
-        datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
+        datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fattIva*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
       }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
     });
   }
@@ -1524,7 +1536,7 @@ async function caricaVendite() {
     window._chartVendCl = new Chart(ctxVC.getContext('2d'), {
       type:'bar', data:{
         labels:top10.map(([c])=>c.length>15?c.substring(0,15)+'…':c),
-        datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
+        datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fattIva*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
       }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
     });
   }
