@@ -1250,12 +1250,30 @@ async function caricaConsegne() {
 
   if (!data||!data.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine per questa data</td></tr>';
-    ['tot-consegne','tot-completate','tot-inattesa','tot-programmati'].forEach(id => document.getElementById(id).textContent='0');
+    ['tot-consegne','tot-completate','tot-inattesa','tot-programmati','tot-litri-cons','tot-fatt-netto-cons','tot-fatt-iva-cons','tot-margine-cons'].forEach(id => document.getElementById(id).textContent='—');
+    document.getElementById('tot-consegne').textContent='0';
   } else {
-    document.getElementById('tot-consegne').textContent = data.filter(r=>r.tipo_ordine!=='deposito').length;
+    const vendite = data.filter(r=>r.tipo_ordine!=='deposito');
+    document.getElementById('tot-consegne').textContent = vendite.length;
     document.getElementById('tot-completate').textContent = data.filter(r=>r.stato==='confermato').length;
     document.getElementById('tot-inattesa').textContent = data.filter(r=>r.stato==='in attesa').length;
     document.getElementById('tot-programmati').textContent = data.filter(r=>r.stato==='programmato').length;
+
+    // Calcola totali vendite (esclusi deposito)
+    let totLitri=0, totFattNetto=0, totFattIva=0, totMargine=0;
+    vendite.forEach(r => {
+      const litri = Number(r.litri);
+      const pNetto = prezzoNoIva(r);
+      const pIva = prezzoConIva(r);
+      totLitri += litri;
+      totFattNetto += pNetto * litri;
+      totFattIva += pIva * litri;
+      totMargine += Number(r.margine) * litri;
+    });
+    document.getElementById('tot-litri-cons').textContent = fmtL(totLitri);
+    document.getElementById('tot-fatt-netto-cons').textContent = fmtE(totFattNetto);
+    document.getElementById('tot-fatt-iva-cons').textContent = fmtE(totFattIva);
+    document.getElementById('tot-margine-cons').textContent = fmtE(totMargine);
 
     // Carica documenti per tutti gli ordini
     const ordineIds = data.map(r=>r.id);
@@ -1331,6 +1349,87 @@ async function annullaOrdine(ordineId) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('Ordine annullato');
   caricaConsegne();
+}
+
+// ── ELENCO VENDITE GIORNALIERO (stampabile) ─────────────────────
+async function generaElencoVenditeGiorno() {
+  var dataFiltro = document.getElementById('filtro-data-consegne').value || oggiISO;
+  var res = await sb.from('ordini').select('*').eq('data', dataFiltro).neq('stato','annullato').neq('tipo_ordine','deposito').order('cliente');
+  var ordini = res.data || [];
+  if (!ordini.length) { toast('Nessun ordine vendita per questa data'); return; }
+
+  var totLitri=0, totNetto=0, totIva=0, totMargine=0, totCosto=0;
+  var righeHtml = '';
+  ordini.forEach(function(r, i) {
+    var litri = Number(r.litri);
+    var pNetto = prezzoNoIva(r);
+    var pIva = prezzoConIva(r);
+    var marg = Number(r.margine) * litri;
+    var costoAcq = Number(r.costo_litro) * litri;
+    var netto = pNetto * litri;
+    var iva = pIva * litri;
+    totLitri += litri; totNetto += netto; totIva += iva; totMargine += marg; totCosto += costoAcq;
+    righeHtml += '<tr>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-weight:bold">' + esc(r.cliente) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.sede_scarico_nome||'') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litri) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(pNetto) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(netto) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + r.iva + '%</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(iva) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(marg) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.stato) + '</td>' +
+      '</tr>';
+  });
+
+  var dataFmt = new Date(dataFiltro).toLocaleDateString('it-IT');
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Elenco Vendite ' + dataFmt + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:15mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:10mm}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#D4A017;color:#fff;padding:8px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;border:1px solid #B8900F;text-align:center}' +
+    '.tot-row td{border-top:3px solid #D4A017!important;font-weight:bold;font-size:12px;background:#FDF3D0!important}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:20px;font-weight:bold;color:#D4A017">ELENCO VENDITE</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Data: <strong>' + dataFmt + '</strong> — Ordini: <strong>' + ordini.length + '</strong></div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti e oli</div></div></div>';
+
+  // KPI riepilogo
+  html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Litri totali</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Fatturato netto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totNetto) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Fatturato IVA incl.</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase;letter-spacing:0.4px">Margine totale</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</div></div>';
+  html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase;letter-spacing:0.4px">Costo acquisto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
+  html += '</div>';
+
+  // Tabella
+  html += '<table><thead><tr><th>#</th><th>Cliente</th><th>Sede scarico</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L netto</th><th>Tot. netto</th><th>IVA</th><th>Tot. IVA incl.</th><th>Margine</th><th>Stato</th></tr></thead><tbody>';
+  html += righeHtml;
+  // Riga totali
+  html += '<tr class="tot-row">' +
+    '<td style="padding:8px;border:1px solid #ddd" colspan="4">TOTALE</td>' +
+    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td>' +
+    '<td style="padding:8px;border:1px solid #ddd"></td>' +
+    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td>' +
+    '<td style="padding:8px;border:1px solid #ddd"></td>' +
+    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td>' +
+    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td>' +
+    '<td style="padding:8px;border:1px solid #ddd"></td></tr>';
+  html += '</tbody></table>';
+
+  html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:8px;margin-top:14px">PhoenixFuel Srl — Elenco vendite generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px"><button onclick="window.print()" style="background:#D4A017;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">Stampa / Salva PDF</button></div>';
+  html += '</body></html>';
+
+  var w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── VENDITE ───────────────────────────────────────────────────────
