@@ -131,9 +131,47 @@ function apriModal(html) {
   document.getElementById('modal-permessi-content').innerHTML = html;
   document.getElementById('modal-permessi').style.display = 'flex';
 }
-function chiudiModalePermessi() { document.getElementById('modal-permessi').style.display = 'none'; }
-document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) chiudiModal(); });
-function chiudiModal() { chiudiModalePermessi(); }
+function chiudiModalePermessi() {
+  document.getElementById('modal-permessi').style.display = 'none';
+}
+function chiudiModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+}
+
+// Pulsante X statico in cima (fuori dal contenuto dinamico, non si rompe mai)
+document.getElementById('btn-chiudi-modale-top').addEventListener('click', function(e) {
+  e.stopPropagation();
+  chiudiModalePermessi();
+});
+
+// Pulsante X statico modal-overlay (modifica cliente/fornitore)
+document.getElementById('btn-chiudi-modal-overlay').addEventListener('click', function(e) {
+  e.stopPropagation();
+  chiudiModal();
+});
+
+// Click sfondo scuro modal-permessi
+document.getElementById('modal-permessi').addEventListener('click', function(e) {
+  if (e.target === this) chiudiModalePermessi();
+});
+
+// Click sfondo scuro modal-overlay (clienti/fornitori form)
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) chiudiModal();
+});
+
+// Bottoni dinamici con data-chiudi-modale
+document.addEventListener('click', function(e) {
+  if (e.target.closest('[data-chiudi-modale]')) chiudiModalePermessi();
+});
+
+// ESC per chiudere qualsiasi modale aperta
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    if (document.getElementById('modal-permessi').style.display === 'flex') chiudiModalePermessi();
+    else if (document.getElementById('modal-overlay').style.display === 'flex') chiudiModal();
+  }
+});
 
 // ── UTILITÀ ───────────────────────────────────────────────────────
 function fmt(n) {
@@ -477,7 +515,12 @@ let prezzoCorrente=null, prezziDelGiorno=[];
 let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false;
 
 function toggleTipoOrdine() {
-  document.getElementById('grp-cliente').style.display = document.getElementById('ord-tipo').value==='cliente' ? '' : 'none';
+  var isCliente = document.getElementById('ord-tipo').value==='cliente';
+  document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
+  var grpSede = document.getElementById('grp-sede');
+  if (grpSede) { grpSede.style.display = 'none'; }
+  var selSede = document.getElementById('ord-sede');
+  if (selSede) { selSede.innerHTML = '<option value="">-- Seleziona sede --</option>'; }
 }
 
 async function aggiornaSelezioniOrdine() {
@@ -754,7 +797,11 @@ async function salvaOrdine() {
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  // Sede di scarico
+  const sedeEl = document.getElementById('ord-sede');
+  const sedeId = sedeEl ? sedeEl.value : '';
+  const sedeNomeTxt = sedeId && sedeEl.options[sedeEl.selectedIndex] ? sedeEl.options[sedeEl.selectedIndex].textContent : '';
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, sede_scarico_id:sedeId||null, sede_scarico_nome:sedeNomeTxt||null };
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   if (prezzoCorrente._isDeposito && tipo !== 'deposito') {
@@ -769,6 +816,10 @@ async function salvaOrdine() {
   document.getElementById('ord-prezzo-netto').value = '';
   document.getElementById('fido-cliente-info').style.display = 'none';
   document.getElementById('prev-fido-warn').style.display = 'none';
+  var grpSedeReset = document.getElementById('grp-sede');
+  if (grpSedeReset) grpSedeReset.style.display = 'none';
+  var selSedeReset = document.getElementById('ord-sede');
+  if (selSedeReset) selSedeReset.innerHTML = '<option value="">-- Seleziona sede --</option>';
   fidoClienteCorrente = null;
   caricaOrdini(); caricaDashboard();
 }
@@ -787,7 +838,7 @@ async function caricaOrdini() {
   }
   const data = allData;
   const tbody = document.getElementById('tabella-ordini');
-  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
+  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="15" class="loading">Nessun ordine</td></tr>'; return; }
   let html = '';
   data.forEach(r => {
     const pL = prezzoConIva(r), tot = pL*r.litri;
@@ -797,7 +848,7 @@ async function caricaOrdini() {
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.sede_scarico_nome||'—') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
   });
   tbody.innerHTML = html;
 }
@@ -817,8 +868,8 @@ function filtraOrdini() {
     if (!celle.length) return;
     const dataOrd = celle[0]?.textContent || '';
     const cliente = celle[2]?.textContent?.toLowerCase() || '';
-    const prod = celle[3]?.textContent || '';
-    const st = celle[12]?.textContent || '';
+    const prod = celle[4]?.textContent || '';
+    const st = celle[13]?.textContent || '';
     let vis = true;
     if (q && !cliente.includes(q)) vis = false;
     if (prodotto && prod !== prodotto) vis = false;
@@ -1398,7 +1449,10 @@ async function apriModaleCliente(id=null) {
 }
 
 async function caricaClienti() {
-  const { data } = await sb.from('clienti').select('*').order('nome');
+  const mostraInattivi = document.getElementById('mostra-inattivi') && document.getElementById('mostra-inattivi').checked;
+  let query = sb.from('clienti').select('*').order('nome');
+  if (!mostraInattivi) query = query.or('attivo.eq.true,attivo.is.null');
+  const { data } = await query;
   const tbody = document.getElementById('tabella-clienti');
   if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="12" class="loading">Nessun cliente</td></tr>'; return; }
 
@@ -1419,7 +1473,10 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    const inattivo = r.attivo === false;
+    const rowStyle = inattivo ? ' style="opacity:0.5"' : '';
+    const badgeInattivo = inattivo ? ' <span class="badge red" style="font-size:9px">Inattivo</span>' : '';
+    return '<tr' + rowStyle + '><td><strong>' + esc(r.nome) + '</strong>' + badgeInattivo + '</td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-primary" style="font-size:11px;padding:4px 10px;background:#378ADD" onclick="apriSediCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📍 Sedi</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
 }
@@ -1513,7 +1570,7 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   if (totScaduti > 0) html += '<span style="color:#A32D2D">Scaduti: <strong>' + totScaduti + '</strong></span>';
   html += '</div>';
 
-  html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
+  html += '<button class="btn-primary" style="width:100%;margin-top:14px" data-chiudi-modale>Chiudi</button>';
   apriModal(html);
 }
 
@@ -1541,6 +1598,156 @@ async function impostaDataPagamento(ordineId, data, clienteId, clienteNome) {
     toast('Pagamento programmato per il ' + new Date(data).toLocaleDateString('it-IT'));
   }
   apriSchedaCliente(clienteId, clienteNome);
+}
+
+// ── SEDI DI SCARICO — CRUD ──────────────────────────────────────
+
+// Funzione per generare l'HTML delle sedi (usata sia dalla Scheda che dal pulsante Sedi)
+function htmlSediScarico(sedi, clienteId, clienteNome) {
+  const nomeEsc = clienteNome.replace(/'/g,"\\'");
+  let html = '<div style="margin-bottom:18px;padding:14px;background:var(--bg-kpi);border-radius:var(--radius-lg)">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+  html += '<div style="font-size:13px;font-weight:500">📍 Sedi di scarico <span class="badge gray">' + sedi.length + '</span></div>';
+  html += '<button class="btn-primary" style="font-size:11px;padding:5px 12px" onclick="mostraFormSede(\'' + clienteId + '\',\'' + nomeEsc + '\')">+ Nuova sede</button>';
+  html += '</div>';
+  html += '<div id="form-nuova-sede" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:var(--radius)">';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:8px">';
+  html += '<div class="form-group"><label>Nome sede</label><input type="text" id="sede-nome" placeholder="es. Deposito Nord" /></div>';
+  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="sede-indirizzo" /></div>';
+  html += '<div class="form-group"><label>Citta</label><input type="text" id="sede-citta" /></div>';
+  html += '<div class="form-group"><label>Provincia</label><input type="text" id="sede-provincia" /></div>';
+  html += '<div class="form-group"><label>CAP</label><input type="text" id="sede-cap" /></div>';
+  html += '<div class="form-group"><label>Note</label><input type="text" id="sede-note" /></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;align-items:center">';
+  html += '<label class="check-label"><input type="checkbox" id="sede-default" /> Sede predefinita</label>';
+  html += '<button class="btn-primary" style="font-size:11px;padding:5px 14px" onclick="salvaSedeScarico(\'' + clienteId + '\',\'' + nomeEsc + '\')">Salva sede</button>';
+  html += '<button style="background:none;border:none;font-size:12px;cursor:pointer;color:var(--text-muted)" onclick="document.getElementById(\'form-nuova-sede\').style.display=\'none\'">Annulla</button>';
+  html += '<input type="hidden" id="sede-edit-id" value="" />';
+  html += '</div></div>';
+
+  if (sedi.length) {
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">';
+    sedi.forEach(function(s) {
+      html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:var(--radius);padding:10px 12px;display:flex;justify-content:space-between;align-items:flex-start">';
+      html += '<div style="flex:1">';
+      html += '<div style="font-size:12px;font-weight:500">' + esc(s.nome) + (s.is_default ? ' <span class="badge green" style="font-size:9px">Predefinita</span>' : '') + '</div>';
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(s.indirizzo||'') + (s.citta ? ', ' + esc(s.citta) : '') + (s.provincia ? ' (' + esc(s.provincia) + ')' : '') + (s.cap ? ' - ' + esc(s.cap) : '') + '</div>';
+      if (s.note) html += '<div style="font-size:10px;color:var(--text-hint);margin-top:2px">' + esc(s.note) + '</div>';
+      html += '</div>';
+      html += '<div style="display:flex;gap:4px;flex-shrink:0">';
+      html += '<button class="btn-edit" title="Modifica" onclick="modificaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + nomeEsc + '\')">✏️</button>';
+      if (!s.is_default) html += '<button class="btn-edit" title="Imposta predefinita" onclick="impostaSedeDefault(\'' + s.id + '\',\'' + clienteId + '\',\'' + nomeEsc + '\')">⭐</button>';
+      html += '<button class="btn-danger" title="Elimina" onclick="eliminaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + nomeEsc + '\')">x</button>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11px;color:var(--text-hint);text-align:center;padding:8px">Nessuna sede di scarico registrata</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// Apri modale dedicato alle sedi di scarico
+async function apriSediCliente(clienteId, clienteNome) {
+  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('is_default',{ascending:false}).order('nome');
+  let html = '<div style="font-size:18px;font-weight:500;margin-bottom:4px">' + esc(clienteNome) + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Gestione sedi di scarico</div>';
+  html += htmlSediScarico(sedi || [], clienteId, clienteNome);
+  html += '<button class="btn-primary" style="width:100%;margin-top:14px" data-chiudi-modale>Chiudi</button>';
+  apriModal(html);
+}
+
+function mostraFormSede(clienteId, clienteNome) {
+  var form = document.getElementById('form-nuova-sede');
+  form.style.display = 'block';
+  document.getElementById('sede-edit-id').value = '';
+  ['sede-nome','sede-indirizzo','sede-citta','sede-provincia','sede-cap','sede-note'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('sede-default').checked = false;
+}
+
+async function salvaSedeScarico(clienteId, clienteNome) {
+  var nome = document.getElementById('sede-nome').value.trim();
+  if (!nome) { toast('Inserisci il nome della sede'); return; }
+  var isDefault = document.getElementById('sede-default').checked;
+  var editId = document.getElementById('sede-edit-id').value;
+
+  var record = {
+    cliente_id: clienteId,
+    nome: nome,
+    indirizzo: document.getElementById('sede-indirizzo').value.trim(),
+    citta: document.getElementById('sede-citta').value.trim(),
+    provincia: document.getElementById('sede-provincia').value.trim(),
+    cap: document.getElementById('sede-cap').value.trim(),
+    note: document.getElementById('sede-note').value.trim(),
+    is_default: isDefault
+  };
+
+  if (isDefault) {
+    await sb.from('sedi_scarico').update({ is_default: false }).eq('cliente_id', clienteId);
+  }
+
+  var error;
+  if (editId) {
+    var res = await sb.from('sedi_scarico').update(record).eq('id', editId);
+    error = res.error;
+  } else {
+    var res2 = await sb.from('sedi_scarico').insert([record]);
+    error = res2.error;
+  }
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(editId ? 'Sede aggiornata!' : 'Sede salvata!');
+  apriSediCliente(clienteId, clienteNome);
+}
+
+async function modificaSedeScarico(sedeId, clienteId, clienteNome) {
+  var res = await sb.from('sedi_scarico').select('*').eq('id', sedeId).single();
+  var sede = res.data;
+  if (!sede) { toast('Sede non trovata'); return; }
+  var form = document.getElementById('form-nuova-sede');
+  form.style.display = 'block';
+  document.getElementById('sede-edit-id').value = sedeId;
+  document.getElementById('sede-nome').value = sede.nome || '';
+  document.getElementById('sede-indirizzo').value = sede.indirizzo || '';
+  document.getElementById('sede-citta').value = sede.citta || '';
+  document.getElementById('sede-provincia').value = sede.provincia || '';
+  document.getElementById('sede-cap').value = sede.cap || '';
+  document.getElementById('sede-note').value = sede.note || '';
+  document.getElementById('sede-default').checked = sede.is_default || false;
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function eliminaSedeScarico(sedeId, clienteId, clienteNome) {
+  if (!confirm('Eliminare questa sede di scarico?')) return;
+  var res = await sb.from('sedi_scarico').update({ attivo: false }).eq('id', sedeId);
+  if (res.error) { toast('Errore: ' + res.error.message); return; }
+  toast('Sede eliminata');
+  apriSediCliente(clienteId, clienteNome);
+}
+
+async function impostaSedeDefault(sedeId, clienteId, clienteNome) {
+  await sb.from('sedi_scarico').update({ is_default: false }).eq('cliente_id', clienteId);
+  var res = await sb.from('sedi_scarico').update({ is_default: true }).eq('id', sedeId);
+  if (res.error) { toast('Errore: ' + res.error.message); return; }
+  toast('Sede predefinita aggiornata');
+  apriSediCliente(clienteId, clienteNome);
+}
+
+// Carica sedi nel dropdown ordine quando si seleziona un cliente
+async function caricaSediOrdine() {
+  var clienteId = document.getElementById('ord-cliente').value;
+  var grpSede = document.getElementById('grp-sede');
+  var selSede = document.getElementById('ord-sede');
+  if (!clienteId) { grpSede.style.display='none'; selSede.innerHTML='<option value="">-- Seleziona sede --</option>'; return; }
+  var res = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('is_default',{ascending:false}).order('nome');
+  var sedi = res.data;
+  if (!sedi || !sedi.length) { grpSede.style.display='none'; selSede.innerHTML='<option value="">Nessuna sede</option>'; return; }
+  grpSede.style.display='';
+  selSede.innerHTML = '<option value="">-- Seleziona sede --</option>' + sedi.map(function(s) {
+    var label = esc(s.nome) + (s.indirizzo ? ' - ' + esc(s.indirizzo) : '') + (s.citta ? ', ' + esc(s.citta) : '') + (s.is_default ? ' *' : '');
+    return '<option value="' + s.id + '"' + (s.is_default?' selected':'') + '>' + label + '</option>';
+  }).join('');
 }
 
 // ── FORNITORI ─────────────────────────────────────────────────────

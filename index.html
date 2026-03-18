@@ -126,7 +126,8 @@
                 <option value="deposito">Approvvigionamento deposito</option>
               </select>
             </div>
-            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente" onchange="controllaFidoCliente()"><option value="">Seleziona...</option></select></div>
+            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente" onchange="controllaFidoCliente();caricaSediOrdine()"><option value="">Seleziona...</option></select></div>
+            <div class="form-group" id="grp-sede" style="display:none"><label>Sede di scarico</label><select id="ord-sede"><option value="">— Seleziona sede —</option></select></div>
             <div class="form-group"><label>Fornitore</label><select id="ord-fornitore" onchange="aggiornaBasiOrdine()"><option value="">— Prima seleziona data —</option></select></div>
             <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label>Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona base —</option></select></div>
@@ -172,8 +173,8 @@
             </div>
           </div>
           <div style="overflow-x:auto">
-          <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
-          <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Sede scarico</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
+          <tbody id="tabella-ordini"><tr><td colspan="15" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
       </div>
@@ -369,6 +370,7 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco clienti</span>
             <div style="display:flex;gap:8px;align-items:center">
+              <label class="check-label"><input type="checkbox" id="mostra-inattivi" onchange="caricaClienti()" /> Mostra inattivi</label>
               <input type="text" id="search-clienti" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraClienti()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
               <button class="btn-primary" onclick="apriModaleCliente()">+ Nuovo cliente</button>
             </div>
@@ -550,7 +552,7 @@
   <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:90%;max-width:700px;max-height:85vh;overflow-y:auto;position:relative;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
       <span id="modal-title" style="font-size:15px;font-weight:500"></span>
-      <button onclick="chiudiModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
+      <button id="btn-chiudi-modal-overlay" style="background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;color:var(--text-muted);padding:4px 14px">x Chiudi</button>
     </div>
     <div id="modal-clienti">
       <div class="form-grid">
@@ -593,10 +595,13 @@
   </div>
 </div>
 
-<!-- MODAL PERMESSI -->
+<!-- MODAL PERMESSI / SCHEDA CLIENTE -->
 <div id="modal-permessi" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;">
-  <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:95%;max-width:900px;max-height:90vh;overflow-y:auto;position:relative;">
-    <div id="modal-permessi-content"></div>
+  <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:0;width:95%;max-width:900px;max-height:90vh;overflow:hidden;position:relative;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:flex-end;padding:12px 16px 0;flex-shrink:0">
+      <button id="btn-chiudi-modale-top" style="background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;color:var(--text-muted);padding:4px 14px">x Chiudi</button>
+    </div>
+    <div id="modal-permessi-content" style="padding:4px 24px 24px;overflow-y:auto;flex:1"></div>
   </div>
 </div>
 <script src="app.js"></script>

@@ -460,6 +460,23 @@ async function caricaDati() {
     document.getElementById('autista').textContent = carico.autista || '—';
     document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
 
+    // Arricchisci ordini con indirizzi da sede di scarico o clienti
+    for (let o of ordini) {
+      if (o.sede_scarico_id) {
+        try {
+          const { data: sede } = await sb.from('sedi_scarico').select('*').eq('id', o.sede_scarico_id).single();
+          if (sede) { o.indirizzo = sede.indirizzo; o.cap = sede.cap; o.provincia = sede.provincia; o.citta = sede.citta; continue; }
+        } catch(e) {}
+      }
+      // Fallback: indirizzo dal cliente
+      if (o.cliente_id) {
+        try {
+          const { data: cl } = await sb.from('clienti').select('indirizzo,citta,provincia,telefono').eq('id', o.cliente_id).single();
+          if (cl) { o.indirizzo = o.indirizzo || cl.indirizzo; o.citta = o.citta || cl.citta; o.provincia = o.provincia || cl.provincia; o.telefono = o.telefono || cl.telefono; }
+        } catch(e) {}
+      }
+    }
+
     renderConsegne(ordini);
 
     // ── PAGINA 2 — GRAFICA CAMION ──
