@@ -215,15 +215,21 @@ async function generaReport() {
 
   if (!da || !a) { alert('Seleziona le date'); return; }
 
-  // Query - solo ordini di tipo deposito (acquisti da fornitori per il deposito)
-  // OPPURE tutti gli ordini se vogliamo vedere anche le vendite dirette
-  // Per il report acquisti prendiamo TUTTI gli ordini non annullati
-  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato');
-  if (prodotto) query = query.eq('prodotto', prodotto);
-  if (fornitori.length) query = query.in('fornitore', fornitori);
-
-  const { data: ordini } = await query.order('data').order('fornitore');
-  if (!ordini || !ordini.length) { alert('Nessun ordine trovato'); return; }
+  let allOrdini = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato');
+    if (prodotto) q = q.eq('prodotto', prodotto);
+    if (fornitori.length) q = q.in('fornitore', fornitori);
+    const { data: batch } = await q.order('data').order('fornitore').range(from, from + pageSize - 1);
+    if (!batch || !batch.length) break;
+    allOrdini = allOrdini.concat(batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  const ordini = allOrdini;
+  if (!ordini.length) { alert('Nessun ordine trovato'); return; }
 
   // Periodo
   document.getElementById('r-periodo').textContent = 'Periodo: ' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT');

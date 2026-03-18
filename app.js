@@ -775,7 +775,17 @@ async function salvaOrdine() {
 
 async function caricaOrdini() {
   await aggiornaSelezioniOrdine();
-  const { data } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false});
+  // Paginazione per superare limite 1000 righe Supabase
+  let allData = [];
+  let from = 0;
+  while (true) {
+    const { data: batch } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false}).range(from, from + 999);
+    if (!batch || !batch.length) break;
+    allData = allData.concat(batch);
+    if (batch.length < 1000) break;
+    from += 1000;
+  }
+  const data = allData;
   const tbody = document.getElementById('tabella-ordini');
   if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
   let html = '';
@@ -1248,10 +1258,19 @@ async function caricaVendite() {
   const a = aEl.value;
   const filtroProd = document.getElementById('vend-prodotto').value;
 
-  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
-  if (filtroProd) query = query.eq('prodotto', filtroProd);
-  const { data } = await query;
-  if (!data) return;
+  let baseQuery = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
+  if (filtroProd) baseQuery = baseQuery.eq('prodotto', filtroProd);
+  let allData = [];
+  let from = 0;
+  while (true) {
+    const { data: batch } = await baseQuery.range(from, from + 999);
+    if (!batch || !batch.length) break;
+    allData = allData.concat(batch);
+    if (batch.length < 1000) break;
+    from += 1000;
+  }
+  const data = allData;
+  if (!data.length) return;
 
   let fatturato=0, litri=0, margine=0;
   const pf={}, pc={};

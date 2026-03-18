@@ -127,10 +127,21 @@ async function generaReport() {
   const da = anno + '-01-01';
   const a = anno + '-12-31';
 
-  let query = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
-  if (prodotti.length < 4) query = query.in('prodotto', prodotti);
-  const { data: ordini } = await query;
-  if (!ordini || !ordini.length) { alert('Nessun dato per ' + anno); return; }
+  // Supabase default limit is 1000 - fetch all with pagination
+  let allOrdini = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
+    if (prodotti.length < 4) q = q.in('prodotto', prodotti);
+    const { data: batch } = await q.order('data').range(from, from + pageSize - 1);
+    if (!batch || !batch.length) break;
+    allOrdini = allOrdini.concat(batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  const ordini = allOrdini;
+  if (!ordini.length) { alert('Nessun dato per ' + anno); return; }
 
   // Calcola per mese
   const mesi = {};
