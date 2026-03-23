@@ -53,6 +53,58 @@
           <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="kpi-ordini">—</div></div>
         </div>
 
+        <!-- QUOTAZIONI CARBURANTI TEMPO REALE -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>📈 Quotazioni carburanti — tempo reale</span>
+            <span style="font-size:10px;color:var(--text-hint)">Fonte: TradingView / ICE Futures</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="height:220px;border-radius:var(--radius);overflow:hidden;border:0.5px solid var(--border)">
+              <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
+                {"symbol":"ICEEUR:GAS1!","width":"100%","height":"100%","locale":"it","dateRange":"1M","colorTheme":"light","isTransparent":true,"autosize":true,"largeChartUrl":""}
+                </script>
+              </div>
+            </div>
+            <div style="height:220px;border-radius:var(--radius);overflow:hidden;border:0.5px solid var(--border)">
+              <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
+                {"symbol":"ICEEUR:BRN1!","width":"100%","height":"100%","locale":"it","dateRange":"1M","colorTheme":"light","isTransparent":true,"autosize":true,"largeChartUrl":""}
+                </script>
+              </div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+            <div style="height:220px;border-radius:var(--radius);overflow:hidden;border:0.5px solid var(--border)">
+              <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
+                {"symbol":"NYMEX:HO1!","width":"100%","height":"100%","locale":"it","dateRange":"1M","colorTheme":"light","isTransparent":true,"autosize":true,"largeChartUrl":""}
+                </script>
+              </div>
+            </div>
+            <div style="height:220px;border-radius:var(--radius);overflow:hidden;border:0.5px solid var(--border)">
+              <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
+                {"symbol":"NYMEX:RB1!","width":"100%","height":"100%","locale":"it","dateRange":"1M","colorTheme":"light","isTransparent":true,"autosize":true,"largeChartUrl":""}
+                </script>
+              </div>
+            </div>
+            <div style="height:220px;border-radius:var(--radius);overflow:hidden;border:0.5px solid var(--border)">
+              <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js" async>
+                {"symbol":"FX:EURUSD","width":"100%","height":"100%","locale":"it","dateRange":"1M","colorTheme":"light","isTransparent":true,"autosize":true,"largeChartUrl":""}
+                </script>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- GIACENZA DEPOSITO -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Giacenza deposito</div>
