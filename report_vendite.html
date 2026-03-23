@@ -46,10 +46,10 @@
 
   .section-title { font-size: 12px; font-weight: bold; color: #D4A017; text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 8px; border-bottom: 1px solid #e8e8e8; padding-bottom: 4px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px; }
-  th { background: #f5f5f5; padding: 6px 8px; text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; color: #666; border: 1px solid #ddd; }
-  td { padding: 6px 8px; border: 1px solid #eee; }
-  td.mono { font-family: 'Courier New', monospace; font-weight: bold; text-align: right; }
+  table { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 12px; }
+  th { background: #f5f5f5; padding: 4px 4px; text-align: left; font-size: 8px; text-transform: uppercase; letter-spacing: 0.3px; color: #666; border: 1px solid #ddd; }
+  td { padding: 4px 4px; border: 1px solid #eee; font-size: 9px; }
+  td.mono { font-family: 'Courier New', monospace; font-weight: bold; text-align: right; font-size: 9px; }
   tr.totale { background: #FDF3D0; font-weight: bold; }
   tr.totale td { border-top: 2px solid #D4A017; }
 
@@ -62,6 +62,7 @@
   .toolbar { position: fixed; bottom: 20px; right: 20px; display: flex; gap: 8px; z-index: 100; }
   .toolbar button { border: none; padding: 10px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: bold; }
   .btn-print { background: #D4A017; color: #fff; }
+  .btn-excel { background: #639922; color: #fff; }
   .btn-back { background: #666; color: #fff; }
 </style>
 </head>
@@ -105,8 +106,9 @@
 <!-- REPORT OUTPUT -->
 <div class="report-container" id="report-container">
   <div class="toolbar no-print">
-    <button class="btn-back" onclick="tornaFiltri()">← Modifica filtri</button>
-    <button class="btn-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+    <button class="btn-back" onclick="tornaFiltri()">&#8592; Modifica filtri</button>
+    <button class="btn-excel" onclick="esportaExcel()">&#128202; Esporta Excel</button>
+    <button class="btn-print" onclick="window.print()">&#128424; Stampa / Salva PDF</button>
   </div>
 
   <div class="page">
@@ -355,6 +357,24 @@ async function generaReport() {
 function tornaFiltri() {
   document.getElementById('filtri-panel').style.display = 'block';
   document.getElementById('report-container').style.display = 'none';
+}
+
+function esportaExcel() {
+  var tables = document.querySelectorAll('.page table');
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Report Vendite</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>';
+  tables.forEach(function(t, i) {
+    var title = t.previousElementSibling;
+    if (title && title.classList.contains('section-title')) html += '<h3>' + title.textContent + '</h3>';
+    html += t.outerHTML + '<br/>';
+  });
+  html += '</body></html>';
+  var blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'report_vendite_' + (document.getElementById('f-da').value || 'report') + '.xls';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 </script>
 </body>

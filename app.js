@@ -1387,10 +1387,11 @@ async function generaElencoVenditeGiorno() {
   var dataFmt = new Date(dataFiltro).toLocaleDateString('it-IT');
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Elenco Vendite ' + dataFmt + '</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:15mm}' +
-    '@media print{.no-print{display:none!important}@page{size:landscape;margin:10mm}}' +
+    '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}}' +
     'table{width:100%;border-collapse:collapse}' +
-    'th{background:#D4A017;color:#fff;padding:8px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;border:1px solid #B8900F;text-align:center}' +
-    '.tot-row td{border-top:3px solid #D4A017!important;font-weight:bold;font-size:12px;background:#FDF3D0!important}' +
+    'th{background:#D4A017;color:#fff;padding:5px 4px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #B8900F;text-align:center}' +
+    'td{font-size:9px;padding:4px}' +
+    '.tot-row td{border-top:3px solid #D4A017!important;font-weight:bold;font-size:10px;background:#FDF3D0!important}' +
     '</style></head><body>';
 
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:10px;margin-bottom:14px">';
@@ -1424,7 +1425,11 @@ async function generaElencoVenditeGiorno() {
   html += '</tbody></table>';
 
   html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:8px;margin-top:14px">PhoenixFuel Srl — Elenco vendite generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
-  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px"><button onclick="window.print()" style="background:#D4A017;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">Stampa / Salva PDF</button></div>';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="esportaExcelElenco()" style="background:#639922;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">Esporta Excel</button>';
+  html += '<button onclick="window.print()" style="background:#D4A017;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">Stampa / Salva PDF</button>';
+  html += '</div>';
+  html += '<script>function esportaExcelElenco(){var t=document.querySelector("table");if(!t)return;var h=\'<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body>\'+t.outerHTML+\'</body></html>\';var b=new Blob([h],{type:"application/vnd.ms-excel;charset=utf-8"});var u=URL.createObjectURL(b);var a=document.createElement("a");a.href=u;a.download="elenco_vendite_' + dataFiltro + '.xls";a.click();URL.revokeObjectURL(u);}<\/script>';
   html += '</body></html>';
 
   var w = window.open('', '_blank');
