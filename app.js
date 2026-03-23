@@ -2264,22 +2264,38 @@ async function invitaUtente() {
   if (!nome||!email) { toast('Compila nome ed email'); return; }
   if (!password || password.length < 6) { toast('La password deve avere almeno 6 caratteri'); return; }
 
-  // 1. Crea utente su Supabase Auth
-  const { data: authData, error: authError } = await sb.auth.signUp({ email, password });
-  if (authError) { toast('Errore creazione accesso: ' + authError.message); return; }
+  // 1. Salva sessione admin corrente PRIMA del signUp
+  var sessioneAdmin = await sb.auth.getSession();
+  var adminToken = sessioneAdmin.data.session ? sessioneAdmin.data.session.access_token : null;
+  var adminRefresh = sessioneAdmin.data.session ? sessioneAdmin.data.session.refresh_token : null;
 
-  // 2. Crea record nella tabella utenti
-  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{email, nome, ruolo, cliente_id:ruolo==='cliente'?clienteId:null, attivo:true}]).select().single();
-  if (error) { toast('Errore salvataggio utente: ' + error.message); return; }
+  // 2. Inserisci PRIMA il record nella tabella utenti (mentre siamo ancora admin)
+  var insertRes = await sb.from('utenti').insert([{email:email, nome:nome, ruolo:ruolo, cliente_id:ruolo==='cliente'?clienteId:null, attivo:true}]).select().single();
+  if (insertRes.error) { toast('Errore salvataggio utente: ' + insertRes.error.message); return; }
+  var nuovoUtente = insertRes.data;
 
-  // 3. Salva permessi
+  // 3. Salva permessi (mentre siamo ancora admin)
   if (ruolo !== 'cliente' && ruolo !== 'admin') {
-    const checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
-    const permessi = Array.from(checks).map(c=>({utente_id:nuovoUtente.id,sezione:c.value,abilitato:c.checked}));
+    var checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
+    var permessi = Array.from(checks).map(function(c) { return {utente_id:nuovoUtente.id, sezione:c.value, abilitato:c.checked}; });
     if (permessi.length) await sb.from('permessi').insert(permessi);
   }
 
-  toast('Utente ' + nome + ' creato con successo! Può accedere con email e password.');
+  // 4. Ora crea l'utente Auth (questo potrebbe cambiare la sessione)
+  var authRes = await sb.auth.signUp({ email:email, password:password });
+  if (authRes.error) {
+    // Se il signUp fallisce, rimuovi il record utenti appena creato
+    await sb.from('utenti').delete().eq('id', nuovoUtente.id);
+    toast('Errore creazione accesso: ' + authRes.error.message);
+    return;
+  }
+
+  // 5. Ripristina sessione admin se è stata cambiata
+  if (adminToken && adminRefresh) {
+    await sb.auth.setSession({ access_token: adminToken, refresh_token: adminRefresh });
+  }
+
+  toast('Utente ' + nome + ' creato con successo! Puo accedere con email e password.');
   // Reset form
   document.getElementById('ut-nome').value = '';
   document.getElementById('ut-email').value = '';
