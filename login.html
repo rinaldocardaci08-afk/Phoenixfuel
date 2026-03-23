@@ -21,7 +21,10 @@
       </div>
       <div class="form-group" style="margin-bottom:20px">
         <label>Password</label>
-        <input type="password" id="login-password" placeholder="••••••••" />
+        <div style="position:relative">
+          <input type="password" id="login-password" placeholder="••••••••" style="width:100%;padding-right:40px" />
+          <button type="button" id="toggle-pw" onclick="togglePassword()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:#999;padding:4px">👁</button>
+        </div>
       </div>
       <button class="btn-primary" style="width:100%" onclick="accedi()">Accedi</button>
       <div id="login-error" style="margin-top:12px;font-size:12px;color:#A32D2D;display:none"></div>
@@ -49,6 +52,13 @@
     }
 
     document.addEventListener('keydown', e => { if (e.key === 'Enter') accedi(); });
+
+    function togglePassword() {
+      var pw = document.getElementById('login-password');
+      var btn = document.getElementById('toggle-pw');
+      if (pw.type === 'password') { pw.type = 'text'; btn.textContent = '🔒'; }
+      else { pw.type = 'password'; btn.textContent = '👁'; }
+    }
   </script>
 </body>
 </html>
