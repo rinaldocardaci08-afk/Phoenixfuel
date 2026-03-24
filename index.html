@@ -123,11 +123,12 @@
             <div class="form-group"><label>Tipo ordine</label>
               <select id="ord-tipo" onchange="toggleTipoOrdine()">
                 <option value="cliente">Vendita a cliente</option>
-                <option value="deposito">Approvvigionamento deposito</option>
+                <option value="entrata_deposito">Entrata deposito</option>
+                <option value="stazione_servizio">Stazione Servizio Oppido</option>
+                <option value="autoconsumo">Autoconsumo camion</option>
               </select>
             </div>
-            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente" onchange="controllaFidoCliente();caricaSediOrdine()"><option value="">Seleziona...</option></select></div>
-            <div class="form-group" id="grp-sede" style="display:none"><label>Sede di scarico</label><select id="ord-sede"><option value="">— Seleziona sede —</option></select></div>
+            <div class="form-group" id="grp-cliente"><label>Cliente</label><select id="ord-cliente" onchange="controllaFidoCliente()"><option value="">Seleziona...</option></select></div>
             <div class="form-group"><label>Fornitore</label><select id="ord-fornitore" onchange="aggiornaBasiOrdine()"><option value="">— Prima seleziona data —</option></select></div>
             <div class="form-group"><label>Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label>Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()"><option value="">— Prima seleziona base —</option></select></div>
@@ -162,8 +163,11 @@
             <span>Elenco ordini</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <input type="text" id="search-ordini" placeholder="Cerca cliente..." oninput="filtraOrdini()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:180px" />
+              <select id="filtro-tipo-ordini" onchange="filtraOrdini()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti i tipi</option><option value="cliente">Vendita cliente</option><option value="entrata_deposito">Entrata deposito</option><option value="stazione_servizio">Stazione Oppido</option><option value="autoconsumo">Autoconsumo</option>
+              </select>
               <select id="filtro-prodotto-ordini" onchange="filtraOrdini()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                <option value="">Tutti i prodotti</option><option>Gasolio Autotrazione</option><option>Benzina</option><option>Gasolio Agricolo</option><option>HVO</option>
+                <option value="">Tutti i prodotti</option>
               </select>
               <select id="filtro-stato-ordini" onchange="filtraOrdini()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="">Tutti gli stati</option><option value="in attesa">In attesa</option><option value="confermato">Confermato</option><option value="programmato">Programmato</option><option value="annullato">Annullato</option>
@@ -173,8 +177,8 @@
             </div>
           </div>
           <div style="overflow-x:auto">
-          <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Sede scarico</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
-          <tbody id="tabella-ordini"><tr><td colspan="15" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
+          <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
       </div>
@@ -192,41 +196,8 @@
             </div>
           </div>
 
-          <!-- Gasolio Autotrazione -->
-          <div style="margin-bottom:16px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#D4A017"></div><span style="font-size:13px;font-weight:500">Gasolio Autotrazione</span></div>
-            <div style="overflow-x:auto">
-            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-            <tbody id="tabella-prezzi-autotrazione"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
-            </div>
-          </div>
-
-          <!-- Benzina -->
-          <div style="margin-bottom:16px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#378ADD"></div><span style="font-size:13px;font-weight:500">Benzina</span></div>
-            <div style="overflow-x:auto">
-            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-            <tbody id="tabella-prezzi-benzina"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
-            </div>
-          </div>
-
-          <!-- Gasolio Agricolo -->
-          <div style="margin-bottom:16px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#639922"></div><span style="font-size:13px;font-weight:500">Gasolio Agricolo</span></div>
-            <div style="overflow-x:auto">
-            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-            <tbody id="tabella-prezzi-agricolo"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
-            </div>
-          </div>
-
-          <!-- HVO -->
-          <div style="margin-bottom:16px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:#3B6D11"></div><span style="font-size:13px;font-weight:500">HVO</span></div>
-            <div style="overflow-x:auto">
-            <table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead>
-            <tbody id="tabella-prezzi-hvo"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table>
-            </div>
-          </div>
+          <!-- Tabelle prezzi prodotti (generate dinamicamente) -->
+          <div id="container-tabelle-prezzi"></div>
         </div>
 
         <div class="card">
@@ -238,8 +209,6 @@
             <div class="form-group"><label>Prodotto</label>
               <select id="pr-prodotto">
                 <option value="">Seleziona...</option>
-                <option>Gasolio Autotrazione</option><option>Gasolio Agricolo</option>
-                <option>HVO</option><option>Benzina</option><option>AdBlue</option>
               </select>
             </div>
             <div class="form-group"><label>Costo/L (€)</label><input type="number" id="pr-costo" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
@@ -259,8 +228,6 @@
             <div class="form-group"><label>Prodotto</label>
               <select id="pc-prodotto">
                 <option value="">Seleziona...</option>
-                <option>Gasolio Autotrazione</option><option>Gasolio Agricolo</option>
-                <option>HVO</option><option>Benzina</option><option>AdBlue</option>
               </select>
             </div>
             <div class="form-group"><label>Prezzo/L (€)</label><input type="number" id="pc-prezzo" step="0.0001" placeholder="0.0000" /></div>
@@ -275,39 +242,29 @@
       <!-- DEPOSITO -->
       <div class="section" id="s-deposito">
         <div class="grid4" style="margin-bottom:20px">
-          <div class="kpi"><div class="kpi-label">Capacità totale</div><div class="kpi-value">280.000 L</div></div>
+          <div class="kpi"><div class="kpi-label">Capacità totale</div><div class="kpi-value" id="dep-capacita">—</div></div>
           <div class="kpi"><div class="kpi-label">Stoccaggio attuale</div><div class="kpi-value" id="dep-totale">—</div></div>
           <div class="kpi"><div class="kpi-label">Riempimento %</div><div class="kpi-value" id="dep-pct">—</div></div>
           <div class="kpi"><div class="kpi-label">Cisterne in allerta</div><div class="kpi-value" id="dep-allerta">—</div></div>
         </div>
-        <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#D4A017"></div><div><div class="dep-product-title">Gasolio Autotrazione</div><div class="dep-product-sub">3 cisterne · 150.000 L</div></div><div class="dep-product-total" id="dep-total-autotrazione">—</div></div><div class="dep-cisterne-grid" id="dep-autotrazione"></div></div>
-        <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#639922"></div><div><div class="dep-product-title">Gasolio Agricolo</div><div class="dep-product-sub">2 cisterne · 40.000 L</div></div><div class="dep-product-total" id="dep-total-agricolo">—</div></div><div class="dep-cisterne-grid" id="dep-agricolo"></div></div>
-        <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#3B6D11"></div><div><div class="dep-product-title">HVO</div><div class="dep-product-sub">2 cisterne · 40.000 L</div></div><div class="dep-product-total" id="dep-total-hvo">—</div></div><div class="dep-cisterne-grid" id="dep-hvo"></div></div>
-        <div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#378ADD"></div><div><div class="dep-product-title">Benzina</div><div class="dep-product-sub">1 cisterna · 50.000 L</div></div><div class="dep-product-total" id="dep-total-benzina">—</div></div><div class="dep-cisterne-grid" id="dep-benzina"></div></div>
+        <div id="container-deposito-prodotti"></div>
         <div class="card"><div class="card-title">Movimenti recenti</div><table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table></div>
       </div>
 
       <!-- CONSEGNE -->
       <div class="section" id="s-consegne">
         <div class="grid4" style="margin-bottom:16px">
-          <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="tot-consegne">—</div></div>
-          <div class="kpi"><div class="kpi-label">Litri totali</div><div class="kpi-value" id="tot-litri-cons">—</div></div>
-          <div class="kpi"><div class="kpi-label">Fatturato netto</div><div class="kpi-value" id="tot-fatt-netto-cons">—</div></div>
-          <div class="kpi"><div class="kpi-label">Fatturato IVA incl.</div><div class="kpi-value" id="tot-fatt-iva-cons">—</div></div>
-        </div>
-        <div class="grid4" style="margin-bottom:16px">
+          <div class="kpi"><div class="kpi-label">Ordini oggi</div><div class="kpi-value" id="tot-consegne">—</div></div>
           <div class="kpi"><div class="kpi-label">Confermati</div><div class="kpi-value" id="tot-completate">—</div></div>
           <div class="kpi"><div class="kpi-label">In attesa</div><div class="kpi-value" id="tot-inattesa">—</div></div>
           <div class="kpi"><div class="kpi-label">Programmati</div><div class="kpi-value" id="tot-programmati">—</div></div>
-          <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="tot-margine-cons">—</div></div>
         </div>
 
         <!-- Filtro data -->
         <div class="card" style="margin-bottom:16px">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Gestione consegne</span>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="generaElencoVenditeGiorno()">📊 Elenco vendite</button>
+            <div style="display:flex;gap:8px;align-items:center">
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Data:</label>
               <input type="date" id="filtro-data-consegne" style="font-size:15px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500" onchange="caricaConsegne()" />
             </div>
@@ -333,16 +290,10 @@
       <!-- VENDITE -->
       <div class="section" id="s-vendite">
         <div class="grid4" style="margin-bottom:16px">
-          <div class="kpi"><div class="kpi-label">Fatturato netto (no IVA)</div><div class="kpi-value" id="vend-fatturato-netto">—</div></div>
-          <div class="kpi"><div class="kpi-label">Fatturato IVA inclusa</div><div class="kpi-value" id="vend-fatturato-iva">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato periodo</div><div class="kpi-value" id="vend-fatturato">—</div></div>
           <div class="kpi"><div class="kpi-label">Litri periodo</div><div class="kpi-value" id="vend-litri">—</div></div>
           <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="vend-margine">—</div></div>
-        </div>
-        <div class="grid4" style="margin-bottom:16px">
           <div class="kpi"><div class="kpi-label">Ordini periodo</div><div class="kpi-value" id="vend-ordini">—</div></div>
-          <div class="kpi"><div class="kpi-label">Costo acquisto</div><div class="kpi-value" id="vend-costo" style="color:#A32D2D">—</div></div>
-          <div class="kpi"><div class="kpi-label">Costo trasporto</div><div class="kpi-value" id="vend-trasporto">—</div></div>
-          <div class="kpi"><div class="kpi-label">Primo margine</div><div class="kpi-value" id="vend-primo-margine" style="color:#639922">—</div></div>
         </div>
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -355,21 +306,18 @@
               <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
               <input type="date" id="vend-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVendite()" />
               <select id="vend-prodotto" onchange="caricaVendite()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                <option value="">Tutti i prodotti</option><option>Gasolio Autotrazione</option><option>Benzina</option><option>Gasolio Agricolo</option><option>HVO</option>
-              </select>
-              <select id="vend-cliente" onchange="caricaVendite()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                <option value="">Tutti i clienti</option>
+                <option value="">Tutti i prodotti</option>
               </select>
             </div>
           </div>
-          <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th></tr></thead>
-          <tbody id="tabella-vendite"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+          <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
 
           <!-- Vendite per cliente -->
           <div style="margin-top:16px">
             <div style="font-size:13px;font-weight:500;margin-bottom:10px">Vendite per cliente</div>
-            <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th><th>Ordini</th></tr></thead>
-            <tbody id="tabella-vendite-clienti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Ordini</th></tr></thead>
+            <tbody id="tabella-vendite-clienti"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
 
           <!-- Grafici vendite -->
@@ -386,7 +334,6 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco clienti</span>
             <div style="display:flex;gap:8px;align-items:center">
-              <label class="check-label"><input type="checkbox" id="mostra-inattivi" onchange="caricaClienti()" /> Mostra inattivi</label>
               <input type="text" id="search-clienti" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraClienti()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
               <button class="btn-primary" onclick="apriModaleCliente()">+ Nuovo cliente</button>
             </div>
@@ -405,7 +352,6 @@
             <span>Elenco fornitori</span>
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="apriReportAcquisti()">📊 Report Acquisti</button>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="apriReportAcquistiMensile()">📅 Acquisti Mensili</button>
               <input type="text" id="search-fornitori" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraFornitori()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
               <button class="btn-primary" onclick="apriModaleFornitore()">+ Nuovo fornitore</button>
             </div>
@@ -433,6 +379,37 @@
         <div class="card"><div class="card-title">Elenco basi di carico</div>
           <table><thead><tr><th>Nome</th><th>Indirizzo</th><th>Città</th><th>Fornitori associati</th><th>Note</th><th></th></tr></thead>
           <tbody id="tabella-basi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- PRODOTTI -->
+      <div class="section" id="s-prodotti">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Nuovo prodotto</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Nome prodotto</label><input type="text" id="prod-nome" placeholder="Es. Gasolio Speciale" /></div>
+            <div class="form-group"><label>Categoria</label>
+              <select id="prod-categoria">
+                <option value="benzine">Benzine (cisterne deposito)</option>
+                <option value="altro">Altro (magazzino virtuale)</option>
+              </select>
+            </div>
+            <div class="form-group"><label>IVA predefinita %</label>
+              <select id="prod-iva">
+                <option value="22">22%</option>
+                <option value="10">10%</option>
+                <option value="4">4%</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Colore grafici</label><input type="color" id="prod-colore" value="#888888" /></div>
+            <div class="form-group"><label>Tipo cisterna</label><input type="text" id="prod-tipo-cisterna" placeholder="Es. autotrazione, benzina..." /></div>
+          </div>
+          <button class="btn-primary" onclick="salvaProdotto()">Salva prodotto</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Elenco prodotti</div>
+          <table><thead><tr><th style="width:20px"></th><th>Nome</th><th>Categoria</th><th>IVA</th><th>Tipo cisterna</th><th>Stato</th><th></th></tr></thead>
+          <tbody id="tabella-prodotti"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
         </div>
       </div>
 
@@ -569,7 +546,7 @@
   <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:90%;max-width:700px;max-height:85vh;overflow-y:auto;position:relative;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
       <span id="modal-title" style="font-size:15px;font-weight:500"></span>
-      <button id="btn-chiudi-modal-overlay" style="background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;color:var(--text-muted);padding:4px 14px">x Chiudi</button>
+      <button onclick="chiudiModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
     </div>
     <div id="modal-clienti">
       <div class="form-grid">
@@ -612,13 +589,10 @@
   </div>
 </div>
 
-<!-- MODAL PERMESSI / SCHEDA CLIENTE -->
+<!-- MODAL PERMESSI -->
 <div id="modal-permessi" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;">
-  <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:0;width:95%;max-width:900px;max-height:90vh;overflow:hidden;position:relative;display:flex;flex-direction:column;">
-    <div style="display:flex;justify-content:flex-end;padding:12px 16px 0;flex-shrink:0">
-      <button id="btn-chiudi-modale-top" style="background:none;border:1px solid var(--border);border-radius:6px;font-size:13px;cursor:pointer;color:var(--text-muted);padding:4px 14px">x Chiudi</button>
-    </div>
-    <div id="modal-permessi-content" style="padding:4px 24px 24px;overflow-y:auto;flex:1"></div>
+  <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:95%;max-width:900px;max-height:90vh;overflow-y:auto;position:relative;">
+    <div id="modal-permessi-content"></div>
   </div>
 </div>
 <script src="app.js"></script>

@@ -86,8 +86,6 @@
       <label>Prodotto</label>
       <select id="f-prodotto">
         <option value="">Tutti i prodotti</option>
-        <option>Gasolio Autotrazione</option><option>Benzina</option>
-        <option>Gasolio Agricolo</option><option>HVO</option>
       </select>
     </div>
     <div class="filtri-group">
@@ -192,15 +190,28 @@ function fmtL(n) {
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 const COLORI = ['#378ADD','#D4A017','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A','#085041','#791F1F'];
-const COLORI_PROD = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#3B6D11' };
+let COLORI_PROD = {};
+let _prodottiCache = [];
 
 async function caricaFiltri() {
-  const { data: fornitori } = await sb.from('fornitori').select('nome').eq('attivo',true).order('nome');
+  const [fornRes, prodRes] = await Promise.all([
+    sb.from('fornitori').select('nome').eq('attivo',true).order('nome'),
+    sb.from('prodotti').select('*').eq('attivo',true).order('ordine_visualizzazione')
+  ]);
+
   const wrap = document.getElementById('f-fornitore-checks');
-  if (!fornitori || !fornitori.length) { wrap.innerHTML = '<span style="color:#999;font-size:12px">Nessun fornitore</span>'; return; }
+  const fornitori = fornRes.data || [];
+  if (!fornitori.length) { wrap.innerHTML = '<span style="color:#999;font-size:12px">Nessun fornitore</span>'; return; }
   wrap.innerHTML = fornitori.map(f =>
     '<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;background:#fff;border:1px solid #ddd;border-radius:6px;padding:5px 10px"><input type="checkbox" class="f-forn-check" value="'+esc(f.nome)+'" /> '+esc(f.nome)+'</label>'
   ).join('');
+
+  _prodottiCache = prodRes.data || [];
+  COLORI_PROD = {};
+  _prodottiCache.forEach(p => { COLORI_PROD[p.nome] = p.colore || '#888'; });
+  const selP = document.getElementById('f-prodotto');
+  selP.innerHTML = '<option value="">Tutti i prodotti</option>';
+  _prodottiCache.forEach(p => { selP.innerHTML += '<option>' + esc(p.nome) + '</option>'; });
 }
 caricaFiltri();
 

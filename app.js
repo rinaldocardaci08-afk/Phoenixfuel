@@ -32,7 +32,12 @@ async function inizializza() {
   document.getElementById('utente-ruolo').textContent = utente.ruolo;
   await costruisciMenu(utente.ruolo, utente.id);
   if (utente.ruolo === 'cliente') { setSection('cliente', document.querySelector('.nav-item')); }
-  else { caricaDashboard(); initForms(); aggiornaSelezioniOrdine(); }
+  else { await caricaCacheProdotti(); caricaDashboard(); initForms(); aggiornaSelezioniOrdine(); }
+}
+
+async function caricaCacheProdotti() {
+  const { data } = await sb.from('prodotti').select('*').order('ordine_visualizzazione');
+  cacheProdotti = data || [];
 }
 
 function initForms() {
@@ -40,6 +45,11 @@ function initForms() {
   if (document.getElementById('ord-data')) document.getElementById('ord-data').value = oggiISO;
   if (document.getElementById('filtro-data-prezzi')) document.getElementById('filtro-data-prezzi').value = oggiISO;
   if (document.getElementById('pc-data')) document.getElementById('pc-data').value = oggiISO;
+  // Popola dropdown prodotti dinamici
+  popolaDropdownProdotti('filtro-prodotto-ordini', true);
+  popolaDropdownProdotti('vend-prodotto', true);
+  popolaDropdownProdotti('pr-prodotto', false);
+  popolaDropdownProdotti('pc-prodotto', false);
 }
 
 async function costruisciMenu(ruolo, utenteId) {
@@ -54,8 +64,8 @@ async function costruisciMenu(ruolo, utenteId) {
       voci.push({ id, ...map[id] });
     });
     voci.push({ section:'Anagrafica' });
-    ['clienti','fornitori','basi'].forEach(id => {
-      const map = { clienti:{icon:'👤',label:'Clienti'}, fornitori:{icon:'🏭',label:'Fornitori'}, basi:{icon:'📍',label:'Basi di carico'} };
+    ['clienti','fornitori','basi','prodotti'].forEach(id => {
+      const map = { clienti:{icon:'👤',label:'Clienti'}, fornitori:{icon:'🏭',label:'Fornitori'}, basi:{icon:'📍',label:'Basi di carico'}, prodotti:{icon:'📦',label:'Prodotti'} };
       voci.push({ id, ...map[id] });
     });
     voci.push({ section:'Logistica' });
@@ -75,6 +85,7 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'clienti', icon:'👤', label:'Clienti', section:'Anagrafica' },
       { id:'fornitori', icon:'🏭', label:'Fornitori' },
       { id:'basi', icon:'📍', label:'Basi di carico' },
+      { id:'prodotti', icon:'📦', label:'Prodotti' },
       { id:'logistica', icon:'🚛', label:'Logistica', section:'Logistica' },
     ];
     let lastSection = null;
@@ -97,14 +108,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
+const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
@@ -131,47 +142,9 @@ function apriModal(html) {
   document.getElementById('modal-permessi-content').innerHTML = html;
   document.getElementById('modal-permessi').style.display = 'flex';
 }
-function chiudiModalePermessi() {
-  document.getElementById('modal-permessi').style.display = 'none';
-}
-function chiudiModal() {
-  document.getElementById('modal-overlay').style.display = 'none';
-}
-
-// Pulsante X statico in cima (fuori dal contenuto dinamico, non si rompe mai)
-document.getElementById('btn-chiudi-modale-top').addEventListener('click', function(e) {
-  e.stopPropagation();
-  chiudiModalePermessi();
-});
-
-// Pulsante X statico modal-overlay (modifica cliente/fornitore)
-document.getElementById('btn-chiudi-modal-overlay').addEventListener('click', function(e) {
-  e.stopPropagation();
-  chiudiModal();
-});
-
-// Click sfondo scuro modal-permessi
-document.getElementById('modal-permessi').addEventListener('click', function(e) {
-  if (e.target === this) chiudiModalePermessi();
-});
-
-// Click sfondo scuro modal-overlay (clienti/fornitori form)
-document.getElementById('modal-overlay').addEventListener('click', function(e) {
-  if (e.target === this) chiudiModal();
-});
-
-// Bottoni dinamici con data-chiudi-modale
-document.addEventListener('click', function(e) {
-  if (e.target.closest('[data-chiudi-modale]')) chiudiModalePermessi();
-});
-
-// ESC per chiudere qualsiasi modale aperta
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') {
-    if (document.getElementById('modal-permessi').style.display === 'flex') chiudiModalePermessi();
-    else if (document.getElementById('modal-overlay').style.display === 'flex') chiudiModal();
-  }
-});
+function chiudiModalePermessi() { document.getElementById('modal-permessi').style.display = 'none'; }
+document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) chiudiModal(); });
+function chiudiModal() { chiudiModalePermessi(); }
 
 // ── UTILITÀ ───────────────────────────────────────────────────────
 function fmt(n) {
@@ -188,8 +161,9 @@ function fmtL(n) {
   return v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' L';
 }
 function badgeStato(stato) {
-  const map = { 'confermato':'green','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal' };
-  return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(stato) + '</span>';
+  const map = { 'confermato':'green','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
+  const labels = { 'entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
+  return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(labels[stato]||stato) + '</span>';
 }
 function badgeRuolo(ruolo) {
   const map = { 'admin':'purple','operatore':'blue','contabilita':'green','logistica':'amber','cliente':'gray' };
@@ -241,7 +215,31 @@ async function apiCall(fn, msgErrore) {
 }
 
 // ── CACHE ─────────────────────────────────────────────────────────
-let cacheClienti=[], cacheFornitori=[];
+let cacheClienti=[], cacheFornitori=[], cacheProdotti=[];
+
+// Helper: popola dropdown prodotti da tabella
+function popolaDropdownProdotti(selectId, includiTutti, soloAttivi) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const prodotti = soloAttivi !== false ? cacheProdotti.filter(p => p.attivo) : cacheProdotti;
+  let html = includiTutti ? '<option value="">Tutti i prodotti</option>' : '<option value="">Seleziona...</option>';
+  prodotti.forEach(p => { html += '<option>' + p.nome + '</option>'; });
+  sel.innerHTML = html;
+}
+
+// Helper: mappa colori prodotti
+function getColoriProdotti() {
+  const m = {};
+  cacheProdotti.forEach(p => { m[p.nome] = p.colore || '#888'; });
+  return m;
+}
+
+// Helper: mappa prodotto → tipo_cisterna
+function getProdottoTipoCisterna() {
+  const m = {};
+  cacheProdotti.forEach(p => { if (p.tipo_cisterna) m[p.nome] = p.tipo_cisterna; });
+  return m;
+}
 
 async function caricaSelectFornitori(selectId) {
   const { data } = await sb.from('fornitori').select('id,nome').eq('attivo',true).order('nome');
@@ -363,8 +361,9 @@ async function caricaPrezzi() {
       const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
       if (totLitri > 0) {
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
+        const prodInfo = cacheProdotti.find(p=>p.nome===prodotto);
         const ovr = _depositoOverrides[prodotto] || {};
-        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodotto==='Gasolio Agricolo'?10:22, _giacenza:totLitri, _isDeposito:true });
+        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
       }
     });
   }
@@ -373,24 +372,25 @@ async function caricaPrezzi() {
   const best = {};
   tuttiPrezzi.forEach(r => { const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
 
-  // Mappa prodotto → id tabella
-  const tabMap = {
-    'Gasolio Autotrazione': 'tabella-prezzi-autotrazione',
-    'Benzina': 'tabella-prezzi-benzina',
-    'Gasolio Agricolo': 'tabella-prezzi-agricolo',
-    'HVO': 'tabella-prezzi-hvo'
-  };
+  // Genera tabelle prezzi dinamicamente dai prodotti
+  const container = document.getElementById('container-tabelle-prezzi');
+  const tabMap = {};
+  cacheProdotti.filter(p => p.attivo).forEach(p => {
+    const tbId = 'tabella-prezzi-' + (p.tipo_cisterna || p.nome.toLowerCase().replace(/\s+/g,'-'));
+    tabMap[p.nome] = tbId;
+  });
+  if (container) {
+    container.innerHTML = cacheProdotti.filter(p => p.attivo).map(p => {
+      const tbId = tabMap[p.nome];
+      return '<div style="margin-bottom:16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:13px;font-weight:500">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
+    }).join('');
+  }
 
   // Raggruppa per prodotto
   const perProdotto = {};
   Object.keys(tabMap).forEach(p => { perProdotto[p] = []; });
   tuttiPrezzi.forEach(r => {
-    const key = Object.keys(tabMap).find(k => r.prodotto === k);
-    if (key) perProdotto[key].push(r);
-    else {
-      // Prodotti non mappati vanno in autotrazione come fallback
-      perProdotto['Gasolio Autotrazione'].push(r);
-    }
+    if (tabMap[r.prodotto]) perProdotto[r.prodotto].push(r);
   });
 
   // Renderizza ogni tabella
@@ -496,7 +496,7 @@ async function confermaCostoDeposito(prodotto) {
   if (isNaN(nuovoCosto) || nuovoCosto <= 0) { toast('Inserisci un costo valido'); return; }
 
   // Aggiorna costo_medio di tutte le cisterne di quel prodotto
-  const prodottoMap = { 'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina' };
+  const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[prodotto] || 'autotrazione';
 
   const { error } = await sb.from('cisterne').update({ costo_medio: nuovoCosto, updated_at: new Date().toISOString() }).eq('tipo', tipo);
@@ -515,12 +515,16 @@ let prezzoCorrente=null, prezziDelGiorno=[];
 let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false;
 
 function toggleTipoOrdine() {
-  var isCliente = document.getElementById('ord-tipo').value==='cliente';
+  const tipo = document.getElementById('ord-tipo').value;
+  const isCliente = tipo === 'cliente';
   document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
-  var grpSede = document.getElementById('grp-sede');
-  if (grpSede) { grpSede.style.display = 'none'; }
-  var selSede = document.getElementById('ord-sede');
-  if (selSede) { selSede.innerHTML = '<option value="">-- Seleziona sede --</option>'; }
+  // Per non-cliente, precompila il nome
+  if (!isCliente) {
+    const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
+    document.getElementById('ord-note').placeholder = lbl[tipo] || '';
+  } else {
+    document.getElementById('ord-note').placeholder = '';
+  }
 }
 
 async function aggiornaSelezioniOrdine() {
@@ -545,7 +549,8 @@ async function aggiornaSelezioniOrdine() {
       if (cis.length) {
         const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
-        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'PhoenixFuel', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodotto==='Gasolio Agricolo'?10:22, _isDeposito:true });
+        const prodI = cacheProdotti.find(pp=>pp.nome===prodotto);
+        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'PhoenixFuel', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
       }
     });
   }
@@ -611,7 +616,7 @@ async function caricaPrezzoPerOrdine() {
     if (clienteId) {
       const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
       if (clienteNome) {
-        const { data: ordPrec } = await sb.from('ordini').select('margine,prodotto').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').neq('tipo_ordine','deposito');
+        const { data: ordPrec } = await sb.from('ordini').select('margine,prodotto').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente');
         const conMargine = (ordPrec||[]).filter(o => Number(o.margine) > 0);
         if (conMargine.length > 0) {
           const media = conMargine.reduce((s, o) => s + Number(o.margine), 0) / conMargine.length;
@@ -765,8 +770,13 @@ async function salvaOrdine() {
   if (litri === null) return;
   const tipo = document.getElementById('ord-tipo').value;
   const clienteId = document.getElementById('ord-cliente').value;
-  const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'Deposito';
-  if (tipo==='cliente'&&!clienteId) { toast('Seleziona un cliente'); return; }
+  let clienteNome;
+  if (tipo === 'cliente') {
+    if (!clienteId) { toast('Seleziona un cliente'); return; }
+    clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'';
+  } else {
+    clienteNome = 'Phoenix Fuel Srl';
+  }
   const trasporto = validaNumero(document.getElementById('ord-trasporto-custom').value || '0', 0, 1, 'Trasporto');
   if (trasporto === null) return;
   const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
@@ -797,14 +807,10 @@ async function salvaOrdine() {
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  // Sede di scarico
-  const sedeEl = document.getElementById('ord-sede');
-  const sedeId = sedeEl ? sedeEl.value : '';
-  const sedeNomeTxt = sedeId && sedeEl.options[sedeEl.selectedIndex] ? sedeEl.options[sedeEl.selectedIndex].textContent : '';
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, sede_scarico_id:sedeId||null, sede_scarico_nome:sedeNomeTxt||null };
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
-  if (prezzoCorrente._isDeposito && tipo !== 'deposito') {
+  if (prezzoCorrente._isDeposito && tipo === 'cliente') {
     await confermaUscitaDeposito(nuovoOrdine.id);
     toast('Ordine salvato e deposito aggiornato!');
   } else {
@@ -816,10 +822,6 @@ async function salvaOrdine() {
   document.getElementById('ord-prezzo-netto').value = '';
   document.getElementById('fido-cliente-info').style.display = 'none';
   document.getElementById('prev-fido-warn').style.display = 'none';
-  var grpSedeReset = document.getElementById('grp-sede');
-  if (grpSedeReset) grpSedeReset.style.display = 'none';
-  var selSedeReset = document.getElementById('ord-sede');
-  if (selSedeReset) selSedeReset.innerHTML = '<option value="">-- Seleziona sede --</option>';
   fidoClienteCorrente = null;
   caricaOrdini(); caricaDashboard();
 }
@@ -838,17 +840,17 @@ async function caricaOrdini() {
   }
   const data = allData;
   const tbody = document.getElementById('tabella-ordini');
-  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="15" class="loading">Nessun ordine</td></tr>'; return; }
+  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
   let html = '';
   data.forEach(r => {
     const pL = prezzoConIva(r), tot = pL*r.litri;
     const basNome = r.basi_carico ? r.basi_carico.nome : '—';
-    const isApprov = r.tipo_ordine==='deposito' && r.stato!=='confermato' && r.stato!=='annullato';
-    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && r.tipo_ordine!=='deposito' && r.stato!=='confermato' && r.stato!=='annullato';
+    const isApprov = r.tipo_ordine==='entrata_deposito' && r.stato!=='confermato' && r.stato!=='annullato';
+    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && r.tipo_ordine==='cliente' && r.stato!=='confermato' && r.stato!=='annullato';
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.sede_scarico_nome||'—') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
   });
   tbody.innerHTML = html;
 }
@@ -860,20 +862,24 @@ function filtraOrdini() {
   const q = (document.getElementById('search-ordini').value||'').toLowerCase();
   const prodotto = document.getElementById('filtro-prodotto-ordini').value;
   const stato = document.getElementById('filtro-stato-ordini').value;
+  const tipoFiltro = document.getElementById('filtro-tipo-ordini').value;
   const da = document.getElementById('filtro-da-ordini').value;
   const a = document.getElementById('filtro-a-ordini').value;
+  const tipoLabels = { 'cliente':'cliente','entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
   const righe = document.querySelectorAll('#tabella-ordini tr');
   righe.forEach(tr => {
     const celle = tr.querySelectorAll('td');
     if (!celle.length) return;
     const dataOrd = celle[0]?.textContent || '';
+    const tipoBadge = celle[1]?.textContent?.trim() || '';
     const cliente = celle[2]?.textContent?.toLowerCase() || '';
-    const prod = celle[4]?.textContent || '';
-    const st = celle[13]?.textContent || '';
+    const prod = celle[3]?.textContent || '';
+    const st = celle[12]?.textContent || '';
     let vis = true;
     if (q && !cliente.includes(q)) vis = false;
     if (prodotto && prod !== prodotto) vis = false;
     if (stato && st !== stato) vis = false;
+    if (tipoFiltro && tipoBadge !== (tipoLabels[tipoFiltro]||tipoFiltro)) vis = false;
     if (da && dataOrd < da) vis = false;
     if (a && dataOrd > a) vis = false;
     tr.style.display = vis ? '' : 'none';
@@ -1048,12 +1054,6 @@ async function eliminaRecord(tabella, id, callback) {
 }
 
 // ── DEPOSITO ─────────────────────────────────────────────────────
-const DEP_CONFIG = {
-  autotrazione:{colore:'#D4A017',elId:'dep-autotrazione',totId:'dep-total-autotrazione'},
-  agricolo:{colore:'#639922',elId:'dep-agricolo',totId:'dep-total-agricolo'},
-  hvo:{colore:'#3B6D11',elId:'dep-hvo',totId:'dep-total-hvo'},
-  benzina:{colore:'#378ADD',elId:'dep-benzina',totId:'dep-total-benzina'}
-};
 
 function cisternasvg(pct, colore) {
   const altMax=80, liv=Math.round((pct/100)*altMax), y=10+(altMax-liv);
@@ -1064,35 +1064,58 @@ function cisternasvg(pct, colore) {
 async function caricaDeposito() {
   const { data: cisterne } = await sb.from('cisterne').select('*').order('tipo').order('nome');
   if (!cisterne) return;
-  let totaleStoccato=0, allerte=0;
-  Object.entries(DEP_CONFIG).forEach(([tipo, cfg]) => {
-    const gruppo = cisterne.filter(c=>c.tipo===tipo);
-    let totG=0;
-    const el = document.getElementById(cfg.elId); if (!el) return;
-    let html = '';
+
+  // Raggruppa cisterne per tipo
+  const tipi = [...new Set(cisterne.map(c => c.tipo))];
+  const container = document.getElementById('container-deposito-prodotti');
+  let totaleStoccato = 0, capacitaTotale = 0, allerte = 0;
+  let cardsHtml = '';
+
+  tipi.forEach(tipo => {
+    const gruppo = cisterne.filter(c => c.tipo === tipo);
+    if (!gruppo.length) return;
+    // Trova colore dal prodotto
+    const prodNome = gruppo[0].prodotto || tipo;
+    const prodInfo = cacheProdotti.find(p => p.tipo_cisterna === tipo || p.nome === prodNome);
+    const colore = prodInfo ? prodInfo.colore : '#888';
+    const nCis = gruppo.length;
+    const capGruppo = gruppo.reduce((s, c) => s + Number(c.capacita_max), 0);
+    let totG = 0;
+
+    let cisHtml = '';
     gruppo.forEach(c => {
-      const pct = Math.round((Number(c.livello_attuale)/Number(c.capacita_max))*100);
-      totG += Number(c.livello_attuale);
-      if (pct<30) allerte++;
-      html += '<div class="dep-cisterna' + (pct<30?' alert':'') + '">' +
+      const capMax = Number(c.capacita_max);
+      const livAtt = Number(c.livello_attuale);
+      // Per cisterne senza limite (es. AdBlue 999999), non mostrare %
+      const isMagazzino = capMax >= 999000;
+      const pct = isMagazzino ? (livAtt > 0 ? 50 : 0) : Math.round((livAtt / capMax) * 100);
+      totG += livAtt;
+      if (!isMagazzino && pct < 30) allerte++;
+      cisHtml += '<div class="dep-cisterna' + (!isMagazzino && pct < 30 ? ' alert' : '') + '">' +
         '<div class="dep-cisterna-name">' + c.nome + '</div>' +
-        cisternasvg(pct, cfg.colore) +
-        '<div class="dep-cisterna-litri">' + Number(c.livello_attuale).toLocaleString('it-IT') + ' L</div>' +
-        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + Number(c.capacita_max).toLocaleString('it-IT') + ' L</div>' +
+        cisternasvg(isMagazzino ? 50 : pct, colore) +
+        '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' L</div>' +
+        '<div class="dep-cisterna-pct">' + (isMagazzino ? 'Magazzino' : pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' L') + '</div>' +
         '<button class="btn-edit" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apriModaleCisterna(\'' + c.id + '\')">Modifica</button>' +
         '</div>';
     });
-    el.innerHTML = html;
-    document.getElementById(cfg.totId).textContent = fmtL(totG);
+
+    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + (capGruppo < 999000 ? ' · ' + capGruppo.toLocaleString('it-IT') + ' L' : ' · Magazzino');
+    cardsHtml += '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
     totaleStoccato += totG;
+    if (capGruppo < 999000) capacitaTotale += capGruppo;
   });
+
+  if (container) container.innerHTML = cardsHtml;
+  document.getElementById('dep-capacita').textContent = fmtL(capacitaTotale);
   document.getElementById('dep-totale').textContent = fmtL(totaleStoccato);
-  document.getElementById('dep-pct').textContent = Math.round((totaleStoccato/280000)*100) + '%';
+  document.getElementById('dep-pct').textContent = capacitaTotale > 0 ? Math.round((totaleStoccato / capacitaTotale) * 100) + '%' : '—';
   document.getElementById('dep-allerta').textContent = allerte;
-  const { data: mov } = await sb.from('ordini').select('*').or('tipo_ordine.eq.deposito,fornitore.ilike.%phoenix%').order('created_at',{ascending:false}).limit(10);
+  const { data: mov } = await sb.from('ordini').select('*').or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%').order('created_at',{ascending:false}).limit(10);
   const tbody = document.getElementById('dep-movimenti');
   if (!mov||!mov.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>'; return; }
-  tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (r.tipo_ordine==='deposito'?'<span class="badge teal">Entrata</span>':'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+  const movBadge = { 'entrata_deposito':'<span class="badge teal">Entrata</span>', 'stazione_servizio':'<span class="badge purple">Stazione</span>', 'autoconsumo':'<span class="badge gray">Autoconsumo</span>' };
+  tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
 }
 
 async function apriModaleCisterna(id) {
@@ -1104,8 +1127,7 @@ async function apriModaleCisterna(id) {
   html += '<div class="form-group"><label>Livello attuale (L)</label><input type="number" id="cis-livello" value="' + c.livello_attuale + '" /></div>';
   html += '<div class="form-group"><label>Capacita massima (L)</label><input type="number" id="cis-cap" value="' + c.capacita_max + '" /></div>';
   html += '<div class="form-group"><label>Prodotto</label><select id="cis-prodotto">';
-  const prodOpts = {'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina'};
-  Object.entries(prodOpts).forEach(([prod,tipo]) => { html += '<option value="' + prod + '"' + (c.prodotto===prod?' selected':'') + '>' + prod + '</option>'; });
+  cacheProdotti.filter(p=>p.attivo).forEach(p => { html += '<option value="' + esc(p.nome) + '"' + (c.prodotto===p.nome?' selected':'') + '>' + esc(p.nome) + '</option>'; });
   html += '</select></div></div>';
   html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1" onclick="salvaModificaCisterna(\'' + id + '\')">Salva</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
   apriModal(html);
@@ -1116,8 +1138,8 @@ async function salvaModificaCisterna(id) {
   const cap = parseFloat(document.getElementById('cis-cap').value);
   if (livello > cap) { toast('Il livello non puo superare la capacita'); return; }
   const prodotto = document.getElementById('cis-prodotto').value;
-  const tipoMap = {'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina'};
-  const tipo = tipoMap[prodotto] || 'autotrazione';
+  const tipoMap = getProdottoTipoCisterna();
+  const tipo = tipoMap[prodotto] || prodotto.toLowerCase().replace(/\s+/g,'-');
   const { error } = await sb.from('cisterne').update({ nome:document.getElementById('cis-nome').value, livello_attuale:livello, capacita_max:cap, tipo, prodotto, updated_at:new Date().toISOString() }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   toast('Cisterna aggiornata!');
@@ -1145,7 +1167,7 @@ async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLi
 async function apriModaleAssegnaCisterna(ordineId) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
-  const prodottoMap = { 'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina','AdBlue':'autotrazione' };
+  const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('nome');
   if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
@@ -1225,7 +1247,7 @@ async function confermaCaricoDeposito(ordineId) {
 async function confermaUscitaDeposito(ordineId) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
-  const prodottoMap = { 'Gasolio Autotrazione':'autotrazione','Gasolio Agricolo':'agricolo','HVO':'hvo','Benzina':'benzina','AdBlue':'autotrazione' };
+  const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('livello_attuale',{ascending:false});
   if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
@@ -1250,30 +1272,12 @@ async function caricaConsegne() {
 
   if (!data||!data.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine per questa data</td></tr>';
-    ['tot-consegne','tot-completate','tot-inattesa','tot-programmati','tot-litri-cons','tot-fatt-netto-cons','tot-fatt-iva-cons','tot-margine-cons'].forEach(id => document.getElementById(id).textContent='—');
-    document.getElementById('tot-consegne').textContent='0';
+    ['tot-consegne','tot-completate','tot-inattesa','tot-programmati'].forEach(id => document.getElementById(id).textContent='0');
   } else {
-    const vendite = data.filter(r=>r.tipo_ordine!=='deposito');
-    document.getElementById('tot-consegne').textContent = vendite.length;
+    document.getElementById('tot-consegne').textContent = data.filter(r=>r.tipo_ordine==='cliente').length;
     document.getElementById('tot-completate').textContent = data.filter(r=>r.stato==='confermato').length;
     document.getElementById('tot-inattesa').textContent = data.filter(r=>r.stato==='in attesa').length;
     document.getElementById('tot-programmati').textContent = data.filter(r=>r.stato==='programmato').length;
-
-    // Calcola totali vendite (esclusi deposito)
-    let totLitri=0, totFattNetto=0, totFattIva=0, totMargine=0;
-    vendite.forEach(r => {
-      const litri = Number(r.litri);
-      const pNetto = prezzoNoIva(r);
-      const pIva = prezzoConIva(r);
-      totLitri += litri;
-      totFattNetto += pNetto * litri;
-      totFattIva += pIva * litri;
-      totMargine += Number(r.margine) * litri;
-    });
-    document.getElementById('tot-litri-cons').textContent = fmtL(totLitri);
-    document.getElementById('tot-fatt-netto-cons').textContent = fmtE(totFattNetto);
-    document.getElementById('tot-fatt-iva-cons').textContent = fmtE(totFattIva);
-    document.getElementById('tot-margine-cons').textContent = fmtE(totMargine);
 
     // Carica documenti per tutti gli ordini
     const ordineIds = data.map(r=>r.id);
@@ -1281,7 +1285,7 @@ async function caricaConsegne() {
     const docsMap = {};
     (allDocs||[]).forEach(d => { if(!docsMap[d.ordine_id]) docsMap[d.ordine_id]=[]; docsMap[d.ordine_id].push(d); });
 
-    tbody.innerHTML = data.filter(r=>r.tipo_ordine!=='deposito').map(r => {
+    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
       const docs = docsMap[r.id] || [];
 
@@ -1351,101 +1355,8 @@ async function annullaOrdine(ordineId) {
   caricaConsegne();
 }
 
-// ── ELENCO VENDITE GIORNALIERO (stampabile) ─────────────────────
-async function generaElencoVenditeGiorno() {
-  var dataFiltro = document.getElementById('filtro-data-consegne').value || oggiISO;
-  var res = await sb.from('ordini').select('*').eq('data', dataFiltro).neq('stato','annullato').neq('tipo_ordine','deposito').order('cliente');
-  var ordini = res.data || [];
-  if (!ordini.length) { toast('Nessun ordine vendita per questa data'); return; }
-
-  var totLitri=0, totNetto=0, totIva=0, totMargine=0, totCosto=0;
-  var righeHtml = '';
-  ordini.forEach(function(r, i) {
-    var litri = Number(r.litri);
-    var pNetto = prezzoNoIva(r);
-    var pIva = prezzoConIva(r);
-    var marg = Number(r.margine) * litri;
-    var costoAcq = Number(r.costo_litro) * litri;
-    var netto = pNetto * litri;
-    var iva = pIva * litri;
-    totLitri += litri; totNetto += netto; totIva += iva; totMargine += marg; totCosto += costoAcq;
-    righeHtml += '<tr>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;font-weight:bold">' + esc(r.cliente) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.sede_scarico_nome||'') + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litri) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(pNetto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(netto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + r.iva + '%</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(iva) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(marg) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.stato) + '</td>' +
-      '</tr>';
-  });
-
-  var dataFmt = new Date(dataFiltro).toLocaleDateString('it-IT');
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Elenco Vendite ' + dataFmt + '</title>' +
-    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:15mm}' +
-    '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}}' +
-    'table{width:100%;border-collapse:collapse}' +
-    'th{background:#D4A017;color:#fff;padding:5px 4px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #B8900F;text-align:center}' +
-    'td{font-size:9px;padding:4px}' +
-    '.tot-row td{border-top:3px solid #D4A017!important;font-weight:bold;font-size:10px;background:#FDF3D0!important}' +
-    '</style></head><body>';
-
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:10px;margin-bottom:14px">';
-  html += '<div><div style="font-size:20px;font-weight:bold;color:#D4A017">ELENCO VENDITE</div>';
-  html += '<div style="font-size:12px;color:#666;margin-top:3px">Data: <strong>' + dataFmt + '</strong> — Ordini: <strong>' + ordini.length + '</strong></div></div>';
-  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
-  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti e oli</div></div></div>';
-
-  // KPI riepilogo
-  html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Litri totali</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Fatturato netto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totNetto) + '</div></div>';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Fatturato IVA incl.</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
-  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase;letter-spacing:0.4px">Margine totale</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</div></div>';
-  html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase;letter-spacing:0.4px">Costo acquisto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
-  html += '</div>';
-
-  // Tabella
-  html += '<table><thead><tr><th>#</th><th>Cliente</th><th>Sede scarico</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L netto</th><th>Tot. netto</th><th>IVA</th><th>Tot. IVA incl.</th><th>Margine</th><th>Stato</th></tr></thead><tbody>';
-  html += righeHtml;
-  // Riga totali
-  html += '<tr class="tot-row">' +
-    '<td style="padding:8px;border:1px solid #ddd" colspan="4">TOTALE</td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd"></td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd"></td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd"></td></tr>';
-  html += '</tbody></table>';
-
-  html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:8px;margin-top:14px">PhoenixFuel Srl — Elenco vendite generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
-  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
-  html += '<button onclick="esportaExcelElenco()" style="background:#639922;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">Esporta Excel</button>';
-  html += '<button onclick="window.print()" style="background:#D4A017;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">Stampa / Salva PDF</button>';
-  html += '</div>';
-  html += '<script>function esportaExcelElenco(){var t=document.querySelector("table");if(!t)return;var h=\'<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body>\'+t.outerHTML+\'</body></html>\';var b=new Blob([h],{type:"application/vnd.ms-excel;charset=utf-8"});var u=URL.createObjectURL(b);var a=document.createElement("a");a.href=u;a.download="elenco_vendite_' + dataFiltro + '.xls";a.click();URL.revokeObjectURL(u);}<\/script>';
-  html += '</body></html>';
-
-  var w = window.open('', '_blank');
-  w.document.write(html);
-  w.document.close();
-}
-
 // ── VENDITE ───────────────────────────────────────────────────────
 async function caricaVendite() {
-  // Popola dropdown clienti (solo la prima volta)
-  const selCliente = document.getElementById('vend-cliente');
-  if (selCliente && selCliente.options.length <= 1) {
-    const { data: cl } = await sb.from('clienti').select('nome').or('attivo.eq.true,attivo.is.null').order('nome');
-    if (cl) cl.forEach(function(c) { selCliente.innerHTML += '<option value="' + esc(c.nome) + '">' + esc(c.nome) + '</option>'; });
-  }
-
   // Imposta date default se non impostate
   const daEl = document.getElementById('vend-da');
   const aEl = document.getElementById('vend-a');
@@ -1454,11 +1365,9 @@ async function caricaVendite() {
   const da = daEl.value;
   const a = aEl.value;
   const filtroProd = document.getElementById('vend-prodotto').value;
-  const filtroCliente = selCliente ? selCliente.value : '';
 
-  let baseQuery = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').neq('tipo_ordine','deposito');
+  let baseQuery = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').eq('tipo_ordine','cliente');
   if (filtroProd) baseQuery = baseQuery.eq('prodotto', filtroProd);
-  if (filtroCliente) baseQuery = baseQuery.eq('cliente', filtroCliente);
   let allData = [];
   let from = 0;
   while (true) {
@@ -1471,52 +1380,40 @@ async function caricaVendite() {
   const data = allData;
   if (!data.length) return;
 
-  let fattNetto=0, fattIva=0, litri=0, margine=0, costoAcq=0, costoTrasp=0;
+  let fatturato=0, litri=0, margine=0;
   const pf={}, pc={};
   data.forEach(r => {
-    const l = Number(r.litri);
-    const netto = prezzoNoIva(r) * l;
-    const iva = prezzoConIva(r) * l;
-    const marg = Number(r.margine) * l;
-    const cAcq = Number(r.costo_litro) * l;
-    const cTra = Number(r.trasporto_litro) * l;
-    fattNetto += netto; fattIva += iva; litri += l; margine += marg; costoAcq += cAcq; costoTrasp += cTra;
+    const tot = prezzoConIva(r) * r.litri;
+    const marg = Number(r.margine) * Number(r.litri);
+    fatturato += tot; litri += Number(r.litri); margine += marg;
     // Per fornitore
-    if (!pf[r.fornitore]) pf[r.fornitore] = {litri:0, fattNetto:0, fattIva:0, margine:0};
-    pf[r.fornitore].litri += l;
-    pf[r.fornitore].fattNetto += netto;
-    pf[r.fornitore].fattIva += iva;
+    if (!pf[r.fornitore]) pf[r.fornitore] = {litri:0, fatturato:0, margine:0};
+    pf[r.fornitore].litri += Number(r.litri);
+    pf[r.fornitore].fatturato += tot;
     pf[r.fornitore].margine += marg;
     // Per cliente
     const cl = r.cliente || 'Sconosciuto';
-    if (!pc[cl]) pc[cl] = {litri:0, fattNetto:0, fattIva:0, margine:0, ordini:0};
-    pc[cl].litri += l;
-    pc[cl].fattNetto += netto;
-    pc[cl].fattIva += iva;
+    if (!pc[cl]) pc[cl] = {litri:0, fatturato:0, margine:0, ordini:0};
+    pc[cl].litri += Number(r.litri);
+    pc[cl].fatturato += tot;
     pc[cl].margine += marg;
     pc[cl].ordini++;
   });
 
-  const primoMargine = fattNetto - costoAcq - costoTrasp;
-
-  document.getElementById('vend-fatturato-netto').textContent = fmtE(fattNetto);
-  document.getElementById('vend-fatturato-iva').textContent = fmtE(fattIva);
+  document.getElementById('vend-fatturato').textContent = fmtE(fatturato);
   document.getElementById('vend-litri').textContent = fmtL(litri);
   document.getElementById('vend-margine').textContent = fmtE(margine);
   document.getElementById('vend-ordini').textContent = data.length;
-  document.getElementById('vend-costo').textContent = fmtE(costoAcq);
-  document.getElementById('vend-trasporto').textContent = fmtE(costoTrasp);
-  document.getElementById('vend-primo-margine').textContent = fmtE(primoMargine);
 
   // Tabella per fornitore
   const tbody = document.getElementById('tabella-vendite');
-  const righeF = Object.entries(pf).sort((a,b) => b[1].fattIva - a[1].fattIva);
-  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattNetto) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattIva) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
+  const righeF = Object.entries(pf).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="4" class="loading">Nessun dato</td></tr>';
 
   // Tabella per cliente
   const tbCl = document.getElementById('tabella-vendite-clienti');
-  const righeCl = Object.entries(pc).sort((a,b) => b[1].fattIva - a[1].fattIva);
-  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattNetto) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fattIva) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="6" class="loading">Nessun dato</td></tr>';
+  const righeCl = Object.entries(pc).sort((a,b) => b[1].fatturato - a[1].fatturato);
+  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
 
   // Grafici vendite
   const coloriGrafico = ['#D4A017','#378ADD','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A'];
@@ -1528,7 +1425,7 @@ async function caricaVendite() {
     window._chartVendForn = new Chart(ctxVF.getContext('2d'), {
       type:'bar', data:{
         labels:righeF.map(([f])=>f.length>18?f.substring(0,18)+'…':f),
-        datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fattIva*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
+        datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
       }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
     });
   }
@@ -1541,7 +1438,7 @@ async function caricaVendite() {
     window._chartVendCl = new Chart(ctxVC.getContext('2d'), {
       type:'bar', data:{
         labels:top10.map(([c])=>c.length>15?c.substring(0,15)+'…':c),
-        datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fattIva*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
+        datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
       }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
     });
   }
@@ -1574,10 +1471,7 @@ async function apriModaleCliente(id=null) {
 }
 
 async function caricaClienti() {
-  const mostraInattivi = document.getElementById('mostra-inattivi') && document.getElementById('mostra-inattivi').checked;
-  let query = sb.from('clienti').select('*').order('nome');
-  if (!mostraInattivi) query = query.or('attivo.eq.true,attivo.is.null');
-  const { data } = await query;
+  const { data } = await sb.from('clienti').select('*').order('nome');
   const tbody = document.getElementById('tabella-clienti');
   if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="12" class="loading">Nessun cliente</td></tr>'; return; }
 
@@ -1598,10 +1492,7 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    const inattivo = r.attivo === false;
-    const rowStyle = inattivo ? ' style="opacity:0.5"' : '';
-    const badgeInattivo = inattivo ? ' <span class="badge red" style="font-size:9px">Inattivo</span>' : '';
-    return '<tr' + rowStyle + '><td><strong>' + esc(r.nome) + '</strong>' + badgeInattivo + '</td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-primary" style="font-size:11px;padding:4px 10px;background:#378ADD" onclick="apriSediCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📍 Sedi</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
 }
@@ -1695,7 +1586,7 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   if (totScaduti > 0) html += '<span style="color:#A32D2D">Scaduti: <strong>' + totScaduti + '</strong></span>';
   html += '</div>';
 
-  html += '<button class="btn-primary" style="width:100%;margin-top:14px" data-chiudi-modale>Chiudi</button>';
+  html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
   apriModal(html);
 }
 
@@ -1723,156 +1614,6 @@ async function impostaDataPagamento(ordineId, data, clienteId, clienteNome) {
     toast('Pagamento programmato per il ' + new Date(data).toLocaleDateString('it-IT'));
   }
   apriSchedaCliente(clienteId, clienteNome);
-}
-
-// ── SEDI DI SCARICO — CRUD ──────────────────────────────────────
-
-// Funzione per generare l'HTML delle sedi (usata sia dalla Scheda che dal pulsante Sedi)
-function htmlSediScarico(sedi, clienteId, clienteNome) {
-  const nomeEsc = clienteNome.replace(/'/g,"\\'");
-  let html = '<div style="margin-bottom:18px;padding:14px;background:var(--bg-kpi);border-radius:var(--radius-lg)">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
-  html += '<div style="font-size:13px;font-weight:500">📍 Sedi di scarico <span class="badge gray">' + sedi.length + '</span></div>';
-  html += '<button class="btn-primary" style="font-size:11px;padding:5px 12px" onclick="mostraFormSede(\'' + clienteId + '\',\'' + nomeEsc + '\')">+ Nuova sede</button>';
-  html += '</div>';
-  html += '<div id="form-nuova-sede" style="display:none;margin-bottom:12px;padding:12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:var(--radius)">';
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:8px">';
-  html += '<div class="form-group"><label>Nome sede</label><input type="text" id="sede-nome" placeholder="es. Deposito Nord" /></div>';
-  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="sede-indirizzo" /></div>';
-  html += '<div class="form-group"><label>Citta</label><input type="text" id="sede-citta" /></div>';
-  html += '<div class="form-group"><label>Provincia</label><input type="text" id="sede-provincia" /></div>';
-  html += '<div class="form-group"><label>CAP</label><input type="text" id="sede-cap" /></div>';
-  html += '<div class="form-group"><label>Note</label><input type="text" id="sede-note" /></div>';
-  html += '</div>';
-  html += '<div style="display:flex;gap:8px;align-items:center">';
-  html += '<label class="check-label"><input type="checkbox" id="sede-default" /> Sede predefinita</label>';
-  html += '<button class="btn-primary" style="font-size:11px;padding:5px 14px" onclick="salvaSedeScarico(\'' + clienteId + '\',\'' + nomeEsc + '\')">Salva sede</button>';
-  html += '<button style="background:none;border:none;font-size:12px;cursor:pointer;color:var(--text-muted)" onclick="document.getElementById(\'form-nuova-sede\').style.display=\'none\'">Annulla</button>';
-  html += '<input type="hidden" id="sede-edit-id" value="" />';
-  html += '</div></div>';
-
-  if (sedi.length) {
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">';
-    sedi.forEach(function(s) {
-      html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:var(--radius);padding:10px 12px;display:flex;justify-content:space-between;align-items:flex-start">';
-      html += '<div style="flex:1">';
-      html += '<div style="font-size:12px;font-weight:500">' + esc(s.nome) + (s.is_default ? ' <span class="badge green" style="font-size:9px">Predefinita</span>' : '') + '</div>';
-      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(s.indirizzo||'') + (s.citta ? ', ' + esc(s.citta) : '') + (s.provincia ? ' (' + esc(s.provincia) + ')' : '') + (s.cap ? ' - ' + esc(s.cap) : '') + '</div>';
-      if (s.note) html += '<div style="font-size:10px;color:var(--text-hint);margin-top:2px">' + esc(s.note) + '</div>';
-      html += '</div>';
-      html += '<div style="display:flex;gap:4px;flex-shrink:0">';
-      html += '<button class="btn-edit" title="Modifica" onclick="modificaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + nomeEsc + '\')">✏️</button>';
-      if (!s.is_default) html += '<button class="btn-edit" title="Imposta predefinita" onclick="impostaSedeDefault(\'' + s.id + '\',\'' + clienteId + '\',\'' + nomeEsc + '\')">⭐</button>';
-      html += '<button class="btn-danger" title="Elimina" onclick="eliminaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + nomeEsc + '\')">x</button>';
-      html += '</div></div>';
-    });
-    html += '</div>';
-  } else {
-    html += '<div style="font-size:11px;color:var(--text-hint);text-align:center;padding:8px">Nessuna sede di scarico registrata</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-// Apri modale dedicato alle sedi di scarico
-async function apriSediCliente(clienteId, clienteNome) {
-  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('is_default',{ascending:false}).order('nome');
-  let html = '<div style="font-size:18px;font-weight:500;margin-bottom:4px">' + esc(clienteNome) + '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Gestione sedi di scarico</div>';
-  html += htmlSediScarico(sedi || [], clienteId, clienteNome);
-  html += '<button class="btn-primary" style="width:100%;margin-top:14px" data-chiudi-modale>Chiudi</button>';
-  apriModal(html);
-}
-
-function mostraFormSede(clienteId, clienteNome) {
-  var form = document.getElementById('form-nuova-sede');
-  form.style.display = 'block';
-  document.getElementById('sede-edit-id').value = '';
-  ['sede-nome','sede-indirizzo','sede-citta','sede-provincia','sede-cap','sede-note'].forEach(function(id) { var el=document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('sede-default').checked = false;
-}
-
-async function salvaSedeScarico(clienteId, clienteNome) {
-  var nome = document.getElementById('sede-nome').value.trim();
-  if (!nome) { toast('Inserisci il nome della sede'); return; }
-  var isDefault = document.getElementById('sede-default').checked;
-  var editId = document.getElementById('sede-edit-id').value;
-
-  var record = {
-    cliente_id: clienteId,
-    nome: nome,
-    indirizzo: document.getElementById('sede-indirizzo').value.trim(),
-    citta: document.getElementById('sede-citta').value.trim(),
-    provincia: document.getElementById('sede-provincia').value.trim(),
-    cap: document.getElementById('sede-cap').value.trim(),
-    note: document.getElementById('sede-note').value.trim(),
-    is_default: isDefault
-  };
-
-  if (isDefault) {
-    await sb.from('sedi_scarico').update({ is_default: false }).eq('cliente_id', clienteId);
-  }
-
-  var error;
-  if (editId) {
-    var res = await sb.from('sedi_scarico').update(record).eq('id', editId);
-    error = res.error;
-  } else {
-    var res2 = await sb.from('sedi_scarico').insert([record]);
-    error = res2.error;
-  }
-  if (error) { toast('Errore: ' + error.message); return; }
-  toast(editId ? 'Sede aggiornata!' : 'Sede salvata!');
-  apriSediCliente(clienteId, clienteNome);
-}
-
-async function modificaSedeScarico(sedeId, clienteId, clienteNome) {
-  var res = await sb.from('sedi_scarico').select('*').eq('id', sedeId).single();
-  var sede = res.data;
-  if (!sede) { toast('Sede non trovata'); return; }
-  var form = document.getElementById('form-nuova-sede');
-  form.style.display = 'block';
-  document.getElementById('sede-edit-id').value = sedeId;
-  document.getElementById('sede-nome').value = sede.nome || '';
-  document.getElementById('sede-indirizzo').value = sede.indirizzo || '';
-  document.getElementById('sede-citta').value = sede.citta || '';
-  document.getElementById('sede-provincia').value = sede.provincia || '';
-  document.getElementById('sede-cap').value = sede.cap || '';
-  document.getElementById('sede-note').value = sede.note || '';
-  document.getElementById('sede-default').checked = sede.is_default || false;
-  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-async function eliminaSedeScarico(sedeId, clienteId, clienteNome) {
-  if (!confirm('Eliminare questa sede di scarico?')) return;
-  var res = await sb.from('sedi_scarico').update({ attivo: false }).eq('id', sedeId);
-  if (res.error) { toast('Errore: ' + res.error.message); return; }
-  toast('Sede eliminata');
-  apriSediCliente(clienteId, clienteNome);
-}
-
-async function impostaSedeDefault(sedeId, clienteId, clienteNome) {
-  await sb.from('sedi_scarico').update({ is_default: false }).eq('cliente_id', clienteId);
-  var res = await sb.from('sedi_scarico').update({ is_default: true }).eq('id', sedeId);
-  if (res.error) { toast('Errore: ' + res.error.message); return; }
-  toast('Sede predefinita aggiornata');
-  apriSediCliente(clienteId, clienteNome);
-}
-
-// Carica sedi nel dropdown ordine quando si seleziona un cliente
-async function caricaSediOrdine() {
-  var clienteId = document.getElementById('ord-cliente').value;
-  var grpSede = document.getElementById('grp-sede');
-  var selSede = document.getElementById('ord-sede');
-  if (!clienteId) { grpSede.style.display='none'; selSede.innerHTML='<option value="">-- Seleziona sede --</option>'; return; }
-  var res = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('is_default',{ascending:false}).order('nome');
-  var sedi = res.data;
-  if (!sedi || !sedi.length) { grpSede.style.display='none'; selSede.innerHTML='<option value="">Nessuna sede</option>'; return; }
-  grpSede.style.display='';
-  selSede.innerHTML = '<option value="">-- Seleziona sede --</option>' + sedi.map(function(s) {
-    var label = esc(s.nome) + (s.indirizzo ? ' - ' + esc(s.indirizzo) : '') + (s.citta ? ', ' + esc(s.citta) : '') + (s.is_default ? ' *' : '');
-    return '<option value="' + s.id + '"' + (s.is_default?' selected':'') + '>' + label + '</option>';
-  }).join('');
 }
 
 // ── FORNITORI ─────────────────────────────────────────────────────
@@ -1964,6 +1705,99 @@ async function caricaBasi() {
   tbody.innerHTML=data.map(r => { const forn=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.fornitori?.nome).filter(Boolean).join(', '):'—'; return '<tr><td><strong>' + r.nome + '</strong></td><td>' + (r.indirizzo||'—') + '</td><td>' + (r.citta||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + forn + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'basi_carico\',\'' + r.id + '\',caricaBasi)">x</button></td></tr>'; }).join('');
 }
 
+// ── PRODOTTI ─────────────────────────────────────────────────────
+
+async function caricaProdotti() {
+  const { data } = await sb.from('prodotti').select('*').order('ordine_visualizzazione');
+  cacheProdotti = data || [];
+  const tbody = document.getElementById('tabella-prodotti');
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun prodotto</td></tr>'; return; }
+  tbody.innerHTML = data.map(r => {
+    const catBadge = r.categoria === 'benzine' ? '<span class="badge teal">Benzine</span>' : '<span class="badge gray">Altro</span>';
+    const statoBadge = r.attivo ? '<span class="badge green">Attivo</span>' : '<span class="badge red">Disattivo</span>';
+    return '<tr>' +
+      '<td><div style="width:14px;height:14px;border-radius:50%;background:' + esc(r.colore) + '"></div></td>' +
+      '<td><strong>' + esc(r.nome) + '</strong></td>' +
+      '<td>' + catBadge + '</td>' +
+      '<td>' + r.iva_default + '%</td>' +
+      '<td style="font-size:11px;color:var(--text-muted)">' + (r.tipo_cisterna || '—') + '</td>' +
+      '<td>' + statoBadge + '</td>' +
+      '<td>' +
+        '<button class="btn-edit" onclick="toggleProdottoAttivo(\'' + r.id + '\',' + r.attivo + ')" title="' + (r.attivo ? 'Disattiva' : 'Attiva') + '">' + (r.attivo ? '🔒' : '🔓') + '</button>' +
+        '<button class="btn-edit" onclick="editaProdotto(\'' + r.id + '\')" title="Modifica">✏️</button>' +
+        '<button class="btn-danger" onclick="eliminaProdotto(\'' + r.id + '\')">x</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+async function salvaProdotto() {
+  const nome = document.getElementById('prod-nome').value.trim();
+  if (!nome) { toast('Inserisci un nome prodotto'); return; }
+  const record = {
+    nome,
+    categoria: document.getElementById('prod-categoria').value,
+    iva_default: parseInt(document.getElementById('prod-iva').value),
+    colore: document.getElementById('prod-colore').value,
+    tipo_cisterna: document.getElementById('prod-tipo-cisterna').value.trim() || null
+  };
+  const { error } = await sb.from('prodotti').insert([record]);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Prodotto salvato!');
+  document.getElementById('prod-nome').value = '';
+  document.getElementById('prod-tipo-cisterna').value = '';
+  document.getElementById('prod-colore').value = '#888888';
+  caricaProdotti();
+}
+
+async function toggleProdottoAttivo(id, attualeAttivo) {
+  const { error } = await sb.from('prodotti').update({ attivo: !attualeAttivo }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(attualeAttivo ? 'Prodotto disattivato' : 'Prodotto attivato');
+  caricaProdotti();
+}
+
+async function editaProdotto(id) {
+  const prod = cacheProdotti.find(p => p.id === id);
+  if (!prod) return;
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica prodotto: ' + esc(prod.nome) + '</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Nome</label><input type="text" id="edit-prod-nome" value="' + esc(prod.nome) + '" /></div>';
+  html += '<div class="form-group"><label>Categoria</label><select id="edit-prod-categoria"><option value="benzine"' + (prod.categoria === 'benzine' ? ' selected' : '') + '>Benzine</option><option value="altro"' + (prod.categoria === 'altro' ? ' selected' : '') + '>Altro</option></select></div>';
+  html += '<div class="form-group"><label>IVA %</label><select id="edit-prod-iva"><option value="22"' + (prod.iva_default === 22 ? ' selected' : '') + '>22%</option><option value="10"' + (prod.iva_default === 10 ? ' selected' : '') + '>10%</option><option value="4"' + (prod.iva_default === 4 ? ' selected' : '') + '>4%</option></select></div>';
+  html += '<div class="form-group"><label>Colore</label><input type="color" id="edit-prod-colore" value="' + (prod.colore || '#888888') + '" /></div>';
+  html += '<div class="form-group"><label>Tipo cisterna</label><input type="text" id="edit-prod-cisterna" value="' + esc(prod.tipo_cisterna || '') + '" /></div>';
+  html += '<div class="form-group"><label>Ordine visual.</label><input type="number" id="edit-prod-ordine" value="' + (prod.ordine_visualizzazione || 0) + '" /></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" onclick="confermaEditaProdotto(\'' + id + '\')">Salva</button><button class="btn-secondary" onclick="chiudiModal()">Annulla</button></div>';
+  apriModal(html);
+}
+
+async function confermaEditaProdotto(id) {
+  const record = {
+    nome: document.getElementById('edit-prod-nome').value.trim(),
+    categoria: document.getElementById('edit-prod-categoria').value,
+    iva_default: parseInt(document.getElementById('edit-prod-iva').value),
+    colore: document.getElementById('edit-prod-colore').value,
+    tipo_cisterna: document.getElementById('edit-prod-cisterna').value.trim() || null,
+    ordine_visualizzazione: parseInt(document.getElementById('edit-prod-ordine').value) || 0
+  };
+  if (!record.nome) { toast('Nome obbligatorio'); return; }
+  const { error } = await sb.from('prodotti').update(record).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Prodotto aggiornato!');
+  chiudiModal();
+  caricaProdotti();
+}
+
+async function eliminaProdotto(id) {
+  const prod = cacheProdotti.find(p => p.id === id);
+  if (!confirm('Eliminare il prodotto "' + (prod?.nome || '') + '"?\n\nATTENZIONE: funziona solo se non ci sono ordini con questo prodotto.')) return;
+  const { error } = await sb.from('prodotti').delete().eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Prodotto eliminato');
+  caricaProdotti();
+}
+
 // ── LOGISTICA ─────────────────────────────────────────────────────
 async function caricaLogistica() {
   await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
@@ -2011,7 +1845,8 @@ function aggiungiScomparto() {
   const div = document.createElement('div');
   div.className = 'scomparto-row';
   div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px';
-  div.innerHTML = '<div class="form-group"><label>Nome scomparto</label><input type="text" class="sc-nome" placeholder="Es. Scomp. 1" /></div><div class="form-group"><label>Capacita (L)</label><input type="number" class="sc-cap" placeholder="0" /></div><div class="form-group"><label>Prodotto default</label><select class="sc-prod"><option value="">Qualsiasi</option><option>Gasolio Autotrazione</option><option>Gasolio Agricolo</option><option>HVO</option><option>Benzina</option><option>AdBlue</option></select></div><button class="btn-danger" onclick="this.parentElement.remove()" style="margin-bottom:2px">x</button>';
+  const opzProd = cacheProdotti.filter(p=>p.attivo).map(p=>'<option>'+p.nome+'</option>').join('');
+  div.innerHTML = '<div class="form-group"><label>Nome scomparto</label><input type="text" class="sc-nome" placeholder="Es. Scomp. 1" /></div><div class="form-group"><label>Capacita (L)</label><input type="number" class="sc-cap" placeholder="0" /></div><div class="form-group"><label>Prodotto default</label><select class="sc-prod"><option value="">Qualsiasi</option>' + opzProd + '</select></div><button class="btn-danger" onclick="this.parentElement.remove()" style="margin-bottom:2px">x</button>';
   wrap.appendChild(div);
 }
 
@@ -2071,7 +1906,7 @@ async function caricaOrdiniPerCarico() {
     // Filtra: escludi depositi e ordini già assegnati a un carico
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
-      if (o.tipo_ordine === 'deposito') return false;
+      if (o.tipo_ordine !== 'cliente') return false;
       return true;
     });
 
@@ -2207,10 +2042,6 @@ function apriReportAcquisti() {
   window.open('report_acquisti.html', '_blank');
 }
 
-function apriReportAcquistiMensile() {
-  window.open('report_acquisti_mensile.html', '_blank');
-}
-
 function apriReportMensile() {
   window.open('report_mensile.html', '_blank');
 }
@@ -2234,7 +2065,7 @@ const SEZIONI_SISTEMA = [
   {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},{id:'deposito',label:'Deposito',icon:'🏗'},
   {id:'consegne',label:'Consegne',icon:'🚚'},{id:'vendite',label:'Vendite',icon:'📊'},
   {id:'clienti',label:'Clienti',icon:'👤'},{id:'fornitori',label:'Fornitori',icon:'🏭'},
-  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'logistica',label:'Logistica',icon:'🚛'},
+  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},
 ];
 
 async function apriModalePermessi(utenteId, nomeUtente) {
@@ -2264,38 +2095,22 @@ async function invitaUtente() {
   if (!nome||!email) { toast('Compila nome ed email'); return; }
   if (!password || password.length < 6) { toast('La password deve avere almeno 6 caratteri'); return; }
 
-  // 1. Salva sessione admin corrente PRIMA del signUp
-  var sessioneAdmin = await sb.auth.getSession();
-  var adminToken = sessioneAdmin.data.session ? sessioneAdmin.data.session.access_token : null;
-  var adminRefresh = sessioneAdmin.data.session ? sessioneAdmin.data.session.refresh_token : null;
+  // 1. Crea utente su Supabase Auth
+  const { data: authData, error: authError } = await sb.auth.signUp({ email, password });
+  if (authError) { toast('Errore creazione accesso: ' + authError.message); return; }
 
-  // 2. Inserisci PRIMA il record nella tabella utenti (mentre siamo ancora admin)
-  var insertRes = await sb.from('utenti').insert([{email:email, nome:nome, ruolo:ruolo, cliente_id:ruolo==='cliente'?clienteId:null, attivo:true}]).select().single();
-  if (insertRes.error) { toast('Errore salvataggio utente: ' + insertRes.error.message); return; }
-  var nuovoUtente = insertRes.data;
+  // 2. Crea record nella tabella utenti
+  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{email, nome, ruolo, cliente_id:ruolo==='cliente'?clienteId:null, attivo:true}]).select().single();
+  if (error) { toast('Errore salvataggio utente: ' + error.message); return; }
 
-  // 3. Salva permessi (mentre siamo ancora admin)
+  // 3. Salva permessi
   if (ruolo !== 'cliente' && ruolo !== 'admin') {
-    var checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
-    var permessi = Array.from(checks).map(function(c) { return {utente_id:nuovoUtente.id, sezione:c.value, abilitato:c.checked}; });
+    const checks = document.querySelectorAll('#grp-ut-permessi input[type=checkbox]');
+    const permessi = Array.from(checks).map(c=>({utente_id:nuovoUtente.id,sezione:c.value,abilitato:c.checked}));
     if (permessi.length) await sb.from('permessi').insert(permessi);
   }
 
-  // 4. Ora crea l'utente Auth (questo potrebbe cambiare la sessione)
-  var authRes = await sb.auth.signUp({ email:email, password:password });
-  if (authRes.error) {
-    // Se il signUp fallisce, rimuovi il record utenti appena creato
-    await sb.from('utenti').delete().eq('id', nuovoUtente.id);
-    toast('Errore creazione accesso: ' + authRes.error.message);
-    return;
-  }
-
-  // 5. Ripristina sessione admin se è stata cambiata
-  if (adminToken && adminRefresh) {
-    await sb.auth.setSession({ access_token: adminToken, refresh_token: adminRefresh });
-  }
-
-  toast('Utente ' + nome + ' creato con successo! Puo accedere con email e password.');
+  toast('Utente ' + nome + ' creato con successo! Può accedere con email e password.');
   // Reset form
   document.getElementById('ut-nome').value = '';
   document.getElementById('ut-email').value = '';
@@ -2395,7 +2210,7 @@ async function caricaGraficiDashboard() {
     const d = new Date(oggi); d.setDate(d.getDate()-i);
     giorni.push(d.toISOString().split('T')[0]);
   }
-  const { data: ord7 } = await sb.from('ordini').select('*').gte('data', giorni[0]).lte('data', giorni[6]).neq('stato','annullato').neq('tipo_ordine','deposito');
+  const { data: ord7 } = await sb.from('ordini').select('*').gte('data', giorni[0]).lte('data', giorni[6]).neq('stato','annullato').eq('tipo_ordine','cliente');
 
   const fattPerGiorno = {};
   giorni.forEach(g => { fattPerGiorno[g]=0; });
@@ -2419,11 +2234,11 @@ async function caricaGraficiDashboard() {
 
   // Dati mese corrente
   const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
-  const { data: ordMese } = await sb.from('ordini').select('*').gte('data', inizio).neq('stato','annullato').neq('tipo_ordine','deposito');
+  const { data: ordMese } = await sb.from('ordini').select('*').gte('data', inizio).neq('stato','annullato').eq('tipo_ordine','cliente');
 
   // Litri per prodotto (mese) — ISTOGRAMMA
   const perProd = {};
-  const prodColori = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#3B6D11' };
+  const prodColori = getColoriProdotti();
   (ordMese||[]).forEach(r => { perProd[r.prodotto] = (perProd[r.prodotto]||0) + Number(r.litri); });
   const prodLabels = Object.keys(perProd);
   const ctx2 = document.getElementById('chart-prodotti');
@@ -2468,7 +2283,7 @@ async function caricaGraficiDashboard() {
     const d = new Date(oggi); d.setDate(d.getDate()-i);
     giorni30.push(d.toISOString().split('T')[0]);
   }
-  const { data: ord30 } = await sb.from('ordini').select('*').gte('data', giorni30[0]).neq('stato','annullato').neq('tipo_ordine','deposito');
+  const { data: ord30 } = await sb.from('ordini').select('*').gte('data', giorni30[0]).neq('stato','annullato').eq('tipo_ordine','cliente');
   const marg30 = {};
   giorni30.forEach(g => { marg30[g]=0; });
   (ord30||[]).forEach(r => { if (marg30[r.data]!==undefined) marg30[r.data] += Number(r.margine)*Number(r.litri); });
