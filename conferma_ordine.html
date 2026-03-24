@@ -53,7 +53,7 @@
 </head>
 <body>
 
-<button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+<button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / PDF</button><button class="no-print" onclick="window.close()" style="position:fixed;bottom:20px;right:180px;border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff;z-index:100">✕ Chiudi</button>
 
 <div id="loading" class="loading-box">Caricamento conferma ordine...</div>
 <div id="error-container"></div>
@@ -106,7 +106,6 @@
           <div><div class="info-label">Data consegna prevista</div><div class="info-value" id="ord-consegna">—</div></div>
           <div><div class="info-label">Fornitore</div><div class="info-value" id="ord-fornitore-val" style="font-size:12px">—</div></div>
           <div><div class="info-label">Stato</div><div class="info-value" id="ord-stato-val" style="font-size:12px">—</div></div>
-          <div style="grid-column:1/-1"><div class="info-label">Sede di scarico</div><div class="info-value" id="ord-sede-val" style="font-size:12px">—</div></div>
         </div>
       </div>
     </div>
@@ -205,16 +204,6 @@ async function caricaDati() {
     document.getElementById('ord-consegna').textContent = new Date(ordine.data).toLocaleDateString('it-IT');
     document.getElementById('ord-fornitore-val').textContent = ordine.fornitore || '—';
     document.getElementById('ord-stato-val').textContent = ordine.stato || '—';
-
-    // Sede di scarico
-    let sedeText = ordine.sede_scarico_nome || '—';
-    if (ordine.sede_scarico_id) {
-      try {
-        const { data: sede } = await sb.from('sedi_scarico').select('*').eq('id', ordine.sede_scarico_id).single();
-        if (sede) sedeText = sede.nome + (sede.indirizzo ? ' — ' + sede.indirizzo : '') + (sede.citta ? ', ' + sede.citta : '') + (sede.provincia ? ' (' + sede.provincia + ')' : '');
-      } catch(e) {}
-    }
-    document.getElementById('ord-sede-val').textContent = sedeText;
 
     // Calcoli prezzi
     const costo = Number(ordine.costo_litro || 0);

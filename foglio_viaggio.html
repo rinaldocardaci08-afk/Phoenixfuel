@@ -71,7 +71,7 @@
 </head>
 <body>
 
-<button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+<button class="print-btn no-print" onclick="window.print()">🖨️ Stampa / PDF</button><button class="no-print" onclick="window.close()" style="position:fixed;bottom:20px;right:180px;border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff;z-index:100">✕ Chiudi</button>
 
 <div id="loading" class="loading-box">Caricamento foglio viaggio...</div>
 <div id="error-container"></div>
@@ -459,23 +459,6 @@ async function caricaDati() {
     document.getElementById('rimorchio').textContent = '—';
     document.getElementById('autista').textContent = carico.autista || '—';
     document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
-
-    // Arricchisci ordini con indirizzi da sede di scarico o clienti
-    for (let o of ordini) {
-      if (o.sede_scarico_id) {
-        try {
-          const { data: sede } = await sb.from('sedi_scarico').select('*').eq('id', o.sede_scarico_id).single();
-          if (sede) { o.indirizzo = sede.indirizzo; o.cap = sede.cap; o.provincia = sede.provincia; o.citta = sede.citta; continue; }
-        } catch(e) {}
-      }
-      // Fallback: indirizzo dal cliente
-      if (o.cliente_id) {
-        try {
-          const { data: cl } = await sb.from('clienti').select('indirizzo,citta,provincia,telefono').eq('id', o.cliente_id).single();
-          if (cl) { o.indirizzo = o.indirizzo || cl.indirizzo; o.citta = o.citta || cl.citta; o.provincia = o.provincia || cl.provincia; o.telefono = o.telefono || cl.telefono; }
-        } catch(e) {}
-      }
-    }
 
     renderConsegne(ordini);
 
