@@ -1067,17 +1067,24 @@ async function caricaDeposito() {
 
   // Raggruppa cisterne per tipo
   const tipi = [...new Set(cisterne.map(c => c.tipo))];
+  // Ordina tipi secondo ordine_visualizzazione dei prodotti
+  const tipiOrdinati = [...tipi].sort((a, b) => {
+    const pa = cacheProdotti.find(p => p.tipo_cisterna === a);
+    const pb = cacheProdotti.find(p => p.tipo_cisterna === b);
+    return (pa ? pa.ordine_visualizzazione : 99) - (pb ? pb.ordine_visualizzazione : 99);
+  });
+
   const container = document.getElementById('container-deposito-prodotti');
   let totaleStoccato = 0, capacitaTotale = 0, allerte = 0;
-  let cardsHtml = '';
+  let htmlBenzine = '', htmlMagazzino = '';
 
-  tipi.forEach(tipo => {
+  tipiOrdinati.forEach(tipo => {
     const gruppo = cisterne.filter(c => c.tipo === tipo);
     if (!gruppo.length) return;
-    // Trova colore dal prodotto
     const prodNome = gruppo[0].prodotto || tipo;
     const prodInfo = cacheProdotti.find(p => p.tipo_cisterna === tipo || p.nome === prodNome);
     const colore = prodInfo ? prodInfo.colore : '#888';
+    const categoria = prodInfo ? prodInfo.categoria : 'altro';
     const nCis = gruppo.length;
     const capGruppo = gruppo.reduce((s, c) => s + Number(c.capacita_max), 0);
     let totG = 0;
@@ -1086,27 +1093,30 @@ async function caricaDeposito() {
     gruppo.forEach(c => {
       const capMax = Number(c.capacita_max);
       const livAtt = Number(c.livello_attuale);
-      // Per cisterne senza limite (es. AdBlue 999999), non mostrare %
-      const isMagazzino = capMax >= 999000;
-      const pct = isMagazzino ? (livAtt > 0 ? 50 : 0) : Math.round((livAtt / capMax) * 100);
+      const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
       totG += livAtt;
-      if (!isMagazzino && pct < 30) allerte++;
-      cisHtml += '<div class="dep-cisterna' + (!isMagazzino && pct < 30 ? ' alert' : '') + '">' +
+      if (pct < 30) allerte++;
+      cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
         '<div class="dep-cisterna-name">' + c.nome + '</div>' +
-        cisternasvg(isMagazzino ? 50 : pct, colore) +
+        cisternasvg(pct, colore) +
         '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' L</div>' +
-        '<div class="dep-cisterna-pct">' + (isMagazzino ? 'Magazzino' : pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' L') + '</div>' +
+        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' L</div>' +
         '<button class="btn-edit" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apriModaleCisterna(\'' + c.id + '\')">Modifica</button>' +
         '</div>';
     });
 
-    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + (capGruppo < 999000 ? ' · ' + capGruppo.toLocaleString('it-IT') + ' L' : ' · Magazzino');
-    cardsHtml += '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + capGruppo.toLocaleString('it-IT') + ' L';
+    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+
+    if (categoria === 'benzine') { htmlBenzine += cardHtml; } else { htmlMagazzino += cardHtml; }
     totaleStoccato += totG;
-    if (capGruppo < 999000) capacitaTotale += capGruppo;
+    capacitaTotale += capGruppo;
   });
 
-  if (container) container.innerHTML = cardsHtml;
+  let finalHtml = '';
+  if (htmlBenzine) finalHtml += '<div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">⛽ Cisterne Carburanti</div>' + htmlBenzine;
+  if (htmlMagazzino) finalHtml += '<div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 8px">📦 Magazzino Altri Prodotti</div>' + htmlMagazzino;
+  if (container) container.innerHTML = finalHtml;
   document.getElementById('dep-capacita').textContent = fmtL(capacitaTotale);
   document.getElementById('dep-totale').textContent = fmtL(totaleStoccato);
   document.getElementById('dep-pct').textContent = capacitaTotale > 0 ? Math.round((totaleStoccato / capacitaTotale) * 100) + '%' : '—';
