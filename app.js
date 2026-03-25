@@ -521,13 +521,14 @@ function toggleTipoOrdine() {
   const tipo = document.getElementById('ord-tipo').value;
   const isCliente = tipo === 'cliente';
   document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
-  // Per non-cliente, precompila il nome
   if (!isCliente) {
     const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
     document.getElementById('ord-note').placeholder = lbl[tipo] || '';
   } else {
     document.getElementById('ord-note').placeholder = '';
   }
+  // Ricalcola prodotti disponibili per il tipo selezionato
+  if (document.getElementById('ord-fornitore').value) aggiornaProdottiOrdine();
 }
 
 async function aggiornaSelezioniOrdine() {
@@ -593,7 +594,13 @@ function aggiornaBasiOrdine() {
 function aggiornaProdottiOrdine() {
   const fornitore = document.getElementById('ord-fornitore').value;
   const baseId = document.getElementById('ord-base').value;
-  const prodotti = [...new Set(prezziDelGiorno.filter(p=>p.fornitore===fornitore&&(baseId?p.base_carico_id===baseId:true)).map(p=>p.prodotto))];
+  const tipo = document.getElementById('ord-tipo').value;
+  let prodotti = [...new Set(prezziDelGiorno.filter(p=>p.fornitore===fornitore&&(baseId?p.base_carico_id===baseId:true)).map(p=>p.prodotto))];
+  // Per stazione Oppido: solo prodotti venduti in stazione (Gasolio Autotrazione e Benzina)
+  if (tipo === 'stazione_servizio') {
+    const prodottiStazione = cacheProdotti.filter(p => p.attivo && p.categoria === 'benzine').map(p => p.nome);
+    prodotti = prodotti.filter(p => prodottiStazione.includes(p));
+  }
   const selProd = document.getElementById('ord-prodotto');
   selProd.innerHTML = '<option value="">Seleziona prodotto...</option>' + prodotti.map(p=>'<option value="'+p+'">'+p+'</option>').join('');
   prezzoCorrente = null;
@@ -2829,17 +2836,56 @@ async function generaReportStazione() {
 // ── LOGISTICA ─────────────────────────────────────────────────────
 async function caricaLogistica() {
   await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
-  const { data: mezzi } = await sb.from('mezzi').select('id,targa,capacita_totale').eq('attivo',true).order('targa');
-  const selM = document.getElementById('car-mezzo');
-  if (selM && mezzi) {
-    selM.innerHTML = '<option value="" data-cap="0">Seleziona mezzo...</option>' + mezzi.map(m => '<option value="' + m.id + '" data-cap="' + m.capacita_totale + '">' + m.targa + ' (' + fmtL(m.capacita_totale) + ')</option>').join('');
-    selM.onchange = function() { aggiornaTotaleOrdiniCarico(); };
-  }
+  // Carica trasportatori nel dropdown
   const { data: trasps } = await sb.from('trasportatori').select('id,nome').eq('attivo',true).order('nome');
   const selT = document.getElementById('car-trasportatore');
   if (selT && trasps) selT.innerHTML = '<option value="">Nostro mezzo</option>' + trasps.map(t => '<option value="' + t.id + '">' + t.nome + '</option>').join('');
   const carData = document.getElementById('car-data');
   if (carData && !carData.value) carData.value = oggiISO;
+  // Carica mezzi propri come default
+  aggiornaVeicoliVettore();
+}
+
+async function aggiornaVeicoliVettore() {
+  const trId = document.getElementById('car-trasportatore').value;
+  const selM = document.getElementById('car-mezzo');
+  const selA = document.getElementById('car-autista');
+  const grpCosto = document.getElementById('grp-costo-trasporto');
+
+  if (!trId) {
+    // Nostro mezzo → mostra mezzi propri
+    const { data: mezzi } = await sb.from('mezzi').select('id,targa,capacita_totale,autista_default').eq('attivo',true).order('targa');
+    if (selM && mezzi) {
+      selM.innerHTML = '<option value="" data-cap="0">Seleziona mezzo...</option>' + mezzi.map(m => '<option value="' + m.id + '" data-cap="' + m.capacita_totale + '" data-autista="' + esc(m.autista_default||'') + '">' + m.targa + ' (' + fmtL(m.capacita_totale) + ')</option>').join('');
+      selM.onchange = function() {
+        // Precompila autista default del mezzo
+        const opt = selM.options[selM.selectedIndex];
+        const autDef = opt?.dataset?.autista || '';
+        if (autDef && selA) {
+          // Cerca se esiste tra le opzioni, altrimenti aggiungi
+          let found = false;
+          for (let i = 0; i < selA.options.length; i++) { if (selA.options[i].value === autDef) { selA.selectedIndex = i; found = true; break; } }
+          if (!found) { selA.innerHTML += '<option value="' + esc(autDef) + '" selected>' + esc(autDef) + '</option>'; }
+        }
+        aggiornaTotaleOrdiniCarico();
+      };
+    }
+    // Autisti: input libero per mezzi propri
+    if (selA) selA.innerHTML = '<option value="">Seleziona autista...</option>';
+    if (grpCosto) grpCosto.style.display = 'none';
+  } else {
+    // Trasportatore esterno → mostra solo i suoi mezzi e autisti
+    const { data: mezziTr } = await sb.from('mezzi_trasportatori').select('id,targa,capacita_totale').eq('trasportatore_id',trId).order('targa');
+    if (selM) {
+      selM.innerHTML = '<option value="" data-cap="0">Seleziona mezzo...</option>' + (mezziTr||[]).map(m => '<option value="tr_' + m.id + '" data-cap="' + (m.capacita_totale||0) + '">' + m.targa + (m.capacita_totale ? ' (' + fmtL(m.capacita_totale) + ')' : '') + '</option>').join('');
+      selM.onchange = function() { aggiornaTotaleOrdiniCarico(); };
+    }
+    const { data: autistiTr } = await sb.from('autisti').select('id,nome').eq('trasportatore_id',trId).order('nome');
+    if (selA) {
+      selA.innerHTML = '<option value="">Seleziona autista...</option>' + (autistiTr||[]).map(a => '<option value="' + esc(a.nome) + '">' + esc(a.nome) + '</option>').join('');
+    }
+    if (grpCosto) grpCosto.style.display = '';
+  }
 }
 
 async function salvaMezzo() {
@@ -2969,15 +3015,17 @@ function aggiornaTotaleOrdiniCarico() {
 
 async function creaNuovoCarico() {
   const data = document.getElementById('car-data').value;
-  const mezzoId = document.getElementById('car-mezzo').value;
+  const mezzoVal = document.getElementById('car-mezzo').value;
   const mezzoTarga = document.getElementById('car-mezzo').options[document.getElementById('car-mezzo').selectedIndex]?.text || '';
   const autista = document.getElementById('car-autista').value;
   const trId = document.getElementById('car-trasportatore').value || null;
+  const costoTrasporto = parseFloat(document.getElementById('car-costo-trasporto')?.value) || 0;
   if (!data) { toast('Inserisci la data'); return; }
-  if (!mezzoId && !trId) { toast('Seleziona un mezzo proprio o un trasportatore esterno'); return; }
+  if (!mezzoVal) { toast('Seleziona un mezzo'); return; }
   const ordiniSel = Array.from(document.querySelectorAll('.ord-carico:checked')).map(c => c.value);
   if (!ordiniSel.length) { toast('Seleziona almeno un ordine'); return; }
-  // Valida capienza
+  // Per mezzi propri, valida capienza
+  const mezzoId = mezzoVal.startsWith('tr_') ? null : mezzoVal;
   if (mezzoId) {
     const { data: mezzo } = await sb.from('mezzi').select('capacita_totale,targa').eq('id', mezzoId).single();
     if (mezzo) {
@@ -2986,8 +3034,9 @@ async function creaNuovoCarico() {
       if (totLitri > Number(mezzo.capacita_totale)) { toast('Portata superata! Totale: ' + fmtL(totLitri) + ' Capienza: ' + fmtL(mezzo.capacita_totale)); return; }
     }
   }
-  // Crea il carico
-  const { data: carico, error } = await sb.from('carichi').insert([{data, mezzo_id:mezzoId||null, mezzo_targa:mezzoTarga, autista, trasportatore_id:trId, stato:'programmato'}]).select().single();
+  const record = {data, mezzo_id:mezzoId, mezzo_targa:mezzoTarga.split(' (')[0], autista, trasportatore_id:trId, stato:'programmato'};
+  if (costoTrasporto > 0) record.costo_trasporto = costoTrasporto;
+  const { data: carico, error } = await sb.from('carichi').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   const righe = ordiniSel.map((oId,i) => ({carico_id:carico.id,ordine_id:oId,sequenza:i+1}));
   await sb.from('carico_ordini').insert(righe);
