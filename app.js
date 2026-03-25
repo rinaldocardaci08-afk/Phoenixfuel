@@ -1275,6 +1275,142 @@ async function confermaUscitaDeposito(ordineId) {
   caricaOrdini();
 }
 
+// ── RETTIFICHE INVENTARIO ─────────────────────────────────────────
+async function caricaRettifiche(tipo) {
+  const tbodyId = tipo === 'deposito' ? 'rett-deposito-storico' : 'rett-stazione-storico';
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false}).limit(30);
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessuna rettifica</td></tr>'; return; }
+  tbody.innerHTML = data.map(r => {
+    const diff = Number(r.differenza);
+    const diffColor = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : 'var(--text)';
+    const diffLabel = (diff > 0 ? '+' : '') + diff.toLocaleString('it-IT') + ' L';
+    const statoBadge = r.confermata ? '<span class="badge green">Confermata</span>' : '<span class="badge amber">In attesa</span>';
+    const cisNome = r.cisterne ? r.cisterne.nome : '—';
+    let azioni = '';
+    if (!r.confermata) {
+      azioni = '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaRettifica(\'' + r.id + '\',\'' + tipo + '\')">✓ Conferma</button> ';
+      azioni += '<button class="btn-danger" style="font-size:10px;padding:3px 6px" onclick="eliminaRettifica(\'' + r.id + '\',\'' + tipo + '\')">x</button>';
+    } else {
+      azioni = '<span style="font-size:10px;color:var(--text-hint)">' + (r.confermata_da || '') + '</span>';
+    }
+    return '<tr><td>' + r.data + '</td><td>' + esc(cisNome) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.giacenza_sistema||0) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmtL(r.giacenza_rilevata) + '</td><td style="font-family:var(--font-mono);color:' + diffColor + ';font-weight:600">' + diffLabel + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td>' + statoBadge + '</td><td>' + azioni + '</td></tr>';
+  }).join('');
+}
+
+async function nuovaRettifica(tipo) {
+  const sede = tipo === 'deposito' ? 'deposito_vibo' : 'stazione_oppido';
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede', sede).order('tipo').order('nome');
+  if (!cisterne || !cisterne.length) { toast('Nessuna cisterna trovata'); return; }
+
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Nuova rettifica — ' + (tipo === 'deposito' ? 'Deposito Vibo' : 'Stazione Oppido') + '</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Data rilevazione</label><input type="date" id="rett-data" value="' + oggiISO + '" /></div>';
+  html += '<div class="form-group"><label>Cisterna</label><select id="rett-cisterna" onchange="aggiornaGiacenzaSistema()">';
+  cisterne.forEach(c => {
+    const prodInfo = cacheProdotti.find(p => p.nome === c.prodotto);
+    const colore = prodInfo ? prodInfo.colore : '#888';
+    html += '<option value="' + c.id + '" data-livello="' + c.livello_attuale + '">' + esc(c.nome) + ' (' + esc(c.prodotto) + ' — attuale: ' + fmtL(c.livello_attuale) + ')</option>';
+  });
+  html += '</select></div>';
+  html += '<div class="form-group"><label>Giacenza a sistema</label><input type="text" id="rett-sistema" readonly style="background:var(--bg);color:var(--text-muted);font-family:var(--font-mono)" /></div>';
+  html += '<div class="form-group"><label>Giacenza rilevata</label><input type="number" id="rett-rilevata" step="0.01" placeholder="Inserisci quantità reale" oninput="calcolaDiffRettifica()" /></div>';
+  html += '<div class="form-group"><label>Differenza</label><input type="text" id="rett-diff" readonly style="background:var(--bg);font-family:var(--font-mono);font-weight:600" /></div>';
+  html += '<div class="form-group"><label>Note / motivazione</label><input type="text" id="rett-note" placeholder="Es. inventario fisico, errore carico..." /></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" onclick="salvaRettifica(\'' + tipo + '\')">💾 Salva rettifica</button><button class="btn-secondary" onclick="chiudiModal()">Annulla</button></div>';
+  apriModal(html);
+  aggiornaGiacenzaSistema();
+}
+
+function aggiornaGiacenzaSistema() {
+  const sel = document.getElementById('rett-cisterna');
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const livello = opt ? opt.dataset.livello : '0';
+  document.getElementById('rett-sistema').value = fmtL(livello);
+  calcolaDiffRettifica();
+}
+
+function calcolaDiffRettifica() {
+  const sel = document.getElementById('rett-cisterna');
+  const opt = sel ? sel.options[sel.selectedIndex] : null;
+  const sistema = opt ? Number(opt.dataset.livello) : 0;
+  const rilevata = parseFloat(document.getElementById('rett-rilevata').value);
+  const diffEl = document.getElementById('rett-diff');
+  if (!isNaN(rilevata)) {
+    const diff = rilevata - sistema;
+    diffEl.value = (diff > 0 ? '+' : '') + diff.toLocaleString('it-IT') + ' L';
+    diffEl.style.color = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : 'var(--text)';
+  } else {
+    diffEl.value = '—';
+    diffEl.style.color = 'var(--text)';
+  }
+}
+
+async function salvaRettifica(tipo) {
+  const data = document.getElementById('rett-data').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  const cisternaId = document.getElementById('rett-cisterna').value;
+  const sel = document.getElementById('rett-cisterna');
+  const opt = sel.options[sel.selectedIndex];
+  const sistema = Number(opt.dataset.livello);
+  const rilevata = parseFloat(document.getElementById('rett-rilevata').value);
+  if (isNaN(rilevata) || rilevata < 0) { toast('Inserisci una giacenza valida'); return; }
+  const note = document.getElementById('rett-note').value.trim();
+
+  const record = {
+    tipo,
+    data,
+    cisterna_id: cisternaId,
+    prodotto: opt.textContent.split('(')[1]?.split(' —')[0]?.trim() || '',
+    giacenza_sistema: sistema,
+    giacenza_rilevata: rilevata,
+    differenza: rilevata - sistema,
+    note: note || null
+  };
+  const { error } = await sb.from('rettifiche_inventario').insert([record]);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Rettifica salvata — in attesa di conferma');
+  chiudiModal();
+  caricaRettifiche(tipo);
+}
+
+async function confermaRettifica(id, tipo) {
+  if (!confirm('Confermare questa rettifica?\n\nLa giacenza della cisterna verrà aggiornata al valore rilevato. Questa operazione non è reversibile.')) return;
+
+  const { data: rett } = await sb.from('rettifiche_inventario').select('*').eq('id', id).single();
+  if (!rett) { toast('Rettifica non trovata'); return; }
+
+  // Aggiorna cisterna con la giacenza rilevata
+  const { error: errCis } = await sb.from('cisterne').update({
+    livello_attuale: rett.giacenza_rilevata,
+    updated_at: new Date().toISOString()
+  }).eq('id', rett.cisterna_id);
+  if (errCis) { toast('Errore aggiornamento cisterna: ' + errCis.message); return; }
+
+  // Segna come confermata
+  const { error: errRett } = await sb.from('rettifiche_inventario').update({
+    confermata: true,
+    confermata_da: utenteCorrente.nome || utenteCorrente.email,
+    confermata_il: new Date().toISOString()
+  }).eq('id', id);
+  if (errRett) { toast('Errore conferma: ' + errRett.message); return; }
+
+  toast('Rettifica confermata — giacenza aggiornata!');
+  caricaRettifiche(tipo);
+  if (tipo === 'deposito') caricaDeposito();
+}
+
+async function eliminaRettifica(id, tipo) {
+  if (!confirm('Eliminare questa rettifica non confermata?')) return;
+  const { error } = await sb.from('rettifiche_inventario').delete().eq('id', id).eq('confermata', false);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Rettifica eliminata');
+  caricaRettifiche(tipo);
+}
+
 // ── CONSEGNE ─────────────────────────────────────────────────────
 async function caricaConsegne() {
   // Imposta data filtro a oggi se non impostata
