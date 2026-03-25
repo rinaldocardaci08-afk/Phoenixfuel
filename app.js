@@ -2962,31 +2962,28 @@ async function generaReportViaggi() {
   const el = document.getElementById('report-viaggi-content');
   if (!carichi.length) { el.innerHTML = '<div class="loading">Nessun viaggio trovato per il periodo</div>'; return; }
 
-  let totLitri=0, totImponibile=0, totIva=0, totCosto=0;
+  let totLitri=0, totCostoTr=0;
   let righe = '';
   carichi.forEach(function(c) {
     const ordini = (c.carico_ordini||[]).map(function(co) { return co.ordini; }).filter(Boolean);
     const litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
-    const imponibileC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)); },0);
-    const ivaC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)*Number(o.iva)/100); },0);
-    // Costo trasporto = somma di (costo_ritiro × litri) per ogni ordine del carico
     const costoTr = ordini.reduce(function(s,o) { return s+(Number(o.costo_ritiro||0)*Number(o.litri)); },0);
     const vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
     const prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
-    totLitri+=litriC; totImponibile+=imponibileC; totIva+=ivaC; totCosto+=costoTr;
-    righe += '<tr><td>' + new Date(c.data).toLocaleDateString('it-IT') + '</td><td>' + esc(vettoreNome) + '</td><td>' + esc(c.mezzo_targa||'—') + '</td><td>' + esc(c.autista||'—') + '</td><td style="font-size:11px">' + esc(prodotti) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtL(litriC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(imponibileC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(ivaC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(costoTr) + '</td><td>' + badgeStato(c.stato) + '</td></tr>';
+    const destinazioni = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
+    totLitri+=litriC; totCostoTr+=costoTr;
+    righe += '<tr><td>' + new Date(c.data).toLocaleDateString('it-IT') + '</td><td>' + esc(vettoreNome) + '</td><td>' + esc(c.mezzo_targa||'—') + '</td><td>' + esc(c.autista||'—') + '</td><td style="font-size:11px">' + esc(prodotti) + '</td><td style="font-size:11px">' + esc(destinazioni) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtL(litriC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(costoTr) + '</td><td>' + badgeStato(c.stato) + '</td></tr>';
   });
 
+  const ivaTr = totCostoTr * 0.22;
   let html = '<div class="grid4" style="margin-bottom:12px">';
   html += '<div class="kpi"><div class="kpi-label">Viaggi</div><div class="kpi-value">' + carichi.length + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Litri totali</div><div class="kpi-value">' + fmtL(totLitri) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value">' + fmtE(totImponibile) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">IVA totale</div><div class="kpi-value">' + fmtE(totIva) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Litri trasportati</div><div class="kpi-value">' + fmtL(totLitri) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Imponibile trasporto</div><div class="kpi-value">' + fmtE(totCostoTr) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">IVA 22%</div><div class="kpi-value">' + fmtE(ivaTr) + '</div></div>';
   html += '</div>';
-  if (totCosto > 0) {
-    html += '<div class="grid2" style="margin-bottom:12px"><div class="kpi"><div class="kpi-label">Costo trasporto totale</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(totCosto) + '</div></div></div>';
-  }
-  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Vettore</th><th>Mezzo</th><th>Autista</th><th>Prodotti</th><th>Litri</th><th>Imponibile</th><th>IVA</th><th>Costo trasp.</th><th>Stato</th></tr></thead><tbody>' + righe + '</tbody></table></div>';
+  html += '<div class="grid2" style="margin-bottom:12px"><div class="kpi" style="border-left:3px solid #D4A017"><div class="kpi-label">Totale trasporto IVA inclusa</div><div class="kpi-value" style="color:#D4A017">' + fmtE(totCostoTr + ivaTr) + '</div></div></div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Vettore</th><th>Mezzo</th><th>Autista</th><th>Prodotti</th><th>Destinazione</th><th>Litri</th><th>Costo viaggio</th><th>Stato</th></tr></thead><tbody>' + righe + '</tbody></table></div>';
   el.innerHTML = html;
 }
 
@@ -2997,23 +2994,19 @@ async function stampaReportViaggi() {
 
   const da = document.getElementById('rep-viaggio-da').value;
   const a = document.getElementById('rep-viaggio-a').value;
-  const vettoreId = document.getElementById('rep-vettore').value;
   const vettoreLabel = document.getElementById('rep-vettore').options[document.getElementById('rep-vettore').selectedIndex]?.text || 'Tutti';
   const daFmt = new Date(da).toLocaleDateString('it-IT');
   const aFmt = new Date(a).toLocaleDateString('it-IT');
 
-  let totLitri=0, totImponibile=0, totIva=0, totCosto=0;
+  let totLitri=0, totCostoTr=0;
   let righeHtml = '';
   carichi.forEach(function(c, i) {
     var ordini = (c.carico_ordini||[]).map(function(co) { return co.ordini; }).filter(Boolean);
     var litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
-    var imponibileC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)); },0);
-    var ivaC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)*Number(o.iva)/100); },0);
     var costoTr = ordini.reduce(function(s,o) { return s+(Number(o.costo_ritiro||0)*Number(o.litri)); },0);
-    var vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
     var prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
-    var clienti = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
-    totLitri+=litriC; totImponibile+=imponibileC; totIva+=ivaC; totCosto+=costoTr;
+    var destinazioni = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
+    totLitri+=litriC; totCostoTr+=costoTr;
 
     righeHtml += '<tr>' +
       '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
@@ -3021,16 +3014,14 @@ async function stampaReportViaggi() {
       '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(c.mezzo_targa||'—') + '</td>' +
       '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(c.autista||'—') + '</td>' +
       '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(prodotti) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(clienti) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(destinazioni) + '</td>' +
       '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litriC) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(imponibileC) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(ivaC) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(imponibileC+ivaC) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + (costoTr > 0 ? fmtE(costoTr) : '—') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(costoTr) + '</td>' +
       '</tr>';
   });
 
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Viaggi ' + vettoreLabel + '</title>' +
+  var ivaTr = totCostoTr * 0.22;
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Proforma trasporti ' + vettoreLabel + '</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
     '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
     'table{width:100%;border-collapse:collapse;margin-bottom:14px}' +
@@ -3039,32 +3030,30 @@ async function stampaReportViaggi() {
     '</style></head><body>';
 
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #378ADD;padding-bottom:10px;margin-bottom:14px">';
-  html += '<div><div style="font-size:18px;font-weight:bold;color:#378ADD">REPORT VIAGGI — PROFORMA</div>';
-  html += '<div style="font-size:12px;color:#666;margin-top:3px">Vettore: <strong>' + esc(vettoreLabel) + '</strong> — Periodo: <strong>' + daFmt + ' / ' + aFmt + '</strong></div>';
-  html += '<div style="font-size:11px;color:#666">Viaggi: <strong>' + carichi.length + '</strong> — Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div>';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#378ADD">PROFORMA TRASPORTI</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Vettore: <strong>' + esc(vettoreLabel) + '</strong></div>';
+  html += '<div style="font-size:12px;color:#666">Periodo: <strong>' + daFmt + ' — ' + aFmt + '</strong> · Viaggi: <strong>' + carichi.length + '</strong></div></div>';
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
-  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti</div></div></div>';
+  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
 
-  html += '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">';
-  html += '<div style="background:#E6F1FB;border:1px solid #378ADD;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">Litri totali</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
-  html += '<div style="background:#E6F1FB;border:1px solid #378ADD;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">Imponibile</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totImponibile) + '</div></div>';
-  html += '<div style="background:#E6F1FB;border:1px solid #378ADD;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">IVA totale</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Totale IVA incl.</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace;color:#D4A017">' + fmtE(totImponibile+totIva) + '</div></div>';
-  if (totCosto > 0) {
-    html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase">Costo trasporto</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
-  }
-  html += '</div>';
-
-  html += '<table><thead><tr><th>#</th><th>Data</th><th>Mezzo</th><th>Autista</th><th>Prodotti</th><th>Clienti</th><th>Litri</th><th>Imponibile</th><th>IVA</th><th>Totale</th><th>Costo Tr.</th></tr></thead><tbody>';
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Mezzo</th><th>Autista</th><th>Prodotti</th><th>Destinazione</th><th>Litri</th><th>Costo viaggio</th></tr></thead><tbody>';
   html += righeHtml;
-  html += '<tr class="tot"><td style="padding:7px;border:1px solid #ddd" colspan="6">TOTALE</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totImponibile) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(totImponibile+totIva) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + (totCosto > 0 ? fmtE(totCosto) : '—') + '</td></tr>';
+  html += '<tr class="tot"><td style="padding:7px;border:1px solid #ddd" colspan="6">TOTALE</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totCostoTr) + '</td></tr>';
   html += '</tbody></table>';
 
-  html += '<div style="margin-top:20px;padding-top:12px;border-top:1px solid #ddd;font-size:10px;color:#999;text-align:center">Documento generato automaticamente — Phoenix Fuel Srl</div>';
+  // Riepilogo fiscale
+  html += '<div style="display:flex;justify-content:flex-end;margin-top:16px"><div style="min-width:280px;border:1px solid #378ADD;border-radius:8px;overflow:hidden">';
+  html += '<div style="display:flex;justify-content:space-between;padding:8px 14px;border-bottom:1px solid #e8e8e8"><span>Imponibile trasporto</span><strong style="font-family:Courier New,monospace">' + fmtE(totCostoTr) + '</strong></div>';
+  html += '<div style="display:flex;justify-content:space-between;padding:8px 14px;border-bottom:1px solid #e8e8e8"><span>IVA 22%</span><strong style="font-family:Courier New,monospace">' + fmtE(ivaTr) + '</strong></div>';
+  html += '<div style="display:flex;justify-content:space-between;padding:10px 14px;background:#E6F1FB;font-size:14px"><strong>TOTALE IVA INCLUSA</strong><strong style="font-family:Courier New,monospace;color:#378ADD">' + fmtE(totCostoTr + ivaTr) + '</strong></div>';
+  html += '</div></div>';
+
+  html += '<div style="margin-top:20px;padding-top:12px;border-top:1px solid #ddd;font-size:10px;color:#999;text-align:center">Documento proforma — Phoenix Fuel Srl</div>';
 
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
-  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">🖨️ Stampa / PDF</button>';
-  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
   html += '</div></body></html>';
 
   var w = window.open('','_blank');
