@@ -346,8 +346,10 @@ async function salvaPrezzoCliente() {
 }
 
 async function caricaPrezzi() {
-  await caricaSelectFornitori('pr-fornitore');
-  await caricaSelectClienti('pc-cliente');
+  // Carica fornitori/clienti solo se cache vuota
+  if (!cacheFornitori.length) await caricaSelectFornitori('pr-fornitore');
+  else { const s=document.getElementById('pr-fornitore'); if(s&&s.options.length<=1) { s.innerHTML='<option value="">Seleziona...</option>'+cacheFornitori.map(f=>'<option value="'+f.id+'">'+f.nome+'</option>').join(''); } }
+  if (!cacheClienti.length) await caricaSelectClienti('pc-cliente');
   const filtroData = document.getElementById('filtro-data-prezzi').value;
   let query = sb.from('prezzi').select('*, basi_carico(nome)').order('data',{ascending:false}).order('fornitore');
   if (filtroData) query = query.eq('data', filtroData);
@@ -629,10 +631,9 @@ async function caricaPrezzoPerOrdine() {
     if (clienteId) {
       const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
       if (clienteNome) {
-        const { data: ordPrec } = await sb.from('ordini').select('margine,prodotto').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente');
-        const conMargine = (ordPrec||[]).filter(o => Number(o.margine) > 0);
-        if (conMargine.length > 0) {
-          const media = conMargine.reduce((s, o) => s + Number(o.margine), 0) / conMargine.length;
+        const { data: ordPrec } = await sb.from('ordini').select('margine').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente').gt('margine',0).order('data',{ascending:false}).limit(20);
+        if (ordPrec && ordPrec.length > 0) {
+          const media = ordPrec.reduce((s, o) => s + Number(o.margine), 0) / ordPrec.length;
           margineDaUsare = media;
         }
       }
@@ -838,7 +839,7 @@ async function salvaOrdine() {
   document.getElementById('fido-cliente-info').style.display = 'none';
   document.getElementById('prev-fido-warn').style.display = 'none';
   fidoClienteCorrente = null;
-  caricaOrdini(); caricaDashboard();
+  caricaOrdini();
 }
 
 async function caricaOrdini() {
@@ -2290,21 +2291,22 @@ async function caricaFormLetture() {
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
   if (!pompe||!pompe.length) { document.getElementById('stz-form-letture').innerHTML='<div class="loading">Nessuna pompa configurata</div>'; return; }
 
-  // Carica letture oggi
-  const { data: lettureOggi } = await sb.from('stazione_letture').select('*').eq('data',data);
-  const lettMap = {}; (lettureOggi||[]).forEach(l => lettMap[l.pompa_id]=Number(l.lettura));
-
-  // Carica lettura giorno precedente per ogni pompa
+  // Carica letture oggi + precedenti in parallelo
+  const pompeIds = pompe.map(p=>p.id);
   const ieri = new Date(new Date(data).getTime()-86400000).toISOString().split('T')[0];
+  const [lettOggiRes, lettPrecRes, prezziRes] = await Promise.all([
+    sb.from('stazione_letture').select('*').eq('data',data).in('pompa_id',pompeIds),
+    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',ieri).order('data',{ascending:false}),
+    sb.from('stazione_prezzi').select('*').eq('data',data)
+  ]);
+  const lettMap = {}; (lettOggiRes.data||[]).forEach(l => lettMap[l.pompa_id]=Number(l.lettura));
+  // Per ogni pompa, prendi l'ultima lettura precedente
   const lettIeriMap = {};
-  for (const p of pompe) {
-    const { data: prev } = await sb.from('stazione_letture').select('lettura,data').eq('pompa_id',p.id).lte('data',ieri).order('data',{ascending:false}).limit(1);
-    if (prev && prev.length) lettIeriMap[p.id] = Number(prev[0].lettura);
-  }
-
-  // Carica prezzi per questa data
-  const { data: prezziData } = await sb.from('stazione_prezzi').select('*').eq('data',data);
-  const prezzoMap = {}; (prezziData||[]).forEach(pr => prezzoMap[pr.prodotto]=Number(pr.prezzo_litro));
+  pompe.forEach(p => {
+    const ultima = (lettPrecRes.data||[]).find(l=>l.pompa_id===p.id);
+    if (ultima) lettIeriMap[p.id] = Number(ultima.lettura);
+  });
+  const prezzoMap = {}; (prezziRes.data||[]).forEach(pr => prezzoMap[pr.prodotto]=Number(pr.prezzo_litro));
 
   // Salva dati per calcolo live e report
   window._stzPompe = pompe;
@@ -2894,6 +2896,8 @@ async function caricaLogistica() {
   if (carData && !carData.value) carData.value = oggiISO;
   // Carica mezzi propri come default
   aggiornaVeicoliVettore();
+  // Carica ordini per la data corrente
+  if (carData && carData.value) caricaOrdiniPerCarico();
   // Popola dropdown vettori per report
   const selRV = document.getElementById('rep-vettore');
   if (selRV && trasps) selRV.innerHTML = '<option value="">Tutti i vettori</option><option value="proprio">Mezzi propri</option>' + trasps.map(t => '<option value="' + t.id + '">' + t.nome + '</option>').join('');
@@ -3142,13 +3146,14 @@ async function caricaOrdiniPerCarico() {
   const wrap = document.getElementById('ordini-per-carico');
   if (!data) { wrap.innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
   try {
-    // Recupera tutti gli ordine_id già assegnati a qualsiasi carico
-    const { data: tuttiAssegnati } = await sb.from('carico_ordini').select('ordine_id');
-    const idsInCarico = new Set((tuttiAssegnati||[]).map(o=>o.ordine_id));
-
-    // Carica ordini della data selezionata (esclusi annullati)
-    const { data: ordini, error } = await sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente');
-    if (error) { console.error('Errore ordini:', error); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
+    // Esegui in parallelo
+    const [assegnatiRes, ordiniRes] = await Promise.all([
+      sb.from('carico_ordini').select('ordine_id'),
+      sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente')
+    ]);
+    const idsInCarico = new Set((assegnatiRes.data||[]).map(o=>o.ordine_id));
+    const ordini = ordiniRes.data;
+    if (ordiniRes.error) { console.error('Errore ordini:', ordiniRes.error); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
 
     // Filtra ordini per logistica
     const ordiniFiltrati = (ordini||[]).filter(o => {
