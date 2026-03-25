@@ -2967,7 +2967,7 @@ async function generaReportViaggi() {
   carichi.forEach(function(c) {
     const ordini = (c.carico_ordini||[]).map(function(co) { return co.ordini; }).filter(Boolean);
     const litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
-    const costoTr = ordini.reduce(function(s,o) { return s+(Number(o.costo_ritiro||0)*Number(o.litri)); },0);
+    const costoTr = ordini.reduce(function(s,o) { return s+(Number(o.trasporto_litro||0)*Number(o.litri)); },0);
     const vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
     const prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
     const destinazioni = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
@@ -3003,7 +3003,7 @@ async function stampaReportViaggi() {
   carichi.forEach(function(c, i) {
     var ordini = (c.carico_ordini||[]).map(function(co) { return co.ordini; }).filter(Boolean);
     var litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
-    var costoTr = ordini.reduce(function(s,o) { return s+(Number(o.costo_ritiro||0)*Number(o.litri)); },0);
+    var costoTr = ordini.reduce(function(s,o) { return s+(Number(o.trasporto_litro||0)*Number(o.litri)); },0);
     var prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
     var destinazioni = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
     totLitri+=litriC; totCostoTr+=costoTr;
