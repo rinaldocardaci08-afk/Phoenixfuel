@@ -254,17 +254,24 @@
       <!-- CONSEGNE -->
       <div class="section" id="s-consegne">
         <div class="grid4" style="margin-bottom:16px">
-          <div class="kpi"><div class="kpi-label">Ordini oggi</div><div class="kpi-value" id="tot-consegne">—</div></div>
+          <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="tot-consegne">—</div></div>
+          <div class="kpi"><div class="kpi-label">Litri totali</div><div class="kpi-value" id="tot-litri-cons">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato netto</div><div class="kpi-value" id="tot-fatt-netto-cons">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato IVA incl.</div><div class="kpi-value" id="tot-fatt-iva-cons">—</div></div>
+        </div>
+        <div class="grid4" style="margin-bottom:16px">
           <div class="kpi"><div class="kpi-label">Confermati</div><div class="kpi-value" id="tot-completate">—</div></div>
           <div class="kpi"><div class="kpi-label">In attesa</div><div class="kpi-value" id="tot-inattesa">—</div></div>
           <div class="kpi"><div class="kpi-label">Programmati</div><div class="kpi-value" id="tot-programmati">—</div></div>
+          <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="tot-margine-cons">—</div></div>
         </div>
 
         <!-- Filtro data -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Gestione consegne</span>
-            <div style="display:flex;gap:8px;align-items:center">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="generaElencoVenditeGiorno()">📊 Elenco vendite</button>
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Data:</label>
               <input type="date" id="filtro-data-consegne" style="font-size:15px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500" onchange="caricaConsegne()" />
             </div>
