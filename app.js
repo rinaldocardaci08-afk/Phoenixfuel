@@ -2520,37 +2520,145 @@ async function eliminaPompa(id, nome) {
 }
 
 async function caricaGiacenzeStazione() {
-  // Calcola giacenze dalla differenza tra ordini entrata (stazione_servizio) e vendite (letture)
-  const { data: ordini } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato');
-  const carichi = {};
-  (ordini||[]).forEach(o => { carichi[o.prodotto] = (carichi[o.prodotto]||0) + Number(o.litri); });
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido').order('tipo').order('nome');
 
-  // Vendite da letture
+  let cisHtmlAll = '';
+  if (cisterne && cisterne.length) {
+    const perProdotto = {};
+    cisterne.forEach(c => {
+      if (!perProdotto[c.prodotto]) perProdotto[c.prodotto] = [];
+      perProdotto[c.prodotto].push(c);
+    });
+
+    Object.entries(perProdotto).forEach(([prodNome, gruppo]) => {
+      const prodInfo = cacheProdotti.find(p => p.nome === prodNome);
+      const colore = prodInfo ? prodInfo.colore : '#888';
+      const nCis = gruppo.length;
+      const capGruppo = gruppo.reduce((s, c) => s + Number(c.capacita_max), 0);
+      let totG = 0;
+
+      let cisHtml = '';
+      gruppo.forEach(c => {
+        const capMax = Number(c.capacita_max);
+        const livAtt = Number(c.livello_attuale);
+        const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
+        totG += livAtt;
+        cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
+          '<div class="dep-cisterna-name">' + c.nome + '</div>' +
+          cisternasvg(pct, colore) +
+          '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' L</div>' +
+          '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' L</div>' +
+          '<button class="btn-edit" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apriModaleCisterna(\'' + c.id + '\')">Modifica</button>' +
+          '</div>';
+      });
+
+      const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + capGruppo.toLocaleString('it-IT') + ' L';
+      cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+    });
+  } else {
+    cisHtmlAll = '<div class="loading">Nessuna cisterna configurata per la stazione</div>';
+  }
+  const elCis = document.getElementById('stz-cisterne-grafiche');
+  if (elCis) elCis.innerHTML = cisHtmlAll;
+
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
-  const pompeIds = (pompe||[]).map(p=>p.id);
-  const { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).order('data');
-  const vendite = {};
-  (pompe||[]).forEach(p => {
-    const lett = (letture||[]).filter(l=>l.pompa_id===p.id).sort((a,b)=>a.data.localeCompare(b.data));
-    if (lett.length >= 2) {
-      const totVenduto = Number(lett[lett.length-1].lettura) - Number(lett[0].lettura);
-      vendite[p.prodotto] = (vendite[p.prodotto]||0) + totVenduto;
-    }
+  const { data: links } = await sb.from('pompe_cisterne').select('*, stazione_pompe(nome), cisterne(nome)');
+  let linkHtml = '';
+  if (pompe && pompe.length) {
+    linkHtml += '<div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px">collegamento pompe e cisterne</div>';
+    linkHtml += '<div style="display:flex;flex-wrap:wrap;gap:10px">';
+    pompe.forEach(p => {
+      const prodInfo = cacheProdotti.find(pr => pr.nome === p.prodotto);
+      const colore = prodInfo ? prodInfo.colore : '#888';
+      const collegati = (links||[]).filter(l => l.pompa_id === p.id).map(l => l.cisterne?.nome || '?');
+      linkHtml += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 14px;min-width:180px">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div style="width:8px;height:8px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:13px">' + esc(p.nome) + '</strong></div>' +
+        '<div style="font-size:11px;color:var(--text-muted)">' + (collegati.length ? collegati.join(', ') : 'Nessuna cisterna') + '</div>' +
+        '</div>';
+    });
+    linkHtml += '</div>';
+  }
+  document.getElementById('stz-magazzino-content').innerHTML = linkHtml;
+}
+
+async function stampaReportAcquistiStazione() {
+  const { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').order('data',{ascending:false});
+  if (!ordini || !ordini.length) { toast('Nessun acquisto stazione trovato'); return; }
+
+  let totLitri = 0, totValore = 0;
+  let righeHtml = '';
+  ordini.forEach(function(r, i) {
+    var litri = Number(r.litri);
+    var costoTot = Number(r.costo_litro) * litri;
+    totLitri += litri;
+    totValore += costoTot;
+    var dataFmt = new Date(r.data).toLocaleDateString('it-IT');
+    righeHtml += '<tr>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + dataFmt + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litri) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(Number(r.costo_litro)) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(costoTot) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.fornitore) + '</td>' +
+      '</tr>';
   });
 
-  const prodotti = [...new Set([...Object.keys(carichi), ...Object.keys(vendite)])];
-  let html = '<div class="grid2" style="margin-top:12px">';
-  prodotti.forEach(prod => {
-    const caricato = carichi[prod] || 0;
-    const venduto = vendite[prod] || 0;
-    const giacenza = caricato - venduto;
-    const prodInfo = cacheProdotti.find(p => p.nome === prod);
-    const colore = prodInfo ? prodInfo.colore : '#888';
-    html += '<div class="kpi" style="border-left:3px solid ' + colore + '"><div class="kpi-label">' + esc(prod) + '</div><div class="kpi-value">' + fmtL(giacenza) + '</div><div style="font-size:10px;color:var(--text-hint);margin-top:4px">Caricati: ' + fmtL(caricato) + ' · Venduti: ' + fmtL(venduto) + '</div></div>';
+  // Riepilogo per anno e prodotto
+  var perAnno = {};
+  ordini.forEach(function(r) {
+    var anno = r.data.substring(0,4);
+    if (!perAnno[anno]) perAnno[anno] = {};
+    if (!perAnno[anno][r.prodotto]) perAnno[anno][r.prodotto] = { litri:0, valore:0, ordini:0 };
+    perAnno[anno][r.prodotto].litri += Number(r.litri);
+    perAnno[anno][r.prodotto].valore += Number(r.costo_litro) * Number(r.litri);
+    perAnno[anno][r.prodotto].ordini++;
   });
+
+  var riepilogoHtml = '';
+  Object.keys(perAnno).sort().reverse().forEach(function(anno) {
+    riepilogoHtml += '<tr><td colspan="4" style="padding:8px;border:1px solid #ddd;background:#f5f5f5;font-weight:bold">' + anno + '</td></tr>';
+    Object.entries(perAnno[anno]).forEach(function(entry) {
+      var prod = entry[0], v = entry[1];
+      riepilogoHtml += '<tr><td style="padding:6px 8px;border:1px solid #ddd;padding-left:20px">' + esc(prod) + '</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + v.ordini + '</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(v.litri) + '</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(v.valore) + '</td></tr>';
+    });
+  });
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Acquisti Stazione Oppido</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:15mm}' +
+    '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:16px}' +
+    'th{background:#6B5FCC;color:#fff;padding:8px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;border:1px solid #5A4FBB;text-align:center}' +
+    '.tot td{border-top:3px solid #6B5FCC!important;font-weight:bold;font-size:12px;background:#EEEDFE!important}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:20px;font-weight:bold;color:#6B5FCC">ACQUISTI STAZIONE OPPIDO</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Totale ordini: <strong>' + ordini.length + '</strong> — Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div></div></div>';
+
+  html += '<div style="display:flex;gap:12px;margin-bottom:14px">';
+  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Valore totale</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totValore) + '</div></div>';
   html += '</div>';
-  if (!prodotti.length) html = '<div class="loading">Nessun dato disponibile</div>';
-  document.getElementById('stz-magazzino-content').innerHTML = html;
+
+  html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;text-transform:uppercase">Riepilogo per anno</div>';
+  html += '<table><thead><tr><th>Prodotto</th><th>Ordini</th><th>Litri</th><th>Valore</th></tr></thead><tbody>' + riepilogoHtml + '</tbody></table>';
+
+  html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;text-transform:uppercase">Dettaglio ordini</div>';
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale</th><th>Fornitore</th></tr></thead><tbody>';
+  html += righeHtml;
+  html += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd" colspan="3">TOTALE</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totValore) + '</td><td style="padding:8px;border:1px solid #ddd"></td></tr>';
+  html += '</tbody></table>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── Report stazione ──
