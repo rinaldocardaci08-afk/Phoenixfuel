@@ -857,7 +857,7 @@ async function caricaOrdini() {
     const pL = prezzoConIva(r), tot = pL*r.litri;
     const basNome = r.basi_carico ? r.basi_carico.nome : '—';
     const isApprov = r.tipo_ordine==='entrata_deposito' && r.stato!=='confermato' && r.stato!=='annullato';
-    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
+    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito') && r.stato!=='confermato' && r.stato!=='annullato';
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
@@ -1433,7 +1433,7 @@ async function caricaConsegne() {
     tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine per questa data</td></tr>';
     ['tot-consegne','tot-completate','tot-inattesa','tot-programmati','tot-litri-cons','tot-fatt-netto-cons','tot-fatt-iva-cons','tot-margine-cons'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='0'; });
   } else {
-    const consegnabili = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio');
+    const consegnabili = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito');
     document.getElementById('tot-consegne').textContent = consegnabili.length;
     document.getElementById('tot-completate').textContent = consegnabili.filter(r=>r.stato==='confermato').length;
     document.getElementById('tot-inattesa').textContent = consegnabili.filter(r=>r.stato==='in attesa').length;
@@ -1452,7 +1452,7 @@ async function caricaConsegne() {
     const docsMap = {};
     (allDocs||[]).forEach(d => { if(!docsMap[d.ordine_id]) docsMap[d.ordine_id]=[]; docsMap[d.ordine_id].push(d); });
 
-    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio').map(r => {
+    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
       const docs = docsMap[r.id] || [];
 
@@ -2120,37 +2120,79 @@ async function caricaOrdiniDaCaricare() {
 }
 
 async function riceviOrdineStazione(ordineId, litri, prodotto) {
-  if (!confirm('Confermi la ricezione di ' + fmtL(litri) + ' di ' + prodotto + ' nella stazione Oppido?\n\nLe cisterne verranno aggiornate automaticamente.')) return;
-
   // Trova cisterne stazione per questo prodotto
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido').eq('prodotto',prodotto).order('nome');
   if (!cisterne || !cisterne.length) { toast('Nessuna cisterna trovata per ' + prodotto + ' alla stazione'); return; }
 
-  // Distribuisci litri nelle cisterne (riempi la prima, poi overflow alla successiva)
-  let litriRimanenti = Number(litri);
-  for (const c of cisterne) {
-    if (litriRimanenti <= 0) break;
+  const prodInfo = cacheProdotti.find(p => p.nome === prodotto);
+  const colore = prodInfo ? prodInfo.colore : '#888';
+  const totLitri = Number(litri);
+
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">📦 Ricezione ' + esc(prodotto) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Quantità da caricare: <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong></div>';
+
+  html += '<div style="margin-bottom:12px">';
+  cisterne.forEach(c => {
     const capMax = Number(c.capacita_max);
     const livAtt = Number(c.livello_attuale);
-    const spazio = capMax - livAtt;
-    const daAggiungere = Math.min(litriRimanenti, spazio > 0 ? spazio : litriRimanenti);
-    const nuovoLivello = livAtt + daAggiungere;
+    const spazio = Math.max(0, capMax - livAtt);
+    const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += '<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:6px"></span><strong>' + esc(c.nome) + '</strong></div>';
+    html += '<span style="font-size:11px;color:var(--text-muted)">' + pct + '% — ' + fmtL(livAtt) + ' / ' + fmtL(capMax) + ' — spazio: <strong>' + fmtL(spazio) + '</strong></span>';
+    html += '</div>';
+    html += '<div style="height:6px;background:var(--border);border-radius:3px;margin-bottom:8px"><div style="height:100%;width:' + pct + '%;background:' + colore + ';border-radius:3px;opacity:0.7"></div></div>';
+    html += '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;width:80px">Litri da caricare:</span><input type="number" class="stz-ricevi-input" data-cisterna="' + c.id + '" data-spazio="' + spazio + '" value="0" min="0" max="' + (capMax * 1.1) + '" step="100" oninput="calcolaRicezioneStazione(' + totLitri + ')" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);width:140px;text-align:right" /></div>';
+    html += '</div>';
+  });
+  html += '</div>';
 
-    const { error } = await sb.from('cisterne').update({
-      livello_attuale: nuovoLivello,
-      updated_at: new Date().toISOString()
-    }).eq('id', c.id);
+  html += '<div id="stz-ricevi-totale" style="padding:10px 14px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border);margin-bottom:12px;font-size:13px"></div>';
+  html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1;background:#639922" onclick="confermaRicezioneStazione(\'' + ordineId + '\',' + totLitri + ')">✅ Conferma ricezione</button><button class="btn-secondary" onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
 
-    if (error) { toast('Errore aggiornamento cisterna: ' + error.message); return; }
-    litriRimanenti -= daAggiungere;
+  apriModal(html);
+  calcolaRicezioneStazione(totLitri);
+}
+
+function calcolaRicezioneStazione(totLitri) {
+  const inputs = document.querySelectorAll('.stz-ricevi-input');
+  let totAssegnati = 0;
+  inputs.forEach(inp => { totAssegnati += parseFloat(inp.value) || 0; });
+  const diff = totLitri - totAssegnati;
+  const el = document.getElementById('stz-ricevi-totale');
+  if (el) {
+    const ok = Math.abs(diff) < 0.01;
+    el.innerHTML = '<div style="display:flex;justify-content:space-between"><span>Assegnati: <strong style="font-family:var(--font-mono)">' + fmtL(totAssegnati) + '</strong> / ' + fmtL(totLitri) + '</span><span style="color:' + (ok ? '#639922' : '#E24B4A') + ';font-weight:600">' + (ok ? '✅ OK' : (diff > 0 ? '⚠ Rimangono ' + fmtL(diff) : '⚠ Eccesso di ' + fmtL(-diff))) + '</span></div>';
+  }
+}
+
+async function confermaRicezioneStazione(ordineId, totLitri) {
+  const inputs = document.querySelectorAll('.stz-ricevi-input');
+  let totAssegnati = 0;
+  inputs.forEach(inp => { totAssegnati += parseFloat(inp.value) || 0; });
+  if (Math.abs(totLitri - totAssegnati) > 0.5) {
+    if (!confirm('I litri assegnati (' + fmtL(totAssegnati) + ') non corrispondono al totale ordine (' + fmtL(totLitri) + '). Procedere comunque?')) return;
   }
 
-  // Segna ordine come ricevuto
+  for (const inp of inputs) {
+    const val = parseFloat(inp.value) || 0;
+    if (val <= 0) continue;
+    const cisId = inp.dataset.cisterna;
+    const { data: cis } = await sb.from('cisterne').select('livello_attuale').eq('id', cisId).single();
+    if (!cis) continue;
+    const nuovoLivello = Number(cis.livello_attuale) + val;
+    const { error } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisId);
+    if (error) { toast('Errore cisterna: ' + error.message); return; }
+  }
+
   const { error } = await sb.from('ordini').update({ ricevuto_stazione: true }).eq('id', ordineId);
   if (error) { toast('Errore: ' + error.message); return; }
 
-  toast('✅ ' + fmtL(litri) + ' di ' + prodotto + ' ricevuti nella stazione!');
+  toast('✅ ' + fmtL(totAssegnati) + ' ricevuti nella stazione!');
+  chiudiModal();
   caricaOrdiniDaCaricare();
+  caricaStazioneDashboard();
 }
 
 async function caricaStazioneDashboard() {
@@ -3122,7 +3164,7 @@ async function caricaOrdiniPerCarico() {
     // Filtra: escludi depositi e ordini già assegnati a un carico
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
-      if (o.tipo_ordine !== 'cliente' && o.tipo_ordine !== 'stazione_servizio') return false;
+      if (o.tipo_ordine !== 'cliente' && o.tipo_ordine !== 'stazione_servizio' && o.tipo_ordine !== 'entrata_deposito') return false;
       return true;
     });
 
