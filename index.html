@@ -526,6 +526,18 @@
 
         <!-- MAGAZZINO -->
         <div class="stz-panel" id="stz-magazzino" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Configurazione pompe</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Nome pompa</label><input type="text" id="stz-pompa-nome" placeholder="Es. Gasolio 3" /></div>
+              <div class="form-group"><label>Prodotto</label><select id="stz-pompa-prodotto"></select></div>
+            </div>
+            <button class="btn-primary" onclick="salvaPompa()">➕ Aggiungi pompa</button>
+            <div style="overflow-x:auto;margin-top:12px">
+            <table><thead><tr><th>Ordine</th><th>Nome</th><th>Prodotto</th><th>Stato</th><th></th></tr></thead>
+            <tbody id="stz-tabella-pompe"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
           <div class="card">
             <div class="card-title">Giacenze stazione Oppido</div>
             <div id="stz-magazzino-content"><div class="loading">Caricamento...</div></div>

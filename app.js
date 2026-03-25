@@ -2042,7 +2042,7 @@ async function caricaFormLetture() {
   pompe.forEach(p => {
     const val = lettMap[p.id] !== undefined ? lettMap[p.id] : '';
     const precVal = lettIeriMap[p.id];
-    const colore = p.prodotto === 'Gasolio Autotrazione' ? '#D4A017' : '#378ADD';
+    const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
     const precLabel = precVal !== undefined ? precVal.toLocaleString('it-IT', {maximumFractionDigits:2}) : '—';
     const prezzo = prezzoMap[p.prodotto] || 0;
 
@@ -2116,7 +2116,7 @@ function stampaReportLetture() {
     const litri = (!isNaN(valOggi) && valIeri !== undefined) ? valOggi - valIeri : 0;
     const euro = litri * prezzo;
     if (litri > 0) { totLitri += litri; totEuro += euro; }
-    const colore = p.prodotto === 'Gasolio Autotrazione' ? '#D4A017' : '#378ADD';
+    const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
 
     righe += '<tr>' +
       '<td style="padding:8px;border:1px solid #ddd"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span><strong>' + esc(p.nome) + '</strong></td>' +
@@ -2195,7 +2195,7 @@ async function caricaStoricoLetture() {
   (letture||[]).forEach(l => {
     const pompa = pompeMap[l.pompa_id];
     if (!pompa) return;
-    const colore = pompa.prodotto==='Gasolio Autotrazione'?'#D4A017':'#378ADD';
+    const _pi = cacheProdotti.find(pp=>pp.nome===pompa.prodotto); const colore = _pi ? _pi.colore : '#888';
     // Trova lettura precedente
     const storPompa = lettureByPompa[l.pompa_id]||[];
     const idx = storPompa.findIndex(s=>s.id===l.id);
@@ -2293,6 +2293,97 @@ async function eliminaVersamento(id) {
 
 // ── Magazzino stazione ──
 async function caricaMagazzinoStazione() {
+  await caricaTabelaPompe();
+  await caricaGiacenzeStazione();
+}
+
+async function caricaTabelaPompe() {
+  // Popola dropdown prodotti
+  const sel = document.getElementById('stz-pompa-prodotto');
+  if (sel) {
+    sel.innerHTML = cacheProdotti.filter(p => p.attivo && p.categoria === 'benzine').map(p => '<option value="' + esc(p.nome) + '">' + esc(p.nome) + '</option>').join('');
+  }
+
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').order('ordine');
+  const tbody = document.getElementById('stz-tabella-pompe');
+  if (!pompe || !pompe.length) { tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessuna pompa</td></tr>'; return; }
+  tbody.innerHTML = pompe.map(p => {
+    const prodInfo = cacheProdotti.find(pr => pr.nome === p.prodotto);
+    const colore = prodInfo ? prodInfo.colore : '#888';
+    const statoBadge = p.attiva ? '<span class="badge green">Attiva</span>' : '<span class="badge red">Disattiva</span>';
+    return '<tr>' +
+      '<td style="font-family:var(--font-mono)">' + p.ordine + '</td>' +
+      '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:6px"></span><strong>' + esc(p.nome) + '</strong></td>' +
+      '<td>' + esc(p.prodotto) + '</td>' +
+      '<td>' + statoBadge + '</td>' +
+      '<td>' +
+        '<button class="btn-edit" onclick="editaPompa(\'' + p.id + '\')" title="Modifica">✏️</button>' +
+        '<button class="btn-edit" onclick="togglePompa(\'' + p.id + '\',' + p.attiva + ')" title="' + (p.attiva ? 'Disattiva' : 'Attiva') + '">' + (p.attiva ? '🔒' : '🔓') + '</button>' +
+        '<button class="btn-danger" onclick="eliminaPompa(\'' + p.id + '\',\'' + esc(p.nome) + '\')">x</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+async function salvaPompa() {
+  const nome = document.getElementById('stz-pompa-nome').value.trim();
+  const prodotto = document.getElementById('stz-pompa-prodotto').value;
+  if (!nome) { toast('Inserisci un nome per la pompa'); return; }
+  if (!prodotto) { toast('Seleziona un prodotto'); return; }
+  // Calcola ordine successivo
+  const { data: existing } = await sb.from('stazione_pompe').select('ordine').order('ordine',{ascending:false}).limit(1);
+  const nextOrdine = existing && existing.length ? existing[0].ordine + 1 : 1;
+  const { error } = await sb.from('stazione_pompe').insert([{ nome, prodotto, ordine: nextOrdine }]);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Pompa "' + nome + '" aggiunta!');
+  document.getElementById('stz-pompa-nome').value = '';
+  caricaTabelaPompe();
+}
+
+async function editaPompa(id) {
+  const { data: p } = await sb.from('stazione_pompe').select('*').eq('id', id).single();
+  if (!p) return;
+  const opzProd = cacheProdotti.filter(pr => pr.attivo && pr.categoria === 'benzine').map(pr =>
+    '<option value="' + esc(pr.nome) + '"' + (pr.nome === p.prodotto ? ' selected' : '') + '>' + esc(pr.nome) + '</option>'
+  ).join('');
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica pompa: ' + esc(p.nome) + '</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Nome</label><input type="text" id="edit-pompa-nome" value="' + esc(p.nome) + '" /></div>';
+  html += '<div class="form-group"><label>Prodotto</label><select id="edit-pompa-prodotto">' + opzProd + '</select></div>';
+  html += '<div class="form-group"><label>Ordine</label><input type="number" id="edit-pompa-ordine" value="' + p.ordine + '" /></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" onclick="confermaEditaPompa(\'' + id + '\')">Salva</button><button class="btn-secondary" onclick="chiudiModal()">Annulla</button></div>';
+  apriModal(html);
+}
+
+async function confermaEditaPompa(id) {
+  const nome = document.getElementById('edit-pompa-nome').value.trim();
+  const prodotto = document.getElementById('edit-pompa-prodotto').value;
+  const ordine = parseInt(document.getElementById('edit-pompa-ordine').value) || 0;
+  if (!nome) { toast('Nome obbligatorio'); return; }
+  const { error } = await sb.from('stazione_pompe').update({ nome, prodotto, ordine }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Pompa aggiornata!');
+  chiudiModal();
+  caricaTabelaPompe();
+}
+
+async function togglePompa(id, attiva) {
+  const { error } = await sb.from('stazione_pompe').update({ attiva: !attiva }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(attiva ? 'Pompa disattivata' : 'Pompa attivata');
+  caricaTabelaPompe();
+}
+
+async function eliminaPompa(id, nome) {
+  if (!confirm('Eliminare la pompa "' + nome + '"?\n\nATTENZIONE: le letture associate verranno perse.')) return;
+  await sb.from('stazione_letture').delete().eq('pompa_id', id);
+  const { error } = await sb.from('stazione_pompe').delete().eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Pompa eliminata');
+  caricaTabelaPompe();
+}
+
+async function caricaGiacenzeStazione() {
   // Calcola giacenze dalla differenza tra ordini entrata (stazione_servizio) e vendite (letture)
   const { data: ordini } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato');
   const carichi = {};
@@ -2317,7 +2408,8 @@ async function caricaMagazzinoStazione() {
     const caricato = carichi[prod] || 0;
     const venduto = vendite[prod] || 0;
     const giacenza = caricato - venduto;
-    const colore = prod === 'Gasolio Autotrazione' ? '#D4A017' : '#378ADD';
+    const prodInfo = cacheProdotti.find(p => p.nome === prod);
+    const colore = prodInfo ? prodInfo.colore : '#888';
     html += '<div class="kpi" style="border-left:3px solid ' + colore + '"><div class="kpi-label">' + esc(prod) + '</div><div class="kpi-value">' + fmtL(giacenza) + '</div><div style="font-size:10px;color:var(--text-hint);margin-top:4px">Caricati: ' + fmtL(caricato) + ' · Venduti: ' + fmtL(venduto) + '</div></div>';
   });
   html += '</div>';
