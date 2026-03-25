@@ -520,7 +520,9 @@ let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false
 function toggleTipoOrdine() {
   const tipo = document.getElementById('ord-tipo').value;
   const isCliente = tipo === 'cliente';
+  const isRitirabile = tipo === 'entrata_deposito' || tipo === 'stazione_servizio';
   document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
+  document.getElementById('grp-costo-ritiro').style.display = isRitirabile ? '' : 'none';
   if (!isCliente) {
     const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
     document.getElementById('ord-note').placeholder = lbl[tipo] || '';
@@ -818,7 +820,9 @@ async function salvaOrdine() {
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
+  const costoRitiro = parseFloat(document.getElementById('ord-costo-ritiro')?.value) || 0;
   const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  if (costoRitiro > 0) record.costo_ritiro = costoRitiro;
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   if (prezzoCorrente._isDeposito && tipo === 'cliente') {
@@ -857,7 +861,7 @@ async function caricaOrdini() {
     const pL = prezzoConIva(r), tot = pL*r.litri;
     const basNome = r.basi_carico ? r.basi_carico.nome : '—';
     const isApprov = r.tipo_ordine==='entrata_deposito' && r.stato!=='confermato' && r.stato!=='annullato';
-    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito') && r.stato!=='confermato' && r.stato!=='annullato';
+    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
@@ -1468,15 +1472,18 @@ async function caricaConsegne() {
         docsHtml = '<span style="font-size:10px;color:var(--text-hint)">—</span>';
       }
 
-      // Azioni
+      // Azioni in base al tipo ordine
       let azioniHtml = '';
-      if (r.stato !== 'confermato') {
+      if (r.tipo_ordine === 'entrata_deposito' && r.stato !== 'confermato') {
+        // Entrata deposito → pulsante "Carica cisterne"
+        azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">📦 Carica</button> ';
+      } else if (r.stato !== 'confermato') {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
 
-      return '<tr><td><strong>' + esc(r.cliente) + '</strong></td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
+      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
   }
 
@@ -3161,11 +3168,14 @@ async function caricaOrdiniPerCarico() {
     const { data: ordini, error } = await sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente');
     if (error) { console.error('Errore ordini:', error); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
 
-    // Filtra: escludi depositi e ordini già assegnati a un carico
+    // Filtra ordini per logistica
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
-      if (o.tipo_ordine !== 'cliente' && o.tipo_ordine !== 'stazione_servizio' && o.tipo_ordine !== 'entrata_deposito') return false;
-      return true;
+      // Ordini cliente → sempre in logistica
+      if (o.tipo_ordine === 'cliente') return true;
+      // Entrata deposito e stazione → solo se franco partenza (costo_ritiro > 0)
+      if ((o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') && Number(o.costo_ritiro||0) > 0) return true;
+      return false;
     });
 
     if (!ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
