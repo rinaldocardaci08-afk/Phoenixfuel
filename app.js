@@ -2561,6 +2561,15 @@ async function caricaGiacenzeStazione() {
   const elCis = document.getElementById('stz-cisterne-grafiche');
   if (elCis) elCis.innerHTML = cisHtmlAll;
 
+  // Popola dropdown anni
+  const selAnno = document.getElementById('stz-acq-anno');
+  if (selAnno && selAnno.options.length <= 1) {
+    const annoCorr = new Date().getFullYear();
+    for (let y = annoCorr; y >= annoCorr - 5; y--) {
+      selAnno.innerHTML += '<option value="' + y + '">' + y + '</option>';
+    }
+  }
+
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
   const { data: links } = await sb.from('pompe_cisterne').select('*, stazione_pompe(nome), cisterne(nome)');
   let linkHtml = '';
@@ -2582,8 +2591,22 @@ async function caricaGiacenzeStazione() {
 }
 
 async function stampaReportAcquistiStazione() {
-  const { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').order('data',{ascending:false});
-  if (!ordini || !ordini.length) { toast('Nessun acquisto stazione trovato'); return; }
+  // Leggi filtri
+  const anno = document.getElementById('stz-acq-anno').value;
+  const da = document.getElementById('stz-acq-da').value;
+  const a = document.getElementById('stz-acq-a').value;
+
+  let query = sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato');
+  let periodoLabel = 'Tutti i dati';
+  if (da && a) {
+    query = query.gte('data', da).lte('data', a);
+    periodoLabel = 'Dal ' + new Date(da).toLocaleDateString('it-IT') + ' al ' + new Date(a).toLocaleDateString('it-IT');
+  } else if (anno) {
+    query = query.gte('data', anno + '-01-01').lte('data', anno + '-12-31');
+    periodoLabel = 'Anno ' + anno;
+  }
+  const { data: ordini } = await query.order('data',{ascending:false});
+  if (!ordini || !ordini.length) { toast('Nessun acquisto trovato per il periodo selezionato'); return; }
 
   let totLitri = 0, totValore = 0;
   let righeHtml = '';
@@ -2634,7 +2657,7 @@ async function stampaReportAcquistiStazione() {
 
   html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:10px;margin-bottom:14px">';
   html += '<div><div style="font-size:20px;font-weight:bold;color:#6B5FCC">ACQUISTI STAZIONE OPPIDO</div>';
-  html += '<div style="font-size:12px;color:#666;margin-top:3px">Totale ordini: <strong>' + ordini.length + '</strong> — Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + periodoLabel + '</strong> — Ordini: <strong>' + ordini.length + '</strong> — Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div>';
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div></div></div>';
 
   html += '<div style="display:flex;gap:12px;margin-bottom:14px">';
