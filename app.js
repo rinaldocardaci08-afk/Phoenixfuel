@@ -522,9 +522,7 @@ let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false
 function toggleTipoOrdine() {
   const tipo = document.getElementById('ord-tipo').value;
   const isCliente = tipo === 'cliente';
-  const isRitirabile = tipo === 'entrata_deposito' || tipo === 'stazione_servizio';
   document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
-  document.getElementById('grp-costo-ritiro').style.display = isRitirabile ? '' : 'none';
   if (!isCliente) {
     const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
     document.getElementById('ord-note').placeholder = lbl[tipo] || '';
@@ -821,9 +819,7 @@ async function salvaOrdine() {
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  const costoRitiro = parseFloat(document.getElementById('ord-costo-ritiro')?.value) || 0;
   const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
-  if (costoRitiro > 0) record.costo_ritiro = costoRitiro;
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   if (prezzoCorrente._isDeposito && tipo === 'cliente') {
@@ -3160,8 +3156,8 @@ async function caricaOrdiniPerCarico() {
       if (idsInCarico.has(o.id)) return false;
       // Ordini cliente → sempre in logistica
       if (o.tipo_ordine === 'cliente') return true;
-      // Entrata deposito e stazione → solo se franco partenza (costo_ritiro > 0)
-      if ((o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') && Number(o.costo_ritiro||0) > 0) return true;
+      // Entrata deposito e stazione → solo se franco partenza (trasporto_litro > 0)
+      if ((o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') && Number(o.trasporto_litro||0) > 0) return true;
       return false;
     });
 
