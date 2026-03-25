@@ -70,6 +70,8 @@ async function costruisciMenu(ruolo, utenteId) {
     });
     voci.push({ section:'Logistica' });
     voci.push({ id:'logistica', icon:'🚛', label:'Logistica' });
+    voci.push({ section:'Stazione' });
+    voci.push({ id:'stazione', icon:'⛽', label:'Stazione Oppido' });
     voci.push({ section:'Impostazioni' });
     voci.push({ id:'utenti', icon:'🔑', label:'Utenti' });
   } else {
@@ -87,6 +89,7 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'basi', icon:'📍', label:'Basi di carico' },
       { id:'prodotti', icon:'📦', label:'Prodotti' },
       { id:'logistica', icon:'🚛', label:'Logistica', section:'Logistica' },
+      { id:'stazione', icon:'⛽', label:'Stazione Oppido', section:'Stazione' },
     ];
     let lastSection = null;
     tutteSezioni.forEach(s => {
@@ -108,14 +111,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
+const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
@@ -1908,6 +1911,360 @@ async function eliminaProdotto(id) {
   caricaProdotti();
 }
 
+// ── STAZIONE OPPIDO ──────────────────────────────────────────────
+function switchStazioneTab(btn) {
+  document.querySelectorAll('.stz-tab').forEach(b => { b.style.background='var(--bg)'; b.style.color='var(--text)'; b.style.border='0.5px solid var(--border)'; b.classList.remove('active'); });
+  btn.style.background=''; btn.style.color=''; btn.style.border=''; btn.classList.add('active');
+  document.querySelectorAll('.stz-panel').forEach(p => p.style.display='none');
+  document.getElementById(btn.dataset.tab).style.display='';
+  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-report':initReportStazione };
+  if (loaders[btn.dataset.tab]) loaders[btn.dataset.tab]();
+}
+
+async function caricaStazione() {
+  // Init date fields
+  document.getElementById('stz-data-lettura').value = oggiISO;
+  document.getElementById('stz-data-lettura').onchange = function() { caricaFormLetture(); };
+  document.getElementById('stz-data-prezzo').value = oggiISO;
+  document.getElementById('stz-data-vers').value = oggiISO;
+  caricaStazioneDashboard();
+}
+
+// ── Dashboard ──
+async function caricaStazioneDashboard() {
+  const oggi = oggiISO;
+  const inizioMese = oggi.substring(0,8) + '01';
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  const pompeIds = (pompe||[]).map(p=>p.id);
+  if (!pompeIds.length) return;
+
+  // Letture del mese
+  const { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',inizioMese).order('data');
+  // Prezzi del mese
+  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').gte('data',inizioMese).order('data');
+  // Versamenti del mese
+  const { data: versamenti } = await sb.from('stazione_versamenti').select('*').gte('data',inizioMese).order('data');
+  // Lettura del giorno prima dell'inizio mese per calcolo primo giorno
+  const giornoPrec = new Date(new Date(inizioMese).getTime()-86400000).toISOString().split('T')[0];
+  const { data: lettPrec } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).eq('data',giornoPrec);
+
+  const tutteLetture = [...(lettPrec||[]), ...(letture||[])];
+  const prezziMap = {};
+  (prezzi||[]).forEach(p => { prezziMap[p.data+'_'+p.prodotto] = p.prezzo_litro; });
+
+  // Calcola vendite per giorno
+  const venditeGiorno = {};
+  const dateUniche = [...new Set((letture||[]).map(l=>l.data))].sort();
+  dateUniche.forEach(data => {
+    let totLitriG=0, totLitriB=0, incasso=0;
+    (pompe||[]).forEach(pompa => {
+      const lettOggi = tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===data);
+      // Trova lettura precedente
+      const datePrecedenti = tutteLetture.filter(l=>l.pompa_id===pompa.id && l.data<data).map(l=>l.data).sort();
+      const dataPrec = datePrecedenti.length ? datePrecedenti[datePrecedenti.length-1] : null;
+      const lettIeri = dataPrec ? tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===dataPrec) : null;
+      if (lettOggi && lettIeri) {
+        const litri = Number(lettOggi.lettura) - Number(lettIeri.lettura);
+        if (litri > 0) {
+          const prezzo = Number(prezziMap[data+'_'+pompa.prodotto] || 0);
+          if (pompa.prodotto === 'Gasolio Autotrazione') totLitriG += litri;
+          else totLitriB += litri;
+          incasso += litri * prezzo;
+        }
+      }
+    });
+    const vers = (versamenti||[]).filter(v=>v.data===data);
+    const totVers = vers.reduce((s,v)=>s+Number(v.contanti||0)+Number(v.pos||0),0);
+    venditeGiorno[data] = { gasolio:totLitriG, benzina:totLitriB, totale:totLitriG+totLitriB, incasso, versamento:totVers };
+  });
+
+  // KPI oggi
+  const vOggi = venditeGiorno[oggi] || { gasolio:0, benzina:0, totale:0, incasso:0 };
+  document.getElementById('stz-litri-oggi').textContent = fmtL(vOggi.totale);
+  document.getElementById('stz-incasso-oggi').textContent = fmtE(vOggi.incasso);
+
+  // KPI mese
+  let totLitriMese=0, totIncassoMese=0;
+  Object.values(venditeGiorno).forEach(v => { totLitriMese+=v.totale; totIncassoMese+=v.incasso; });
+  document.getElementById('stz-litri-mese').textContent = fmtL(totLitriMese);
+  document.getElementById('stz-incasso-mese').textContent = fmtE(totIncassoMese);
+
+  // KPI versamenti mese
+  const totCash = (versamenti||[]).reduce((s,v)=>s+Number(v.contanti||0),0);
+  const totPos = (versamenti||[]).reduce((s,v)=>s+Number(v.pos||0),0);
+  document.getElementById('stz-vers-contanti').textContent = fmtE(totCash);
+  document.getElementById('stz-vers-pos').textContent = fmtE(totPos);
+
+  // Tabella ultimi 7 giorni
+  const tbody = document.getElementById('stz-dash-tabella');
+  const ultimi7 = dateUniche.slice(-7).reverse();
+  if (!ultimi7.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun dato</td></tr>'; return; }
+  tbody.innerHTML = ultimi7.map(data => {
+    const v = venditeGiorno[data];
+    return '<tr><td>' + data + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.gasolio) + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.benzina) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + fmtL(v.totale) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.incasso) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.versamento) + '</td></tr>';
+  }).join('');
+}
+
+// ── Letture contatori ──
+async function caricaTabLetture() {
+  await caricaFormLetture();
+  await caricaStoricoLetture();
+}
+
+async function caricaFormLetture() {
+  const data = document.getElementById('stz-data-lettura').value || oggiISO;
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  if (!pompe||!pompe.length) { document.getElementById('stz-form-letture').innerHTML='<div class="loading">Nessuna pompa configurata</div>'; return; }
+
+  // Carica letture esistenti per questa data
+  const { data: lettureOggi } = await sb.from('stazione_letture').select('*').eq('data',data);
+  const lettMap = {}; (lettureOggi||[]).forEach(l => lettMap[l.pompa_id]=l.lettura);
+
+  // Carica lettura precedente per calcolare litri venduti
+  const ieri = new Date(new Date(data).getTime()-86400000).toISOString().split('T')[0];
+  const { data: lettureIeri } = await sb.from('stazione_letture').select('*').lte('data',ieri).order('data',{ascending:false});
+  const lettIeriMap = {};
+  (pompe||[]).forEach(p => {
+    const ultima = (lettureIeri||[]).find(l=>l.pompa_id===p.id);
+    if (ultima) lettIeriMap[p.id] = Number(ultima.lettura);
+  });
+
+  let html = '<div class="form-grid">';
+  pompe.forEach(p => {
+    const val = lettMap[p.id] || '';
+    const ieri = lettIeriMap[p.id];
+    const ieriLabel = ieri !== undefined ? '<span style="font-size:10px;color:var(--text-hint)">Prec: ' + ieri.toLocaleString('it-IT') + '</span>' : '';
+    const colore = p.prodotto === 'Gasolio Autotrazione' ? '#D4A017' : '#378ADD';
+    html += '<div class="form-group"><label><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(p.nome) + ' ' + ieriLabel + '</label><input type="number" class="stz-lettura-input" data-pompa="' + p.id + '" value="' + val + '" placeholder="Lettura contatore" step="0.01" /></div>';
+  });
+  html += '</div>';
+  document.getElementById('stz-form-letture').innerHTML = html;
+}
+
+async function salvaLetture() {
+  const data = document.getElementById('stz-data-lettura').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  const inputs = document.querySelectorAll('.stz-lettura-input');
+  let salvate = 0;
+  for (const inp of inputs) {
+    const val = parseFloat(inp.value);
+    if (isNaN(val)) continue;
+    const { error } = await sb.from('stazione_letture').upsert({ pompa_id:inp.dataset.pompa, data, lettura:val }, { onConflict:'pompa_id,data' });
+    if (error) { toast('Errore: ' + error.message); return; }
+    salvate++;
+  }
+  if (salvate === 0) { toast('Inserisci almeno una lettura'); return; }
+  toast(salvate + ' letture salvate!');
+  caricaStoricoLetture();
+}
+
+async function caricaStoricoLetture() {
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  const { data: letture } = await sb.from('stazione_letture').select('*').order('data',{ascending:false}).limit(50);
+  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false});
+  const tbody = document.getElementById('stz-storico-letture');
+  if (!letture||!letture.length) { tbody.innerHTML='<tr><td colspan="6" class="loading">Nessuna lettura</td></tr>'; return; }
+
+  const pompeMap = {}; (pompe||[]).forEach(p=>pompeMap[p.id]=p);
+  const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
+  const lettureByPompa = {};
+  (letture||[]).forEach(l => { if(!lettureByPompa[l.pompa_id]) lettureByPompa[l.pompa_id]=[]; lettureByPompa[l.pompa_id].push(l); });
+
+  let html = '';
+  (letture||[]).forEach(l => {
+    const pompa = pompeMap[l.pompa_id];
+    if (!pompa) return;
+    const colore = pompa.prodotto==='Gasolio Autotrazione'?'#D4A017':'#378ADD';
+    // Trova lettura precedente
+    const storPompa = lettureByPompa[l.pompa_id]||[];
+    const idx = storPompa.findIndex(s=>s.id===l.id);
+    const prec = idx < storPompa.length-1 ? storPompa[idx+1] : null;
+    const litri = prec ? Number(l.lettura)-Number(prec.lettura) : null;
+    const prezzo = Number(prezziMap[l.data+'_'+pompa.prodotto]||0);
+    const incasso = litri && prezzo ? litri*prezzo : null;
+    html += '<tr><td>' + l.data + '</td><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(pompa.nome) + '</td><td style="font-family:var(--font-mono)">' + Number(l.lettura).toLocaleString('it-IT',{minimumFractionDigits:2}) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + (litri!==null?fmtL(litri):'—') + '</td><td style="font-family:var(--font-mono)">' + (prezzo?fmt(prezzo):'—') + '</td><td style="font-family:var(--font-mono)">' + (incasso!==null?fmtE(incasso):'—') + '</td></tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+// ── Prezzi pompa ──
+async function caricaTabPrezzi() { await caricaStoricoPrezzi(); }
+
+async function salvaPrezziPompa() {
+  const data = document.getElementById('stz-data-prezzo').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  const gasolio = parseFloat(document.getElementById('stz-prezzo-gasolio').value);
+  const benzina = parseFloat(document.getElementById('stz-prezzo-benzina').value);
+  if (isNaN(gasolio) && isNaN(benzina)) { toast('Inserisci almeno un prezzo'); return; }
+  let salvati = 0;
+  if (!isNaN(gasolio)) {
+    const { error } = await sb.from('stazione_prezzi').upsert({ data, prodotto:'Gasolio Autotrazione', prezzo_litro:gasolio }, { onConflict:'data,prodotto' });
+    if (error) { toast('Errore: '+error.message); return; }
+    salvati++;
+  }
+  if (!isNaN(benzina)) {
+    const { error } = await sb.from('stazione_prezzi').upsert({ data, prodotto:'Benzina', prezzo_litro:benzina }, { onConflict:'data,prodotto' });
+    if (error) { toast('Errore: '+error.message); return; }
+    salvati++;
+  }
+  toast(salvati + ' prezzi salvati!');
+  document.getElementById('stz-prezzo-gasolio').value = '';
+  document.getElementById('stz-prezzo-benzina').value = '';
+  caricaStoricoPrezzi();
+}
+
+async function caricaStoricoPrezzi() {
+  const { data } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false}).limit(30);
+  const tbody = document.getElementById('stz-storico-prezzi');
+  if (!data||!data.length) { tbody.innerHTML='<tr><td colspan="4" class="loading">Nessun prezzo</td></tr>'; return; }
+  // Raggruppa per data
+  const perData = {};
+  data.forEach(r => { if(!perData[r.data]) perData[r.data]={}; perData[r.data][r.prodotto]=r; });
+  tbody.innerHTML = Object.entries(perData).sort((a,b)=>b[0].localeCompare(a[0])).map(([data,prodotti]) => {
+    const g = prodotti['Gasolio Autotrazione'];
+    const b = prodotti['Benzina'];
+    return '<tr><td>' + data + '</td><td style="font-family:var(--font-mono)">' + (g?'€ '+Number(g.prezzo_litro).toFixed(3):'—') + '</td><td style="font-family:var(--font-mono)">' + (b?'€ '+Number(b.prezzo_litro).toFixed(3):'—') + '</td><td><button class="btn-danger" onclick="eliminaPrezziPompa(\''+data+'\')">x</button></td></tr>';
+  }).join('');
+}
+
+async function eliminaPrezziPompa(data) {
+  if (!confirm('Eliminare i prezzi del ' + data + '?')) return;
+  await sb.from('stazione_prezzi').delete().eq('data',data);
+  toast('Prezzi eliminati');
+  caricaStoricoPrezzi();
+}
+
+// ── Versamenti ──
+async function caricaTabVersamenti() { await caricaStoricoVersamenti(); }
+
+async function salvaVersamento() {
+  const data = document.getElementById('stz-data-vers').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  const contanti = parseFloat(document.getElementById('stz-vers-cash').value) || 0;
+  const pos = parseFloat(document.getElementById('stz-vers-pos-input').value) || 0;
+  if (contanti === 0 && pos === 0) { toast('Inserisci almeno un importo'); return; }
+  const note = document.getElementById('stz-vers-note').value.trim();
+  const { error } = await sb.from('stazione_versamenti').insert([{ data, contanti, pos, note: note || null }]);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('Versamento salvato! Totale: ' + fmtE(contanti+pos));
+  document.getElementById('stz-vers-cash').value = '';
+  document.getElementById('stz-vers-pos-input').value = '';
+  document.getElementById('stz-vers-note').value = '';
+  caricaStoricoVersamenti();
+}
+
+async function caricaStoricoVersamenti() {
+  const { data } = await sb.from('stazione_versamenti').select('*').order('data',{ascending:false}).limit(30);
+  const tbody = document.getElementById('stz-storico-versamenti');
+  if (!data||!data.length) { tbody.innerHTML='<tr><td colspan="6" class="loading">Nessun versamento</td></tr>'; return; }
+  tbody.innerHTML = data.map(r => {
+    const tot = Number(r.contanti||0)+Number(r.pos||0);
+    return '<tr><td>' + r.data + '</td><td style="font-family:var(--font-mono)">' + fmtE(r.contanti||0) + '</td><td style="font-family:var(--font-mono)">' + fmtE(r.pos||0) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaVersamento(\''+r.id+'\')">x</button></td></tr>';
+  }).join('');
+}
+
+async function eliminaVersamento(id) {
+  if (!confirm('Eliminare questo versamento?')) return;
+  await sb.from('stazione_versamenti').delete().eq('id',id);
+  toast('Versamento eliminato');
+  caricaStoricoVersamenti();
+}
+
+// ── Magazzino stazione ──
+async function caricaMagazzinoStazione() {
+  // Calcola giacenze dalla differenza tra ordini entrata (stazione_servizio) e vendite (letture)
+  const { data: ordini } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato');
+  const carichi = {};
+  (ordini||[]).forEach(o => { carichi[o.prodotto] = (carichi[o.prodotto]||0) + Number(o.litri); });
+
+  // Vendite da letture
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  const pompeIds = (pompe||[]).map(p=>p.id);
+  const { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).order('data');
+  const vendite = {};
+  (pompe||[]).forEach(p => {
+    const lett = (letture||[]).filter(l=>l.pompa_id===p.id).sort((a,b)=>a.data.localeCompare(b.data));
+    if (lett.length >= 2) {
+      const totVenduto = Number(lett[lett.length-1].lettura) - Number(lett[0].lettura);
+      vendite[p.prodotto] = (vendite[p.prodotto]||0) + totVenduto;
+    }
+  });
+
+  const prodotti = [...new Set([...Object.keys(carichi), ...Object.keys(vendite)])];
+  let html = '<div class="grid2" style="margin-top:12px">';
+  prodotti.forEach(prod => {
+    const caricato = carichi[prod] || 0;
+    const venduto = vendite[prod] || 0;
+    const giacenza = caricato - venduto;
+    const colore = prod === 'Gasolio Autotrazione' ? '#D4A017' : '#378ADD';
+    html += '<div class="kpi" style="border-left:3px solid ' + colore + '"><div class="kpi-label">' + esc(prod) + '</div><div class="kpi-value">' + fmtL(giacenza) + '</div><div style="font-size:10px;color:var(--text-hint);margin-top:4px">Caricati: ' + fmtL(caricato) + ' · Venduti: ' + fmtL(venduto) + '</div></div>';
+  });
+  html += '</div>';
+  if (!prodotti.length) html = '<div class="loading">Nessun dato disponibile</div>';
+  document.getElementById('stz-magazzino-content').innerHTML = html;
+}
+
+// ── Report stazione ──
+function initReportStazione() {
+  const oggi = new Date();
+  document.getElementById('stz-report-da').value = oggi.toISOString().substring(0,8) + '01';
+  document.getElementById('stz-report-a').value = oggiISO;
+}
+
+async function generaReportStazione() {
+  const da = document.getElementById('stz-report-da').value;
+  const a = document.getElementById('stz-report-a').value;
+  if (!da || !a) { toast('Seleziona le date'); return; }
+
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  const pompeIds = (pompe||[]).map(p=>p.id);
+  const { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',da).lte('data',a).order('data');
+  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').gte('data',da).lte('data',a);
+  const { data: versamenti } = await sb.from('stazione_versamenti').select('*').gte('data',da).lte('data',a);
+  // Lettura precedente al periodo
+  const giornoPre = new Date(new Date(da).getTime()-86400000).toISOString().split('T')[0];
+  const { data: lettPre } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false});
+
+  const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
+  const tutteLetture = [...(lettPre||[]), ...(letture||[])];
+  let totGasolio=0, totBenzina=0, totIncasso=0;
+
+  const dateUniche = [...new Set((letture||[]).map(l=>l.data))].sort();
+  let righeHtml = '';
+  dateUniche.forEach(data => {
+    let gG=0, gB=0, inc=0;
+    (pompe||[]).forEach(pompa => {
+      const lettOggi = tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===data);
+      const datePrecedenti = tutteLetture.filter(l=>l.pompa_id===pompa.id && l.data<data).map(l=>l.data).sort();
+      const dataPrec = datePrecedenti.length ? datePrecedenti[datePrecedenti.length-1] : null;
+      const lettIeri = dataPrec ? tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===dataPrec) : null;
+      if (lettOggi && lettIeri) {
+        const litri = Number(lettOggi.lettura) - Number(lettIeri.lettura);
+        if (litri > 0) {
+          const prezzo = Number(prezziMap[data+'_'+pompa.prodotto]||0);
+          if (pompa.prodotto==='Gasolio Autotrazione') gG+=litri; else gB+=litri;
+          inc += litri*prezzo;
+        }
+      }
+    });
+    totGasolio+=gG; totBenzina+=gB; totIncasso+=inc;
+    righeHtml += '<tr><td>'+data+'</td><td style="font-family:var(--font-mono)">'+fmtL(gG)+'</td><td style="font-family:var(--font-mono)">'+fmtL(gB)+'</td><td style="font-family:var(--font-mono);font-weight:bold">'+fmtL(gG+gB)+'</td><td style="font-family:var(--font-mono)">'+fmtE(inc)+'</td></tr>';
+  });
+
+  const totCash = (versamenti||[]).reduce((s,v)=>s+Number(v.contanti||0),0);
+  const totPosV = (versamenti||[]).reduce((s,v)=>s+Number(v.pos||0),0);
+
+  let html = '<div class="grid4" style="margin-bottom:12px">';
+  html += '<div class="kpi"><div class="kpi-label">Gasolio</div><div class="kpi-value">' + fmtL(totGasolio) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Benzina</div><div class="kpi-value">' + fmtL(totBenzina) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Incasso totale</div><div class="kpi-value">' + fmtE(totIncasso) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Versamenti</div><div class="kpi-value">' + fmtE(totCash+totPosV) + '</div></div>';
+  html += '</div>';
+  html += '<div class="grid2" style="margin-bottom:12px"><div class="kpi"><div class="kpi-label">Contanti</div><div class="kpi-value">' + fmtE(totCash) + '</div></div><div class="kpi"><div class="kpi-label">POS</div><div class="kpi-value">' + fmtE(totPosV) + '</div></div></div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th></tr></thead><tbody>' + righeHtml + '</tbody></table></div>';
+  document.getElementById('stz-report-content').innerHTML = html;
+}
+
 // ── LOGISTICA ─────────────────────────────────────────────────────
 async function caricaLogistica() {
   await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
@@ -2175,7 +2532,7 @@ const SEZIONI_SISTEMA = [
   {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},{id:'deposito',label:'Deposito',icon:'🏗'},
   {id:'consegne',label:'Consegne',icon:'🚚'},{id:'vendite',label:'Vendite',icon:'📊'},
   {id:'clienti',label:'Clienti',icon:'👤'},{id:'fornitori',label:'Fornitori',icon:'🏭'},
-  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},
+  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},{id:'stazione',label:'Stazione Oppido',icon:'⛽'},
 ];
 
 async function apriModalePermessi(utenteId, nomeUtente) {

@@ -427,6 +427,120 @@
         </div>
       </div>
 
+      <!-- STAZIONE OPPIDO -->
+      <div class="section" id="s-stazione">
+        <!-- Tab navigation -->
+        <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn-primary stz-tab active" data-tab="stz-dashboard" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px">📊 Dashboard</button>
+          <button class="btn-primary stz-tab" data-tab="stz-letture" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Letture</button>
+          <button class="btn-primary stz-tab" data-tab="stz-prezzi" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Prezzi pompa</button>
+          <button class="btn-primary stz-tab" data-tab="stz-versamenti" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏦 Versamenti</button>
+          <button class="btn-primary stz-tab" data-tab="stz-magazzino" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Magazzino</button>
+          <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
+        </div>
+
+        <!-- DASHBOARD -->
+        <div class="stz-panel" id="stz-dashboard">
+          <div class="grid4" style="margin-bottom:16px">
+            <div class="kpi"><div class="kpi-label">Litri venduti oggi</div><div class="kpi-value" id="stz-litri-oggi">—</div></div>
+            <div class="kpi"><div class="kpi-label">Incasso oggi</div><div class="kpi-value" id="stz-incasso-oggi">—</div></div>
+            <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="stz-litri-mese">—</div></div>
+            <div class="kpi"><div class="kpi-label">Incasso mese</div><div class="kpi-value" id="stz-incasso-mese">—</div></div>
+          </div>
+          <div class="grid2" style="margin-bottom:16px">
+            <div class="kpi"><div class="kpi-label">Versamenti mese (contanti)</div><div class="kpi-value" id="stz-vers-contanti">—</div></div>
+            <div class="kpi"><div class="kpi-label">Versamenti mese (POS)</div><div class="kpi-value" id="stz-vers-pos">—</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Ultimi 7 giorni</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Versamento €</th></tr></thead>
+            <tbody id="stz-dash-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- LETTURE CONTATORI -->
+        <div class="stz-panel" id="stz-letture" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>Inserisci letture giornaliere</span>
+              <input type="date" id="stz-data-lettura" style="font-size:14px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+            </div>
+            <div id="stz-form-letture"><div class="loading">Caricamento pompe...</div></div>
+            <button class="btn-primary" onclick="salvaLetture()" style="margin-top:12px">💾 Salva letture</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Storico letture e vendite</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Pompa</th><th>Lettura</th><th>Litri venduti</th><th>Prezzo/L</th><th>Incasso €</th></tr></thead>
+            <tbody id="stz-storico-letture"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- PREZZI POMPA -->
+        <div class="stz-panel" id="stz-prezzi" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Imposta prezzi pompa</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Data</label><input type="date" id="stz-data-prezzo" /></div>
+              <div class="form-group"><label>Gasolio €/L</label><input type="number" id="stz-prezzo-gasolio" step="0.001" placeholder="1.789" /></div>
+              <div class="form-group"><label>Benzina €/L</label><input type="number" id="stz-prezzo-benzina" step="0.001" placeholder="1.889" /></div>
+            </div>
+            <button class="btn-primary" onclick="salvaPrezziPompa()">💾 Salva prezzi</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Storico prezzi pompa</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Gasolio €/L</th><th>Benzina €/L</th><th></th></tr></thead>
+            <tbody id="stz-storico-prezzi"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- VERSAMENTI -->
+        <div class="stz-panel" id="stz-versamenti" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Registra versamento</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Data</label><input type="date" id="stz-data-vers" /></div>
+              <div class="form-group"><label>Contanti €</label><input type="number" id="stz-vers-cash" step="0.01" placeholder="0.00" /></div>
+              <div class="form-group"><label>POS €</label><input type="number" id="stz-vers-pos-input" step="0.01" placeholder="0.00" /></div>
+              <div class="form-group"><label>Note</label><input type="text" id="stz-vers-note" placeholder="Es. versamento settimanale" /></div>
+            </div>
+            <button class="btn-primary" onclick="salvaVersamento()">💾 Salva versamento</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Storico versamenti</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Contanti</th><th>POS</th><th>Totale</th><th>Note</th><th></th></tr></thead>
+            <tbody id="stz-storico-versamenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- MAGAZZINO -->
+        <div class="stz-panel" id="stz-magazzino" style="display:none">
+          <div class="card">
+            <div class="card-title">Giacenze stazione Oppido</div>
+            <div id="stz-magazzino-content"><div class="loading">Caricamento...</div></div>
+          </div>
+        </div>
+
+        <!-- REPORT -->
+        <div class="stz-panel" id="stz-report" style="display:none">
+          <div class="card">
+            <div class="card-title">Report stazione</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Da</label><input type="date" id="stz-report-da" /></div>
+              <div class="form-group"><label>A</label><input type="date" id="stz-report-a" /></div>
+            </div>
+            <button class="btn-primary" onclick="generaReportStazione()" style="margin-top:8px">📊 Genera report</button>
+            <div id="stz-report-content" style="margin-top:16px"></div>
+          </div>
+        </div>
+      </div>
 
       <!-- LOGISTICA -->
       <div class="section" id="s-logistica">
