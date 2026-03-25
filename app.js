@@ -354,7 +354,7 @@ async function caricaPrezzi() {
   const { data } = await query;
 
   // Calcola prezzi PhoenixFuel da costo medio cisterne
-  const { data: cisterne } = await sb.from('cisterne').select('*');
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo');
   const { data: baseDeposito } = await sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle();
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
@@ -536,7 +536,7 @@ async function aggiornaSelezioniOrdine() {
   // Esegui query in parallelo
   const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
     sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', data),
-    _cacheCisterne ? Promise.resolve({data:_cacheCisterne}) : sb.from('cisterne').select('*'),
+    _cacheCisterne ? Promise.resolve({data:_cacheCisterne}) : sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
     _cacheBaseDepositoLoaded ? Promise.resolve({data:_cacheBaseDeposito}) : sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
   ]);
 
@@ -1065,7 +1065,7 @@ function cisternasvg(pct, colore) {
 }
 
 async function caricaDeposito() {
-  const { data: cisterne } = await sb.from('cisterne').select('*').order('tipo').order('nome');
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo').order('tipo').order('nome');
   if (!cisterne) return;
 
   // Raggruppa cisterne per tipo
@@ -1184,7 +1184,7 @@ async function apriModaleAssegnaCisterna(ordineId) {
   if (!ordine) return;
   const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
-  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('nome');
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).eq('sede','deposito_vibo').order('nome');
   if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
 
   // Distribuzione automatica ottimale
@@ -1264,7 +1264,7 @@ async function confermaUscitaDeposito(ordineId) {
   if (!ordine) return;
   const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
-  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).order('livello_attuale',{ascending:false});
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).eq('sede','deposito_vibo').order('livello_attuale',{ascending:false});
   if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
   const cis = cisterne[0];
   if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
@@ -1462,6 +1462,9 @@ async function caricaConsegne() {
 
       // Azioni
       let azioniHtml = '';
+      if (r.stato !== 'confermato') {
+        azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
+      }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
 
@@ -1471,6 +1474,21 @@ async function caricaConsegne() {
 
   // Ordini non processati (in attesa, qualsiasi data passata o oggi)
   await caricaNonProcessati();
+}
+
+async function confermaOrdineConsegna(ordineId) {
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+  if (!confirm('Confermare la consegna di ' + fmtL(ordine.litri) + ' di ' + ordine.prodotto + ' a ' + ordine.cliente + '?')) return;
+
+  // Se l'ordine viene dal deposito PhoenixFuel, scarica anche dalla cisterna
+  if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
+    await confermaUscitaDeposito(ordineId);
+  } else {
+    await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+  }
+  toast('Ordine confermato!');
+  caricaConsegne();
 }
 
 async function caricaNonProcessati() {
@@ -2067,7 +2085,70 @@ async function caricaStazione() {
 }
 
 // ── Dashboard ──
+async function caricaOrdiniDaCaricare() {
+  const { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').eq('stato','confermato').or('ricevuto_stazione.eq.false,ricevuto_stazione.is.null').order('data',{ascending:false});
+  const el = document.getElementById('stz-da-caricare');
+  if (!el) return;
+  if (!ordini || !ordini.length) { el.innerHTML = ''; return; }
+
+  let html = '<div class="card" style="border-left:4px solid #6B5FCC">';
+  html += '<div class="card-title" style="color:#6B5FCC">📦 Ordini in arrivo — da ricevere in cisterna (' + ordini.length + ')</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Stato</th><th></th></tr></thead><tbody>';
+  ordini.forEach(function(r) {
+    const dataFmt = new Date(r.data).toLocaleDateString('it-IT');
+    const _pi = cacheProdotti.find(function(p) { return p.nome === r.prodotto; });
+    const colore = _pi ? _pi.colore : '#888';
+    html += '<tr>' +
+      '<td>' + dataFmt + '</td>' +
+      '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
+      '<td>' + esc(r.fornitore) + '</td>' +
+      '<td>' + badgeStato(r.stato) + '</td>' +
+      '<td><button class="btn-primary" style="font-size:11px;padding:4px 12px;background:#639922" onclick="riceviOrdineStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto) + '\')">📦 Ricevi</button></td>' +
+      '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+  el.innerHTML = html;
+}
+
+async function riceviOrdineStazione(ordineId, litri, prodotto) {
+  if (!confirm('Confermi la ricezione di ' + fmtL(litri) + ' di ' + prodotto + ' nella stazione Oppido?\n\nLe cisterne verranno aggiornate automaticamente.')) return;
+
+  // Trova cisterne stazione per questo prodotto
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido').eq('prodotto',prodotto).order('nome');
+  if (!cisterne || !cisterne.length) { toast('Nessuna cisterna trovata per ' + prodotto + ' alla stazione'); return; }
+
+  // Distribuisci litri nelle cisterne (riempi la prima, poi overflow alla successiva)
+  let litriRimanenti = Number(litri);
+  for (const c of cisterne) {
+    if (litriRimanenti <= 0) break;
+    const capMax = Number(c.capacita_max);
+    const livAtt = Number(c.livello_attuale);
+    const spazio = capMax - livAtt;
+    const daAggiungere = Math.min(litriRimanenti, spazio > 0 ? spazio : litriRimanenti);
+    const nuovoLivello = livAtt + daAggiungere;
+
+    const { error } = await sb.from('cisterne').update({
+      livello_attuale: nuovoLivello,
+      updated_at: new Date().toISOString()
+    }).eq('id', c.id);
+
+    if (error) { toast('Errore aggiornamento cisterna: ' + error.message); return; }
+    litriRimanenti -= daAggiungere;
+  }
+
+  // Segna ordine come ricevuto
+  const { error } = await sb.from('ordini').update({ ricevuto_stazione: true }).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  toast('✅ ' + fmtL(litri) + ' di ' + prodotto + ' ricevuti nella stazione!');
+  caricaOrdiniDaCaricare();
+}
+
 async function caricaStazioneDashboard() {
+  // Ordini confermati da caricare in cisterna
+  await caricaOrdiniDaCaricare();
+
   const oggi = oggiISO;
   const inizioMese = oggi.substring(0,8) + '01';
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
@@ -2994,16 +3075,42 @@ function apriReportMensile() {
 }
 
 async function apriDettaglioCarico(caricoId) {
-  const { data: carico } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordini(cliente,prodotto,litri,note))').eq('id', caricoId).single();
+  const { data: carico } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordine_id, ordini(id,cliente,prodotto,litri,note,stato,fornitore))').eq('id', caricoId).single();
   if (!carico) return;
   const ordini = carico.carico_ordini ? [...carico.carico_ordini].sort((a,b)=>a.sequenza-b.sequenza) : [];
+  const nonConfermati = ordini.filter(o => o.ordini && o.ordini.stato !== 'confermato');
   let html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Dettaglio carico — ' + carico.data + '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Mezzo: ' + (carico.mezzo_targa||'—') + ' · Autista: ' + (carico.autista||'—') + '</div>';
-  html += '<table style="width:100%;font-size:12px;margin-bottom:16px"><thead><tr><th>#</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Note</th></tr></thead><tbody>';
-  ordini.forEach(o => { html += '<tr><td>' + o.sequenza + '</td><td>' + (o.ordini?.cliente||'—') + '</td><td>' + (o.ordini?.prodotto||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(o.ordini?.litri||0) + '</td><td style="font-size:11px;color:var(--text-muted)">' + (o.ordini?.note||'—') + '</td></tr>'; });
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Mezzo: ' + (carico.mezzo_targa||'—') + ' · Autista: ' + (carico.autista||'—') + ' · ' + ordini.length + ' consegne' + (nonConfermati.length ? ' · <span style="color:#BA7517">' + nonConfermati.length + ' da confermare</span>' : ' · <span style="color:#639922">tutte confermate</span>') + '</div>';
+  html += '<table style="width:100%;font-size:12px;margin-bottom:16px"><thead><tr><th>#</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Stato</th><th>Note</th></tr></thead><tbody>';
+  ordini.forEach(o => { html += '<tr><td>' + o.sequenza + '</td><td>' + (o.ordini?.cliente||'—') + '</td><td>' + (o.ordini?.prodotto||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(o.ordini?.litri||0) + '</td><td>' + badgeStato(o.ordini?.stato||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (o.ordini?.note||'—') + '</td></tr>'; });
   html += '</tbody></table>';
-  html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1" onclick="apriFoglioViaggio(\'' + caricoId + '\')">🖨️ Foglio viaggio</button><button onclick="chiudiModalePermessi()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  if (nonConfermati.length) {
+    html += '<button class="btn-primary" style="flex:1;background:#639922" onclick="confermaTutteConsegneCarico(\'' + caricoId + '\')">✅ Conferma tutte (' + nonConfermati.length + ')</button>';
+  }
+  html += '<button class="btn-primary" style="flex:1" onclick="apriFoglioViaggio(\'' + caricoId + '\')">🖨️ Foglio viaggio</button><button onclick="chiudiModalePermessi()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
   apriModal(html);
+}
+
+async function confermaTutteConsegneCarico(caricoId) {
+  const { data: caricoOrdini } = await sb.from('carico_ordini').select('ordine_id, ordini(id,stato,fornitore)').eq('carico_id', caricoId);
+  if (!caricoOrdini || !caricoOrdini.length) { toast('Nessun ordine nel carico'); return; }
+  const daConfermare = caricoOrdini.filter(co => co.ordini && co.ordini.stato !== 'confermato');
+  if (!daConfermare.length) { toast('Tutti gli ordini sono già confermati'); return; }
+  if (!confirm('Confermare ' + daConfermare.length + ' consegne di questo carico?')) return;
+
+  let confermati = 0;
+  for (const co of daConfermare) {
+    if (co.ordini.fornitore && co.ordini.fornitore.toLowerCase().includes('phoenix')) {
+      await confermaUscitaDeposito(co.ordine_id);
+    } else {
+      await sb.from('ordini').update({ stato:'confermato' }).eq('id', co.ordine_id);
+    }
+    confermati++;
+  }
+  toast(confermati + ' consegne confermate!');
+  chiudiModal();
+  caricaCarichi();
 }
 
 // ── PERMESSI ──────────────────────────────────────────────────────
@@ -3115,7 +3222,7 @@ async function caricaDashboard() {
 }
 
 async function caricaGiacenzaDashboard() {
-  const { data: cisterne } = await sb.from('cisterne').select('*');
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo');
   const wrap = document.getElementById('dash-giacenza');
   if (!wrap) return;
   if (!cisterne || !cisterne.length) { wrap.innerHTML = '<div class="loading">Nessuna cisterna configurata</div>'; return; }
