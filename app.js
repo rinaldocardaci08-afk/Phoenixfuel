@@ -849,7 +849,7 @@ async function caricaOrdini() {
     const pL = prezzoConIva(r), tot = pL*r.litri;
     const basNome = r.basi_carico ? r.basi_carico.nome : '—';
     const isApprov = r.tipo_ordine==='entrata_deposito' && r.stato!=='confermato' && r.stato!=='annullato';
-    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && r.tipo_ordine==='cliente' && r.stato!=='confermato' && r.stato!=='annullato';
+    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
@@ -1425,14 +1425,14 @@ async function caricaConsegne() {
     tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine per questa data</td></tr>';
     ['tot-consegne','tot-completate','tot-inattesa','tot-programmati','tot-litri-cons','tot-fatt-netto-cons','tot-fatt-iva-cons','tot-margine-cons'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='0'; });
   } else {
-    const clienti = data.filter(r=>r.tipo_ordine==='cliente');
-    document.getElementById('tot-consegne').textContent = clienti.length;
-    document.getElementById('tot-completate').textContent = data.filter(r=>r.stato==='confermato').length;
-    document.getElementById('tot-inattesa').textContent = data.filter(r=>r.stato==='in attesa').length;
-    document.getElementById('tot-programmati').textContent = data.filter(r=>r.stato==='programmato').length;
+    const consegnabili = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio');
+    document.getElementById('tot-consegne').textContent = consegnabili.length;
+    document.getElementById('tot-completate').textContent = consegnabili.filter(r=>r.stato==='confermato').length;
+    document.getElementById('tot-inattesa').textContent = consegnabili.filter(r=>r.stato==='in attesa').length;
+    document.getElementById('tot-programmati').textContent = consegnabili.filter(r=>r.stato==='programmato').length;
     // KPI aggiuntivi
     let tLitri=0, tNetto=0, tIva=0, tMargine=0;
-    clienti.forEach(r => { const l=Number(r.litri); tLitri+=l; tNetto+=prezzoNoIva(r)*l; tIva+=prezzoConIva(r)*l; tMargine+=Number(r.margine)*l; });
+    consegnabili.forEach(r => { const l=Number(r.litri); tLitri+=l; tNetto+=prezzoNoIva(r)*l; tIva+=prezzoConIva(r)*l; tMargine+=Number(r.margine)*l; });
     const elL=document.getElementById('tot-litri-cons'); if(elL) elL.textContent=fmtL(tLitri);
     const elN=document.getElementById('tot-fatt-netto-cons'); if(elN) elN.textContent=fmtE(tNetto);
     const elI=document.getElementById('tot-fatt-iva-cons'); if(elI) elI.textContent=fmtE(tIva);
@@ -1444,7 +1444,7 @@ async function caricaConsegne() {
     const docsMap = {};
     (allDocs||[]).forEach(d => { if(!docsMap[d.ordine_id]) docsMap[d.ordine_id]=[]; docsMap[d.ordine_id].push(d); });
 
-    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente').map(r => {
+    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
       const docs = docsMap[r.id] || [];
 
@@ -2853,7 +2853,7 @@ async function caricaOrdiniPerCarico() {
     // Filtra: escludi depositi e ordini già assegnati a un carico
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
-      if (o.tipo_ordine !== 'cliente') return false;
+      if (o.tipo_ordine !== 'cliente' && o.tipo_ordine !== 'stazione_servizio') return false;
       return true;
     });
 
