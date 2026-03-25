@@ -591,14 +591,15 @@ function aggiornaBasiOrdine() {
   prezzoCorrente = null;
 }
 
-function aggiornaProdottiOrdine() {
+async function aggiornaProdottiOrdine() {
   const fornitore = document.getElementById('ord-fornitore').value;
   const baseId = document.getElementById('ord-base').value;
   const tipo = document.getElementById('ord-tipo').value;
   let prodotti = [...new Set(prezziDelGiorno.filter(p=>p.fornitore===fornitore&&(baseId?p.base_carico_id===baseId:true)).map(p=>p.prodotto))];
-  // Per stazione Oppido: solo prodotti venduti in stazione (Gasolio Autotrazione e Benzina)
+  // Per stazione Oppido: solo prodotti delle pompe attive
   if (tipo === 'stazione_servizio') {
-    const prodottiStazione = cacheProdotti.filter(p => p.attivo && p.categoria === 'benzine').map(p => p.nome);
+    const { data: pompe } = await sb.from('stazione_pompe').select('prodotto').eq('attiva',true);
+    const prodottiStazione = [...new Set((pompe||[]).map(p => p.prodotto))];
     prodotti = prodotti.filter(p => prodottiStazione.includes(p));
   }
   const selProd = document.getElementById('ord-prodotto');
