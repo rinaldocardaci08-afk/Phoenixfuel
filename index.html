@@ -410,13 +410,20 @@
             </div>
             <div class="form-group"><label>Colore grafici</label><input type="color" id="prod-colore" value="#888888" /></div>
             <div class="form-group"><label>Tipo cisterna</label><input type="text" id="prod-tipo-cisterna" placeholder="Es. autotrazione, benzina..." /></div>
+            <div class="form-group"><label>Capacità max magazzino</label><input type="number" id="prod-capacita" placeholder="Es. 50000" /></div>
+            <div class="form-group"><label>Unità di misura</label>
+              <select id="prod-unita">
+                <option value="litri">Litri (L)</option>
+                <option value="pezzi">Pezzi (pz)</option>
+              </select>
+            </div>
           </div>
           <button class="btn-primary" onclick="salvaProdotto()">Salva prodotto</button>
         </div>
         <div class="card">
           <div class="card-title">Elenco prodotti</div>
-          <table><thead><tr><th style="width:20px"></th><th>Nome</th><th>Categoria</th><th>IVA</th><th>Tipo cisterna</th><th>Stato</th><th></th></tr></thead>
-          <tbody id="tabella-prodotti"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th style="width:20px"></th><th>Nome</th><th>Categoria</th><th>IVA</th><th>Capacità</th><th>Unità</th><th>Stato</th><th></th></tr></thead>
+          <tbody id="tabella-prodotti"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
         </div>
       </div>
 

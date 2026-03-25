@@ -1085,6 +1085,7 @@ async function caricaDeposito() {
     const prodInfo = cacheProdotti.find(p => p.tipo_cisterna === tipo || p.nome === prodNome);
     const colore = prodInfo ? prodInfo.colore : '#888';
     const categoria = prodInfo ? prodInfo.categoria : 'altro';
+    const um = prodInfo && prodInfo.unita_misura === 'pezzi' ? 'pz' : 'L';
     const nCis = gruppo.length;
     const capGruppo = gruppo.reduce((s, c) => s + Number(c.capacita_max), 0);
     let totG = 0;
@@ -1099,14 +1100,15 @@ async function caricaDeposito() {
       cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
         '<div class="dep-cisterna-name">' + c.nome + '</div>' +
         cisternasvg(pct, colore) +
-        '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' L</div>' +
-        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' L</div>' +
+        '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' ' + um + '</div>' +
+        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' ' + um + '</div>' +
         '<button class="btn-edit" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apriModaleCisterna(\'' + c.id + '\')">Modifica</button>' +
         '</div>';
     });
 
-    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + capGruppo.toLocaleString('it-IT') + ' L';
-    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + capGruppo.toLocaleString('it-IT') + ' ' + um;
+    const totLabel = um === 'pz' ? totG.toLocaleString('it-IT') + ' pz' : fmtL(totG);
+    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + totLabel + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
 
     if (categoria === 'benzine') { htmlBenzine += cardHtml; } else { htmlMagazzino += cardHtml; }
     totaleStoccato += totG;
@@ -1809,16 +1811,19 @@ async function caricaProdotti() {
   const { data } = await sb.from('prodotti').select('*').order('ordine_visualizzazione');
   cacheProdotti = data || [];
   const tbody = document.getElementById('tabella-prodotti');
-  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun prodotto</td></tr>'; return; }
+  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessun prodotto</td></tr>'; return; }
   tbody.innerHTML = data.map(r => {
     const catBadge = r.categoria === 'benzine' ? '<span class="badge teal">Benzine</span>' : '<span class="badge gray">Altro</span>';
     const statoBadge = r.attivo ? '<span class="badge green">Attivo</span>' : '<span class="badge red">Disattivo</span>';
+    const um = r.unita_misura === 'pezzi' ? 'pz' : 'L';
+    const capLabel = r.capacita_default ? Number(r.capacita_default).toLocaleString('it-IT') + ' ' + um : '—';
     return '<tr>' +
       '<td><div style="width:14px;height:14px;border-radius:50%;background:' + esc(r.colore) + '"></div></td>' +
       '<td><strong>' + esc(r.nome) + '</strong></td>' +
       '<td>' + catBadge + '</td>' +
       '<td>' + r.iva_default + '%</td>' +
-      '<td style="font-size:11px;color:var(--text-muted)">' + (r.tipo_cisterna || '—') + '</td>' +
+      '<td style="font-family:var(--font-mono);font-size:11px">' + capLabel + '</td>' +
+      '<td style="font-size:11px;color:var(--text-muted)">' + (r.unita_misura === 'pezzi' ? 'Pezzi' : 'Litri') + '</td>' +
       '<td>' + statoBadge + '</td>' +
       '<td>' +
         '<button class="btn-edit" onclick="toggleProdottoAttivo(\'' + r.id + '\',' + r.attivo + ')" title="' + (r.attivo ? 'Disattiva' : 'Attiva') + '">' + (r.attivo ? '🔒' : '🔓') + '</button>' +
@@ -1836,7 +1841,9 @@ async function salvaProdotto() {
     categoria: document.getElementById('prod-categoria').value,
     iva_default: parseInt(document.getElementById('prod-iva').value),
     colore: document.getElementById('prod-colore').value,
-    tipo_cisterna: document.getElementById('prod-tipo-cisterna').value.trim() || null
+    tipo_cisterna: document.getElementById('prod-tipo-cisterna').value.trim() || null,
+    capacita_default: parseFloat(document.getElementById('prod-capacita').value) || 0,
+    unita_misura: document.getElementById('prod-unita').value
   };
   const { error } = await sb.from('prodotti').insert([record]);
   if (error) { toast('Errore: ' + error.message); return; }
@@ -1844,6 +1851,7 @@ async function salvaProdotto() {
   document.getElementById('prod-nome').value = '';
   document.getElementById('prod-tipo-cisterna').value = '';
   document.getElementById('prod-colore').value = '#888888';
+  document.getElementById('prod-capacita').value = '';
   caricaProdotti();
 }
 
@@ -1864,6 +1872,8 @@ async function editaProdotto(id) {
   html += '<div class="form-group"><label>IVA %</label><select id="edit-prod-iva"><option value="22"' + (prod.iva_default === 22 ? ' selected' : '') + '>22%</option><option value="10"' + (prod.iva_default === 10 ? ' selected' : '') + '>10%</option><option value="4"' + (prod.iva_default === 4 ? ' selected' : '') + '>4%</option></select></div>';
   html += '<div class="form-group"><label>Colore</label><input type="color" id="edit-prod-colore" value="' + (prod.colore || '#888888') + '" /></div>';
   html += '<div class="form-group"><label>Tipo cisterna</label><input type="text" id="edit-prod-cisterna" value="' + esc(prod.tipo_cisterna || '') + '" /></div>';
+  html += '<div class="form-group"><label>Capacità max</label><input type="number" id="edit-prod-capacita" value="' + (prod.capacita_default || 0) + '" /></div>';
+  html += '<div class="form-group"><label>Unità misura</label><select id="edit-prod-unita"><option value="litri"' + (prod.unita_misura !== 'pezzi' ? ' selected' : '') + '>Litri</option><option value="pezzi"' + (prod.unita_misura === 'pezzi' ? ' selected' : '') + '>Pezzi</option></select></div>';
   html += '<div class="form-group"><label>Ordine visual.</label><input type="number" id="edit-prod-ordine" value="' + (prod.ordine_visualizzazione || 0) + '" /></div>';
   html += '</div>';
   html += '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" onclick="confermaEditaProdotto(\'' + id + '\')">Salva</button><button class="btn-secondary" onclick="chiudiModal()">Annulla</button></div>';
@@ -1877,6 +1887,8 @@ async function confermaEditaProdotto(id) {
     iva_default: parseInt(document.getElementById('edit-prod-iva').value),
     colore: document.getElementById('edit-prod-colore').value,
     tipo_cisterna: document.getElementById('edit-prod-cisterna').value.trim() || null,
+    capacita_default: parseFloat(document.getElementById('edit-prod-capacita').value) || 0,
+    unita_misura: document.getElementById('edit-prod-unita').value,
     ordine_visualizzazione: parseInt(document.getElementById('edit-prod-ordine').value) || 0
   };
   if (!record.nome) { toast('Nome obbligatorio'); return; }
