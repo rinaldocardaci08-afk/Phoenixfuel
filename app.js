@@ -860,7 +860,7 @@ async function caricaOrdini() {
   data.forEach(r => {
     const pL = prezzoConIva(r), tot = pL*r.litri;
     const basNome = r.basi_carico ? r.basi_carico.nome : '—';
-    const isApprov = r.tipo_ordine==='entrata_deposito' && r.stato!=='confermato' && r.stato!=='annullato';
+    const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
     const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
@@ -1264,7 +1264,7 @@ async function confermaCaricoDeposito(ordineId) {
     const qta = parseFloat(inp?.value)||0;
     if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, ordine.costo_litro);
   }
-  await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+  await sb.from('ordini').update({ stato:'confermato', caricato_deposito:true }).eq('id', ordineId);
   toast('Carico confermato! Cisterne aggiornate.');
   chiudiModalePermessi();
   caricaDeposito();
@@ -1474,7 +1474,7 @@ async function caricaConsegne() {
 
       // Azioni in base al tipo ordine
       let azioniHtml = '';
-      if (r.tipo_ordine === 'entrata_deposito' && r.stato !== 'confermato') {
+      if (r.tipo_ordine === 'entrata_deposito' && !r.caricato_deposito && r.stato !== 'annullato') {
         // Entrata deposito → pulsante "Carica cisterne"
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">📦 Carica</button> ';
       } else if (r.stato !== 'confermato') {
