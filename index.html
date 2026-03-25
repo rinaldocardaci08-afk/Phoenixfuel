@@ -463,11 +463,15 @@
         <!-- LETTURE CONTATORI -->
         <div class="stz-panel" id="stz-letture" style="display:none">
           <div class="card" style="margin-bottom:16px">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-              <span>Inserisci letture giornaliere</span>
-              <input type="date" id="stz-data-lettura" style="font-size:14px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Letture giornaliere contatori</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="date" id="stz-data-lettura" onchange="caricaFormLetture()" style="font-size:14px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportLetture()">🖨️ Report</button>
+              </div>
             </div>
             <div id="stz-form-letture"><div class="loading">Caricamento pompe...</div></div>
+            <div id="stz-totali-letture" style="margin-top:12px"></div>
             <button class="btn-primary" onclick="salvaLetture()" style="margin-top:12px">💾 Salva letture</button>
           </div>
           <div class="card">
