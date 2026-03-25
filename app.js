@@ -2845,6 +2845,13 @@ async function caricaLogistica() {
   if (carData && !carData.value) carData.value = oggiISO;
   // Carica mezzi propri come default
   aggiornaVeicoliVettore();
+  // Popola dropdown vettori per report
+  const selRV = document.getElementById('rep-vettore');
+  if (selRV && trasps) selRV.innerHTML = '<option value="">Tutti i vettori</option><option value="proprio">Mezzi propri</option>' + trasps.map(t => '<option value="' + t.id + '">' + t.nome + '</option>').join('');
+  const repDa = document.getElementById('rep-viaggio-da');
+  const repA = document.getElementById('rep-viaggio-a');
+  if (repDa && !repDa.value) repDa.value = oggiISO.substring(0,8) + '01';
+  if (repA && !repA.value) repA.value = oggiISO;
 }
 
 async function aggiornaVeicoliVettore() {
@@ -2887,6 +2894,140 @@ async function aggiornaVeicoliVettore() {
     }
     if (grpCosto) grpCosto.style.display = '';
   }
+}
+
+// ── REPORT VIAGGI PER VETTORE ──
+async function _caricaDatiViaggi() {
+  const vettore = document.getElementById('rep-vettore').value;
+  const da = document.getElementById('rep-viaggio-da').value;
+  const a = document.getElementById('rep-viaggio-a').value;
+  if (!da || !a) { toast('Seleziona il periodo'); return null; }
+
+  // Carica carichi con ordini
+  let query = sb.from('carichi').select('*, carico_ordini(ordine_id, ordini(*)), trasportatori(nome)').gte('data',da).lte('data',a).order('data',{ascending:false});
+  if (vettore === 'proprio') {
+    query = query.is('trasportatore_id', null);
+  } else if (vettore) {
+    query = query.eq('trasportatore_id', vettore);
+  }
+  const { data: carichi } = await query;
+  if (!carichi || !carichi.length) { return []; }
+  return carichi;
+}
+
+async function generaReportViaggi() {
+  const carichi = await _caricaDatiViaggi();
+  if (carichi === null) return;
+  const el = document.getElementById('report-viaggi-content');
+  if (!carichi.length) { el.innerHTML = '<div class="loading">Nessun viaggio trovato per il periodo</div>'; return; }
+
+  let totLitri=0, totImponibile=0, totIva=0, totCosto=0;
+  let righe = '';
+  carichi.forEach(function(c) {
+    const ordini = (c.carico_ordini||[]).map(function(co) { return co.ordini; }).filter(Boolean);
+    const litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
+    const imponibileC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)); },0);
+    const ivaC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)*Number(o.iva)/100); },0);
+    const costoTr = Number(c.costo_trasporto||0);
+    const vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
+    const prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
+    totLitri+=litriC; totImponibile+=imponibileC; totIva+=ivaC; totCosto+=costoTr;
+    righe += '<tr><td>' + new Date(c.data).toLocaleDateString('it-IT') + '</td><td>' + esc(vettoreNome) + '</td><td>' + esc(c.mezzo_targa||'—') + '</td><td>' + esc(c.autista||'—') + '</td><td style="font-size:11px">' + esc(prodotti) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtL(litriC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(imponibileC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(ivaC) + '</td><td style="font-family:var(--font-mono);text-align:right">' + fmtE(costoTr) + '</td><td>' + badgeStato(c.stato) + '</td></tr>';
+  });
+
+  let html = '<div class="grid4" style="margin-bottom:12px">';
+  html += '<div class="kpi"><div class="kpi-label">Viaggi</div><div class="kpi-value">' + carichi.length + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Litri totali</div><div class="kpi-value">' + fmtL(totLitri) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value">' + fmtE(totImponibile) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">IVA totale</div><div class="kpi-value">' + fmtE(totIva) + '</div></div>';
+  html += '</div>';
+  if (totCosto > 0) {
+    html += '<div class="grid2" style="margin-bottom:12px"><div class="kpi"><div class="kpi-label">Costo trasporto totale</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(totCosto) + '</div></div></div>';
+  }
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Vettore</th><th>Mezzo</th><th>Autista</th><th>Prodotti</th><th>Litri</th><th>Imponibile</th><th>IVA</th><th>Costo trasp.</th><th>Stato</th></tr></thead><tbody>' + righe + '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+async function stampaReportViaggi() {
+  const carichi = await _caricaDatiViaggi();
+  if (carichi === null) return;
+  if (!carichi.length) { toast('Nessun viaggio trovato per il periodo'); return; }
+
+  const da = document.getElementById('rep-viaggio-da').value;
+  const a = document.getElementById('rep-viaggio-a').value;
+  const vettoreId = document.getElementById('rep-vettore').value;
+  const vettoreLabel = document.getElementById('rep-vettore').options[document.getElementById('rep-vettore').selectedIndex]?.text || 'Tutti';
+  const daFmt = new Date(da).toLocaleDateString('it-IT');
+  const aFmt = new Date(a).toLocaleDateString('it-IT');
+
+  let totLitri=0, totImponibile=0, totIva=0, totCosto=0;
+  let righeHtml = '';
+  carichi.forEach(function(c, i) {
+    var ordini = (c.carico_ordini||[]).map(function(co) { return co.ordini; }).filter(Boolean);
+    var litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
+    var imponibileC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)); },0);
+    var ivaC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)*Number(o.iva)/100); },0);
+    var costoTr = Number(c.costo_trasporto||0);
+    var vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
+    var prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
+    var clienti = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
+    totLitri+=litriC; totImponibile+=imponibileC; totIva+=ivaC; totCosto+=costoTr;
+
+    righeHtml += '<tr>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + new Date(c.data).toLocaleDateString('it-IT') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(c.mezzo_targa||'—') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(c.autista||'—') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(prodotti) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(clienti) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litriC) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(imponibileC) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(ivaC) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(imponibileC+ivaC) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + (costoTr > 0 ? fmtE(costoTr) : '—') + '</td>' +
+      '</tr>';
+  });
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Viaggi ' + vettoreLabel + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:14px}' +
+    'th{background:#378ADD;color:#fff;padding:7px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #2A6DB5;text-align:center}' +
+    '.tot td{border-top:3px solid #378ADD!important;font-weight:bold;font-size:11px;background:#E6F1FB!important}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #378ADD;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#378ADD">REPORT VIAGGI — PROFORMA</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Vettore: <strong>' + esc(vettoreLabel) + '</strong> — Periodo: <strong>' + daFmt + ' / ' + aFmt + '</strong></div>';
+  html += '<div style="font-size:11px;color:#666">Viaggi: <strong>' + carichi.length + '</strong> — Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti</div></div></div>';
+
+  html += '<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">';
+  html += '<div style="background:#E6F1FB;border:1px solid #378ADD;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">Litri totali</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  html += '<div style="background:#E6F1FB;border:1px solid #378ADD;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">Imponibile</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totImponibile) + '</div></div>';
+  html += '<div style="background:#E6F1FB;border:1px solid #378ADD;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">IVA totale</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Totale IVA incl.</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace;color:#D4A017">' + fmtE(totImponibile+totIva) + '</div></div>';
+  if (totCosto > 0) {
+    html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase">Costo trasporto</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
+  }
+  html += '</div>';
+
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Mezzo</th><th>Autista</th><th>Prodotti</th><th>Clienti</th><th>Litri</th><th>Imponibile</th><th>IVA</th><th>Totale</th><th>Costo Tr.</th></tr></thead><tbody>';
+  html += righeHtml;
+  html += '<tr class="tot"><td style="padding:7px;border:1px solid #ddd" colspan="6">TOTALE</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totImponibile) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(totImponibile+totIva) + '</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + (totCosto > 0 ? fmtE(totCosto) : '—') + '</td></tr>';
+  html += '</tbody></table>';
+
+  html += '<div style="margin-top:20px;padding-top:12px;border-top:1px solid #ddd;font-size:10px;color:#999;text-align:center">Documento generato automaticamente — Phoenix Fuel Srl</div>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 async function salvaMezzo() {
