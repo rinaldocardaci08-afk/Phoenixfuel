@@ -2907,19 +2907,15 @@ async function aggiornaVeicoliVettore() {
   const trId = document.getElementById('car-trasportatore').value;
   const selM = document.getElementById('car-mezzo');
   const selA = document.getElementById('car-autista');
-  const grpCosto = document.getElementById('grp-costo-trasporto');
 
   if (!trId) {
-    // Nostro mezzo → mostra mezzi propri
     const { data: mezzi } = await sb.from('mezzi').select('id,targa,capacita_totale,autista_default').eq('attivo',true).order('targa');
     if (selM && mezzi) {
       selM.innerHTML = '<option value="" data-cap="0">Seleziona mezzo...</option>' + mezzi.map(m => '<option value="' + m.id + '" data-cap="' + m.capacita_totale + '" data-autista="' + esc(m.autista_default||'') + '">' + m.targa + ' (' + fmtL(m.capacita_totale) + ')</option>').join('');
       selM.onchange = function() {
-        // Precompila autista default del mezzo
         const opt = selM.options[selM.selectedIndex];
         const autDef = opt?.dataset?.autista || '';
         if (autDef && selA) {
-          // Cerca se esiste tra le opzioni, altrimenti aggiungi
           let found = false;
           for (let i = 0; i < selA.options.length; i++) { if (selA.options[i].value === autDef) { selA.selectedIndex = i; found = true; break; } }
           if (!found) { selA.innerHTML += '<option value="' + esc(autDef) + '" selected>' + esc(autDef) + '</option>'; }
@@ -2927,11 +2923,8 @@ async function aggiornaVeicoliVettore() {
         aggiornaTotaleOrdiniCarico();
       };
     }
-    // Autisti: input libero per mezzi propri
     if (selA) selA.innerHTML = '<option value="">Seleziona autista...</option>';
-    if (grpCosto) grpCosto.style.display = 'none';
   } else {
-    // Trasportatore esterno → mostra solo i suoi mezzi e autisti
     const { data: mezziTr } = await sb.from('mezzi_trasportatori').select('id,targa,capacita_totale').eq('trasportatore_id',trId).order('targa');
     if (selM) {
       selM.innerHTML = '<option value="" data-cap="0">Seleziona mezzo...</option>' + (mezziTr||[]).map(m => '<option value="tr_' + m.id + '" data-cap="' + (m.capacita_totale||0) + '">' + m.targa + (m.capacita_totale ? ' (' + fmtL(m.capacita_totale) + ')' : '') + '</option>').join('');
@@ -2941,7 +2934,6 @@ async function aggiornaVeicoliVettore() {
     if (selA) {
       selA.innerHTML = '<option value="">Seleziona autista...</option>' + (autistiTr||[]).map(a => '<option value="' + esc(a.nome) + '">' + esc(a.nome) + '</option>').join('');
     }
-    if (grpCosto) grpCosto.style.display = '';
   }
 }
 
@@ -2977,7 +2969,8 @@ async function generaReportViaggi() {
     const litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
     const imponibileC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)); },0);
     const ivaC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)*Number(o.iva)/100); },0);
-    const costoTr = Number(c.costo_trasporto||0);
+    // Costo trasporto = somma di (costo_ritiro × litri) per ogni ordine del carico
+    const costoTr = ordini.reduce(function(s,o) { return s+(Number(o.costo_ritiro||0)*Number(o.litri)); },0);
     const vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
     const prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
     totLitri+=litriC; totImponibile+=imponibileC; totIva+=ivaC; totCosto+=costoTr;
@@ -3016,7 +3009,7 @@ async function stampaReportViaggi() {
     var litriC = ordini.reduce(function(s,o) { return s+Number(o.litri); },0);
     var imponibileC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)); },0);
     var ivaC = ordini.reduce(function(s,o) { var pn=Number(o.costo_litro)+Number(o.trasporto_litro)+Number(o.margine); return s+(pn*Number(o.litri)*Number(o.iva)/100); },0);
-    var costoTr = Number(c.costo_trasporto||0);
+    var costoTr = ordini.reduce(function(s,o) { return s+(Number(o.costo_ritiro||0)*Number(o.litri)); },0);
     var vettoreNome = c.trasportatori ? c.trasportatori.nome : 'Mezzo proprio';
     var prodotti = [...new Set(ordini.map(function(o) { return o.prodotto; }))].join(', ');
     var clienti = [...new Set(ordini.map(function(o) { return o.cliente; }))].join(', ');
@@ -3213,12 +3206,10 @@ async function creaNuovoCarico() {
   const mezzoTarga = document.getElementById('car-mezzo').options[document.getElementById('car-mezzo').selectedIndex]?.text || '';
   const autista = document.getElementById('car-autista').value;
   const trId = document.getElementById('car-trasportatore').value || null;
-  const costoTrasporto = parseFloat(document.getElementById('car-costo-trasporto')?.value) || 0;
   if (!data) { toast('Inserisci la data'); return; }
   if (!mezzoVal) { toast('Seleziona un mezzo'); return; }
   const ordiniSel = Array.from(document.querySelectorAll('.ord-carico:checked')).map(c => c.value);
   if (!ordiniSel.length) { toast('Seleziona almeno un ordine'); return; }
-  // Per mezzi propri, valida capienza
   const mezzoId = mezzoVal.startsWith('tr_') ? null : mezzoVal;
   if (mezzoId) {
     const { data: mezzo } = await sb.from('mezzi').select('capacita_totale,targa').eq('id', mezzoId).single();
@@ -3229,7 +3220,6 @@ async function creaNuovoCarico() {
     }
   }
   const record = {data, mezzo_id:mezzoId, mezzo_targa:mezzoTarga.split(' (')[0], autista, trasportatore_id:trId, stato:'programmato'};
-  if (costoTrasporto > 0) record.costo_trasporto = costoTrasporto;
   const { data: carico, error } = await sb.from('carichi').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   const righe = ordiniSel.map((oId,i) => ({carico_id:carico.id,ordine_id:oId,sequenza:i+1}));
