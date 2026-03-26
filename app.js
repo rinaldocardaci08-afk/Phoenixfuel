@@ -2137,6 +2137,18 @@ async function caricaVenditeAnnuali() {
     const annoCorr = oggi.getFullYear();
     for (let a = annoCorr; a >= annoCorr - 4; a--) selAnno.innerHTML += '<option value="' + a + '">' + a + '</option>';
   }
+  // Popola anche i selettori di confronto
+  const selC1 = document.getElementById('vann-confronto-a1');
+  const selC2 = document.getElementById('vann-confronto-a2');
+  if (selC1 && selC1.options.length === 0) {
+    const annoCorr = oggi.getFullYear();
+    for (let a = annoCorr; a >= annoCorr - 4; a--) {
+      selC1.innerHTML += '<option value="' + a + '">' + a + '</option>';
+      selC2.innerHTML += '<option value="' + a + '">' + a + '</option>';
+    }
+    selC1.value = annoCorr;
+    selC2.value = annoCorr - 1;
+  }
   const anno = parseInt(selAnno.value);
   if (!anno) return;
 
@@ -2303,6 +2315,182 @@ async function stampaReportAnnuale() {
   html += '</div></body></html>';
   var w = window.open('','_blank'); w.document.write(html); w.document.close();
 }
+
+// ── CONFRONTO ANNO SU ANNO ───────────────────────────────────────
+let _chartConfLitri=null, _chartConfFatt=null;
+let _ultimoConfronto = null;
+
+async function _caricaDatiAnno(anno) {
+  const da = anno + '-01-01', a = anno + '-12-31';
+  // Ingrosso
+  let allIng = [], from = 0;
+  while (true) {
+    const { data: batch } = await sb.from('ordini').select('data,litri,costo_litro,trasporto_litro,margine,iva').gte('data', da).lte('data', a).neq('stato','annullato').eq('tipo_ordine','cliente').range(from, from + 999);
+    if (!batch || !batch.length) break;
+    allIng = allIng.concat(batch);
+    if (batch.length < 1000) break;
+    from += 1000;
+  }
+  // Dettaglio
+  const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
+  const { data: letture } = await sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', da).lte('data', a).order('data');
+  const { data: prezziP } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a);
+  const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
+  const prezziMap = {}; (prezziP||[]).forEach(p => { prezziMap[p.data+'_'+p.prodotto] = Number(p.prezzo_litro); });
+  const lettPerData = {}; (letture||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
+  const dateOrd = Object.keys(lettPerData).sort();
+  const dettPerGiorno = {};
+  dateOrd.forEach(data => {
+    let litriG=0, incassoG=0;
+    lettPerData[data].forEach(l => {
+      const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+      const prev = dateOrd.filter(d => d < data);
+      const prevD = prev.length ? prev[prev.length-1] : null;
+      let precL = null;
+      if (prevD && lettPerData[prevD]) { const pl = lettPerData[prevD].find(x => x.pompa_id === l.pompa_id); if (pl) precL = Number(pl.lettura); }
+      if (precL === null) return;
+      const lv = Number(l.lettura) - precL; if (lv <= 0) return;
+      litriG += lv; incassoG += lv * (prezziMap[data+'_'+pompa.prodotto] || 0);
+    });
+    dettPerGiorno[data] = { litri: litriG, incasso: incassoG };
+  });
+  // Aggrega per mese
+  const mesi = [];
+  for (let m = 0; m < 12; m++) {
+    let ingLitri=0, ingFatt=0, ingMarg=0, dettLitri=0, dettInc=0;
+    const prefix = anno + '-' + String(m+1).padStart(2,'0');
+    allIng.forEach(r => { if (r.data.startsWith(prefix)) { ingLitri += Number(r.litri); ingFatt += prezzoNoIva(r)*Number(r.litri); ingMarg += Number(r.margine)*Number(r.litri); } });
+    Object.entries(dettPerGiorno).forEach(([d,v]) => { if (d.startsWith(prefix)) { dettLitri += v.litri; dettInc += v.incasso; } });
+    mesi.push({ ingLitri, ingFatt, ingMarg, dettLitri, dettInc, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc });
+  }
+  return mesi;
+}
+
+async function confrontaAnni() {
+  const anno1 = parseInt(document.getElementById('vann-confronto-a1').value);
+  const anno2 = parseInt(document.getElementById('vann-confronto-a2').value);
+  if (!anno1 || !anno2) { toast('Seleziona entrambi gli anni'); return; }
+  if (anno1 === anno2) { toast('Seleziona due anni diversi'); return; }
+
+  const wrap = document.getElementById('confronto-anni-content');
+  wrap.innerHTML = '<div class="loading" style="padding:20px 0">Caricamento dati ' + anno1 + ' e ' + anno2 + '...</div>';
+
+  const [mesi1, mesi2] = await Promise.all([_caricaDatiAnno(anno1), _caricaDatiAnno(anno2)]);
+  _ultimoConfronto = { anno1, anno2, mesi1, mesi2 };
+
+  // Tabella confronto
+  let html = '<div style="overflow-x:auto"><table><thead><tr>';
+  html += '<th>Mese</th>';
+  html += '<th>Litri ' + anno1 + '</th><th>Litri ' + anno2 + '</th><th>Diff. litri</th><th>Δ %</th>';
+  html += '<th>Fatt. ' + anno1 + '</th><th>Fatt. ' + anno2 + '</th><th>Diff. fatt.</th><th>Δ %</th>';
+  html += '</tr></thead><tbody>';
+
+  let tot1L=0,tot2L=0,tot1F=0,tot2F=0;
+  for (let m = 0; m < 12; m++) {
+    const l1 = mesi1[m].totLitri, l2 = mesi2[m].totLitri;
+    const f1 = mesi1[m].totFatt, f2 = mesi2[m].totFatt;
+    const diffL = l1 - l2, diffF = f1 - f2;
+    const pctL = l2 > 0 ? ((l1 - l2) / l2 * 100) : (l1 > 0 ? 100 : 0);
+    const pctF = f2 > 0 ? ((f1 - f2) / f2 * 100) : (f1 > 0 ? 100 : 0);
+    tot1L+=l1; tot2L+=l2; tot1F+=f1; tot2F+=f2;
+    const colL = diffL > 0 ? '#639922' : diffL < 0 ? '#A32D2D' : 'var(--text-muted)';
+    const colF = diffF > 0 ? '#639922' : diffF < 0 ? '#A32D2D' : 'var(--text-muted)';
+    const arrowL = diffL > 0 ? '▲' : diffL < 0 ? '▼' : '—';
+    const arrowF = diffF > 0 ? '▲' : diffF < 0 ? '▼' : '—';
+    const hasData = l1 > 0 || l2 > 0;
+    html += '<tr' + (!hasData ? ' style="opacity:0.35"' : '') + '>';
+    html += '<td><strong>' + MESI_NOMI[m] + '</strong></td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtL(l1) + '</td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtL(l2) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + colL + ';font-weight:500">' + arrowL + ' ' + fmtL(Math.abs(diffL)) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + colL + ';font-weight:500">' + (pctL > 0 ? '+' : '') + pctL.toFixed(1) + '%</td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtE(f1) + '</td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtE(f2) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + colF + ';font-weight:500">' + arrowF + ' ' + fmtE(Math.abs(diffF)) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + colF + ';font-weight:500">' + (pctF > 0 ? '+' : '') + pctF.toFixed(1) + '%</td>';
+    html += '</tr>';
+  }
+  // Riga totale
+  const tdL = tot1L - tot2L, tdF = tot1F - tot2F;
+  const tpL = tot2L > 0 ? ((tot1L-tot2L)/tot2L*100) : 0;
+  const tpF = tot2F > 0 ? ((tot1F-tot2F)/tot2F*100) : 0;
+  const tcL = tdL > 0 ? '#639922' : tdL < 0 ? '#A32D2D' : 'var(--text-muted)';
+  const tcF = tdF > 0 ? '#639922' : tdF < 0 ? '#A32D2D' : 'var(--text-muted)';
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600">';
+  html += '<td>TOTALE</td>';
+  html += '<td style="font-family:var(--font-mono)">' + fmtL(tot1L) + '</td>';
+  html += '<td style="font-family:var(--font-mono)">' + fmtL(tot2L) + '</td>';
+  html += '<td style="font-family:var(--font-mono);color:' + tcL + '">' + (tdL>0?'▲':'▼') + ' ' + fmtL(Math.abs(tdL)) + '</td>';
+  html += '<td style="font-family:var(--font-mono);color:' + tcL + '">' + (tpL>0?'+':'') + tpL.toFixed(1) + '%</td>';
+  html += '<td style="font-family:var(--font-mono)">' + fmtE(tot1F) + '</td>';
+  html += '<td style="font-family:var(--font-mono)">' + fmtE(tot2F) + '</td>';
+  html += '<td style="font-family:var(--font-mono);color:' + tcF + '">' + (tdF>0?'▲':'▼') + ' ' + fmtE(Math.abs(tdF)) + '</td>';
+  html += '<td style="font-family:var(--font-mono);color:' + tcF + '">' + (tpF>0?'+':'') + tpF.toFixed(1) + '%</td>';
+  html += '</tr></tbody></table></div>';
+
+  // Canvas per grafici
+  html += '<div class="grid2" style="margin-top:16px">';
+  html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Litri totali — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-litri" height="250"></canvas></div>';
+  html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato imponibile — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-fatt" height="250"></canvas></div>';
+  html += '</div>';
+
+  wrap.innerHTML = html;
+
+  // Grafici
+  const labelsM = MESI_NOMI.map(n => n.substring(0,3));
+
+  const ctxL = document.getElementById('chart-conf-litri');
+  if (ctxL) {
+    if (_chartConfLitri) _chartConfLitri.destroy();
+    _chartConfLitri = new Chart(ctxL.getContext('2d'), {
+      type:'bar', data:{ labels:labelsM, datasets:[
+        { label:String(anno1), data:mesi1.map(m=>Math.round(m.totLitri)), backgroundColor:'#D4A017', borderRadius:4 },
+        { label:String(anno2), data:mesi2.map(m=>Math.round(m.totLitri)), backgroundColor:'rgba(212,160,23,0.35)', borderRadius:4 }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}}} }
+    });
+  }
+
+  const ctxF = document.getElementById('chart-conf-fatt');
+  if (ctxF) {
+    if (_chartConfFatt) _chartConfFatt.destroy();
+    _chartConfFatt = new Chart(ctxF.getContext('2d'), {
+      type:'bar', data:{ labels:labelsM, datasets:[
+        { label:String(anno1), data:mesi1.map(m=>Math.round(m.totFatt)), backgroundColor:'#378ADD', borderRadius:4 },
+        { label:String(anno2), data:mesi2.map(m=>Math.round(m.totFatt)), backgroundColor:'rgba(55,138,221,0.35)', borderRadius:4 }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+    });
+  }
+}
+
+function stampaConfrontoAnni() {
+  if (!_ultimoConfronto) { toast('Prima esegui un confronto'); return; }
+  const { anno1, anno2 } = _ultimoConfronto;
+  const wrap = document.getElementById('confronto-anni-content');
+  const tbl = wrap.querySelector('table');
+  if (!tbl) { toast('Nessun dato da stampare'); return; }
+  let righeHtml = tbl.innerHTML.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--text-muted\)/g,'#666').replace(/var\(--accent\)/g,'#D85A30');
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confronto ' + anno1 + ' vs ' + anno2 + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:9px}.rpt-header{flex-direction:column!important;gap:8px}table{font-size:8px}th,td{padding:3px 2px!important}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#378ADD;color:#fff;padding:7px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #2A6DB5;text-align:center}' +
+    'td{padding:6px 8px;border:1px solid #ddd}' +
+    '</style></head><body>';
+  html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #378ADD;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#378ADD">CONFRONTO VENDITE ' + anno1 + ' vs ' + anno2 + '</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Litri e fatturato imponibile — Ingrosso + Dettaglio</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+  html += '<table>' + righeHtml + '</table>';
+  html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
 // ── CLIENTI ───────────────────────────────────────────────────────
 async function salvaCliente(id=null) {
   const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, fido_massimo:parseFloat(document.getElementById('cl-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
