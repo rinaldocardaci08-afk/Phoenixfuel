@@ -46,11 +46,21 @@
 
       <!-- DASHBOARD -->
       <div class="section active" id="s-dashboard">
+        <!-- KPI INGROSSO -->
+        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Vendita all'ingrosso — oggi</div>
         <div class="grid4">
-          <div class="kpi"><div class="kpi-label">Fatturato oggi</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
-          <div class="kpi"><div class="kpi-label">Litri consegnati</div><div class="kpi-value" id="kpi-litri">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato ingrosso</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
+          <div class="kpi"><div class="kpi-label">Litri ingrosso</div><div class="kpi-value" id="kpi-litri">—</div></div>
           <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value" id="kpi-margine">—</div></div>
-          <div class="kpi"><div class="kpi-label">Ordini del giorno</div><div class="kpi-value" id="kpi-ordini">—</div></div>
+          <div class="kpi"><div class="kpi-label">Ordini clienti</div><div class="kpi-value" id="kpi-ordini">—</div></div>
+        </div>
+        <!-- KPI DETTAGLIO -->
+        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">⛽ Vendita al dettaglio — stazione Oppido</div>
+        <div class="grid4" style="margin-bottom:20px">
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso oggi pompe</div><div class="kpi-value" id="kpi-dett-incasso">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Litri venduti pompe</div><div class="kpi-value" id="kpi-dett-litri">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso mese</div><div class="kpi-value" id="kpi-dett-mese">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Movimenti interni oggi</div><div class="kpi-value" id="kpi-mov-interni">—</div></div>
         </div>
 
         <!-- GIACENZA DEPOSITO -->
@@ -67,22 +77,22 @@
         <!-- GRAFICI DASHBOARD -->
         <div class="grid2" style="margin-bottom:16px">
           <div class="card">
-            <div class="card-title">Fatturato ultimi 7 giorni</div>
+            <div class="card-title">Fatturato ingrosso ultimi 7 giorni</div>
             <canvas id="chart-fatturato" height="200"></canvas>
           </div>
           <div class="card">
-            <div class="card-title">Litri per prodotto — mese corrente</div>
+            <div class="card-title">Litri ingrosso per prodotto — mese corrente</div>
             <canvas id="chart-prodotti" height="200"></canvas>
           </div>
         </div>
 
         <div class="grid2" style="margin-bottom:16px">
           <div class="card">
-            <div class="card-title">Vendite giornaliere — mese corrente (€)</div>
+            <div class="card-title">Vendite ingrosso giornaliere — mese corrente (€)</div>
             <canvas id="chart-vendite-mese" height="200"></canvas>
           </div>
           <div class="card">
-            <div class="card-title">Andamento margine ultimi 30 giorni</div>
+            <div class="card-title">Margine ingrosso ultimi 30 giorni</div>
             <canvas id="chart-margine" height="200"></canvas>
           </div>
         </div>
@@ -311,41 +321,100 @@
 
       <!-- VENDITE -->
       <div class="section" id="s-vendite">
-        <div class="grid4" style="margin-bottom:16px">
-          <div class="kpi"><div class="kpi-label">Fatturato periodo</div><div class="kpi-value" id="vend-fatturato">—</div></div>
-          <div class="kpi"><div class="kpi-label">Litri periodo</div><div class="kpi-value" id="vend-litri">—</div></div>
-          <div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" id="vend-margine">—</div></div>
-          <div class="kpi"><div class="kpi-label">Ordini periodo</div><div class="kpi-value" id="vend-ordini">—</div></div>
+        <!-- TAB NAVIGATION -->
+        <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn-primary vend-tab active" data-tab="vend-ingrosso" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px">📋 Ingrosso</button>
+          <button class="btn-primary vend-tab" data-tab="vend-dettaglio" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Dettaglio</button>
+          <button class="btn-primary vend-tab" data-tab="vend-annuale" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Riepilogo annuale</button>
         </div>
-        <div class="card">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span>Analisi vendite</span>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="apriReportVendite()">📊 Report PDF</button>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="apriReportMensile()">📅 Vendite Mensili</button>
-              <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
-              <input type="date" id="vend-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVendite()" />
-              <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
-              <input type="date" id="vend-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVendite()" />
-              <select id="vend-prodotto" onchange="caricaVendite()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                <option value="">Tutti i prodotti</option>
-              </select>
+
+        <!-- ═══ TAB INGROSSO ═══ -->
+        <div class="vend-panel" id="vend-ingrosso">
+          <div class="grid4" style="margin-bottom:16px">
+            <div class="kpi"><div class="kpi-label">Fatturato ingrosso</div><div class="kpi-value" id="vend-fatturato">—</div></div>
+            <div class="kpi"><div class="kpi-label">Litri ingrosso</div><div class="kpi-value" id="vend-litri">—</div></div>
+            <div class="kpi"><div class="kpi-label">Margine ingrosso</div><div class="kpi-value" id="vend-margine">—</div></div>
+            <div class="kpi"><div class="kpi-label">Ordini clienti</div><div class="kpi-value" id="vend-ordini">—</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Vendite ingrosso a clienti</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="apriReportVendite()">📊 Report PDF</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="apriReportMensile()">📅 Mensile</button>
+                <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
+                <input type="date" id="vend-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeIngrosso()" />
+                <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
+                <input type="date" id="vend-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeIngrosso()" />
+                <select id="vend-prodotto" onchange="caricaVenditeIngrosso()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                  <option value="">Tutti i prodotti</option>
+                </select>
+              </div>
+            </div>
+            <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
+            <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
+            <div style="margin-top:16px">
+              <div style="font-size:13px;font-weight:500;margin-bottom:10px">Vendite per cliente</div>
+              <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Ordini</th></tr></thead>
+              <tbody id="tabella-vendite-clienti"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+            <div class="grid2" style="margin-top:16px">
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato per fornitore</div><canvas id="chart-vend-fornitori" height="220"></canvas></div>
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato per cliente (top 10)</div><canvas id="chart-vend-clienti" height="220"></canvas></div>
             </div>
           </div>
-          <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
-          <tbody id="tabella-vendite"><tr><td colspan="4" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
 
-          <!-- Vendite per cliente -->
-          <div style="margin-top:16px">
-            <div style="font-size:13px;font-weight:500;margin-bottom:10px">Vendite per cliente</div>
-            <table><thead><tr><th>Cliente</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Ordini</th></tr></thead>
-            <tbody id="tabella-vendite-clienti"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+        <!-- ═══ TAB DETTAGLIO (Stazione) ═══ -->
+        <div class="vend-panel" id="vend-dettaglio" style="display:none">
+          <div class="grid4" style="margin-bottom:16px">
+            <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso pompe periodo</div><div class="kpi-value" id="vdett-incasso">—</div></div>
+            <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Litri venduti pompe</div><div class="kpi-value" id="vdett-litri">—</div></div>
+            <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Costo approvv.</div><div class="kpi-value" id="vdett-costo">—</div></div>
+            <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Margine dettaglio</div><div class="kpi-value" id="vdett-margine">—</div></div>
           </div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Vendite al dettaglio — Stazione Oppido</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportDettaglio()">📊 Report PDF</button>
+                <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
+                <input type="date" id="vdett-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
+                <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
+                <input type="date" id="vdett-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ricavi da letture pompe × prezzo pompa. Costo da ordini stazione_servizio (trasferimenti interni).</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Tot. Litri</th><th>Incasso €</th><th>Costo approvv.</th><th>Margine €</th></tr></thead>
+            <tbody id="tabella-vend-dettaglio"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+            <div class="grid2" style="margin-top:16px">
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Incasso giornaliero pompe</div><canvas id="chart-dett-incasso" height="220"></canvas></div>
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Margine dettaglio giornaliero</div><canvas id="chart-dett-margine" height="220"></canvas></div>
+            </div>
+          </div>
+        </div>
 
-          <!-- Grafici vendite -->
-          <div class="grid2" style="margin-top:16px">
-            <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato per fornitore</div><canvas id="chart-vend-fornitori" height="220"></canvas></div>
-            <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato per cliente (top 10)</div><canvas id="chart-vend-clienti" height="220"></canvas></div>
+        <!-- ═══ TAB RIEPILOGO ANNUALE ═══ -->
+        <div class="vend-panel" id="vend-annuale" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Riepilogo vendite totali per mese</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="stampaReportAnnuale()">📊 Report PDF</button>
+                <select id="vann-anno" onchange="caricaVenditeAnnuali()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ingrosso (ordini clienti) + Dettaglio (letture pompe stazione). Litri e fatturato imponibile per mese.</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Totale litri</th><th>Totale fatturato</th></tr></thead>
+            <tbody id="tabella-vend-annuale"><tr><td colspan="8" class="loading">Seleziona un anno...</td></tr></tbody></table>
+            </div>
+            <div class="grid2" style="margin-top:16px">
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato mensile per canale</div><canvas id="chart-ann-fatturato" height="250"></canvas></div>
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Litri mensili per canale</div><canvas id="chart-ann-litri" height="250"></canvas></div>
+            </div>
           </div>
         </div>
       </div>

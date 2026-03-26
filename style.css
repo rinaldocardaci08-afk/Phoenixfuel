@@ -177,8 +177,8 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
     flex: 1 1 auto; min-width: 0;
   }
 
-  /* ── TAB STAZIONE ── */
-  .stz-tab { flex: 1 1 calc(33% - 4px); min-width: 0; font-size: 11px !important; padding: 7px 6px !important; text-align: center; }
+  /* ── TAB STAZIONE + VENDITE ── */
+  .stz-tab, .vend-tab { flex: 1 1 calc(33% - 4px); min-width: 0; font-size: 11px !important; padding: 7px 6px !important; text-align: center; }
 
   /* ── MODALI ── */
   #modal-overlay > div,

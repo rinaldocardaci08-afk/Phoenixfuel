@@ -130,6 +130,17 @@ function setSection(id, el) {
   }
 }
 
+// ── TAB VENDITE ─────────────────────────────────────────────────
+function switchVenditeTab(btn) {
+  document.querySelectorAll('.vend-tab').forEach(t => { t.style.background='var(--bg)'; t.style.color='var(--text)'; t.style.border='0.5px solid var(--border)'; t.classList.remove('active'); });
+  btn.style.background='var(--accent)'; btn.style.color='#fff'; btn.style.border='none'; btn.classList.add('active');
+  document.querySelectorAll('.vend-panel').forEach(p => p.style.display='none');
+  document.getElementById(btn.dataset.tab).style.display='block';
+  if (btn.dataset.tab === 'vend-ingrosso') caricaVenditeIngrosso();
+  else if (btn.dataset.tab === 'vend-dettaglio') caricaVenditeDettaglio();
+  else if (btn.dataset.tab === 'vend-annuale') caricaVenditeAnnuali();
+}
+
 // ── SIDEBAR MOBILE ───────────────────────────────────────────────
 function toggleSidebar() {
   document.querySelector('.sidebar').classList.toggle('open');
@@ -1905,7 +1916,15 @@ async function generaElencoVenditeGiorno() {
 }
 
 // ── VENDITE ───────────────────────────────────────────────────────
-async function caricaVendite() {
+function caricaVendite() {
+  // Entry point: carica il tab attivo
+  const activeTab = document.querySelector('.vend-tab.active');
+  if (activeTab && activeTab.dataset.tab === 'vend-dettaglio') caricaVenditeDettaglio();
+  else if (activeTab && activeTab.dataset.tab === 'vend-annuale') caricaVenditeAnnuali();
+  else caricaVenditeIngrosso();
+}
+
+async function caricaVenditeIngrosso() {
   // Imposta date default se non impostate
   const daEl = document.getElementById('vend-da');
   const aEl = document.getElementById('vend-a');
@@ -1993,6 +2012,297 @@ async function caricaVendite() {
   }
 }
 
+// ── VENDITE DETTAGLIO (Stazione Oppido) ──────────────────────────
+let _chartDettIncasso=null, _chartDettMargine=null;
+
+async function caricaVenditeDettaglio() {
+  const daEl = document.getElementById('vdett-da');
+  const aEl = document.getElementById('vdett-a');
+  if (!daEl.value) daEl.value = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
+  if (!aEl.value) aEl.value = oggiISO;
+  const da = daEl.value, a = aEl.value;
+
+  // Letture pompe nel periodo
+  const { data: pompe } = await sb.from('stazione_pompe').select('id,nome,prodotto').eq('attiva',true);
+  const { data: letture } = await sb.from('stazione_letture').select('*').gte('data', da).lte('data', a).order('data');
+  const { data: prezziPompa } = await sb.from('stazione_prezzi').select('*').gte('data', da).lte('data', a);
+
+  // Costo approvvigionamento: ordini stazione_servizio confermati nel periodo
+  const { data: ordStz } = await sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').gte('data', da).lte('data', a);
+  const costoApprovv = (ordStz||[]).reduce((s,r) => s + Number(r.costo_litro) * Number(r.litri), 0);
+
+  // Calcola vendite giornaliere da letture
+  const giorniMap = {};
+  const pompeMap = {};
+  (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
+
+  // Raggruppa letture per data
+  const letturePerData = {};
+  (letture||[]).forEach(l => {
+    if (!letturePerData[l.data]) letturePerData[l.data] = [];
+    letturePerData[l.data].push(l);
+  });
+
+  // Prezzi per data/prodotto
+  const prezziMap = {};
+  (prezziPompa||[]).forEach(p => { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
+
+  const dateOrdinate = Object.keys(letturePerData).sort();
+  let totIncasso=0, totLitri=0, totGasolio=0, totBenzina=0;
+
+  dateOrdinate.forEach(data => {
+    const gg = { litriG:0, litriB:0, incasso:0 };
+    letturePerData[data].forEach(l => {
+      const pompa = pompeMap[l.pompa_id];
+      if (!pompa) return;
+      // Trova lettura giorno precedente
+      const datePrev = dateOrdinate.filter(d => d < data);
+      const prevData = datePrev.length ? datePrev[datePrev.length-1] : null;
+      let precLettura = null;
+      if (prevData && letturePerData[prevData]) {
+        const pl = letturePerData[prevData].find(x => x.pompa_id === l.pompa_id);
+        if (pl) precLettura = Number(pl.lettura);
+      }
+      if (precLettura === null) return;
+      const litriVenduti = Number(l.lettura) - precLettura;
+      if (litriVenduti <= 0) return;
+      const prezzo = prezziMap[data + '_' + pompa.prodotto] || 0;
+      const incasso = litriVenduti * prezzo;
+      if (pompa.prodotto === 'Gasolio Autotrazione') gg.litriG += litriVenduti;
+      else gg.litriB += litriVenduti;
+      gg.incasso += incasso;
+    });
+    giorniMap[data] = gg;
+    totGasolio += gg.litriG;
+    totBenzina += gg.litriB;
+    totLitri += gg.litriG + gg.litriB;
+    totIncasso += gg.incasso;
+  });
+
+  const margineDettaglio = totIncasso - costoApprovv;
+
+  // KPI
+  document.getElementById('vdett-incasso').textContent = fmtE(totIncasso);
+  document.getElementById('vdett-litri').textContent = fmtL(totLitri);
+  document.getElementById('vdett-costo').textContent = fmtE(costoApprovv);
+  document.getElementById('vdett-margine').textContent = fmtE(margineDettaglio);
+
+  // Tabella giornaliera
+  const tbody = document.getElementById('tabella-vend-dettaglio');
+  if (!dateOrdinate.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessuna lettura nel periodo</td></tr>';
+  } else {
+    let runCosto = 0;
+    const costoGiorno = costoApprovv / (dateOrdinate.length || 1);
+    tbody.innerHTML = dateOrdinate.map(d => {
+      const g = giorniMap[d];
+      const totG = g.litriG + g.litriB;
+      runCosto += costoGiorno;
+      const margG = g.incasso - costoGiorno;
+      return '<tr><td>' + d + '</td><td style="font-family:var(--font-mono)">' + fmtL(g.litriG) + '</td><td style="font-family:var(--font-mono)">' + fmtL(g.litriB) + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtL(totG) + '</td><td style="font-family:var(--font-mono)">' + fmtE(g.incasso) + '</td><td style="font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(costoGiorno) + '</td><td style="font-family:var(--font-mono);color:' + (margG >= 0 ? '#639922' : '#A32D2D') + '">' + fmtE(margG) + '</td></tr>';
+    }).join('');
+    // Riga totale
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:500"><td>TOTALE</td><td style="font-family:var(--font-mono)">' + fmtL(totGasolio) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totBenzina) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totIncasso) + '</td><td style="font-family:var(--font-mono)">' + fmtE(costoApprovv) + '</td><td style="font-family:var(--font-mono);color:' + (margineDettaglio >= 0 ? '#639922' : '#A32D2D') + '">' + fmtE(margineDettaglio) + '</td></tr>';
+  }
+
+  // Grafici
+  const labelsG = dateOrdinate.map(d => { const dt=new Date(d); return dt.getDate()+'/'+(dt.getMonth()+1); });
+  const ctxI = document.getElementById('chart-dett-incasso');
+  if (ctxI) {
+    if (_chartDettIncasso) _chartDettIncasso.destroy();
+    _chartDettIncasso = new Chart(ctxI.getContext('2d'), {
+      type:'bar', data:{ labels:labelsG, datasets:[{ label:'Incasso €', data:dateOrdinate.map(d=>Math.round(giorniMap[d].incasso*100)/100), backgroundColor:'#6B5FCC', borderRadius:4 }] },
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
+    });
+  }
+  const ctxM = document.getElementById('chart-dett-margine');
+  if (ctxM) {
+    const costoG = costoApprovv / (dateOrdinate.length || 1);
+    if (_chartDettMargine) _chartDettMargine.destroy();
+    _chartDettMargine = new Chart(ctxM.getContext('2d'), {
+      type:'line', data:{ labels:labelsG, datasets:[{ label:'Margine €', data:dateOrdinate.map(d=>Math.round((giorniMap[d].incasso-costoG)*100)/100), borderColor:'#639922', backgroundColor:'rgba(99,153,34,0.1)', fill:true, tension:0.3, pointRadius:2 }] },
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:v=>'€ '+v}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
+    });
+  }
+}
+
+// ── VENDITE RIEPILOGO ANNUALE ────────────────────────────────────
+const MESI_NOMI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+let _chartAnnFatt=null, _chartAnnLitri=null;
+
+async function caricaVenditeAnnuali() {
+  // Popola select anno
+  const selAnno = document.getElementById('vann-anno');
+  if (selAnno.options.length === 0) {
+    const annoCorr = oggi.getFullYear();
+    for (let a = annoCorr; a >= annoCorr - 4; a--) selAnno.innerHTML += '<option value="' + a + '">' + a + '</option>';
+  }
+  const anno = parseInt(selAnno.value);
+  if (!anno) return;
+
+  const da = anno + '-01-01';
+  const a = anno + '-12-31';
+
+  // Ingrosso: ordini tipo_ordine='cliente'
+  let allIng = [];
+  let from = 0;
+  while (true) {
+    const { data: batch } = await sb.from('ordini').select('data,litri,costo_litro,trasporto_litro,margine,iva').gte('data', da).lte('data', a).neq('stato','annullato').eq('tipo_ordine','cliente').range(from, from + 999);
+    if (!batch || !batch.length) break;
+    allIng = allIng.concat(batch);
+    if (batch.length < 1000) break;
+    from += 1000;
+  }
+
+  // Dettaglio: letture stazione
+  const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
+  const { data: letture } = await sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', da).lte('data', a).order('data');
+  const { data: prezziP } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a);
+
+  const pompeMap = {};
+  (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
+  const prezziMap = {};
+  (prezziP||[]).forEach(p => { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
+
+  // Calcola dettaglio per giorno
+  const lettPerData = {};
+  (letture||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
+  const dateOrd = Object.keys(lettPerData).sort();
+
+  const dettaglioPerGiorno = {};
+  dateOrd.forEach(data => {
+    let litriG = 0, incassoG = 0;
+    lettPerData[data].forEach(l => {
+      const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+      const prev = dateOrd.filter(d => d < data);
+      const prevD = prev.length ? prev[prev.length-1] : null;
+      let precL = null;
+      if (prevD && lettPerData[prevD]) { const pl = lettPerData[prevD].find(x => x.pompa_id === l.pompa_id); if (pl) precL = Number(pl.lettura); }
+      if (precL === null) return;
+      const lv = Number(l.lettura) - precL; if (lv <= 0) return;
+      const pr = prezziMap[data + '_' + pompa.prodotto] || 0;
+      litriG += lv; incassoG += lv * pr;
+    });
+    dettaglioPerGiorno[data] = { litri: litriG, incasso: incassoG };
+  });
+
+  // Aggrega per mese
+  const mesi = [];
+  for (let m = 0; m < 12; m++) {
+    let ingLitri=0, ingFatt=0, ingMarg=0, dettLitri=0, dettInc=0;
+    const mStr = String(m+1).padStart(2,'0');
+    const prefix = anno + '-' + mStr;
+
+    allIng.forEach(r => { if (r.data.startsWith(prefix)) { ingLitri += Number(r.litri); ingFatt += prezzoNoIva(r)*Number(r.litri); ingMarg += Number(r.margine)*Number(r.litri); } });
+    Object.entries(dettaglioPerGiorno).forEach(([d,v]) => { if (d.startsWith(prefix)) { dettLitri += v.litri; dettInc += v.incasso; } });
+
+    mesi.push({ mese: MESI_NOMI[m], ingLitri, ingFatt, ingMarg, dettLitri, dettInc, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc });
+  }
+
+  // Tabella
+  const tbody = document.getElementById('tabella-vend-annuale');
+  let totIL=0,totIF=0,totIM=0,totDL=0,totDI=0,totTL=0,totTF=0;
+  tbody.innerHTML = mesi.map(m => {
+    totIL+=m.ingLitri; totIF+=m.ingFatt; totIM+=m.ingMarg; totDL+=m.dettLitri; totDI+=m.dettInc; totTL+=m.totLitri; totTF+=m.totFatt;
+    const hasData = m.ingLitri > 0 || m.dettLitri > 0;
+    return '<tr' + (!hasData?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(m.ingLitri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(m.ingFatt) + '</td><td style="font-family:var(--font-mono);color:#639922">' + fmtE(m.ingMarg) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtL(m.dettLitri) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtE(m.dettInc) + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtL(m.totLitri) + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtE(m.totFatt) + '</td></tr>';
+  }).join('');
+  tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE ' + anno + '</td><td style="font-family:var(--font-mono)">' + fmtL(totIL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totIF) + '</td><td style="font-family:var(--font-mono);color:#639922">' + fmtE(totIM) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtL(totDL) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtE(totDI) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totTL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totTF) + '</td></tr>';
+
+  // Grafici
+  const labelsM = mesi.map(m => m.mese.substring(0,3));
+  const ctxF = document.getElementById('chart-ann-fatturato');
+  if (ctxF) {
+    if (_chartAnnFatt) _chartAnnFatt.destroy();
+    _chartAnnFatt = new Chart(ctxF.getContext('2d'), {
+      type:'bar', data:{ labels:labelsM, datasets:[
+        { label:'Ingrosso', data:mesi.map(m=>Math.round(m.ingFatt)), backgroundColor:'#D4A017', borderRadius:4 },
+        { label:'Dettaglio', data:mesi.map(m=>Math.round(m.dettInc)), backgroundColor:'#6B5FCC', borderRadius:4 }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}},x:{stacked:true}} }
+    });
+  }
+  const ctxL = document.getElementById('chart-ann-litri');
+  if (ctxL) {
+    if (_chartAnnLitri) _chartAnnLitri.destroy();
+    _chartAnnLitri = new Chart(ctxL.getContext('2d'), {
+      type:'bar', data:{ labels:labelsM, datasets:[
+        { label:'Ingrosso', data:mesi.map(m=>Math.round(m.ingLitri)), backgroundColor:'#D4A017', borderRadius:4 },
+        { label:'Dettaglio', data:mesi.map(m=>Math.round(m.dettLitri)), backgroundColor:'#6B5FCC', borderRadius:4 }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}},x:{stacked:true}} }
+    });
+  }
+}
+
+// ── REPORT PDF DETTAGLIO ─────────────────────────────────────────
+async function stampaReportDettaglio() {
+  const da = document.getElementById('vdett-da').value;
+  const a = document.getElementById('vdett-a').value;
+  if (!da||!a) { toast('Seleziona il periodo'); return; }
+  // Rigenera i dati come in caricaVenditeDettaglio ma per il report
+  toast('Generazione report in corso...');
+  // Usa i dati già nella tabella
+  const tbody = document.getElementById('tabella-vend-dettaglio');
+  const righe = tbody.querySelectorAll('tr');
+  if (!righe.length) { toast('Nessun dato da stampare'); return; }
+  let righeHtml = '';
+  righe.forEach(tr => { righeHtml += '<tr>' + tr.innerHTML.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--text-muted\)/g,'#666') + '</tr>'; });
+
+  const daFmt = new Date(da).toLocaleDateString('it-IT');
+  const aFmt = new Date(a).toLocaleDateString('it-IT');
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vendite Dettaglio Stazione</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:10px}.rpt-header{flex-direction:column!important;gap:8px}table{font-size:9px}th,td{padding:4px 3px!important}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#6B5FCC;color:#fff;padding:7px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #5A4FBB;text-align:center}' +
+    'td{padding:6px 8px;border:1px solid #ddd}' +
+    '</style></head><body>';
+  html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#6B5FCC">VENDITE AL DETTAGLIO — STAZIONE OPPIDO</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + daFmt + ' — ' + aFmt + '</strong></div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+  html += '<table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Tot. Litri</th><th>Incasso €</th><th>Costo approvv.</th><th>Margine €</th></tr></thead><tbody>';
+  html += righeHtml + '</tbody></table>';
+  html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
+// ── REPORT PDF ANNUALE ───────────────────────────────────────────
+async function stampaReportAnnuale() {
+  const anno = document.getElementById('vann-anno').value;
+  if (!anno) { toast('Seleziona un anno'); return; }
+  const tbody = document.getElementById('tabella-vend-annuale');
+  const righe = tbody.querySelectorAll('tr');
+  if (!righe.length) { toast('Nessun dato da stampare'); return; }
+  let righeHtml = '';
+  righe.forEach(tr => { righeHtml += '<tr>' + tr.innerHTML.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--accent\)/g,'#D85A30') + '</tr>'; });
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Riepilogo Annuale ' + anno + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:10px}.rpt-header{flex-direction:column!important;gap:8px}table{font-size:9px}th,td{padding:4px 3px!important}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#639922;color:#fff;padding:7px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #4A7A19;text-align:center}' +
+    'td{padding:6px 8px;border:1px solid #ddd}' +
+    '</style></head><body>';
+  html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #639922;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#639922">RIEPILOGO VENDITE ANNUALE ' + anno + '</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Ingrosso (clienti diretti) + Dettaglio (stazione Oppido)</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+  html += '<table><thead><tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Totale litri</th><th>Totale fatturato</th></tr></thead><tbody>';
+  html += righeHtml + '</tbody></table>';
+  html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:8px;margin-top:14px">PhoenixFuel Srl — Riepilogo annuale ' + anno + '</div>';
+  html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#639922;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
 // ── CLIENTI ───────────────────────────────────────────────────────
 async function salvaCliente(id=null) {
   const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, fido_massimo:parseFloat(document.getElementById('cl-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
@@ -3766,12 +4076,69 @@ const COLORI_DASH = {
 async function caricaDashboard() {
   const{data}=await sb.from('ordini').select('*').eq('data',oggiISO);
   if (!data) return;
+
+  // INGROSSO: solo tipo_ordine='cliente'
+  const ingrosso = data.filter(r => r.tipo_ordine === 'cliente' && r.stato !== 'annullato');
   let fatturato=0,litri=0,margine=0;
-  data.forEach(r=>{fatturato+=prezzoConIva(r)*r.litri;litri+=Number(r.litri);margine+=Number(r.margine);});
+  ingrosso.forEach(r=>{fatturato+=prezzoConIva(r)*r.litri;litri+=Number(r.litri);margine+=Number(r.margine);});
   document.getElementById('kpi-fatturato').textContent=fmtE(fatturato);
   document.getElementById('kpi-litri').textContent=fmtL(litri);
-  document.getElementById('kpi-margine').textContent=data.length?'€ '+(margine/data.length).toFixed(4)+'/L':'—';
-  document.getElementById('kpi-ordini').textContent=data.length;
+  document.getElementById('kpi-margine').textContent=ingrosso.length?'€ '+(margine/ingrosso.length).toFixed(4)+'/L':'—';
+  document.getElementById('kpi-ordini').textContent=ingrosso.length;
+
+  // MOVIMENTI INTERNI oggi
+  const movInterni = data.filter(r => (r.tipo_ordine === 'stazione_servizio' || r.tipo_ordine === 'entrata_deposito' || r.tipo_ordine === 'autoconsumo') && r.stato !== 'annullato');
+  document.getElementById('kpi-mov-interni').textContent = movInterni.length;
+
+  // DETTAGLIO: letture pompe oggi vs ieri
+  try {
+    const ieri = new Date(oggi); ieri.setDate(ieri.getDate()-1);
+    const ieriISO = ieri.toISOString().split('T')[0];
+    const [lettOggiRes, lettIeriRes, prezziOggiRes, lettMeseRes] = await Promise.all([
+      sb.from('stazione_letture').select('pompa_id,lettura').eq('data', oggiISO),
+      sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieriISO),
+      sb.from('stazione_prezzi').select('prodotto,prezzo_litro').eq('data', oggiISO),
+      sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', oggiISO.substring(0,8)+'01').lte('data', oggiISO).order('data')
+    ]);
+    const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
+    const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
+    const prezziMap = {}; (prezziOggiRes.data||[]).forEach(p => { prezziMap[p.prodotto] = Number(p.prezzo_litro); });
+    const lettIeriMap = {}; (lettIeriRes.data||[]).forEach(l => { lettIeriMap[l.pompa_id] = Number(l.lettura); });
+
+    let dettLitri=0, dettIncasso=0;
+    (lettOggiRes.data||[]).forEach(l => {
+      const prec = lettIeriMap[l.pompa_id];
+      if (prec === undefined) return;
+      const lv = Number(l.lettura) - prec; if (lv <= 0) return;
+      const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+      dettLitri += lv;
+      dettIncasso += lv * (prezziMap[pompa.prodotto] || 0);
+    });
+    document.getElementById('kpi-dett-incasso').textContent = fmtE(dettIncasso);
+    document.getElementById('kpi-dett-litri').textContent = fmtL(dettLitri);
+
+    // Incasso mese da letture
+    const lettPerData = {};
+    (lettMeseRes.data||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
+    const dateOrd = Object.keys(lettPerData).sort();
+    let meseIncasso = 0;
+    for (let i = 1; i < dateOrd.length; i++) {
+      const dPrec = dateOrd[i-1], dCorr = dateOrd[i];
+      const { data: prz } = await sb.from('stazione_prezzi').select('prodotto,prezzo_litro').eq('data', dCorr);
+      const pmDay = {}; (prz||[]).forEach(p => { pmDay[p.prodotto] = Number(p.prezzo_litro); });
+      (lettPerData[dCorr]||[]).forEach(l => {
+        const lPrec = (lettPerData[dPrec]||[]).find(x => x.pompa_id === l.pompa_id);
+        if (!lPrec) return;
+        const lv = Number(l.lettura) - Number(lPrec.lettura); if (lv <= 0) return;
+        const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+        meseIncasso += lv * (pmDay[pompa.prodotto] || 0);
+      });
+    }
+    document.getElementById('kpi-dett-mese').textContent = fmtE(meseIncasso);
+  } catch(e) {
+    console.error('Errore KPI dettaglio:', e);
+  }
+
   const{data:rec}=await sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5);
   const tbody=document.getElementById('dashboard-ordini');
   tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
