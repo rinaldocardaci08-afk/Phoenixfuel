@@ -1842,7 +1842,8 @@ async function generaElencoVenditeGiorno() {
   if (!ordini.length) { toast('Nessun ordine vendita per questa data'); return; }
 
   var totLitri=0, totNetto=0, totIva=0, totMargine=0, totCosto=0;
-  var righeHtml = '';
+  var perCliente = {};
+  var righeArr = [];
   ordini.forEach(function(r, i) {
     var litri = Number(r.litri);
     var pNetto = prezzoNoIva(r);
@@ -1852,59 +1853,90 @@ async function generaElencoVenditeGiorno() {
     var netto = pNetto * litri;
     var iva = pIva * litri;
     totLitri += litri; totNetto += netto; totIva += iva; totMargine += marg; totCosto += costoAcq;
-    righeHtml += '<tr>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;font-weight:bold">' + esc(r.cliente) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.sede_scarico_nome||'') + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litri) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(pNetto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(netto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + r.iva + '%</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(iva) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(marg) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.stato) + '</td>' +
-      '</tr>';
+    // Per cliente
+    var cl = r.cliente || '—';
+    if (!perCliente[cl]) perCliente[cl] = { ordini:0, litri:0, netto:0, iva:0, margine:0 };
+    perCliente[cl].ordini++; perCliente[cl].litri += litri;
+    perCliente[cl].netto += netto; perCliente[cl].iva += iva; perCliente[cl].margine += marg;
+    righeArr.push('<tr>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:center;font-size:10px">' + (i+1) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;font-weight:bold;font-size:10px">' + esc(r.cliente) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;font-size:10px">' + esc(r.prodotto) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-size:10px">' + fmtL(litri) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-size:10px">' + fmt(pNetto) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-size:10px">' + fmtE(netto) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:center;font-size:10px">' + r.iva + '%</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold;font-size:10px">' + fmtE(iva) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922;font-size:10px">' + fmtE(marg) + '</td>' +
+      '</tr>');
   });
 
   var dataFmt = new Date(dataFiltro).toLocaleDateString('it-IT');
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Elenco Vendite ' + dataFmt + '</title>' +
-    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:15mm}' +
-    '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}}' +
-    '@media(max-width:600px){body{padding:4mm!important;font-size:10px}.rpt-header{flex-direction:column!important;gap:8px}.rpt-header>div:last-child{text-align:left!important}.rpt-kpi{grid-template-columns:repeat(2,1fr)!important;gap:6px!important}table{font-size:9px}th,td{padding:4px 3px!important}.rpt-actions{bottom:8px!important;right:8px!important}button{padding:8px 12px!important;font-size:12px!important}}' +
-    'table{width:100%;border-collapse:collapse}' +
-    'th{background:#D4A017;color:#fff;padding:8px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;border:1px solid #B8900F;text-align:center}' +
-    '.tot-row td{border-top:3px solid #D4A017!important;font-weight:bold;font-size:12px;background:#FDF3D0!important}' +
-    '</style></head><body>';
 
+  // CSS base
+  var css = '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px}' +
+    '.page{width:210mm;min-height:297mm;padding:15mm 12mm;margin:0 auto;background:#fff}' +
+    '@media print{.no-print{display:none!important}.page{margin:0;padding:10mm;page-break-after:always}.page:last-child{page-break-after:auto}@page{size:portrait;margin:0}}' +
+    '@media screen{.page{box-shadow:0 2px 12px rgba(0,0,0,0.08);margin:10px auto}body{background:#f5f4f0}}' +
+    '@media(max-width:600px){.page{padding:4mm!important;width:auto!important;min-height:auto!important}body{font-size:10px}.rpt-header{flex-direction:column!important;gap:8px}.rpt-kpi{grid-template-columns:repeat(2,1fr)!important}table{font-size:8px!important}th,td{padding:3px 2px!important}.rpt-actions{bottom:8px!important;right:8px!important}button{padding:8px 12px!important;font-size:12px!important}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#D4A017;color:#fff;padding:6px 5px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #B8900F;text-align:center}' +
+    '.tot-row td{border-top:3px solid #D4A017!important;font-weight:bold;background:#FDF3D0!important}' +
+    '.section-title{font-size:11px;font-weight:bold;color:#D4A017;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;border-bottom:1px solid #e8e8e8;padding-bottom:3px}' +
+    '.page-label{font-size:9px;color:#bbb;text-align:right;margin-bottom:4px}' +
+    '</style>';
+
+  // ═══ PAGINA 1: Header + KPI + Riepilogo per cliente ═══
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Elenco Vendite ' + dataFmt + '</title>' + css + '</head><body>';
+
+  html += '<div class="page">';
   html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:10px;margin-bottom:14px">';
-  html += '<div><div style="font-size:20px;font-weight:bold;color:#D4A017">ELENCO VENDITE</div>';
+  html += '<div><div style="font-size:20px;font-weight:bold;color:#D4A017">ELENCO VENDITE INGROSSO</div>';
   html += '<div style="font-size:12px;color:#666;margin-top:3px">Data: <strong>' + dataFmt + '</strong> — Ordini: <strong>' + ordini.length + '</strong></div></div>';
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
-  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti e oli</div></div></div>';
+  html += '<div style="font-size:10px;color:#666">Vendita all\'ingrosso di carburanti</div></div></div>';
 
+  // KPI
   html += '<div class="rpt-kpi" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px">';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Litri totali</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Fatturato netto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totNetto) + '</div></div>';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase;letter-spacing:0.4px">Fatturato IVA incl.</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
-  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase;letter-spacing:0.4px">Margine totale</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</div></div>';
-  html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase;letter-spacing:0.4px">Costo acquisto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Litri totali</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Fatt. netto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totNetto) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Fatt. IVA incl.</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</div></div>';
+  html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase">Costo acquisto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
   html += '</div>';
 
-  html += '<table><thead><tr><th>#</th><th>Cliente</th><th>Sede scarico</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L netto</th><th>Tot. netto</th><th>IVA</th><th>Tot. IVA incl.</th><th>Margine</th><th>Stato</th></tr></thead><tbody>';
-  html += righeHtml;
-  html += '<tr class="tot-row">' +
-    '<td style="padding:8px;border:1px solid #ddd" colspan="4">TOTALE</td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd"></td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd"></td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td>' +
-    '<td style="padding:8px;border:1px solid #ddd"></td></tr>';
+  // Riepilogo per CLIENTE
+  html += '<div class="section-title">Riepilogo vendite per cliente</div>';
+  html += '<table><thead><tr><th>Cliente</th><th>Ordini</th><th>Litri</th><th>Fatt. netto</th><th>Fatt. IVA incl.</th><th>Margine</th></tr></thead><tbody>';
+  var clArr = Object.entries(perCliente).sort(function(a,b) { return b[1].iva - a[1].iva; });
+  clArr.forEach(function(entry) {
+    var c = entry[0], v = entry[1];
+    html += '<tr><td style="padding:5px 6px;border:1px solid #ddd;font-weight:bold">' + esc(c) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:center;font-family:Courier New,monospace">' + v.ordini + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(v.litri) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(v.netto) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(v.iva) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(v.margine) + '</td></tr>';
+  });
+  html += '<tr class="tot-row"><td style="padding:6px;border:1px solid #ddd;font-weight:bold">TOTALE</td><td style="padding:6px;border:1px solid #ddd;text-align:center;font-family:Courier New,monospace">' + ordini.length + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(totIva) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td></tr>';
   html += '</tbody></table>';
+  html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:6px;margin-top:10px">PhoenixFuel Srl — Elenco vendite ' + dataFmt + '</div>';
+  html += '</div>'; // chiude pagina 1
 
-  html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:8px;margin-top:14px">PhoenixFuel Srl — Elenco vendite generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
+  // ═══ PAGINE DETTAGLIO ORDINI (paginato ~35 righe) ═══
+  var RPP = 35;
+  var theadHtml = '<thead><tr><th>#</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L netto</th><th>Tot. netto</th><th>IVA</th><th>Tot. IVA incl.</th><th>Margine</th></tr></thead>';
+  var rigaTot = '<tr class="tot-row"><td style="padding:6px;border:1px solid #ddd" colspan="3">TOTALE (' + ordini.length + ' ordini)</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:6px;border:1px solid #ddd"></td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td><td style="padding:6px;border:1px solid #ddd"></td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td></tr>';
+
+  var totPag = Math.ceil(righeArr.length / RPP);
+  for (var p = 0; p < totPag; p++) {
+    var s = p * RPP, e = Math.min(s + RPP, righeArr.length);
+    var isLast = (p === totPag - 1);
+    html += '<div class="page">';
+    html += '<div class="page-label">Dettaglio ordini — Pag. ' + (p+1) + '/' + totPag + ' — ' + dataFmt + '</div>';
+    if (p === 0) html += '<div class="section-title">Dettaglio singoli ordini</div>';
+    html += '<table>' + theadHtml + '<tbody>' + righeArr.slice(s, e).join('');
+    if (isLast) html += rigaTot;
+    html += '</tbody></table>';
+    if (isLast) html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:6px;margin-top:10px">PhoenixFuel Srl — Documento interno</div>';
+    html += '</div>';
+  }
+
   html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="background:#D4A017;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">🖨️ Stampa / PDF</button>';
   html += '<button onclick="window.close()" style="background:#E24B4A;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">✕ Chiudi</button>';
