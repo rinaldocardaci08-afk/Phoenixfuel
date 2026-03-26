@@ -937,7 +937,7 @@
   <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:90%;max-width:700px;max-height:85vh;overflow-y:auto;position:relative;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
       <span id="modal-title" style="font-size:15px;font-weight:500"></span>
-      <button onclick="chiudiModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted)">×</button>
+      <button onclick="chiudiModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-muted);padding:6px 10px;border-radius:6px;line-height:1" title="Chiudi">×</button>
     </div>
     <div id="modal-clienti">
       <div class="form-grid">
@@ -978,13 +978,14 @@
       </div>
     </div>
     <button id="modal-save-btn" class="btn-primary" style="width:100%;margin-top:8px">Salva</button>
+    <button onclick="chiudiModal()" style="width:100%;margin-top:6px;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:13px;font-family:var(--font);color:var(--text-muted)">Annulla</button>
   </div>
 </div>
 
 <!-- MODAL PERMESSI -->
 <div id="modal-permessi" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1001;align-items:center;justify-content:center;">
   <div style="background:var(--bg-card);border-radius:var(--radius-lg);padding:24px;width:95%;max-width:900px;max-height:90vh;overflow-y:auto;position:relative;">
-    <button onclick="chiudiModal()" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px 8px;line-height:1">✕</button>
+    <button onclick="chiudiModal()" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-muted);padding:6px 10px;border-radius:6px;line-height:1;z-index:1" title="Chiudi">✕</button>
     <div id="modal-permessi-content"></div>
   </div>
 </div>

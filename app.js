@@ -160,8 +160,10 @@ function apriModal(html) {
   document.getElementById('modal-permessi').style.display = 'flex';
 }
 function chiudiModalePermessi() { document.getElementById('modal-permessi').style.display = 'none'; }
-document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) chiudiModal(); });
-function chiudiModal() { chiudiModalePermessi(); }
+function chiudiModalOverlay() { document.getElementById('modal-overlay').style.display = 'none'; }
+document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) chiudiModalOverlay(); });
+document.getElementById('modal-permessi').addEventListener('click', function(e) { if (e.target === this) chiudiModalePermessi(); });
+function chiudiModal() { chiudiModalePermessi(); chiudiModalOverlay(); }
 
 // ── UTILITÀ ───────────────────────────────────────────────────────
 function _sep(s) { return s.replace(/\./g, "'"); }
