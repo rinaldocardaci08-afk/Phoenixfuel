@@ -32,7 +32,7 @@ async function inizializza() {
   document.getElementById('utente-ruolo').textContent = utente.ruolo;
   await costruisciMenu(utente.ruolo, utente.id);
   if (utente.ruolo === 'cliente') { setSection('cliente', document.querySelector('.nav-item')); }
-  else { await caricaCacheProdotti(); caricaDashboard(); initForms(); aggiornaSelezioniOrdine(); }
+  else { await Promise.all([caricaCacheProdotti(), caricaSelectClienti('ord-cliente')]); caricaDashboard(); initForms(); aggiornaSelezioniOrdine(); }
 }
 
 async function caricaCacheProdotti() {
@@ -593,21 +593,33 @@ function aggiornaBasiOrdine() {
   prezzoCorrente = null;
 }
 
+let _cacheProdottiStazione = null;
+
 async function aggiornaProdottiOrdine() {
   const fornitore = document.getElementById('ord-fornitore').value;
   const baseId = document.getElementById('ord-base').value;
   const tipo = document.getElementById('ord-tipo').value;
   let prodotti = [...new Set(prezziDelGiorno.filter(p=>p.fornitore===fornitore&&(baseId?p.base_carico_id===baseId:true)).map(p=>p.prodotto))];
-  // Per stazione Oppido: solo prodotti delle pompe attive
+  // Per stazione Oppido: solo prodotti delle pompe attive (cached)
   if (tipo === 'stazione_servizio') {
-    const { data: pompe } = await sb.from('stazione_pompe').select('prodotto').eq('attiva',true);
-    const prodottiStazione = [...new Set((pompe||[]).map(p => p.prodotto))];
-    prodotti = prodotti.filter(p => prodottiStazione.includes(p));
+    if (!_cacheProdottiStazione) {
+      const { data: pompe } = await sb.from('stazione_pompe').select('prodotto').eq('attiva',true);
+      _cacheProdottiStazione = [...new Set((pompe||[]).map(p => p.prodotto))];
+    }
+    prodotti = prodotti.filter(p => _cacheProdottiStazione.includes(p));
   }
+  // Ordina per ordine_visualizzazione (Gasolio Autotrazione=1, Benzina=2, etc)
+  prodotti.sort((a,b) => {
+    const pa = cacheProdotti.find(p=>p.nome===a);
+    const pb = cacheProdotti.find(p=>p.nome===b);
+    return (pa?pa.ordine_visualizzazione:99) - (pb?pb.ordine_visualizzazione:99);
+  });
   const selProd = document.getElementById('ord-prodotto');
   selProd.innerHTML = '<option value="">Seleziona prodotto...</option>' + prodotti.map(p=>'<option value="'+p+'">'+p+'</option>').join('');
   prezzoCorrente = null;
 }
+
+let _cacheMarginClienti = {};
 
 async function caricaPrezzoPerOrdine() {
   const fornitore = document.getElementById('ord-fornitore').value;
@@ -623,22 +635,26 @@ async function caricaPrezzoPerOrdine() {
     const pnInput = document.getElementById('ord-prezzo-netto');
     trInput.value = match.trasporto_litro;
 
-    // Calcola media margine per questo prodotto dal cliente selezionato
+    // Calcola media margine (con cache per evitare query ripetute)
     let margineDaUsare = Number(match.margine);
     const clienteId = document.getElementById('ord-cliente').value;
     if (clienteId) {
-      const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
-      if (clienteNome) {
-        const { data: ordPrec } = await sb.from('ordini').select('margine').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente').gt('margine',0).order('data',{ascending:false}).limit(20);
-        if (ordPrec && ordPrec.length > 0) {
-          const media = ordPrec.reduce((s, o) => s + Number(o.margine), 0) / ordPrec.length;
-          margineDaUsare = media;
+      const cacheKey = clienteId + '_' + prodotto;
+      if (_cacheMarginClienti[cacheKey] !== undefined) {
+        margineDaUsare = _cacheMarginClienti[cacheKey];
+      } else {
+        const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
+        if (clienteNome) {
+          const { data: ordPrec } = await sb.from('ordini').select('margine').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente').gt('margine',0).order('data',{ascending:false}).limit(10);
+          if (ordPrec && ordPrec.length > 0) {
+            margineDaUsare = ordPrec.reduce((s, o) => s + Number(o.margine), 0) / ordPrec.length;
+          }
+          _cacheMarginClienti[cacheKey] = margineDaUsare;
         }
       }
     }
 
     mgInput.value = margineDaUsare.toFixed(4);
-    // Calcola prezzo netto = costo + trasporto + margine
     const noIva = Number(match.costo_litro) + Number(match.trasporto_litro) + margineDaUsare;
     pnInput.value = noIva.toFixed(4);
     aggiornaPrevOrdine();
@@ -835,22 +851,14 @@ async function salvaOrdine() {
   document.getElementById('fido-cliente-info').style.display = 'none';
   document.getElementById('prev-fido-warn').style.display = 'none';
   fidoClienteCorrente = null;
+  _cacheMarginClienti = {};
   caricaOrdini();
 }
 
 async function caricaOrdini() {
   await aggiornaSelezioniOrdine();
-  // Paginazione per superare limite 1000 righe Supabase
-  let allData = [];
-  let from = 0;
-  while (true) {
-    const { data: batch } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false}).range(from, from + 999);
-    if (!batch || !batch.length) break;
-    allData = allData.concat(batch);
-    if (batch.length < 1000) break;
-    from += 1000;
-  }
-  const data = allData;
+  // Carica solo gli ultimi 500 ordini per velocità (i filtri restringono ulteriormente)
+  const { data } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false}).limit(500);
   const tbody = document.getElementById('tabella-ordini');
   if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
   let html = '';
