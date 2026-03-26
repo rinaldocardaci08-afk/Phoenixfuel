@@ -28,13 +28,24 @@
     body { background: #fff; }
     @page { size: portrait; margin: 0; }
   }
+  @media (max-width: 600px) {
+    .page { padding: 4mm !important; width: auto !important; min-height: auto !important; }
+    body { font-size: 10px; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
+    .charts-grid { grid-template-columns: 1fr !important; }
+    table { font-size: 9px; }
+    th, td { padding: 3px 4px !important; }
+    .report-header { flex-direction: column !important; gap: 8px; }
+    .toolbar { bottom: 8px !important; right: 8px !important; }
+    .toolbar button { padding: 8px 12px !important; font-size: 12px !important; }
+  }
   .report-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #D4A017; padding-bottom: 10px; margin-bottom: 14px; }
   .report-title { font-size: 20px; font-weight: bold; color: #D4A017; }
   .report-sub { font-size: 11px; color: #666; margin-top: 3px; }
   .report-logo { max-height: 50px; }
   .report-filtri-info { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 11px; color: #555; display: flex; flex-wrap: wrap; gap: 16px; }
   .report-filtri-info strong { color: #1a1a18; }
-  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
   .kpi-box { background: #fafaf8; border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px; text-align: center; }
   .kpi-label { font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
   .kpi-val { font-size: 18px; font-weight: bold; font-family: 'Courier New', monospace; color: #1a1a18; }
@@ -99,12 +110,13 @@
       <div class="kpi-box"><div class="kpi-label">Fatturato IVA incl.</div><div class="kpi-val" id="r-fatturato">—</div></div>
       <div class="kpi-box"><div class="kpi-label">Litri venduti</div><div class="kpi-val" id="r-litri">—</div></div>
       <div class="kpi-box"><div class="kpi-label">Margine totale</div><div class="kpi-val" id="r-margine">—</div></div>
+      <div class="kpi-box" style="background:#EAF3DE;border-color:#639922"><div class="kpi-label" style="color:#27500A">Margine medio/L</div><div class="kpi-val" id="r-margine-litro" style="color:#639922">—</div></div>
       <div class="kpi-box"><div class="kpi-label">N. Ordini</div><div class="kpi-val" id="r-ordini">—</div></div>
     </div>
     <div class="section-title">Riepilogo vendite per cliente</div>
-    <table><thead><tr><th>Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead><tbody id="r-tab-clienti"></tbody></table>
+    <table><thead><tr><th>Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Margine/L</th></tr></thead><tbody id="r-tab-clienti"></tbody></table>
     <div class="section-title">Riepilogo per fornitore</div>
-    <table><thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead><tbody id="r-tab-fornitori"></tbody></table>
+    <table><thead><tr><th>Fornitore</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>Margine/L</th></tr></thead><tbody id="r-tab-fornitori"></tbody></table>
     <div class="report-footer">PhoenixFuel Srl — Report generato il <span id="r-gen-date"></span></div>
   </div>
 
@@ -225,19 +237,22 @@ async function generaReport(){
   document.getElementById('r-fatturato').textContent=fmtE(fatturato);
   document.getElementById('r-litri').textContent=fmtL(litri)+' L';
   document.getElementById('r-margine').textContent=fmtE(margine);
+  document.getElementById('r-margine-litro').textContent=litri>0?fmt(margine/litri):'—';
   document.getElementById('r-ordini').textContent=ordini.length;
 
   // Tabella CLIENTI (prima!)
   const clArr=Object.entries(perCliente).sort((a,b)=>b[1].fatturato-a[1].fatturato);
-  document.getElementById('r-tab-clienti').innerHTML=clArr.map(([c,v])=>
-    '<tr><td><strong>'+esc(c)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtE(v.margine)+'</td></tr>'
-  ).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtE(margine)+'</td></tr>';
+  document.getElementById('r-tab-clienti').innerHTML=clArr.map(([c,v])=>{
+    const ml=v.litri>0?v.margine/v.litri:0;
+    return '<tr><td><strong>'+esc(c)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtE(v.margine)+'</td><td class="mono" style="color:#639922">'+fmt(ml)+'</td></tr>';
+  }).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtE(margine)+'</td><td class="mono" style="color:#639922">'+fmt(litri>0?margine/litri:0)+'</td></tr>';
 
   // Tabella FORNITORI
   const foArr=Object.entries(perFornitore).sort((a,b)=>b[1].fatturato-a[1].fatturato);
-  document.getElementById('r-tab-fornitori').innerHTML=foArr.map(([f,v])=>
-    '<tr><td><strong>'+esc(f)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtE(v.margine)+'</td></tr>'
-  ).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtE(margine)+'</td></tr>';
+  document.getElementById('r-tab-fornitori').innerHTML=foArr.map(([f,v])=>{
+    const ml=v.litri>0?v.margine/v.litri:0;
+    return '<tr><td><strong>'+esc(f)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtE(v.margine)+'</td><td class="mono" style="color:#639922">'+fmt(ml)+'</td></tr>';
+  }).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtE(margine)+'</td><td class="mono" style="color:#639922">'+fmt(litri>0?margine/litri:0)+'</td></tr>';
 
   // ═══ DETTAGLIO ORDINI — multi-pagina (~35 righe/pagina) ═══
   const RPP=35;
