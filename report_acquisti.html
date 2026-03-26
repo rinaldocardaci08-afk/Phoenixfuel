@@ -89,6 +89,16 @@
       </select>
     </div>
     <div class="filtri-group">
+      <label>Destinazione acquisto</label>
+      <select id="f-destinazione">
+        <option value="">Tutte le destinazioni</option>
+        <option value="cliente">Vendita a cliente</option>
+        <option value="entrata_deposito">Entrata deposito</option>
+        <option value="stazione_servizio">Stazione servizio</option>
+        <option value="autoconsumo">Autoconsumo</option>
+      </select>
+    </div>
+    <div class="filtri-group">
       <label>Date</label>
       <div style="display:flex;gap:8px">
         <input type="date" id="f-da" style="flex:1" />
@@ -132,10 +142,17 @@
     <div class="section-title">Confronto costi medi per fornitore</div>
     <div id="r-confronto" class="confronto-grid"></div>
 
+    <!-- Riepilogo per DESTINAZIONE -->
+    <div class="section-title">Riepilogo per destinazione acquisto</div>
+    <table>
+      <thead><tr><th>Destinazione</th><th>Ordini</th><th>Litri</th><th>Costo totale</th><th>Costo medio/L</th><th>Trasporto tot.</th></tr></thead>
+      <tbody id="r-tab-destinazione"></tbody>
+    </table>
+
     <!-- Tabelle -->
     <div class="section-title">Dettaglio acquisti</div>
     <table>
-      <thead><tr><th>Data</th><th>Fornitore</th><th>Base carico</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale costo</th><th>Trasporto tot.</th></tr></thead>
+      <thead><tr><th>Data</th><th>Fornitore</th><th>Destinazione</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale costo</th><th>Trasporto tot.</th></tr></thead>
       <tbody id="r-tabella"></tbody>
     </table>
 
@@ -187,10 +204,18 @@ function fmtE(n) {
 }
 function fmtL(n) {
   const v = Number(n);
-  const dec = v % 1 === 0 ? 0 : 0;
-  return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 0 }));
+  return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
 }
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+const DEST_LABELS = { 'cliente':'Vendita cliente', 'entrata_deposito':'Entrata deposito', 'stazione_servizio':'Stazione servizio', 'autoconsumo':'Autoconsumo' };
+const DEST_COLORS = { 'cliente':'#D4A017', 'entrata_deposito':'#378ADD', 'stazione_servizio':'#6B5FCC', 'autoconsumo':'#BA7517' };
+function destBadge(tipo) {
+  const label = DEST_LABELS[tipo] || tipo || '—';
+  const colors = { 'cliente':'amber', 'entrata_deposito':'blue', 'stazione_servizio':'purple', 'autoconsumo':'gray' };
+  const cls = colors[tipo] || 'gray';
+  return '<span style="display:inline-block;padding:2px 6px;border-radius:10px;font-size:9px;font-weight:500;background:' + (cls==='amber'?'#FAEEDA':cls==='blue'?'#E6F1FB':cls==='purple'?'#EEEDFE':'#eee') + ';color:' + (cls==='amber'?'#633806':cls==='blue'?'#0C447C':cls==='purple'?'#26215C':'#666') + '">' + label + '</span>';
+}
 
 const COLORI = ['#378ADD','#D4A017','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A','#085041','#791F1F'];
 let COLORI_PROD = {};
@@ -225,6 +250,7 @@ async function generaReport() {
   const da = document.getElementById('f-da').value;
   const a = document.getElementById('f-a').value;
   const prodotto = document.getElementById('f-prodotto').value;
+  const destinazione = document.getElementById('f-destinazione').value;
   const fornitori = Array.from(document.querySelectorAll('.f-forn-check:checked')).map(cb => cb.value);
 
   if (!da || !a) { alert('Seleziona le date'); return; }
@@ -236,6 +262,7 @@ async function generaReport() {
     let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato');
     if (prodotto) q = q.eq('prodotto', prodotto);
     if (fornitori.length) q = q.in('fornitore', fornitori);
+    if (destinazione) q = q.eq('tipo_ordine', destinazione);
     const { data: batch } = await q.order('data').order('fornitore').range(from, from + pageSize - 1);
     if (!batch || !batch.length) break;
     allOrdini = allOrdini.concat(batch);
@@ -252,11 +279,12 @@ async function generaReport() {
   let filtriHtml = '<span>Periodo: <strong>' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT') + '</strong></span>';
   if (fornitori.length) filtriHtml += '<span>Fornitori: <strong>' + fornitori.map(f=>esc(f)).join(', ') + '</strong></span>';
   if (prodotto) filtriHtml += '<span>Prodotto: <strong>' + esc(prodotto) + '</strong></span>';
+  if (destinazione) filtriHtml += '<span>Destinazione: <strong>' + (DEST_LABELS[destinazione]||destinazione) + '</strong></span>';
   document.getElementById('r-filtri').innerHTML = filtriHtml;
 
   // Calcoli
   let totCosto=0, totLitri=0, totTrasp=0;
-  const perGiorno={}, perFornitore={}, perProdotto={};
+  const perGiorno={}, perFornitore={}, perProdotto={}, perDestinazione={};
 
   ordini.forEach(r => {
     const costoTot = Number(r.costo_litro) * Number(r.litri);
@@ -278,6 +306,12 @@ async function generaReport() {
     const pr = r.prodotto||'—';
     if (!perProdotto[pr]) perProdotto[pr] = { litri:0, costo:0 };
     perProdotto[pr].litri += litri; perProdotto[pr].costo += costoTot;
+
+    // Per destinazione
+    const dest = r.tipo_ordine || 'cliente';
+    if (!perDestinazione[dest]) perDestinazione[dest] = { ordini:0, litri:0, costo:0, trasporto:0 };
+    perDestinazione[dest].ordini++; perDestinazione[dest].litri += litri;
+    perDestinazione[dest].costo += costoTot; perDestinazione[dest].trasporto += traspTot;
   });
 
   const costoMedioGlob = totLitri > 0 ? totCosto / totLitri : 0;
@@ -316,13 +350,20 @@ async function generaReport() {
   });
   document.getElementById('r-confronto').innerHTML = confHtml;
 
+  // Tabella per DESTINAZIONE
+  const destArr = Object.entries(perDestinazione).sort((a,b) => b[1].costo - a[1].costo);
+  document.getElementById('r-tab-destinazione').innerHTML = destArr.map(([d,v]) => {
+    const cm = v.litri > 0 ? v.costo / v.litri : 0;
+    return '<tr><td>' + destBadge(d) + '</td><td class="mono">' + v.ordini + '</td><td class="mono">' + fmtL(v.litri) + '</td><td class="mono">' + fmtE(v.costo) + '</td><td class="mono">' + fmt(cm) + '</td><td class="mono">' + fmtE(v.trasporto) + '</td></tr>';
+  }).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(totLitri) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmt(costoMedioGlob) + '</td><td class="mono">' + fmtE(totTrasp) + '</td></tr>';
+
   // Tabella dettaglio
   let tLitri=0, tCosto=0, tTrasp=0;
   document.getElementById('r-tabella').innerHTML = ordini.map(r => {
     const costoTot = Number(r.costo_litro) * Number(r.litri);
     const traspTot = Number(r.trasporto_litro) * Number(r.litri);
     tLitri += Number(r.litri); tCosto += costoTot; tTrasp += traspTot;
-    return '<tr><td>' + r.data + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(r.base_carico_id ? '—' : '—') + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(r.costo_litro) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td></tr>';
+    return '<tr><td>' + r.data + '</td><td>' + esc(r.fornitore) + '</td><td>' + destBadge(r.tipo_ordine) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(r.costo_litro) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td></tr>';
   }).join('') + '<tr class="totale"><td colspan="4"><strong>TOTALI</strong></td><td class="mono">' + fmtL(tLitri) + '</td><td class="mono">' + fmt(tLitri>0?tCosto/tLitri:0) + '</td><td class="mono">' + fmtE(tCosto) + '</td><td class="mono">' + fmtE(tTrasp) + '</td></tr>';
 
   // Tabella fornitori
@@ -344,13 +385,13 @@ async function generaReport() {
   const labelsG = giorniArr.map(g => { const d=new Date(g); return d.getDate()+'/'+(d.getMonth()+1); });
   _charts.giorno = new Chart(document.getElementById('r-chart-giorno').getContext('2d'), {
     type:'bar', data:{ labels:labelsG, datasets:[{ label:'€', data:giorniArr.map(g=>Math.round(perGiorno[g].costo*100)/100), backgroundColor:'#378ADD', borderRadius:4 }] },
-    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}},x:{ticks:{font:{size:9}}}} }
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}},x:{ticks:{font:{size:9}}}} }
   });
 
   // Costo medio per fornitore
   _charts.costi = new Chart(document.getElementById('r-chart-costi').getContext('2d'), {
     type:'bar', data:{ labels:foArr.map(([f])=>f.length>15?f.substring(0,15)+'…':f), datasets:[{ label:'€/L', data:foArr.map(([,v])=>v.litri>0?Math.round((v.costo/v.litri)*10000)/10000:0), backgroundColor:foArr.map((_,i)=>COLORI[i%COLORI.length]), borderRadius:4 }] },
-    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+v}}} }
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
   });
 
   // Litri per fornitore
