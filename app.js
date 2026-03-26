@@ -72,6 +72,8 @@ async function costruisciMenu(ruolo, utenteId) {
     voci.push({ id:'logistica', icon:'🚛', label:'Logistica' });
     voci.push({ section:'Stazione' });
     voci.push({ id:'stazione', icon:'⛽', label:'Stazione Oppido' });
+    voci.push({ section:'Autoconsumo' });
+    voci.push({ id:'autoconsumo', icon:'🛢', label:'Autoconsumo' });
     voci.push({ section:'Impostazioni' });
     voci.push({ id:'utenti', icon:'🔑', label:'Utenti' });
   } else {
@@ -90,6 +92,7 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'prodotti', icon:'📦', label:'Prodotti' },
       { id:'logistica', icon:'🚛', label:'Logistica', section:'Logistica' },
       { id:'stazione', icon:'⛽', label:'Stazione Oppido', section:'Stazione' },
+      { id:'autoconsumo', icon:'🛢', label:'Autoconsumo', section:'Autoconsumo' },
     ];
     let lastSection = null;
     tutteSezioni.forEach(s => {
@@ -111,14 +114,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
+const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
@@ -1116,7 +1119,6 @@ async function caricaDeposito() {
       const livAtt = Number(c.livello_attuale);
       const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
       totG += livAtt;
-      if (pct < 30) allerte++;
       cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
         '<div class="dep-cisterna-name">' + c.nome + '</div>' +
         cisternasvg(pct, colore) +
@@ -1130,9 +1132,14 @@ async function caricaDeposito() {
     const totLabel = um === 'pz' ? totG.toLocaleString('it-IT') + ' pz' : fmtL(totG);
     const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + totLabel + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
 
-    if (categoria === 'benzine') { htmlBenzine += cardHtml; } else { htmlMagazzino += cardHtml; }
-    totaleStoccato += totG;
-    capacitaTotale += capGruppo;
+    if (categoria === 'benzine') { htmlBenzine += cardHtml; totaleStoccato += totG; capacitaTotale += capGruppo; } else { htmlMagazzino += cardHtml; }
+  });
+
+  // Allerte: ricalcola solo benzine
+  allerte = 0;
+  cisterne.filter(c => { const pi = cacheProdotti.find(p => p.tipo_cisterna === c.tipo || p.nome === c.prodotto); return pi && pi.categoria === 'benzine'; }).forEach(c => {
+    const pct = Number(c.capacita_max) > 0 ? Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100) : 0;
+    if (pct < 30) allerte++;
   });
 
   let finalHtml = '';
@@ -1480,6 +1487,208 @@ async function stampaRettifiche(tipo) {
 
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+}
+
+// ── AUTOCONSUMO ──────────────────────────────────────────────────
+async function caricaAutoconsumo() {
+  // Cisterna autoconsumo
+  const { data: cis } = await sb.from('cisterne').select('*').eq('sede','autoconsumo').single();
+  if (cis) {
+    const pct = Number(cis.capacita_max) > 0 ? Math.round((Number(cis.livello_attuale) / Number(cis.capacita_max)) * 100) : 0;
+    document.getElementById('ac-giacenza').textContent = fmtL(cis.livello_attuale);
+    const el = document.getElementById('ac-cisterna-grafica');
+    if (el) {
+      el.innerHTML = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#BA7517"></div><div><div class="dep-product-title">' + esc(cis.nome) + '</div><div class="dep-product-sub">Gasolio Autotrazione · cap. ' + fmtL(cis.capacita_max) + '</div></div><div class="dep-product-total">' + fmtL(cis.livello_attuale) + '</div></div><div class="dep-cisterne-grid"><div class="dep-cisterna">' + cisternasvg(pct, '#BA7517') + '<div class="dep-cisterna-litri">' + Number(cis.livello_attuale).toLocaleString('it-IT') + ' L</div><div class="dep-cisterna-pct">' + pct + '% · cap. ' + Number(cis.capacita_max).toLocaleString('it-IT') + ' L</div></div></div></div>';
+    }
+    window._cisternaAutoconsumo = cis;
+  }
+
+  // Prelievi mese
+  const inizioMese = oggiISO.substring(0,8) + '01';
+  const { data: prelMese } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', inizioMese).lte('data', oggiISO);
+  const totMese = (prelMese||[]).reduce((s,p) => s + Number(p.litri), 0);
+  document.getElementById('ac-prelievi-mese').textContent = fmtL(totMese);
+
+  // Ordini autoconsumo confermati da ricevere
+  await caricaOrdiniAutoconsumo();
+
+  // Popola mezzi propri
+  const { data: mezzi } = await sb.from('mezzi').select('id,targa').eq('attivo',true).order('targa');
+  const selM = document.getElementById('ac-mezzo');
+  if (selM && mezzi) selM.innerHTML = '<option value="">Seleziona camion...</option>' + mezzi.map(m => '<option value="' + m.id + '" data-targa="' + esc(m.targa) + '">' + m.targa + '</option>').join('');
+
+  // Data default
+  const dataEl = document.getElementById('ac-data');
+  if (dataEl && !dataEl.value) dataEl.value = oggiISO;
+
+  // Filtri anno
+  const selAnno = document.getElementById('ac-filtro-anno');
+  if (selAnno && selAnno.options.length <= 1) {
+    const annoCorrente = new Date().getFullYear();
+    selAnno.innerHTML = '';
+    for (let a = annoCorrente; a >= annoCorrente - 3; a--) selAnno.innerHTML += '<option value="' + a + '">' + a + '</option>';
+  }
+  const da = document.getElementById('ac-filtro-da');
+  const aa = document.getElementById('ac-filtro-a');
+  if (da && !da.value) da.value = inizioMese;
+  if (aa && !aa.value) aa.value = oggiISO;
+
+  caricaPrelievi();
+}
+
+async function caricaOrdiniAutoconsumo() {
+  const { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','autoconsumo').eq('stato','confermato').or('caricato_deposito.eq.false,caricato_deposito.is.null').order('data',{ascending:false});
+  const el = document.getElementById('ac-da-ricevere');
+  if (!el) return;
+  if (!ordini || !ordini.length) { el.innerHTML = ''; return; }
+
+  let html = '<div class="card" style="border-left:4px solid #BA7517">';
+  html += '<div class="card-title" style="color:#BA7517">📦 Ordini autoconsumo da ricevere (' + ordini.length + ')</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th></th></tr></thead><tbody>';
+  ordini.forEach(function(r) {
+    html += '<tr><td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 12px;background:#BA7517" onclick="riceviAutoconsumo(\'' + r.id + '\',' + r.litri + ')">📦 Ricevi</button></td></tr>';
+  });
+  html += '</tbody></table></div></div>';
+  el.innerHTML = html;
+}
+
+async function riceviAutoconsumo(ordineId, litri) {
+  const cis = window._cisternaAutoconsumo;
+  if (!cis) { toast('Cisterna autoconsumo non trovata'); return; }
+  if (!confirm('Confermi la ricezione di ' + fmtL(litri) + ' L nella cisterna autoconsumo?')) return;
+
+  const nuovoLivello = Number(cis.livello_attuale) + Number(litri);
+  const { error: errCis } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
+  if (errCis) { toast('Errore cisterna: ' + errCis.message); return; }
+
+  await sb.from('ordini').update({ caricato_deposito: true }).eq('id', ordineId);
+  toast('✅ ' + fmtL(litri) + ' L ricevuti nella cisterna autoconsumo!');
+  caricaAutoconsumo();
+}
+
+async function salvaPrelievoAutoconsumo() {
+  const data = document.getElementById('ac-data').value;
+  const mezzoId = document.getElementById('ac-mezzo').value;
+  const mezzoTarga = document.getElementById('ac-mezzo').options[document.getElementById('ac-mezzo').selectedIndex]?.dataset?.targa || '';
+  const litri = parseFloat(document.getElementById('ac-litri').value);
+  const note = document.getElementById('ac-note').value;
+  if (!data || !mezzoId || !litri || litri <= 0) { toast('Compila data, camion e litri'); return; }
+
+  const cis = window._cisternaAutoconsumo;
+  if (!cis) { toast('Cisterna autoconsumo non trovata'); return; }
+  if (Number(cis.livello_attuale) < litri) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
+
+  // Registra prelievo
+  const { error } = await sb.from('prelievi_autoconsumo').insert([{ data, mezzo_id: mezzoId, mezzo_targa: mezzoTarga, litri, note }]);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Scala dalla cisterna
+  const nuovoLivello = Number(cis.livello_attuale) - litri;
+  await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
+
+  toast('⛽ Prelievo di ' + fmtL(litri) + ' L registrato per ' + mezzoTarga);
+  document.getElementById('ac-litri').value = '';
+  document.getElementById('ac-note').value = '';
+  caricaAutoconsumo();
+}
+
+async function caricaPrelievi() {
+  const da = document.getElementById('ac-filtro-da').value;
+  const a = document.getElementById('ac-filtro-a').value;
+  if (!da || !a) return;
+  const { data } = await sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a).order('data',{ascending:false}).order('created_at',{ascending:false});
+  const tbody = document.getElementById('ac-tabella-prelievi');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessun prelievo nel periodo</td></tr>';
+    document.getElementById('ac-totale-prelievi').innerHTML = '';
+    return;
+  }
+  let totLitri = 0;
+  tbody.innerHTML = data.map(function(r) {
+    totLitri += Number(r.litri);
+    return '<tr><td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td><td>' + esc(r.mezzo_targa||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaPrelievo(\'' + r.id + '\')">x</button></td></tr>';
+  }).join('');
+  document.getElementById('ac-totale-prelievi').innerHTML = 'Totale periodo: <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + data.length + ' prelievi';
+}
+
+async function eliminaPrelievo(id) {
+  if (!confirm('Eliminare questo prelievo? I litri verranno restituiti alla cisterna.')) return;
+  const { data: prel } = await sb.from('prelievi_autoconsumo').select('*').eq('id', id).single();
+  if (!prel) return;
+  const { error } = await sb.from('prelievi_autoconsumo').delete().eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  // Restituisci litri alla cisterna
+  const cis = window._cisternaAutoconsumo;
+  if (cis) {
+    const nuovoLivello = Number(cis.livello_attuale) + Number(prel.litri);
+    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
+  }
+  toast('Prelievo eliminato');
+  caricaAutoconsumo();
+}
+
+async function stampaPrelievi() {
+  const da = document.getElementById('ac-filtro-da').value;
+  const a = document.getElementById('ac-filtro-a').value;
+  if (!da || !a) { toast('Seleziona il periodo'); return; }
+  const { data } = await sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a).order('data',{ascending:false});
+  if (!data || !data.length) { toast('Nessun prelievo nel periodo'); return; }
+
+  const daFmt = new Date(da).toLocaleDateString('it-IT');
+  const aFmt = new Date(a).toLocaleDateString('it-IT');
+  let totLitri = 0;
+  let righeHtml = '';
+  // Raggruppa per camion
+  const perCamion = {};
+  data.forEach(function(r, i) {
+    totLitri += Number(r.litri);
+    const targa = r.mezzo_targa || '—';
+    if (!perCamion[targa]) perCamion[targa] = 0;
+    perCamion[targa] += Number(r.litri);
+    righeHtml += '<tr>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + new Date(r.data).toLocaleDateString('it-IT') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-weight:500">' + esc(targa) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtL(r.litri) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(r.note||'—') + '</td>' +
+      '</tr>';
+  });
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Registro Prelievi Autoconsumo</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
+    '@media print{.no-print{display:none!important}@page{margin:8mm}}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:14px}' +
+    'th{background:#BA7517;color:#fff;padding:7px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #9A6213;text-align:center}' +
+    '.tot td{border-top:3px solid #BA7517!important;font-weight:bold;font-size:11px;background:#FDF3D0!important}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #BA7517;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#BA7517">REGISTRO PRELIEVI AUTOCONSUMO</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + daFmt + ' — ' + aFmt + '</strong> · Prelievi: <strong>' + data.length + '</strong></div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  // Riepilogo per camion
+  html += '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">';
+  html += '<div style="background:#FDF3D0;border:1px solid #BA7517;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Totale litri</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  Object.keys(perCamion).sort().forEach(function(targa) {
+    html += '<div style="background:#F5F5F5;border:1px solid #ddd;border-radius:6px;padding:10px 14px;text-align:center"><div style="font-size:8px;color:#666;text-transform:uppercase">' + esc(targa) + '</div><div style="font-size:14px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(perCamion[targa]) + '</div></div>';
+  });
+  html += '</div>';
+
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Camion</th><th>Litri</th><th>Note</th></tr></thead><tbody>';
+  html += righeHtml;
+  html += '<tr class="tot"><td style="padding:7px;border:1px solid #ddd" colspan="3">TOTALE</td><td style="padding:7px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:7px;border:1px solid #ddd"></td></tr>';
+  html += '</tbody></table>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#BA7517;color:#fff">🖨️ Stampa / PDF</button>';
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
