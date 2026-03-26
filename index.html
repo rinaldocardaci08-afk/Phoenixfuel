@@ -254,7 +254,10 @@
         <div class="card" style="margin-top:16px">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>📋 Rettifiche inventario deposito</span>
-            <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('deposito')">+ Nuova rettifica</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('deposito')">+ Nuova rettifica</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="stampaRettifiche('deposito')">🖨️ Stampa</button>
+            </div>
           </div>
           <div style="overflow-x:auto">
           <table><thead><tr><th>Data</th><th>Cisterna</th><th>Sistema</th><th>Rilevata</th><th>Diff.</th><th>Note</th><th>Stato</th><th></th></tr></thead>
@@ -573,7 +576,10 @@
           <div class="card" style="margin-top:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📋 Rettifiche inventario stazione</span>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('stazione')">+ Nuova rettifica</button>
+              <div style="display:flex;gap:6px">
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('stazione')">+ Nuova rettifica</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="stampaRettifiche('stazione')">🖨️ Stampa</button>
+              </div>
             </div>
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Cisterna</th><th>Sistema</th><th>Rilevata</th><th>Diff.</th><th>Note</th><th>Stato</th><th></th></tr></thead>

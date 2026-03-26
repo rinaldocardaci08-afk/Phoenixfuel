@@ -1148,6 +1148,7 @@ async function caricaDeposito() {
   if (!mov||!mov.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>'; return; }
   const movBadge = { 'entrata_deposito':'<span class="badge teal">Entrata</span>', 'stazione_servizio':'<span class="badge purple">Stazione</span>', 'autoconsumo':'<span class="badge gray">Autoconsumo</span>' };
   tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+  caricaRettifiche('deposito');
 }
 
 async function apriModaleCisterna(id) {
@@ -1297,7 +1298,7 @@ async function caricaRettifiche(tipo) {
   const tbodyId = tipo === 'deposito' ? 'rett-deposito-storico' : 'rett-stazione-storico';
   const tbody = document.getElementById(tbodyId);
   if (!tbody) return;
-  const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false}).limit(30);
+  const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false}).limit(100);
   if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessuna rettifica</td></tr>'; return; }
   tbody.innerHTML = data.map(r => {
     const diff = Number(r.differenza);
@@ -1418,6 +1419,7 @@ async function confermaRettifica(id, tipo) {
   toast('Rettifica confermata — giacenza aggiornata!');
   caricaRettifiche(tipo);
   if (tipo === 'deposito') caricaDeposito();
+  else caricaGiacenzeStazione();
 }
 
 async function eliminaRettifica(id, tipo) {
@@ -1426,6 +1428,64 @@ async function eliminaRettifica(id, tipo) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('Rettifica eliminata');
   caricaRettifiche(tipo);
+}
+
+async function stampaRettifiche(tipo) {
+  const sedeLabel = tipo === 'deposito' ? 'Deposito Vibo' : 'Stazione Oppido';
+  const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false});
+  if (!data || !data.length) { toast('Nessuna rettifica da stampare'); return; }
+
+  let righeHtml = '';
+  data.forEach(function(r, i) {
+    var diff = Number(r.differenza || 0);
+    var diffColor = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : '#333';
+    var diffLabel = (diff > 0 ? '+' : '') + diff.toLocaleString('it-IT') + ' L';
+    var stato = r.confermata ? 'CONFERMATA' : 'IN ATTESA';
+    var statoColor = r.confermata ? '#639922' : '#BA7517';
+    var confInfo = r.confermata ? (r.confermata_da || '') + (r.confermata_il ? ' — ' + new Date(r.confermata_il).toLocaleDateString('it-IT') : '') : '';
+    righeHtml += '<tr>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + r.data + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.cisterne ? r.cisterne.nome : '—') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto || '—') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(r.giacenza_sistema||0) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtL(r.giacenza_rilevata) + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:' + diffColor + ';font-weight:bold">' + diffLabel + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:10px">' + esc(r.note||'—') + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;color:' + statoColor + ';font-weight:bold;font-size:10px">' + stato + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd;font-size:9px;color:#666">' + confInfo + '</td>' +
+      '</tr>';
+  });
+
+  var totConfirmate = data.filter(function(r) { return r.confermata; }).length;
+  var totAttesa = data.filter(function(r) { return !r.confermata; }).length;
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Rettifiche ' + sedeLabel + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#6B5FCC;color:#fff;padding:7px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #5A4FBB;text-align:center}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#6B5FCC">REGISTRO RETTIFICHE INVENTARIO</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Sede: <strong>' + sedeLabel + '</strong> — Totale: <strong>' + data.length + '</strong> rettifiche</div>';
+  html += '<div style="font-size:11px;color:#666">Confermate: <strong style="color:#639922">' + totConfirmate + '</strong> — In attesa: <strong style="color:#BA7517">' + totAttesa + '</strong></div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Cisterna</th><th>Prodotto</th><th>Giac. sistema</th><th>Giac. rilevata</th><th>Differenza</th><th>Note</th><th>Stato</th><th>Confermata da</th></tr></thead><tbody>';
+  html += righeHtml;
+  html += '</tbody></table>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── CONSEGNE ─────────────────────────────────────────────────────
@@ -2575,6 +2635,7 @@ async function eliminaVersamento(id) {
 async function caricaMagazzinoStazione() {
   await caricaTabelaPompe();
   await caricaGiacenzeStazione();
+  caricaRettifiche('stazione');
 }
 
 async function caricaTabelaPompe() {
