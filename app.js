@@ -1775,7 +1775,7 @@ async function caricaConsegne() {
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
 
-      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
+      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.sede_scarico_nome ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.sede_scarico_nome) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
   }
 
@@ -2697,7 +2697,110 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   html += '</div>';
 
   html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
+
+  // ═══ SEDI DI SCARICO ═══
+  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attiva', true).order('predefinita',{ascending:false}).order('nome');
+  html = html.replace('onclick="chiudiModalePermessi()">Chiudi</button>', '');
+
+  html += '<div style="margin-top:18px;border-top:0.5px solid var(--border);padding-top:14px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:13px;font-weight:500">📍 Sedi di scarico / consegna</div>';
+  html += '<button class="btn-primary" style="font-size:11px;padding:5px 12px" onclick="aggiungiSedeScarico(\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">+ Nuova sede</button></div>';
+
+  if (sedi && sedi.length) {
+    html += '<div style="overflow-x:auto"><table style="width:100%;font-size:12px"><thead><tr><th>Nome sede</th><th>Indirizzo</th><th>Città</th><th>Nota</th><th>Default</th><th></th></tr></thead><tbody>';
+    sedi.forEach(s => {
+      html += '<tr><td><strong>' + esc(s.nome) + '</strong></td><td>' + esc(s.indirizzo||'—') + '</td><td>' + esc(s.citta||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(s.nota||'—') + '</td>';
+      html += '<td>' + (s.predefinita ? '<span class="badge green">Default</span>' : '<button class="btn-edit" style="font-size:10px" onclick="impostaSedePredefinita(\'' + s.id + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">imposta</button>') + '</td>';
+      html += '<td style="white-space:nowrap"><button class="btn-edit" onclick="editaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">✏️</button><button class="btn-danger" onclick="eliminaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">x</button></td></tr>';
+    });
+    html += '</tbody></table></div>';
+  } else {
+    html += '<div style="font-size:12px;color:var(--text-hint);padding:8px 0">Nessuna sede aggiuntiva. La consegna avverrà all\'indirizzo principale del cliente.</div>';
+  }
+  html += '</div>';
+
+  html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
   apriModal(html);
+}
+
+// ── SEDI DI SCARICO ──────────────────────────────────────────────
+function aggiungiSedeScarico(clienteId, clienteNome) {
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:14px">Nuova sede di scarico</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Cliente: <strong>' + esc(clienteNome) + '</strong></div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Nome sede</label><input type="text" id="sede-nome" placeholder="Es. Cantiere Via Roma" /></div>';
+  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="sede-indirizzo" /></div>';
+  html += '<div class="form-group"><label>Città</label><input type="text" id="sede-citta" /></div>';
+  html += '<div class="form-group"><label>Provincia</label><input type="text" id="sede-provincia" /></div>';
+  html += '<div class="form-group"><label>Nota</label><input type="text" id="sede-nota" placeholder="Facoltativo" /></div>';
+  html += '<div class="form-group"><label>Predefinita</label><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="sede-predefinita" /> Sede di scarico predefinita</label></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:14px">';
+  html += '<button class="btn-primary" style="flex:1" onclick="salvaSedeScarico(null,\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">Salva</button>';
+  html += '<button onclick="apriSchedaCliente(\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">← Torna</button>';
+  html += '</div>';
+  apriModal(html);
+}
+
+async function editaSedeScarico(sedeId, clienteId, clienteNome) {
+  const { data: s } = await sb.from('sedi_scarico').select('*').eq('id', sedeId).single();
+  if (!s) { toast('Sede non trovata'); return; }
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:14px">Modifica sede di scarico</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Nome sede</label><input type="text" id="sede-nome" value="' + esc(s.nome) + '" /></div>';
+  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="sede-indirizzo" value="' + esc(s.indirizzo||'') + '" /></div>';
+  html += '<div class="form-group"><label>Città</label><input type="text" id="sede-citta" value="' + esc(s.citta||'') + '" /></div>';
+  html += '<div class="form-group"><label>Provincia</label><input type="text" id="sede-provincia" value="' + esc(s.provincia||'') + '" /></div>';
+  html += '<div class="form-group"><label>Nota</label><input type="text" id="sede-nota" value="' + esc(s.nota||'') + '" /></div>';
+  html += '<div class="form-group"><label>Predefinita</label><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="sede-predefinita" ' + (s.predefinita?'checked':'') + ' /> Sede predefinita</label></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:14px">';
+  html += '<button class="btn-primary" style="flex:1" onclick="salvaSedeScarico(\'' + sedeId + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">Salva</button>';
+  html += '<button onclick="apriSchedaCliente(\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">← Torna</button>';
+  html += '</div>';
+  apriModal(html);
+}
+
+async function salvaSedeScarico(sedeId, clienteId, clienteNome) {
+  const nome = document.getElementById('sede-nome').value.trim();
+  if (!nome) { toast('Inserisci il nome della sede'); return; }
+  const record = {
+    cliente_id: clienteId,
+    nome,
+    indirizzo: document.getElementById('sede-indirizzo').value,
+    citta: document.getElementById('sede-citta').value,
+    provincia: document.getElementById('sede-provincia').value,
+    nota: document.getElementById('sede-nota').value,
+    predefinita: document.getElementById('sede-predefinita').checked
+  };
+  // Se predefinita, resetta le altre
+  if (record.predefinita) {
+    await sb.from('sedi_scarico').update({ predefinita: false }).eq('cliente_id', clienteId);
+  }
+  let error;
+  if (sedeId) {
+    ({ error } = await sb.from('sedi_scarico').update(record).eq('id', sedeId));
+  } else {
+    ({ error } = await sb.from('sedi_scarico').insert([record]));
+  }
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(sedeId ? 'Sede aggiornata!' : 'Sede creata!');
+  apriSchedaCliente(clienteId, clienteNome);
+}
+
+async function eliminaSedeScarico(sedeId, clienteId, clienteNome) {
+  if (!confirm('Eliminare questa sede di scarico?')) return;
+  const { error } = await sb.from('sedi_scarico').update({ attiva: false }).eq('id', sedeId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Sede eliminata');
+  apriSchedaCliente(clienteId, clienteNome);
+}
+
+async function impostaSedePredefinita(sedeId, clienteId, clienteNome) {
+  await sb.from('sedi_scarico').update({ predefinita: false }).eq('cliente_id', clienteId);
+  await sb.from('sedi_scarico').update({ predefinita: true }).eq('id', sedeId);
+  toast('Sede predefinita aggiornata');
+  apriSchedaCliente(clienteId, clienteNome);
 }
 
 async function togglePagamento(ordineId, pagato, clienteId, clienteNome) {
@@ -4139,7 +4242,6 @@ async function caricaOrdiniPerCarico() {
   const wrap = document.getElementById('ordini-per-carico');
   if (!data) { wrap.innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
   try {
-    // Esegui in parallelo
     const [assegnatiRes, ordiniRes] = await Promise.all([
       sb.from('carico_ordini').select('ordine_id'),
       sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente')
@@ -4148,20 +4250,50 @@ async function caricaOrdiniPerCarico() {
     const ordini = ordiniRes.data;
     if (ordiniRes.error) { console.error('Errore ordini:', ordiniRes.error); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
 
-    // Filtra ordini per logistica
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
-      // Ordini cliente → sempre in logistica
       if (o.tipo_ordine === 'cliente') return true;
-      // Entrata deposito e stazione → solo se franco partenza (trasporto_litro > 0)
       if ((o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') && Number(o.trasporto_litro||0) > 0) return true;
       return false;
     });
 
     if (!ordiniFiltrati.length) { wrap.innerHTML = '<div class="loading">Nessun ordine disponibile per questa data</div>'; return; }
+
+    // Carica sedi di scarico per tutti i clienti coinvolti
+    const clientiNomi = [...new Set(ordiniFiltrati.map(o => o.cliente).filter(Boolean))];
+    const { data: clientiData } = await sb.from('clienti').select('id,nome').in('nome', clientiNomi);
+    const clienteIdMap = {};
+    (clientiData||[]).forEach(c => { clienteIdMap[c.nome] = c.id; });
+
+    const clienteIds = Object.values(clienteIdMap);
+    let sediMap = {}; // clienteId → [sedi]
+    if (clienteIds.length) {
+      const { data: sedi } = await sb.from('sedi_scarico').select('*').in('cliente_id', clienteIds).eq('attiva', true).order('predefinita',{ascending:false}).order('nome');
+      (sedi||[]).forEach(s => {
+        if (!sediMap[s.cliente_id]) sediMap[s.cliente_id] = [];
+        sediMap[s.cliente_id].push(s);
+      });
+    }
+
     wrap.innerHTML = ordiniFiltrati.map(o => {
       const badge = badgeStato(o.stato);
-      return '<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" /><div style="flex:1"><div style="font-weight:500">' + o.cliente + '</div><div style="color:var(--text-muted)">' + o.prodotto + ' · ' + fmtL(o.litri) + '</div></div>' + badge + '</label>';
+      const cId = clienteIdMap[o.cliente];
+      const sedi = cId ? (sediMap[cId] || []) : [];
+      let sedeHtml = '';
+      if (sedi.length > 1) {
+        // Dropdown sedi
+        sedeHtml = '<select class="ord-sede-select" data-ordine="' + o.id + '" style="font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-top:3px;max-width:100%">';
+        sedi.forEach(s => {
+          sedeHtml += '<option value="' + s.id + '" data-nome="' + esc(s.nome + (s.indirizzo ? ' — ' + s.indirizzo : '')) + '"' + (s.predefinita ? ' selected' : '') + '>' + esc(s.nome) + (s.citta ? ' (' + s.citta + ')' : '') + '</option>';
+        });
+        sedeHtml += '</select>';
+      } else if (sedi.length === 1) {
+        sedeHtml = '<div style="font-size:10px;color:#6B5FCC;margin-top:2px">📍 ' + esc(sedi[0].nome) + '</div>';
+        sedeHtml += '<input type="hidden" class="ord-sede-select" data-ordine="' + o.id + '" value="' + sedi[0].id + '" data-nome="' + esc(sedi[0].nome) + '" />';
+      }
+      // Mostra sede già assegnata
+      const sedeGia = o.sede_scarico_nome ? '<div style="font-size:10px;color:#639922;margin-top:2px">📍 ' + esc(o.sede_scarico_nome) + '</div>' : '';
+      return '<label style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:6px"><input type="checkbox" class="ord-carico" value="' + o.id + '" data-litri="' + o.litri + '" onchange="aggiornaTotaleOrdiniCarico()" style="margin-top:3px" /><div style="flex:1"><div style="font-weight:500">' + esc(o.cliente) + '</div><div style="color:var(--text-muted)">' + esc(o.prodotto) + ' · ' + fmtL(o.litri) + '</div>' + sedeGia + sedeHtml + '</div>' + badge + '</label>';
     }).join('');
     aggiornaTotaleOrdiniCarico();
   } catch(err) {
@@ -4212,6 +4344,18 @@ async function creaNuovoCarico() {
   const righe = ordiniSel.map((oId,i) => ({carico_id:carico.id,ordine_id:oId,sequenza:i+1}));
   await sb.from('carico_ordini').insert(righe);
   await Promise.all(ordiniSel.map(oId => sb.from('ordini').update({stato:'programmato'}).eq('id',oId)));
+
+  // Salva sedi di scarico selezionate sugli ordini
+  const sedeSelects = document.querySelectorAll('.ord-sede-select');
+  for (const sel of sedeSelects) {
+    const ordineId = sel.dataset.ordine;
+    if (!ordiniSel.includes(ordineId)) continue;
+    const sedeId = sel.value;
+    const sedeNome = sel.tagName === 'SELECT' ? (sel.selectedOptions[0]?.dataset?.nome || '') : (sel.dataset.nome || '');
+    if (sedeId) {
+      await sb.from('ordini').update({ sede_scarico_id: sedeId, sede_scarico_nome: sedeNome }).eq('id', ordineId);
+    }
+  }
 
   // Controlla se ci sono ordini dal deposito PhoenixFuel da scaricare
   const { data: ordiniCarico } = await sb.from('ordini').select('*').in('id', ordiniSel);
