@@ -175,19 +175,20 @@ document.getElementById('f-da').value = new Date(new Date().getFullYear(), new D
 document.getElementById('f-a').value = oggi;
 document.getElementById('r-gen-date').textContent = new Date().toLocaleDateString('it-IT');
 
+function _sep(s){return s.replace(/\./g,"'");}
 function fmt(n) {
   const v = Number(n);
-  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
 }
 function fmtE(n) {
   const v = Number(n);
   const dec = v % 1 === 0 ? 0 : 2;
-  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+  return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }));
 }
 function fmtL(n) {
   const v = Number(n);
   const dec = v % 1 === 0 ? 0 : 0;
-  return v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 0 });
+  return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 0 }));
 }
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 

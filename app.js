@@ -164,18 +164,19 @@ document.getElementById('modal-overlay').addEventListener('click', function(e) {
 function chiudiModal() { chiudiModalePermessi(); }
 
 // ── UTILITÀ ───────────────────────────────────────────────────────
+function _sep(s) { return s.replace(/\./g, "'"); }
 function fmt(n) {
   const v = Number(n);
-  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
 }
 function fmtE(n) {
   const v = Number(n);
   const dec = v % 1 === 0 ? 0 : 2;
-  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+  return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }));
 }
 function fmtL(n) {
   const v = Number(n);
-  return v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' L';
+  return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })) + ' L';
 }
 function badgeStato(stato) {
   const map = { 'confermato':'green','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
@@ -1133,14 +1134,14 @@ async function caricaDeposito() {
       cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
         '<div class="dep-cisterna-name">' + c.nome + '</div>' +
         cisternasvg(pct, colore) +
-        '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' ' + um + '</div>' +
-        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' ' + um + '</div>' +
+        '<div class="dep-cisterna-litri">' + _sep(livAtt.toLocaleString('it-IT')) + ' ' + um + '</div>' +
+        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(capMax.toLocaleString('it-IT')) + ' ' + um + '</div>' +
         '<button class="btn-edit" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apriModaleCisterna(\'' + c.id + '\')">Modifica</button>' +
         '</div>';
     });
 
-    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + capGruppo.toLocaleString('it-IT') + ' ' + um;
-    const totLabel = um === 'pz' ? totG.toLocaleString('it-IT') + ' pz' : fmtL(totG);
+    const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + _sep(capGruppo.toLocaleString('it-IT')) + ' ' + um;
+    const totLabel = um === 'pz' ? _sep(totG.toLocaleString('it-IT')) + ' pz' : fmtL(totG);
     const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + totLabel + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
 
     if (categoria === 'benzine') { htmlBenzine += cardHtml; totaleStoccato += totG; capacitaTotale += capGruppo; } else { htmlMagazzino += cardHtml; }
@@ -1321,7 +1322,7 @@ async function caricaRettifiche(tipo) {
   tbody.innerHTML = data.map(r => {
     const diff = Number(r.differenza);
     const diffColor = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : 'var(--text)';
-    const diffLabel = (diff > 0 ? '+' : '') + diff.toLocaleString('it-IT') + ' L';
+    const diffLabel = (diff > 0 ? '+' : '') + _sep(diff.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
     const statoBadge = r.confermata ? '<span class="badge green">Confermata</span>' : '<span class="badge amber">In attesa</span>';
     const cisNome = r.cisterne ? r.cisterne.nome : '—';
     let azioni = '';
@@ -1377,7 +1378,7 @@ function calcolaDiffRettifica() {
   const diffEl = document.getElementById('rett-diff');
   if (!isNaN(rilevata)) {
     const diff = rilevata - sistema;
-    diffEl.value = (diff > 0 ? '+' : '') + diff.toLocaleString('it-IT') + ' L';
+    diffEl.value = (diff > 0 ? '+' : '') + _sep(diff.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
     diffEl.style.color = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : 'var(--text)';
   } else {
     diffEl.value = '—';
@@ -1457,7 +1458,7 @@ async function stampaRettifiche(tipo) {
   data.forEach(function(r, i) {
     var diff = Number(r.differenza || 0);
     var diffColor = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : '#333';
-    var diffLabel = (diff > 0 ? '+' : '') + diff.toLocaleString('it-IT') + ' L';
+    var diffLabel = (diff > 0 ? '+' : '') + _sep(diff.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
     var stato = r.confermata ? 'CONFERMATA' : 'IN ATTESA';
     var statoColor = r.confermata ? '#639922' : '#BA7517';
     var confInfo = r.confermata ? (r.confermata_da || '') + (r.confermata_il ? ' — ' + new Date(r.confermata_il).toLocaleDateString('it-IT') : '') : '';
@@ -1516,7 +1517,7 @@ async function caricaAutoconsumo() {
     document.getElementById('ac-giacenza').textContent = fmtL(cis.livello_attuale);
     const el = document.getElementById('ac-cisterna-grafica');
     if (el) {
-      el.innerHTML = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#BA7517"></div><div><div class="dep-product-title">' + esc(cis.nome) + '</div><div class="dep-product-sub">Gasolio Autotrazione · cap. ' + fmtL(cis.capacita_max) + '</div></div><div class="dep-product-total">' + fmtL(cis.livello_attuale) + '</div></div><div class="dep-cisterne-grid"><div class="dep-cisterna">' + cisternasvg(pct, '#BA7517') + '<div class="dep-cisterna-litri">' + Number(cis.livello_attuale).toLocaleString('it-IT') + ' L</div><div class="dep-cisterna-pct">' + pct + '% · cap. ' + Number(cis.capacita_max).toLocaleString('it-IT') + ' L</div></div></div></div>';
+      el.innerHTML = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#BA7517"></div><div><div class="dep-product-title">' + esc(cis.nome) + '</div><div class="dep-product-sub">Gasolio Autotrazione · cap. ' + fmtL(cis.capacita_max) + '</div></div><div class="dep-product-total">' + fmtL(cis.livello_attuale) + '</div></div><div class="dep-cisterne-grid"><div class="dep-cisterna">' + cisternasvg(pct, '#BA7517') + '<div class="dep-cisterna-litri">' + _sep(Number(cis.livello_attuale).toLocaleString('it-IT')) + ' L</div><div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(Number(cis.capacita_max).toLocaleString('it-IT')) + ' L</div></div></div></div>';
     }
     window._cisternaAutoconsumo = cis;
   }
@@ -2026,7 +2027,7 @@ async function caricaVenditeIngrosso() {
       type:'bar', data:{
         labels:righeF.map(([f])=>f.length>18?f.substring(0,18)+'…':f),
         datasets:[{ label:'Fatturato €', data:righeF.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:righeF.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
     });
   }
 
@@ -2039,7 +2040,7 @@ async function caricaVenditeIngrosso() {
       type:'bar', data:{
         labels:top10.map(([c])=>c.length>15?c.substring(0,15)+'…':c),
         datasets:[{ label:'Fatturato €', data:top10.map(([,v])=>Math.round(v.fatturato*100)/100), backgroundColor:top10.map((_,i)=>coloriGrafico[i%coloriGrafico.length]), borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
     });
   }
 }
@@ -2144,7 +2145,7 @@ async function caricaVenditeDettaglio() {
     if (_chartDettIncasso) _chartDettIncasso.destroy();
     _chartDettIncasso = new Chart(ctxI.getContext('2d'), {
       type:'bar', data:{ labels:labelsG, datasets:[{ label:'Incasso €', data:dateOrdinate.map(d=>Math.round(giorniMap[d].incasso*100)/100), backgroundColor:'#6B5FCC', borderRadius:4 }] },
-      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
     });
   }
   const ctxM = document.getElementById('chart-dett-margine');
@@ -2262,7 +2263,7 @@ async function caricaVenditeAnnuali() {
       type:'bar', data:{ labels:labelsM, datasets:[
         { label:'Ingrosso', data:mesi.map(m=>Math.round(m.ingFatt)), backgroundColor:'#D4A017', borderRadius:4 },
         { label:'Dettaglio', data:mesi.map(m=>Math.round(m.dettInc)), backgroundColor:'#6B5FCC', borderRadius:4 }
-      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}},x:{stacked:true}} }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>fmtE(v)}},x:{stacked:true}} }
     });
   }
   const ctxL = document.getElementById('chart-ann-litri');
@@ -2272,7 +2273,7 @@ async function caricaVenditeAnnuali() {
       type:'bar', data:{ labels:labelsM, datasets:[
         { label:'Ingrosso', data:mesi.map(m=>Math.round(m.ingLitri)), backgroundColor:'#D4A017', borderRadius:4 },
         { label:'Dettaglio', data:mesi.map(m=>Math.round(m.dettLitri)), backgroundColor:'#6B5FCC', borderRadius:4 }
-      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}},x:{stacked:true}} }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>fmtL(v)}},x:{stacked:true}} }
     });
   }
 }
@@ -2478,7 +2479,7 @@ async function confrontaAnni() {
       type:'bar', data:{ labels:labelsM, datasets:[
         { label:String(anno1), data:mesi1.map(m=>Math.round(m.totLitri)), backgroundColor:'#D4A017', borderRadius:4 },
         { label:String(anno2), data:mesi2.map(m=>Math.round(m.totLitri)), backgroundColor:'rgba(212,160,23,0.35)', borderRadius:4 }
-      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}}} }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v)}}} }
     });
   }
 
@@ -2489,7 +2490,7 @@ async function confrontaAnni() {
       type:'bar', data:{ labels:labelsM, datasets:[
         { label:String(anno1), data:mesi1.map(m=>Math.round(m.totFatt)), backgroundColor:'#378ADD', borderRadius:4 },
         { label:String(anno2), data:mesi2.map(m=>Math.round(m.totFatt)), backgroundColor:'rgba(55,138,221,0.35)', borderRadius:4 }
-      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
     });
   }
 }
@@ -2847,7 +2848,7 @@ async function caricaProdotti() {
     const catBadge = r.categoria === 'benzine' ? '<span class="badge teal">Benzine</span>' : '<span class="badge gray">Altro</span>';
     const statoBadge = r.attivo ? '<span class="badge green">Attivo</span>' : '<span class="badge red">Disattivo</span>';
     const um = r.unita_misura === 'pezzi' ? 'pz' : 'L';
-    const capLabel = r.capacita_default ? Number(r.capacita_default).toLocaleString('it-IT') + ' ' + um : '—';
+    const capLabel = r.capacita_default ? _sep(Number(r.capacita_default).toLocaleString('it-IT')) + ' ' + um : '—';
     return '<tr>' +
       '<td><div style="width:14px;height:14px;border-radius:50%;background:' + esc(r.colore) + '"></div></td>' +
       '<td><strong>' + esc(r.nome) + '</strong></td>' +
@@ -3177,7 +3178,7 @@ async function caricaFormLetture() {
     const val = lettMap[p.id] !== undefined ? lettMap[p.id] : '';
     const precVal = lettIeriMap[p.id];
     const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
-    const precLabel = precVal !== undefined ? precVal.toLocaleString('it-IT', {maximumFractionDigits:2}) : '—';
+    const precLabel = precVal !== undefined ? _sep(precVal.toLocaleString('it-IT', {maximumFractionDigits:2})) : '—';
     const prezzo = prezzoMap[p.prodotto] || 0;
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">';
@@ -3215,8 +3216,8 @@ function calcolaLettureVendite() {
     if (!isNaN(valOggi) && valIeri !== undefined) {
       const litri = valOggi - valIeri;
       const euro = litri * prezzo;
-      elLitri.textContent = litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo';
-      elEuro.textContent = prezzo > 0 ? '€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+      elLitri.textContent = litri >= 0 ? _sep(litri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L' : '⚠ negativo';
+      elEuro.textContent = prezzo > 0 ? '€ ' + _sep(euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) : '—';
       if (litri >= 0) { totLitri += litri; totEuro += euro; }
     } else {
       elLitri.textContent = '—';
@@ -3228,8 +3229,8 @@ function calcolaLettureVendite() {
   const totEl = document.getElementById('stz-totali-letture');
   if (totEl) {
     totEl.innerHTML = '<div style="display:flex;gap:20px;padding:12px 16px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)">' +
-      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale litri</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + totLitri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L</div></div>' +
-      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale incasso</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:#639922">€ ' + totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div></div>' +
+      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale litri</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + _sep(totLitri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L</div></div>' +
+      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale incasso</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:#639922">€ ' + _sep(totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) + '</div></div>' +
       '</div>';
   }
 }
@@ -3254,11 +3255,11 @@ function stampaReportLetture() {
 
     righe += '<tr>' +
       '<td style="padding:8px;border:1px solid #ddd"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span><strong>' + esc(p.nome) + '</strong></td>' +
-      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">' + (valIeri !== undefined ? valIeri.toLocaleString('it-IT',{maximumFractionDigits:2}) : '—') + '</td>' +
-      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;font-weight:bold">' + (!isNaN(valOggi) ? valOggi.toLocaleString('it-IT',{maximumFractionDigits:2}) : '—') + '</td>' +
-      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">' + litri.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L</td>' +
+      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">' + (valIeri !== undefined ? _sep(valIeri.toLocaleString('it-IT',{maximumFractionDigits:2})) : '—') + '</td>' +
+      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;font-weight:bold">' + (!isNaN(valOggi) ? _sep(valOggi.toLocaleString('it-IT',{maximumFractionDigits:2})) : '—') + '</td>' +
+      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">' + _sep(litri.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</td>' +
       '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">€ ' + prezzo.toFixed(3) + '</td>' +
-      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;font-weight:bold">€ ' + euro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td>' +
+      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;font-weight:bold">€ ' + _sep(euro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</td>' +
       '</tr>';
   });
 
@@ -3277,13 +3278,13 @@ function stampaReportLetture() {
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div></div></div>';
 
   html += '<div class="rpt-kpi" style="display:flex;gap:12px;margin-bottom:14px">';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#7A5D00;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + totLitri.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L</div></div>';
-  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#27500A;text-transform:uppercase">Incasso totale</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace;color:#639922">€ ' + totEuro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#7A5D00;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + _sep(totLitri.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#27500A;text-transform:uppercase">Incasso totale</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace;color:#639922">€ ' + _sep(totEuro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</div></div>';
   html += '</div>';
 
   html += '<table><thead><tr><th>Pompa</th><th>Contatore prec.</th><th>Contatore oggi</th><th>Litri venduti</th><th>Prezzo/L</th><th>Incasso €</th></tr></thead><tbody>';
   html += righe;
-  html += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd">TOTALE</td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + totLitri.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L</td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ ' + totEuro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td></tr>';
+  html += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd">TOTALE</td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + _sep(totLitri.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ ' + _sep(totEuro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</td></tr>';
   html += '</tbody></table>';
 
   html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
@@ -3338,7 +3339,7 @@ async function caricaStoricoLetture() {
     const litri = prec ? Number(l.lettura)-Number(prec.lettura) : null;
     const prezzo = Number(prezziMap[l.data+'_'+pompa.prodotto]||0);
     const incasso = litri && prezzo ? litri*prezzo : null;
-    html += '<tr><td>' + l.data + '</td><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(pompa.nome) + '</td><td style="font-family:var(--font-mono)">' + Number(l.lettura).toLocaleString('it-IT',{minimumFractionDigits:2}) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + (litri!==null?fmtL(litri):'—') + '</td><td style="font-family:var(--font-mono)">' + (prezzo?fmt(prezzo):'—') + '</td><td style="font-family:var(--font-mono)">' + (incasso!==null?fmtE(incasso):'—') + '</td></tr>';
+    html += '<tr><td>' + l.data + '</td><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(pompa.nome) + '</td><td style="font-family:var(--font-mono)">' + _sep(Number(l.lettura).toLocaleString('it-IT',{minimumFractionDigits:2})) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + (litri!==null?fmtL(litri):'—') + '</td><td style="font-family:var(--font-mono)">' + (prezzo?fmt(prezzo):'—') + '</td><td style="font-family:var(--font-mono)">' + (incasso!==null?fmtE(incasso):'—') + '</td></tr>';
   });
   tbody.innerHTML = html;
 }
@@ -3546,13 +3547,13 @@ async function caricaGiacenzeStazione() {
         cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
           '<div class="dep-cisterna-name">' + c.nome + '</div>' +
           cisternasvg(pct, colore) +
-          '<div class="dep-cisterna-litri">' + livAtt.toLocaleString('it-IT') + ' L</div>' +
-          '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + capMax.toLocaleString('it-IT') + ' L</div>' +
+          '<div class="dep-cisterna-litri">' + _sep(livAtt.toLocaleString('it-IT')) + ' L</div>' +
+          '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(capMax.toLocaleString('it-IT')) + ' L</div>' +
           '<button class="btn-edit" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="apriModaleCisterna(\'' + c.id + '\')">Modifica</button>' +
           '</div>';
       });
 
-      const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + capGruppo.toLocaleString('it-IT') + ' L';
+      const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + _sep(capGruppo.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
       cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
     });
   } else {
@@ -4428,7 +4429,7 @@ async function caricaGraficiDashboard() {
       type:'bar', data:{
         labels:labels7,
         datasets:[{ label:'Fatturato €', data:giorni.map(g=>Math.round(fattPerGiorno[g]*100)/100), backgroundColor:'#D4A017', borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
     });
   }
 
@@ -4448,7 +4449,7 @@ async function caricaGraficiDashboard() {
       type:'bar', data:{
         labels:prodLabels,
         datasets:[{ label:'Litri', data:prodLabels.map(p=>Math.round(perProd[p])), backgroundColor:prodLabels.map(p=>prodColori[p]||'#888'), borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v)}}} }
     });
   }
 
@@ -4473,7 +4474,7 @@ async function caricaGraficiDashboard() {
       type:'bar', data:{
         labels:labelsM,
         datasets:[{ label:'Vendite €', data:giorniMese.map(g=>Math.round(vendPerGiorno[g]*100)/100), backgroundColor:'#D85A30', borderRadius:4 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
     });
   }
 

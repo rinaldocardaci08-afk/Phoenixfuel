@@ -100,13 +100,14 @@ const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+function _sep(s){return s.replace(/\./g,"'");}
 function fmtN(n) {
   const v = Number(n);
   const dec = Math.abs(v % 1) < 0.005 ? 0 : 2;
-  return v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 });
+  return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }));
 }
 function fmtE(n) { return '€ ' + fmtN(n); }
-function fmtL(n) { return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+function fmtL(n) { return _sep(Number(n).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })); }
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -270,7 +271,7 @@ async function generaReport() {
       type:'bar', data:{
         labels:labelsMesi,
         datasets:[{ label:'Litri', data:dataLitri, backgroundColor:'#6B5FCC', borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>v.toLocaleString('it-IT')+' L'}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>_sep(v.toLocaleString('it-IT'))+' L'}}} }
     });
   }
 
@@ -280,7 +281,7 @@ async function generaReport() {
       type:'bar', data:{
         labels:labelsMesi,
         datasets:[{ label:'Fatturato €', data:dataFatt, backgroundColor:'#D4A017', borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+v.toLocaleString('it-IT')}}} }
+      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+_sep(v.toLocaleString('it-IT'))}}} }
     });
   }
 

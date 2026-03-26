@@ -100,10 +100,11 @@ const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-function fmtN(n) { var v=Number(n); var d=Math.abs(v%1)<0.005?0:2; return v.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:2}); }
+function fmtN(n) { var v=Number(n); var d=Math.abs(v%1)<0.005?0:2; return _sep(v.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:2})); }
 function fmtE(n) { return '€ ' + fmtN(n); }
-function fmt(n) { return '€ ' + Number(n).toLocaleString('it-IT',{minimumFractionDigits:4,maximumFractionDigits:4}); }
-function fmtL(n) { return Number(n).toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function _sep(s){return s.replace(/\./g,"'");}
+function fmt(n) { return '€ ' + _sep(Number(n).toLocaleString('it-IT',{minimumFractionDigits:4,maximumFractionDigits:4})); }
+function fmtL(n) { return _sep(Number(n).toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0})); }
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 var MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -280,7 +281,7 @@ async function generaReport() {
   if (ctxL) {
     new Chart(ctxL.getContext('2d'), {
       type:'bar', data:{ labels:labelsMesi, datasets:[{ label:'Litri', data:dataLitri, backgroundColor:'#378ADD', borderRadius:6 }] },
-      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:function(v){return v.toLocaleString('it-IT')+' L'}}}} }
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:function(v){return _sep(v.toLocaleString('it-IT'))+' L'}}}} }
     });
   }
 
@@ -288,7 +289,7 @@ async function generaReport() {
   if (ctxC) {
     new Chart(ctxC.getContext('2d'), {
       type:'bar', data:{ labels:labelsMesi, datasets:[{ label:'Costo', data:dataCosto, backgroundColor:'#D4A017', borderRadius:6 }] },
-      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:function(v){return '€ '+v.toLocaleString('it-IT')}}}} }
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:function(v){return '€ '+_sep(v.toLocaleString('it-IT'))}}}} }
     });
   }
 
@@ -300,7 +301,7 @@ async function generaReport() {
     if (ctxF) {
       new Chart(ctxF.getContext('2d'), {
         type:'bar', data:{ labels:foArr2.map(function(x){return x[0].length>15?x[0].substring(0,15)+'…':x[0];}), datasets:[{ label:'€', data:foArr2.map(function(x){return Math.round(x[1].costo*100)/100;}), backgroundColor:foArr2.map(function(_,i){return COLORI[i%COLORI.length];}), borderRadius:6 }] },
-        options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:function(v){return '€ '+v.toLocaleString('it-IT')}}}} }
+        options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:function(v){return '€ '+_sep(v.toLocaleString('it-IT'))}}}} }
       });
     }
 
