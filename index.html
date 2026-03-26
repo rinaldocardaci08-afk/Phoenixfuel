@@ -162,7 +162,7 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>Elenco ordini</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <input type="text" id="search-ordini" placeholder="Cerca cliente..." oninput="filtraOrdini()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:180px" />
+              <input type="text" id="search-ordini" placeholder="Cerca cliente..." oninput="filtraOrdini()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);min-width:120px;max-width:200px;flex:1" />
               <select id="filtro-tipo-ordini" onchange="filtraOrdini()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="">Tutti i tipi</option><option value="cliente">Vendita cliente</option><option value="entrata_deposito">Entrata deposito</option><option value="stazione_servizio">Stazione Oppido</option><option value="autoconsumo">Autoconsumo</option>
               </select>
@@ -189,10 +189,10 @@
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Listino prezzi</span>
-            <div style="display:flex;gap:8px;align-items:center">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoPDF()">📊 Genera listino PDF</button>
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Filtra data:</label>
-              <input type="date" id="filtro-data-prezzi" style="font-size:15px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500" onchange="caricaPrezzi()" />
+              <input type="date" id="filtro-data-prezzi" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500;max-width:180px" onchange="caricaPrezzi()" />
             </div>
           </div>
 
@@ -288,7 +288,7 @@
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="generaElencoVenditeGiorno()">📊 Elenco vendite</button>
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Data:</label>
-              <input type="date" id="filtro-data-consegne" style="font-size:15px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500" onchange="caricaConsegne()" />
+              <input type="date" id="filtro-data-consegne" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500;max-width:180px" onchange="caricaConsegne()" />
             </div>
           </div>
 
@@ -355,8 +355,8 @@
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco clienti</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input type="text" id="search-clienti" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraClienti()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="search-clienti" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraClienti()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);min-width:140px;max-width:280px;flex:1" />
               <button class="btn-primary" onclick="apriModaleCliente()">+ Nuovo cliente</button>
             </div>
           </div>
@@ -372,9 +372,9 @@
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco fornitori</span>
-            <div style="display:flex;gap:8px;align-items:center">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="apriReportAcquisti()">📊 Report Acquisti</button>
-              <input type="text" id="search-fornitori" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraFornitori()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);width:250px" />
+              <input type="text" id="search-fornitori" placeholder="Cerca per nome, città, P.IVA..." oninput="filtraFornitori()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);min-width:140px;max-width:280px;flex:1" />
               <button class="btn-primary" onclick="apriModaleFornitore()">+ Nuovo fornitore</button>
             </div>
           </div>
@@ -483,8 +483,8 @@
           <div class="card" style="margin-bottom:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>Letture giornaliere contatori</span>
-              <div style="display:flex;gap:8px;align-items:center">
-                <input type="date" id="stz-data-lettura" onchange="caricaFormLetture()" style="font-size:14px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="date" id="stz-data-lettura" onchange="caricaFormLetture()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportLetture()">🖨️ Report</button>
               </div>
             </div>
@@ -640,7 +640,7 @@
             <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" /></div>
             <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" /></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:8px">
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
             <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
             <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
           </div>

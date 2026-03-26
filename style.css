@@ -168,6 +168,48 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
   .card-title input[type="text"], .card-title input[type="date"], .card-title select {
     width: 100% !important; max-width: 100% !important;
   }
+
+  /* ── TOOLBAR / FILTRI nei card-title ── */
+  .card-title > div { width: 100%; flex-wrap: wrap !important; }
+  .card-title > div > input,
+  .card-title > div > select,
+  .card-title > div > button {
+    flex: 1 1 auto; min-width: 0;
+  }
+
+  /* ── TAB STAZIONE ── */
+  .stz-tab { flex: 1 1 calc(33% - 4px); min-width: 0; font-size: 11px !important; padding: 7px 6px !important; text-align: center; }
+
+  /* ── MODALI ── */
+  #modal-overlay > div,
+  #modal-permessi > div {
+    width: 96% !important; max-width: 96% !important;
+    padding: 16px !important; margin: 8px auto;
+    max-height: 92vh !important;
+  }
+  /* Form grid nei modali */
+  #modal-overlay .form-grid,
+  #modal-permessi .form-grid { grid-template-columns: 1fr !important; }
+
+  /* ── TOAST centrato su mobile ── */
+  .toast { left: 50%; right: auto; transform: translateX(-50%); bottom: 16px; max-width: 90vw; text-align: center; }
+
+  /* ── GRAFICI ── */
+  canvas { max-height: 180px; }
+
+  /* ── DEPOSITO header prodotto ── */
+  .dep-product-header { flex-wrap: wrap; gap: 8px; }
+  .dep-product-total { margin-left: 0; font-size: 15px; width: 100%; }
+
+  /* ── SCHEDA CLIENTE tabella scrollabile ── */
+  #modal-permessi table { display: block; overflow-x: auto; white-space: nowrap; }
+  #modal-permessi thead, #modal-permessi tbody, #modal-permessi tr { display: table; width: 100%; table-layout: auto; }
+
+  /* ── BADGE più compatto ── */
+  .badge { font-size: 9px; padding: 2px 6px; }
+
+  /* ── BOTTONI AZIONE nelle tabelle ── */
+  .btn-edit, .btn-danger { font-size: 13px; padding: 4px; }
 }
 
 @media (max-width: 480px) {
@@ -175,6 +217,15 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
   .kpi-value { font-size: 14px; }
   .content { padding: 10px 8px; }
   .dep-cisterne-grid { grid-template-columns: 1fr; }
+
+  /* Tab stazione: 2 per riga su schermi piccoli */
+  .stz-tab { flex: 1 1 calc(50% - 4px); font-size: 10px !important; padding: 6px 4px !important; }
+
+  /* Topbar date nascosta su schermi molto piccoli */
+  .topbar-date { display: none; }
+
+  /* KPI mono sfonda: riduci font */
+  .kpi-value { font-size: 13px; word-break: break-all; }
 }
 
 @media (min-width: 769px) {
