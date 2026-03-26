@@ -3953,8 +3953,107 @@ async function caricaMezziPropri() {
   if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun mezzo</td></tr>'; return; }
   tbody.innerHTML = data.map(m => {
     const scomparti = m.scomparti_mezzo ? m.scomparti_mezzo.map(s => s.nome + ' (' + fmtL(s.capacita) + (s.prodotto_default?' · '+s.prodotto_default:'') + ')').join(', ') : '—';
-    return '<tr><td><strong>' + m.targa + '</strong></td><td>' + (m.descrizione||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(m.capacita_totale) + '</td><td>' + (m.autista_default||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + scomparti + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'mezzi\',\'' + m.id + '\',caricaMezziPropri)">x</button></td></tr>';
+    return '<tr><td><strong>' + m.targa + '</strong></td><td>' + (m.descrizione||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(m.capacita_totale) + '</td><td>' + (m.autista_default||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + scomparti + '</td><td style="white-space:nowrap"><button class="btn-edit" title="Modifica" onclick="apriModaleMezzo(\'' + m.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'mezzi\',\'' + m.id + '\',caricaMezziPropri)">x</button></td></tr>';
   }).join('');
+}
+
+async function apriModaleMezzo(id) {
+  const { data: m } = await sb.from('mezzi').select('*, scomparti_mezzo(*)').eq('id', id).single();
+  if (!m) { toast('Mezzo non trovato'); return; }
+
+  const opzProd = cacheProdotti.filter(p=>p.attivo).map(p=>'<option value="'+esc(p.nome)+'">'+esc(p.nome)+'</option>').join('');
+
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica mezzo: ' + esc(m.targa) + '</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Targa</label><input type="text" id="mod-mz-targa" value="' + esc(m.targa) + '" /></div>';
+  html += '<div class="form-group"><label>Descrizione</label><input type="text" id="mod-mz-descr" value="' + esc(m.descrizione||'') + '" /></div>';
+  html += '<div class="form-group"><label>Capacità totale (L)</label><input type="number" id="mod-mz-cap" value="' + (m.capacita_totale||0) + '" /></div>';
+  html += '<div class="form-group"><label>Autista default</label><input type="text" id="mod-mz-autista" value="' + esc(m.autista_default||'') + '" /></div>';
+  html += '<div class="form-group"><label>Stato</label><select id="mod-mz-attivo"><option value="true"' + (m.attivo!==false?' selected':'') + '>Attivo</option><option value="false"' + (m.attivo===false?' selected':'') + '>Disattivato</option></select></div>';
+  html += '</div>';
+
+  // Scomparti esistenti
+  html += '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin:14px 0 8px">Scomparti cisterna</div>';
+  html += '<div id="mod-scomparti-wrap">';
+  if (m.scomparti_mezzo && m.scomparti_mezzo.length) {
+    m.scomparti_mezzo.forEach(s => {
+      html += '<div class="mod-scomparto-row" data-id="' + s.id + '" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px">';
+      html += '<div class="form-group"><label>Nome</label><input type="text" class="mod-sc-nome" value="' + esc(s.nome) + '" /></div>';
+      html += '<div class="form-group"><label>Capacità (L)</label><input type="number" class="mod-sc-cap" value="' + (s.capacita||0) + '" /></div>';
+      html += '<div class="form-group"><label>Prodotto default</label><select class="mod-sc-prod"><option value="">Qualsiasi</option>' + opzProd.replace('value="'+esc(s.prodotto_default||'')+'"', 'value="'+esc(s.prodotto_default||'')+'" selected') + '</select></div>';
+      html += '<button class="btn-danger" onclick="this.parentElement.remove()" style="margin-bottom:2px">x</button>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+  html += '<button type="button" onclick="aggiungiScompartoModale()" style="background:none;border:0.5px dashed var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text-muted);cursor:pointer;width:100%;margin-top:4px">+ Aggiungi scomparto</button>';
+
+  html += '<div style="display:flex;gap:8px;margin-top:16px">';
+  html += '<button class="btn-primary" style="flex:1" onclick="salvaModificaMezzo(\'' + id + '\')">Salva modifiche</button>';
+  html += '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+function aggiungiScompartoModale() {
+  const wrap = document.getElementById('mod-scomparti-wrap');
+  const opzProd = cacheProdotti.filter(p=>p.attivo).map(p=>'<option value="'+esc(p.nome)+'">'+esc(p.nome)+'</option>').join('');
+  const div = document.createElement('div');
+  div.className = 'mod-scomparto-row';
+  div.dataset.id = 'new';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px';
+  div.innerHTML = '<div class="form-group"><label>Nome</label><input type="text" class="mod-sc-nome" placeholder="Es. Scomp. 1" /></div><div class="form-group"><label>Capacità (L)</label><input type="number" class="mod-sc-cap" placeholder="0" /></div><div class="form-group"><label>Prodotto default</label><select class="mod-sc-prod"><option value="">Qualsiasi</option>' + opzProd + '</select></div><button class="btn-danger" onclick="this.parentElement.remove()" style="margin-bottom:2px">x</button>';
+  wrap.appendChild(div);
+}
+
+async function salvaModificaMezzo(id) {
+  const targa = document.getElementById('mod-mz-targa').value.trim().toUpperCase();
+  const descr = document.getElementById('mod-mz-descr').value;
+  const cap = parseFloat(document.getElementById('mod-mz-cap').value);
+  const autista = document.getElementById('mod-mz-autista').value;
+  const attivo = document.getElementById('mod-mz-attivo').value === 'true';
+  if (!targa || !cap) { toast('Inserisci targa e capacità'); return; }
+
+  // Aggiorna mezzo
+  const { error } = await sb.from('mezzi').update({ targa, descrizione:descr, capacita_totale:cap, autista_default:autista, attivo }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Gestisci scomparti: elimina quelli rimossi, aggiorna esistenti, inserisci nuovi
+  const righe = document.querySelectorAll('.mod-scomparto-row');
+  const idsPresenti = [];
+
+  for (const row of righe) {
+    const scId = row.dataset.id;
+    const nome = row.querySelector('.mod-sc-nome').value.trim();
+    const capSc = parseFloat(row.querySelector('.mod-sc-cap').value) || 0;
+    const prod = row.querySelector('.mod-sc-prod').value;
+    if (!nome || capSc <= 0) continue;
+
+    if (scId && scId !== 'new') {
+      // Aggiorna esistente
+      await sb.from('scomparti_mezzo').update({ nome, capacita:capSc, prodotto_default:prod||null }).eq('id', scId);
+      idsPresenti.push(scId);
+    } else {
+      // Nuovo scomparto
+      const { data: nuovo } = await sb.from('scomparti_mezzo').insert([{ mezzo_id:id, nome, capacita:capSc, prodotto_default:prod||null }]).select().single();
+      if (nuovo) idsPresenti.push(nuovo.id);
+    }
+  }
+
+  // Elimina scomparti rimossi dall'utente
+  const { data: tuttiSc } = await sb.from('scomparti_mezzo').select('id').eq('mezzo_id', id);
+  if (tuttiSc) {
+    for (const sc of tuttiSc) {
+      if (!idsPresenti.includes(sc.id)) {
+        await sb.from('scomparti_mezzo').delete().eq('id', sc.id);
+      }
+    }
+  }
+
+  toast('Mezzo ' + targa + ' aggiornato!');
+  chiudiModalePermessi();
+  caricaMezziPropri();
 }
 
 function aggiungiScomparto() {
