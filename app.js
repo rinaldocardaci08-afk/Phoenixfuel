@@ -2714,7 +2714,7 @@ function aggiungiRigaSede(s) {
     '<div class="form-group"><label>Indirizzo</label><input type="text" class="sede-r-indirizzo" value="' + esc(s ? s.indirizzo || '' : '') + '" /></div>' +
     '<div class="form-group"><label>Città</label><input type="text" class="sede-r-citta" value="' + esc(s ? s.citta || '' : '') + '" /></div>' +
     '<div style="display:flex;flex-direction:column;gap:4px;align-items:center"><button class="btn-danger" onclick="this.closest(\'.cl-sede-row\').remove()" title="Rimuovi">x</button>' +
-    '<label style="font-size:10px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="sede-default" class="sede-r-default" ' + (s && s.predefinita ? 'checked' : '') + ' /> def.</label></div>';
+    '<label style="font-size:10px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="sede-default" class="sede-r-default" ' + (s && s.predefinito ? 'checked' : '') + ' /> def.</label></div>';
   lista.appendChild(div);
 }
 
@@ -2724,7 +2724,7 @@ async function caricaSediCliente(clienteId) {
   if (!clienteId) { wrap.style.display = 'none'; lista.innerHTML = ''; return; }
   wrap.style.display = 'block';
   lista.innerHTML = '';
-  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('predefinita',{ascending:false}).order('nome');
+  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('predefinito',{ascending:false}).order('nome');
   if (sedi && sedi.length) {
     sedi.forEach(s => aggiungiRigaSede(s));
   }
@@ -2740,10 +2740,10 @@ async function salvaSediCliente(clienteId) {
     const nome = row.querySelector('.sede-r-nome').value.trim();
     const indirizzo = row.querySelector('.sede-r-indirizzo').value;
     const citta = row.querySelector('.sede-r-citta').value;
-    const predefinita = row.querySelector('.sede-r-default').checked;
+    const predefinito = row.querySelector('.sede-r-default').checked;
     if (!nome) continue;
 
-    const record = { cliente_id: clienteId, nome, indirizzo, citta, predefinita };
+    const record = { cliente_id: clienteId, nome, indirizzo, citta, predefinito };
 
     if (sedeId && sedeId !== 'new') {
       await sb.from('sedi_scarico').update(record).eq('id', sedeId);
@@ -4383,7 +4383,7 @@ async function caricaOrdiniPerCarico() {
     const clienteIds = Object.values(clienteIdMap);
     let sediMap = {}; // clienteId → [sedi]
     if (clienteIds.length) {
-      const { data: sedi } = await sb.from('sedi_scarico').select('*').in('cliente_id', clienteIds).eq('attivo', true).order('predefinita',{ascending:false}).order('nome');
+      const { data: sedi } = await sb.from('sedi_scarico').select('*').in('cliente_id', clienteIds).eq('attivo', true).order('predefinito',{ascending:false}).order('nome');
       (sedi||[]).forEach(s => {
         if (!sediMap[s.cliente_id]) sediMap[s.cliente_id] = [];
         sediMap[s.cliente_id].push(s);
@@ -4399,7 +4399,7 @@ async function caricaOrdiniPerCarico() {
         // Dropdown sedi
         sedeHtml = '<select class="ord-sede-select" data-ordine="' + o.id + '" style="font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-top:3px;max-width:100%">';
         sedi.forEach(s => {
-          sedeHtml += '<option value="' + s.id + '" data-nome="' + esc(s.nome + (s.indirizzo ? ' — ' + s.indirizzo : '')) + '"' + (s.predefinita ? ' selected' : '') + '>' + esc(s.nome) + (s.citta ? ' (' + s.citta + ')' : '') + '</option>';
+          sedeHtml += '<option value="' + s.id + '" data-nome="' + esc(s.nome + (s.indirizzo ? ' — ' + s.indirizzo : '')) + '"' + (s.predefinito ? ' selected' : '') + '>' + esc(s.nome) + (s.citta ? ' (' + s.citta + ')' : '') + '</option>';
         });
         sedeHtml += '</select>';
       } else if (sedi.length === 1) {
