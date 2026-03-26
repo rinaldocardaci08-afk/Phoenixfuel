@@ -121,7 +121,7 @@ function setSection(id, el) {
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:async()=>{await caricaClienti();caricaScadenzario();}, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
@@ -2759,6 +2759,146 @@ async function impostaDataPagamento(ordineId, data, clienteId, clienteNome) {
     toast('Pagamento programmato per il ' + new Date(data).toLocaleDateString('it-IT'));
   }
   apriSchedaCliente(clienteId, clienteNome);
+}
+
+// ── SCADENZARIO CREDITI ──────────────────────────────────────────
+async function caricaScadenzario() {
+  // 1 sola query: tutti ordini non pagati tipo cliente
+  const { data: ordini } = await sb.from('ordini').select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,giorni_pagamento,stato').eq('tipo_ordine','cliente').neq('stato','annullato').eq('pagato',false);
+  const { data: clienti } = await sb.from('clienti').select('id,nome,cliente_rete,fido_massimo,giorni_pagamento');
+
+  const clMap = {};
+  (clienti||[]).forEach(c => { clMap[c.nome] = c; if (c.id) clMap[c.id] = c; });
+
+  const oggiMs = oggi.getTime();
+  const MS_DAY = 86400000;
+
+  // Fasce aging
+  const fasce = [
+    { label: 'Non scaduto', min: -Infinity, max: 0, ordini: 0, importo: 0, color: '#639922', bg: '#EAF3DE' },
+    { label: 'Scaduto 1–30 gg', min: 1, max: 30, ordini: 0, importo: 0, color: '#BA7517', bg: '#FAEEDA' },
+    { label: 'Scaduto 31–60 gg', min: 31, max: 60, ordini: 0, importo: 0, color: '#D85A30', bg: '#FDE8D8' },
+    { label: 'Scaduto 61–90 gg', min: 61, max: 90, ordini: 0, importo: 0, color: '#A32D2D', bg: '#FCEBEB' },
+    { label: 'Scaduto oltre 90 gg', min: 91, max: Infinity, ordini: 0, importo: 0, color: '#791F1F', bg: '#F5D5D5' }
+  ];
+
+  let totCrediti = 0, totScaduti = 0, totInScadenza = 0, totOk = 0;
+  const perCliente = {};
+
+  (ordini||[]).forEach(o => {
+    const cl = clMap[o.cliente_id] || clMap[o.cliente] || {};
+    const ggPag = o.giorni_pagamento || cl.giorni_pagamento || 30;
+    const scadenza = new Date(o.data);
+    scadenza.setDate(scadenza.getDate() + ggPag);
+    const ggScaduto = Math.floor((oggiMs - scadenza.getTime()) / MS_DAY);
+    const importo = prezzoConIva(o) * Number(o.litri);
+
+    totCrediti += importo;
+    if (ggScaduto > 0) totScaduti += importo;
+    else if (ggScaduto > -30) totInScadenza += importo;
+    else totOk += importo;
+
+    // Fascia aging
+    for (const f of fasce) {
+      if (ggScaduto >= f.min && ggScaduto <= f.max) {
+        f.ordini++; f.importo += importo; break;
+      }
+    }
+
+    // Per cliente
+    const nomeC = o.cliente || '—';
+    if (!perCliente[nomeC]) perCliente[nomeC] = { ordini: 0, importo: 0, scaduto: 0, maxGgScaduto: 0, rete: cl.cliente_rete || false, fidoMax: Number(cl.fido_massimo || 0) };
+    perCliente[nomeC].ordini++;
+    perCliente[nomeC].importo += importo;
+    if (ggScaduto > 0) {
+      perCliente[nomeC].scaduto += importo;
+      perCliente[nomeC].maxGgScaduto = Math.max(perCliente[nomeC].maxGgScaduto, ggScaduto);
+    }
+  });
+
+  // KPI
+  document.getElementById('scad-totale').textContent = fmtE(totCrediti);
+  document.getElementById('scad-scaduti').textContent = fmtE(totScaduti);
+  document.getElementById('scad-inscadenza').textContent = fmtE(totInScadenza);
+  document.getElementById('scad-ok').textContent = fmtE(totOk);
+
+  // Tabella aging fasce
+  const tbFasce = document.getElementById('scad-aging-fasce');
+  tbFasce.innerHTML = fasce.map(f => {
+    const pct = totCrediti > 0 ? Math.round((f.importo / totCrediti) * 100) : 0;
+    return '<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + f.color + ';margin-right:6px"></span><strong>' + f.label + '</strong></td><td style="font-family:var(--font-mono)">' + f.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtE(f.importo) + '</td><td><div style="display:flex;align-items:center;gap:6px"><div style="height:8px;width:' + pct + '%;max-width:100px;background:' + f.color + ';border-radius:4px"></div><span style="font-size:11px;font-family:var(--font-mono)">' + pct + '%</span></div></td></tr>';
+  }).join('') + '<tr style="font-weight:bold;border-top:2px solid var(--border)"><td>TOTALE</td><td style="font-family:var(--font-mono)">' + (ordini||[]).length + '</td><td style="font-family:var(--font-mono)">' + fmtE(totCrediti) + '</td><td>100%</td></tr>';
+
+  // Tabella dettaglio per cliente (ordinata per scaduto desc)
+  const clArr = Object.entries(perCliente).sort((a, b) => b[1].scaduto - a[1].scaduto);
+  const tbDett = document.getElementById('scad-dettaglio');
+  tbDett.innerHTML = clArr.map(([nome, v]) => {
+    const pctFido = v.fidoMax > 0 ? Math.round((v.importo / v.fidoMax) * 100) : 0;
+    const fidoColor = pctFido >= 90 ? '#A32D2D' : pctFido >= 60 ? '#BA7517' : '#639922';
+    const scadColor = v.maxGgScaduto > 90 ? '#791F1F' : v.maxGgScaduto > 60 ? '#A32D2D' : v.maxGgScaduto > 30 ? '#D85A30' : v.maxGgScaduto > 0 ? '#BA7517' : '#639922';
+    return '<tr>' +
+      '<td><strong>' + esc(nome) + '</strong></td>' +
+      '<td>' + (v.rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + v.ordini + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtE(v.importo) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:' + (v.scaduto > 0 ? '#A32D2D' : 'var(--text-muted)') + ';font-weight:' + (v.scaduto > 0 ? '600' : '400') + '">' + (v.scaduto > 0 ? fmtE(v.scaduto) : '—') + '</td>' +
+      '<td style="font-family:var(--font-mono);color:' + scadColor + ';font-weight:500">' + (v.maxGgScaduto > 0 ? v.maxGgScaduto + ' gg' : '—') + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + (v.fidoMax > 0 ? fmtE(v.fidoMax) : '—') + '</td>' +
+      '<td>' + (v.fidoMax > 0 ? '<span style="font-family:var(--font-mono);color:' + fidoColor + ';font-weight:500">' + pctFido + '%</span>' : '—') + '</td>' +
+      '</tr>';
+  }).join('');
+
+  if (!clArr.length) tbDett.innerHTML = '<tr><td colspan="8" class="loading">Nessun credito aperto</td></tr>';
+  toast('Scadenzario aggiornato: ' + (ordini||[]).length + ' ordini aperti');
+}
+
+function stampaScadenzario() {
+  const kpiTot = document.getElementById('scad-totale').textContent;
+  const kpiScad = document.getElementById('scad-scaduti').textContent;
+  const kpiInScad = document.getElementById('scad-inscadenza').textContent;
+  const kpiOk = document.getElementById('scad-ok').textContent;
+  if (kpiTot === '—') { toast('Prima aggiorna lo scadenzario'); return; }
+
+  const tblFasce = document.getElementById('scad-aging-fasce').closest('table').outerHTML;
+  const tblDett = document.getElementById('scad-dettaglio').closest('table').outerHTML;
+
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Scadenzario Crediti</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm;color:#000}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:9px}table{font-size:8px}th,td{padding:3px 2px!important}.kpi-grid{grid-template-columns:1fr 1fr!important}}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:14px}' +
+    'th{background:#378ADD;color:#fff;padding:6px 8px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #2A6DB5;text-align:left}' +
+    'td{padding:5px 8px;border:1px solid #ddd}' +
+    '.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}' +
+    '.kpi-box{border-radius:8px;padding:14px;text-align:center;border:1px solid #ddd}' +
+    '.kpi-label{font-size:9px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}' +
+    '.kpi-val{font-size:18px;font-weight:bold;font-family:Courier New,monospace}' +
+    '.badge{display:inline-block;padding:2px 6px;border-radius:10px;font-size:9px;font-weight:500}' +
+    '.badge.purple{background:#EEEDFE;color:#26215C}.badge.gray{background:#eee;color:#666}' +
+    '</style></head><body>' +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #378ADD;padding-bottom:10px;margin-bottom:14px">' +
+    '<div><div style="font-size:18px;font-weight:bold;color:#378ADD">SCADENZARIO CREDITI CLIENTI</div>' +
+    '<div style="font-size:12px;color:#666;margin-top:3px">Generato il ' + oggi.toLocaleDateString('it-IT') + '</div></div>' +
+    '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div></div></div>' +
+    '<div class="kpi-grid">' +
+    '<div class="kpi-box" style="background:#E6F1FB;border-color:#B8D4F0"><div class="kpi-label" style="color:#0C447C">Totale crediti</div><div class="kpi-val">' + kpiTot + '</div></div>' +
+    '<div class="kpi-box" style="background:#FCEBEB;border-color:#E8AAAA"><div class="kpi-label" style="color:#791F1F">Scaduti</div><div class="kpi-val" style="color:#A32D2D">' + kpiScad + '</div></div>' +
+    '<div class="kpi-box" style="background:#FAEEDA;border-color:#E8D5A8"><div class="kpi-label" style="color:#633806">In scadenza 30gg</div><div class="kpi-val" style="color:#BA7517">' + kpiInScad + '</div></div>' +
+    '<div class="kpi-box" style="background:#EAF3DE;border-color:#B8D4A0"><div class="kpi-label" style="color:#27500A">Entro termini</div><div class="kpi-val" style="color:#639922">' + kpiOk + '</div></div>' +
+    '</div>' +
+    '<div style="font-size:12px;font-weight:bold;color:#378ADD;text-transform:uppercase;margin-bottom:8px">Aging per fascia</div>' +
+    tblFasce.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--border\)/g,'#ddd').replace(/var\(--text-muted\)/g,'#666') +
+    '<div style="font-size:12px;font-weight:bold;color:#378ADD;text-transform:uppercase;margin-bottom:8px;margin-top:16px">Dettaglio per cliente</div>' +
+    tblDett.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--border\)/g,'#ddd').replace(/var\(--text-muted\)/g,'#666') +
+    '<div style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;border-top:1px solid #ddd;padding-top:8px">PhoenixFuel Srl — Report generato il ' + oggi.toLocaleDateString('it-IT') + ' — Documento interno</div>' +
+    '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">' +
+    '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">🖨️ Stampa / PDF</button>' +
+    '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#666;color:#fff">✕ Chiudi</button></div>' +
+    '</body></html>';
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 // ── FORNITORI ─────────────────────────────────────────────────────

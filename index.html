@@ -473,6 +473,36 @@
           <tbody id="tabella-clienti"><tr><td colspan="13" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
+
+        <!-- SCADENZARIO CREDITI -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📊 Scadenzario crediti clienti</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="caricaScadenzario()">🔄 Aggiorna</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaScadenzario()">🖨️ Report PDF</button>
+            </div>
+          </div>
+          <!-- KPI crediti -->
+          <div class="grid4" style="margin-bottom:16px" id="scad-kpi">
+            <div class="kpi"><div class="kpi-label">Totale crediti</div><div class="kpi-value" id="scad-totale">—</div></div>
+            <div class="kpi" style="background:#FCEBEB"><div class="kpi-label" style="color:#791F1F">Scaduti</div><div class="kpi-value" id="scad-scaduti" style="color:#A32D2D">—</div></div>
+            <div class="kpi" style="background:#FAEEDA"><div class="kpi-label" style="color:#633806">In scadenza (30gg)</div><div class="kpi-value" id="scad-inscadenza" style="color:#BA7517">—</div></div>
+            <div class="kpi" style="background:#EAF3DE"><div class="kpi-label" style="color:#27500A">Entro termini</div><div class="kpi-value" id="scad-ok" style="color:#639922">—</div></div>
+          </div>
+          <!-- Aging per fascia -->
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Aging per fascia di scaduto</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Fascia</th><th>N. ordini</th><th>Importo</th><th>% sul totale</th></tr></thead>
+          <tbody id="scad-aging-fasce"><tr><td colspan="4" class="loading">Premi Aggiorna</td></tr></tbody></table>
+          </div>
+          <!-- Dettaglio per cliente -->
+          <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin:16px 0 8px">Dettaglio crediti per cliente</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Cliente</th><th>Gruppo</th><th>Ordini aperti</th><th>Importo totale</th><th>Di cui scaduto</th><th>Scaduto max gg</th><th>Fido max</th><th>% fido usato</th></tr></thead>
+          <tbody id="scad-dettaglio"><tr><td colspan="8" class="loading">Premi Aggiorna</td></tr></tbody></table>
+          </div>
+        </div>
       </div>
 
       <!-- FORNITORI -->
