@@ -1968,6 +1968,15 @@ async function caricaVenditeIngrosso() {
   const da = daEl.value;
   const a = aEl.value;
   const filtroProd = document.getElementById('vend-prodotto').value;
+  const filtroGruppo = document.getElementById('vend-sottogruppo').value; // 'rete' | 'consumo' | ''
+
+  // Carica mappa clienti rete/consumo se serve filtrare
+  let clientiReteMap = null;
+  if (filtroGruppo) {
+    const { data: clAll } = await sb.from('clienti').select('nome,cliente_rete');
+    clientiReteMap = {};
+    (clAll||[]).forEach(c => { clientiReteMap[c.nome] = !!c.cliente_rete; });
+  }
 
   let baseQuery = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato').eq('tipo_ordine','cliente');
   if (filtroProd) baseQuery = baseQuery.eq('prodotto', filtroProd);
@@ -1980,8 +1989,24 @@ async function caricaVenditeIngrosso() {
     if (batch.length < 1000) break;
     from += 1000;
   }
-  const data = allData;
-  if (!data.length) return;
+
+  // Filtra per sottogruppo
+  let data = allData;
+  if (filtroGruppo && clientiReteMap) {
+    data = allData.filter(r => {
+      const isRete = clientiReteMap[r.cliente] || false;
+      return filtroGruppo === 'rete' ? isRete : !isRete;
+    });
+  }
+  if (!data.length) {
+    document.getElementById('vend-fatturato').textContent = '—';
+    document.getElementById('vend-litri').textContent = '—';
+    document.getElementById('vend-margine').textContent = '—';
+    document.getElementById('vend-ordini').textContent = '0';
+    document.getElementById('tabella-vendite').innerHTML = '<tr><td colspan="4" class="loading">Nessun dato per il filtro selezionato</td></tr>';
+    document.getElementById('tabella-vendite-clienti').innerHTML = '<tr><td colspan="5" class="loading">—</td></tr>';
+    return;
+  }
 
   let fatturato=0, litri=0, margine=0;
   const pf={}, pc={};
@@ -2528,7 +2553,7 @@ function stampaConfrontoAnni() {
 
 // ── CLIENTI ───────────────────────────────────────────────────────
 async function salvaCliente(id=null) {
-  const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, fido_massimo:parseFloat(document.getElementById('cl-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
+  const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, cliente_rete:document.getElementById('cl-rete').checked, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, fido_massimo:parseFloat(document.getElementById('cl-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
   if (!record.nome) { toast('Inserisci il nome'); return; }
   let error;
   if (id) { ({error}=await sb.from('clienti').update(record).eq('id',id)); }
@@ -2543,9 +2568,10 @@ async function apriModaleCliente(id=null) {
   document.getElementById('modal-save-btn').onclick = () => salvaCliente(id);
   ['cl-nome','cl-piva','cl-cf','cl-indirizzo','cl-citta','cl-provincia','cl-telefono','cl-email','cl-fido','cl-zona','cl-prodotti','cl-note'].forEach(c => { const el=document.getElementById(c); if(el) el.value=''; });
   document.getElementById('cl-tipo').value='azienda'; document.getElementById('cl-gg').value='30';
+  document.getElementById('cl-rete').checked = false;
   if (id) {
     const{data}=await sb.from('clienti').select('*').eq('id',id).single();
-    if(data){ ['nome','piva','cf:codice_fiscale','indirizzo','citta','provincia','telefono','email'].forEach(f => { const[k,v]=f.split(':'); const el=document.getElementById('cl-'+(v||k)); if(el) el.value=data[v||k]||''; }); document.getElementById('cl-tipo').value=data.tipo||'azienda'; document.getElementById('cl-fido').value=data.fido_massimo||0; document.getElementById('cl-gg').value=data.giorni_pagamento||30; document.getElementById('cl-zona').value=data.zona_consegna||''; document.getElementById('cl-prodotti').value=data.prodotti_abituali||''; document.getElementById('cl-note').value=data.note||''; }
+    if(data){ ['nome','piva','cf:codice_fiscale','indirizzo','citta','provincia','telefono','email'].forEach(f => { const[k,v]=f.split(':'); const el=document.getElementById('cl-'+(v||k)); if(el) el.value=data[v||k]||''; }); document.getElementById('cl-tipo').value=data.tipo||'azienda'; document.getElementById('cl-fido').value=data.fido_massimo||0; document.getElementById('cl-gg').value=data.giorni_pagamento||30; document.getElementById('cl-zona').value=data.zona_consegna||''; document.getElementById('cl-prodotti').value=data.prodotti_abituali||''; document.getElementById('cl-note').value=data.note||''; document.getElementById('cl-rete').checked = !!data.cliente_rete; }
   }
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-clienti').style.display='block';
@@ -2574,7 +2600,7 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }));
   tbody.innerHTML = rows.join('');
 }
@@ -2608,7 +2634,7 @@ async function apriSchedaCliente(clienteId, clienteNome) {
 
   let html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:12px">';
   html += '<div><div style="font-size:18px;font-weight:500">' + esc(clienteNome) + '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(cliente.tipo||'azienda') + ' · ' + esc(cliente.citta||'—') + ' · P.IVA: ' + esc(cliente.piva||'—') + '</div></div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(cliente.tipo||'azienda') + ' · ' + (cliente.cliente_rete ? '<span class="badge purple" style="font-size:10px">Rete</span>' : '<span class="badge gray" style="font-size:10px">Consumo</span>') + ' · ' + esc(cliente.citta||'—') + ' · P.IVA: ' + esc(cliente.piva||'—') + '</div></div>';
   if (fidoMax > 0) {
     const fidoColor = pctFido >= 90 ? '#A32D2D' : pctFido >= 60 ? '#BA7517' : '#639922';
     html += '<div style="text-align:right"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase">Fido</div>';

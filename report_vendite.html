@@ -68,6 +68,7 @@
     <div class="filtri-group"><label>Fornitore</label><select id="f-fornitore"><option value="">Tutti i fornitori</option></select></div>
     <div class="filtri-group"><label>Prodotto</label><select id="f-prodotto"><option value="">Tutti i prodotti</option></select></div>
     <div class="filtri-group"><label>Cliente</label><select id="f-cliente"><option value="">Tutti i clienti</option></select></div>
+    <div class="filtri-group"><label>Sottogruppo</label><select id="f-sottogruppo"><option value="">Rete + Consumo</option><option value="rete">Solo Rete</option><option value="consumo">Solo Consumo</option></select></div>
     <div class="filtri-group"><label>Data Inizio</label><input type="date" id="f-da" /></div>
     <div class="filtri-group"><label>Data Fine</label><input type="date" id="f-a" /></div>
   </div>
@@ -169,7 +170,15 @@ const COLORI=['#D4A017','#378ADD','#639922','#3B6D11','#D85A30','#6B5FCC','#BA75
 async function generaReport(){
   const da=document.getElementById('f-da').value,a=document.getElementById('f-a').value;
   const fornitore=document.getElementById('f-fornitore').value,prodotto=document.getElementById('f-prodotto').value,cliente=document.getElementById('f-cliente').value;
+  const sottogruppo=document.getElementById('f-sottogruppo').value;
   if(!da||!a){alert('Seleziona le date');return;}
+
+  // Carica mappa clienti rete se serve
+  let clientiReteMap=null;
+  if(sottogruppo){
+    const{data:clAll}=await sb.from('clienti').select('nome,cliente_rete');
+    clientiReteMap={};(clAll||[]).forEach(c=>{clientiReteMap[c.nome]=!!c.cliente_rete;});
+  }
 
   let allOrdini=[],from=0;
   while(true){
@@ -178,14 +187,21 @@ async function generaReport(){
     const{data:batch}=await q.order('data').order('cliente').range(from,from+999);
     if(!batch||!batch.length)break;allOrdini=allOrdini.concat(batch);if(batch.length<1000)break;from+=1000;
   }
-  const ordini=allOrdini;
-  if(!ordini.length){alert('Nessun ordine trovato');return;}
 
+  // Filtra per sottogruppo
+  let ordini=allOrdini;
+  if(sottogruppo&&clientiReteMap){
+    ordini=allOrdini.filter(r=>{const isRete=clientiReteMap[r.cliente]||false;return sottogruppo==='rete'?isRete:!isRete;});
+  }
+  if(!ordini.length){alert('Nessun ordine trovato per i filtri selezionati');return;}
+
+  const sottoLabel=sottogruppo==='rete'?'Rete':sottogruppo==='consumo'?'Consumo':'Rete + Consumo';
   const periodoTxt='Periodo: '+new Date(da).toLocaleDateString('it-IT')+' — '+new Date(a).toLocaleDateString('it-IT');
   document.getElementById('r-periodo').textContent=periodoTxt;
   document.getElementById('r-periodo2').textContent=periodoTxt;
 
   let filtriHtml='<span>'+periodoTxt+'</span>';
+  filtriHtml+='<span>Gruppo: <strong>'+sottoLabel+'</strong></span>';
   if(fornitore)filtriHtml+='<span>Fornitore: <strong>'+esc(fornitore)+'</strong></span>';
   if(prodotto)filtriHtml+='<span>Prodotto: <strong>'+esc(prodotto)+'</strong></span>';
   if(cliente)filtriHtml+='<span>Cliente: <strong>'+esc(cliente)+'</strong></span>';

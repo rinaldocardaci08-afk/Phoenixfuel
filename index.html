@@ -366,6 +366,11 @@
                 <select id="vend-prodotto" onchange="caricaVenditeIngrosso()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                   <option value="">Tutti i prodotti</option>
                 </select>
+                <select id="vend-sottogruppo" onchange="caricaVenditeIngrosso()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                  <option value="">Rete + Consumo</option>
+                  <option value="rete">Solo Rete</option>
+                  <option value="consumo">Solo Consumo</option>
+                </select>
               </div>
             </div>
             <table><thead><tr><th>Fornitore</th><th>Litri</th><th>Fatturato</th><th>Margine</th></tr></thead>
@@ -464,8 +469,8 @@
             </div>
           </div>
           <div style="overflow-x:auto">
-          <table><thead><tr><th>Nome</th><th>Tipo</th><th>P.IVA</th><th>Città</th><th>Telefono</th><th>Fido max</th><th>Fido usato</th><th>Fido residuo</th><th>Gg pag.</th><th>Prodotti</th><th>Note</th><th></th></tr></thead>
-          <tbody id="tabella-clienti"><tr><td colspan="12" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th>Nome</th><th>Tipo</th><th>Gruppo</th><th>P.IVA</th><th>Città</th><th>Telefono</th><th>Fido max</th><th>Fido usato</th><th>Fido residuo</th><th>Gg pag.</th><th>Prodotti</th><th>Note</th><th></th></tr></thead>
+          <tbody id="tabella-clienti"><tr><td colspan="13" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
       </div>
@@ -938,6 +943,7 @@
       <div class="form-grid">
         <div class="form-group"><label>Nome / Ragione sociale</label><input type="text" id="cl-nome" /></div>
         <div class="form-group"><label>Tipo</label><select id="cl-tipo"><option value="azienda">Azienda</option><option value="agricoltore">Agricoltore</option><option value="privato">Privato</option><option value="comune">Comune / Ente</option><option value="trasportatore">Trasportatore</option></select></div>
+        <div class="form-group"><label>Sottogruppo</label><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="cl-rete" /> Cliente Rete</label></div>
         <div class="form-group"><label>P.IVA</label><input type="text" id="cl-piva" /></div>
         <div class="form-group"><label>Codice fiscale</label><input type="text" id="cl-cf" /></div>
         <div class="form-group"><label>Indirizzo</label><input type="text" id="cl-indirizzo" /></div>
