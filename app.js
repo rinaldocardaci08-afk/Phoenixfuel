@@ -1564,14 +1564,33 @@ async function salvaPrelievoAutoconsumo() {
   caricaAutoconsumo();
 }
 
+function resetFiltroCamion() {
+  const sel = document.getElementById('ac-filtro-camion');
+  if (sel) { sel.innerHTML = '<option value="">Tutti i camion</option>'; }
+}
+
 async function caricaPrelievi() {
   const da = document.getElementById('ac-filtro-da').value;
   const a = document.getElementById('ac-filtro-a').value;
+  const filtroCamion = document.getElementById('ac-filtro-camion').value;
   if (!da || !a) return;
-  const { data } = await sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a).order('data',{ascending:false}).order('created_at',{ascending:false});
+  let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a);
+  if (filtroCamion) q = q.eq('mezzo_targa', filtroCamion);
+  const { data } = await q.order('data',{ascending:false}).order('created_at',{ascending:false});
   const tbody = document.getElementById('ac-tabella-prelievi');
+
+  // Popola dropdown camion (solo se vuoto o cambio periodo)
+  const sel = document.getElementById('ac-filtro-camion');
+  if (sel.options.length <= 1) {
+    const { data: tutti } = await sb.from('prelievi_autoconsumo').select('mezzo_targa').gte('data', da).lte('data', a);
+    const targhe = [...new Set((tutti||[]).map(r => r.mezzo_targa).filter(Boolean))].sort();
+    const valPrec = sel.value;
+    sel.innerHTML = '<option value="">Tutti i camion</option>' + targhe.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('');
+    sel.value = valPrec;
+  }
+
   if (!data || !data.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessun prelievo nel periodo</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessun prelievo' + (filtroCamion ? ' per ' + filtroCamion : '') + '</td></tr>';
     document.getElementById('ac-totale-prelievi').innerHTML = '';
     return;
   }
@@ -1580,7 +1599,7 @@ async function caricaPrelievi() {
     totLitri += Number(r.litri);
     return '<tr><td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td><td>' + esc(r.mezzo_targa||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaPrelievo(\'' + r.id + '\')">x</button></td></tr>';
   }).join('');
-  document.getElementById('ac-totale-prelievi').innerHTML = 'Totale periodo: <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + data.length + ' prelievi';
+  document.getElementById('ac-totale-prelievi').innerHTML = 'Totale periodo' + (filtroCamion ? ' (' + filtroCamion + ')' : '') + ': <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + data.length + ' prelievi';
 }
 
 async function eliminaPrelievo(id) {
@@ -1602,8 +1621,11 @@ async function eliminaPrelievo(id) {
 async function stampaPrelievi() {
   const da = document.getElementById('ac-filtro-da').value;
   const a = document.getElementById('ac-filtro-a').value;
+  const filtroCamion = document.getElementById('ac-filtro-camion').value;
   if (!da || !a) { toast('Seleziona il periodo'); return; }
-  const { data } = await sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a).order('data',{ascending:false});
+  let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a);
+  if (filtroCamion) q = q.eq('mezzo_targa', filtroCamion);
+  const { data } = await q.order('data',{ascending:false});
   if (!data || !data.length) { toast('Nessun prelievo nel periodo'); return; }
 
   const daFmt = new Date(da).toLocaleDateString('it-IT');
@@ -1637,7 +1659,7 @@ async function stampaPrelievi() {
 
   html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #BA7517;padding-bottom:10px;margin-bottom:14px">';
   html += '<div><div style="font-size:18px;font-weight:bold;color:#BA7517">REGISTRO PRELIEVI AUTOCONSUMO</div>';
-  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + daFmt + ' — ' + aFmt + '</strong> · Prelievi: <strong>' + data.length + '</strong></div></div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + daFmt + ' — ' + aFmt + '</strong>' + (filtroCamion ? ' · Camion: <strong>' + esc(filtroCamion) + '</strong>' : '') + ' · Prelievi: <strong>' + data.length + '</strong></div></div>';
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
   html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
 

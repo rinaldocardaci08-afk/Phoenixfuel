@@ -897,9 +897,12 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>📋 Registro prelievi</span>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <select id="ac-filtro-anno" onchange="caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)"></select>
-              <input type="date" id="ac-filtro-da" onchange="caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
-              <input type="date" id="ac-filtro-a" onchange="caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
+              <input type="date" id="ac-filtro-da" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
+              <input type="date" id="ac-filtro-a" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
+              <select id="ac-filtro-anno" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)"></select>
+              <select id="ac-filtro-camion" onchange="caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)">
+                <option value="">Tutti i camion</option>
+              </select>
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="stampaPrelievi()">🖨️ Stampa registro</button>
             </div>
           </div>
