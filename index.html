@@ -274,6 +274,23 @@
           <tbody id="rett-deposito-storico"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
+
+        <!-- GIACENZE FINE ANNO DEPOSITO -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📊 Chiusura giacenze fine anno</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="giac-dep-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('deposito_vibo')">🔄 Calcola</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('deposito_vibo')">✅ Convalida</button>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Calcola entrate/uscite dell'anno per prodotto. Inserisci la giacenza reale rilevata e convalida per fissare il saldo di partenza dell'anno successivo.</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
+          <tbody id="giac-dep-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+          </div>
+        </div>
       </div>
 
       <!-- CONSEGNE -->
@@ -672,6 +689,23 @@
             <tbody id="rett-stazione-storico"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
+
+          <!-- GIACENZE FINE ANNO STAZIONE -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📊 Chiusura giacenze fine anno</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select id="giac-stz-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('stazione_oppido')">🔄 Calcola</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('stazione_oppido')">✅ Convalida</button>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Entrate da ordini stazione. Uscite da letture pompe. Inserisci giacenza reale e convalida.</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
+            <tbody id="giac-stz-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+            </div>
+          </div>
         </div>
 
         <!-- REPORT -->
@@ -839,6 +873,23 @@
           <tbody id="ac-tabella-prelievi"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
           <div id="ac-totale-prelievi" style="margin-top:8px;font-size:12px;color:var(--text-muted)"></div>
+        </div>
+
+        <!-- GIACENZE FINE ANNO AUTOCONSUMO -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📊 Chiusura giacenze fine anno</span>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="giac-ac-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('autoconsumo')">🔄 Calcola</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('autoconsumo')">✅ Convalida</button>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Entrate da ordini autoconsumo ricevuti. Uscite da prelievi registrati. Convalida per fissare il saldo di partenza dell'anno successivo.</div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
+          <tbody id="giac-ac-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+          </div>
         </div>
       </div>
 
