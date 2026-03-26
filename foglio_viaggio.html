@@ -181,7 +181,8 @@ function getColore(prodotto, percentuale) {
   return colori.basso;
 }
 
-function fmtL(n) { return Number(n).toLocaleString('it-IT'); }
+function _sep(s) { return String(s).replace(/\./g, "'"); }
+function fmtL(n) { return _sep(Number(n).toLocaleString('it-IT')); }
 
 // ── GRAFICA CAMION SVG (stile realistico + scomparti dinamici) ──
 function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale) {
@@ -198,7 +199,6 @@ function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale) {
   const gancioW = 20;
   const trX = rimX + rimW + gancioW;
   const trW = 180;
-  const cabX = trX + trW - 92;
   const wY = rimY + rimH + 22;
 
   let svg = `<svg class="truck-svg" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">`;
@@ -277,47 +277,86 @@ function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale) {
   // ── GANCIO ──
   svg += `<rect x="${rimX + rimW}" y="${rimY + rimH - 12}" width="${gancioW}" height="10" rx="3" fill="#777" stroke="#555" stroke-width="0.5"/>`;
 
-  // ── TRATTORE ──
-  // Corpo
-  svg += `<rect x="${trX}" y="${rimY + 10}" width="${trW}" height="${rimH - 2}" rx="4" fill="#cc0000" stroke="#990000" stroke-width="2"/>`;
-  // Serbatoio laterale
-  svg += `<rect x="${trX + 12}" y="${rimY + 50}" width="40" height="52" rx="6" fill="#aa0000" stroke="#880000" stroke-width="1"/>`;
-  // Cabina
-  svg += `<rect x="${cabX}" y="${rimY - 18}" width="92" height="${rimH + 20}" rx="8" fill="#dd1111" stroke="#aa0000" stroke-width="2"/>`;
-  // Tetto
-  svg += `<rect x="${cabX + 2}" y="${rimY - 26}" width="88" height="12" rx="4" fill="#ee2222" stroke="#cc0000" stroke-width="1"/>`;
-  // Parabrezza
-  svg += `<rect x="${cabX + 10}" y="${rimY - 10}" width="70" height="48" rx="5" fill="#a8d8f0" stroke="#6699aa" stroke-width="1.5"/>`;
-  svg += `<rect x="${cabX + 14}" y="${rimY - 6}" width="20" height="40" rx="3" fill="#c8e8f8" opacity="0.4"/>`;
-  // Finestrino
-  svg += `<rect x="${cabX + 10}" y="${rimY + 44}" width="30" height="22" rx="3" fill="#a8d8f0" stroke="#6699aa" stroke-width="1"/>`;
-  // Fari
-  svg += `<rect x="${cabX + 86}" y="${rimY + 50}" width="8" height="14" rx="2" fill="#ffee88" stroke="#ccaa44" stroke-width="0.5"/>`;
-  svg += `<rect x="${cabX + 86}" y="${rimY + 70}" width="8" height="10" rx="2" fill="#ff8844" stroke="#cc6633" stroke-width="0.5"/>`;
-  // Paraurti
-  svg += `<rect x="${cabX + 88}" y="${rimY + 90}" width="8" height="18" rx="2" fill="#999" stroke="#666" stroke-width="0.5"/>`;
-  // Specchietto
-  svg += `<rect x="${cabX - 2}" y="${rimY}" width="4" height="16" rx="1" fill="#333"/>`;
-  svg += `<rect x="${cabX - 10}" y="${rimY - 2}" width="10" height="8" rx="2" fill="#444" stroke="#333" stroke-width="0.5"/>`;
-  // Tubo scarico
-  svg += `<rect x="${cabX - 2}" y="${rimY - 32}" width="6" height="10" rx="2" fill="#666" stroke="#444" stroke-width="0.5"/>`;
-
+  // ── TRATTORE (stile classico con cofano) ──
+  const chassisY = rimY + rimH;
+  
   // Telaio trattore
-  svg += `<rect x="${trX}" y="${rimY + rimH}" width="${trW + 10}" height="8" rx="2" fill="#555" stroke="#333" stroke-width="0.5"/>`;
+  svg += `<rect x="${trX}" y="${chassisY}" width="${trW + 10}" height="8" rx="2" fill="#555" stroke="#333" stroke-width="0.5"/>`;
+  
+  // Serbatoio carburante laterale (sotto telaio, tra ruote)
+  svg += `<rect x="${trX + 30}" y="${rimY + 60}" width="50" height="48" rx="8" fill="#888" stroke="#666" stroke-width="1"/>`;
+  svg += `<rect x="${trX + 34}" y="${rimY + 64}" width="42" height="6" rx="2" fill="#999" opacity="0.5"/>`;
+  
+  // Cofano motore (parte lunga davanti)
+  const cofanoX = trX + 8;
+  const cofanoW = trW - 96;
+  const cofanoY = rimY + 20;
+  const cofanoH = rimH - 12;
+  svg += `<rect x="${cofanoX}" y="${cofanoY}" width="${cofanoW}" height="${cofanoH}" rx="4" fill="#cc2222" stroke="#991111" stroke-width="1.5"/>`;
+  // Presa aria cofano
+  svg += `<rect x="${cofanoX + 8}" y="${cofanoY + 6}" width="${cofanoW - 16}" height="4" rx="2" fill="#aa1111"/>`;
+  svg += `<rect x="${cofanoX + 8}" y="${cofanoY + 14}" width="${cofanoW - 16}" height="4" rx="2" fill="#aa1111"/>`;
+  // Griglia frontale
+  const grigliaX = cofanoX + cofanoW;
+  svg += `<rect x="${grigliaX}" y="${cofanoY + 4}" width="6" height="${cofanoH - 8}" rx="2" fill="#ccc" stroke="#999" stroke-width="0.5"/>`;
+  
+  // Cabina
+  const cabW = 86;
+  const realCabX = trX + trW - cabW + 6;
+  const cabY = rimY - 26;
+  const cabH = rimH + 34;
+  // Corpo cabina
+  svg += `<path d="M${realCabX} ${cabY + 12} Q${realCabX} ${cabY} ${realCabX + 12} ${cabY} L${realCabX + cabW - 4} ${cabY} Q${realCabX + cabW} ${cabY} ${realCabX + cabW} ${cabY + 12} L${realCabX + cabW} ${cabY + cabH} L${realCabX} ${cabY + cabH} Z" fill="#dd2222" stroke="#aa1111" stroke-width="2"/>`;
+  
+  // Aletta aerodinamica sul tetto
+  svg += `<path d="M${realCabX + 2} ${cabY + 8} Q${realCabX - 14} ${cabY - 4} ${realCabX - 18} ${cabY + 20} L${realCabX} ${cabY + 20} Z" fill="#dd2222" stroke="#aa1111" stroke-width="1"/>`;
+  
+  // Parabrezza (inclinato)
+  svg += `<path d="M${realCabX + 4} ${cabY + 10} L${realCabX - 8} ${cabY + 56} L${realCabX - 8} ${cabY + 78} L${realCabX + 4} ${cabY + 78} Z" fill="#a8d8f0" stroke="#6699aa" stroke-width="1.5"/>`;
+  // Riflesso parabrezza
+  svg += `<path d="M${realCabX + 2} ${cabY + 14} L${realCabX - 4} ${cabY + 42} L${realCabX - 2} ${cabY + 42} L${realCabX + 4} ${cabY + 18} Z" fill="#c8e8f8" opacity="0.4"/>`;
+  
+  // Finestrino laterale
+  svg += `<rect x="${realCabX + 12}" y="${cabY + 12}" width="32" height="28" rx="3" fill="#a8d8f0" stroke="#6699aa" stroke-width="1"/>`;
+  svg += `<rect x="${realCabX + 14}" y="${cabY + 14}" width="8" height="24" rx="2" fill="#c8e8f8" opacity="0.3"/>`;
+  
+  // Porta cabina
+  svg += `<rect x="${realCabX + 10}" y="${cabY + 44}" width="36" height="60" rx="3" fill="none" stroke="#aa1111" stroke-width="1"/>`;
+  svg += `<circle cx="${realCabX + 40}" cy="${cabY + 74}" r="3" fill="#ccc" stroke="#999" stroke-width="0.5"/>`;
+  
+  // Fari anteriori (sul muso)
+  svg += `<rect x="${realCabX - 10}" y="${cabY + 60}" width="6" height="12" rx="2" fill="#ffee88" stroke="#ccaa44" stroke-width="0.5"/>`;
+  svg += `<rect x="${realCabX - 10}" y="${cabY + 76}" width="6" height="8" rx="2" fill="#ff6633" stroke="#cc4422" stroke-width="0.5"/>`;
+  
+  // Paraurti anteriore
+  svg += `<rect x="${realCabX - 14}" y="${cabY + cabH - 8}" width="12" height="8" rx="2" fill="#ccc" stroke="#999" stroke-width="0.5"/>`;
+  
+  // Specchietto retrovisore
+  svg += `<rect x="${realCabX - 4}" y="${cabY + 8}" width="3" height="20" rx="1" fill="#333"/>`;
+  svg += `<rect x="${realCabX - 14}" y="${cabY + 4}" width="12" height="10" rx="2" fill="#444" stroke="#333" stroke-width="0.5"/>`;
+  
+  // Tubo di scarico (smokestack)
+  svg += `<rect x="${realCabX + cabW - 10}" y="${cabY - 14}" width="7" height="22" rx="2" fill="#777" stroke="#555" stroke-width="0.5"/>`;
+  svg += `<ellipse cx="${realCabX + cabW - 6.5}" cy="${cabY - 14}" rx="5" ry="2" fill="#666"/>`;
+  
+  // Luci tetto
+  svg += `<rect x="${realCabX + 14}" y="${cabY}" width="5" height="3" rx="1" fill="#ff8800"/>`;
+  svg += `<rect x="${realCabX + 24}" y="${cabY}" width="5" height="3" rx="1" fill="#ff8800"/>`;
+  svg += `<rect x="${realCabX + 34}" y="${cabY}" width="5" height="3" rx="1" fill="#ff8800"/>`;
 
   // ── RUOTE TRATTORE ──
-  const rtW = [trX + 50, trX + 90, cabX + 46];
+  const rtW = [trX + 50, trX + 90, realCabX + 36];
   rtW.forEach(cx => {
-    svg += `<path d="M${cx-22} ${rimY+rimH+6} A22 22 0 0 1 ${cx+22} ${rimY+rimH+6}" fill="#aa0000" stroke="#880000" stroke-width="0.5"/>`;
+    svg += `<path d="M${cx-22} ${chassisY + 6} A22 22 0 0 1 ${cx+22} ${chassisY + 6}" fill="#aa0000" stroke="#880000" stroke-width="0.5"/>`;
     svg += `<circle cx="${cx}" cy="${wY}" r="20" fill="#2a2a2a" stroke="#111" stroke-width="2"/>`;
     svg += `<circle cx="${cx}" cy="${wY}" r="12" fill="#555"/>`;
     svg += `<circle cx="${cx}" cy="${wY}" r="5" fill="#888"/>`;
   });
 
-  // ── TOTALE SUL TRATTORE ──
+  // ── TOTALE SUL COFANO ──
   const tot = Object.values(ordiniPerScomparto).reduce((s, v) => s + v, 0);
-  svg += `<text x="${trX + 42}" y="${rimY + 38}" font-size="14" font-weight="bold" fill="#fff" font-family="Arial">${fmtL(tot)} L</text>`;
-  svg += `<text x="${trX + 42}" y="${rimY + 52}" font-size="8" fill="#ffcccc" font-family="Arial">Totale caricato</text>`;
+  svg += `<text x="${cofanoX + cofanoW/2}" y="${cofanoY + cofanoH/2 + 2}" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff" font-family="Arial">${fmtL(tot)} L</text>`;
+  svg += `<text x="${cofanoX + cofanoW/2}" y="${cofanoY + cofanoH/2 + 15}" text-anchor="middle" font-size="7" fill="#ffcccc" font-family="Arial">Totale caricato</text>`;
 
   // Terreno
   svg += `<line x1="0" y1="${wY + 22}" x2="${svgW}" y2="${wY + 22}" stroke="#ccc" stroke-width="0.5"/>`;
