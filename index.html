@@ -957,6 +957,14 @@
         <div class="form-group"><label>Prodotti abituali</label><input type="text" id="cl-prodotti" /></div>
         <div class="form-group"><label>Note</label><input type="text" id="cl-note" /></div>
       </div>
+      <!-- SEDI DI SCARICO -->
+      <div id="cl-sedi-wrap" style="margin-top:14px;border-top:0.5px solid var(--border);padding-top:12px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px">📍 Sedi di scarico / consegna</div>
+          <button type="button" class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="aggiungiRigaSede()">+ Aggiungi sede</button>
+        </div>
+        <div id="cl-sedi-lista"></div>
+      </div>
     </div>
     <div id="modal-fornitori">
       <div class="form-grid">

@@ -2557,10 +2557,16 @@ function stampaConfrontoAnni() {
 async function salvaCliente(id=null) {
   const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, cliente_rete:document.getElementById('cl-rete').checked, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, fido_massimo:parseFloat(document.getElementById('cl-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
   if (!record.nome) { toast('Inserisci il nome'); return; }
-  let error;
+  let error, clienteId = id;
   if (id) { ({error}=await sb.from('clienti').update(record).eq('id',id)); }
-  else { ({error}=await sb.from('clienti').insert([record])); }
+  else {
+    const res = await sb.from('clienti').insert([record]).select().single();
+    error = res.error;
+    if (res.data) clienteId = res.data.id;
+  }
   if (error) { toast('Errore: '+error.message); return; }
+  // Salva sedi di scarico
+  if (clienteId) await salvaSediCliente(clienteId);
   toast(id?'Cliente aggiornato!':'Cliente salvato!');
   cacheClienti=[]; chiudiModal(); caricaClienti();
 }
@@ -2571,9 +2577,13 @@ async function apriModaleCliente(id=null) {
   ['cl-nome','cl-piva','cl-cf','cl-indirizzo','cl-citta','cl-provincia','cl-telefono','cl-email','cl-fido','cl-zona','cl-prodotti','cl-note'].forEach(c => { const el=document.getElementById(c); if(el) el.value=''; });
   document.getElementById('cl-tipo').value='azienda'; document.getElementById('cl-gg').value='30';
   document.getElementById('cl-rete').checked = false;
+  document.getElementById('cl-sedi-lista').innerHTML = '';
   if (id) {
     const{data}=await sb.from('clienti').select('*').eq('id',id).single();
     if(data){ ['nome','piva','cf:codice_fiscale','indirizzo','citta','provincia','telefono','email'].forEach(f => { const[k,v]=f.split(':'); const el=document.getElementById('cl-'+(v||k)); if(el) el.value=data[v||k]||''; }); document.getElementById('cl-tipo').value=data.tipo||'azienda'; document.getElementById('cl-fido').value=data.fido_massimo||0; document.getElementById('cl-gg').value=data.giorni_pagamento||30; document.getElementById('cl-zona').value=data.zona_consegna||''; document.getElementById('cl-prodotti').value=data.prodotti_abituali||''; document.getElementById('cl-note').value=data.note||''; document.getElementById('cl-rete').checked = !!data.cliente_rete; }
+    await caricaSediCliente(id);
+  } else {
+    document.getElementById('cl-sedi-wrap').style.display = 'block';
   }
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-clienti').style.display='block';
@@ -2697,110 +2707,69 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   html += '</div>';
 
   html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
+  apriModal(html);
+}
 
-  // ═══ SEDI DI SCARICO ═══
+// ── SEDI DI SCARICO (inline nel form cliente) ───────────────────
+function aggiungiRigaSede(s) {
+  const lista = document.getElementById('cl-sedi-lista');
+  const div = document.createElement('div');
+  div.className = 'cl-sede-row';
+  div.dataset.id = s ? s.id : 'new';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:10px;background:var(--bg-kpi);border-radius:8px';
+  div.innerHTML = '<div class="form-group"><label>Nome sede</label><input type="text" class="sede-r-nome" value="' + esc(s ? s.nome : '') + '" placeholder="Es. Cantiere Via Roma" /></div>' +
+    '<div class="form-group"><label>Indirizzo</label><input type="text" class="sede-r-indirizzo" value="' + esc(s ? s.indirizzo || '' : '') + '" /></div>' +
+    '<div class="form-group"><label>Città</label><input type="text" class="sede-r-citta" value="' + esc(s ? s.citta || '' : '') + '" /></div>' +
+    '<div style="display:flex;flex-direction:column;gap:4px;align-items:center"><button class="btn-danger" onclick="this.closest(\'.cl-sede-row\').remove()" title="Rimuovi">x</button>' +
+    '<label style="font-size:10px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="sede-default" class="sede-r-default" ' + (s && s.predefinita ? 'checked' : '') + ' /> def.</label></div>';
+  lista.appendChild(div);
+}
+
+async function caricaSediCliente(clienteId) {
+  const wrap = document.getElementById('cl-sedi-wrap');
+  const lista = document.getElementById('cl-sedi-lista');
+  if (!clienteId) { wrap.style.display = 'none'; lista.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  lista.innerHTML = '';
   const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attiva', true).order('predefinita',{ascending:false}).order('nome');
-  html = html.replace('onclick="chiudiModalePermessi()">Chiudi</button>', '');
-
-  html += '<div style="margin-top:18px;border-top:0.5px solid var(--border);padding-top:14px">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-size:13px;font-weight:500">📍 Sedi di scarico / consegna</div>';
-  html += '<button class="btn-primary" style="font-size:11px;padding:5px 12px" onclick="aggiungiSedeScarico(\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">+ Nuova sede</button></div>';
-
   if (sedi && sedi.length) {
-    html += '<div style="overflow-x:auto"><table style="width:100%;font-size:12px"><thead><tr><th>Nome sede</th><th>Indirizzo</th><th>Città</th><th>Nota</th><th>Default</th><th></th></tr></thead><tbody>';
-    sedi.forEach(s => {
-      html += '<tr><td><strong>' + esc(s.nome) + '</strong></td><td>' + esc(s.indirizzo||'—') + '</td><td>' + esc(s.citta||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(s.nota||'—') + '</td>';
-      html += '<td>' + (s.predefinita ? '<span class="badge green">Default</span>' : '<button class="btn-edit" style="font-size:10px" onclick="impostaSedePredefinita(\'' + s.id + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">imposta</button>') + '</td>';
-      html += '<td style="white-space:nowrap"><button class="btn-edit" onclick="editaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">✏️</button><button class="btn-danger" onclick="eliminaSedeScarico(\'' + s.id + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">x</button></td></tr>';
-    });
-    html += '</tbody></table></div>';
-  } else {
-    html += '<div style="font-size:12px;color:var(--text-hint);padding:8px 0">Nessuna sede aggiuntiva. La consegna avverrà all\'indirizzo principale del cliente.</div>';
+    sedi.forEach(s => aggiungiRigaSede(s));
   }
-  html += '</div>';
-
-  html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
-  apriModal(html);
 }
 
-// ── SEDI DI SCARICO ──────────────────────────────────────────────
-function aggiungiSedeScarico(clienteId, clienteNome) {
-  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:14px">Nuova sede di scarico</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Cliente: <strong>' + esc(clienteNome) + '</strong></div>';
-  html += '<div class="form-grid">';
-  html += '<div class="form-group"><label>Nome sede</label><input type="text" id="sede-nome" placeholder="Es. Cantiere Via Roma" /></div>';
-  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="sede-indirizzo" /></div>';
-  html += '<div class="form-group"><label>Città</label><input type="text" id="sede-citta" /></div>';
-  html += '<div class="form-group"><label>Provincia</label><input type="text" id="sede-provincia" /></div>';
-  html += '<div class="form-group"><label>Nota</label><input type="text" id="sede-nota" placeholder="Facoltativo" /></div>';
-  html += '<div class="form-group"><label>Predefinita</label><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="sede-predefinita" /> Sede di scarico predefinita</label></div>';
-  html += '</div>';
-  html += '<div style="display:flex;gap:8px;margin-top:14px">';
-  html += '<button class="btn-primary" style="flex:1" onclick="salvaSedeScarico(null,\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">Salva</button>';
-  html += '<button onclick="apriSchedaCliente(\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">← Torna</button>';
-  html += '</div>';
-  apriModal(html);
-}
+async function salvaSediCliente(clienteId) {
+  if (!clienteId) return;
+  const righe = document.querySelectorAll('.cl-sede-row');
+  const idsPresenti = [];
 
-async function editaSedeScarico(sedeId, clienteId, clienteNome) {
-  const { data: s } = await sb.from('sedi_scarico').select('*').eq('id', sedeId).single();
-  if (!s) { toast('Sede non trovata'); return; }
-  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:14px">Modifica sede di scarico</div>';
-  html += '<div class="form-grid">';
-  html += '<div class="form-group"><label>Nome sede</label><input type="text" id="sede-nome" value="' + esc(s.nome) + '" /></div>';
-  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="sede-indirizzo" value="' + esc(s.indirizzo||'') + '" /></div>';
-  html += '<div class="form-group"><label>Città</label><input type="text" id="sede-citta" value="' + esc(s.citta||'') + '" /></div>';
-  html += '<div class="form-group"><label>Provincia</label><input type="text" id="sede-provincia" value="' + esc(s.provincia||'') + '" /></div>';
-  html += '<div class="form-group"><label>Nota</label><input type="text" id="sede-nota" value="' + esc(s.nota||'') + '" /></div>';
-  html += '<div class="form-group"><label>Predefinita</label><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="sede-predefinita" ' + (s.predefinita?'checked':'') + ' /> Sede predefinita</label></div>';
-  html += '</div>';
-  html += '<div style="display:flex;gap:8px;margin-top:14px">';
-  html += '<button class="btn-primary" style="flex:1" onclick="salvaSedeScarico(\'' + sedeId + '\',\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')">Salva</button>';
-  html += '<button onclick="apriSchedaCliente(\'' + clienteId + '\',\'' + esc(clienteNome).replace(/'/g,"\\'") + '\')" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">← Torna</button>';
-  html += '</div>';
-  apriModal(html);
-}
+  for (const row of righe) {
+    const sedeId = row.dataset.id;
+    const nome = row.querySelector('.sede-r-nome').value.trim();
+    const indirizzo = row.querySelector('.sede-r-indirizzo').value;
+    const citta = row.querySelector('.sede-r-citta').value;
+    const predefinita = row.querySelector('.sede-r-default').checked;
+    if (!nome) continue;
 
-async function salvaSedeScarico(sedeId, clienteId, clienteNome) {
-  const nome = document.getElementById('sede-nome').value.trim();
-  if (!nome) { toast('Inserisci il nome della sede'); return; }
-  const record = {
-    cliente_id: clienteId,
-    nome,
-    indirizzo: document.getElementById('sede-indirizzo').value,
-    citta: document.getElementById('sede-citta').value,
-    provincia: document.getElementById('sede-provincia').value,
-    nota: document.getElementById('sede-nota').value,
-    predefinita: document.getElementById('sede-predefinita').checked
-  };
-  // Se predefinita, resetta le altre
-  if (record.predefinita) {
-    await sb.from('sedi_scarico').update({ predefinita: false }).eq('cliente_id', clienteId);
+    const record = { cliente_id: clienteId, nome, indirizzo, citta, predefinita };
+
+    if (sedeId && sedeId !== 'new') {
+      await sb.from('sedi_scarico').update(record).eq('id', sedeId);
+      idsPresenti.push(sedeId);
+    } else {
+      const { data: nuovo } = await sb.from('sedi_scarico').insert([record]).select().single();
+      if (nuovo) idsPresenti.push(nuovo.id);
+    }
   }
-  let error;
-  if (sedeId) {
-    ({ error } = await sb.from('sedi_scarico').update(record).eq('id', sedeId));
-  } else {
-    ({ error } = await sb.from('sedi_scarico').insert([record]));
+
+  // Disattiva sedi rimosse
+  const { data: tuttiDb } = await sb.from('sedi_scarico').select('id').eq('cliente_id', clienteId).eq('attiva', true);
+  if (tuttiDb) {
+    for (const s of tuttiDb) {
+      if (!idsPresenti.includes(s.id)) {
+        await sb.from('sedi_scarico').update({ attiva: false }).eq('id', s.id);
+      }
+    }
   }
-  if (error) { toast('Errore: ' + error.message); return; }
-  toast(sedeId ? 'Sede aggiornata!' : 'Sede creata!');
-  apriSchedaCliente(clienteId, clienteNome);
-}
-
-async function eliminaSedeScarico(sedeId, clienteId, clienteNome) {
-  if (!confirm('Eliminare questa sede di scarico?')) return;
-  const { error } = await sb.from('sedi_scarico').update({ attiva: false }).eq('id', sedeId);
-  if (error) { toast('Errore: ' + error.message); return; }
-  toast('Sede eliminata');
-  apriSchedaCliente(clienteId, clienteNome);
-}
-
-async function impostaSedePredefinita(sedeId, clienteId, clienteNome) {
-  await sb.from('sedi_scarico').update({ predefinita: false }).eq('cliente_id', clienteId);
-  await sb.from('sedi_scarico').update({ predefinita: true }).eq('id', sedeId);
-  toast('Sede predefinita aggiornata');
-  apriSchedaCliente(clienteId, clienteNome);
 }
 
 async function togglePagamento(ordineId, pagato, clienteId, clienteNome) {
