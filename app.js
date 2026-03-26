@@ -2724,7 +2724,7 @@ async function caricaSediCliente(clienteId) {
   if (!clienteId) { wrap.style.display = 'none'; lista.innerHTML = ''; return; }
   wrap.style.display = 'block';
   lista.innerHTML = '';
-  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attiva', true).order('predefinita',{ascending:false}).order('nome');
+  const { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('predefinita',{ascending:false}).order('nome');
   if (sedi && sedi.length) {
     sedi.forEach(s => aggiungiRigaSede(s));
   }
@@ -2755,11 +2755,11 @@ async function salvaSediCliente(clienteId) {
   }
 
   // Disattiva sedi rimosse
-  const { data: tuttiDb } = await sb.from('sedi_scarico').select('id').eq('cliente_id', clienteId).eq('attiva', true);
+  const { data: tuttiDb } = await sb.from('sedi_scarico').select('id').eq('cliente_id', clienteId).eq('attivo', true);
   if (tuttiDb) {
     for (const s of tuttiDb) {
       if (!idsPresenti.includes(s.id)) {
-        await sb.from('sedi_scarico').update({ attiva: false }).eq('id', s.id);
+        await sb.from('sedi_scarico').update({ attivo: false }).eq('id', s.id);
       }
     }
   }
@@ -4383,7 +4383,7 @@ async function caricaOrdiniPerCarico() {
     const clienteIds = Object.values(clienteIdMap);
     let sediMap = {}; // clienteId → [sedi]
     if (clienteIds.length) {
-      const { data: sedi } = await sb.from('sedi_scarico').select('*').in('cliente_id', clienteIds).eq('attiva', true).order('predefinita',{ascending:false}).order('nome');
+      const { data: sedi } = await sb.from('sedi_scarico').select('*').in('cliente_id', clienteIds).eq('attivo', true).order('predefinita',{ascending:false}).order('nome');
       (sedi||[]).forEach(s => {
         if (!sediMap[s.cliente_id]) sediMap[s.cliente_id] = [];
         sediMap[s.cliente_id].push(s);
