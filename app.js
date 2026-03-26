@@ -121,7 +121,7 @@ function setSection(id, el) {
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:async()=>{await caricaClienti();caricaScadenzario();}, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
@@ -139,6 +139,14 @@ function switchVenditeTab(btn) {
   if (btn.dataset.tab === 'vend-ingrosso') caricaVenditeIngrosso();
   else if (btn.dataset.tab === 'vend-dettaglio') caricaVenditeDettaglio();
   else if (btn.dataset.tab === 'vend-annuale') caricaVenditeAnnuali();
+}
+
+function switchClientiTab(btn) {
+  document.querySelectorAll('.cli-tab').forEach(t => { t.style.background='var(--bg)'; t.style.color='var(--text)'; t.style.border='0.5px solid var(--border)'; t.classList.remove('active'); });
+  btn.style.background='var(--accent)'; btn.style.color='#fff'; btn.style.border='none'; btn.classList.add('active');
+  document.querySelectorAll('.cli-panel').forEach(p => p.style.display='none');
+  document.getElementById(btn.dataset.tab).style.display='block';
+  if (btn.dataset.tab === 'cli-scadenzario') caricaScadenzario();
 }
 
 // ── SIDEBAR MOBILE ───────────────────────────────────────────────
