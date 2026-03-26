@@ -2039,7 +2039,59 @@ async function caricaBasi() {
   const{data}=await sb.from('basi_carico').select('*, fornitori_basi(fornitore_id, fornitori(nome))').order('nome');
   const tbody=document.getElementById('tabella-basi');
   if (!data||!data.length){tbody.innerHTML='<tr><td colspan="6" class="loading">Nessuna base</td></tr>';return;}
-  tbody.innerHTML=data.map(r => { const forn=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.fornitori?.nome).filter(Boolean).join(', '):'—'; return '<tr><td><strong>' + r.nome + '</strong></td><td>' + (r.indirizzo||'—') + '</td><td>' + (r.citta||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + forn + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'basi_carico\',\'' + r.id + '\',caricaBasi)">x</button></td></tr>'; }).join('');
+  tbody.innerHTML=data.map(r => {
+    const forn=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.fornitori?.nome).filter(Boolean).join(', '):'—';
+    return '<tr><td><strong>' + r.nome + '</strong></td><td>' + (r.indirizzo||'—') + '</td><td>' + (r.citta||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + forn + '</td><td style="font-size:11px;color:var(--text-muted)">' + (r.note||'—') + '</td><td><button class="btn-edit" onclick="editaBase(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'basi_carico\',\'' + r.id + '\',caricaBasi)">x</button></td></tr>';
+  }).join('');
+}
+
+async function editaBase(id) {
+  const { data: base } = await sb.from('basi_carico').select('*, fornitori_basi(fornitore_id)').eq('id', id).single();
+  if (!base) return;
+  const { data: fornitori } = await sb.from('fornitori').select('id,nome').eq('attivo',true).order('nome');
+  const fornitoriAssegnati = (base.fornitori_basi||[]).map(fb => fb.fornitore_id);
+
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica base: ' + esc(base.nome) + '</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Nome</label><input type="text" id="edit-ba-nome" value="' + esc(base.nome) + '" /></div>';
+  html += '<div class="form-group"><label>Indirizzo</label><input type="text" id="edit-ba-indirizzo" value="' + esc(base.indirizzo||'') + '" /></div>';
+  html += '<div class="form-group"><label>Città</label><input type="text" id="edit-ba-citta" value="' + esc(base.citta||'') + '" /></div>';
+  html += '<div class="form-group"><label>Provincia</label><input type="text" id="edit-ba-provincia" value="' + esc(base.provincia||'') + '" /></div>';
+  html += '<div class="form-group"><label>Note</label><input type="text" id="edit-ba-note" value="' + esc(base.note||'') + '" /></div>';
+  html += '</div>';
+  html += '<div style="margin-top:12px"><div style="font-size:12px;font-weight:500;margin-bottom:8px">Fornitori associati</div>';
+  html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+  (fornitori||[]).forEach(f => {
+    const checked = fornitoriAssegnati.includes(f.id) ? ' checked' : '';
+    html += '<label style="display:flex;align-items:center;gap:4px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer"><input type="checkbox" class="edit-ba-forn" value="' + f.id + '"' + checked + ' /> ' + esc(f.nome) + '</label>';
+  });
+  html += '</div></div>';
+  html += '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn-primary" onclick="confermaEditaBase(\'' + id + '\')">Salva</button><button class="btn-secondary" onclick="chiudiModal()">Annulla</button></div>';
+  apriModal(html);
+}
+
+async function confermaEditaBase(id) {
+  const record = {
+    nome: document.getElementById('edit-ba-nome').value.trim(),
+    indirizzo: document.getElementById('edit-ba-indirizzo').value,
+    citta: document.getElementById('edit-ba-citta').value,
+    provincia: document.getElementById('edit-ba-provincia').value,
+    note: document.getElementById('edit-ba-note').value
+  };
+  if (!record.nome) { toast('Nome obbligatorio'); return; }
+  const { error } = await sb.from('basi_carico').update(record).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Aggiorna fornitori associati
+  await sb.from('fornitori_basi').delete().eq('base_carico_id', id);
+  const checks = document.querySelectorAll('.edit-ba-forn:checked');
+  if (checks.length) {
+    await sb.from('fornitori_basi').insert(Array.from(checks).map(c => ({ fornitore_id: c.value, base_carico_id: id })));
+  }
+
+  toast('Base aggiornata!');
+  chiudiModal();
+  caricaBasi();
 }
 
 // ── PRODOTTI ─────────────────────────────────────────────────────
