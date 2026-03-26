@@ -99,6 +99,12 @@
       </select>
     </div>
     <div class="filtri-group">
+      <label>Anno (vista mensile)</label>
+      <select id="f-anno" onchange="impostaDateAnno()">
+        <option value="">Personalizzato</option>
+      </select>
+    </div>
+    <div class="filtri-group">
       <label>Date</label>
       <div style="display:flex;gap:8px">
         <input type="date" id="f-da" style="flex:1" />
@@ -169,6 +175,20 @@
     </table>
 
     <!-- Grafici -->
+    <div id="r-mensile-wrap" style="display:none">
+      <div class="section-title">Andamento mensile anno</div>
+      <div class="charts-grid" style="margin-bottom:16px">
+        <div class="chart-box"><div class="chart-title">Litri acquistati per mese</div><canvas id="r-chart-mese-litri" height="220"></canvas></div>
+        <div class="chart-box"><div class="chart-title">Costo imponibile per mese</div><canvas id="r-chart-mese-costo" height="220"></canvas></div>
+      </div>
+      <!-- Riepilogo mensile tabella -->
+      <div class="section-title">Riepilogo mensile</div>
+      <table>
+        <thead><tr><th>Mese</th><th>Ordini</th><th>Litri</th><th>Costo totale</th><th>Costo medio/L</th><th>Trasporto</th></tr></thead>
+        <tbody id="r-tab-mensile"></tbody>
+      </table>
+    </div>
+
     <div class="charts-grid" style="margin-top:16px">
       <div class="chart-box"><div class="chart-title">Acquisti per giorno</div><canvas id="r-chart-giorno" height="180"></canvas></div>
       <div class="chart-box"><div class="chart-title">Costo medio per fornitore</div><canvas id="r-chart-costi" height="180"></canvas></div>
@@ -191,6 +211,20 @@ const oggi = new Date().toISOString().split('T')[0];
 document.getElementById('f-da').value = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
 document.getElementById('f-a').value = oggi;
 document.getElementById('r-gen-date').textContent = new Date().toLocaleDateString('it-IT');
+
+// Popola selettore anno
+const selAnno = document.getElementById('f-anno');
+const annoCorr = new Date().getFullYear();
+for (let a = annoCorr; a >= annoCorr - 5; a--) selAnno.innerHTML += '<option value="' + a + '">' + a + '</option>';
+
+function impostaDateAnno() {
+  const anno = document.getElementById('f-anno').value;
+  if (!anno) return;
+  document.getElementById('f-da').value = anno + '-01-01';
+  document.getElementById('f-a').value = anno + '-12-31';
+}
+
+const MESI_LABEL = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
 
 function _sep(s){return s.replace(/\./g,"'");}
 function fmt(n) {
@@ -405,6 +439,63 @@ async function generaReport() {
     type:'doughnut', data:{ labels:prArr.map(([p])=>p), datasets:[{ data:prArr.map(([,v])=>v.costo), backgroundColor:prArr.map(([p])=>COLORI_PROD[p]||'#888') }] },
     options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:10}}}} }
   });
+
+  // ═══ VISTA MENSILE (se periodo > 2 mesi) ═══
+  const annoSel = document.getElementById('f-anno').value;
+  const mesiBetween = (new Date(a).getFullYear() - new Date(da).getFullYear()) * 12 + (new Date(a).getMonth() - new Date(da).getMonth());
+  const wrapMensile = document.getElementById('r-mensile-wrap');
+
+  if (mesiBetween >= 2) {
+    wrapMensile.style.display = 'block';
+    // Aggrega per mese
+    const perMese = {};
+    ordini.forEach(r => {
+      const d = new Date(r.data);
+      const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      if (!perMese[key]) perMese[key] = { ordini:0, litri:0, costo:0, trasporto:0 };
+      perMese[key].ordini++;
+      perMese[key].litri += Number(r.litri);
+      perMese[key].costo += Number(r.costo_litro) * Number(r.litri);
+      perMese[key].trasporto += Number(r.trasporto_litro) * Number(r.litri);
+    });
+
+    // Genera tutte le chiavi mese nel range
+    const mesiKeys = [];
+    const dStart = new Date(da);
+    const dEnd = new Date(a);
+    let cur = new Date(dStart.getFullYear(), dStart.getMonth(), 1);
+    while (cur <= dEnd) {
+      mesiKeys.push(cur.getFullYear() + '-' + String(cur.getMonth()+1).padStart(2,'0'));
+      cur.setMonth(cur.getMonth() + 1);
+    }
+
+    const mesiLabels = mesiKeys.map(k => { const p=k.split('-'); return MESI_LABEL[parseInt(p[1])-1] + (annoSel ? '' : ' ' + p[0]); });
+    const mesiLitri = mesiKeys.map(k => (perMese[k]||{litri:0}).litri);
+    const mesiCosto = mesiKeys.map(k => (perMese[k]||{costo:0}).costo);
+
+    // Grafico litri per mese
+    _charts.meseLitri = new Chart(document.getElementById('r-chart-mese-litri').getContext('2d'), {
+      type:'bar', data:{ labels:mesiLabels, datasets:[{ label:'Litri', data:mesiLitri, backgroundColor:'#378ADD', borderRadius:4 }] },
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v)+' L'}}} }
+    });
+
+    // Grafico costo per mese
+    _charts.meseCosto = new Chart(document.getElementById('r-chart-mese-costo').getContext('2d'), {
+      type:'bar', data:{ labels:mesiLabels, datasets:[{ label:'€', data:mesiCosto.map(v=>Math.round(v*100)/100), backgroundColor:'#D4A017', borderRadius:4 }] },
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
+    });
+
+    // Tabella mensile
+    document.getElementById('r-tab-mensile').innerHTML = mesiKeys.map(k => {
+      const m = perMese[k] || { ordini:0, litri:0, costo:0, trasporto:0 };
+      const cm = m.litri > 0 ? m.costo / m.litri : 0;
+      const p = k.split('-');
+      const label = MESI_LABEL[parseInt(p[1])-1] + ' ' + p[0];
+      return '<tr><td><strong>' + label + '</strong></td><td class="mono">' + m.ordini + '</td><td class="mono">' + fmtL(m.litri) + '</td><td class="mono">' + fmtE(m.costo) + '</td><td class="mono">' + fmt(cm) + '</td><td class="mono">' + fmtE(m.trasporto) + '</td></tr>';
+    }).join('') + '<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">' + ordini.length + '</td><td class="mono">' + fmtL(totLitri) + '</td><td class="mono">' + fmtE(totCosto) + '</td><td class="mono">' + fmt(totLitri>0?totCosto/totLitri:0) + '</td><td class="mono">' + fmtE(totTrasp) + '</td></tr>';
+  } else {
+    wrapMensile.style.display = 'none';
+  }
 
   document.getElementById('filtri-panel').style.display = 'none';
   document.getElementById('report-container').style.display = 'block';
