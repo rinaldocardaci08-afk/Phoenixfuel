@@ -4912,25 +4912,29 @@ function calcolaCassa() {
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
   var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
-  var contanti = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var contantiInput = parseFloat(document.getElementById('cassa-contanti').value) || 0;
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
   var creditiSospesi = window._cassaSaldoCrediti || 0;
   var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
 
-  // Somma spese contanti
   var totSpese = 0;
   document.querySelectorAll('.cassa-spesa-importo').forEach(function(inp) { totSpese += parseFloat(inp.value) || 0; });
 
-  var totIncassi = bancomat + nexi + aziendali + contanti;
   var totVendite = window._cassaTotVendite || 0;
 
-  // Quadratura vendite vs incassi
+  // Contanti effettivi: se inseriti manualmente usa quelli, altrimenti = vendite - carte
+  var contantiCalcolati = totVendite - bancomat - nexi - aziendali;
+  var contanti = contantiInput > 0 ? contantiInput : Math.max(0, contantiCalcolati);
+
+  // Somma incassi = carte + contanti inseriti (per quadratura)
+  var totIncassi = bancomat + nexi + aziendali + contantiInput;
+
+  // KPI quadratura vendite vs incassi
   document.getElementById('cassa-tot-incassi').textContent = fmtE(totIncassi);
   var kpiQ = document.getElementById('cassa-kpi-quadra');
-  var diff1 = Math.abs(totVendite - totIncassi);
-  if (diff1 < 0.01 && totIncassi > 0) {
+  if (totIncassi > 0 && Math.abs(totVendite - totIncassi) < 0.50) {
     kpiQ.style.background = '#EAF3DE'; kpiQ.style.borderColor = '#639922';
   } else if (totIncassi > 0) {
     kpiQ.style.background = '#FCEBEB'; kpiQ.style.borderColor = '#E24B4A';
@@ -4938,16 +4942,17 @@ function calcolaCassa() {
     kpiQ.style.background = ''; kpiQ.style.borderColor = '';
   }
 
-  // Valore contanti
+  // Valore contanti (mostra il calcolato se non inserito, altrimenti l'inserito)
   document.getElementById('cassa-val-contanti').textContent = fmtE(contanti);
 
-  // Contanti da versare
+  // Contanti da versare = contanti + crediti emessi - rimborsi - rimborsi prec + crediti sospesi - spese
   var daVersare = contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese;
+  daVersare = Math.round(daVersare * 100) / 100;
   document.getElementById('cassa-da-versare').textContent = fmtE(daVersare);
   document.getElementById('cassa-kpi-daversare').textContent = fmtE(daVersare);
 
-  // Differenza
-  var differenza = versato - daVersare;
+  // Differenza versamento
+  var differenza = Math.round((versato - daVersare) * 100) / 100;
   document.getElementById('cassa-differenza').textContent = fmtE(differenza);
   var kpiDiff = document.getElementById('cassa-kpi-diff');
   if (Math.abs(differenza) < 0.01 && versato > 0) {
@@ -4969,20 +4974,23 @@ async function salvaCassa() {
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
   var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
-  var contanti = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var contantiInput = parseFloat(document.getElementById('cassa-contanti').value) || 0;
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
   var creditiSospesi = window._cassaSaldoCrediti || 0;
   var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
+  var totVendite = window._cassaTotVendite || 0;
+
+  var contanti = contantiInput > 0 ? contantiInput : Math.max(0, totVendite - bancomat - nexi - aziendali);
 
   var totSpese = 0;
   document.querySelectorAll('.cassa-spesa-importo').forEach(function(inp) { totSpese += parseFloat(inp.value) || 0; });
-  var daVersare = contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese;
-  var differenza = versato - daVersare;
+  var daVersare = Math.round((contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese) * 100) / 100;
+  var differenza = Math.round((versato - daVersare) * 100) / 100;
 
   var record = {
-    data, totale_vendite: window._cassaTotVendite || 0,
+    data, totale_vendite: totVendite,
     bancomat, carte_nexi: nexi, carte_aziendali: aziendali, contanti,
     crediti_emessi: creditiEmessi, rimborsi_effettuati: rimborsi,
     rimborsi_giorni_prec: rimborsiPrec, crediti_da_rimborsare: creditiSospesi,
@@ -5105,7 +5113,8 @@ async function stampaCassa() {
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
   var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
-  var contanti = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var contantiInput = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var contanti = contantiInput > 0 ? contantiInput : Math.max(0, totVendite - bancomat - nexi - aziendali);
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
@@ -5118,8 +5127,8 @@ async function stampaCassa() {
     var imp = parseFloat(row.querySelector('.cassa-spesa-importo').value) || 0;
     if (imp > 0) { totSpese += imp; speseHtml += '<tr><td style="padding:4px 8px;border:1px solid #ddd;padding-left:20px;color:#666">− Spesa: ' + esc(nota) + '</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#A32D2D">− € ' + imp.toFixed(2) + '</td></tr>'; }
   });
-  var daVersare = contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese;
-  var differenza = versato - daVersare;
+  var daVersare = Math.round((contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese) * 100) / 100;
+  var differenza = Math.round((versato - daVersare) * 100) / 100;
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Registro Cassa ' + data + '</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}@media print{.no-print{display:none!important}@page{size:portrait;margin:8mm}}table{width:100%;border-collapse:collapse;margin-bottom:12px}td{padding:6px 8px;border:1px solid #ddd}.mono{font-family:Courier New,monospace;text-align:right;font-weight:bold}.section{font-size:10px;font-weight:bold;color:#6B5FCC;text-transform:uppercase;letter-spacing:0.3px;padding:8px;background:#f5f5f5;border:1px solid #ddd}</style></head><body>';
