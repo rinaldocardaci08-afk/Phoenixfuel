@@ -4523,17 +4523,24 @@ async function caricaGiacenzeStazione() {
         const capMax = Number(c.capacita_max);
         const livAtt = Number(c.livello_attuale);
         const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
+        const cmp = Number(c.costo_medio||0);
         totG += livAtt;
         cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
           '<div class="dep-cisterna-name">' + c.nome + '</div>' +
           cisternasvg(pct, colore) +
           '<div class="dep-cisterna-litri">' + _sep(livAtt.toLocaleString('it-IT')) + ' L</div>' +
           '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(capMax.toLocaleString('it-IT')) + ' L</div>' +
+          (cmp > 0 ? '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmp.toFixed(4) + '</strong></div>' : '') +
           '</div>';
       });
 
       const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + _sep(capGruppo.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
-      cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+      // CMP medio ponderato per il gruppo
+      let cmpGruppo = 0, valGruppo = 0;
+      gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
+      cmpGruppo = totG > 0 ? valGruppo / totG : 0;
+      const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
+      cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
     });
   } else {
     cisHtmlAll = '<div class="loading">Nessuna cisterna configurata per la stazione</div>';
