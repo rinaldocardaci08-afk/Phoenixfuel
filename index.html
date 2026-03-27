@@ -1107,6 +1107,28 @@
         <!-- Ordini autoconsumo da ricevere -->
         <div id="ac-da-ricevere" style="margin-bottom:16px"></div>
 
+        <!-- Storico ordini autoconsumo -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📦 Storico ordini autoconsumo</span>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <select id="ac-ord-anno" onchange="caricaStoricoOrdiniAutoconsumo()" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);font-weight:600"></select>
+              <select id="ac-ord-mese" onchange="caricaStoricoOrdiniAutoconsumo()" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);font-weight:600">
+                <option value="">Tutto l'anno</option>
+                <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option>
+                <option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
+                <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+              </select>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+          <table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Costo/L</th><th>Totale</th><th>Stato</th></tr></thead>
+          <tbody id="ac-storico-ordini"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+          <div id="ac-storico-totali" style="margin-top:8px;font-size:12px;color:var(--text-muted)"></div>
+        </div>
+
         <!-- Form prelievo -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Nuovo prelievo</div>

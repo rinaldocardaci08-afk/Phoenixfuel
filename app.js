@@ -1561,6 +1561,16 @@ async function caricaAutoconsumo() {
 
   caricaPrelievi();
   _popolaSelAnnoGiac('giac-ac-anno');
+
+  // Popola selettori storico ordini autoconsumo
+  var selOrdAnno = document.getElementById('ac-ord-anno');
+  if (selOrdAnno && selOrdAnno.options.length === 0) {
+    var annoC = new Date().getFullYear();
+    for (var yy = annoC; yy >= annoC - 5; yy--) selOrdAnno.innerHTML += '<option value="' + yy + '"' + (yy===annoC?' selected':'') + '>' + yy + '</option>';
+  }
+  var selOrdMese = document.getElementById('ac-ord-mese');
+  if (selOrdMese) selOrdMese.value = String(new Date().getMonth()+1).padStart(2,'0');
+  caricaStoricoOrdiniAutoconsumo();
 }
 
 async function caricaOrdiniAutoconsumo() {
@@ -1591,6 +1601,48 @@ async function riceviAutoconsumo(ordineId, litri) {
   await sb.from('ordini').update({ caricato_deposito: true }).eq('id', ordineId);
   toast('✅ ' + fmtL(litri) + ' L ricevuti nella cisterna autoconsumo!');
   caricaAutoconsumo();
+}
+
+async function caricaStoricoOrdiniAutoconsumo() {
+  var anno = document.getElementById('ac-ord-anno').value;
+  var mese = document.getElementById('ac-ord-mese').value;
+  if (!anno) return;
+
+  var da = anno + '-' + (mese || '01') + '-01';
+  var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
+  var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
+
+  var { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','autoconsumo').neq('stato','annullato').gte('data', da).lte('data', a).order('data',{ascending:false});
+
+  var tbody = document.getElementById('ac-storico-ordini');
+  var totDiv = document.getElementById('ac-storico-totali');
+
+  if (!ordini || !ordini.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine nel periodo</td></tr>';
+    totDiv.innerHTML = '';
+    return;
+  }
+
+  var totLitri = 0, totValore = 0;
+  tbody.innerHTML = ordini.map(function(r, idx) {
+    var costo = Number(r.costo_litro||0) + Number(r.trasporto_litro||0);
+    var totale = costo * Number(r.litri);
+    totLitri += Number(r.litri);
+    totValore += totale;
+    var ricevuto = r.caricato_deposito;
+    var badge = ricevuto ? '<span class="badge green">Ricevuto</span>' : '<span class="badge amber">Da ricevere</span>';
+    return '<tr' + (idx%2 ? ' style="background:var(--bg)"' : '') + '>' +
+      '<td>' + r.data + '</td>' +
+      '<td>' + esc(r.prodotto) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
+      '<td>' + esc(r.fornitore) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmt(costo) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:500">' + fmtE(totale) + '</td>' +
+      '<td>' + badge + '</td></tr>';
+  }).join('');
+
+  var meseNome = mese ? ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1] : 'Anno ' + anno;
+  totDiv.innerHTML = '<strong>' + ordini.length + ' ordini</strong> · ' + meseNome + ' ' + anno + ' · Totale: <strong>' + fmtL(totLitri) + ' L</strong> · Valore: <strong>' + fmtE(totValore) + '</strong>';
 }
 
 async function salvaPrelievoAutoconsumo() {
