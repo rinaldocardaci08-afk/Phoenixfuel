@@ -3047,12 +3047,12 @@ async function caricaFornitori() {
   const tbody=document.getElementById('tabella-fornitori');
   if (!data||!data.length){tbody.innerHTML='<tr><td colspan="12" class="loading">Nessun fornitore</td></tr>';return;}
 
-  // Carica TUTTI gli ordini non pagati per fido fornitori in UNA query
-  const fornConFido = data.filter(r => Number(r.fido_massimo||0) > 0);
+  // Carica TUTTI gli ordini non pagati fornitore per fido
+  const fornConFido = data.filter(r => Number(r.fido_massimo||0) > 0 || Number(r.fido||0) > 0);
   let ordFornMap = {};
   if (fornConFido.length) {
     const nomi = fornConFido.map(f => f.nome);
-    const { data: ordNonPag } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,margine,iva,litri,giorni_pagamento').neq('stato','annullato').in('fornitore', nomi);
+    const { data: ordNonPag } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,margine,iva,litri,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi);
     (ordNonPag||[]).forEach(o => {
       if (!ordFornMap[o.fornitore]) ordFornMap[o.fornitore] = [];
       ordFornMap[o.fornitore].push(o);
@@ -3061,18 +3061,17 @@ async function caricaFornitori() {
 
   tbody.innerHTML = data.map(r => {
     let usato = 0, residuo = 0;
-    const fidoMax = Number(r.fido_massimo||0);
+    const fidoMax = Number(r.fido_massimo||0) || Number(r.fido||0);
     if (fidoMax > 0) {
       const ords = ordFornMap[r.nome] || [];
       ords.forEach(o => {
-        const scad = new Date(o.data);
-        scad.setDate(scad.getDate() + (o.giorni_pagamento || r.giorni_pagamento || 30));
-        if (scad > oggi) usato += prezzoConIva(o) * Number(o.litri);
+        if (o.pagato_fornitore) return;
+        usato += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
       });
       residuo = fidoMax - usato;
     }
     const basi=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.basi_carico?.nome).filter(Boolean).join(', '):'—';
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }).join('');
 }
 
@@ -3083,6 +3082,109 @@ function filtraFornitori() {
     const testo = tr.textContent.toLowerCase();
     tr.style.display = !q || testo.includes(q) ? '' : 'none';
   });
+}
+
+async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
+  const { data: fornitore } = await sb.from('fornitori').select('*').eq('id', fornitoreId).single();
+  if (!fornitore) { toast('Fornitore non trovato'); return; }
+
+  // Ordini di acquisto da questo fornitore (entrata_deposito + stazione_servizio)
+  const { data: ordini } = await sb.from('ordini').select('id,data,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore').eq('fornitore', fornitoreNome).neq('stato','annullato').order('data',{ascending:false}).limit(500);
+
+  const fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
+  var fidoUsato = 0, totNonPagato = 0, totPagato = 0;
+  (ordini||[]).forEach(function(o) {
+    var costo = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
+    if (o.pagato_fornitore) { totPagato += costo; }
+    else { fidoUsato += costo; totNonPagato += costo; }
+  });
+  var fidoResiduo = fidoMax > 0 ? fidoMax - fidoUsato : 0;
+  var pctFido = fidoMax > 0 ? Math.round((fidoUsato / fidoMax) * 100) : 0;
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:12px">';
+  html += '<div><div style="font-size:18px;font-weight:500">' + esc(fornitoreNome) + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(fornitore.citta||'—') + ' · P.IVA: ' + esc(fornitore.piva||'—') + ' · Pag. ' + (fornitore.giorni_pagamento||30) + ' gg</div></div>';
+
+  // Grafico fido
+  if (fidoMax > 0) {
+    var fidoColor = pctFido >= 90 ? '#A32D2D' : pctFido >= 60 ? '#BA7517' : '#639922';
+    html += '<div style="text-align:right;min-width:200px">';
+    html += '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;margin-bottom:4px">Fido fornitore</div>';
+    html += '<div style="display:flex;gap:12px;justify-content:flex-end;margin-bottom:6px">';
+    html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Fido</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600">' + fmtE(fidoMax) + '</div></div>';
+    html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Utilizzato</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:' + fidoColor + '">' + fmtE(fidoUsato) + '</div></div>';
+    html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Disponibile</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#639922">' + fmtE(fidoResiduo) + '</div></div>';
+    html += '</div>';
+    html += '<div style="height:8px;width:100%;background:var(--border);border-radius:4px"><div style="height:100%;width:' + Math.min(100,pctFido) + '%;background:' + fidoColor + ';border-radius:4px;transition:width 0.3s"></div></div>';
+    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + pctFido + '% utilizzato</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Tabella ordini con gestione pagamenti
+  html += '<div style="max-height:400px;overflow-y:auto">';
+  html += '<table style="width:100%;font-size:12px"><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale</th><th>Pagato</th><th>Data pag.</th></tr></thead><tbody>';
+
+  if (!ordini || !ordini.length) {
+    html += '<tr><td colspan="8" class="loading">Nessun ordine</td></tr>';
+  } else {
+    ordini.forEach(function(o) {
+      var costoUnitario = Number(o.costo_litro||0) + Number(o.trasporto_litro||0);
+      var tot = costoUnitario * Number(o.litri);
+      var isPagato = o.pagato_fornitore === true;
+      var tipoLabel = o.tipo_ordine === 'stazione_servizio' ? '<span class="badge purple" style="font-size:9px">Stazione</span>' : o.tipo_ordine === 'entrata_deposito' ? '<span class="badge teal" style="font-size:9px">Deposito</span>' : '<span class="badge blue" style="font-size:9px">' + esc(o.tipo_ordine) + '</span>';
+      var rowStyle = isPagato ? 'opacity:0.5' : '';
+
+      html += '<tr style="' + rowStyle + '">';
+      html += '<td>' + o.data + '</td>';
+      html += '<td>' + tipoLabel + '</td>';
+      html += '<td>' + esc(o.prodotto) + '</td>';
+      html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
+      html += '<td style="font-family:var(--font-mono)">€ ' + costoUnitario.toFixed(4) + '</td>';
+      html += '<td style="font-family:var(--font-mono);font-weight:500">' + fmtE(tot) + '</td>';
+      html += '<td><input type="checkbox" ' + (isPagato ? 'checked' : '') + ' onchange="togglePagamentoFornitore(\'' + o.id + '\',this.checked,\'' + fornitoreId + '\',\'' + fornitoreNome.replace(/'/g,"\\'") + '\')" /></td>';
+      html += '<td>';
+      if (isPagato && o.data_pagamento_fornitore) {
+        html += '<span style="font-size:11px;color:#639922">' + o.data_pagamento_fornitore + '</span>';
+      } else {
+        html += '<input type="date" style="font-size:11px;padding:2px 4px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg)" value="' + (o.data_pagamento_fornitore||'') + '" onchange="impostaDataPagFornitore(\'' + o.id + '\',this.value,\'' + fornitoreId + '\',\'' + fornitoreNome.replace(/'/g,"\\'") + '\')" />';
+      }
+      html += '</td>';
+      html += '</tr>';
+    });
+  }
+
+  html += '</tbody></table></div>';
+
+  // Riepilogo
+  var totOrdini = (ordini||[]).length;
+  var nPagati = (ordini||[]).filter(function(o){return o.pagato_fornitore;}).length;
+  var nDaPagare = totOrdini - nPagati;
+  html += '<div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">';
+  html += '<span>Totale ordini: <strong>' + totOrdini + '</strong></span>';
+  html += '<span style="color:#639922">Pagati: <strong>' + nPagati + '</strong> (' + fmtE(totPagato) + ')</span>';
+  html += '<span>Da pagare: <strong>' + nDaPagare + '</strong> (' + fmtE(totNonPagato) + ')</span>';
+  html += '</div>';
+
+  html += '<button class="btn-primary" style="width:100%;margin-top:14px" onclick="chiudiModalePermessi()">Chiudi</button>';
+  apriModal(html);
+}
+
+async function togglePagamentoFornitore(ordineId, pagato, fornitoreId, fornitoreNome) {
+  var update = { pagato_fornitore: pagato };
+  if (pagato) update.data_pagamento_fornitore = oggiISO;
+  else update.data_pagamento_fornitore = null;
+  var { error } = await sb.from('ordini').update(update).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(pagato ? '✅ Fattura segnata come pagata' : 'Fattura segnata come non pagata');
+  apriSchedaFornitore(fornitoreId, fornitoreNome);
+}
+
+async function impostaDataPagFornitore(ordineId, data, fornitoreId, fornitoreNome) {
+  var { error } = await sb.from('ordini').update({ data_pagamento_fornitore: data || null }).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Data pagamento aggiornata');
+  apriSchedaFornitore(fornitoreId, fornitoreNome);
 }
 
 // ── BASI DI CARICO ────────────────────────────────────────────────
