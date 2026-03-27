@@ -366,11 +366,17 @@ async function caricaPrezzi() {
   const filtroData = document.getElementById('filtro-data-prezzi').value;
   let query = sb.from('prezzi').select('*, basi_carico(nome)').order('data',{ascending:false}).order('fornitore');
   if (filtroData) query = query.eq('data', filtroData);
-  const { data } = await query;
+  else query = query.limit(200); // Limite sicurezza se nessun filtro
 
-  // Calcola prezzi PhoenixFuel da costo medio cisterne
-  const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo');
-  const { data: baseDeposito } = await sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle();
+  // Query parallele
+  const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
+    query,
+    sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
+    sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
+  ]);
+  const data = prezziRes.data;
+  const cisterne = cisterneRes.data;
+  const baseDeposito = baseDepRes.data;
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
@@ -3057,7 +3063,9 @@ async function caricaFornitori() {
   let ordFornMap = {};
   if (fornConFido.length) {
     const nomi = fornConFido.map(f => f.nome);
-    const { data: ordTutti } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,litri,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi);
+    var limiteAnno = new Date(); limiteAnno.setFullYear(limiteAnno.getFullYear()-1);
+    var limiteAnnoISO = limiteAnno.toISOString().split('T')[0];
+    const { data: ordTutti } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,litri,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi).gte('data',limiteAnnoISO);
     (ordTutti||[]).forEach(o => {
       if (!ordFornMap[o.fornitore]) ordFornMap[o.fornitore] = [];
       ordFornMap[o.fornitore].push(o);
@@ -3962,7 +3970,7 @@ async function salvaLetture() {
   const data = document.getElementById('stz-data-lettura').value;
   if (!data) { toast('Seleziona una data'); return; }
   const inputs = document.querySelectorAll('.stz-lettura-input');
-  let salvate = 0;
+  var upserts = [], cpOps = [];
   for (const inp of inputs) {
     const val = parseFloat(inp.value);
     if (isNaN(val)) continue;
@@ -3972,30 +3980,36 @@ async function salvaLetture() {
     const inputPD = document.querySelector('.stz-prezzo-div[data-pompa="' + pompaId + '"]');
     const litriPD = inputLD ? parseFloat(inputLD.value) || 0 : 0;
     const prezzoPD = inputPD ? parseFloat(inputPD.value) || 0 : 0;
-    const { error } = await sb.from('stazione_letture').upsert({ pompa_id:pompaId, data, lettura:val, litri_prezzo_diverso:litriPD, prezzo_diverso:prezzoPD }, { onConflict:'pompa_id,data' });
-    if (error) { toast('Errore: ' + error.message); return; }
-    salvate++;
-
-    // Salva cambio prezzo nello storico prezzi pompa
+    upserts.push(sb.from('stazione_letture').upsert({ pompa_id:pompaId, data, lettura:val, litri_prezzo_diverso:litriPD, prezzo_diverso:prezzoPD }, { onConflict:'pompa_id,data' }));
+    // Cambio prezzo nello storico prezzi pompa
     const cpKey = prodotto + ' (cambio prezzo)';
     if (litriPD > 0 && prezzoPD > 0) {
-      await sb.from('stazione_prezzi').upsert({ data, prodotto:cpKey, prezzo_litro:prezzoPD, note:'cambio_prezzo' }, { onConflict:'data,prodotto' });
+      cpOps.push(sb.from('stazione_prezzi').upsert({ data, prodotto:cpKey, prezzo_litro:prezzoPD }, { onConflict:'data,prodotto' }));
     } else {
-      // Rimuovi eventuale cambio prezzo precedente per questo giorno/prodotto
-      await sb.from('stazione_prezzi').delete().eq('data',data).eq('prodotto',cpKey);
+      cpOps.push(sb.from('stazione_prezzi').delete().eq('data',data).eq('prodotto',cpKey));
     }
   }
-  if (salvate === 0) { toast('Inserisci almeno una lettura'); return; }
-  toast(salvate + ' letture salvate!');
+  if (!upserts.length) { toast('Inserisci almeno una lettura'); return; }
+  var results = await Promise.all(upserts);
+  var errore = results.find(r => r.error);
+  if (errore) { toast('Errore: ' + errore.error.message); return; }
+  await Promise.all(cpOps);
+  toast(upserts.length + ' letture salvate!');
   calcolaLettureVendite();
   caricaStoricoLetture();
+  caricaStoricoPrezzi();
 }
 
 async function caricaStoricoLetture() {
-  // Carica tutte le date disponibili e i dati necessari
-  const { data: letture } = await sb.from('stazione_letture').select('*').order('data',{ascending:false});
-  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
-  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false});
+  // Carica solo ultimi 90 giorni per performance
+  var limite = new Date(); limite.setDate(limite.getDate()-90);
+  var limiteISO = limite.toISOString().split('T')[0];
+  const [lettRes, pompeRes, prezziRes] = await Promise.all([
+    sb.from('stazione_letture').select('*').gte('data',limiteISO).order('data',{ascending:false}),
+    sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine'),
+    sb.from('stazione_prezzi').select('*').gte('data',limiteISO).order('data',{ascending:false})
+  ]);
+  const letture = lettRes.data; const pompe = pompeRes.data; const prezzi = prezziRes.data;
 
   if (!letture||!letture.length) {
     document.getElementById('stz-storico-letture').innerHTML='<tr><td colspan="6" class="loading">Nessuna lettura</td></tr>';
@@ -4127,15 +4141,25 @@ function copiaPrezzoCambio(input) {
 // ══════════════════════════════════════════════════════════════
 
 async function caricaMarginalita() {
-  // Carica tutte le date con letture
-  const { data: letture } = await sb.from('stazione_letture').select('*').order('data',{ascending:false});
-  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
-  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false});
-  const { data: costi } = await sb.from('stazione_costi').select('*').order('data',{ascending:false});
-  // CMP corrente dalle cisterne stazione
-  const { data: cisterne } = await sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido');
-  // Storico CMP
-  const { data: cmpStorico } = await sb.from('stazione_cmp_storico').select('*').eq('sede','stazione_oppido').order('created_at',{ascending:false});
+  // Carica ultimi 90 giorni per performance
+  var limDate = new Date(); limDate.setDate(limDate.getDate()-90);
+  var limISO = limDate.toISOString().split('T')[0];
+
+  const [lettRes, pompeRes, prezziRes, costiRes, cisRes, cmpRes] = await Promise.all([
+    sb.from('stazione_letture').select('*').gte('data',limISO).order('data',{ascending:false}),
+    sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine'),
+    sb.from('stazione_prezzi').select('*').gte('data',limISO).order('data',{ascending:false}),
+    sb.from('stazione_costi').select('*').gte('data',limISO).order('data',{ascending:false}),
+    sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido'),
+    sb.from('stazione_cmp_storico').select('*').eq('sede','stazione_oppido').order('created_at',{ascending:false}).limit(20)
+  ]);
+
+  const letture = lettRes.data;
+  const pompe = pompeRes.data;
+  const prezzi = prezziRes.data;
+  const costi = costiRes.data;
+  const cisterne = cisRes.data;
+  const cmpStorico = cmpRes.data;
 
   if (!letture||!letture.length) {
     document.getElementById('marg-pompe-content').innerHTML='<div class="loading">Nessuna lettura disponibile</div>';
@@ -4826,12 +4850,14 @@ async function caricaCassa() {
   if (!input.value) input.value = oggiISO;
   var data = input.value;
 
-  // Carica dati salvati
-  var { data: cassa } = await sb.from('stazione_cassa').select('*').eq('data', data).maybeSingle();
-  var { data: spese } = await sb.from('stazione_spese_contanti').select('*').eq('data', data).order('created_at');
-
-  // Calcola totale vendite da letture
-  var totVendite = await _calcolaTotVenditeDaLetture(data);
+  // Carica dati salvati in parallelo
+  var [cassaRes, speseRes, totVendite] = await Promise.all([
+    sb.from('stazione_cassa').select('*').eq('data', data).maybeSingle(),
+    sb.from('stazione_spese_contanti').select('*').eq('data', data).order('created_at'),
+    _calcolaTotVenditeDaLetture(data)
+  ]);
+  var cassa = cassaRes.data;
+  var spese = speseRes.data;
   document.getElementById('cassa-tot-vendite').textContent = fmtE(totVendite);
 
   // Popola campi
@@ -5016,16 +5042,16 @@ async function salvaCassa() {
   var { error } = await sb.from('stazione_cassa').upsert(record, { onConflict: 'data' });
   if (error) { toast('Errore: ' + error.message); return; }
 
-  // Salva spese contanti
+  // Salva spese contanti (batch)
   await sb.from('stazione_spese_contanti').delete().eq('data', data);
+  var speseInserts = [];
   var righeSpese = document.querySelectorAll('#cassa-spese-lista > div');
   for (var i = 0; i < righeSpese.length; i++) {
     var nota = righeSpese[i].querySelector('.cassa-spesa-nota').value;
     var importo = parseFloat(righeSpese[i].querySelector('.cassa-spesa-importo').value) || 0;
-    if (importo > 0) {
-      await sb.from('stazione_spese_contanti').insert([{ data, nota, importo }]);
-    }
+    if (importo > 0) speseInserts.push({ data, nota, importo });
   }
+  if (speseInserts.length) await sb.from('stazione_spese_contanti').insert(speseInserts);
 
   // Registro crediti giornaliero: un solo record per giorno
   // Saldo = crediti emessi - rimborsi - rimborsi gg precedenti
@@ -6378,13 +6404,15 @@ async function caricaDashboard() {
   try {
     const ieri = new Date(oggi); ieri.setDate(ieri.getDate()-1);
     const ieriISO = ieri.toISOString().split('T')[0];
-    const [lettOggiRes, lettIeriRes, prezziOggiRes, lettMeseRes] = await Promise.all([
+    const [lettOggiRes, lettIeriRes, prezziOggiRes, lettMeseRes, pompeRes, prezziMeseRes] = await Promise.all([
       sb.from('stazione_letture').select('pompa_id,lettura').eq('data', oggiISO),
       sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieriISO),
       sb.from('stazione_prezzi').select('prodotto,prezzo_litro').eq('data', oggiISO),
-      sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', oggiISO.substring(0,8)+'01').lte('data', oggiISO).order('data')
+      sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', oggiISO.substring(0,8)+'01').lte('data', oggiISO).order('data'),
+      sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true),
+      sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', oggiISO.substring(0,8)+'01').lte('data', oggiISO)
     ]);
-    const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
+    const pompe = pompeRes.data;
     const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
     const prezziMap = {}; (prezziOggiRes.data||[]).forEach(p => { prezziMap[p.prodotto] = Number(p.prezzo_litro); });
     const lettIeriMap = {}; (lettIeriRes.data||[]).forEach(l => { lettIeriMap[l.pompa_id] = Number(l.lettura); });
@@ -6405,10 +6433,8 @@ async function caricaDashboard() {
     const lettPerData = {};
     (lettMeseRes.data||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
     const dateOrd = Object.keys(lettPerData).sort();
-    // Carica TUTTI i prezzi del mese in UNA query
-    const { data: prezziMese } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', oggiISO.substring(0,8)+'01').lte('data', oggiISO);
     const prezziMeseMap = {};
-    (prezziMese||[]).forEach(p => { prezziMeseMap[p.data+'_'+p.prodotto] = Number(p.prezzo_litro); });
+    (prezziMeseRes.data||[]).forEach(p => { prezziMeseMap[p.data+'_'+p.prodotto] = Number(p.prezzo_litro); });
 
     let meseIncasso = 0;
     for (let i = 1; i < dateOrd.length; i++) {
