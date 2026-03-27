@@ -3447,14 +3447,18 @@ async function caricaFormLetture() {
     html += '</div>';
     // Risultati calcolati per questa pompa — dettaglio suddivisione
     html += '<div id="stz-calc-' + p.id + '" style="padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px;font-size:12px"></div>';
-    // Prezzo standard + prezzo diverso su una riga
-    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+    // Prezzo standard
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
     html += '<span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Prezzo pompa:</span>';
     html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '<span style="color:#E24B4A">non impostato</span>') + '</span>';
-    html += '<span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap">Litri cambio prezzo:</span>';
-    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" value="' + (litriDivSaved || '') + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
-    html += '<span style="font-size:10px;color:var(--text-muted)">€/L:</span>';
-    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" value="' + (prezzoDivSaved || '') + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
+    html += '</div>';
+    // Cambio prezzo — riga dedicata più grande
+    html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#FFF8E1;border:0.5px solid #F0D080;border-radius:8px">';
+    html += '<span style="font-size:12px;color:#8B6914;font-weight:600;white-space:nowrap">⚡ Cambio prezzo:</span>';
+    html += '<span style="font-size:12px;color:#8B6914">Litri</span>';
+    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" value="' + (litriDivSaved || '') + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:120px;text-align:right" />';
+    html += '<span style="font-size:12px;color:#8B6914">€/L</span>';
+    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" value="' + (prezzoDivSaved || '') + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:120px;text-align:right" />';
     html += '</div>';
     html += '</div>';
   });
@@ -3498,7 +3502,7 @@ function calcolaLettureVendite() {
       if (litriDiv > 0 && prezzoDiv > 0) {
         calcHtml += '<div style="font-size:11px;color:var(--text-muted);padding-top:4px;border-top:0.5px dashed var(--border)">';
         calcHtml += '<div>↳ ' + litriStd.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoStd.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroStd.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong></div>';
-        calcHtml += '<div style="color:#BA7517">↳ ' + litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoDiv.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroDiv.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong> <span style="font-size:9px;background:#FFF3E0;color:#BA7517;padding:1px 5px;border-radius:4px">cambio prezzo</span></div>';
+        calcHtml += '<div style="color:#1a1a18">↳ ' + litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoDiv.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroDiv.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong> <span style="font-size:9px;background:#1a1a18;color:#fff;padding:1px 5px;border-radius:4px">cambio prezzo</span></div>';
         calcHtml += '</div>';
       }
       elCalc.innerHTML = calcHtml;
@@ -3527,8 +3531,8 @@ function calcolaLettureVendite() {
     el.innerHTML =
       '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:14px;font-weight:600">Totali live</div>' +
       '<div style="margin-bottom:14px">' +
-        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#E8A030">GASOLIO</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#E8A030">' + litriGasolio.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#fff">GASOLIO</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#fff">' + litriGasolio.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#7CFC00">€ ' + euroGasolio.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>' +
       '</div>' +
       '<div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:14px">' +
@@ -3581,11 +3585,11 @@ function stampaReportLetture() {
       '</tr>';
     // Riga aggiuntiva per prezzo diverso
     if (litriDiv > 0 && prezzoDiv > 0) {
-      righe += '<tr style="background:#FFF8E1;font-size:10px">' +
-        '<td style="padding:4px 8px;border:1px solid #ddd;color:#BA7517" colspan="3">↳ di cui a prezzo diverso</td>' +
-        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#BA7517">' + _sep(litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</td>' +
-        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#BA7517">€ ' + prezzoDiv.toFixed(3) + '</td>' +
-        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#BA7517">€ ' + _sep((litriDiv * prezzoDiv).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</td>' +
+      righe += '<tr style="background:#f0f0f0;font-size:10px">' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;color:#333" colspan="3">↳ di cui a cambio prezzo</td>' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#333">' + _sep(litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</td>' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#333">€ ' + prezzoDiv.toFixed(3) + '</td>' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#333;font-weight:bold">€ ' + _sep((litriDiv * prezzoDiv).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</td>' +
         '</tr>';
     }
   });
@@ -3633,7 +3637,7 @@ async function salvaLetture() {
     const val = parseFloat(inp.value);
     if (isNaN(val)) continue;
     const pompaId = inp.dataset.pompa;
-    // Litri e prezzo diverso
+    const prodotto = inp.dataset.prodotto;
     const inputLD = document.querySelector('.stz-litri-div[data-pompa="' + pompaId + '"]');
     const inputPD = document.querySelector('.stz-prezzo-div[data-pompa="' + pompaId + '"]');
     const litriPD = inputLD ? parseFloat(inputLD.value) || 0 : 0;
@@ -3641,6 +3645,15 @@ async function salvaLetture() {
     const { error } = await sb.from('stazione_letture').upsert({ pompa_id:pompaId, data, lettura:val, litri_prezzo_diverso:litriPD, prezzo_diverso:prezzoPD }, { onConflict:'pompa_id,data' });
     if (error) { toast('Errore: ' + error.message); return; }
     salvate++;
+
+    // Salva cambio prezzo nello storico prezzi pompa
+    const cpKey = prodotto + ' (cambio prezzo)';
+    if (litriPD > 0 && prezzoPD > 0) {
+      await sb.from('stazione_prezzi').upsert({ data, prodotto:cpKey, prezzo_litro:prezzoPD, note:'cambio_prezzo' }, { onConflict:'data,prodotto' });
+    } else {
+      // Rimuovi eventuale cambio prezzo precedente per questo giorno/prodotto
+      await sb.from('stazione_prezzi').delete().eq('data',data).eq('prodotto',cpKey);
+    }
   }
   if (salvate === 0) { toast('Inserisci almeno una lettura'); return; }
   toast(salvate + ' letture salvate!');
@@ -3741,11 +3754,11 @@ function renderStoricoGiorno(idx) {
 
     // Sotto-riga cambio prezzo
     if (hasCambio && litri !== null) {
-      html += '<tr style="background:#FFF8E1;font-size:10px">' +
-        '<td style="padding:3px 8px;color:#BA7517" colspan="3">↳ di cui ' + fmtL(litriStd) + ' L × € ' + prezzo.toFixed(3) + ' = ' + fmtE(euroStd) + '</td>' +
-        '<td style="padding:3px 8px;color:#BA7517;font-family:var(--font-mono)">' + fmtL(litriPD) + '</td>' +
-        '<td style="padding:3px 8px;color:#BA7517;font-family:var(--font-mono)">€ ' + prezzoPD.toFixed(3) + '</td>' +
-        '<td style="padding:3px 8px;color:#BA7517;font-family:var(--font-mono);font-weight:bold">' + fmtE(euroDiv) + ' <span style="font-size:8px;background:#FFF3E0;padding:1px 4px;border-radius:3px">cambio</span></td>' +
+      html += '<tr style="background:#f5f5f0;font-size:10px">' +
+        '<td style="padding:3px 8px;color:#1a1a18" colspan="3">↳ di cui ' + fmtL(litriStd) + ' L × € ' + prezzo.toFixed(3) + ' = ' + fmtE(euroStd) + '</td>' +
+        '<td style="padding:3px 8px;color:#1a1a18;font-family:var(--font-mono)">' + fmtL(litriPD) + '</td>' +
+        '<td style="padding:3px 8px;color:#1a1a18;font-family:var(--font-mono)">€ ' + prezzoPD.toFixed(3) + '</td>' +
+        '<td style="padding:3px 8px;color:#1a1a18;font-family:var(--font-mono);font-weight:bold">' + fmtE(euroDiv) + ' <span style="font-size:8px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio prezzo</span></td>' +
         '</tr>';
     }
   });
@@ -3796,17 +3809,23 @@ async function salvaPrezziPompa() {
 }
 
 async function caricaStoricoPrezzi() {
-  const { data } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false}).limit(30);
+  const { data } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false}).limit(50);
   const tbody = document.getElementById('stz-storico-prezzi');
   if (!data||!data.length) { tbody.innerHTML='<tr><td colspan="4" class="loading">Nessun prezzo</td></tr>'; return; }
-  // Raggruppa per data
   const perData = {};
   data.forEach(r => { if(!perData[r.data]) perData[r.data]={}; perData[r.data][r.prodotto]=r; });
-  tbody.innerHTML = Object.entries(perData).sort((a,b)=>b[0].localeCompare(a[0])).map(([data,prodotti]) => {
+  var html = '';
+  Object.entries(perData).sort((a,b)=>b[0].localeCompare(a[0])).forEach(([data,prodotti]) => {
     const g = prodotti['Gasolio Autotrazione'];
     const b = prodotti['Benzina'];
-    return '<tr><td>' + data + '</td><td style="font-family:var(--font-mono)">' + (g?'€ '+Number(g.prezzo_litro).toFixed(3):'—') + '</td><td style="font-family:var(--font-mono)">' + (b?'€ '+Number(b.prezzo_litro).toFixed(3):'—') + '</td><td><button class="btn-danger" onclick="eliminaPrezziPompa(\''+data+'\')">x</button></td></tr>';
-  }).join('');
+    const cpG = prodotti['Gasolio Autotrazione (cambio prezzo)'];
+    const cpB = prodotti['Benzina (cambio prezzo)'];
+    html += '<tr><td>' + data + '</td><td style="font-family:var(--font-mono)">' + (g?'€ '+Number(g.prezzo_litro).toFixed(3):'—') + '</td><td style="font-family:var(--font-mono)">' + (b?'€ '+Number(b.prezzo_litro).toFixed(3):'—') + '</td><td><button class="btn-danger" onclick="eliminaPrezziPompa(\''+data+'\')">x</button></td></tr>';
+    if (cpG || cpB) {
+      html += '<tr style="background:#f5f5f0;font-size:10px"><td style="padding:3px 8px"><span style="background:#1a1a18;color:#fff;padding:1px 5px;border-radius:4px;font-size:8px">cambio prezzo</span></td><td style="padding:3px 8px;font-family:var(--font-mono);color:#1a1a18">' + (cpG ? '€ '+Number(cpG.prezzo_litro).toFixed(3) : '') + '</td><td style="padding:3px 8px;font-family:var(--font-mono);color:#1a1a18">' + (cpB ? '€ '+Number(cpB.prezzo_litro).toFixed(3) : '') + '</td><td></td></tr>';
+    }
+  });
+  tbody.innerHTML = html;
 }
 
 async function eliminaPrezziPompa(data) {
