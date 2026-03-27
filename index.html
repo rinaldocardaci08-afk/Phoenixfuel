@@ -839,7 +839,7 @@
         <!-- REPORT -->
         <div class="stz-panel" id="stz-report" style="display:none">
           <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Report stazione</div>
+            <div class="card-title">Report stazione — Periodo personalizzato</div>
             <div class="form-grid">
               <div class="form-group"><label>Da</label><input type="date" id="stz-report-da" /></div>
               <div class="form-group"><label>A</label><input type="date" id="stz-report-a" /></div>
@@ -849,6 +849,23 @@
               <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportAcquistiStazione()">🖨️ Report acquisti</button>
             </div>
             <div id="stz-report-content" style="margin-top:16px"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Report mensile contatori pompe</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Anno</label>
+                <select id="stz-rep-anno" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
+              </div>
+              <div class="form-group"><label>Mese</label>
+                <select id="stz-rep-mese" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                  <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option>
+                  <option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                  <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
+                  <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn-primary" style="margin-top:8px;background:#6B5FCC" onclick="stampaReportMensileContatori()">🖨️ Report mensile contatori</button>
           </div>
         </div>
       </div>
