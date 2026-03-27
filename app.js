@@ -4788,6 +4788,11 @@ async function caricaCassa() {
   var { data: cassa } = await sb.from('stazione_cassa').select('*').eq('data', data).maybeSingle();
   var { data: spese } = await sb.from('stazione_spese_contanti').select('*').eq('data', data).order('created_at');
 
+  // Calcola saldo crediti sospesi dal registro
+  var { data: credAperti } = await sb.from('stazione_crediti').select('importo').eq('stato','sospeso');
+  var saldoCrediti = (credAperti||[]).reduce(function(s,c){ return s + Number(c.importo); }, 0);
+  window._cassaSaldoCrediti = saldoCrediti;
+
   // Calcola totale vendite da letture
   var totVendite = await _calcolaTotVenditeDaLetture(data);
   document.getElementById('cassa-tot-vendite').textContent = fmtE(totVendite);
@@ -4800,7 +4805,7 @@ async function caricaCassa() {
   document.getElementById('cassa-crediti-emessi').value = cassa ? cassa.crediti_emessi || '' : '';
   document.getElementById('cassa-rimborsi').value = cassa ? cassa.rimborsi_effettuati || '' : '';
   document.getElementById('cassa-rimborsi-prec').value = cassa ? cassa.rimborsi_giorni_prec || '' : '';
-  document.getElementById('cassa-crediti-sospesi').value = cassa ? cassa.crediti_da_rimborsare || '' : '';
+  document.getElementById('cassa-crediti-sospesi').textContent = fmtE(saldoCrediti);
   document.getElementById('cassa-versato').value = cassa ? cassa.versato || '' : '';
 
   // Popola spese contanti
@@ -4878,7 +4883,7 @@ function calcolaCassa() {
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
-  var creditiSospesi = parseFloat(document.getElementById('cassa-crediti-sospesi').value) || 0;
+  var creditiSospesi = window._cassaSaldoCrediti || 0;
   var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
 
   // Somma spese contanti
@@ -4935,7 +4940,7 @@ async function salvaCassa() {
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
-  var creditiSospesi = parseFloat(document.getElementById('cassa-crediti-sospesi').value) || 0;
+  var creditiSospesi = window._cassaSaldoCrediti || 0;
   var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
 
   var totSpese = 0;
@@ -4989,6 +4994,11 @@ async function salvaCassa() {
   }
 
   toast('Registro cassa salvato!');
+  // Ricalcola saldo crediti sospesi
+  var { data: credAgg } = await sb.from('stazione_crediti').select('importo').eq('stato','sospeso');
+  window._cassaSaldoCrediti = (credAgg||[]).reduce(function(s,c){ return s + Number(c.importo); }, 0);
+  document.getElementById('cassa-crediti-sospesi').textContent = fmtE(window._cassaSaldoCrediti);
+  calcolaCassa();
   caricaCrediti();
 }
 
@@ -5045,6 +5055,12 @@ async function rimborsaCredito(id) {
   var { error } = await sb.from('stazione_crediti').update({ stato: 'rimborsato', data_rimborso: oggiISO }).eq('id', id);
   if (error) { toast('Errore: ' + error.message); return; }
   toast('Credito rimborsato!');
+  // Ricalcola saldo
+  var { data: credAgg } = await sb.from('stazione_crediti').select('importo').eq('stato','sospeso');
+  window._cassaSaldoCrediti = (credAgg||[]).reduce(function(s,c){ return s + Number(c.importo); }, 0);
+  var elSaldo = document.getElementById('cassa-crediti-sospesi');
+  if (elSaldo) elSaldo.textContent = fmtE(window._cassaSaldoCrediti);
+  calcolaCassa();
   caricaCrediti();
 }
 
@@ -5060,7 +5076,7 @@ async function stampaCassa() {
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
-  var creditiSospesi = parseFloat(document.getElementById('cassa-crediti-sospesi').value) || 0;
+  var creditiSospesi = window._cassaSaldoCrediti || 0;
   var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
   var totSpese = 0;
   var speseHtml = '';
