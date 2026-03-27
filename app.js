@@ -4044,6 +4044,13 @@ async function salvaLetture() {
   calcolaLettureVendite();
   caricaStoricoLetture();
   caricaStoricoPrezzi();
+
+  // Chiedi se vuole andare al giorno successivo
+  var domaniNav = new Date(new Date(data).getTime() + 86400000).toISOString().split('T')[0];
+  if (confirm('Letture salvate! Prezzi preparati per il ' + domaniNav + '.\nVuoi andare al giorno ' + domaniNav + '?')) {
+    document.getElementById('stz-data-lettura').value = domaniNav;
+    caricaFormLetture();
+  }
 }
 
 async function caricaStoricoLetture() {
@@ -4563,6 +4570,15 @@ async function salvaCostiMarg() {
   } catch(e) { console.warn('Auto costi domani:', e); }
 
   renderStoricoMarg();
+
+  // Chiedi se vuole andare al giorno successivo
+  if (dataCorr) {
+    var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
+    if (confirm('Costi salvati! Dati preparati per il ' + domani + '.\nVuoi andare al giorno ' + domani + '?')) {
+      // Ricarica marginalità con i nuovi dati e naviga al giorno più recente
+      await caricaMarginalita();
+    }
+  }
 }
 
 // ── Prezzi pompa ──
@@ -5262,25 +5278,18 @@ async function stampaCassa() {
 }
 
 function initReportStazione() {
-  const oggi = new Date();
-  document.getElementById('stz-report-da').value = oggi.toISOString().substring(0,8) + '01';
-  document.getElementById('stz-report-a').value = oggiISO;
-  var annoCorr = oggi.getFullYear();
-  var meseCorr = String(oggi.getMonth()+1).padStart(2,'0');
-  // Popola anno contatori
-  var selAnno = document.getElementById('stz-rep-anno');
-  if (selAnno && selAnno.options.length === 0) {
-    for (var y = annoCorr; y >= annoCorr - 5; y--) selAnno.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
-  }
-  var selMese = document.getElementById('stz-rep-mese');
-  if (selMese) selMese.value = meseCorr;
-  // Popola anno/mese cassa
-  var selAnnoCassa = document.getElementById('stz-rep-cassa-anno');
-  if (selAnnoCassa && selAnnoCassa.options.length === 0) {
-    for (var y2 = annoCorr; y2 >= annoCorr - 5; y2--) selAnnoCassa.innerHTML += '<option value="' + y2 + '"' + (y2===annoCorr?' selected':'') + '>' + y2 + '</option>';
-  }
-  var selMeseCassa = document.getElementById('stz-rep-cassa-mese');
-  if (selMeseCassa) selMeseCassa.value = meseCorr;
+  var annoCorr = new Date().getFullYear();
+  var meseCorr = String(new Date().getMonth()+1).padStart(2,'0');
+  ['stz-rep-anno','stz-rep-cassa-anno','stz-rep-vend-anno'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    if (sel && sel.options.length === 0) {
+      for (var y = annoCorr; y >= annoCorr - 5; y--) sel.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
+    }
+  });
+  ['stz-rep-mese','stz-rep-cassa-mese','stz-rep-vend-mese'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    if (sel) sel.value = meseCorr;
+  });
 }
 
 async function _caricaDatiCassaMese(anno, mese) {
@@ -5607,78 +5616,120 @@ async function stampaReportMensileContatori() {
   w.document.close();
 }
 
-async function generaReportStazione() {
-  const da = document.getElementById('stz-report-da').value;
-  const a = document.getElementById('stz-report-a').value;
-  if (!da || !a) { toast('Seleziona le date'); return; }
-
-  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
-  const pompeIds = (pompe||[]).map(p=>p.id);
-  const { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',da).lte('data',a).order('data');
-  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').gte('data',da).lte('data',a);
-  const { data: versamenti } = await sb.from('stazione_versamenti').select('*').gte('data',da).lte('data',a);
-  const { data: costiDb } = await sb.from('stazione_costi').select('*').gte('data',da).lte('data',a);
-  const giornoPre = new Date(new Date(da).getTime()-86400000).toISOString().split('T')[0];
-  const { data: lettPre } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false});
-
-  const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
-  const costiMap = {}; (costiDb||[]).forEach(c=>{ costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro); });
-  const tutteLetture = [...(lettPre||[]), ...(letture||[])];
-  let totGasolio=0, totBenzina=0, totIncasso=0, totCosto=0, totMargine=0;
-
-  const dateUniche = [...new Set((letture||[]).map(l=>l.data))].sort();
-  let righeHtml = '';
-  dateUniche.forEach(data => {
-    let gG=0, gB=0, inc=0, costoG=0;
-    (pompe||[]).forEach(pompa => {
-      const lettOggi = tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===data);
-      const datePrecedenti = tutteLetture.filter(l=>l.pompa_id===pompa.id && l.data<data).map(l=>l.data).sort();
-      const dataPrec = datePrecedenti.length ? datePrecedenti[datePrecedenti.length-1] : null;
-      const lettIeri = dataPrec ? tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===dataPrec) : null;
-      if (lettOggi && lettIeri) {
-        const litri = Number(lettOggi.lettura) - Number(lettIeri.lettura);
-        if (litri > 0) {
-          const prezzo = Number(prezziMap[data+'_'+pompa.prodotto]||0);
-          const costo = costiMap[data+'_'+pompa.prodotto] || 0;
-          const litriPD = Number(lettOggi.litri_prezzo_diverso||0);
-          const prezzoPD = Number(lettOggi.prezzo_diverso||0);
-          const hasCambio = litriPD > 0 && prezzoPD > 0;
-          const litriStd = hasCambio ? Math.max(0, litri - litriPD) : litri;
-          if (pompa.prodotto==='Gasolio Autotrazione') gG+=litri; else gB+=litri;
-          inc += (litriStd*prezzo) + (hasCambio ? litriPD*prezzoPD : 0);
-          costoG += litri * costo;
+async function _caricaDatiVenditeMese(anno, mese) {
+  var da = anno + '-' + mese + '-01';
+  var ultimoGiorno = new Date(Number(anno), Number(mese), 0).getDate();
+  var a = anno + '-' + mese + '-' + String(ultimoGiorno).padStart(2,'0');
+  var { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  var pompeIds = (pompe||[]).map(function(p){return p.id;});
+  if (!pompeIds.length) return { righe:[], totali:{} };
+  var giornoPre = new Date(new Date(da).getTime()-86400000).toISOString().split('T')[0];
+  var [lettRes, prezRes, costiRes, lettPreRes] = await Promise.all([
+    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',da).lte('data',a).order('data'),
+    sb.from('stazione_prezzi').select('*').gte('data',da).lte('data',a),
+    sb.from('stazione_costi').select('*').gte('data',da).lte('data',a),
+    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false}).limit(pompeIds.length)
+  ]);
+  var letture=lettRes.data||[], prezzi=prezRes.data||[], costiDb=costiRes.data||[], lettPre=lettPreRes.data||[];
+  var prezziMap={}; prezzi.forEach(function(p){prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro;});
+  var costiMap={}; costiDb.forEach(function(c){costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro);});
+  var tutteLetture=[...lettPre,...letture];
+  var dateUniche=[...new Set(letture.map(function(l){return l.data;}))].sort();
+  var righe=[], totV={gasolio:0,benzina:0,incasso:0,costo:0,margine:0};
+  dateUniche.forEach(function(data){
+    var gG=0,gB=0,inc=0,costoG=0;
+    pompe.forEach(function(pompa){
+      var lettOggi=tutteLetture.find(function(l){return l.pompa_id===pompa.id&&l.data===data;});
+      var dp=tutteLetture.filter(function(l){return l.pompa_id===pompa.id&&l.data<data;}).map(function(l){return l.data;}).sort();
+      var dPrec=dp.length?dp[dp.length-1]:null;
+      var lettIeri=dPrec?tutteLetture.find(function(l){return l.pompa_id===pompa.id&&l.data===dPrec;}):null;
+      if(lettOggi&&lettIeri){
+        var litri=Number(lettOggi.lettura)-Number(lettIeri.lettura);
+        if(litri>0){
+          var prezzo=Number(prezziMap[data+'_'+pompa.prodotto]||0);
+          var costo=costiMap[data+'_'+pompa.prodotto]||0;
+          var litriPD=Number(lettOggi.litri_prezzo_diverso||0);
+          var prezzoPD=Number(lettOggi.prezzo_diverso||0);
+          var hasCambio=litriPD>0&&prezzoPD>0;
+          var litriStd=hasCambio?Math.max(0,litri-litriPD):litri;
+          if(pompa.prodotto==='Gasolio Autotrazione') gG+=litri; else gB+=litri;
+          inc+=(litriStd*prezzo)+(hasCambio?litriPD*prezzoPD:0);
+          costoG+=litri*costo;
         }
       }
     });
-    const marg = inc - costoG;
-    totGasolio+=gG; totBenzina+=gB; totIncasso+=inc; totCosto+=costoG; totMargine+=marg;
-    const hasCosti = costoG > 0;
-    const margColor = marg >= 0 ? '#639922' : '#E24B4A';
-    righeHtml += '<tr><td>'+data+'</td><td style="font-family:var(--font-mono)">'+fmtL(gG)+'</td><td style="font-family:var(--font-mono)">'+fmtL(gB)+'</td><td style="font-family:var(--font-mono);font-weight:bold">'+fmtL(gG+gB)+'</td><td style="font-family:var(--font-mono)">'+fmtE(inc)+'</td><td style="font-family:var(--font-mono)">'+(hasCosti?fmtE(costoG):'<span style="color:var(--text-muted)">—</span>')+'</td><td style="font-family:var(--font-mono);font-weight:bold;color:'+(hasCosti?margColor:'var(--text-muted)')+'">'+(hasCosti?fmtE(marg):'—')+'</td></tr>';
+    var marg=inc-costoG;
+    totV.gasolio+=gG;totV.benzina+=gB;totV.incasso+=inc;totV.costo+=costoG;totV.margine+=marg;
+    righe.push({data:data,gasolio:gG,benzina:gB,totale:gG+gB,incasso:inc,costo:costoG,margine:marg});
   });
-  // Riga totale
-  const tmColor = totMargine >= 0 ? '#639922' : '#E24B4A';
-  righeHtml += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td style="font-family:var(--font-mono)">'+fmtL(totGasolio)+'</td><td style="font-family:var(--font-mono)">'+fmtL(totBenzina)+'</td><td style="font-family:var(--font-mono)">'+fmtL(totGasolio+totBenzina)+'</td><td style="font-family:var(--font-mono)">'+fmtE(totIncasso)+'</td><td style="font-family:var(--font-mono)">'+(totCosto>0?fmtE(totCosto):'—')+'</td><td style="font-family:var(--font-mono);color:'+tmColor+'">'+(totCosto>0?fmtE(totMargine):'—')+'</td></tr>';
-
-  const totCash = (versamenti||[]).reduce((s,v)=>s+Number(v.contanti||0),0);
-  const totPosV = (versamenti||[]).reduce((s,v)=>s+Number(v.pos||0),0);
-  const margMedioL = (totGasolio+totBenzina) > 0 && totCosto > 0 ? totMargine / (totGasolio+totBenzina) : 0;
-
-  let html = '<div class="grid4" style="margin-bottom:12px">';
-  html += '<div class="kpi"><div class="kpi-label">Gasolio</div><div class="kpi-value">' + fmtL(totGasolio) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Benzina</div><div class="kpi-value">' + fmtL(totBenzina) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Incasso totale</div><div class="kpi-value">' + fmtE(totIncasso) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Versamenti</div><div class="kpi-value">' + fmtE(totCash+totPosV) + '</div></div>';
-  html += '</div>';
-  html += '<div class="grid4" style="margin-bottom:12px">';
-  html += '<div class="kpi"><div class="kpi-label">Contanti</div><div class="kpi-value">' + fmtE(totCash) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">POS</div><div class="kpi-value">' + fmtE(totPosV) + '</div></div>';
-  html += '<div class="kpi" style="' + (totCosto > 0 ? 'background:#EAF3DE;border-color:#639922' : '') + '"><div class="kpi-label" style="' + (totCosto > 0 ? 'color:#27500A' : '') + '">Margine totale</div><div class="kpi-value" style="color:' + (totCosto > 0 ? tmColor : 'var(--text-muted)') + '">' + (totCosto > 0 ? fmtE(totMargine) : '—') + '</div></div>';
-  html += '<div class="kpi" style="' + (totCosto > 0 ? 'background:#EAF3DE;border-color:#639922' : '') + '"><div class="kpi-label" style="' + (totCosto > 0 ? 'color:#27500A' : '') + '">Margine medio/L</div><div class="kpi-value" style="color:' + (totCosto > 0 ? tmColor : 'var(--text-muted)') + '">' + (totCosto > 0 ? '€ ' + margMedioL.toFixed(4) : '—') + '</div></div>';
-  html += '</div>';
-  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Costo €</th><th>Margine €</th></tr></thead><tbody>' + righeHtml + '</tbody></table></div>';
-  document.getElementById('stz-report-content').innerHTML = html;
+  return {righe:righe,totali:totV};
 }
+
+async function stampaReportVenditeStazione() {
+  var anno=document.getElementById('stz-rep-vend-anno').value;
+  var mese=document.getElementById('stz-rep-vend-mese').value;
+  if(!anno||!mese){toast('Seleziona anno e mese');return;}
+  var meseNome=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1];
+  toast('Generazione report vendite...');
+  var r=await _caricaDatiVenditeMese(anno,mese);
+  var righe=r.righe,t=r.totali;
+
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Vendite '+meseNome+' '+anno+'</title>'+
+    '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:8mm;color:#1a1a18}'+
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}}'+
+    'table{width:100%;border-collapse:collapse}'+
+    'th{background:#6B5FCC;color:#fff;padding:5px 4px;font-size:8px;text-transform:uppercase;border:1px solid #5A4FBB;text-align:right}'+
+    'th:first-child{text-align:left}'+
+    'td{padding:4px 5px;border:1px solid #ddd;font-size:9px;text-align:right;font-family:Courier New,monospace}'+
+    'td:first-child{text-align:left;font-family:Arial;font-weight:500}'+
+    '.tot{background:#f0f0f0;font-weight:bold}.tot td{border-top:2px solid #6B5FCC}'+
+    '.alt{background:#fafaf8}'+
+    '</style></head><body>';
+
+  html+='<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:10px">';
+  html+='<div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">REPORT VENDITE — STAZIONE OPPIDO</div>';
+  html+='<div style="font-size:12px;color:#666;margin-top:2px">'+meseNome+' '+anno+'</div></div>';
+  html+='<div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div>';
+  html+='<div style="font-size:8px;color:#666">Generato il '+new Date().toLocaleDateString('it-IT')+'</div></div></div>';
+
+  html+='<table><thead><tr><th style="text-align:left;width:50px">Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Costo €</th><th>Margine €</th></tr></thead><tbody>';
+  righe.forEach(function(r,i){
+    var mc=r.margine>=0?'#639922':'#E24B4A';
+    html+='<tr'+(i%2?' class="alt"':'')+'><td>'+r.data.substring(8)+'/'+r.data.substring(5,7)+'</td><td>'+fmtL(r.gasolio)+'</td><td>'+fmtL(r.benzina)+'</td><td style="font-weight:bold">'+fmtL(r.totale)+'</td><td>'+fmtE(r.incasso)+'</td><td>'+(r.costo>0?fmtE(r.costo):'—')+'</td><td style="font-weight:bold;color:'+mc+'">'+(r.costo>0?fmtE(r.margine):'—')+'</td></tr>';
+  });
+  var tmc=t.margine>=0?'#639922':'#E24B4A';
+  html+='<tr class="tot"><td>TOTALE</td><td>'+fmtL(t.gasolio)+'</td><td>'+fmtL(t.benzina)+'</td><td>'+fmtL(t.gasolio+t.benzina)+'</td><td>'+fmtE(t.incasso)+'</td><td>'+(t.costo>0?fmtE(t.costo):'—')+'</td><td style="color:'+tmc+'">'+(t.costo>0?fmtE(t.margine):'—')+'</td></tr>';
+  html+='</tbody></table>';
+
+  if(!righe.length) html+='<div style="text-align:center;padding:20px;color:#888">Nessun dato vendite</div>';
+  html+='<div style="text-align:center;font-size:8px;color:#aaa;margin-top:10px;border-top:1px solid #ddd;padding-top:5px">PhoenixFuel Srl — Report vendite '+meseNome+' '+anno+'</div>';
+  html+='<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
+  var w=window.open('','_blank');w.document.write(html);w.document.close();
+}
+
+async function esportaVenditeExcel() {
+  var anno=document.getElementById('stz-rep-vend-anno').value;
+  var mese=document.getElementById('stz-rep-vend-mese').value;
+  if(!anno||!mese){toast('Seleziona anno e mese');return;}
+  var meseNome=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1];
+  toast('Generazione Excel vendite...');
+  var r=await _caricaDatiVenditeMese(anno,mese);
+  if(typeof XLSX==='undefined'){toast('Libreria Excel non caricata');return;}
+  var header=['Data','Gasolio (L)','Benzina (L)','Totale (L)','Incasso €','Costo €','Margine €'];
+  var rows=[header];
+  r.righe.forEach(function(v){rows.push([v.data,v.gasolio,v.benzina,v.totale,Math.round(v.incasso*100)/100,Math.round(v.costo*100)/100,Math.round(v.margine*100)/100]);});
+  var t=r.totali;
+  rows.push(['TOTALE',t.gasolio,t.benzina,t.gasolio+t.benzina,Math.round(t.incasso*100)/100,Math.round(t.costo*100)/100,Math.round(t.margine*100)/100]);
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:12},{wch:12},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14}];
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Vendite '+meseNome);
+  XLSX.writeFile(wb,'ReportVendite_'+meseNome+'_'+anno+'.xlsx');
+  toast('Excel vendite generato!');
+}
+
+// Backward compatibility - old function
+async function generaReportStazione() { stampaReportVenditeStazione(); }
 
 // ── LOGISTICA ─────────────────────────────────────────────────────
 async function caricaLogistica() {
