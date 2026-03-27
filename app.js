@@ -3450,7 +3450,7 @@ async function caricaFormLetture() {
     // Prezzo standard
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
     html += '<span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Prezzo pompa:</span>';
-    html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '<span style="color:#E24B4A">non impostato</span>') + '</span>';
+    html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#1a1a18">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '<span style="color:#E24B4A">non impostato</span>') + '</span>';
     html += '</div>';
     // Cambio prezzo — riga dedicata più grande
     html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#FFF8E1;border:0.5px solid #F0D080;border-radius:8px">';
@@ -3498,7 +3498,7 @@ function calcolaLettureVendite() {
       const euroDiv = litriDiv * prezzoDiv;
       const euro = euroStd + euroDiv;
 
-      var calcHtml = '<div style="display:flex;gap:16px;font-size:13px;margin-bottom:4px"><span style="color:var(--text-muted)">Litri totali: <strong style="font-family:var(--font-mono)">' + (litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo') + '</strong></span><span style="color:' + colore + '">Venduto: <strong style="font-family:var(--font-mono)">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></span></div>';
+      var calcHtml = '<div style="display:flex;gap:16px;font-size:13px;margin-bottom:4px"><span style="color:var(--text-muted)">Litri totali: <strong style="font-family:var(--font-mono)">' + (litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo') + '</strong></span><span style="color:#1a1a18">Venduto: <strong style="font-family:var(--font-mono);color:#639922">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></span></div>';
       if (litriDiv > 0 && prezzoDiv > 0) {
         calcHtml += '<div style="font-size:11px;color:var(--text-muted);padding-top:4px;border-top:0.5px dashed var(--border)">';
         calcHtml += '<div>↳ ' + litriStd.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoStd.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroStd.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong></div>';
@@ -3870,7 +3870,7 @@ function renderMargGiorno(idx) {
     // Riga litri standard
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
     html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriStd) + '</div></div>';
-    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '—') + '</div></div>';
+    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#1a1a18">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '—') + '</div></div>';
     html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo €/L</div><input type="number" class="marg-costo" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriStd + '" data-prezzo="' + prezzo + '" value="' + (costoSaved || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
     html += '<div id="marg-res-' + l.pompa_id + '"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
     html += '</div>';
