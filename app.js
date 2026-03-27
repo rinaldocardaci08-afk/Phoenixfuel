@@ -3071,7 +3071,7 @@ async function caricaFornitori() {
       residuo = fidoMax - usato;
     }
     const basi=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.basi_carico?.nome).filter(Boolean).join(', '):'—';
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + String(r.nome||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }).join('');
 }
 
@@ -3091,22 +3091,30 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
   // Ordini di acquisto da questo fornitore
   const { data: ordini } = await sb.from('ordini').select('id,data,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore,giorni_pagamento').eq('fornitore', fornitoreNome).neq('stato','annullato').order('data',{ascending:false}).limit(500);
 
-  // Auto-pagamento: se giorni_pagamento impostati, segna come pagate le fatture scadute
+  // Auto-pagamento: segna come pagate le fatture scadute (batch)
   var ggPag = fornitore.giorni_pagamento || 30;
-  var autoUpdated = 0;
-  for (var ai = 0; ai < (ordini||[]).length; ai++) {
-    var o = ordini[ai];
-    if (o.pagato_fornitore) continue;
+  var idsScaduti = [];
+  var datePag = {};
+  (ordini||[]).forEach(function(o) {
+    if (o.pagato_fornitore || !o.data) return;
     var scadenza = new Date(o.data);
     scadenza.setDate(scadenza.getDate() + (o.giorni_pagamento || ggPag));
     if (scadenza <= oggi) {
-      await sb.from('ordini').update({ pagato_fornitore: true, data_pagamento_fornitore: scadenza.toISOString().split('T')[0] }).eq('id', o.id);
-      o.pagato_fornitore = true;
-      o.data_pagamento_fornitore = scadenza.toISOString().split('T')[0];
-      autoUpdated++;
+      idsScaduti.push(o.id);
+      datePag[o.id] = scadenza.toISOString().split('T')[0];
     }
+  });
+  if (idsScaduti.length) {
+    try {
+      await Promise.all(idsScaduti.map(function(id) {
+        return sb.from('ordini').update({ pagato_fornitore: true, data_pagamento_fornitore: datePag[id] }).eq('id', id);
+      }));
+      (ordini||[]).forEach(function(o) {
+        if (datePag[o.id]) { o.pagato_fornitore = true; o.data_pagamento_fornitore = datePag[o.id]; }
+      });
+      toast(idsScaduti.length + ' fatture scadute segnate come pagate');
+    } catch(e) { console.warn('Auto-pagamento fallito:', e); }
   }
-  if (autoUpdated > 0) toast(autoUpdated + ' fatture scadute segnate come pagate');
 
   const fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
   var fidoUsato = 0, totNonPagato = 0, totPagato = 0;
