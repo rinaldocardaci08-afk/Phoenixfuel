@@ -2612,7 +2612,12 @@ function stampaConfrontoAnni() {
 
 // ── CLIENTI ───────────────────────────────────────────────────────
 async function salvaCliente(id=null) {
-  const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, cliente_rete:document.getElementById('cl-rete').checked, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, fido_massimo:parseFloat(document.getElementById('cl-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
+  const record = { nome:document.getElementById('cl-nome').value.trim(), tipo:document.getElementById('cl-tipo').value, cliente_rete:document.getElementById('cl-rete').checked, piva:document.getElementById('cl-piva').value, codice_fiscale:document.getElementById('cl-cf').value, indirizzo:document.getElementById('cl-indirizzo').value, citta:document.getElementById('cl-citta').value, provincia:document.getElementById('cl-provincia').value, telefono:document.getElementById('cl-telefono').value, email:document.getElementById('cl-email').value, giorni_pagamento:parseInt(document.getElementById('cl-gg').value), zona_consegna:document.getElementById('cl-zona').value, prodotti_abituali:document.getElementById('cl-prodotti').value, note:document.getElementById('cl-note').value };
+  // Fido: solo admin può modificarlo
+  var isAdmin = utenteCorrente && utenteCorrente.ruolo === 'admin';
+  if (isAdmin) {
+    record.fido_massimo = parseFloat(document.getElementById('cl-fido').value) || 0;
+  }
   if (!record.nome) { toast('Inserisci il nome'); return; }
   let error, clienteId = id;
   if (id) { ({error}=await sb.from('clienti').update(record).eq('id',id)); }
@@ -2642,6 +2647,14 @@ async function apriModaleCliente(id=null) {
   } else {
     document.getElementById('cl-sedi-wrap').style.display = 'block';
   }
+  // Fido: solo admin può modificarlo
+  var fidoEl = document.getElementById('cl-fido');
+  if (fidoEl) {
+    var isAdmin = utenteCorrente && utenteCorrente.ruolo === 'admin';
+    fidoEl.disabled = !isAdmin;
+    fidoEl.style.opacity = isAdmin ? '1' : '0.5';
+    fidoEl.title = isAdmin ? '' : 'Solo l\'amministratore può modificare il fido';
+  }
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-clienti').style.display='block';
   document.getElementById('modal-fornitori').style.display='none';
@@ -2652,7 +2665,10 @@ async function caricaClienti() {
   const tbody = document.getElementById('tabella-clienti');
   if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="13" class="loading">Nessun cliente</td></tr>'; return; }
 
-  // Carica TUTTI gli ordini non pagati in UNA query per calcolare fido
+  var attivi = data.filter(function(r){ return r.attivo !== false; });
+  var inattivi = data.filter(function(r){ return r.attivo === false; });
+
+  // Carica ordini non pagati per fido
   const clientiConFido = data.filter(r => Number(r.fido_massimo||0) > 0);
   let ordiniMap = {};
   if (clientiConFido.length) {
@@ -2664,18 +2680,16 @@ async function caricaClienti() {
     });
   }
 
-  tbody.innerHTML = data.map(r => {
+  function rigaCliente(r) {
     let fidoUsatoHtml = '—', fidoResiduoHtml = '—';
     const fidoMax = Number(r.fido_massimo || 0);
     if (fidoMax > 0) {
       const ordini = (ordiniMap[r.id]||[]).concat(ordiniMap[r.nome]||[]);
-      // Deduplica per id se necessario
       const seen = new Set();
       let usato = 0;
       ordini.forEach(o => {
         const k = o.cliente_id + '_' + o.data + '_' + o.litri;
-        if (seen.has(k)) return;
-        seen.add(k);
+        if (seen.has(k)) return; seen.add(k);
         const scad = new Date(o.data);
         scad.setDate(scad.getDate() + (o.giorni_pagamento || r.giorni_pagamento || 30));
         if (scad > oggi) usato += prezzoConIva(o) * Number(o.litri);
@@ -2685,13 +2699,21 @@ async function caricaClienti() {
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
     return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
-  }).join('');
+  }
+
+  var html = attivi.map(rigaCliente).join('');
+  if (inattivi.length) {
+    html += '<tr><td colspan="13" style="background:var(--bg);padding:12px;font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid var(--border)">Clienti inattivi (' + inattivi.length + ')</td></tr>';
+    html += inattivi.map(function(r) { return rigaCliente(r).replace('<tr>', '<tr style="opacity:0.5">'); }).join('');
+  }
+  tbody.innerHTML = html;
 }
 
 function filtraClienti() {
   const q = (document.getElementById('search-clienti').value||'').toLowerCase();
   const righe = document.querySelectorAll('#tabella-clienti tr');
   righe.forEach(tr => {
+    if (tr.querySelector('td[colspan]')) { tr.style.display = q ? 'none' : ''; return; }
     const testo = tr.textContent.toLowerCase();
     tr.style.display = !q || testo.includes(q) ? '' : 'none';
   });
@@ -4864,7 +4886,6 @@ async function caricaCassa() {
   document.getElementById('cassa-bancomat').value = cassa ? cassa.bancomat || '' : '';
   document.getElementById('cassa-nexi').value = cassa ? cassa.carte_nexi || '' : '';
   document.getElementById('cassa-aziendali').value = cassa ? cassa.carte_aziendali || '' : '';
-  document.getElementById('cassa-contanti').value = cassa ? cassa.contanti || '' : '';
   document.getElementById('cassa-crediti-emessi').value = cassa ? cassa.crediti_emessi || '' : '';
   document.getElementById('cassa-rimborsi').value = cassa ? cassa.rimborsi_effettuati || '' : '';
   document.getElementById('cassa-rimborsi-prec').value = cassa ? cassa.rimborsi_giorni_prec || '' : '';
@@ -4944,7 +4965,6 @@ function calcolaCassa() {
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
   var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
-  var contantiInput = parseFloat(document.getElementById('cassa-contanti').value) || 0;
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
@@ -4955,28 +4975,25 @@ function calcolaCassa() {
 
   var totVendite = window._cassaTotVendite || 0;
 
-  // Contanti: se inseriti usa quelli, altrimenti = vendite - carte
-  var contanti = contantiInput > 0 ? contantiInput : Math.max(0, totVendite - bancomat - nexi - aziendali);
+  // Somma incassi carte
+  var totCarte = Math.round((bancomat + nexi + aziendali) * 100) / 100;
+  document.getElementById('cassa-tot-incassi').textContent = fmtE(totCarte);
 
-  // Somma incassi = carte + contanti
-  var totIncassi = bancomat + nexi + aziendali + contantiInput;
+  // Contanti = vendite - carte (sempre auto)
+  var contanti = Math.max(0, Math.round((totVendite - totCarte) * 100) / 100);
+  document.getElementById('cassa-val-contanti').textContent = fmtE(contanti);
 
-  // KPI quadratura vendite vs incassi
-  document.getElementById('cassa-tot-incassi').textContent = fmtE(totIncassi);
+  // KPI: carte non devono superare vendite
   var kpiQ = document.getElementById('cassa-kpi-quadra');
-  if (totIncassi > 0 && Math.abs(totVendite - totIncassi) < 0.50) {
+  if (totCarte > 0 && totCarte <= totVendite + 0.50) {
     kpiQ.style.background = '#EAF3DE'; kpiQ.style.borderColor = '#639922';
-  } else if (totIncassi > 0) {
+  } else if (totCarte > totVendite + 0.50) {
     kpiQ.style.background = '#FCEBEB'; kpiQ.style.borderColor = '#E24B4A';
   } else {
     kpiQ.style.background = ''; kpiQ.style.borderColor = '';
   }
 
-  // Valore contanti
-  document.getElementById('cassa-val-contanti').textContent = fmtE(contanti);
-
-  // Crediti da rimborsare = saldo giornaliero (emessi - rimborsati)
-  // Positivo = cash in più da versare, Negativo = cash in meno da versare
+  // Crediti da rimborsare = saldo giornaliero
   var creditiDaRimborsare = Math.round((creditiEmessi - rimborsi) * 100) / 100;
   var elCrediti = document.getElementById('cassa-crediti-sospesi');
   elCrediti.textContent = (creditiDaRimborsare >= 0 ? '+ ' : '− ') + fmtE(Math.abs(creditiDaRimborsare));
@@ -5010,14 +5027,14 @@ async function salvaCassa() {
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
   var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
-  var contantiInput = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
   var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
   var totVendite = window._cassaTotVendite || 0;
 
-  var contanti = contantiInput > 0 ? contantiInput : Math.max(0, totVendite - bancomat - nexi - aziendali);
+  var contanti = Math.max(0, Math.round((totVendite - bancomat - nexi - aziendali) * 100) / 100);
 
   var totSpese = 0;
   document.querySelectorAll('.cassa-spesa-importo').forEach(function(inp) { totSpese += parseFloat(inp.value) || 0; });
@@ -5129,8 +5146,8 @@ async function stampaCassa() {
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
   var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
-  var contantiInput = parseFloat(document.getElementById('cassa-contanti').value) || 0;
-  var contanti = contantiInput > 0 ? contantiInput : Math.max(0, totVendite - bancomat - nexi - aziendali);
+  
+  var contanti = Math.max(0, Math.round((totVendite - bancomat - nexi - aziendali) * 100) / 100);
   var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
   var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
   var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
@@ -5149,16 +5166,17 @@ async function stampaCassa() {
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Registro Cassa ' + data + '</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}@media print{.no-print{display:none!important}@page{size:portrait;margin:8mm}}table{width:100%;border-collapse:collapse;margin-bottom:12px}td{padding:6px 8px;border:1px solid #ddd}.mono{font-family:Courier New,monospace;text-align:right;font-weight:bold}.section{font-size:10px;font-weight:bold;color:#6B5FCC;text-transform:uppercase;letter-spacing:0.3px;padding:8px;background:#f5f5f5;border:1px solid #ddd}</style></head><body>';
   html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:14px"><div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">REGISTRO CASSA — STAZIONE OPPIDO</div><div style="font-size:12px;color:#666;margin-top:2px">' + dataFmt + '</div></div><div style="text-align:right"><div style="font-size:12px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
-  html += '<table><tr class="section"><td colspan="2">Incassi per tipo</td></tr>';
+  html += '<table><tr class="section"><td colspan="2">Riepilogo giornata</td></tr>';
+  html += '<tr style="background:#EAF3DE"><td style="font-weight:bold">Totale vendite (letture)</td><td class="mono" style="color:#639922">' + fmtE(totVendite) + '</td></tr>';
+  html += '</table>';
+  html += '<table><tr class="section"><td colspan="2">Incassi carte</td></tr>';
   html += '<tr><td>Bancomat</td><td class="mono">' + fmtE(bancomat) + '</td></tr>';
   html += '<tr><td>Carte Nexi</td><td class="mono">' + fmtE(nexi) + '</td></tr>';
   html += '<tr><td>Carte aziendali</td><td class="mono">' + fmtE(aziendali) + '</td></tr>';
-  html += '<tr><td>Contanti</td><td class="mono">' + fmtE(contanti) + '</td></tr>';
-  html += '<tr style="background:#f0f0f0;font-weight:bold"><td>Totale incassi</td><td class="mono">' + fmtE(bancomat+nexi+aziendali+contanti) + '</td></tr>';
-  html += '<tr style="background:#EAF3DE"><td style="font-weight:bold">Totale vendite (letture)</td><td class="mono" style="color:#639922">' + fmtE(totVendite) + '</td></tr>';
+  html += '<tr style="background:#f0f0f0;font-weight:bold"><td>Totale incassi carte</td><td class="mono">' + fmtE(bancomat+nexi+aziendali) + '</td></tr>';
   html += '</table>';
   html += '<table><tr class="section"><td colspan="2">Operazioni contanti</td></tr>';
-  html += '<tr><td>Valore contanti</td><td class="mono">' + fmtE(contanti) + '</td></tr>';
+  html += '<tr style="font-weight:bold"><td>Contanti (vendite − carte)</td><td class="mono">' + fmtE(contanti) + '</td></tr>';
   html += '<tr><td>+ Crediti emessi</td><td class="mono" style="color:#639922">+ ' + fmtE(creditiEmessi) + '</td></tr>';
   html += '<tr><td>− Rimborsi effettuati</td><td class="mono" style="color:#A32D2D">− ' + fmtE(rimborsi) + '</td></tr>';
   html += '<tr><td>− Rimborsi giorni prec.</td><td class="mono" style="color:#A32D2D">− ' + fmtE(rimborsiPrec) + '</td></tr>';

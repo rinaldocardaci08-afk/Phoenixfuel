@@ -868,25 +868,24 @@
               </div>
             </div>
 
-            <!-- KPI vendite vs incassi -->
+            <!-- KPI vendite vs incassi carte -->
             <div class="grid2" style="margin-bottom:16px">
               <div class="kpi"><div class="kpi-label">Totale vendite (da letture)</div><div class="kpi-value" id="cassa-tot-vendite">—</div></div>
-              <div class="kpi" id="cassa-kpi-quadra"><div class="kpi-label">Somma incassi</div><div class="kpi-value" id="cassa-tot-incassi">—</div></div>
+              <div class="kpi" id="cassa-kpi-quadra"><div class="kpi-label">Somma incassi carte</div><div class="kpi-value" id="cassa-tot-incassi">—</div></div>
             </div>
 
-            <!-- Incassi per tipo -->
-            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Incassi per tipo</div>
-            <div class="grid2" style="margin-bottom:16px;gap:8px">
+            <!-- Incassi carte -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Incassi carte</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
               <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #378ADD;border-radius:0"><div style="flex:1;font-size:12px">Bancomat</div><input type="number" id="cassa-bancomat" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
               <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #6B5FCC;border-radius:0"><div style="flex:1;font-size:12px">Carte Nexi</div><input type="number" id="cassa-nexi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
               <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #D85A30;border-radius:0"><div style="flex:1;font-size:12px">Carte aziendali</div><input type="number" id="cassa-aziendali" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
-              <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #639922;border-radius:0"><div style="flex:1;font-size:12px">Contanti</div><input type="number" id="cassa-contanti" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
             </div>
 
             <!-- Operazioni contanti -->
             <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Operazioni contanti</div>
             <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">
-              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1">Valore contanti</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:600" id="cassa-val-contanti">—</div></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:13px;flex:1;font-weight:600;color:#639922">Contanti (vendite − carte)</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#639922" id="cassa-val-contanti">—</div></div>
               <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#639922;font-weight:600">+</span> Crediti emessi</div><input type="number" id="cassa-crediti-emessi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
               <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#A32D2D;font-weight:600">−</span> Rimborsi effettuati</div><input type="number" id="cassa-rimborsi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
               <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#A32D2D;font-weight:600">−</span> Rimborsi giorni prec.</div><input type="number" id="cassa-rimborsi-prec" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
