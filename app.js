@@ -3088,8 +3088,25 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
   const { data: fornitore } = await sb.from('fornitori').select('*').eq('id', fornitoreId).single();
   if (!fornitore) { toast('Fornitore non trovato'); return; }
 
-  // Ordini di acquisto da questo fornitore (entrata_deposito + stazione_servizio)
-  const { data: ordini } = await sb.from('ordini').select('id,data,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore').eq('fornitore', fornitoreNome).neq('stato','annullato').order('data',{ascending:false}).limit(500);
+  // Ordini di acquisto da questo fornitore
+  const { data: ordini } = await sb.from('ordini').select('id,data,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore,giorni_pagamento').eq('fornitore', fornitoreNome).neq('stato','annullato').order('data',{ascending:false}).limit(500);
+
+  // Auto-pagamento: se giorni_pagamento impostati, segna come pagate le fatture scadute
+  var ggPag = fornitore.giorni_pagamento || 30;
+  var autoUpdated = 0;
+  for (var ai = 0; ai < (ordini||[]).length; ai++) {
+    var o = ordini[ai];
+    if (o.pagato_fornitore) continue;
+    var scadenza = new Date(o.data);
+    scadenza.setDate(scadenza.getDate() + (o.giorni_pagamento || ggPag));
+    if (scadenza <= oggi) {
+      await sb.from('ordini').update({ pagato_fornitore: true, data_pagamento_fornitore: scadenza.toISOString().split('T')[0] }).eq('id', o.id);
+      o.pagato_fornitore = true;
+      o.data_pagamento_fornitore = scadenza.toISOString().split('T')[0];
+      autoUpdated++;
+    }
+  }
+  if (autoUpdated > 0) toast(autoUpdated + ' fatture scadute segnate come pagate');
 
   const fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
   var fidoUsato = 0, totNonPagato = 0, totPagato = 0;
@@ -3103,7 +3120,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
 
   var html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:12px">';
   html += '<div><div style="font-size:18px;font-weight:500">' + esc(fornitoreNome) + '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(fornitore.citta||'—') + ' · P.IVA: ' + esc(fornitore.piva||'—') + ' · Pag. ' + (fornitore.giorni_pagamento||30) + ' gg</div></div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(fornitore.citta||'—') + ' · P.IVA: ' + esc(fornitore.piva||'—') + ' · Pag. ' + ggPag + ' gg</div></div>';
 
   // Grafico fido
   if (fidoMax > 0) {
@@ -3123,25 +3140,30 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
 
   // Tabella ordini con gestione pagamenti
   html += '<div style="max-height:400px;overflow-y:auto">';
-  html += '<table style="width:100%;font-size:12px"><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale</th><th>Pagato</th><th>Data pag.</th></tr></thead><tbody>';
+  html += '<table style="width:100%;font-size:12px"><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale</th><th>Scadenza</th><th>Pagato</th><th>Data pag.</th></tr></thead><tbody>';
 
   if (!ordini || !ordini.length) {
-    html += '<tr><td colspan="8" class="loading">Nessun ordine</td></tr>';
+    html += '<tr><td colspan="9" class="loading">Nessun ordine</td></tr>';
   } else {
     ordini.forEach(function(o) {
       var costoUnitario = Number(o.costo_litro||0) + Number(o.trasporto_litro||0);
       var tot = costoUnitario * Number(o.litri);
       var isPagato = o.pagato_fornitore === true;
+      var scadData = new Date(o.data);
+      scadData.setDate(scadData.getDate() + (o.giorni_pagamento || ggPag));
+      var scadISO = scadData.toISOString().split('T')[0];
+      var isScaduto = !isPagato && scadData <= oggi;
       var tipoLabel = o.tipo_ordine === 'stazione_servizio' ? '<span class="badge purple" style="font-size:9px">Stazione</span>' : o.tipo_ordine === 'entrata_deposito' ? '<span class="badge teal" style="font-size:9px">Deposito</span>' : '<span class="badge blue" style="font-size:9px">' + esc(o.tipo_ordine) + '</span>';
       var rowStyle = isPagato ? 'opacity:0.5' : '';
 
       html += '<tr style="' + rowStyle + '">';
       html += '<td>' + o.data + '</td>';
       html += '<td>' + tipoLabel + '</td>';
-      html += '<td>' + esc(o.prodotto) + '</td>';
+      html += '<td style="font-size:11px">' + esc(o.prodotto) + '</td>';
       html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
       html += '<td style="font-family:var(--font-mono)">€ ' + costoUnitario.toFixed(4) + '</td>';
       html += '<td style="font-family:var(--font-mono);font-weight:500">' + fmtE(tot) + '</td>';
+      html += '<td style="font-size:11px">' + scadISO + (isScaduto ? ' <span style="color:#A32D2D;font-size:9px;font-weight:500">SCADUTA</span>' : '') + '</td>';
       html += '<td><input type="checkbox" ' + (isPagato ? 'checked' : '') + ' onchange="togglePagamentoFornitore(\'' + o.id + '\',this.checked,\'' + fornitoreId + '\',\'' + fornitoreNome.replace(/'/g,"\\'") + '\')" /></td>';
       html += '<td>';
       if (isPagato && o.data_pagamento_fornitore) {
@@ -4825,9 +4847,12 @@ async function _calcolaTotVenditeDaLetture(data) {
   var pompeIds = (pompe||[]).map(function(p){return p.id;});
   if (!pompeIds.length) return 0;
   var giornoPre = new Date(new Date(data).getTime()-86400000).toISOString().split('T')[0];
-  var { data: lettOggi } = await sb.from('stazione_letture').select('*').eq('data',data).in('pompa_id',pompeIds);
-  var { data: lettPrec } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false});
-  var { data: prezzi } = await sb.from('stazione_prezzi').select('*').eq('data',data);
+  var [r1, r2, r3] = await Promise.all([
+    sb.from('stazione_letture').select('*').eq('data',data).in('pompa_id',pompeIds),
+    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false}).limit(pompeIds.length),
+    sb.from('stazione_prezzi').select('*').eq('data',data)
+  ]);
+  var lettOggi = r1.data; var lettPrec = r2.data; var prezzi = r3.data;
   var prezziMap = {};
   (prezzi||[]).forEach(function(p){ prezziMap[p.prodotto] = Number(p.prezzo_litro); });
   var pompeMap = {};

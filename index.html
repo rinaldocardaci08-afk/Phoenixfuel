@@ -18,6 +18,25 @@
       #stz-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
       #stz-totali-live > div { display:flex; flex-wrap:wrap; gap:16px; }
       #marg-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
+      /* Stack 2-column flex layouts */
+      #stz-letture-layout, #stz-marg-layout { flex-direction:column !important; }
+      /* Contatore inputs responsive */
+      .stz-lettura-input { width:100% !important; max-width:100% !important; font-size:16px !important; box-sizing:border-box; }
+      /* Cambio prezzo inputs */
+      .stz-litri-div, .stz-prezzo-div { width:90px !important; font-size:14px !important; padding:6px 8px !important; }
+      /* Grid stacks */
+      .grid2, .grid4, [style*="grid-template-columns:1fr 1fr 1fr"] { grid-template-columns:1fr !important; }
+      /* Cassa incassi */
+      #stz-cassa .grid2 { grid-template-columns:1fr !important; }
+      /* Tables scroll */
+      table { font-size:11px; }
+      th, td { padding:4px 6px !important; }
+      /* Tab buttons smaller */
+      .stz-tab { font-size:11px !important; padding:6px 10px !important; }
+      /* KPI smaller */
+      .kpi-value { font-size:16px !important; }
+      /* Card padding */
+      .card { padding:12px !important; }
     }
   </style>
 </head>
@@ -665,7 +684,7 @@
               </div>
             </div>
             <!-- Layout 2 colonne: form a sinistra, totale sticky a destra -->
-            <div style="display:flex;gap:20px;align-items:flex-start">
+            <div id="stz-letture-layout" style="display:flex;gap:20px;align-items:flex-start">
               <div style="flex:1;min-width:0">
                 <div id="stz-form-letture"><div class="loading">Caricamento pompe...</div></div>
                 <div id="stz-totali-letture" style="margin-top:12px"></div>
@@ -809,7 +828,7 @@
                 <button onclick="margGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               </div>
             </div>
-            <div style="display:flex;gap:20px;align-items:flex-start">
+            <div id="stz-marg-layout" style="display:flex;gap:20px;align-items:flex-start">
               <div style="flex:1;min-width:0">
                 <div id="marg-pompe-content"><div class="loading">Caricamento...</div></div>
                 <button class="btn-primary" onclick="salvaCostiMarg()" style="margin-top:12px">💾 Salva costi</button>
