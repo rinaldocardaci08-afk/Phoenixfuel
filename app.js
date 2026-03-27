@@ -3364,7 +3364,7 @@ function switchStazioneTab(btn) {
   btn.style.background=''; btn.style.color=''; btn.style.border=''; btn.classList.add('active');
   document.querySelectorAll('.stz-panel').forEach(p => p.style.display='none');
   document.getElementById(btn.dataset.tab).style.display='';
-  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-marginalita':caricaMarginalita, 'stz-report':initReportStazione };
+  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-marginalita':caricaMarginalita, 'stz-cassa':caricaCassa, 'stz-report':initReportStazione };
   if (loaders[btn.dataset.tab]) loaders[btn.dataset.tab]();
 }
 
@@ -4775,6 +4775,334 @@ async function stampaReportAcquistiStazione() {
 }
 
 // ── Report stazione ──
+// ══════════════════════════════════════════════════════════════
+// ── CASSA STAZIONE ───────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+async function caricaCassa() {
+  var input = document.getElementById('cassa-data');
+  if (!input.value) input.value = oggiISO;
+  var data = input.value;
+
+  // Carica dati salvati
+  var { data: cassa } = await sb.from('stazione_cassa').select('*').eq('data', data).maybeSingle();
+  var { data: spese } = await sb.from('stazione_spese_contanti').select('*').eq('data', data).order('created_at');
+
+  // Calcola totale vendite da letture
+  var totVendite = await _calcolaTotVenditeDaLetture(data);
+  document.getElementById('cassa-tot-vendite').textContent = fmtE(totVendite);
+
+  // Popola campi
+  document.getElementById('cassa-bancomat').value = cassa ? cassa.bancomat || '' : '';
+  document.getElementById('cassa-nexi').value = cassa ? cassa.carte_nexi || '' : '';
+  document.getElementById('cassa-aziendali').value = cassa ? cassa.carte_aziendali || '' : '';
+  document.getElementById('cassa-contanti').value = cassa ? cassa.contanti || '' : '';
+  document.getElementById('cassa-crediti-emessi').value = cassa ? cassa.crediti_emessi || '' : '';
+  document.getElementById('cassa-rimborsi').value = cassa ? cassa.rimborsi_effettuati || '' : '';
+  document.getElementById('cassa-rimborsi-prec').value = cassa ? cassa.rimborsi_giorni_prec || '' : '';
+  document.getElementById('cassa-crediti-sospesi').value = cassa ? cassa.crediti_da_rimborsare || '' : '';
+  document.getElementById('cassa-versato').value = cassa ? cassa.versato || '' : '';
+
+  // Popola spese contanti
+  var listaSpese = document.getElementById('cassa-spese-lista');
+  listaSpese.innerHTML = '';
+  (spese||[]).forEach(function(s) {
+    _aggiungiRigaSpesa(s.id, s.nota || '', s.importo || 0);
+  });
+
+  window._cassaTotVendite = totVendite;
+  calcolaCassa();
+  caricaCrediti();
+}
+
+async function _calcolaTotVenditeDaLetture(data) {
+  var { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
+  var pompeIds = (pompe||[]).map(function(p){return p.id;});
+  if (!pompeIds.length) return 0;
+  var giornoPre = new Date(new Date(data).getTime()-86400000).toISOString().split('T')[0];
+  var { data: lettOggi } = await sb.from('stazione_letture').select('*').eq('data',data).in('pompa_id',pompeIds);
+  var { data: lettPrec } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false});
+  var { data: prezzi } = await sb.from('stazione_prezzi').select('*').eq('data',data);
+  var prezziMap = {};
+  (prezzi||[]).forEach(function(p){ prezziMap[p.prodotto] = Number(p.prezzo_litro); });
+  var pompeMap = {};
+  (pompe||[]).forEach(function(p){ pompeMap[p.id] = p; });
+  var tot = 0;
+  (lettOggi||[]).forEach(function(l) {
+    var pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+    var prec = (lettPrec||[]).find(function(x){return x.pompa_id===l.pompa_id;});
+    if (!prec) return;
+    var litri = Number(l.lettura) - Number(prec.lettura);
+    if (litri <= 0) return;
+    var prezzo = prezziMap[pompa.prodotto] || 0;
+    var litriPD = Number(l.litri_prezzo_diverso||0);
+    var prezzoPD = Number(l.prezzo_diverso||0);
+    if (litriPD > 0 && prezzoPD > 0) {
+      tot += (Math.max(0, litri - litriPD) * prezzo) + (litriPD * prezzoPD);
+    } else {
+      tot += litri * prezzo;
+    }
+  });
+  return tot;
+}
+
+function cassaGiorno(dir) {
+  var input = document.getElementById('cassa-data');
+  var d = input.value ? new Date(input.value) : new Date();
+  d.setDate(d.getDate() + dir);
+  input.value = d.toISOString().split('T')[0];
+  caricaCassa();
+}
+
+function aggiungiSpesaCassa() {
+  _aggiungiRigaSpesa('new_' + Date.now(), '', 0);
+  calcolaCassa();
+}
+
+function _aggiungiRigaSpesa(id, nota, importo) {
+  var lista = document.getElementById('cassa-spese-lista');
+  var row = document.createElement('div');
+  row.dataset.speseId = id;
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:4px';
+  row.innerHTML = '<input type="text" class="cassa-spesa-nota" value="' + esc(nota) + '" placeholder="Nota spesa..." style="font-size:12px;flex:1;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />' +
+    '<input type="number" class="cassa-spesa-importo" value="' + (importo || '') + '" placeholder="0.00" step="0.01" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:13px;text-align:right;width:90px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />' +
+    '<button onclick="this.parentElement.remove();calcolaCassa()" style="font-size:12px;padding:2px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;color:#A32D2D">x</button>';
+  lista.appendChild(row);
+}
+
+function calcolaCassa() {
+  var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
+  var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
+  var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
+  var contanti = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
+  var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
+  var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
+  var creditiSospesi = parseFloat(document.getElementById('cassa-crediti-sospesi').value) || 0;
+  var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
+
+  // Somma spese contanti
+  var totSpese = 0;
+  document.querySelectorAll('.cassa-spesa-importo').forEach(function(inp) { totSpese += parseFloat(inp.value) || 0; });
+
+  var totIncassi = bancomat + nexi + aziendali + contanti;
+  var totVendite = window._cassaTotVendite || 0;
+
+  // Quadratura vendite vs incassi
+  document.getElementById('cassa-tot-incassi').textContent = fmtE(totIncassi);
+  var kpiQ = document.getElementById('cassa-kpi-quadra');
+  var diff1 = Math.abs(totVendite - totIncassi);
+  if (diff1 < 0.01 && totIncassi > 0) {
+    kpiQ.style.background = '#EAF3DE'; kpiQ.style.borderColor = '#639922';
+  } else if (totIncassi > 0) {
+    kpiQ.style.background = '#FCEBEB'; kpiQ.style.borderColor = '#E24B4A';
+  } else {
+    kpiQ.style.background = ''; kpiQ.style.borderColor = '';
+  }
+
+  // Valore contanti
+  document.getElementById('cassa-val-contanti').textContent = fmtE(contanti);
+
+  // Contanti da versare
+  var daVersare = contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese;
+  document.getElementById('cassa-da-versare').textContent = fmtE(daVersare);
+  document.getElementById('cassa-kpi-daversare').textContent = fmtE(daVersare);
+
+  // Differenza
+  var differenza = versato - daVersare;
+  document.getElementById('cassa-differenza').textContent = fmtE(differenza);
+  var kpiDiff = document.getElementById('cassa-kpi-diff');
+  if (Math.abs(differenza) < 0.01 && versato > 0) {
+    kpiDiff.style.background = '#EAF3DE'; kpiDiff.style.borderColor = '#639922';
+    document.getElementById('cassa-differenza').style.color = '#639922';
+  } else if (versato > 0) {
+    kpiDiff.style.background = '#FCEBEB'; kpiDiff.style.borderColor = '#E24B4A';
+    document.getElementById('cassa-differenza').style.color = '#A32D2D';
+  } else {
+    kpiDiff.style.background = ''; kpiDiff.style.borderColor = '';
+    document.getElementById('cassa-differenza').style.color = '';
+  }
+}
+
+async function salvaCassa() {
+  var data = document.getElementById('cassa-data').value;
+  if (!data) { toast('Seleziona una data'); return; }
+
+  var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
+  var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
+  var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
+  var contanti = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
+  var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
+  var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
+  var creditiSospesi = parseFloat(document.getElementById('cassa-crediti-sospesi').value) || 0;
+  var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
+
+  var totSpese = 0;
+  document.querySelectorAll('.cassa-spesa-importo').forEach(function(inp) { totSpese += parseFloat(inp.value) || 0; });
+  var daVersare = contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese;
+  var differenza = versato - daVersare;
+
+  var record = {
+    data, totale_vendite: window._cassaTotVendite || 0,
+    bancomat, carte_nexi: nexi, carte_aziendali: aziendali, contanti,
+    crediti_emessi: creditiEmessi, rimborsi_effettuati: rimborsi,
+    rimborsi_giorni_prec: rimborsiPrec, crediti_da_rimborsare: creditiSospesi,
+    contanti_da_versare: daVersare, versato, differenza
+  };
+
+  var { error } = await sb.from('stazione_cassa').upsert(record, { onConflict: 'data' });
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Salva spese contanti
+  await sb.from('stazione_spese_contanti').delete().eq('data', data);
+  var righeSpese = document.querySelectorAll('#cassa-spese-lista > div');
+  for (var i = 0; i < righeSpese.length; i++) {
+    var nota = righeSpese[i].querySelector('.cassa-spesa-nota').value;
+    var importo = parseFloat(righeSpese[i].querySelector('.cassa-spesa-importo').value) || 0;
+    if (importo > 0) {
+      await sb.from('stazione_spese_contanti').insert([{ data, nota, importo }]);
+    }
+  }
+
+  // Gestisci crediti automaticamente
+  if (creditiEmessi > 0) {
+    await sb.from('stazione_crediti').insert([{ data_emissione: data, importo: creditiEmessi, stato: 'sospeso', nota: 'Crediti emessi ' + data }]);
+  }
+  if (rimborsi > 0 || rimborsiPrec > 0) {
+    // Segna crediti sospesi come rimborsati (i più vecchi prima)
+    var totRimb = rimborsi + rimborsiPrec;
+    var { data: credAperti } = await sb.from('stazione_crediti').select('*').eq('stato','sospeso').order('data_emissione');
+    var restante = totRimb;
+    for (var j = 0; j < (credAperti||[]).length && restante > 0.01; j++) {
+      var c = credAperti[j];
+      if (Number(c.importo) <= restante) {
+        await sb.from('stazione_crediti').update({ stato: 'rimborsato', data_rimborso: data }).eq('id', c.id);
+        restante -= Number(c.importo);
+      } else {
+        // Rimborso parziale: aggiorna importo residuo
+        await sb.from('stazione_crediti').update({ importo: Number(c.importo) - restante, nota: (c.nota||'') + ' (parz. rimborsato € ' + restante.toFixed(2) + ')' }).eq('id', c.id);
+        await sb.from('stazione_crediti').insert([{ data_emissione: c.data_emissione, importo: restante, stato: 'rimborsato', data_rimborso: data, nota: 'Rimborso parziale' }]);
+        restante = 0;
+      }
+    }
+  }
+
+  toast('Registro cassa salvato!');
+  caricaCrediti();
+}
+
+// ── CREDITI SOSPESI ──
+async function caricaCrediti() {
+  var { data: crediti } = await sb.from('stazione_crediti').select('*').order('data_emissione',{ascending:false}).limit(50);
+  var tbody = document.getElementById('cred-tabella');
+
+  var totAperti = 0, nAperti = 0, totRimb = 0, nRimb = 0;
+  var inizioMese = oggiISO.substring(0,8) + '01';
+
+  (crediti||[]).forEach(function(c) {
+    if (c.stato === 'sospeso') { totAperti += Number(c.importo); nAperti++; }
+    if (c.stato === 'rimborsato' && c.data_rimborso >= inizioMese) { totRimb += Number(c.importo); nRimb++; }
+  });
+
+  document.getElementById('cred-aperti').textContent = fmtE(totAperti) + ' (' + nAperti + ')';
+  document.getElementById('cred-rimborsati').textContent = fmtE(totRimb) + ' (' + nRimb + ')';
+  document.getElementById('cred-totale').textContent = fmtE(totAperti + totRimb) + ' (' + (crediti||[]).length + ')';
+
+  if (!crediti || !crediti.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun credito</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = crediti.map(function(c) {
+    var isSospeso = c.stato === 'sospeso';
+    var badge = isSospeso ? '<span class="badge red">sospeso</span>' : '<span class="badge green">rimborsato</span>';
+    return '<tr style="' + (isSospeso ? '' : 'opacity:0.5') + '"><td>' + c.data_emissione + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtE(c.importo) + '</td><td>' + badge + '</td><td>' + (c.data_rimborso || '—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(c.nota||'') + '</td><td>' + (isSospeso ? '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="rimborsaCredito(\'' + c.id + '\')">Rimborsa</button>' : '') + '</td></tr>';
+  }).join('');
+}
+
+async function nuovoCredito() {
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:12px">Nuovo credito sospeso</div>';
+  html += '<div class="form-grid"><div class="form-group"><label>Data</label><input type="date" id="nc-data" value="' + oggiISO + '" /></div><div class="form-group"><label>Importo €</label><input type="number" id="nc-importo" step="0.01" placeholder="0.00" /></div><div class="form-group"><label>Note</label><input type="text" id="nc-nota" placeholder="Descrizione..." /></div></div>';
+  html += '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" style="flex:1;background:#D85A30" onclick="salvaCredito()">Salva credito</button><button class="btn-secondary" onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
+  apriModal(html);
+}
+
+async function salvaCredito() {
+  var data = document.getElementById('nc-data').value;
+  var importo = parseFloat(document.getElementById('nc-importo').value);
+  var nota = document.getElementById('nc-nota').value;
+  if (!data || isNaN(importo) || importo <= 0) { toast('Compila data e importo'); return; }
+  var { error } = await sb.from('stazione_crediti').insert([{ data_emissione: data, importo, nota, stato: 'sospeso' }]);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Credito registrato!');
+  chiudiModal();
+  caricaCrediti();
+}
+
+async function rimborsaCredito(id) {
+  if (!confirm('Segnare questo credito come rimborsato?')) return;
+  var { error } = await sb.from('stazione_crediti').update({ stato: 'rimborsato', data_rimborso: oggiISO }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Credito rimborsato!');
+  caricaCrediti();
+}
+
+async function stampaCassa() {
+  var data = document.getElementById('cassa-data').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  var dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  var totVendite = window._cassaTotVendite || 0;
+  var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
+  var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
+  var aziendali = parseFloat(document.getElementById('cassa-aziendali').value) || 0;
+  var contanti = parseFloat(document.getElementById('cassa-contanti').value) || 0;
+  var creditiEmessi = parseFloat(document.getElementById('cassa-crediti-emessi').value) || 0;
+  var rimborsi = parseFloat(document.getElementById('cassa-rimborsi').value) || 0;
+  var rimborsiPrec = parseFloat(document.getElementById('cassa-rimborsi-prec').value) || 0;
+  var creditiSospesi = parseFloat(document.getElementById('cassa-crediti-sospesi').value) || 0;
+  var versato = parseFloat(document.getElementById('cassa-versato').value) || 0;
+  var totSpese = 0;
+  var speseHtml = '';
+  document.querySelectorAll('#cassa-spese-lista > div').forEach(function(row) {
+    var nota = row.querySelector('.cassa-spesa-nota').value || '—';
+    var imp = parseFloat(row.querySelector('.cassa-spesa-importo').value) || 0;
+    if (imp > 0) { totSpese += imp; speseHtml += '<tr><td style="padding:4px 8px;border:1px solid #ddd;padding-left:20px;color:#666">− Spesa: ' + esc(nota) + '</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#A32D2D">− € ' + imp.toFixed(2) + '</td></tr>'; }
+  });
+  var daVersare = contanti + creditiEmessi - rimborsi - rimborsiPrec + creditiSospesi - totSpese;
+  var differenza = versato - daVersare;
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Registro Cassa ' + data + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}@media print{.no-print{display:none!important}@page{size:portrait;margin:8mm}}table{width:100%;border-collapse:collapse;margin-bottom:12px}td{padding:6px 8px;border:1px solid #ddd}.mono{font-family:Courier New,monospace;text-align:right;font-weight:bold}.section{font-size:10px;font-weight:bold;color:#6B5FCC;text-transform:uppercase;letter-spacing:0.3px;padding:8px;background:#f5f5f5;border:1px solid #ddd}</style></head><body>';
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:14px"><div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">REGISTRO CASSA — STAZIONE OPPIDO</div><div style="font-size:12px;color:#666;margin-top:2px">' + dataFmt + '</div></div><div style="text-align:right"><div style="font-size:12px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
+  html += '<table><tr class="section"><td colspan="2">Incassi per tipo</td></tr>';
+  html += '<tr><td>Bancomat</td><td class="mono">' + fmtE(bancomat) + '</td></tr>';
+  html += '<tr><td>Carte Nexi</td><td class="mono">' + fmtE(nexi) + '</td></tr>';
+  html += '<tr><td>Carte aziendali</td><td class="mono">' + fmtE(aziendali) + '</td></tr>';
+  html += '<tr><td>Contanti</td><td class="mono">' + fmtE(contanti) + '</td></tr>';
+  html += '<tr style="background:#f0f0f0;font-weight:bold"><td>Totale incassi</td><td class="mono">' + fmtE(bancomat+nexi+aziendali+contanti) + '</td></tr>';
+  html += '<tr style="background:#EAF3DE"><td style="font-weight:bold">Totale vendite (letture)</td><td class="mono" style="color:#639922">' + fmtE(totVendite) + '</td></tr>';
+  html += '</table>';
+  html += '<table><tr class="section"><td colspan="2">Operazioni contanti</td></tr>';
+  html += '<tr><td>Valore contanti</td><td class="mono">' + fmtE(contanti) + '</td></tr>';
+  html += '<tr><td>+ Crediti emessi</td><td class="mono" style="color:#639922">+ ' + fmtE(creditiEmessi) + '</td></tr>';
+  html += '<tr><td>− Rimborsi effettuati</td><td class="mono" style="color:#A32D2D">− ' + fmtE(rimborsi) + '</td></tr>';
+  html += '<tr><td>− Rimborsi giorni prec.</td><td class="mono" style="color:#A32D2D">− ' + fmtE(rimborsiPrec) + '</td></tr>';
+  html += '<tr><td>+ Crediti da rimborsare</td><td class="mono" style="color:#639922">+ ' + fmtE(creditiSospesi) + '</td></tr>';
+  html += speseHtml;
+  html += '<tr style="background:#EAF3DE;font-weight:bold"><td>Contanti da versare</td><td class="mono" style="color:#639922">' + fmtE(daVersare) + '</td></tr>';
+  html += '</table>';
+  html += '<table><tr class="section"><td colspan="2">Quadratura versamento</td></tr>';
+  html += '<tr><td>Da versare</td><td class="mono">' + fmtE(daVersare) + '</td></tr>';
+  html += '<tr><td>Versato</td><td class="mono">' + fmtE(versato) + '</td></tr>';
+  var diffColor = Math.abs(differenza) < 0.01 ? '#639922' : '#A32D2D';
+  html += '<tr style="background:' + (Math.abs(differenza)<0.01 ? '#EAF3DE' : '#FCEBEB') + ';font-weight:bold"><td>Differenza</td><td class="mono" style="color:' + diffColor + '">' + fmtE(differenza) + '</td></tr>';
+  html += '</table>';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div>';
+  html += '</body></html>';
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
 function initReportStazione() {
   const oggi = new Date();
   document.getElementById('stz-report-da').value = oggi.toISOString().substring(0,8) + '01';

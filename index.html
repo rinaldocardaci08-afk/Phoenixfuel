@@ -609,6 +609,7 @@
           <button class="btn-primary stz-tab" data-tab="stz-versamenti" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏦 Versamenti</button>
           <button class="btn-primary stz-tab" data-tab="stz-magazzino" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Magazzino</button>
           <button class="btn-primary stz-tab" data-tab="stz-marginalita" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Marginalità</button>
+          <button class="btn-primary stz-tab" data-tab="stz-cassa" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏧 Cassa</button>
           <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
         </div>
 
@@ -832,6 +833,78 @@
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Prodotto</th><th>CMP prec.</th><th>Litri caricati</th><th>Costo carico</th><th>CMP nuovo</th></tr></thead>
             <tbody id="marg-cmp-storico"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- CASSA -->
+        <div class="stz-panel" id="stz-cassa" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Registro cassa giornaliero</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <button onclick="cassaGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+                <input type="date" id="cassa-data" onchange="caricaCassa()" style="font-size:16px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:700;text-align:center;min-width:160px" />
+                <button onclick="cassaGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+              </div>
+            </div>
+
+            <!-- KPI vendite vs incassi -->
+            <div class="grid2" style="margin-bottom:16px">
+              <div class="kpi"><div class="kpi-label">Totale vendite (da letture)</div><div class="kpi-value" id="cassa-tot-vendite">—</div></div>
+              <div class="kpi" id="cassa-kpi-quadra"><div class="kpi-label">Somma incassi</div><div class="kpi-value" id="cassa-tot-incassi">—</div></div>
+            </div>
+
+            <!-- Incassi per tipo -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Incassi per tipo</div>
+            <div class="grid2" style="margin-bottom:16px;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #378ADD;border-radius:0"><div style="flex:1;font-size:12px">Bancomat</div><input type="number" id="cassa-bancomat" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #6B5FCC;border-radius:0"><div style="flex:1;font-size:12px">Carte Nexi</div><input type="number" id="cassa-nexi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #D85A30;border-radius:0"><div style="flex:1;font-size:12px">Carte aziendali</div><input type="number" id="cassa-aziendali" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #639922;border-radius:0"><div style="flex:1;font-size:12px">Contanti</div><input type="number" id="cassa-contanti" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;text-align:right;width:120px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+            </div>
+
+            <!-- Operazioni contanti -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Operazioni contanti</div>
+            <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1">Valore contanti</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:600" id="cassa-val-contanti">—</div></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#639922;font-weight:600">+</span> Crediti emessi</div><input type="number" id="cassa-crediti-emessi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#A32D2D;font-weight:600">−</span> Rimborsi effettuati</div><input type="number" id="cassa-rimborsi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#A32D2D;font-weight:600">−</span> Rimborsi giorni prec.</div><input type="number" id="cassa-rimborsi-prec" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="font-size:12px;flex:1"><span style="color:#639922;font-weight:600">+</span> Crediti da rimborsare</div><input type="number" id="cassa-crediti-sospesi" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:14px;text-align:right;width:100px;padding:4px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" /></div>
+              <!-- Spese contanti multiple -->
+              <div style="padding:6px 0;border-bottom:0.5px dashed var(--border)"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-size:12px;flex:1"><span style="color:#A32D2D;font-weight:600">−</span> Spese contanti</div><button onclick="aggiungiSpesaCassa()" style="font-size:11px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);cursor:pointer;color:var(--text)">+ Aggiungi</button></div><div id="cassa-spese-lista"></div></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 0;margin-top:4px"><div style="font-size:14px;flex:1;font-weight:600">Contanti da versare</div><div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:#639922" id="cassa-da-versare">—</div></div>
+            </div>
+
+            <!-- Quadratura versamento -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Quadratura versamento</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" style="margin-bottom:16px;gap:10px">
+              <div class="kpi"><div class="kpi-label">Da versare</div><div class="kpi-value" id="cassa-kpi-daversare">—</div></div>
+              <div class="kpi"><div class="kpi-label">Versato</div><input type="number" id="cassa-versato" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:18px;font-weight:700;text-align:center;width:100%;border:none;background:transparent;color:var(--text);padding:4px 0" /></div>
+              <div class="kpi" id="cassa-kpi-diff"><div class="kpi-label">Differenza</div><div class="kpi-value" id="cassa-differenza">—</div></div>
+            </div>
+
+            <div style="display:flex;gap:8px">
+              <button class="btn-primary" style="flex:1" onclick="salvaCassa()">💾 Salva registro</button>
+              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaCassa()">🖨️ Stampa</button>
+            </div>
+          </div>
+
+          <!-- Registro crediti -->
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Registro crediti sospesi</span>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#D85A30" onclick="nuovoCredito()">+ Nuovo credito</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" style="margin-bottom:12px;gap:10px">
+              <div class="kpi" style="background:#FCEBEB;border-color:#E24B4A"><div class="kpi-label" style="color:#791F1F">Crediti aperti</div><div class="kpi-value" style="color:#A32D2D" id="cred-aperti">—</div></div>
+              <div class="kpi" style="background:#EAF3DE;border-color:#639922"><div class="kpi-label" style="color:#27500A">Rimborsati (mese)</div><div class="kpi-value" style="color:#3B6D11" id="cred-rimborsati">—</div></div>
+              <div class="kpi"><div class="kpi-label">Totale storico</div><div class="kpi-value" id="cred-totale">—</div></div>
+            </div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Importo</th><th>Stato</th><th>Data rimborso</th><th>Note</th><th></th></tr></thead>
+            <tbody id="cred-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
         </div>
