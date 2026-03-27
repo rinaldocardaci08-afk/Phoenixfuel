@@ -5265,17 +5265,183 @@ function initReportStazione() {
   const oggi = new Date();
   document.getElementById('stz-report-da').value = oggi.toISOString().substring(0,8) + '01';
   document.getElementById('stz-report-a').value = oggiISO;
-  // Popola anno
+  var annoCorr = oggi.getFullYear();
+  var meseCorr = String(oggi.getMonth()+1).padStart(2,'0');
+  // Popola anno contatori
   var selAnno = document.getElementById('stz-rep-anno');
   if (selAnno && selAnno.options.length === 0) {
-    var annoCorr = oggi.getFullYear();
-    for (var y = annoCorr; y >= annoCorr - 5; y--) {
-      selAnno.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
+    for (var y = annoCorr; y >= annoCorr - 5; y--) selAnno.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
+  }
+  var selMese = document.getElementById('stz-rep-mese');
+  if (selMese) selMese.value = meseCorr;
+  // Popola anno/mese cassa
+  var selAnnoCassa = document.getElementById('stz-rep-cassa-anno');
+  if (selAnnoCassa && selAnnoCassa.options.length === 0) {
+    for (var y2 = annoCorr; y2 >= annoCorr - 5; y2--) selAnnoCassa.innerHTML += '<option value="' + y2 + '"' + (y2===annoCorr?' selected':'') + '>' + y2 + '</option>';
+  }
+  var selMeseCassa = document.getElementById('stz-rep-cassa-mese');
+  if (selMeseCassa) selMeseCassa.value = meseCorr;
+}
+
+async function _caricaDatiCassaMese(anno, mese) {
+  var da = anno + '-' + mese + '-01';
+  var ultimoGiorno = new Date(Number(anno), Number(mese), 0).getDate();
+  var a = anno + '-' + mese + '-' + String(ultimoGiorno).padStart(2,'0');
+  var [cassaRes, speseRes] = await Promise.all([
+    sb.from('stazione_cassa').select('*').gte('data', da).lte('data', a).order('data'),
+    sb.from('stazione_spese_contanti').select('data,importo').gte('data', da).lte('data', a)
+  ]);
+  var casse = cassaRes.data || [];
+  var speseMap = {};
+  (speseRes.data || []).forEach(function(s) { speseMap[s.data] = (speseMap[s.data] || 0) + Number(s.importo); });
+  return { casse: casse, speseMap: speseMap, da: da, a: a, ultimoGiorno: ultimoGiorno };
+}
+
+async function stampaReportCassaMensile() {
+  var anno = document.getElementById('stz-rep-cassa-anno').value;
+  var mese = document.getElementById('stz-rep-cassa-mese').value;
+  if (!anno || !mese) { toast('Seleziona anno e mese'); return; }
+  var meseNome = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1];
+
+  toast('Generazione report cassa...');
+  var r = await _caricaDatiCassaMese(anno, mese);
+  var casse = r.casse, speseMap = r.speseMap;
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Cassa ' + meseNome + ' ' + anno + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:9px;margin:0;padding:6mm;color:#1a1a18}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:5mm}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#6B5FCC;color:#fff;padding:4px 3px;font-size:7px;text-transform:uppercase;letter-spacing:0.2px;border:1px solid #5A4FBB;text-align:right}' +
+    'th:first-child{text-align:left}' +
+    'td{padding:3px 4px;border:1px solid #ddd;font-size:9px;text-align:right;font-family:Courier New,monospace}' +
+    'td:first-child{text-align:left;font-family:Arial,sans-serif;font-weight:500}' +
+    '.tot{background:#f0f0f0;font-weight:bold}.tot td{border-top:2px solid #6B5FCC}' +
+    '.alt{background:#fafaf8}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:10px">';
+  html += '<div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">REPORT CASSA MENSILE — STAZIONE OPPIDO</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:2px">' + meseNome + ' ' + anno + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:13px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:8px;color:#666">Generato il ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  html += '<table><thead><tr>';
+  html += '<th style="text-align:left;width:42px">Data</th>';
+  html += '<th>Vendite tot.</th>';
+  html += '<th style="background:#185FA5">Bancomat</th>';
+  html += '<th style="background:#534AB7">Carte Nexi</th>';
+  html += '<th style="background:#993C1D">Carte Aziend.</th>';
+  html += '<th>Cred. emessi</th>';
+  html += '<th>Cred. rimb.</th>';
+  html += '<th>Rimb. gg prec</th>';
+  html += '<th>Spese cont.</th>';
+  html += '<th style="background:#3B6D11">Cont. versati</th>';
+  html += '</tr></thead><tbody>';
+
+  var totV=0, totB=0, totN=0, totA=0, totCE=0, totCR=0, totRP=0, totSP=0, totCV=0;
+
+  casse.forEach(function(c, idx) {
+    var gg = c.data.substring(8) + '/' + c.data.substring(5,7);
+    var vendite = Number(c.totale_vendite||0);
+    var banc = Number(c.bancomat||0);
+    var nexi = Number(c.carte_nexi||0);
+    var azien = Number(c.carte_aziendali||0);
+    var ce = Number(c.crediti_emessi||0);
+    var cr = Number(c.rimborsi_effettuati||0);
+    var rp = Number(c.rimborsi_giorni_prec||0);
+    var sp = speseMap[c.data] || 0;
+    var cv = Number(c.versato||0);
+
+    totV+=vendite; totB+=banc; totN+=nexi; totA+=azien; totCE+=ce; totCR+=cr; totRP+=rp; totSP+=sp; totCV+=cv;
+
+    html += '<tr' + (idx%2 ? ' class="alt"' : '') + '>';
+    html += '<td>' + gg + '</td>';
+    html += '<td>' + fmtE(vendite) + '</td>';
+    html += '<td>' + fmtE(banc) + '</td>';
+    html += '<td>' + fmtE(nexi) + '</td>';
+    html += '<td>' + fmtE(azien) + '</td>';
+    html += '<td>' + (ce > 0 ? fmtE(ce) : '—') + '</td>';
+    html += '<td>' + (cr > 0 ? fmtE(cr) : '—') + '</td>';
+    html += '<td>' + (rp > 0 ? fmtE(rp) : '—') + '</td>';
+    html += '<td>' + (sp > 0 ? fmtE(sp) : '—') + '</td>';
+    html += '<td style="font-weight:bold;color:#3B6D11">' + fmtE(cv) + '</td>';
+    html += '</tr>';
+  });
+
+  html += '<tr class="tot">';
+  html += '<td>TOTALE</td>';
+  html += '<td>' + fmtE(totV) + '</td>';
+  html += '<td>' + fmtE(totB) + '</td>';
+  html += '<td>' + fmtE(totN) + '</td>';
+  html += '<td>' + fmtE(totA) + '</td>';
+  html += '<td>' + fmtE(totCE) + '</td>';
+  html += '<td>' + fmtE(totCR) + '</td>';
+  html += '<td>' + fmtE(totRP) + '</td>';
+  html += '<td>' + fmtE(totSP) + '</td>';
+  html += '<td style="color:#3B6D11">' + fmtE(totCV) + '</td>';
+  html += '</tr></tbody></table>';
+
+  if (!casse.length) {
+    html += '<div style="text-align:center;padding:20px;color:#888">Nessun dato cassa per ' + meseNome + ' ' + anno + '</div>';
+  }
+
+  html += '<div style="text-align:center;font-size:8px;color:#aaa;margin-top:10px;border-top:1px solid #ddd;padding-top:5px">PhoenixFuel Srl — Report cassa ' + meseNome + ' ' + anno + '</div>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
+async function esportaCassaExcel() {
+  var anno = document.getElementById('stz-rep-cassa-anno').value;
+  var mese = document.getElementById('stz-rep-cassa-mese').value;
+  if (!anno || !mese) { toast('Seleziona anno e mese'); return; }
+  var meseNome = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1];
+
+  toast('Generazione Excel...');
+  var r = await _caricaDatiCassaMese(anno, mese);
+  var casse = r.casse, speseMap = r.speseMap;
+
+  if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata. Ricarica la pagina.'); return; }
+
+  var header = ['Data','Vendite totali','Bancomat','Carte Nexi','Carte Aziendali','Crediti emessi','Crediti rimborsati','Rimb. gg prec.','Spese contanti','Contanti versati'];
+  var righe = [header];
+  var totV=0, totB=0, totN=0, totA=0, totCE=0, totCR=0, totRP=0, totSP=0, totCV=0;
+
+  casse.forEach(function(c) {
+    var vendite = Number(c.totale_vendite||0);
+    var banc = Number(c.bancomat||0);
+    var nexi = Number(c.carte_nexi||0);
+    var azien = Number(c.carte_aziendali||0);
+    var ce = Number(c.crediti_emessi||0);
+    var cr = Number(c.rimborsi_effettuati||0);
+    var rp = Number(c.rimborsi_giorni_prec||0);
+    var sp = speseMap[c.data] || 0;
+    var cv = Number(c.versato||0);
+    totV+=vendite; totB+=banc; totN+=nexi; totA+=azien; totCE+=ce; totCR+=cr; totRP+=rp; totSP+=sp; totCV+=cv;
+    righe.push([c.data, vendite, banc, nexi, azien, ce, cr, rp, sp, cv]);
+  });
+
+  righe.push(['TOTALE', totV, totB, totN, totA, totCE, totCR, totRP, totSP, totCV]);
+
+  var ws = XLSX.utils.aoa_to_sheet(righe);
+  // Formatta colonne numeriche
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  for (var R = 1; R <= range.e.r; R++) {
+    for (var C = 1; C <= 9; C++) {
+      var addr = XLSX.utils.encode_cell({r:R,c:C});
+      if (ws[addr]) ws[addr].z = '#,##0.00';
     }
   }
-  // Seleziona mese corrente
-  var selMese = document.getElementById('stz-rep-mese');
-  if (selMese) selMese.value = String(oggi.getMonth()+1).padStart(2,'0');
+  ws['!cols'] = [{wch:12},{wch:14},{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14}];
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Cassa ' + meseNome);
+  XLSX.writeFile(wb, 'ReportCassa_' + meseNome + '_' + anno + '.xlsx');
+  toast('Excel generato!');
 }
 
 async function stampaReportMensileContatori() {

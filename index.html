@@ -13,6 +13,7 @@
   <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     @media (max-width: 768px) {
       #stz-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
@@ -953,6 +954,26 @@
               </div>
             </div>
             <button class="btn-primary" style="margin-top:8px;background:#6B5FCC" onclick="stampaReportMensileContatori()">🖨️ Report mensile contatori</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Report cassa mensile</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Anno</label>
+                <select id="stz-rep-cassa-anno" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
+              </div>
+              <div class="form-group"><label>Mese</label>
+                <select id="stz-rep-cassa-mese" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                  <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option>
+                  <option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                  <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
+                  <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportCassaMensile()">🖨️ Stampa / PDF</button>
+              <button class="btn-primary" style="background:#639922" onclick="esportaCassaExcel()">📊 Esporta Excel</button>
+            </div>
           </div>
         </div>
       </div>
