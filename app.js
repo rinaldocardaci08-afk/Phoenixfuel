@@ -5083,6 +5083,13 @@ async function salvaCassa() {
     }
   }
 
+  // Registra versamento automatico nella sezione Versamenti
+  var totCarte = Math.round((bancomat + nexi + aziendali) * 100) / 100;
+  await sb.from('stazione_versamenti').delete().eq('data', data).ilike('note', '%registro cassa%');
+  if (versato > 0 || totCarte > 0) {
+    await sb.from('stazione_versamenti').insert([{ data, contanti: versato, pos: totCarte, note: 'Da registro cassa' }]);
+  }
+
   toast('Registro cassa salvato!');
   calcolaCassa();
   caricaCrediti();
