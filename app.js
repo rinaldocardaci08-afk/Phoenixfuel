@@ -3408,7 +3408,7 @@ async function caricaFormLetture() {
     sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',ieri).order('data',{ascending:false}),
     sb.from('stazione_prezzi').select('*').eq('data',data)
   ]);
-  const lettMap = {}; (lettOggiRes.data||[]).forEach(l => lettMap[l.pompa_id]=Number(l.lettura));
+  const lettMap = {}; (lettOggiRes.data||[]).forEach(l => lettMap[l.pompa_id]={ lettura:Number(l.lettura), litri_pd:Number(l.litri_prezzo_diverso||0), prezzo_pd:Number(l.prezzo_diverso||0) });
   // Per ogni pompa, prendi l'ultima lettura precedente
   const lettIeriMap = {};
   pompe.forEach(p => {
@@ -3425,7 +3425,10 @@ async function caricaFormLetture() {
 
   let html = '';
   pompe.forEach(p => {
-    const val = lettMap[p.id] !== undefined ? lettMap[p.id] : '';
+    const rec = lettMap[p.id];
+    const val = rec ? rec.lettura : '';
+    const litriDivSaved = rec ? rec.litri_pd : '';
+    const prezzoDivSaved = rec ? rec.prezzo_pd : '';
     const precVal = lettIeriMap[p.id];
     const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
     const precRaw = precVal !== undefined ? String(precVal) : '—';
@@ -3442,16 +3445,16 @@ async function caricaFormLetture() {
     html += '<div style="flex:1;min-width:160px"><div style="font-size:10px;color:var(--text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600">Oggi</div>';
     html += '<input type="number" class="stz-lettura-input" data-pompa="' + p.id + '" data-prodotto="' + esc(p.prodotto) + '" value="' + val + '" placeholder="00000000" step="0.01" max="99999999" oninput="calcolaLettureVendite()" style="font-family:\'Courier New\',monospace;font-size:18px;font-weight:700;padding:8px 12px;border:none;border-radius:8px;background:#1a1a1a;color:#7CFC00;width:180px;max-width:100%;text-align:left;letter-spacing:3px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)" /></div>';
     html += '</div>';
-    // Risultati calcolati per questa pompa (litri + venduto)
-    html += '<div style="display:flex;gap:16px;font-size:13px;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px" id="stz-calc-' + p.id + '"><span style="color:var(--text-muted)">Litri: <strong id="stz-litri-' + p.id + '" style="font-family:var(--font-mono)">—</strong></span><span style="color:' + colore + '">Venduto: <strong id="stz-euro-' + p.id + '" style="font-family:var(--font-mono)">—</strong></span></div>';
+    // Risultati calcolati per questa pompa — dettaglio suddivisione
+    html += '<div id="stz-calc-' + p.id + '" style="padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px;font-size:12px"></div>';
     // Prezzo standard + prezzo diverso su una riga
     html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
     html += '<span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Prezzo pompa:</span>';
     html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '<span style="color:#E24B4A">non impostato</span>') + '</span>';
-    html += '<span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap">Litri prezzo diverso:</span>';
-    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
+    html += '<span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap">Litri cambio prezzo:</span>';
+    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" value="' + (litriDivSaved || '') + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
     html += '<span style="font-size:10px;color:var(--text-muted)">€/L:</span>';
-    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
+    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" value="' + (prezzoDivSaved || '') + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
     html += '</div>';
     html += '</div>';
   });
@@ -3470,15 +3473,14 @@ function calcolaLettureVendite() {
 
   pompe.forEach(p => {
     const input = document.querySelector('.stz-lettura-input[data-pompa="' + p.id + '"]');
-    const elLitri = document.getElementById('stz-litri-' + p.id);
-    const elEuro = document.getElementById('stz-euro-' + p.id);
-    if (!input || !elLitri || !elEuro) return;
+    const elCalc = document.getElementById('stz-calc-' + p.id);
+    if (!input || !elCalc) return;
 
     const valOggi = parseFloat(input.value);
     const valIeri = ieriMap[p.id];
     const prezzoStd = prezzoMap[p.prodotto] || 0;
+    const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
 
-    // Litri a prezzo diverso
     const inputLitriDiv = document.querySelector('.stz-litri-div[data-pompa="' + p.id + '"]');
     const inputPrezzoDiv = document.querySelector('.stz-prezzo-div[data-pompa="' + p.id + '"]');
     const litriDiv = inputLitriDiv ? parseFloat(inputLitriDiv.value) || 0 : 0;
@@ -3488,23 +3490,31 @@ function calcolaLettureVendite() {
       compilate++;
       const litri = valOggi - valIeri;
       const litriStd = Math.max(0, litri - litriDiv);
-      const euro = (litriStd * prezzoStd) + (litriDiv * prezzoDiv);
-      elLitri.textContent = litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo';
-      elEuro.textContent = prezzoStd > 0 ? '€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+      const euroStd = litriStd * prezzoStd;
+      const euroDiv = litriDiv * prezzoDiv;
+      const euro = euroStd + euroDiv;
+
+      var calcHtml = '<div style="display:flex;gap:16px;font-size:13px;margin-bottom:4px"><span style="color:var(--text-muted)">Litri totali: <strong style="font-family:var(--font-mono)">' + (litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo') + '</strong></span><span style="color:' + colore + '">Venduto: <strong style="font-family:var(--font-mono)">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></span></div>';
+      if (litriDiv > 0 && prezzoDiv > 0) {
+        calcHtml += '<div style="font-size:11px;color:var(--text-muted);padding-top:4px;border-top:0.5px dashed var(--border)">';
+        calcHtml += '<div>↳ ' + litriStd.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoStd.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroStd.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong></div>';
+        calcHtml += '<div style="color:#BA7517">↳ ' + litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoDiv.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroDiv.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong> <span style="font-size:9px;background:#FFF3E0;color:#BA7517;padding:1px 5px;border-radius:4px">cambio prezzo</span></div>';
+        calcHtml += '</div>';
+      }
+      elCalc.innerHTML = calcHtml;
+
       if (litri >= 0) {
         totLitri += litri; totEuro += euro;
-        const isGasolio = p.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+        var isGasolio = p.prodotto.toLowerCase().indexOf('gasolio') >= 0;
         if (isGasolio) { litriGasolio += litri; euroGasolio += euro; }
         else { litriBenzina += litri; euroBenzina += euro; }
       }
     } else {
-      elLitri.textContent = '—';
-      elEuro.textContent = '—';
+      elCalc.innerHTML = '<span style="color:var(--text-muted);font-size:13px">Litri: <strong style="font-family:var(--font-mono)">—</strong></span>';
     }
   });
 
-  // Totali sotto il form
-  const totEl = document.getElementById('stz-totali-letture');
+  var totEl = document.getElementById('stz-totali-letture');
   if (totEl) {
     totEl.innerHTML = '<div style="display:flex;gap:20px;padding:12px 16px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)">' +
       '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale litri</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + totLitri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L</div></div>' +
@@ -3512,24 +3522,20 @@ function calcolaLettureVendite() {
       '</div>';
   }
 
-  // Pannello LIVE a destra — diviso Gasolio / Benzina
   var el = document.getElementById('stz-totali-live');
   if (el) {
     el.innerHTML =
       '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:14px;font-weight:600">Totali live</div>' +
-      // GASOLIO
       '<div style="margin-bottom:14px">' +
-        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#FFD580">GASOLIO</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#fff">' + litriGasolio.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#E8A030">GASOLIO</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#E8A030">' + litriGasolio.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#7CFC00">€ ' + euroGasolio.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>' +
       '</div>' +
-      // BENZINA
       '<div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:14px">' +
         '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#378ADD"></div><span style="font-size:11px;font-weight:600;color:#87CEFA">BENZINA</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#fff">' + litriBenzina.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#87CEFA">' + litriBenzina.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#7CFC00">€ ' + euroBenzina.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>' +
       '</div>' +
-      // TOTALE GENERALE
       '<div style="border-top:1px solid rgba(255,255,255,0.15);padding-top:12px">' +
         '<div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:6px">TOTALE</div>' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:20px;font-weight:800;color:#fff">' + totLitri.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
@@ -3626,7 +3632,13 @@ async function salvaLetture() {
   for (const inp of inputs) {
     const val = parseFloat(inp.value);
     if (isNaN(val)) continue;
-    const { error } = await sb.from('stazione_letture').upsert({ pompa_id:inp.dataset.pompa, data, lettura:val }, { onConflict:'pompa_id,data' });
+    const pompaId = inp.dataset.pompa;
+    // Litri e prezzo diverso
+    const inputLD = document.querySelector('.stz-litri-div[data-pompa="' + pompaId + '"]');
+    const inputPD = document.querySelector('.stz-prezzo-div[data-pompa="' + pompaId + '"]');
+    const litriPD = inputLD ? parseFloat(inputLD.value) || 0 : 0;
+    const prezzoPD = inputPD ? parseFloat(inputPD.value) || 0 : 0;
+    const { error } = await sb.from('stazione_letture').upsert({ pompa_id:pompaId, data, lettura:val, litri_prezzo_diverso:litriPD, prezzo_diverso:prezzoPD }, { onConflict:'pompa_id,data' });
     if (error) { toast('Errore: ' + error.message); return; }
     salvate++;
   }
@@ -3676,7 +3688,6 @@ function renderStoricoGiorno(idx) {
   const data = s.dateUniche[idx];
   const lettureGiorno = s.lettureByData[data] || [];
 
-  // Aggiorna label data
   const dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
   document.getElementById('stz-storico-data-label').textContent = dataFmt;
 
@@ -3687,17 +3698,34 @@ function renderStoricoGiorno(idx) {
     const pompa = s.pompeMap[l.pompa_id];
     if (!pompa) return;
     const _pi = cacheProdotti.find(pp=>pp.nome===pompa.prodotto); const colore = _pi ? _pi.colore : '#888';
-    // Trova lettura precedente per questa pompa
     const storPompa = s.lettureByPompa[l.pompa_id]||[];
     const iSorted = storPompa.sort((a,b)=>b.data.localeCompare(a.data));
     const myIdx = iSorted.findIndex(x=>x.id===l.id);
     const prec = myIdx < iSorted.length-1 ? iSorted[myIdx+1] : null;
     const litri = prec ? Number(l.lettura)-Number(prec.lettura) : null;
     const prezzo = Number(s.prezziMap[l.data+'_'+pompa.prodotto]||0);
-    const incasso = litri!==null && prezzo ? litri*prezzo : null;
+
+    // Cambio prezzo
+    const litriPD = Number(l.litri_prezzo_diverso||0);
+    const prezzoPD = Number(l.prezzo_diverso||0);
+    const hasCambio = litriPD > 0 && prezzoPD > 0;
+
+    var incasso = null;
+    var litriStd = litri;
+    var euroStd = 0, euroDiv = 0;
+    if (litri !== null && prezzo) {
+      if (hasCambio) {
+        litriStd = Math.max(0, litri - litriPD);
+        euroStd = litriStd * prezzo;
+        euroDiv = litriPD * prezzoPD;
+        incasso = euroStd + euroDiv;
+      } else {
+        incasso = litri * prezzo;
+      }
+    }
 
     if (litri!==null && litri >= 0) {
-      const isGasolio = pompa.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+      var isGasolio = pompa.prodotto.toLowerCase().indexOf('gasolio') >= 0;
       if (isGasolio) { totLitriG += litri; totEuroG += (incasso||0); }
       else { totLitriB += litri; totEuroB += (incasso||0); }
     }
@@ -3710,11 +3738,20 @@ function renderStoricoGiorno(idx) {
       '<td style="font-family:var(--font-mono)">' + (prezzo?fmt(prezzo):'—') + '</td>' +
       '<td style="font-family:var(--font-mono);font-weight:bold">' + (incasso!==null?fmtE(incasso):'—') + '</td>' +
       '</tr>';
+
+    // Sotto-riga cambio prezzo
+    if (hasCambio && litri !== null) {
+      html += '<tr style="background:#FFF8E1;font-size:10px">' +
+        '<td style="padding:3px 8px;color:#BA7517" colspan="3">↳ di cui ' + fmtL(litriStd) + ' L × € ' + prezzo.toFixed(3) + ' = ' + fmtE(euroStd) + '</td>' +
+        '<td style="padding:3px 8px;color:#BA7517;font-family:var(--font-mono)">' + fmtL(litriPD) + '</td>' +
+        '<td style="padding:3px 8px;color:#BA7517;font-family:var(--font-mono)">€ ' + prezzoPD.toFixed(3) + '</td>' +
+        '<td style="padding:3px 8px;color:#BA7517;font-family:var(--font-mono);font-weight:bold">' + fmtE(euroDiv) + ' <span style="font-size:8px;background:#FFF3E0;padding:1px 4px;border-radius:3px">cambio</span></td>' +
+        '</tr>';
+    }
   });
 
-  // Riga totale
-  const totLitri = totLitriG + totLitriB;
-  const totEuro = totEuroG + totEuroB;
+  var totLitri = totLitriG + totLitriB;
+  var totEuro = totEuroG + totEuroB;
   html += '<tr style="background:var(--bg);font-weight:bold;border-top:2px solid var(--border)">' +
     '<td colspan="3" style="font-size:11px;text-transform:uppercase">Totale giorno</td>' +
     '<td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td></td>' +
@@ -3722,8 +3759,7 @@ function renderStoricoGiorno(idx) {
 
   tbody.innerHTML = html;
 
-  // Riepilogo sopra la tabella
-  const riepEl = document.getElementById('stz-storico-riepilogo');
+  var riepEl = document.getElementById('stz-storico-riepilogo');
   if (riepEl) {
     riepEl.innerHTML = '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
       '<div style="flex:1;min-width:120px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid #BA7517"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Gasolio</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + fmtL(totLitriG) + ' L</div><div style="font-family:var(--font-mono);font-size:13px;color:#639922">' + fmtE(totEuroG) + '</div></div>' +
