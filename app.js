@@ -5007,6 +5007,12 @@ async function salvaCassa() {
     contanti_da_versare: daVersare, versato, differenza
   };
 
+  // Controlla se esiste già un registro per questa data
+  var { data: cassaEsistente } = await sb.from('stazione_cassa').select('id').eq('data', data).maybeSingle();
+  if (cassaEsistente) {
+    if (!confirm('Esiste già un registro cassa per il ' + data + '.\nVuoi sovrascriverlo?')) return;
+  }
+
   var { error } = await sb.from('stazione_cassa').upsert(record, { onConflict: 'data' });
   if (error) { toast('Errore: ' + error.message); return; }
 
@@ -5021,26 +5027,16 @@ async function salvaCassa() {
     }
   }
 
-  // Gestisci crediti automaticamente
-  if (creditiEmessi > 0) {
-    await sb.from('stazione_crediti').insert([{ data_emissione: data, importo: creditiEmessi, stato: 'sospeso', nota: 'Crediti emessi ' + data }]);
-  }
-  if (rimborsi > 0 || rimborsiPrec > 0) {
-    // Segna crediti sospesi come rimborsati (i più vecchi prima)
-    var totRimb = rimborsi + rimborsiPrec;
-    var { data: credAperti } = await sb.from('stazione_crediti').select('*').eq('stato','sospeso').order('data_emissione');
-    var restante = totRimb;
-    for (var j = 0; j < (credAperti||[]).length && restante > 0.01; j++) {
-      var c = credAperti[j];
-      if (Number(c.importo) <= restante) {
-        await sb.from('stazione_crediti').update({ stato: 'rimborsato', data_rimborso: data }).eq('id', c.id);
-        restante -= Number(c.importo);
-      } else {
-        // Rimborso parziale: aggiorna importo residuo
-        await sb.from('stazione_crediti').update({ importo: Number(c.importo) - restante, nota: (c.nota||'') + ' (parz. rimborsato € ' + restante.toFixed(2) + ')' }).eq('id', c.id);
-        await sb.from('stazione_crediti').insert([{ data_emissione: c.data_emissione, importo: restante, stato: 'rimborsato', data_rimborso: data, nota: 'Rimborso parziale' }]);
-        restante = 0;
-      }
+  // Registro crediti giornaliero: un solo record per giorno
+  // Saldo = crediti emessi - rimborsi - rimborsi gg precedenti
+  var saldoCredGiorno = Math.round((creditiEmessi - rimborsi - rimborsiPrec) * 100) / 100;
+  if (saldoCredGiorno !== 0 || creditiEmessi > 0 || rimborsi > 0 || rimborsiPrec > 0) {
+    var notaCred = 'Crediti: ' + fmtE(creditiEmessi) + ' | Rimborsi: ' + fmtE(rimborsi) + ' | Rimb.prec: ' + fmtE(rimborsiPrec);
+    var { data: esistente } = await sb.from('stazione_crediti').select('id').eq('data_emissione', data).maybeSingle();
+    if (esistente) {
+      await sb.from('stazione_crediti').update({ importo: saldoCredGiorno, nota: notaCred }).eq('id', esistente.id);
+    } else {
+      await sb.from('stazione_crediti').insert([{ data_emissione: data, importo: saldoCredGiorno, nota: notaCred }]);
     }
   }
 
@@ -5049,60 +5045,54 @@ async function salvaCassa() {
   caricaCrediti();
 }
 
-// ── CREDITI SOSPESI ──
+// ── REGISTRO CREDITI GIORNALIERO ──
 async function caricaCrediti() {
-  var { data: crediti } = await sb.from('stazione_crediti').select('*').order('data_emissione',{ascending:false}).limit(50);
+  var { data: crediti } = await sb.from('stazione_crediti').select('*').order('data_emissione',{ascending:false}).limit(60);
   var tbody = document.getElementById('cred-tabella');
 
-  var totAperti = 0, nAperti = 0, totRimb = 0, nRimb = 0;
+  var totale = 0, totMese = 0;
   var inizioMese = oggiISO.substring(0,8) + '01';
 
   (crediti||[]).forEach(function(c) {
-    if (c.stato === 'sospeso') { totAperti += Number(c.importo); nAperti++; }
-    if (c.stato === 'rimborsato' && c.data_rimborso >= inizioMese) { totRimb += Number(c.importo); nRimb++; }
+    var imp = Number(c.importo||0);
+    totale += imp;
+    if (c.data_emissione >= inizioMese) totMese += imp;
   });
 
-  document.getElementById('cred-aperti').textContent = fmtE(totAperti) + ' (' + nAperti + ')';
-  document.getElementById('cred-rimborsati').textContent = fmtE(totRimb) + ' (' + nRimb + ')';
-  document.getElementById('cred-totale').textContent = fmtE(totAperti + totRimb) + ' (' + (crediti||[]).length + ')';
+  // KPI
+  var elTot = document.getElementById('cred-totale');
+  elTot.textContent = fmtE(totale);
+  elTot.style.color = totale >= 0 ? '#A32D2D' : '#639922';
+
+  var elMese = document.getElementById('cred-mese');
+  elMese.textContent = fmtE(totMese);
+  elMese.style.color = totMese >= 0 ? '#A32D2D' : '#639922';
 
   if (!crediti || !crediti.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun credito</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun registro</td></tr>';
     return;
   }
 
   tbody.innerHTML = crediti.map(function(c) {
-    var isSospeso = c.stato === 'sospeso';
-    var badge = isSospeso ? '<span class="badge red">sospeso</span>' : '<span class="badge green">rimborsato</span>';
-    return '<tr style="' + (isSospeso ? '' : 'opacity:0.5') + '"><td>' + c.data_emissione + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtE(c.importo) + '</td><td>' + badge + '</td><td>' + (c.data_rimborso || '—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(c.nota||'') + '</td><td>' + (isSospeso ? '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="rimborsaCredito(\'' + c.id + '\')">Rimborsa</button>' : '') + '</td></tr>';
+    var imp = Number(c.importo||0);
+    var isPos = imp >= 0;
+    var colore = isPos ? '#A32D2D' : '#639922';
+    var segno = isPos ? '+' : '−';
+    // Estrai dettagli dalla nota
+    var notaParts = (c.nota||'').split('|').map(function(s){return s.trim();});
+    var credVal = '—', rimbVal = '—', rimbPrecVal = '—';
+    notaParts.forEach(function(p) {
+      if (p.indexOf('Crediti:') === 0) credVal = p.replace('Crediti:','').trim();
+      if (p.indexOf('Rimborsi:') === 0) rimbVal = p.replace('Rimborsi:','').trim();
+      if (p.indexOf('Rimb.prec:') === 0) rimbPrecVal = p.replace('Rimb.prec:','').trim();
+    });
+    return '<tr><td style="font-weight:500">' + c.data_emissione + '</td>' +
+      '<td style="font-family:var(--font-mono);font-size:11px">' + credVal + '</td>' +
+      '<td style="font-family:var(--font-mono);font-size:11px">' + rimbVal + '</td>' +
+      '<td style="font-family:var(--font-mono);font-size:11px">' + rimbPrecVal + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:600;color:' + colore + '">' + segno + ' ' + fmtE(Math.abs(imp)) + '</td>' +
+      '<td style="font-size:11px;color:var(--text-muted)">' + (isPos ? 'credito netto' : 'riduzione crediti') + '</td></tr>';
   }).join('');
-}
-
-async function nuovoCredito() {
-  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:12px">Nuovo credito sospeso</div>';
-  html += '<div class="form-grid"><div class="form-group"><label>Data</label><input type="date" id="nc-data" value="' + oggiISO + '" /></div><div class="form-group"><label>Importo €</label><input type="number" id="nc-importo" step="0.01" placeholder="0.00" /></div><div class="form-group"><label>Note</label><input type="text" id="nc-nota" placeholder="Descrizione..." /></div></div>';
-  html += '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" style="flex:1;background:#D85A30" onclick="salvaCredito()">Salva credito</button><button class="btn-secondary" onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
-  apriModal(html);
-}
-
-async function salvaCredito() {
-  var data = document.getElementById('nc-data').value;
-  var importo = parseFloat(document.getElementById('nc-importo').value);
-  var nota = document.getElementById('nc-nota').value;
-  if (!data || isNaN(importo) || importo <= 0) { toast('Compila data e importo'); return; }
-  var { error } = await sb.from('stazione_crediti').insert([{ data_emissione: data, importo, nota, stato: 'sospeso' }]);
-  if (error) { toast('Errore: ' + error.message); return; }
-  toast('Credito registrato!');
-  chiudiModal();
-  caricaCrediti();
-}
-
-async function rimborsaCredito(id) {
-  if (!confirm('Segnare questo credito come rimborsato?')) return;
-  var { error } = await sb.from('stazione_crediti').update({ stato: 'rimborsato', data_rimborso: oggiISO }).eq('id', id);
-  if (error) { toast('Errore: ' + error.message); return; }
-  toast('Credito rimborsato!');
-  caricaCrediti();
 }
 
 async function stampaCassa() {

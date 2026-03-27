@@ -912,17 +912,13 @@
 
           <!-- Registro crediti -->
           <div class="card">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-              <span>Registro crediti sospesi</span>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#D85A30" onclick="nuovoCredito()">+ Nuovo credito</button>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
-              <div class="kpi" style="background:#FCEBEB;border-color:#E24B4A"><div class="kpi-label" style="color:#791F1F">Crediti aperti</div><div class="kpi-value" style="color:#A32D2D" id="cred-aperti">—</div></div>
-              <div class="kpi" style="background:#EAF3DE;border-color:#639922"><div class="kpi-label" style="color:#27500A">Rimborsati (mese)</div><div class="kpi-value" style="color:#3B6D11" id="cred-rimborsati">—</div></div>
-              <div class="kpi"><div class="kpi-label">Totale storico</div><div class="kpi-value" id="cred-totale">—</div></div>
+            <div class="card-title">Registro crediti — storico giornaliero</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+              <div class="kpi"><div class="kpi-label">Saldo crediti totale</div><div class="kpi-value" id="cred-totale">—</div></div>
+              <div class="kpi"><div class="kpi-label">Saldo mese corrente</div><div class="kpi-value" id="cred-mese">—</div></div>
             </div>
             <div style="overflow-x:auto">
-            <table><thead><tr><th>Data</th><th>Importo</th><th>Stato</th><th>Data rimborso</th><th>Note</th><th></th></tr></thead>
+            <table><thead><tr><th>Data</th><th>Crediti</th><th>Rimborsi</th><th>Rimb. gg prec.</th><th>Saldo giorno</th><th>Nota</th></tr></thead>
             <tbody id="cred-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
