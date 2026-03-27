@@ -3047,13 +3047,13 @@ async function caricaFornitori() {
   const tbody=document.getElementById('tabella-fornitori');
   if (!data||!data.length){tbody.innerHTML='<tr><td colspan="12" class="loading">Nessun fornitore</td></tr>';return;}
 
-  // Carica TUTTI gli ordini non pagati fornitore per fido
+  // Carica TUTTI gli ordini per fido fornitori in UNA query
   const fornConFido = data.filter(r => Number(r.fido_massimo||0) > 0 || Number(r.fido||0) > 0);
   let ordFornMap = {};
   if (fornConFido.length) {
     const nomi = fornConFido.map(f => f.nome);
-    const { data: ordNonPag } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,margine,iva,litri,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi);
-    (ordNonPag||[]).forEach(o => {
+    const { data: ordTutti } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,litri,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi);
+    (ordTutti||[]).forEach(o => {
       if (!ordFornMap[o.fornitore]) ordFornMap[o.fornitore] = [];
       ordFornMap[o.fornitore].push(o);
     });
@@ -3062,16 +3062,23 @@ async function caricaFornitori() {
   tbody.innerHTML = data.map(r => {
     let usato = 0, residuo = 0;
     const fidoMax = Number(r.fido_massimo||0) || Number(r.fido||0);
+    const ggPag = r.giorni_pagamento || 30;
     if (fidoMax > 0) {
       const ords = ordFornMap[r.nome] || [];
       ords.forEach(o => {
         if (o.pagato_fornitore) return;
+        // Considera scadute come pagate (stessa logica della scheda)
+        if (o.data) {
+          var scad = new Date(o.data);
+          scad.setDate(scad.getDate() + (o.giorni_pagamento || ggPag));
+          if (scad <= oggi) return; // Scaduta = pagata
+        }
         usato += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
       });
       residuo = fidoMax - usato;
     }
     const basi=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.basi_carico?.nome).filter(Boolean).join(', '):'—';
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + String(r.nome||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + ggPag + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + String(r.nome||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }).join('');
 }
 
