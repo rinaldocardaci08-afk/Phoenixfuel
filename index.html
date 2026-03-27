@@ -17,6 +17,7 @@
     @media (max-width: 768px) {
       #stz-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
       #stz-totali-live > div { display:flex; flex-wrap:wrap; gap:16px; }
+      #marg-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
     }
   </style>
 </head>
@@ -606,6 +607,7 @@
           <button class="btn-primary stz-tab" data-tab="stz-prezzi" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Prezzi pompa</button>
           <button class="btn-primary stz-tab" data-tab="stz-versamenti" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏦 Versamenti</button>
           <button class="btn-primary stz-tab" data-tab="stz-magazzino" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Magazzino</button>
+          <button class="btn-primary stz-tab" data-tab="stz-marginalita" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Marginalità</button>
           <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
         </div>
 
@@ -773,6 +775,30 @@
             <div style="overflow-x:auto">
             <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
             <tbody id="giac-stz-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- MARGINALITA -->
+        <div class="stz-panel" id="stz-marginalita" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Marginalità giornaliera</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <button onclick="margGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+                <span id="marg-data-label" style="font-family:var(--font-mono);font-size:14px;font-weight:600;min-width:110px;text-align:center">—</span>
+                <button onclick="margGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:20px;align-items:flex-start">
+              <div style="flex:1;min-width:0">
+                <div id="marg-pompe-content"><div class="loading">Caricamento...</div></div>
+                <button class="btn-primary" onclick="salvaCostiMarg()" style="margin-top:12px">💾 Salva costi</button>
+              </div>
+              <div id="marg-totali-live" style="position:sticky;top:80px;min-width:200px;max-width:240px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:14px;padding:20px;color:#fff;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Marginalità live</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.3);text-align:center">Seleziona un giorno...</div>
+              </div>
             </div>
           </div>
         </div>

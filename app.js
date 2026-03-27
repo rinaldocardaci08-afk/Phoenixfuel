@@ -3195,7 +3195,7 @@ function switchStazioneTab(btn) {
   btn.style.background=''; btn.style.color=''; btn.style.border=''; btn.classList.add('active');
   document.querySelectorAll('.stz-panel').forEach(p => p.style.display='none');
   document.getElementById(btn.dataset.tab).style.display='';
-  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-report':initReportStazione };
+  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-marginalita':caricaMarginalita, 'stz-report':initReportStazione };
   if (loaders[btn.dataset.tab]) loaders[btn.dataset.tab]();
 }
 
@@ -3458,7 +3458,7 @@ async function caricaFormLetture() {
     html += '<span style="font-size:12px;color:#8B6914">Litri</span>';
     html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" value="' + (litriDivSaved || '') + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:120px;text-align:right" />';
     html += '<span style="font-size:12px;color:#8B6914">€/L</span>';
-    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" value="' + (prezzoDivSaved || '') + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:120px;text-align:right" />';
+    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" data-prodotto="' + esc(p.prodotto) + '" value="' + (prezzoDivSaved || '') + '" placeholder="0.000" step="0.001" oninput="copiaPrezzoCambio(this);calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:120px;text-align:right" />';
     html += '</div>';
     html += '</div>';
   });
@@ -3780,6 +3780,236 @@ function renderStoricoGiorno(idx) {
       '<div style="flex:1;min-width:120px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid #639922"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Totale</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + fmtL(totLitri) + ' L</div><div style="font-family:var(--font-mono);font-size:13px;color:#639922;font-weight:700">' + fmtE(totEuro) + '</div></div>' +
       '</div>';
   }
+}
+
+// ── Auto-copia prezzo cambio tra pompe stesso prodotto ──
+function copiaPrezzoCambio(input) {
+  const prodotto = input.dataset.prodotto;
+  const pompaId = input.dataset.pompa;
+  const val = input.value;
+  document.querySelectorAll('.stz-prezzo-div[data-prodotto="' + prodotto + '"]').forEach(inp => {
+    if (inp.dataset.pompa !== pompaId) inp.value = val;
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── MARGINALITÀ STAZIONE ─────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+async function caricaMarginalita() {
+  // Carica tutte le date con letture
+  const { data: letture } = await sb.from('stazione_letture').select('*').order('data',{ascending:false});
+  const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false});
+  const { data: costi } = await sb.from('stazione_costi').select('*').order('data',{ascending:false});
+
+  if (!letture||!letture.length) {
+    document.getElementById('marg-pompe-content').innerHTML='<div class="loading">Nessuna lettura disponibile</div>';
+    document.getElementById('marg-data-label').textContent = '—';
+    return;
+  }
+
+  const dateUniche = [...new Set(letture.map(l=>l.data))].sort().reverse();
+  const pompeMap = {}; (pompe||[]).forEach(p=>pompeMap[p.id]=p);
+  const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
+  const costiMap = {}; (costi||[]).forEach(c=>{ costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro); });
+  const lettureByData = {};
+  letture.forEach(l => { if(!lettureByData[l.data]) lettureByData[l.data]=[]; lettureByData[l.data].push(l); });
+  const lettureByPompa = {};
+  letture.forEach(l => { if(!lettureByPompa[l.pompa_id]) lettureByPompa[l.pompa_id]=[]; lettureByPompa[l.pompa_id].push(l); });
+
+  window._margData = { dateUniche, pompeMap, prezziMap, costiMap, lettureByData, lettureByPompa, pompe, indice: 0 };
+  renderMargGiorno(0);
+}
+
+function margGiorno(dir) {
+  if (!window._margData) return;
+  var m = window._margData;
+  var nuovoIdx = m.indice - dir;
+  if (nuovoIdx < 0 || nuovoIdx >= m.dateUniche.length) return;
+  m.indice = nuovoIdx;
+  renderMargGiorno(nuovoIdx);
+}
+
+function renderMargGiorno(idx) {
+  var m = window._margData;
+  if (!m) return;
+  var data = m.dateUniche[idx];
+  var lettureGiorno = m.lettureByData[data] || [];
+
+  var dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
+  document.getElementById('marg-data-label').textContent = dataFmt;
+
+  var el = document.getElementById('marg-pompe-content');
+  var html = '';
+
+  lettureGiorno.forEach(function(l) {
+    var pompa = m.pompeMap[l.pompa_id];
+    if (!pompa) return;
+    var _pi = cacheProdotti.find(function(pp){return pp.nome===pompa.prodotto;}); var colore = _pi ? _pi.colore : '#888';
+    // Lettura precedente
+    var storPompa = (m.lettureByPompa[l.pompa_id]||[]).sort(function(a,b){return b.data.localeCompare(a.data);});
+    var myIdx = storPompa.findIndex(function(x){return x.id===l.id;});
+    var prec = myIdx < storPompa.length-1 ? storPompa[myIdx+1] : null;
+    var litri = prec ? Number(l.lettura)-Number(prec.lettura) : 0;
+    if (litri < 0) litri = 0;
+    var prezzo = Number(m.prezziMap[data+'_'+pompa.prodotto]||0);
+
+    // Cambio prezzo
+    var litriPD = Number(l.litri_prezzo_diverso||0);
+    var prezzoPD = Number(l.prezzo_diverso||0);
+    var hasCambio = litriPD > 0 && prezzoPD > 0;
+    var litriStd = hasCambio ? Math.max(0, litri - litriPD) : litri;
+
+    // Costo salvato
+    var costoSaved = m.costiMap[data+'_'+pompa.prodotto] || '';
+
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(pompa.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + ' — ' + fmtL(litri) + ' L totali</span></div>';
+
+    // Riga litri standard
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
+    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriStd) + '</div></div>';
+    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '—') + '</div></div>';
+    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo €/L</div><input type="number" class="marg-costo" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriStd + '" data-prezzo="' + prezzo + '" value="' + (costoSaved || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
+    html += '<div id="marg-res-' + l.pompa_id + '"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
+    html += '</div>';
+
+    // Riga cambio prezzo
+    if (hasCambio) {
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:8px 12px;background:#f5f5f0;border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
+      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Litri <span style="font-size:8px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio</span></div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriPD) + '</div></div>';
+      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Vendita €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600">€ ' + prezzoPD.toFixed(3) + '</div></div>';
+      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Costo €/L</div><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoSaved || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
+      html += '<div id="marg-res-cp-' + l.pompa_id + '"><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+  calcolaMargini();
+}
+
+function copiaCostoMarg(input) {
+  var prodotto = input.dataset.prodotto;
+  var pompaId = input.dataset.pompa;
+  var val = input.value;
+  var isCp = input.classList.contains('marg-costo-cp');
+  var selector = isCp ? '.marg-costo-cp' : '.marg-costo';
+  document.querySelectorAll(selector + '[data-prodotto="' + prodotto + '"]').forEach(function(inp) {
+    if (inp.dataset.pompa !== pompaId) inp.value = val;
+  });
+}
+
+function calcolaMargini() {
+  var litriGasolio=0, euroGasolio=0, margGasolio=0;
+  var litriBenzina=0, euroBenzina=0, margBenzina=0;
+
+  // Litri standard
+  document.querySelectorAll('.marg-costo').forEach(function(inp) {
+    var costo = parseFloat(inp.value) || 0;
+    var prezzo = parseFloat(inp.dataset.prezzo) || 0;
+    var litri = parseFloat(inp.dataset.litri) || 0;
+    var pompaId = inp.dataset.pompa;
+    var prodotto = inp.dataset.prodotto;
+    var margL = prezzo > 0 && costo > 0 ? prezzo - costo : 0;
+    var margTot = margL * litri;
+    var isGasolio = prodotto.toLowerCase().indexOf('gasolio') >= 0;
+
+    var elRes = document.getElementById('marg-res-' + pompaId);
+    if (elRes) {
+      var mColor = margL >= 0 ? '#639922' : '#E24B4A';
+      elRes.innerHTML = '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) : '—') + '</div>' +
+        '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) : '—') + '</div>';
+    }
+
+    if (costo > 0 && litri > 0) {
+      if (isGasolio) { litriGasolio += litri; euroGasolio += litri*prezzo; margGasolio += margTot; }
+      else { litriBenzina += litri; euroBenzina += litri*prezzo; margBenzina += margTot; }
+    }
+  });
+
+  // Litri cambio prezzo
+  document.querySelectorAll('.marg-costo-cp').forEach(function(inp) {
+    var costo = parseFloat(inp.value) || 0;
+    var prezzo = parseFloat(inp.dataset.prezzo) || 0;
+    var litri = parseFloat(inp.dataset.litri) || 0;
+    var pompaId = inp.dataset.pompa;
+    var prodotto = inp.dataset.prodotto;
+    var margL = prezzo > 0 && costo > 0 ? prezzo - costo : 0;
+    var margTot = margL * litri;
+    var isGasolio = prodotto.toLowerCase().indexOf('gasolio') >= 0;
+
+    var elRes = document.getElementById('marg-res-cp-' + pompaId);
+    if (elRes) {
+      var mColor = margL >= 0 ? '#639922' : '#E24B4A';
+      elRes.innerHTML = '<div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) : '—') + '</div>' +
+        '<div style="font-size:9px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) : '—') + '</div>';
+    }
+
+    if (costo > 0 && litri > 0) {
+      if (isGasolio) { litriGasolio += litri; euroGasolio += litri*prezzo; margGasolio += margTot; }
+      else { litriBenzina += litri; euroBenzina += litri*prezzo; margBenzina += margTot; }
+    }
+  });
+
+  var totLitri = litriGasolio + litriBenzina;
+  var totEuro = euroGasolio + euroBenzina;
+  var totMarg = margGasolio + margBenzina;
+
+  // Pannello live
+  var el = document.getElementById('marg-totali-live');
+  if (el) {
+    el.innerHTML =
+      '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:14px;font-weight:600">Marginalità live</div>' +
+      '<div style="margin-bottom:14px">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#fff">GASOLIO</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#fff">' + litriGasolio.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#7CFC00">€ ' + euroGasolio.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Margine</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:800;color:' + (margGasolio>=0?'#7CFC00':'#FF6B6B') + '">€ ' + margGasolio.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>' +
+      '</div>' +
+      '<div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:14px">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#378ADD"></div><span style="font-size:11px;font-weight:600;color:#87CEFA">BENZINA</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#87CEFA">' + litriBenzina.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#7CFC00">€ ' + euroBenzina.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Margine</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:800;color:' + (margBenzina>=0?'#7CFC00':'#FF6B6B') + '">€ ' + margBenzina.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>' +
+      '</div>' +
+      '<div style="border-top:1px solid rgba(255,255,255,0.15);padding-top:12px">' +
+        '<div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:6px">TOTALE GIORNATA</div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:#fff">' + totLitri.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:#7CFC00">€ ' + totEuro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Margine</span><span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:' + (totMarg>=0?'#7CFC00':'#FF6B6B') + '">€ ' + totMarg.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>' +
+      '</div>';
+  }
+}
+
+async function salvaCostiMarg() {
+  var inputs = document.querySelectorAll('.marg-costo');
+  var salvati = {};
+  for (var i = 0; i < inputs.length; i++) {
+    var inp = inputs[i];
+    var costo = parseFloat(inp.value);
+    if (isNaN(costo) || costo <= 0) continue;
+    var key = inp.dataset.data + '_' + inp.dataset.prodotto;
+    if (salvati[key]) continue;
+    var { error } = await sb.from('stazione_costi').upsert({ data:inp.dataset.data, prodotto:inp.dataset.prodotto, costo_litro:costo }, { onConflict:'data,prodotto' });
+    if (error) { toast('Errore: ' + error.message); return; }
+    salvati[key] = true;
+  }
+  var count = Object.keys(salvati).length;
+  if (count === 0) { toast('Inserisci almeno un costo'); return; }
+  // Aggiorna cache
+  var m = window._margData;
+  if (m) {
+    for (var k in salvati) {
+      var parts = k.split('_'); var d = parts[0]; var p = parts.slice(1).join('_');
+      var inp2 = document.querySelector('.marg-costo[data-data="'+d+'"][data-prodotto="'+p+'"]');
+      if (inp2) m.costiMap[d+'_'+p] = parseFloat(inp2.value);
+    }
+  }
+  toast(count + ' costi salvati!');
 }
 
 // ── Prezzi pompa ──
