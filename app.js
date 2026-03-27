@@ -4017,6 +4017,30 @@ async function salvaLetture() {
   if (errore) { toast('Errore: ' + errore.error.message); return; }
   await Promise.all(cpOps);
   toast(upserts.length + ' letture salvate!');
+
+  // ═══ Auto-crea prezzi pompa per giorno successivo ═══
+  try {
+    var domani = new Date(new Date(data).getTime() + 86400000).toISOString().split('T')[0];
+    var pompe = window._stzPompe || [];
+    var prodottiUnici = [...new Set(pompe.map(function(p){return p.prodotto;}))];
+    var prezziDomani = [];
+    prodottiUnici.forEach(function(prodotto) {
+      // Priorità: cambio prezzo del giorno > prezzo standard del giorno
+      var cpKey = prodotto + ' (cambio prezzo)';
+      var inputCP = document.querySelector('.stz-prezzo-div[data-prodotto="' + prodotto + '"]');
+      var prezzoCP = inputCP ? parseFloat(inputCP.value) || 0 : 0;
+      var prezzoStd = (window._stzPrezzoMap || {})[prodotto] || 0;
+      var prezzoFinale = prezzoCP > 0 ? prezzoCP : prezzoStd;
+      if (prezzoFinale > 0) {
+        prezziDomani.push(sb.from('stazione_prezzi').upsert({ data: domani, prodotto: prodotto, prezzo_litro: prezzoFinale }, { onConflict:'data,prodotto' }));
+      }
+    });
+    if (prezziDomani.length) {
+      await Promise.all(prezziDomani);
+      toast('Prezzi ' + domani + ' preparati automaticamente');
+    }
+  } catch(e) { console.warn('Auto prezzi domani:', e); }
+
   calcolaLettureVendite();
   caricaStoricoLetture();
   caricaStoricoPrezzi();
@@ -4505,6 +4529,39 @@ async function salvaCostiMarg() {
     }
   }
   toast(count + ' costi salvati!');
+
+  // ═══ Auto-crea costi per giorno successivo da CMP cisterne ═══
+  try {
+    // Trova la data dei costi salvati
+    var dataCorr = null;
+    var inputs2 = document.querySelectorAll('.marg-costo');
+    for (var j = 0; j < inputs2.length; j++) { if (inputs2[j].dataset.data) { dataCorr = inputs2[j].dataset.data; break; } }
+    if (dataCorr) {
+      var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
+      var { data: cisterne } = await sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido');
+      if (cisterne && cisterne.length) {
+        // Calcola CMP per prodotto
+        var cmpPerProdotto = {};
+        cisterne.forEach(function(c) {
+          if (!cmpPerProdotto[c.prodotto]) cmpPerProdotto[c.prodotto] = { litri:0, valore:0 };
+          cmpPerProdotto[c.prodotto].litri += Number(c.livello_attuale||0);
+          cmpPerProdotto[c.prodotto].valore += Number(c.livello_attuale||0) * Number(c.costo_medio||0);
+        });
+        var costiDomani = [];
+        Object.entries(cmpPerProdotto).forEach(function([prodotto, v]) {
+          var cmp = v.litri > 0 ? Math.round(v.valore / v.litri * 1000000) / 1000000 : 0;
+          if (cmp > 0) {
+            costiDomani.push(sb.from('stazione_costi').upsert({ data: domani, prodotto: prodotto, costo_litro: cmp }, { onConflict:'data,prodotto' }));
+          }
+        });
+        if (costiDomani.length) {
+          await Promise.all(costiDomani);
+          toast('Costi ' + domani + ' preparati da CMP');
+        }
+      }
+    }
+  } catch(e) { console.warn('Auto costi domani:', e); }
+
   renderStoricoMarg();
 }
 
