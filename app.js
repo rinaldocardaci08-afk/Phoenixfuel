@@ -3428,28 +3428,30 @@ async function caricaFormLetture() {
     const val = lettMap[p.id] !== undefined ? lettMap[p.id] : '';
     const precVal = lettIeriMap[p.id];
     const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
-    const precLabel = precVal !== undefined ? _sep(precVal.toLocaleString('it-IT', {maximumFractionDigits:2})) : '—';
+    const precRaw = precVal !== undefined ? String(precVal) : '—';
     const prezzo = prezzoMap[p.prodotto] || 0;
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(p.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(p.prodotto) + '</span></div>';
-    // Riga precedente (read-only) — INGRANDITA
-    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;background:var(--bg-card);padding:10px 14px;border-radius:8px;border:0.5px solid var(--border)"><span style="font-size:13px;color:var(--text-muted);width:130px;font-weight:500">📋 Giorno prec.:</span><span style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--text)">' + precLabel + '</span></div>';
-    // Input lettura oggi
-    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text);width:100px">Oggi:</span><input type="number" class="stz-lettura-input" data-pompa="' + p.id + '" data-prodotto="' + esc(p.prodotto) + '" value="' + val + '" placeholder="00000000" step="0.01" max="99999999" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);width:180px;max-width:100%;text-align:right" /></div>';
-    // Risultati calcolati
-    html += '<div style="display:flex;gap:16px;font-size:12px;padding-top:6px;border-top:0.5px dashed var(--border)" id="stz-calc-' + p.id + '"><span style="color:var(--text-muted)">Litri: <strong id="stz-litri-' + p.id + '">—</strong></span><span style="color:' + colore + '">Incasso: <strong id="stz-euro-' + p.id + '">—</strong></span></div>';
-    // Prezzo standard
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:0.5px dashed var(--border)">';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(p.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(p.prodotto) + '</span></div>';
+    // Contatori stile meccanico — Giorno prec. e Oggi stessa dimensione
+    html += '<div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap">';
+    // Giorno prec. (contatore meccanico)
+    html += '<div style="flex:1;min-width:160px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Giorno prec.</div>';
+    html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:18px;font-weight:700;color:#f0f0f0;letter-spacing:3px">' + precRaw + '</span></div></div>';
+    // Oggi (contatore meccanico con input)
+    html += '<div style="flex:1;min-width:160px"><div style="font-size:10px;color:var(--text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600">Oggi</div>';
+    html += '<input type="number" class="stz-lettura-input" data-pompa="' + p.id + '" data-prodotto="' + esc(p.prodotto) + '" value="' + val + '" placeholder="00000000" step="0.01" max="99999999" oninput="calcolaLettureVendite()" style="font-family:\'Courier New\',monospace;font-size:18px;font-weight:700;padding:8px 12px;border:none;border-radius:8px;background:#1a1a1a;color:#7CFC00;width:180px;max-width:100%;text-align:left;letter-spacing:3px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)" /></div>';
+    html += '</div>';
+    // Risultati calcolati per questa pompa (litri + venduto)
+    html += '<div style="display:flex;gap:16px;font-size:13px;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px" id="stz-calc-' + p.id + '"><span style="color:var(--text-muted)">Litri: <strong id="stz-litri-' + p.id + '" style="font-family:var(--font-mono)">—</strong></span><span style="color:' + colore + '">Venduto: <strong id="stz-euro-' + p.id + '" style="font-family:var(--font-mono)">—</strong></span></div>';
+    // Prezzo standard + prezzo diverso su una riga
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
     html += '<span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Prezzo pompa:</span>';
     html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '<span style="color:#E24B4A">non impostato</span>') + '</span>';
-    html += '</div>';
-    // Litri a prezzo diverso
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
-    html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap">Litri a prezzo diverso:</span>';
-    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:90px;text-align:right" />';
+    html += '<span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap">Litri prezzo diverso:</span>';
+    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
     html += '<span style="font-size:10px;color:var(--text-muted)">€/L:</span>';
-    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:90px;text-align:right" />';
+    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:80px;text-align:right" />';
     html += '</div>';
     html += '</div>';
   });
@@ -3464,6 +3466,7 @@ function calcolaLettureVendite() {
   const ieriMap = window._stzIeriMap || {};
   const prezzoMap = window._stzPrezzoMap || {};
   let totLitri = 0, totEuro = 0, compilate = 0;
+  let litriGasolio = 0, euroGasolio = 0, litriBenzina = 0, euroBenzina = 0;
 
   pompe.forEach(p => {
     const input = document.querySelector('.stz-lettura-input[data-pompa="' + p.id + '"]');
@@ -3484,34 +3487,56 @@ function calcolaLettureVendite() {
     if (!isNaN(valOggi) && valIeri !== undefined) {
       compilate++;
       const litri = valOggi - valIeri;
-      // Incasso: (litri - litriDiv) × prezzoStd + litriDiv × prezzoDiv
       const litriStd = Math.max(0, litri - litriDiv);
       const euro = (litriStd * prezzoStd) + (litriDiv * prezzoDiv);
-      elLitri.textContent = litri >= 0 ? _sep(litri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L' : '⚠ negativo';
-      elEuro.textContent = prezzoStd > 0 ? '€ ' + _sep(euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) : '—';
-      if (litri >= 0) { totLitri += litri; totEuro += euro; }
+      elLitri.textContent = litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo';
+      elEuro.textContent = prezzoStd > 0 ? '€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+      if (litri >= 0) {
+        totLitri += litri; totEuro += euro;
+        const isGasolio = p.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+        if (isGasolio) { litriGasolio += litri; euroGasolio += euro; }
+        else { litriBenzina += litri; euroBenzina += euro; }
+      }
     } else {
       elLitri.textContent = '—';
       elEuro.textContent = '—';
     }
   });
 
-  // Totali
+  // Totali sotto il form
   const totEl = document.getElementById('stz-totali-letture');
   if (totEl) {
     totEl.innerHTML = '<div style="display:flex;gap:20px;padding:12px 16px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)">' +
-      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale litri</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + _sep(totLitri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L</div></div>' +
-      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale incasso</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:#639922">€ ' + _sep(totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) + '</div></div>' +
+      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale litri</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + totLitri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L</div></div>' +
+      '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale venduto</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:#639922">€ ' + totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div></div>' +
       '</div>';
   }
 
-  // Pannello LIVE a destra
-  var elLiveLitri = document.getElementById('stz-live-litri');
-  var elLiveEuro = document.getElementById('stz-live-euro');
-  var elLivePompe = document.getElementById('stz-live-pompe');
-  if (elLiveLitri) elLiveLitri.textContent = _sep(totLitri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L';
-  if (elLiveEuro) elLiveEuro.textContent = '€ ' + _sep(totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}));
-  if (elLivePompe) elLivePompe.textContent = compilate + ' / ' + pompe.length;
+  // Pannello LIVE a destra — diviso Gasolio / Benzina
+  var el = document.getElementById('stz-totali-live');
+  if (el) {
+    el.innerHTML =
+      '<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:14px;font-weight:600">Totali live</div>' +
+      // GASOLIO
+      '<div style="margin-bottom:14px">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#FFD580">GASOLIO</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#fff">' + litriGasolio.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#7CFC00">€ ' + euroGasolio.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>' +
+      '</div>' +
+      // BENZINA
+      '<div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:14px">' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#378ADD"></div><span style="font-size:11px;font-weight:600;color:#87CEFA">BENZINA</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#fff">' + litriBenzina.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#7CFC00">€ ' + euroBenzina.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>' +
+      '</div>' +
+      // TOTALE GENERALE
+      '<div style="border-top:1px solid rgba(255,255,255,0.15);padding-top:12px">' +
+        '<div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:6px">TOTALE</div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:20px;font-weight:800;color:#fff">' + totLitri.toLocaleString('it-IT', {maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto</span><span style="font-family:var(--font-mono);font-size:20px;font-weight:800;color:#7CFC00">€ ' + totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:8px;text-align:center">' + compilate + ' / ' + pompe.length + ' pompe</div>' +
+      '</div>';
+  }
 }
 
 function stampaReportLetture() {
