@@ -349,6 +349,15 @@ async function salvaPrezzoCliente() {
   toast('Prezzo cliente salvato!');
 }
 
+function scorriGiornoPrezzi(dir) {
+  var input = document.getElementById('filtro-data-prezzi');
+  if (!input) return;
+  var current = input.value ? new Date(input.value) : new Date();
+  current.setDate(current.getDate() + dir);
+  input.value = current.toISOString().split('T')[0];
+  caricaPrezzi();
+}
+
 async function caricaPrezzi() {
   // Carica fornitori/clienti solo se cache vuota
   if (!cacheFornitori.length) await caricaSelectFornitori('pr-fornitore');
