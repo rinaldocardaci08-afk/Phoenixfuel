@@ -5059,6 +5059,15 @@ async function salvaCassa() {
   var { error } = await sb.from('stazione_cassa').upsert(record, { onConflict: 'data' });
   if (error) { toast('Errore: ' + error.message); return; }
 
+  // Registra versamento automatico nella sezione Versamenti
+  try {
+    var totCarte = Math.round((bancomat + nexi + aziendali) * 100) / 100;
+    await sb.from('stazione_versamenti').delete().eq('data', data).eq('note', 'Da registro cassa');
+    if (versato > 0 || totCarte > 0) {
+      await sb.from('stazione_versamenti').insert([{ data: data, contanti: versato, pos: totCarte, note: 'Da registro cassa' }]);
+    }
+  } catch(e) { console.warn('Errore versamento auto:', e); }
+
   // Salva spese contanti (batch)
   await sb.from('stazione_spese_contanti').delete().eq('data', data);
   var speseInserts = [];
@@ -5081,13 +5090,6 @@ async function salvaCassa() {
     } else {
       await sb.from('stazione_crediti').insert([{ data_emissione: data, importo: saldoCredGiorno, nota: notaCred }]);
     }
-  }
-
-  // Registra versamento automatico nella sezione Versamenti
-  var totCarte = Math.round((bancomat + nexi + aziendali) * 100) / 100;
-  await sb.from('stazione_versamenti').delete().eq('data', data).ilike('note', '%registro cassa%');
-  if (versato > 0 || totCarte > 0) {
-    await sb.from('stazione_versamenti').insert([{ data, contanti: versato, pos: totCarte, note: 'Da registro cassa' }]);
   }
 
   toast('Registro cassa salvato!');
