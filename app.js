@@ -3431,14 +3431,26 @@ async function caricaFormLetture() {
     const precLabel = precVal !== undefined ? _sep(precVal.toLocaleString('it-IT', {maximumFractionDigits:2})) : '—';
     const prezzo = prezzoMap[p.prodotto] || 0;
 
-    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">';
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(p.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(p.prodotto) + ' · ' + (prezzo ? '€ ' + prezzo.toFixed(3) + '/L' : '<span style="color:#E24B4A">prezzo non impostato</span>') + '</span></div>';
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(p.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(p.prodotto) + '</span></div>';
     // Riga precedente (read-only)
     html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><span style="font-size:11px;color:var(--text-muted);width:100px">Giorno prec.:</span><span style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--text-muted)">' + precLabel + '</span></div>';
     // Input lettura oggi
     html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text);width:100px">Oggi:</span><input type="number" class="stz-lettura-input" data-pompa="' + p.id + '" data-prodotto="' + esc(p.prodotto) + '" value="' + val + '" placeholder="00000000" step="0.01" max="99999999" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);width:180px;max-width:100%;text-align:right" /></div>';
     // Risultati calcolati
     html += '<div style="display:flex;gap:16px;font-size:12px;padding-top:6px;border-top:0.5px dashed var(--border)" id="stz-calc-' + p.id + '"><span style="color:var(--text-muted)">Litri: <strong id="stz-litri-' + p.id + '">—</strong></span><span style="color:' + colore + '">Incasso: <strong id="stz-euro-' + p.id + '">—</strong></span></div>';
+    // Prezzo standard
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:0.5px dashed var(--border)">';
+    html += '<span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Prezzo pompa:</span>';
+    html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + colore + '">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '<span style="color:#E24B4A">non impostato</span>') + '</span>';
+    html += '</div>';
+    // Litri a prezzo diverso
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">';
+    html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap">Litri a prezzo diverso:</span>';
+    html += '<input type="number" class="stz-litri-div" data-pompa="' + p.id + '" placeholder="0" step="0.01" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:90px;text-align:right" />';
+    html += '<span style="font-size:10px;color:var(--text-muted)">€/L:</span>';
+    html += '<input type="number" class="stz-prezzo-div" data-pompa="' + p.id + '" placeholder="0.000" step="0.001" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:90px;text-align:right" />';
+    html += '</div>';
     html += '</div>';
   });
   document.getElementById('stz-form-letture').innerHTML = html;
@@ -3461,13 +3473,21 @@ function calcolaLettureVendite() {
 
     const valOggi = parseFloat(input.value);
     const valIeri = ieriMap[p.id];
-    const prezzo = prezzoMap[p.prodotto] || 0;
+    const prezzoStd = prezzoMap[p.prodotto] || 0;
+
+    // Litri a prezzo diverso
+    const inputLitriDiv = document.querySelector('.stz-litri-div[data-pompa="' + p.id + '"]');
+    const inputPrezzoDiv = document.querySelector('.stz-prezzo-div[data-pompa="' + p.id + '"]');
+    const litriDiv = inputLitriDiv ? parseFloat(inputLitriDiv.value) || 0 : 0;
+    const prezzoDiv = inputPrezzoDiv ? parseFloat(inputPrezzoDiv.value) || 0 : 0;
 
     if (!isNaN(valOggi) && valIeri !== undefined) {
       const litri = valOggi - valIeri;
-      const euro = litri * prezzo;
+      // Incasso: (litri - litriDiv) × prezzoStd + litriDiv × prezzoDiv
+      const litriStd = Math.max(0, litri - litriDiv);
+      const euro = (litriStd * prezzoStd) + (litriDiv * prezzoDiv);
       elLitri.textContent = litri >= 0 ? _sep(litri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L' : '⚠ negativo';
-      elEuro.textContent = prezzo > 0 ? '€ ' + _sep(euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) : '—';
+      elEuro.textContent = prezzoStd > 0 ? '€ ' + _sep(euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) : '—';
       if (litri >= 0) { totLitri += litri; totEuro += euro; }
     } else {
       elLitri.textContent = '—';
@@ -3497,9 +3517,17 @@ function stampaReportLetture() {
     const input = document.querySelector('.stz-lettura-input[data-pompa="' + p.id + '"]');
     const valOggi = input ? parseFloat(input.value) : NaN;
     const valIeri = ieriMap[p.id];
-    const prezzo = prezzoMap[p.prodotto] || 0;
+    const prezzoStd = prezzoMap[p.prodotto] || 0;
     const litri = (!isNaN(valOggi) && valIeri !== undefined) ? valOggi - valIeri : 0;
-    const euro = litri * prezzo;
+
+    // Prezzo diverso
+    const inputLD = document.querySelector('.stz-litri-div[data-pompa="' + p.id + '"]');
+    const inputPD = document.querySelector('.stz-prezzo-div[data-pompa="' + p.id + '"]');
+    const litriDiv = inputLD ? parseFloat(inputLD.value) || 0 : 0;
+    const prezzoDiv = inputPD ? parseFloat(inputPD.value) || 0 : 0;
+    const litriStd = Math.max(0, litri - litriDiv);
+    const euro = (litriStd * prezzoStd) + (litriDiv * prezzoDiv);
+
     if (litri > 0) { totLitri += litri; totEuro += euro; }
     const _pi = cacheProdotti.find(pp=>pp.nome===p.prodotto); const colore = _pi ? _pi.colore : '#888';
 
@@ -3508,9 +3536,18 @@ function stampaReportLetture() {
       '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">' + (valIeri !== undefined ? _sep(valIeri.toLocaleString('it-IT',{maximumFractionDigits:2})) : '—') + '</td>' +
       '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;font-weight:bold">' + (!isNaN(valOggi) ? _sep(valOggi.toLocaleString('it-IT',{maximumFractionDigits:2})) : '—') + '</td>' +
       '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">' + _sep(litri.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</td>' +
-      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">€ ' + prezzo.toFixed(3) + '</td>' +
+      '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right">€ ' + prezzoStd.toFixed(3) + '</td>' +
       '<td style="padding:8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;font-weight:bold">€ ' + _sep(euro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</td>' +
       '</tr>';
+    // Riga aggiuntiva per prezzo diverso
+    if (litriDiv > 0 && prezzoDiv > 0) {
+      righe += '<tr style="background:#FFF8E1;font-size:10px">' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;color:#BA7517" colspan="3">↳ di cui a prezzo diverso</td>' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#BA7517">' + _sep(litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2})) + ' L</td>' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#BA7517">€ ' + prezzoDiv.toFixed(3) + '</td>' +
+        '<td style="padding:4px 8px;border:1px solid #ddd;font-family:Courier New,monospace;text-align:right;color:#BA7517">€ ' + _sep((litriDiv * prezzoDiv).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})) + '</td>' +
+        '</tr>';
+    }
   });
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Letture Stazione ' + dataFmt + '</title>' +
@@ -4460,17 +4497,19 @@ async function creaNuovoCarico() {
   await sb.from('carico_ordini').insert(righe);
   await Promise.all(ordiniSel.map(oId => sb.from('ordini').update({stato:'programmato'}).eq('id',oId)));
 
-  // Salva sedi di scarico selezionate sugli ordini
+  // Salva sedi di scarico selezionate sugli ordini (in parallelo)
   const sedeSelects = document.querySelectorAll('.ord-sede-select');
+  const sedeUpdates = [];
   for (const sel of sedeSelects) {
     const ordineId = sel.dataset.ordine;
     if (!ordiniSel.includes(ordineId)) continue;
     const sedeId = sel.value;
     const sedeNome = sel.tagName === 'SELECT' ? (sel.selectedOptions[0]?.dataset?.nome || '') : (sel.dataset.nome || '');
     if (sedeId) {
-      await sb.from('ordini').update({ sede_scarico_id: sedeId, sede_scarico_nome: sedeNome }).eq('id', ordineId);
+      sedeUpdates.push(sb.from('ordini').update({ sede_scarico_id: sedeId, sede_scarico_nome: sedeNome }).eq('id', ordineId));
     }
   }
+  if (sedeUpdates.length) await Promise.all(sedeUpdates);
 
   // Controlla se ci sono ordini dal deposito PhoenixFuel da scaricare
   const { data: ordiniCarico } = await sb.from('ordini').select('*').in('id', ordiniSel);
