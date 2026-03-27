@@ -542,8 +542,8 @@ function toggleTipoOrdine() {
   } else {
     document.getElementById('ord-note').placeholder = '';
   }
-  // Ricalcola prodotti disponibili per il tipo selezionato
-  if (document.getElementById('ord-fornitore').value) aggiornaProdottiOrdine();
+  // Ricalcola fornitori e prodotti (filtra PhoenixFuel per entrata_deposito)
+  aggiornaSelezioniOrdine();
 }
 
 async function aggiornaSelezioniOrdine() {
@@ -574,7 +574,12 @@ async function aggiornaSelezioniOrdine() {
     });
   }
 
-  const fornitori = [...new Map(prezziDelGiorno.map(p=>[p.fornitore,{nome:p.fornitore}])).values()];
+  var fornitori = [...new Map(prezziDelGiorno.map(p=>[p.fornitore,{nome:p.fornitore}])).values()];
+  // Per entrata deposito: escludi PhoenixFuel (non puoi caricare dal tuo stesso deposito)
+  var tipoOrd = document.getElementById('ord-tipo').value;
+  if (tipoOrd === 'entrata_deposito') {
+    fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('phoenix') === -1; });
+  }
   const selFor = document.getElementById('ord-fornitore');
   selFor.innerHTML = '<option value="">Seleziona fornitore...</option>' + fornitori.map(f=>'<option value="'+f.nome+'">'+f.nome+'</option>').join('');
   document.getElementById('ord-base').innerHTML = '<option value="">— Prima seleziona fornitore —</option>';
