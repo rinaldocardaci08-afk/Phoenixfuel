@@ -4802,6 +4802,7 @@ async function invitaUtente() {
   const password = document.getElementById('ut-password').value;
   const ruolo = document.getElementById('ut-ruolo').value;
   const clienteId = document.getElementById('ut-cliente').value || null;
+  const postazione = ruolo==='cliente' ? null : document.getElementById('ut-postazione').value;
   if (!nome||!email) { toast('Compila nome ed email'); return; }
   if (!password || password.length < 6) { toast('La password deve avere almeno 6 caratteri'); return; }
 
@@ -4810,7 +4811,7 @@ async function invitaUtente() {
   if (authError) { toast('Errore creazione accesso: ' + authError.message); return; }
 
   // 2. Crea record nella tabella utenti
-  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{email, nome, ruolo, cliente_id:ruolo==='cliente'?clienteId:null, attivo:true}]).select().single();
+  const { data: nuovoUtente, error } = await sb.from('utenti').insert([{email, nome, ruolo, cliente_id:ruolo==='cliente'?clienteId:null, postazione:postazione||'ufficio', attivo:true}]).select().single();
   if (error) { toast('Errore salvataggio utente: ' + error.message); return; }
 
   // 3. Salva permessi
@@ -4832,7 +4833,15 @@ function toggleRuoloCliente() {
   const ruolo = document.getElementById('ut-ruolo').value;
   document.getElementById('grp-ut-cliente').style.display = ruolo==='cliente' ? '' : 'none';
   document.getElementById('grp-ut-permessi').style.display = ruolo==='cliente' ? 'none' : '';
+  document.getElementById('grp-ut-postazione').style.display = ruolo==='cliente' ? 'none' : '';
   if (ruolo==='cliente') caricaSelectClienti('ut-cliente');
+}
+
+async function cambiaPostazione(utenteId, postazione) {
+  const { error } = await sb.from('utenti').update({ postazione }).eq('id', utenteId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  const postLabels = { 'ufficio':'Ufficio', 'stazione_oppido':'Stazione Oppido', 'deposito_vibo':'Deposito Vibo', 'logistica':'Logistica' };
+  toast('Postazione aggiornata: ' + (postLabels[postazione]||postazione));
 }
 
 async function caricaUtentiCompleto() {
@@ -4847,8 +4856,14 @@ async function caricaUtentiCompleto() {
   }
   const{data}=await sb.from('utenti').select('*, clienti(nome)').order('nome');
   const tbody=document.getElementById('tabella-utenti');
-  if (!data||!data.length){tbody.innerHTML='<tr><td colspan="7" class="loading">Nessun utente</td></tr>';return;}
-  tbody.innerHTML=data.map(r => '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>').join('');
+  if (!data||!data.length){tbody.innerHTML='<tr><td colspan="8" class="loading">Nessun utente</td></tr>';return;}
+  const postLabels = { 'ufficio':'🏢 Ufficio', 'stazione_oppido':'⛽ Stazione', 'deposito_vibo':'🏭 Deposito', 'logistica':'🚛 Logistica' };
+  const postOptions = Object.entries(postLabels).map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('');
+  tbody.innerHTML=data.map(r => {
+    const post = r.postazione || 'ufficio';
+    const postSelect = r.ruolo==='cliente' ? '<span style="font-size:11px;color:var(--text-muted)">—</span>' : '<select onchange="cambiaPostazione(\''+r.id+'\',this.value)" style="font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + postOptions.replace('value="'+post+'"','value="'+post+'" selected') + '</select>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td>' + postSelect + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>';
+  }).join('');
 }
 
 // ── GIACENZE FINE ANNO ───────────────────────────────────────────
