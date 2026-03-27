@@ -4677,6 +4677,180 @@ function initReportStazione() {
   const oggi = new Date();
   document.getElementById('stz-report-da').value = oggi.toISOString().substring(0,8) + '01';
   document.getElementById('stz-report-a').value = oggiISO;
+  // Popola anno
+  var selAnno = document.getElementById('stz-rep-anno');
+  if (selAnno && selAnno.options.length === 0) {
+    var annoCorr = oggi.getFullYear();
+    for (var y = annoCorr; y >= annoCorr - 5; y--) {
+      selAnno.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
+    }
+  }
+  // Seleziona mese corrente
+  var selMese = document.getElementById('stz-rep-mese');
+  if (selMese) selMese.value = String(oggi.getMonth()+1).padStart(2,'0');
+}
+
+async function stampaReportMensileContatori() {
+  var anno = document.getElementById('stz-rep-anno').value;
+  var mese = document.getElementById('stz-rep-mese').value;
+  if (!anno || !mese) { toast('Seleziona anno e mese'); return; }
+
+  var da = anno + '-' + mese + '-01';
+  var ultimoGiorno = new Date(Number(anno), Number(mese), 0).getDate();
+  var a = anno + '-' + mese + '-' + String(ultimoGiorno).padStart(2,'0');
+  var meseNome = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1];
+
+  toast('Generazione report in corso...');
+
+  var { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
+  var pompeIds = (pompe||[]).map(function(p){return p.id;});
+  if (!pompeIds.length) { toast('Nessuna pompa configurata'); return; }
+
+  var giornoPre = new Date(new Date(da).getTime()-86400000).toISOString().split('T')[0];
+  var { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',giornoPre).lte('data',a).order('data');
+
+  var lettPerPompaData = {};
+  (letture||[]).forEach(function(l){
+    if (!lettPerPompaData[l.pompa_id]) lettPerPompaData[l.pompa_id] = {};
+    lettPerPompaData[l.pompa_id][l.data] = l;
+  });
+
+  var giorni = [];
+  for (var d = 1; d <= ultimoGiorno; d++) {
+    giorni.push(anno + '-' + mese + '-' + String(d).padStart(2,'0'));
+  }
+
+  var nPompe = pompe.length;
+  var colTotale = 1 + (nPompe * 2) + 1;
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Contatori ' + meseNome + ' ' + anno + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:8mm;color:#1a1a18}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}}' +
+    'table{width:100%;border-collapse:collapse;margin-bottom:14px}' +
+    'th{background:#6B5FCC;color:#fff;padding:4px 3px;font-size:7px;text-transform:uppercase;letter-spacing:0.2px;border:1px solid #5A4FBB;text-align:center}' +
+    'th.sub{background:#7B73CC;font-size:7px;padding:2px 3px}' +
+    'td{padding:3px 4px;border:1px solid #ddd;font-size:9px}' +
+    '.m{font-family:Courier New,monospace;text-align:right}' +
+    '.b{font-weight:bold}' +
+    '.tot{background:#f0f0f0;font-weight:bold}' +
+    '.tot td{border-top:2px solid #6B5FCC}' +
+    '.lt{text-align:right;background:#fafaf8}' +
+    '</style></head><body>';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:12px">';
+  html += '<div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">REGISTRO CONTATORI — STAZIONE OPPIDO</div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:2px">' + meseNome + ' ' + anno + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:13px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:8px;color:#666">Generato il ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  // ═══ TABELLA UNICA ORIZZONTALE ═══
+  // Header: Data | Pompa1 Cont. | Pompa1 Litri | Pompa2 Cont. | ... | Litri totali
+  html += '<table><thead><tr><th rowspan="2" style="width:45px">Data</th>';
+  pompe.forEach(function(p) {
+    var _pi = cacheProdotti.find(function(pp){return pp.nome===p.prodotto;});
+    var colore = _pi ? _pi.colore : '#888';
+    html += '<th colspan="2" style="border-bottom:2px solid ' + colore + '">' + esc(p.nome) + '</th>';
+  });
+  html += '<th rowspan="2" style="background:#534AB7;width:60px">Litri<br>totali</th></tr>';
+  html += '<tr>';
+  pompe.forEach(function() {
+    html += '<th class="sub">Cont.</th><th class="sub">Litri</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  // Dati per giorno
+  var totPerPompa = {};
+  pompe.forEach(function(p) { totPerPompa[p.id] = { litri:0, nome:p.nome, prodotto:p.prodotto }; });
+  var totGenerale = 0;
+
+  giorni.forEach(function(data) {
+    var litriGiorno = 0;
+    var hasData = false;
+    var celle = '';
+
+    pompe.forEach(function(pompa) {
+      var lettPompa = lettPerPompaData[pompa.id] || {};
+      var lettOggi = lettPompa[data];
+
+      if (!lettOggi) {
+        celle += '<td class="m" style="color:#ccc">—</td><td class="m" style="color:#ccc">—</td>';
+        return;
+      }
+      hasData = true;
+      var lettura = Number(lettOggi.lettura);
+      var datePrev = Object.keys(lettPompa).filter(function(d){return d < data;}).sort();
+      var prevData = datePrev.length ? datePrev[datePrev.length-1] : null;
+      if (!prevData && lettPompa[giornoPre]) prevData = giornoPre;
+      var lettIeri = prevData ? lettPompa[prevData] : null;
+      var litri = lettIeri ? lettura - Number(lettIeri.lettura) : null;
+
+      celle += '<td class="m" style="font-size:8px;color:#666">' + String(lettura) + '</td>';
+      if (litri !== null && litri > 0) {
+        celle += '<td class="m b">' + fmtL(litri) + '</td>';
+        totPerPompa[pompa.id].litri += litri;
+        litriGiorno += litri;
+      } else {
+        celle += '<td class="m" style="color:#ccc">—</td>';
+      }
+    });
+
+    totGenerale += litriGiorno;
+    var gg = data.substring(8);
+    html += '<tr' + (!hasData ? ' style="opacity:0.3"' : '') + '><td><strong>' + gg + '/' + mese + '</strong></td>' + celle + '<td class="m b lt">' + (litriGiorno > 0 ? fmtL(litriGiorno) : '—') + '</td></tr>';
+  });
+
+  // Riga totale
+  html += '<tr class="tot"><td>TOTALE</td>';
+  pompe.forEach(function(p) {
+    html += '<td></td><td class="m">' + fmtL(totPerPompa[p.id].litri) + '</td>';
+  });
+  html += '<td class="m">' + fmtL(totGenerale) + '</td></tr>';
+  html += '</tbody></table>';
+
+  // ═══ RIEPILOGO ═══
+  html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">';
+
+  // Per pompa
+  html += '<div style="flex:1;min-width:200px"><div style="font-size:10px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;border-bottom:1px solid #6B5FCC;padding-bottom:3px">Riepilogo per pompa</div>';
+  html += '<table><thead><tr><th style="text-align:left">Pompa</th><th>Prodotto</th><th>Litri</th></tr></thead><tbody>';
+  pompe.forEach(function(p) {
+    var _pi = cacheProdotti.find(function(pp){return pp.nome===p.prodotto;});
+    var colore = _pi ? _pi.colore : '#888';
+    html += '<tr><td><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+colore+';margin-right:3px"></span><strong>' + esc(p.nome) + '</strong></td><td style="font-size:8px">' + esc(p.prodotto) + '</td><td class="m b">' + fmtL(totPerPompa[p.id].litri) + '</td></tr>';
+  });
+  html += '<tr class="tot"><td colspan="2">TOTALE</td><td class="m">' + fmtL(totGenerale) + '</td></tr>';
+  html += '</tbody></table></div>';
+
+  // Per prodotto
+  var perProdotto = {};
+  pompe.forEach(function(p) {
+    if (!perProdotto[p.prodotto]) {
+      var _pi = cacheProdotti.find(function(pp){return pp.nome===p.prodotto;});
+      perProdotto[p.prodotto] = { litri:0, colore: _pi ? _pi.colore : '#888' };
+    }
+    perProdotto[p.prodotto].litri += totPerPompa[p.id].litri;
+  });
+
+  html += '<div style="flex:1;min-width:200px"><div style="font-size:10px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;border-bottom:1px solid #6B5FCC;padding-bottom:3px">Riepilogo per prodotto</div>';
+  html += '<table><thead><tr><th style="text-align:left">Prodotto</th><th>Litri</th></tr></thead><tbody>';
+  Object.entries(perProdotto).forEach(function([prod, v]) {
+    html += '<tr><td><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+v.colore+';margin-right:3px"></span><strong>' + esc(prod) + '</strong></td><td class="m b">' + fmtL(v.litri) + '</td></tr>';
+  });
+  html += '<tr class="tot"><td>TOTALE MESE</td><td class="m">' + fmtL(totGenerale) + '</td></tr>';
+  html += '</tbody></table></div>';
+  html += '</div>';
+
+  html += '<div style="text-align:center;font-size:8px;color:#aaa;margin-top:12px;border-top:1px solid #ddd;padding-top:5px">PhoenixFuel Srl — Registro contatori ' + meseNome + ' ' + anno + '</div>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  var w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
 }
 
 async function generaReportStazione() {
