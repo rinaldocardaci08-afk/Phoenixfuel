@@ -657,9 +657,17 @@
             </div>
           </div>
           <div class="card">
-            <div class="card-title">Storico letture e vendite</div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Storico letture e vendite</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <button onclick="storicoLettureGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+                <span id="stz-storico-data-label" style="font-family:var(--font-mono);font-size:14px;font-weight:600;min-width:110px;text-align:center">—</span>
+                <button onclick="storicoLettureGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+              </div>
+            </div>
+            <div id="stz-storico-riepilogo" style="margin-bottom:10px"></div>
             <div style="overflow-x:auto">
-            <table><thead><tr><th>Data</th><th>Pompa</th><th>Lettura</th><th>Litri venduti</th><th>Prezzo/L</th><th>Incasso €</th></tr></thead>
+            <table><thead><tr><th>Pompa</th><th>Lettura prec.</th><th>Lettura</th><th>Litri venduti</th><th>Prezzo/L</th><th>Incasso €</th></tr></thead>
             <tbody id="stz-storico-letture"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>

@@ -3637,32 +3637,100 @@ async function salvaLetture() {
 }
 
 async function caricaStoricoLetture() {
+  // Carica tutte le date disponibili e i dati necessari
+  const { data: letture } = await sb.from('stazione_letture').select('*').order('data',{ascending:false});
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
-  const { data: letture } = await sb.from('stazione_letture').select('*').order('data',{ascending:false}).limit(50);
   const { data: prezzi } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false});
-  const tbody = document.getElementById('stz-storico-letture');
-  if (!letture||!letture.length) { tbody.innerHTML='<tr><td colspan="6" class="loading">Nessuna lettura</td></tr>'; return; }
 
+  if (!letture||!letture.length) {
+    document.getElementById('stz-storico-letture').innerHTML='<tr><td colspan="6" class="loading">Nessuna lettura</td></tr>';
+    document.getElementById('stz-storico-data-label').textContent = '—';
+    return;
+  }
+
+  // Cache globale per navigazione
+  const dateUniche = [...new Set(letture.map(l=>l.data))].sort().reverse();
   const pompeMap = {}; (pompe||[]).forEach(p=>pompeMap[p.id]=p);
   const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
+  const lettureByData = {};
+  letture.forEach(l => { if(!lettureByData[l.data]) lettureByData[l.data]=[]; lettureByData[l.data].push(l); });
   const lettureByPompa = {};
-  (letture||[]).forEach(l => { if(!lettureByPompa[l.pompa_id]) lettureByPompa[l.pompa_id]=[]; lettureByPompa[l.pompa_id].push(l); });
+  letture.forEach(l => { if(!lettureByPompa[l.pompa_id]) lettureByPompa[l.pompa_id]=[]; lettureByPompa[l.pompa_id].push(l); });
 
-  let html = '';
-  (letture||[]).forEach(l => {
-    const pompa = pompeMap[l.pompa_id];
+  window._storicoLetture = { dateUniche, pompeMap, prezziMap, lettureByData, lettureByPompa, indice: 0 };
+  renderStoricoGiorno(0);
+}
+
+function storicoLettureGiorno(dir) {
+  if (!window._storicoLetture) return;
+  const s = window._storicoLetture;
+  const nuovoIdx = s.indice - dir; // -dir perché dateUniche è desc (0=più recente)
+  if (nuovoIdx < 0 || nuovoIdx >= s.dateUniche.length) return;
+  s.indice = nuovoIdx;
+  renderStoricoGiorno(nuovoIdx);
+}
+
+function renderStoricoGiorno(idx) {
+  const s = window._storicoLetture;
+  if (!s) return;
+  const data = s.dateUniche[idx];
+  const lettureGiorno = s.lettureByData[data] || [];
+
+  // Aggiorna label data
+  const dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
+  document.getElementById('stz-storico-data-label').textContent = dataFmt;
+
+  const tbody = document.getElementById('stz-storico-letture');
+  let html = '', totLitriG=0, totEuroG=0, totLitriB=0, totEuroB=0;
+
+  lettureGiorno.forEach(l => {
+    const pompa = s.pompeMap[l.pompa_id];
     if (!pompa) return;
     const _pi = cacheProdotti.find(pp=>pp.nome===pompa.prodotto); const colore = _pi ? _pi.colore : '#888';
-    // Trova lettura precedente
-    const storPompa = lettureByPompa[l.pompa_id]||[];
-    const idx = storPompa.findIndex(s=>s.id===l.id);
-    const prec = idx < storPompa.length-1 ? storPompa[idx+1] : null;
+    // Trova lettura precedente per questa pompa
+    const storPompa = s.lettureByPompa[l.pompa_id]||[];
+    const iSorted = storPompa.sort((a,b)=>b.data.localeCompare(a.data));
+    const myIdx = iSorted.findIndex(x=>x.id===l.id);
+    const prec = myIdx < iSorted.length-1 ? iSorted[myIdx+1] : null;
     const litri = prec ? Number(l.lettura)-Number(prec.lettura) : null;
-    const prezzo = Number(prezziMap[l.data+'_'+pompa.prodotto]||0);
-    const incasso = litri && prezzo ? litri*prezzo : null;
-    html += '<tr><td>' + l.data + '</td><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(pompa.nome) + '</td><td style="font-family:var(--font-mono)">' + _sep(Number(l.lettura).toLocaleString('it-IT',{minimumFractionDigits:2})) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + (litri!==null?fmtL(litri):'—') + '</td><td style="font-family:var(--font-mono)">' + (prezzo?fmt(prezzo):'—') + '</td><td style="font-family:var(--font-mono)">' + (incasso!==null?fmtE(incasso):'—') + '</td></tr>';
+    const prezzo = Number(s.prezziMap[l.data+'_'+pompa.prodotto]||0);
+    const incasso = litri!==null && prezzo ? litri*prezzo : null;
+
+    if (litri!==null && litri >= 0) {
+      const isGasolio = pompa.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+      if (isGasolio) { totLitriG += litri; totEuroG += (incasso||0); }
+      else { totLitriB += litri; totEuroB += (incasso||0); }
+    }
+
+    html += '<tr>' +
+      '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(pompa.nome) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:var(--text-muted)">' + (prec ? String(Number(prec.lettura)) : '—') + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:bold">' + String(Number(l.lettura)) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:bold">' + (litri!==null?fmtL(litri):'—') + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + (prezzo?fmt(prezzo):'—') + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:bold">' + (incasso!==null?fmtE(incasso):'—') + '</td>' +
+      '</tr>';
   });
+
+  // Riga totale
+  const totLitri = totLitriG + totLitriB;
+  const totEuro = totEuroG + totEuroB;
+  html += '<tr style="background:var(--bg);font-weight:bold;border-top:2px solid var(--border)">' +
+    '<td colspan="3" style="font-size:11px;text-transform:uppercase">Totale giorno</td>' +
+    '<td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td></td>' +
+    '<td style="font-family:var(--font-mono);color:#639922">' + fmtE(totEuro) + '</td></tr>';
+
   tbody.innerHTML = html;
+
+  // Riepilogo sopra la tabella
+  const riepEl = document.getElementById('stz-storico-riepilogo');
+  if (riepEl) {
+    riepEl.innerHTML = '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:120px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid #BA7517"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Gasolio</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + fmtL(totLitriG) + ' L</div><div style="font-family:var(--font-mono);font-size:13px;color:#639922">' + fmtE(totEuroG) + '</div></div>' +
+      '<div style="flex:1;min-width:120px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid #378ADD"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Benzina</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + fmtL(totLitriB) + ' L</div><div style="font-family:var(--font-mono);font-size:13px;color:#639922">' + fmtE(totEuroB) + '</div></div>' +
+      '<div style="flex:1;min-width:120px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid #639922"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">Totale</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + fmtL(totLitri) + ' L</div><div style="font-family:var(--font-mono);font-size:13px;color:#639922;font-weight:700">' + fmtE(totEuro) + '</div></div>' +
+      '</div>';
+  }
 }
 
 // ── Prezzi pompa ──
