@@ -437,8 +437,8 @@
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ingrosso (ordini clienti) + Dettaglio (letture pompe stazione). Litri e fatturato imponibile per mese.</div>
             <div style="overflow-x:auto">
-            <table><thead><tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Totale litri</th><th>Totale fatturato</th></tr></thead>
-            <tbody id="tabella-vend-annuale"><tr><td colspan="8" class="loading">Seleziona un anno...</td></tr></tbody></table>
+            <table><thead><tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Margine dettaglio</th><th>Totale litri</th><th>Totale fatturato</th><th>Totale margine</th></tr></thead>
+            <tbody id="tabella-vend-annuale"><tr><td colspan="10" class="loading">Seleziona un anno...</td></tr></tbody></table>
             </div>
             <div class="grid2" style="margin-top:16px">
               <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato mensile per canale</div><canvas id="chart-ann-fatturato" height="250"></canvas></div>
@@ -799,6 +799,13 @@
                 <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Marginalità live</div>
                 <div style="font-size:12px;color:rgba(255,255,255,0.3);text-align:center">Seleziona un giorno...</div>
               </div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px">
+            <div class="card-title">Storico marginalità</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Gasolio L</th><th>Benzina L</th><th>Venduto €</th><th>Costo €</th><th>Margine €</th><th>€/L</th></tr></thead>
+            <tbody id="marg-storico-tabella"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
         </div>
