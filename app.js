@@ -3272,12 +3272,29 @@ async function riceviOrdineStazione(ordineId, litri, prodotto) {
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido').eq('prodotto',prodotto).order('nome');
   if (!cisterne || !cisterne.length) { toast('Nessuna cisterna trovata per ' + prodotto + ' alla stazione'); return; }
 
+  // Carica dati ordine per mostrare costo
+  const { data: ordine } = await sb.from('ordini').select('costo_litro,trasporto_litro').eq('id',ordineId).single();
+  const costoOrdine = ordine ? Number(ordine.costo_litro||0) + Number(ordine.trasporto_litro||0) : 0;
+
   const prodInfo = cacheProdotti.find(p => p.nome === prodotto);
   const colore = prodInfo ? prodInfo.colore : '#888';
   const totLitri = Number(litri);
 
+  // Calcola CMP attuale per questo prodotto
+  let litriAttuali = 0, valoreAttuale = 0;
+  cisterne.forEach(c => { litriAttuali += Number(c.livello_attuale||0); valoreAttuale += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
+  const cmpAttuale = litriAttuali > 0 ? valoreAttuale / litriAttuali : 0;
+  const cmpDopo = (litriAttuali + totLitri) > 0 ? (valoreAttuale + totLitri * costoOrdine) / (litriAttuali + totLitri) : costoOrdine;
+
   let html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">📦 Ricezione ' + esc(prodotto) + '</div>';
-  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Quantità da caricare: <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong></div>';
+  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Quantità da caricare: <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong></div>';
+
+  // Info CMP
+  html += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
+  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo carico</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">€ ' + costoOrdine.toFixed(4) + '</div></div>';
+  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">CMP attuale</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + (cmpAttuale > 0 ? '€ ' + cmpAttuale.toFixed(4) : '—') + '</div></div>';
+  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:#EAF3DE;border-radius:8px;border:0.5px solid #639922"><div style="font-size:9px;color:#27500A;text-transform:uppercase">CMP dopo carico</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#639922">€ ' + cmpDopo.toFixed(4) + '</div></div>';
+  html += '</div>';
 
   html += '<div style="margin-bottom:12px">';
   cisterne.forEach(c => {
@@ -3323,21 +3340,51 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
     if (!confirm('I litri assegnati (' + fmtL(totAssegnati) + ') non corrispondono al totale ordine (' + fmtL(totLitri) + '). Procedere comunque?')) return;
   }
 
+  // Carica ordine per ottenere costo e trasporto
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+  const costoCarico = Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0);
+  const prodotto = ordine.prodotto;
+
   for (const inp of inputs) {
     const val = parseFloat(inp.value) || 0;
     if (val <= 0) continue;
     const cisId = inp.dataset.cisterna;
-    const { data: cis } = await sb.from('cisterne').select('livello_attuale').eq('id', cisId).single();
+    const { data: cis } = await sb.from('cisterne').select('livello_attuale,costo_medio').eq('id', cisId).single();
     if (!cis) continue;
-    const nuovoLivello = Number(cis.livello_attuale) + val;
-    const { error } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisId);
+
+    // Calcolo CMP: (litri_esistenti × costo_medio_attuale + litri_nuovi × costo_carico) / totale_litri
+    const litriPrec = Number(cis.livello_attuale);
+    const cmpPrec = Number(cis.costo_medio || 0);
+    const nuovoLivello = litriPrec + val;
+    var cmpNuovo = 0;
+    if (nuovoLivello > 0) {
+      cmpNuovo = ((litriPrec * cmpPrec) + (val * costoCarico)) / nuovoLivello;
+    }
+    // Arrotonda a 6 decimali
+    cmpNuovo = Math.round(cmpNuovo * 1000000) / 1000000;
+
+    const { error } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, costo_medio: cmpNuovo, updated_at: new Date().toISOString() }).eq('id', cisId);
     if (error) { toast('Errore cisterna: ' + error.message); return; }
+
+    // Registra nello storico CMP
+    await sb.from('stazione_cmp_storico').insert([{
+      data: ordine.data || oggiISO,
+      prodotto: prodotto,
+      sede: 'stazione_oppido',
+      cmp_precedente: cmpPrec,
+      cmp_nuovo: cmpNuovo,
+      litri_precedenti: litriPrec,
+      litri_caricati: val,
+      costo_carico: costoCarico,
+      ordine_id: ordineId
+    }]);
   }
 
   const { error } = await sb.from('ordini').update({ ricevuto_stazione: true }).eq('id', ordineId);
   if (error) { toast('Errore: ' + error.message); return; }
 
-  toast('✅ ' + fmtL(totAssegnati) + ' ricevuti nella stazione!');
+  toast('✅ ' + fmtL(totAssegnati) + ' ricevuti — CMP aggiornato a € ' + cmpNuovo.toFixed(4) + '/L');
   chiudiModal();
   caricaOrdiniDaCaricare();
   caricaStazioneDashboard();
@@ -3833,6 +3880,10 @@ async function caricaMarginalita() {
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
   const { data: prezzi } = await sb.from('stazione_prezzi').select('*').order('data',{ascending:false});
   const { data: costi } = await sb.from('stazione_costi').select('*').order('data',{ascending:false});
+  // CMP corrente dalle cisterne stazione
+  const { data: cisterne } = await sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido');
+  // Storico CMP
+  const { data: cmpStorico } = await sb.from('stazione_cmp_storico').select('*').eq('sede','stazione_oppido').order('created_at',{ascending:false});
 
   if (!letture||!letture.length) {
     document.getElementById('marg-pompe-content').innerHTML='<div class="loading">Nessuna lettura disponibile</div>';
@@ -3849,9 +3900,25 @@ async function caricaMarginalita() {
   const lettureByPompa = {};
   letture.forEach(l => { if(!lettureByPompa[l.pompa_id]) lettureByPompa[l.pompa_id]=[]; lettureByPompa[l.pompa_id].push(l); });
 
-  window._margData = { dateUniche, pompeMap, prezziMap, costiMap, lettureByData, lettureByPompa, pompe, indice: 0 };
+  // Calcola CMP corrente per prodotto (media ponderata cisterne)
+  const cmpCorrente = {};
+  const cmpPerProdotto = {};
+  (cisterne||[]).forEach(c => {
+    var p = c.prodotto;
+    if (!cmpPerProdotto[p]) cmpPerProdotto[p] = { litri:0, valore:0 };
+    var liv = Number(c.livello_attuale||0);
+    var cm = Number(c.costo_medio||0);
+    cmpPerProdotto[p].litri += liv;
+    cmpPerProdotto[p].valore += liv * cm;
+  });
+  Object.entries(cmpPerProdotto).forEach(function([p,v]) {
+    cmpCorrente[p] = v.litri > 0 ? Math.round((v.valore / v.litri) * 1000000) / 1000000 : 0;
+  });
+
+  window._margData = { dateUniche, pompeMap, prezziMap, costiMap, lettureByData, lettureByPompa, pompe, indice: 0, cmpCorrente, cmpStorico: cmpStorico||[] };
   renderMargGiorno(0);
   renderStoricoMarg();
+  renderStoricoCMP();
 }
 
 function renderStoricoMarg() {
@@ -3902,6 +3969,50 @@ function renderStoricoMarg() {
   tbody.innerHTML = html || '<tr><td colspan="7" class="loading">Nessun dato</td></tr>';
 }
 
+function renderStoricoCMP() {
+  var m = window._margData;
+  if (!m) return;
+
+  // CMP corrente
+  var cmpEl = document.getElementById('marg-cmp-corrente');
+  if (cmpEl && m.cmpCorrente) {
+    var cmpHtml = '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+    Object.entries(m.cmpCorrente).forEach(function([prodotto, cmp]) {
+      var _pi = cacheProdotti.find(function(p){return p.nome===prodotto;}); var colore = _pi ? _pi.colore : '#888';
+      cmpHtml += '<div style="flex:1;min-width:140px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid ' + colore + '">';
+      cmpHtml += '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">' + esc(prodotto) + '</div>';
+      cmpHtml += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700">€ ' + (cmp > 0 ? cmp.toFixed(4) : '—') + '</div>';
+      cmpHtml += '<div style="font-size:9px;color:var(--text-muted)">CMP corrente</div>';
+      cmpHtml += '</div>';
+    });
+    cmpHtml += '</div>';
+    cmpEl.innerHTML = cmpHtml;
+  }
+
+  // Storico CMP
+  var tbody = document.getElementById('marg-cmp-storico');
+  if (!tbody) return;
+  var storico = m.cmpStorico || [];
+  if (!storico.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessuna variazione registrata</td></tr>';
+    return;
+  }
+  var html = '';
+  storico.slice(0, 20).forEach(function(r) {
+    var _pi = cacheProdotti.find(function(p){return p.nome===r.prodotto;}); var colore = _pi ? _pi.colore : '#888';
+    var dataFmt = new Date(r.data).toLocaleDateString('it-IT');
+    html += '<tr>' +
+      '<td>' + dataFmt + '</td>' +
+      '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:var(--text-muted)">€ ' + Number(r.cmp_precedente).toFixed(4) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtL(r.litri_caricati) + ' L</td>' +
+      '<td style="font-family:var(--font-mono)">€ ' + Number(r.costo_carico).toFixed(4) + '/L</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:bold;color:#639922">€ ' + Number(r.cmp_nuovo).toFixed(4) + '</td>' +
+      '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
 function margGiorno(dir) {
   if (!window._margData) return;
   var m = window._margData;
@@ -3941,8 +4052,14 @@ function renderMargGiorno(idx) {
     var hasCambio = litriPD > 0 && prezzoPD > 0;
     var litriStd = hasCambio ? Math.max(0, litri - litriPD) : litri;
 
-    // Costo salvato
+    // Costo salvato o CMP come default
     var costoSaved = m.costiMap[data+'_'+pompa.prodotto] || '';
+    var costoProposto = costoSaved;
+    var isCMP = false;
+    if (!costoProposto && m.cmpCorrente && m.cmpCorrente[pompa.prodotto]) {
+      costoProposto = m.cmpCorrente[pompa.prodotto];
+      isCMP = true;
+    }
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
     html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(pompa.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + ' — ' + fmtL(litri) + ' L totali</span></div>';
@@ -3951,7 +4068,7 @@ function renderMargGiorno(idx) {
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
     html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriStd) + '</div></div>';
     html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#1a1a18">' + (prezzo ? '€ ' + prezzo.toFixed(3) : '—') + '</div></div>';
-    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo €/L</div><input type="number" class="marg-costo" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriStd + '" data-prezzo="' + prezzo + '" value="' + (costoSaved || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
+    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo €/L' + (isCMP ? ' <span style="font-size:8px;background:#378ADD;color:#fff;padding:1px 4px;border-radius:3px">CMP</span>' : '') + '</div><input type="number" class="marg-costo" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriStd + '" data-prezzo="' + prezzo + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid ' + (isCMP ? '#378ADD' : 'var(--border)') + ';border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
     html += '<div id="marg-res-' + l.pompa_id + '"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
     html += '</div>';
 
@@ -3960,7 +4077,7 @@ function renderMargGiorno(idx) {
       html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;align-items:center;padding:8px 12px;background:#f5f5f0;border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
       html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Litri <span style="font-size:8px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio</span></div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriPD) + '</div></div>';
       html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Vendita €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600">€ ' + prezzoPD.toFixed(3) + '</div></div>';
-      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Costo €/L</div><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoSaved || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
+      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Costo €/L' + (isCMP ? ' <span style="font-size:8px;background:#378ADD;color:#fff;padding:1px 4px;border-radius:3px">CMP</span>' : '') + '</div><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="copiaCostoMarg(this);calcolaMargini()" style="font-family:var(--font-mono);font-size:15px;font-weight:600;padding:6px 10px;border:0.5px solid ' + (isCMP ? '#378ADD' : 'var(--border)') + ';border-radius:8px;background:#fff;color:#1a1a18;width:110px;text-align:right" /></div>';
       html += '<div id="marg-res-cp-' + l.pompa_id + '"><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
       html += '</div>';
     }
