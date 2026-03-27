@@ -10,6 +10,7 @@
   // ── Assegna ID univoci ai blocchi ──
   function assegnaIds() {
     document.querySelectorAll('#s-stazione .stz-panel').forEach(panel => {
+      if (panel.id === 'stz-dashboard') return; // Dashboard non riordinabile
       const panelId = panel.id;
       const cards = panel.querySelectorAll(':scope > .card, :scope > .grid4, :scope > .grid2, :scope > [id="stz-da-caricare"]');
       cards.forEach((card, i) => {

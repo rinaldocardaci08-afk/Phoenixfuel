@@ -626,6 +626,23 @@
             <div class="kpi"><div class="kpi-label">Versamenti mese (contanti)</div><div class="kpi-value" id="stz-vers-contanti">—</div></div>
             <div class="kpi"><div class="kpi-label">Versamenti mese (POS)</div><div class="kpi-value" id="stz-vers-pos">—</div></div>
           </div>
+
+          <!-- Giacenze cisterne -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Giacenze cisterne stazione</div>
+            <div id="stz-dash-cisterne"><div class="loading">Caricamento...</div></div>
+          </div>
+
+          <!-- Grafici mese corrente -->
+          <div class="grid2" style="margin-bottom:16px">
+            <div class="card"><div class="card-title">Litri venduti per giorno</div><canvas id="stz-dash-chart-litri" height="200"></canvas></div>
+            <div class="card"><div class="card-title">Fatturato per giorno</div><canvas id="stz-dash-chart-fatturato" height="200"></canvas></div>
+          </div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Margine per giorno</div>
+            <canvas id="stz-dash-chart-margine" height="180"></canvas>
+          </div>
+
           <div class="card">
             <div class="card-title">Ultimi 7 giorni</div>
             <div style="overflow-x:auto">

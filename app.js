@@ -3390,8 +3390,10 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
   caricaStazioneDashboard();
 }
 
+let _stzDashCharts = {};
+function _destroyStzDashCharts() { Object.values(_stzDashCharts).forEach(c=>c.destroy()); _stzDashCharts={}; }
+
 async function caricaStazioneDashboard() {
-  // Ordini confermati da caricare in cisterna
   await caricaOrdiniDaCaricare();
 
   const oggi = oggiISO;
@@ -3400,28 +3402,56 @@ async function caricaStazioneDashboard() {
   const pompeIds = (pompe||[]).map(p=>p.id);
   if (!pompeIds.length) return;
 
-  // Letture del mese
-  const { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',inizioMese).order('data');
-  // Prezzi del mese
-  const { data: prezzi } = await sb.from('stazione_prezzi').select('*').gte('data',inizioMese).order('data');
-  // Versamenti del mese
-  const { data: versamenti } = await sb.from('stazione_versamenti').select('*').gte('data',inizioMese).order('data');
-  // Lettura del giorno prima dell'inizio mese per calcolo primo giorno
-  const giornoPrec = new Date(new Date(inizioMese).getTime()-86400000).toISOString().split('T')[0];
-  const { data: lettPrec } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).eq('data',giornoPrec);
+  const [lettRes, prezRes, versRes, lettPrecRes, cisRes, costiRes] = await Promise.all([
+    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',inizioMese).order('data'),
+    sb.from('stazione_prezzi').select('*').gte('data',inizioMese).order('data'),
+    sb.from('stazione_versamenti').select('*').gte('data',inizioMese).order('data'),
+    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).eq('data', new Date(new Date(inizioMese).getTime()-86400000).toISOString().split('T')[0]),
+    sb.from('cisterne').select('*').eq('sede','stazione_oppido').order('prodotto,nome'),
+    sb.from('stazione_costi').select('*').gte('data',inizioMese).lte('data',oggi)
+  ]);
 
-  const tutteLetture = [...(lettPrec||[]), ...(letture||[])];
+  const letture = lettRes.data||[];
+  const prezzi = prezRes.data||[];
+  const versamenti = versRes.data||[];
+  const lettPrec = lettPrecRes.data||[];
+  const cisterne = cisRes.data||[];
+  const costiDb = costiRes.data||[];
+
+  // ═══ CISTERNE ═══
+  const cisEl = document.getElementById('stz-dash-cisterne');
+  if (cisEl && cisterne.length) {
+    var cisHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">';
+    cisterne.forEach(function(c) {
+      var _pi = cacheProdotti.find(function(p){return p.nome===c.prodotto;}); var colore = _pi ? _pi.colore : '#888';
+      var pct = Number(c.capacita_max) > 0 ? Math.round(Number(c.livello_attuale)/Number(c.capacita_max)*100) : 0;
+      var cmp = Number(c.costo_medio||0);
+      cisHtml += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:3px solid '+colore+';border-radius:10px;padding:12px">';
+      cisHtml += '<div style="font-size:12px;font-weight:600;margin-bottom:4px">'+esc(c.nome)+'</div>';
+      cisHtml += '<div style="height:6px;background:var(--border);border-radius:3px;margin-bottom:6px"><div style="height:100%;width:'+pct+'%;background:'+colore+';border-radius:3px"></div></div>';
+      cisHtml += '<div style="display:flex;justify-content:space-between;font-size:11px"><span style="font-family:var(--font-mono);font-weight:700">'+fmtL(c.livello_attuale)+' L</span><span style="color:var(--text-muted)">'+pct+'%</span></div>';
+      if (cmp > 0) cisHtml += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ '+cmp.toFixed(4)+'</strong></div>';
+      cisHtml += '</div>';
+    });
+    cisHtml += '</div>';
+    cisEl.innerHTML = cisHtml;
+  } else if (cisEl) {
+    cisEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Nessuna cisterna configurata</div>';
+  }
+
+  // ═══ VENDITE PER GIORNO ═══
+  const tutteLetture = [...lettPrec, ...letture];
   const prezziMap = {};
-  (prezzi||[]).forEach(p => { prezziMap[p.data+'_'+p.prodotto] = p.prezzo_litro; });
+  prezzi.forEach(p => { prezziMap[p.data+'_'+p.prodotto] = p.prezzo_litro; });
+  const costiMap = {};
+  costiDb.forEach(c => { costiMap[c.data+'_'+c.prodotto] = Number(c.costo_litro); });
 
-  // Calcola vendite per giorno
   const venditeGiorno = {};
-  const dateUniche = [...new Set((letture||[]).map(l=>l.data))].sort();
+  const dateUniche = [...new Set(letture.map(l=>l.data))].sort();
   dateUniche.forEach(data => {
-    let totLitriG=0, totLitriB=0, incasso=0;
+    let totLitriG=0, totLitriB=0, incasso=0, costo=0;
     (pompe||[]).forEach(pompa => {
       const lettOggi = tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===data);
-      // Trova lettura precedente
       const datePrecedenti = tutteLetture.filter(l=>l.pompa_id===pompa.id && l.data<data).map(l=>l.data).sort();
       const dataPrec = datePrecedenti.length ? datePrecedenti[datePrecedenti.length-1] : null;
       const lettIeri = dataPrec ? tutteLetture.find(l=>l.pompa_id===pompa.id && l.data===dataPrec) : null;
@@ -3429,42 +3459,84 @@ async function caricaStazioneDashboard() {
         const litri = Number(lettOggi.lettura) - Number(lettIeri.lettura);
         if (litri > 0) {
           const prezzo = Number(prezziMap[data+'_'+pompa.prodotto] || 0);
+          const co = costiMap[data+'_'+pompa.prodotto] || 0;
           if (pompa.prodotto === 'Gasolio Autotrazione') totLitriG += litri;
           else totLitriB += litri;
           incasso += litri * prezzo;
+          costo += litri * co;
         }
       }
     });
     const vers = (versamenti||[]).filter(v=>v.data===data);
     const totVers = vers.reduce((s,v)=>s+Number(v.contanti||0)+Number(v.pos||0),0);
-    venditeGiorno[data] = { gasolio:totLitriG, benzina:totLitriB, totale:totLitriG+totLitriB, incasso, versamento:totVers };
+    venditeGiorno[data] = { gasolio:totLitriG, benzina:totLitriB, totale:totLitriG+totLitriB, incasso, costo, margine:incasso-costo, versamento:totVers };
   });
 
-  // KPI oggi
+  // ═══ KPI ═══
   const vOggi = venditeGiorno[oggi] || { gasolio:0, benzina:0, totale:0, incasso:0 };
   document.getElementById('stz-litri-oggi').textContent = fmtL(vOggi.totale);
   document.getElementById('stz-incasso-oggi').textContent = fmtE(vOggi.incasso);
 
-  // KPI mese
   let totLitriMese=0, totIncassoMese=0;
   Object.values(venditeGiorno).forEach(v => { totLitriMese+=v.totale; totIncassoMese+=v.incasso; });
   document.getElementById('stz-litri-mese').textContent = fmtL(totLitriMese);
   document.getElementById('stz-incasso-mese').textContent = fmtE(totIncassoMese);
 
-  // KPI versamenti mese
   const totCash = (versamenti||[]).reduce((s,v)=>s+Number(v.contanti||0),0);
   const totPos = (versamenti||[]).reduce((s,v)=>s+Number(v.pos||0),0);
   document.getElementById('stz-vers-contanti').textContent = fmtE(totCash);
   document.getElementById('stz-vers-pos').textContent = fmtE(totPos);
 
-  // Tabella ultimi 7 giorni
+  // ═══ TABELLA ULTIMI 7 GIORNI ═══
   const tbody = document.getElementById('stz-dash-tabella');
   const ultimi7 = dateUniche.slice(-7).reverse();
-  if (!ultimi7.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun dato</td></tr>'; return; }
-  tbody.innerHTML = ultimi7.map(data => {
-    const v = venditeGiorno[data];
-    return '<tr><td>' + data + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.gasolio) + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.benzina) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + fmtL(v.totale) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.incasso) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.versamento) + '</td></tr>';
-  }).join('');
+  if (!ultimi7.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun dato</td></tr>'; }
+  else {
+    tbody.innerHTML = ultimi7.map(data => {
+      const v = venditeGiorno[data];
+      return '<tr><td>' + data + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.gasolio) + '</td><td style="font-family:var(--font-mono)">' + fmtL(v.benzina) + '</td><td style="font-family:var(--font-mono);font-weight:bold">' + fmtL(v.totale) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.incasso) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.versamento) + '</td></tr>';
+    }).join('');
+  }
+
+  // ═══ GRAFICI ═══
+  _destroyStzDashCharts();
+  const labels = dateUniche.map(d => { var dt=new Date(d); return dt.getDate()+'/'+(dt.getMonth()+1); });
+  const dataGasolio = dateUniche.map(d => Math.round(venditeGiorno[d].gasolio));
+  const dataBenzina = dateUniche.map(d => Math.round(venditeGiorno[d].benzina));
+  const dataIncasso = dateUniche.map(d => Math.round(venditeGiorno[d].incasso*100)/100);
+  const dataMargine = dateUniche.map(d => Math.round(venditeGiorno[d].margine*100)/100);
+
+  // Grafico Litri
+  var ctxL = document.getElementById('stz-dash-chart-litri');
+  if (ctxL) {
+    _stzDashCharts.litri = new Chart(ctxL.getContext('2d'), {
+      type:'bar', data:{ labels, datasets:[
+        { label:'Gasolio', data:dataGasolio, backgroundColor:'#BA7517', borderRadius:4 },
+        { label:'Benzina', data:dataBenzina, backgroundColor:'#378ADD', borderRadius:4 }
+      ]}, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:10}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>fmtL(v)}},x:{stacked:true,ticks:{font:{size:9}}}} }
+    });
+  }
+
+  // Grafico Fatturato
+  var ctxF = document.getElementById('stz-dash-chart-fatturato');
+  if (ctxF) {
+    _stzDashCharts.fatturato = new Chart(ctxF.getContext('2d'), {
+      type:'bar', data:{ labels, datasets:[
+        { label:'Incasso €', data:dataIncasso, backgroundColor:'#639922', borderRadius:4 }
+      ]}, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}},x:{ticks:{font:{size:9}}}} }
+    });
+  }
+
+  // Grafico Margine
+  var ctxM = document.getElementById('stz-dash-chart-margine');
+  if (ctxM) {
+    var coloriMargine = dataMargine.map(v => v >= 0 ? '#639922' : '#E24B4A');
+    _stzDashCharts.margine = new Chart(ctxM.getContext('2d'), {
+      type:'bar', data:{ labels, datasets:[
+        { label:'Margine €', data:dataMargine, backgroundColor:coloriMargine, borderRadius:4 }
+      ]}, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:false,ticks:{callback:v=>fmtE(v)}},x:{ticks:{font:{size:9}}}} }
+    });
+  }
 }
 
 // ── Letture contatori ──
