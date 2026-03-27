@@ -1119,18 +1119,28 @@ async function caricaDeposito() {
       const capMax = Number(c.capacita_max);
       const livAtt = Number(c.livello_attuale);
       const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
+      const cmp = Number(c.costo_medio||0);
       totG += livAtt;
       cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
         '<div class="dep-cisterna-name">' + c.nome + '</div>' +
         cisternasvg(pct, colore) +
         '<div class="dep-cisterna-litri">' + _sep(livAtt.toLocaleString('it-IT')) + ' ' + um + '</div>' +
         '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(capMax.toLocaleString('it-IT')) + ' ' + um + '</div>' +
+        (cmp > 0 ? '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmp.toFixed(4) + '</strong></div>' : '') +
         '</div>';
     });
 
     const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + _sep(capGruppo.toLocaleString('it-IT')) + ' ' + um;
     const totLabel = um === 'pz' ? _sep(totG.toLocaleString('it-IT')) + ' pz' : fmtL(totG);
-    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div></div><div class="dep-product-total">' + totLabel + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+    // CMP medio ponderato per il gruppo
+    let cmpGruppo = 0;
+    if (um !== 'pz') {
+      let valGruppo = 0;
+      gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
+      cmpGruppo = totG > 0 ? valGruppo / totG : 0;
+    }
+    const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
+    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div class="dep-product-total">' + totLabel + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
 
     if (categoria === 'benzine') { htmlBenzine += cardHtml; totaleStoccato += totG; capacitaTotale += capGruppo; } else { htmlMagazzino += cardHtml; }
   });
@@ -1163,17 +1173,34 @@ async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLi
   const { data: cis } = await sb.from('cisterne').select('*').eq('id', cisternaId).single();
   if (!cis) return;
   let nuovoLivello, nuovoCostoMedio = Number(cis.costo_medio||0);
+  const cmpPrec = Number(cis.costo_medio||0);
+  const litriPrec = Number(cis.livello_attuale);
   if (tipo==='entrata') {
-    nuovoLivello = Number(cis.livello_attuale) + Number(litri);
-    if (costoLitro && costoLitro > 0) {
-      const costoVecchio = Number(cis.livello_attuale) * Number(cis.costo_medio||0);
+    nuovoLivello = litriPrec + Number(litri);
+    if (costoLitro && costoLitro > 0 && nuovoLivello > 0) {
+      const costoVecchio = litriPrec * cmpPrec;
       nuovoCostoMedio = (costoVecchio + Number(litri)*Number(costoLitro)) / nuovoLivello;
+      nuovoCostoMedio = Math.round(nuovoCostoMedio * 1000000) / 1000000;
     }
   } else {
-    nuovoLivello = Math.max(0, Number(cis.livello_attuale) - Number(litri));
+    nuovoLivello = Math.max(0, litriPrec - Number(litri));
   }
   await sb.from('cisterne').update({ livello_attuale:nuovoLivello, costo_medio:nuovoCostoMedio, updated_at:new Date().toISOString() }).eq('id', cisternaId);
   await sb.from('movimenti_cisterne').insert([{ cisterna_id:cisternaId, ordine_id:ordineId, tipo, litri, data }]);
+  // Registra variazione CMP nello storico se entrata con costo
+  if (tipo === 'entrata' && costoLitro && costoLitro > 0) {
+    await sb.from('stazione_cmp_storico').insert([{
+      data: data || oggiISO,
+      prodotto: cis.prodotto || '',
+      sede: cis.sede || 'deposito_vibo',
+      cmp_precedente: cmpPrec,
+      cmp_nuovo: nuovoCostoMedio,
+      litri_precedenti: litriPrec,
+      litri_caricati: Number(litri),
+      costo_carico: Number(costoLitro),
+      ordine_id: ordineId
+    }]);
+  }
 }
 
 async function apriModaleAssegnaCisterna(ordineId) {
@@ -1247,7 +1274,7 @@ async function confermaCaricoDeposito(ordineId) {
   for (const c of cisterne) {
     const inp = document.getElementById('cis-qty-'+c.id);
     const qta = parseFloat(inp?.value)||0;
-    if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, ordine.costo_litro);
+    if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, Number(ordine.costo_litro||0) + Number(ordine.trasporto_litro||0));
   }
   await sb.from('ordini').update({ stato:'confermato', caricato_deposito:true }).eq('id', ordineId);
   toast('Carico confermato! Cisterne aggiornate.');
