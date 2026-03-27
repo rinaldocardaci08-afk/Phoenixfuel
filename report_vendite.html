@@ -6,6 +6,7 @@
 <title>Report Vendite — PhoenixFuel</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 12px; color: #000; background: #f5f4f0; }
@@ -92,6 +93,7 @@
   <div class="toolbar no-print">
     <button class="btn-back" onclick="tornaFiltri()">← Modifica filtri</button>
     <button class="btn-print" onclick="window.print()">🖨️ Stampa / PDF</button>
+    <button onclick="esportaExcel()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#217346;color:#fff">📊 Esporta Excel</button>
     <button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>
   </div>
 
@@ -293,6 +295,92 @@ async function generaReport(){
 
   document.getElementById('filtri-panel').style.display='none';
   document.getElementById('report-container').style.display='block';
+
+  // Salva dati globali per export Excel
+  window._exportData={ordini,perCliente,perFornitore,perProdotto,clArr,foArr,fatturato,litri,margine,periodoTxt,sottoLabel};
+}
+
+function esportaExcel(){
+  if(!window._exportData){alert('Genera prima il report');return;}
+  const d=window._exportData;
+
+  const wb=XLSX.utils.book_new();
+
+  // --- Foglio 1: Riepilogo KPI ---
+  const kpi=[
+    ['REPORT VENDITE INGROSSO — '+d.periodoTxt],
+    ['Gruppo: '+d.sottoLabel],
+    [],
+    ['KPI','Valore'],
+    ['Fatturato IVA incl.',d.fatturato],
+    ['Litri venduti',d.litri],
+    ['Margine totale',d.margine],
+    ['Margine medio/L',d.litri>0?d.margine/d.litri:0],
+    ['N. Ordini',d.ordini.length]
+  ];
+  const wsKpi=XLSX.utils.aoa_to_sheet(kpi);
+  wsKpi['!cols']=[{wch:22},{wch:18}];
+  XLSX.utils.book_append_sheet(wb,wsKpi,'Riepilogo');
+
+  // --- Foglio 2: Per Cliente ---
+  const hCl=[['Cliente','Ordini','Litri','Fatturato','Margine','Margine/L']];
+  d.clArr.forEach(([c,v])=>{
+    hCl.push([c,v.ordini,v.litri,v.fatturato,v.margine,v.litri>0?v.margine/v.litri:0]);
+  });
+  hCl.push(['TOTALE',d.ordini.length,d.litri,d.fatturato,d.margine,d.litri>0?d.margine/d.litri:0]);
+  const wsCl=XLSX.utils.aoa_to_sheet(hCl);
+  wsCl['!cols']=[{wch:30},{wch:10},{wch:14},{wch:16},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsCl,'Per Cliente');
+
+  // --- Foglio 3: Per Fornitore ---
+  const hFo=[['Fornitore','Ordini','Litri','Fatturato','Margine','Margine/L']];
+  d.foArr.forEach(([f,v])=>{
+    hFo.push([f,v.ordini,v.litri,v.fatturato,v.margine,v.litri>0?v.margine/v.litri:0]);
+  });
+  hFo.push(['TOTALE',d.ordini.length,d.litri,d.fatturato,d.margine,d.litri>0?d.margine/d.litri:0]);
+  const wsFo=XLSX.utils.aoa_to_sheet(hFo);
+  wsFo['!cols']=[{wch:30},{wch:10},{wch:14},{wch:16},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsFo,'Per Fornitore');
+
+  // --- Foglio 4: Dettaglio Ordini ---
+  const hDet=[['Data','Cliente','Prodotto','Litri','Prezzo/L','Totale','Costo','Trasporto','Margine','Fornitore']];
+  let tL=0,tF=0,tC=0,tT=0,tM=0;
+  d.ordini.forEach(r=>{
+    const pL=prezzoConIva(r),tot=pL*Number(r.litri),cT=Number(r.costo_litro)*Number(r.litri),tTr=Number(r.trasporto_litro)*Number(r.litri),mT=Number(r.margine)*Number(r.litri);
+    tL+=Number(r.litri);tF+=tot;tC+=cT;tT+=tTr;tM+=mT;
+    hDet.push([r.data,r.cliente,r.prodotto,Number(r.litri),pL,tot,cT,tTr,mT,r.fornitore]);
+  });
+  hDet.push(['TOTALE ('+d.ordini.length+' ordini)','','',tL,'',tF,tC,tT,tM,'']);
+  const wsDet=XLSX.utils.aoa_to_sheet(hDet);
+  wsDet['!cols']=[{wch:12},{wch:28},{wch:18},{wch:12},{wch:12},{wch:14},{wch:14},{wch:12},{wch:12},{wch:22}];
+  XLSX.utils.book_append_sheet(wb,wsDet,'Dettaglio Ordini');
+
+  // --- Foglio 5: Per Prodotto ---
+  const hPr=[['Prodotto','Litri','Fatturato']];
+  Object.entries(d.perProdotto).sort((a,b)=>b[1].fatturato-a[1].fatturato).forEach(([p,v])=>{
+    hPr.push([p,v.litri,v.fatturato]);
+  });
+  const wsPr=XLSX.utils.aoa_to_sheet(hPr);
+  wsPr['!cols']=[{wch:24},{wch:14},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,wsPr,'Per Prodotto');
+
+  // Formattazione numeri per tutti i fogli
+  [wsCl,wsFo,wsDet,wsPr,wsKpi].forEach(ws=>{
+    const range=XLSX.utils.decode_range(ws['!ref']||'A1');
+    for(let R=range.s.r;R<=range.e.r;R++){
+      for(let C=range.s.c;C<=range.e.c;C++){
+        const addr=XLSX.utils.encode_cell({r:R,c:C});
+        const cell=ws[addr];
+        if(cell&&typeof cell.v==='number'){
+          cell.t='n';
+          cell.z=Number.isInteger(cell.v)?'#,##0':'#,##0.0000';
+        }
+      }
+    }
+  });
+
+  const nomeFile='Report_Vendite_Ingrosso_'+document.getElementById('f-da').value+'_'+document.getElementById('f-a').value+'.xlsx';
+  XLSX.writeFile(wb,nomeFile);
 }
 
 function tornaFiltri(){

@@ -13,6 +13,12 @@
   <link rel="apple-touch-icon" href="icon-192.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    @media (max-width: 768px) {
+      #stz-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
+      #stz-totali-live > div { display:flex; flex-wrap:wrap; gap:16px; }
+    }
+  </style>
 </head>
 <body>
 <div class="app">
@@ -637,9 +643,29 @@
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportLetture()">🖨️ Report</button>
               </div>
             </div>
-            <div id="stz-form-letture"><div class="loading">Caricamento pompe...</div></div>
-            <div id="stz-totali-letture" style="margin-top:12px"></div>
-            <button class="btn-primary" onclick="salvaLetture()" style="margin-top:12px">💾 Salva letture</button>
+            <!-- Layout 2 colonne: form a sinistra, totale sticky a destra -->
+            <div style="display:flex;gap:20px;align-items:flex-start">
+              <div style="flex:1;min-width:0">
+                <div id="stz-form-letture"><div class="loading">Caricamento pompe...</div></div>
+                <div id="stz-totali-letture" style="margin-top:12px"></div>
+                <button class="btn-primary" onclick="salvaLetture()" style="margin-top:12px">💾 Salva letture</button>
+              </div>
+              <div id="stz-totali-live" style="position:sticky;top:80px;min-width:180px;max-width:220px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:14px;padding:20px;color:#fff;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Totali live</div>
+                <div style="margin-bottom:18px">
+                  <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Litri totali</div>
+                  <div id="stz-live-litri" style="font-size:26px;font-weight:800;font-family:var(--font-mono);line-height:1.1">—</div>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:14px">
+                  <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Incasso totale</div>
+                  <div id="stz-live-euro" style="font-size:26px;font-weight:800;font-family:var(--font-mono);color:#7CFC00;line-height:1.1">—</div>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:14px;margin-top:14px">
+                  <div style="font-size:10px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Pompe compilate</div>
+                  <div id="stz-live-pompe" style="font-size:16px;font-weight:700;font-family:var(--font-mono)">—</div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="card">
             <div class="card-title">Storico letture e vendite</div>
@@ -1042,5 +1068,6 @@
   </div>
 </div>
 <script src="app.js"></script>
+<script src="stz-sortable.js"></script>
 </body>
 </html>

@@ -3433,8 +3433,8 @@ async function caricaFormLetture() {
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
     html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(p.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(p.prodotto) + '</span></div>';
-    // Riga precedente (read-only)
-    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><span style="font-size:11px;color:var(--text-muted);width:100px">Giorno prec.:</span><span style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--text-muted)">' + precLabel + '</span></div>';
+    // Riga precedente (read-only) — INGRANDITA
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;background:var(--bg-card);padding:10px 14px;border-radius:8px;border:0.5px solid var(--border)"><span style="font-size:13px;color:var(--text-muted);width:130px;font-weight:500">📋 Giorno prec.:</span><span style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--text)">' + precLabel + '</span></div>';
     // Input lettura oggi
     html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text);width:100px">Oggi:</span><input type="number" class="stz-lettura-input" data-pompa="' + p.id + '" data-prodotto="' + esc(p.prodotto) + '" value="' + val + '" placeholder="00000000" step="0.01" max="99999999" oninput="calcolaLettureVendite()" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);width:180px;max-width:100%;text-align:right" /></div>';
     // Risultati calcolati
@@ -3463,7 +3463,7 @@ function calcolaLettureVendite() {
   const pompe = window._stzPompe || [];
   const ieriMap = window._stzIeriMap || {};
   const prezzoMap = window._stzPrezzoMap || {};
-  let totLitri = 0, totEuro = 0;
+  let totLitri = 0, totEuro = 0, compilate = 0;
 
   pompe.forEach(p => {
     const input = document.querySelector('.stz-lettura-input[data-pompa="' + p.id + '"]');
@@ -3482,6 +3482,7 @@ function calcolaLettureVendite() {
     const prezzoDiv = inputPrezzoDiv ? parseFloat(inputPrezzoDiv.value) || 0 : 0;
 
     if (!isNaN(valOggi) && valIeri !== undefined) {
+      compilate++;
       const litri = valOggi - valIeri;
       // Incasso: (litri - litriDiv) × prezzoStd + litriDiv × prezzoDiv
       const litriStd = Math.max(0, litri - litriDiv);
@@ -3503,6 +3504,14 @@ function calcolaLettureVendite() {
       '<div><span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Totale incasso</span><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:#639922">€ ' + _sep(totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) + '</div></div>' +
       '</div>';
   }
+
+  // Pannello LIVE a destra
+  var elLiveLitri = document.getElementById('stz-live-litri');
+  var elLiveEuro = document.getElementById('stz-live-euro');
+  var elLivePompe = document.getElementById('stz-live-pompe');
+  if (elLiveLitri) elLiveLitri.textContent = _sep(totLitri.toLocaleString('it-IT', {maximumFractionDigits:2})) + ' L';
+  if (elLiveEuro) elLiveEuro.textContent = '€ ' + _sep(totEuro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}));
+  if (elLivePompe) elLivePompe.textContent = compilate + ' / ' + pompe.length;
 }
 
 function stampaReportLetture() {
