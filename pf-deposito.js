@@ -207,19 +207,74 @@ async function confermaCaricoDeposito(ordineId) {
   caricaOrdini();
 }
 
-async function confermaUscitaDeposito(ordineId) {
+async function confermaUscitaDeposito(ordineId, auto) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
   const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).eq('sede','deposito_vibo').order('livello_attuale',{ascending:false});
   if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
-  const cis = cisterne[0];
-  if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
+
+  // Filtra cisterne con giacenza sufficiente
+  var cisConGiac = cisterne.filter(function(c) { return Number(c.livello_attuale) >= Number(ordine.litri); });
+
+  // Nessuna cisterna ha abbastanza
+  if (cisConGiac.length === 0) {
+    toast('Nessuna cisterna ha giacenza sufficiente per ' + fmtL(ordine.litri) + ' L! Max: ' + fmtL(cisterne[0].livello_attuale));
+    return;
+  }
+
+  // 1 sola cisterna O flusso automatico → scarico diretto dalla più piena
+  if (cisConGiac.length === 1 || auto) {
+    await _eseguiUscitaDeposito(ordineId, ordine, cisConGiac[0]);
+    return;
+  }
+
+  // 2+ cisterne e click manuale → mostra selettore
+  var defaultCis = cisConGiac[0]; // già ordinato per livello desc
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Scegli cisterna per uscita — ' + ordine.prodotto + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">' + ordine.cliente + ' · <strong>' + fmtL(ordine.litri) + '</strong></div>';
+  html += '<div style="margin:14px 0">';
+
+  cisConGiac.forEach(function(c) {
+    var pct = Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100);
+    var cmp = Number(c.costo_medio || 0);
+    var isDefault = c.id === defaultCis.id;
+    var barColor = pct < 20 ? '#E24B4A' : pct < 40 ? '#BA7517' : '#639922';
+
+    html += '<label style="display:block;padding:14px 16px;background:' + (isDefault ? '#EAF3DE' : 'var(--bg)') + ';border:' + (isDefault ? '2px solid #639922' : '0.5px solid var(--border)') + ';border-radius:10px;margin-bottom:8px;cursor:pointer">';
+    html += '<div style="display:flex;align-items:center;gap:10px">';
+    html += '<input type="radio" name="cis-uscita" value="' + c.id + '"' + (isDefault ? ' checked' : '') + ' style="width:18px;height:18px" />';
+    html += '<div style="flex:1">';
+    html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:500">' + c.nome + '</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmtL(c.livello_attuale) + ' / ' + fmtL(c.capacita_max) + '</span></div>';
+    html += '<div style="height:5px;background:var(--border);border-radius:3px;margin-bottom:4px"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:3px"></div></div>';
+    html += '<div style="display:flex;gap:16px;font-size:10px;color:var(--text-muted)"><span>Riempimento: ' + pct + '%</span><span>CMP: <strong style="font-family:var(--font-mono)">€ ' + cmp.toFixed(4) + '</strong></span><span>Dopo uscita: ' + fmtL(Number(c.livello_attuale) - Number(ordine.litri)) + '</span></div>';
+    html += '</div></div></label>';
+  });
+
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1;background:#639922" onclick="confermaSceltaCisternaUscita(\'' + ordineId + '\')">Conferma uscita</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
+
+  apriModal(html);
+}
+
+async function confermaSceltaCisternaUscita(ordineId) {
+  var sel = document.querySelector('input[name="cis-uscita"]:checked');
+  if (!sel) { toast('Seleziona una cisterna'); return; }
+  var cisId = sel.value;
+  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  var { data: cis } = await sb.from('cisterne').select('*').eq('id', cisId).single();
+  if (!ordine || !cis) { toast('Errore dati'); return; }
+  if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('Giacenza insufficiente!'); return; }
+  await _eseguiUscitaDeposito(ordineId, ordine, cis);
+  chiudiModalePermessi();
+}
+
+async function _eseguiUscitaDeposito(ordineId, ordine, cis) {
   await aggiornaCisterna(cis.id, ordine.litri, 'uscita', ordineId, ordine.data);
   await sb.from('ordini').update({ stato:'confermato', cisterna_id:cis.id }).eq('id', ordineId);
-  _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente);
-  toast('Uscita registrata! Cisterna aggiornata.');
+  _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente + ' da ' + cis.nome + ' (CMP € ' + Number(cis.costo_medio||0).toFixed(4) + ')');
+  toast('Uscita registrata da ' + cis.nome + '!');
   caricaDeposito();
   caricaOrdini();
 }

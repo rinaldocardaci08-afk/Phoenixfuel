@@ -495,7 +495,7 @@ async function syncOrdiniBacklog() {
 
       // Uscita deposito automatica se PhoenixFuel
       if (record.fornitore && record.fornitore.toLowerCase().indexOf('phoenix') >= 0 && (record.tipo_ordine === 'cliente' || record.tipo_ordine === 'stazione_servizio')) {
-        try { await confermaUscitaDeposito(nuovoOrdine.id); } catch(e) {}
+        try { await confermaUscitaDeposito(nuovoOrdine.id, true); } catch(e) {}
       }
 
       // Check fido post-sync

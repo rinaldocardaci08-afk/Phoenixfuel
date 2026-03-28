@@ -505,7 +505,7 @@ async function eseguiScaricaDeposito(ordiniIdsStr) {
   let scaricati = 0, errori = 0;
   for (const id of ids) {
     try {
-      await confermaUscitaDeposito(id);
+      await confermaUscitaDeposito(id, true);
       scaricati++;
     } catch(e) {
       console.error('Errore scarico ordine ' + id, e);
@@ -586,7 +586,7 @@ async function confermaTutteConsegneCarico(caricoId) {
   let confermati = 0;
   for (const co of daConfermare) {
     if (co.ordini.fornitore && co.ordini.fornitore.toLowerCase().includes('phoenix')) {
-      await confermaUscitaDeposito(co.ordine_id);
+      await confermaUscitaDeposito(co.ordine_id, true);
     } else {
       await sb.from('ordini').update({ stato:'confermato' }).eq('id', co.ordine_id);
     }

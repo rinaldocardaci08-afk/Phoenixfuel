@@ -616,7 +616,7 @@ async function salvaOrdine() {
   if (error) { toast('Errore: '+error.message); return; }
   _auditLog('crea_ordine', 'ordini', tipo + ' ' + clienteNome + ' ' + prezzoCorrente.prodotto + ' ' + litri + 'L');
   if (prezzoCorrente._isDeposito && tipo === 'cliente') {
-    await confermaUscitaDeposito(nuovoOrdine.id);
+    await confermaUscitaDeposito(nuovoOrdine.id, true);
     toast('Ordine salvato e deposito aggiornato!');
   } else {
     toast('Ordine salvato!');

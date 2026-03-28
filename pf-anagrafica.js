@@ -74,7 +74,7 @@ async function confermaOrdineConsegna(ordineId) {
 
   // Se l'ordine viene dal deposito PhoenixFuel, scarica anche dalla cisterna
   if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
-    await confermaUscitaDeposito(ordineId);
+    await confermaUscitaDeposito(ordineId, true);
   } else {
     await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
   }
