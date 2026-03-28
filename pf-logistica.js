@@ -479,6 +479,10 @@ async function creaNuovoCarico() {
 
   // Controlla se ci sono ordini dal deposito PhoenixFuel da scaricare
   const { data: ordiniCarico } = await sb.from('ordini').select('*').in('id', ordiniSel);
+
+  // ═══ GENERA DAS AUTOMATICI per ogni ordine del carico ═══
+  await _generaDasPerCarico(carico.id, ordiniCarico || [], mezzoTarga.split(' (')[0], autista, data);
+
   const ordiniDeposito = (ordiniCarico||[]).filter(o => o.fornitore && o.fornitore.toLowerCase().includes('phoenix'));
   if (ordiniDeposito.length > 0) {
     const totLitriDep = ordiniDeposito.reduce((s,o) => s + Number(o.litri), 0);
@@ -597,3 +601,187 @@ async function confermaTutteConsegneCarico(caricoId) {
   caricaCarichi();
 }
 
+
+// ── DAS DOCUMENTI ────────────────────────────────────────────────
+
+var _dasDescrProdotti = {
+  'Gasolio Autotrazione': {
+    codice: 'E43027102011',
+    adr: 'Gasolio Auto 10 PPM — ADR: UN 1202 GASOLIO, III (D/E) DISP.SPEC.640L',
+    desc: 'Oli di petrolio o di minerali bituminosi, diversi dagli oli greggi, e preparazioni non nominate né comprese altrove, contenuti biodiesel, diversi dai residui degli oli da gas - aventi tenore, in peso, di zolfo inferiore o uguale a 0,001 %',
+    densita_amb: 826.20, densita_15: 828.90
+  },
+  'Benzina': {
+    codice: 'E43021101011',
+    adr: 'Benzina — ADR: UN 1203 BENZINA, II (D/E)',
+    desc: 'Benzine per motori, aventi tenore in peso di zolfo inferiore o uguale a 0,001%',
+    densita_amb: 740.00, densita_15: 742.00
+  },
+  'Gasolio Agricolo': {
+    codice: 'E43027102011',
+    adr: 'Gasolio Agricolo — ADR: UN 1202 GASOLIO, III (D/E) DISP.SPEC.640L',
+    desc: 'Gasolio per uso agricolo con marcatori e coloranti, aventi tenore, in peso, di zolfo inferiore o uguale a 0,001 %',
+    densita_amb: 826.20, densita_15: 828.90
+  }
+};
+
+async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
+  if (!ordini || !ordini.length) return;
+  var anno = new Date(data).getFullYear();
+  var dasInserts = [];
+
+  for (var i = 0; i < ordini.length; i++) {
+    var o = ordini[i];
+    // Carica dati destinatario
+    var dest = { piva:'', ragsoc: o.cliente || '', indirizzo:'', citta:'' };
+    if (o.cliente_id) {
+      try {
+        var { data: cl } = await sb.from('clienti').select('piva,nome,indirizzo,citta,provincia').eq('id', o.cliente_id).single();
+        if (cl) {
+          dest.piva = cl.piva || '';
+          dest.ragsoc = cl.nome;
+          dest.indirizzo = cl.indirizzo || '';
+          dest.citta = (cl.citta || '') + (cl.provincia ? ' (' + cl.provincia + ')' : '');
+        }
+      } catch(e) {}
+    }
+    // Sede scarico se presente
+    if (o.sede_scarico_nome) {
+      dest.indirizzo = o.sede_scarico_nome;
+    }
+
+    var info = _dasDescrProdotti[o.prodotto] || _dasDescrProdotti['Gasolio Autotrazione'];
+    var litri = Number(o.litri);
+    var pesoNetto = Math.round(litri * info.densita_amb / 1000);
+    var litri15 = Math.round(litri * info.densita_amb / info.densita_15);
+
+    dasInserts.push({
+      anno: anno,
+      ordine_id: o.id,
+      carico_id: caricoId,
+      data: data,
+      dest_piva: dest.piva,
+      dest_ragsoc: dest.ragsoc,
+      dest_indirizzo: dest.indirizzo,
+      dest_citta: dest.citta,
+      mezzo_targa: targa,
+      autista: autista,
+      prodotto: o.prodotto,
+      codice_prodotto: info.codice,
+      descrizione_adr: info.adr,
+      litri_ambiente: litri,
+      litri_15: litri15,
+      peso_netto_kg: pesoNetto,
+      densita_ambiente: info.densita_amb,
+      densita_15: info.densita_15
+    });
+  }
+
+  if (dasInserts.length) {
+    var { error } = await sb.from('das_documenti').insert(dasInserts);
+    if (error) console.warn('Errore DAS:', error.message);
+    else _auditLog('genera_das', 'das_documenti', dasInserts.length + ' DAS generati per carico ' + caricoId);
+  }
+}
+
+async function stampaDas(dasId) {
+  var { data: das } = await sb.from('das_documenti').select('*').eq('id', dasId).single();
+  if (!das) { toast('DAS non trovato'); return; }
+  var numDas = 'DAS-' + das.anno + '/' + String(das.numero_progressivo).padStart(4,'0');
+  var info = _dasDescrProdotti[das.prodotto] || _dasDescrProdotti['Gasolio Autotrazione'];
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + numDas + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:10mm;color:#1a1a18}' +
+    '@media print{.no-print{display:none!important}@page{size:A4 portrait;margin:8mm}}' +
+    '.db{border:1.5px solid #333;max-width:700px;margin:0 auto}' +
+    '.dh{text-align:center;padding:12px;border-bottom:1.5px solid #333}' +
+    '.dr{display:flex;border-bottom:1px solid #ccc}.dc{flex:1;padding:6px 10px;border-right:1px solid #ccc}.dc:last-child{border-right:none}' +
+    '.dl{font-size:8px;text-transform:uppercase;color:#666;letter-spacing:0.3px;margin-bottom:2px;font-weight:600}' +
+    '.dv{font-size:11px;font-weight:500}' +
+    '.ds{background:#f0f0f0;padding:5px 10px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #ccc;color:#444}' +
+    '.df{display:flex;padding:4px 10px;border-bottom:1px solid #eee}.dfl{width:220px;font-size:9px;color:#666}.dfv{flex:1;font-size:11px;font-weight:500}' +
+    '</style></head><body>';
+
+  html += '<div class="db" style="position:relative">';
+  html += '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:55px;color:rgba(107,95,204,0.07);font-weight:900;letter-spacing:5px;pointer-events:none">COPIA INTERNA</div>';
+
+  // Header
+  html += '<div class="dh"><div style="font-size:13px;font-weight:700;letter-spacing:2px;color:#6B5FCC">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:16px;font-weight:700;margin:4px 0">DOCUMENTO DI ACCOMPAGNAMENTO</div>';
+  html += '<div style="font-size:11px;color:#666">Copia interna — pre-compilazione e-DAS</div></div>';
+
+  // Numero
+  html += '<div style="text-align:center;padding:10px;border-bottom:1.5px solid #333;background:#fafafa">';
+  html += '<div style="font-size:8px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Riferimento interno</div>';
+  html += '<div style="font-size:20px;font-weight:700;letter-spacing:2px">' + numDas + '</div></div>';
+
+  // Mittente / Destinatario
+  html += '<div class="dr"><div class="dc"><div class="dl">Deposito mittente</div><div class="dv">' + esc(das.mittente_codice) + '</div>';
+  html += '<div style="font-weight:600;margin-top:2px">' + esc(das.mittente_ragsoc) + '</div>';
+  html += '<div style="font-size:10px;color:#555">' + esc(das.mittente_indirizzo) + '</div>';
+  html += '<div style="font-size:10px;color:#555">' + esc(das.mittente_citta) + '</div></div>';
+  html += '<div class="dc"><div class="dl">Destinatario</div><div class="dv">' + esc(das.dest_piva || '') + '</div>';
+  html += '<div style="font-weight:600;margin-top:2px">' + esc(das.dest_ragsoc) + '</div>';
+  html += '<div style="font-size:10px;color:#555">' + esc(das.dest_indirizzo || '') + '</div>';
+  html += '<div style="font-size:10px;color:#555">' + esc(das.dest_citta || '') + '</div></div></div>';
+
+  html += '<div class="dr"><div class="dc"><div class="dl">Data</div><div class="dv">' + das.data + '</div></div>';
+  html += '<div class="dc"><div class="dl">P.IVA Mittente</div><div class="dv">' + esc(das.mittente_piva) + '</div></div></div>';
+
+  // Trasporto
+  html += '<div class="ds">Trasportatore / mezzo di trasporto</div>';
+  html += '<div class="df"><div class="dfl">Modalità trasporto:</div><div class="dfv">Trasporto stradale</div></div>';
+  html += '<div class="df"><div class="dfl">Tipo mezzo:</div><div class="dfv">Veicolo</div></div>';
+  html += '<div class="df"><div class="dfl">Identificativo mezzo:</div><div class="dfv" style="font-size:13px;font-weight:700;letter-spacing:1px">' + esc(das.mezzo_targa || '') + '</div></div>';
+  html += '<div class="df"><div class="dfl">Primo vettore:</div><div class="dfv">' + esc(das.mittente_piva) + ' — ' + esc(das.mittente_ragsoc) + '</div></div>';
+  html += '<div class="df"><div class="dfl">Primo incaricato del trasporto:</div><div class="dfv">' + esc(das.autista || '') + '</div></div>';
+
+  // Prodotto
+  html += '<div class="ds">Prodotto n°: 1</div>';
+  html += '<div style="padding:6px 10px;font-size:9px;color:#555;line-height:1.4;border-bottom:1px solid #eee">' + esc(info.desc) + '</div>';
+  html += '<div style="padding:6px 10px;font-size:11px;font-weight:600;border-bottom:1px solid #ccc">' + esc(das.descrizione_adr || '') + '</div>';
+
+  html += '<div class="dr"><div class="dc"><div class="dl">Codice del prodotto</div><div class="dv" style="font-family:monospace">' + esc(das.codice_prodotto || '') + '</div></div>';
+  html += '<div class="dc"><div class="dl">Peso Netto (kg)</div><div class="dv" style="font-family:monospace;font-size:14px">' + fmtL(das.peso_netto_kg || 0) + '</div></div></div>';
+
+  html += '<div class="dr"><div class="dc"><div class="dl">Volume a temp. ambiente (lt)</div><div class="dv" style="font-family:monospace;font-size:16px;color:#6B5FCC;font-weight:700">' + fmtL(das.litri_ambiente || 0) + '</div></div>';
+  html += '<div class="dc"><div class="dl">Volume a 15° (lt)</div><div class="dv" style="font-family:monospace;font-size:14px">' + fmtL(das.litri_15 || 0) + '</div></div></div>';
+
+  html += '<div class="dr"><div class="dc"><div class="dl">Densità a temp. ambiente (kg/mc)</div><div class="dv" style="font-family:monospace">' + Number(das.densita_ambiente || 0).toFixed(2).replace('.', ',') + '</div></div>';
+  html += '<div class="dc"><div class="dl">Densità a 15° (kg/mc)</div><div class="dv" style="font-family:monospace">' + Number(das.densita_15 || 0).toFixed(2).replace('.', ',') + '</div></div></div>';
+
+  html += '<div style="padding:6px 10px;font-size:10px;color:#555;border-bottom:1px solid #ccc">Liquidi alla rinfusa</div>';
+
+  // Firme
+  html += '<div class="dr" style="min-height:50px"><div class="dc"><div class="dl">Firma speditore</div></div>';
+  html += '<div class="dc"><div class="dl">Firma autista</div></div>';
+  html += '<div class="dc"><div class="dl">Firma destinatario</div></div></div>';
+
+  // Footer
+  html += '<div style="text-align:center;padding:8px;font-size:8px;color:#999;border-top:1px solid #ccc">';
+  html += 'PhoenixFuel Srl — ' + numDas + ' — Generato il ' + new Date(das.created_at).toLocaleDateString('it-IT') + ' · Questo documento NON sostituisce l\'e-DAS ufficiale ADM</div>';
+  html += '</div>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div>';
+  html += '</body></html>';
+
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
+async function mostraDasOrdine(ordineId) {
+  var { data: dasList } = await sb.from('das_documenti').select('*').eq('ordine_id', ordineId).order('created_at',{ascending:false});
+  if (!dasList || !dasList.length) { toast('Nessun DAS per questo ordine'); return; }
+  if (dasList.length === 1) { stampaDas(dasList[0].id); return; }
+  // Più DAS → mostra lista
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:12px">DAS per questo ordine</div>';
+  dasList.forEach(function(d) {
+    var num = 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4,'0');
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border-radius:8px;margin-bottom:6px">';
+    html += '<div><strong>' + num + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:8px">' + d.data + ' · ' + esc(d.prodotto) + ' · ' + fmtL(d.litri_ambiente) + '</span></div>';
+    html += '<button class="btn-primary" style="font-size:11px;padding:5px 14px" onclick="stampaDas(\'' + d.id + '\')">🖨️ Stampa</button>';
+    html += '</div>';
+  });
+  apriModal(html);
+}

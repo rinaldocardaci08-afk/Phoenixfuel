@@ -652,7 +652,7 @@ async function caricaOrdini() {
     let btnCisterna = '';
     if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
     else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
   });
   tbody.innerHTML = html;
 }
@@ -724,7 +724,23 @@ async function apriModaleOrdine(id) {
   html += '<div style="margin-top:16px;border-top:0.5px solid var(--border);padding-top:14px">';
   html += '<div style="font-size:13px;font-weight:500;margin-bottom:10px">Documenti allegati</div>';
 
-  // Lista documenti esistenti
+  // DAS interni
+  var { data: dasOrdine } = await sb.from('das_documenti').select('*').eq('ordine_id', id).order('created_at',{ascending:false});
+  if (dasOrdine && dasOrdine.length) {
+    html += '<div style="margin-bottom:10px">';
+    dasOrdine.forEach(function(d) {
+      var numDas = 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4,'0');
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#FDF3D0;border-radius:6px;margin-bottom:4px;font-size:12px;border-left:3px solid #D4A017">';
+      html += '<span class="badge amber" style="font-size:9px">DAS</span>';
+      html += '<strong style="font-family:var(--font-mono)">' + numDas + '</strong>';
+      html += '<span style="font-size:10px;color:var(--text-muted)">' + d.data + ' · ' + esc(d.prodotto) + ' · ' + fmtL(d.litri_ambiente) + ' · ' + esc(d.mezzo_targa||'') + '</span>';
+      html += '<button class="btn-primary" style="font-size:10px;padding:3px 10px;margin-left:auto" onclick="stampaDas(\'' + d.id + '\')">🖨️ Stampa</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Lista documenti caricati
   if (docs && docs.length) {
     html += '<div style="margin-bottom:10px">';
     docs.forEach(d => {
