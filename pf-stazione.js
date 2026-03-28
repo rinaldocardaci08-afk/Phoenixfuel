@@ -1962,6 +1962,257 @@ async function stampaRegistroDifferenze() {
   var w = window.open('', '_blank'); w.document.write(html); w.document.close();
 }
 
+// ── OCR SCONTRINO STAZIONE ──────────────────────────────────────
+async function ocrScontrino(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var statusEl = document.getElementById('ocr-status');
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '⏳ Lettura scontrino in corso... (può impiegare 10-20 secondi)';
+
+  try {
+    var worker = await Tesseract.createWorker('ita');
+    var { data } = await worker.recognize(file);
+    await worker.terminate();
+    var testo = data.text;
+
+    statusEl.innerHTML = '✅ Scontrino letto! Estrazione dati...';
+
+    // Parsing dei dati dallo scontrino
+    var risultato = _parseScontrino(testo);
+
+    // Mostra risultati per conferma
+    var html = '<div style="font-size:13px;font-weight:600;margin-bottom:10px">📋 Dati estratti dallo scontrino</div>';
+
+    // Letture pompe
+    if (risultato.pompe.length) {
+      html += '<div style="font-size:11px;font-weight:500;color:var(--text-muted);margin-bottom:6px">TOTALIZZATORI POMPE</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:12px">';
+      risultato.pompe.forEach(function(p) {
+        html += '<div style="padding:8px 10px;background:var(--bg);border-radius:6px;border-left:3px solid ' + (p.prodotto === 'Diesel' ? '#D4A017' : '#639922') + '">';
+        html += '<div style="font-size:10px;color:var(--text-muted)">' + p.nome + ' (' + p.prodotto + ')</div>';
+        html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600">' + p.finale + '</div>';
+        html += '<div style="font-size:10px;color:var(--text-hint)">diff: ' + p.differenza + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    // Incassi
+    html += '<div style="font-size:11px;font-weight:500;color:var(--text-muted);margin-bottom:6px">INCASSI</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;margin-bottom:12px">';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Bancomat</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.bancomat) + '</div></div>';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Nexi</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.nexi) + '</div></div>';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Totale carte</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.totCarte) + '</div></div>';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Totale stazione</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.totaleStazione) + '</div></div>';
+    html += '</div>';
+
+    // Crediti
+    html += '<div style="font-size:11px;font-weight:500;color:var(--text-muted);margin-bottom:6px">CREDITI</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;margin-bottom:12px">';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Emessi</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.creditiEmessi) + '</div></div>';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Rimborsati</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.creditiRimborsati) + '</div></div>';
+    html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Rimb. gg prec</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.creditiRimbPrec) + '</div></div>';
+    html += '</div>';
+
+    html += '<div style="display:flex;gap:8px;margin-top:8px">';
+    html += '<button class="btn-primary" style="flex:1;background:#639922" onclick="applicaOcrCassa()">✅ Applica alla cassa</button>';
+    html += '<button class="btn-primary" style="background:#378ADD" onclick="applicaOcrLetture()">⛽ Applica alle letture</button>';
+    html += '<button onclick="document.getElementById(\'ocr-status\').style.display=\'none\'" style="padding:8px 14px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:12px">Chiudi</button>';
+    html += '</div>';
+
+    statusEl.innerHTML = html;
+
+    // Salva risultato per applicazione
+    window._ocrRisultato = risultato;
+
+  } catch(e) {
+    statusEl.innerHTML = '❌ Errore lettura: ' + e.message + '. Riprova con una foto più nitida.';
+    console.error('OCR error:', e);
+  }
+
+  input.value = '';
+}
+
+function _parseScontrino(testo) {
+  var r = {
+    pompe: [], bancomat: 0, nexi: 0, totCarte: 0, totaleStazione: 0,
+    creditiEmessi: 0, creditiRimborsati: 0, creditiRimbPrec: 0, contanti: 0
+  };
+
+  var righe = testo.split('\n').map(function(l) { return l.trim(); });
+
+  // Parsing totalizzatori pompe
+  var pompaCorrente = null, prodottoCorrente = '';
+  for (var i = 0; i < righe.length; i++) {
+    var riga = righe[i];
+
+    // Pompa XX
+    var mPompa = riga.match(/Pompa\s+(\d+)/i);
+    if (mPompa) { pompaCorrente = 'Pompa ' + mPompa[1]; continue; }
+
+    // Prodotto (Verde/Diesel)
+    if (pompaCorrente && /^(Verde|Diesel|Gasolio|Benzina)/i.test(riga)) {
+      prodottoCorrente = riga.trim();
+      continue;
+    }
+
+    // Totalizzatore finale
+    var mFinale = riga.match(/total[il]zzatore\s+finale\s+(\d+)/i);
+    if (mFinale && pompaCorrente) {
+      var mIniziale = (righe[i - 1] || '').match(/total[il]zzatore\s+[Ii]niziale\s+(\d+)/i);
+      var mDiff = (righe[i + 1] || '').match(/differenza\s+(\d+)/i);
+      r.pompe.push({
+        nome: pompaCorrente,
+        prodotto: prodottoCorrente || '—',
+        iniziale: mIniziale ? parseInt(mIniziale[1]) : 0,
+        finale: parseInt(mFinale[1]),
+        differenza: mDiff ? parseInt(mDiff[1]) : 0
+      });
+      pompaCorrente = null;
+      prodottoCorrente = '';
+      continue;
+    }
+
+    // Importi — parsing numeri formato italiano (1.010,34 o 102,30)
+    var _pNum = function(s) {
+      if (!s) return 0;
+      s = s.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+      return parseFloat(s) || 0;
+    };
+
+    // BANCOMAT OUTDOOR importo
+    if (/BANCOMAT\s+OUTDOOR/i.test(riga)) {
+      // Cerca "Importo complessivo Euro" nelle prossime righe
+      for (var j = i + 1; j < Math.min(i + 8, righe.length); j++) {
+        var mBanc = righe[j].match(/[Ii]mporto\s+complessivo\s+Euro\s+([\d.,]+)/);
+        if (mBanc) { r.bancomat = _pNum(mBanc[1]); break; }
+      }
+    }
+
+    // NEXI OUTDOOR importo
+    if (/NEXI\s+OUTDOOR/i.test(riga)) {
+      for (var j = i + 1; j < Math.min(i + 8, righe.length); j++) {
+        var mNexi = righe[j].match(/[Ii]mporto\s+complessivo\s+Euro\s+([\d.,]+)/);
+        if (mNexi) { r.nexi = _pNum(mNexi[1]); break; }
+      }
+    }
+
+    // TOTALE GENERALE DI STAZIONE CON CARTE
+    var mTotCarte = riga.match(/CON\s+CARTE.*?Euro\s+([\d.,]+)/i);
+    if (!mTotCarte) mTotCarte = riga.match(/TOTALE\s+GENERALE\s+DI\s+STAZIONE/i) ? (righe[i + 1] || '').match(/CON\s+CARTE.*?Euro\s+([\d.,]+)/i) : null;
+    if (mTotCarte) r.totCarte = _pNum(mTotCarte[1]);
+
+    // TOTALE GENERALE DI STAZIONE Euro
+    var mTotGen = riga.match(/TOTALE\s+GENERALE[\s\S]*?Euro\s+([\d.,]+)/i);
+    if (mTotGen && !/CON CARTE/i.test(riga)) r.totaleStazione = _pNum(mTotGen[1]);
+
+    // Crediti emessi
+    var mCredE = riga.match(/crediti\s+emess[il].*?([\d.,]+)/i);
+    if (mCredE) r.creditiEmessi = _pNum(mCredE[1]);
+
+    // Crediti rimborsati
+    var mCredR = riga.match(/[Cc]rediti\s+rimborsati.*?([\d.,]+)/i);
+    if (mCredR) r.creditiRimborsati = _pNum(mCredR[1]);
+
+    // Crediti rimb giorni prec
+    var mCredP = riga.match(/[Cc]rediti\s+rimb.*?giorni\s+prec.*?([\d.,]+)/i);
+    if (mCredP) r.creditiRimbPrec = _pNum(mCredP[1]);
+
+    // Incasso netto (contanti)
+    var mContanti = riga.match(/[Ii]ncasso\s+netto.*?([\d.,]+)/i);
+    if (mContanti) r.contanti = _pNum(mContanti[1]);
+  }
+
+  // Fallback totale carte
+  if (r.totCarte === 0 && (r.bancomat > 0 || r.nexi > 0)) r.totCarte = r.bancomat + r.nexi;
+
+  return r;
+}
+
+function applicaOcrCassa() {
+  var r = window._ocrRisultato;
+  if (!r) { toast('Nessun dato OCR disponibile'); return; }
+
+  // Compila campi cassa
+  if (r.bancomat > 0) document.getElementById('cassa-bancomat').value = r.bancomat.toFixed(2);
+  if (r.nexi > 0) document.getElementById('cassa-nexi').value = r.nexi.toFixed(2);
+  if (r.creditiEmessi > 0) document.getElementById('cassa-crediti-emessi').value = r.creditiEmessi.toFixed(2);
+  if (r.creditiRimborsati > 0) document.getElementById('cassa-rimborsi').value = r.creditiRimborsati.toFixed(2);
+  if (r.creditiRimbPrec > 0) document.getElementById('cassa-rimborsi-prec').value = r.creditiRimbPrec.toFixed(2);
+
+  calcolaCassa();
+  toast('✅ Dati scontrino applicati alla cassa!');
+  document.getElementById('ocr-status').style.display = 'none';
+}
+
+async function applicaOcrLetture() {
+  var r = window._ocrRisultato;
+  if (!r || !r.pompe.length) { toast('Nessun totalizzatore trovato'); return; }
+
+  // Mappa pompe dello scontrino alle pompe del sistema
+  var { data: pompeSistema } = await sb.from('stazione_pompe').select('id,nome,prodotto,ordine_visualizzazione').eq('attiva', true).order('ordine_visualizzazione');
+  if (!pompeSistema || !pompeSistema.length) { toast('Nessuna pompa configurata nel sistema'); return; }
+
+  // Mostra dialog di mappatura
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:12px">Associa totalizzatori alle pompe</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Verifica che ogni totalizzatore sia associato alla pompa corretta, poi conferma.</div>';
+
+  r.pompe.forEach(function(p, idx) {
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px">';
+    html += '<div style="flex:1"><strong>' + p.nome + '</strong> (' + p.prodotto + ')<br><span style="font-family:var(--font-mono);font-size:14px">' + p.finale + '</span> <span style="font-size:10px;color:var(--text-hint)">diff: ' + p.differenza + '</span></div>';
+    html += '<span style="font-size:16px">→</span>';
+    html += '<select id="ocr-mappa-' + idx + '" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">';
+    html += '<option value="">— Ignora —</option>';
+    pompeSistema.forEach(function(ps) {
+      // Auto-match per nome/ordine
+      var sel = '';
+      var pompaNum = p.nome.match(/\d+/);
+      if (pompaNum && ps.nome && ps.nome.indexOf(pompaNum[0]) >= 0) sel = ' selected';
+      else if (pompaNum && ps.ordine_visualizzazione === parseInt(pompaNum[0])) sel = ' selected';
+      html += '<option value="' + ps.id + '"' + sel + '>' + ps.nome + ' (' + ps.prodotto + ')</option>';
+    });
+    html += '</select></div>';
+  });
+
+  html += '<div style="display:flex;gap:8px;margin-top:12px">';
+  html += '<button class="btn-primary" style="flex:1;background:#639922" onclick="confermaOcrLetture()">✅ Salva letture</button>';
+  html += '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function confermaOcrLetture() {
+  var r = window._ocrRisultato;
+  if (!r || !r.pompe.length) return;
+  var data = document.getElementById('cassa-data').value || oggiISO;
+  var salvate = 0;
+
+  for (var idx = 0; idx < r.pompe.length; idx++) {
+    var sel = document.getElementById('ocr-mappa-' + idx);
+    if (!sel || !sel.value) continue;
+    var pompaId = sel.value;
+    var lettura = r.pompe[idx].finale;
+
+    var { error } = await sb.from('stazione_letture').upsert({
+      pompa_id: pompaId, data: data, lettura: lettura
+    }, { onConflict: 'pompa_id,data' });
+
+    if (!error) salvate++;
+  }
+
+  chiudiModalePermessi();
+  toast('✅ ' + salvate + ' letture salvate da scontrino!');
+  document.getElementById('ocr-status').style.display = 'none';
+  _auditLog('ocr_letture', 'stazione_letture', salvate + ' letture da OCR scontrino ' + data);
+
+  // Ricarica letture se siamo nel tab letture
+  if (document.getElementById('stz-letture') && document.getElementById('stz-letture').style.display !== 'none') {
+    caricaTabLetture();
+  }
+}
+
 async function stampaCassa() {
   var data = document.getElementById('cassa-data').value;
   if (!data) { toast('Seleziona una data'); return; }

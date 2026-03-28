@@ -14,6 +14,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     @media (max-width: 768px) {
       #stz-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
@@ -1055,7 +1056,10 @@
             <div style="display:flex;gap:8px">
               <button class="btn-primary" style="flex:1" onclick="salvaCassa()">💾 Salva registro</button>
               <button class="btn-primary" style="background:#6B5FCC" onclick="stampaCassa()">🖨️ Stampa</button>
+              <button class="btn-primary" style="background:#378ADD" onclick="document.getElementById('ocr-scontrino-input').click()">📷 Leggi scontrino</button>
+              <input type="file" id="ocr-scontrino-input" accept="image/*" style="display:none" onchange="ocrScontrino(this)" />
             </div>
+            <div id="ocr-status" style="display:none;margin-top:10px;padding:10px 14px;background:#E6F1FB;border-radius:8px;font-size:12px;color:#0C447C"></div>
           </div>
 
           <!-- Registro crediti -->
