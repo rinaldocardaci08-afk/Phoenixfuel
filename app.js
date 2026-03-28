@@ -5202,7 +5202,8 @@ async function salvaCassa() {
   // Se offline: accoda tutto e esci
   if (!navigator.onLine) {
     await _sbWrite('stazione_cassa', 'upsert', record, 'data');
-    // Spese
+    // Spese: delete prima, poi insert (evita doppioni)
+    await _sbWrite('stazione_spese_contanti', 'delete', null, { data: data });
     var speseOff = [];
     document.querySelectorAll('#cassa-spese-lista > div').forEach(function(row) {
       var nota = row.querySelector('.cassa-spesa-nota').value;
@@ -5215,7 +5216,8 @@ async function salvaCassa() {
     if (saldoOff !== 0 || creditiEmessi > 0 || rimborsi > 0 || rimborsiPrec > 0) {
       await _sbWrite('stazione_crediti', 'upsert', { data_emissione: data, importo: saldoOff, nota: 'Crediti: ' + fmtE(creditiEmessi) + ' | Rimborsi: ' + fmtE(rimborsi) + ' | Rimb.prec: ' + fmtE(rimborsiPrec) }, 'data_emissione');
     }
-    // Versamento
+    // Versamento: delete prima, poi insert (evita doppioni)
+    await _sbWrite('stazione_versamenti', 'delete', null, { data: data, note: 'Da registro cassa' });
     var totCarteOff = Math.round((bancomat + nexi + aziendali) * 100) / 100;
     if (versato > 0 || totCarteOff > 0) {
       await _sbWrite('stazione_versamenti', 'insert', [{ data: data, contanti: versato, pos: totCarteOff, note: 'Da registro cassa' }]);
@@ -7055,7 +7057,7 @@ async function switchPostazione(nuova) {
 document.addEventListener('click', function(e) {
   var dd = document.getElementById('postazione-dropdown');
   var post = document.getElementById('utente-postazione');
-  if (dd && dd.style.display !== 'none' && !dd.contains(e.target) && e.target !== post) {
+  if (dd && dd.style.display !== 'none' && !dd.contains(e.target) && e.target !== post && !post.contains(e.target)) {
     dd.style.display = 'none';
   }
 });
@@ -7152,7 +7154,7 @@ async function aggiornaBadgeBacheca() {
   var badge = document.getElementById('bacheca-badge');
   if (!badge) return;
   try {
-    var { count } = await sb.from('bacheca_avvisi').select('id', { count: 'exact', head: true }).eq('letto', false);
+    var { count } = await sb.from('bacheca_avvisi').select('*', { count: 'exact', head: true }).eq('letto', false);
     if (count > 0) {
       badge.textContent = count > 99 ? '99+' : count;
       badge.style.display = 'inline-block';
@@ -7263,7 +7265,8 @@ async function _sbWrite(table, action, data, conflictOrMatch) {
     return { data: null, error: { message: 'Azione non riconosciuta' } };
   } catch(err) {
     // Errore rete → accoda
-    if (!navigator.onLine || (err.message && (err.message.indexOf('fetch') >= 0 || err.message.indexOf('network') >= 0 || err.message.indexOf('Failed') >= 0))) {
+    var isNetErr = !navigator.onLine || (err instanceof TypeError) || (err.message && (err.message.indexOf('fetch') >= 0 || err.message.indexOf('network') >= 0 || err.message.indexOf('Failed') >= 0 || err.message.indexOf('NetworkError') >= 0 || err.message.indexOf('Load failed') >= 0));
+    if (isNetErr) {
       _isOnline = false;
       _updateOnlineStatus();
       await _addToOfflineQueue({ table: table, action: action, data: data, match: conflictOrMatch || null });
@@ -7330,8 +7333,14 @@ async function _syncOfflineQueue() {
 
     if (synced > 0) {
       toast('✅ ' + synced + ' operazioni sincronizzate!');
-      // Notifica in bacheca
-      inviaAvvisoSistema(synced + ' operazioni offline sincronizzate con successo.', 'sistema');
+      // Notifica in bacheca (diretto, no _sbWrite per evitare ricorsione)
+      try {
+        await sb.from('bacheca_avvisi').insert([{
+          tipo: 'sistema', priorita: 'normale',
+          messaggio: synced + ' operazioni offline sincronizzate con successo.',
+          mittente_nome: 'Sistema PhoenixFuel', letto: false
+        }]);
+      } catch(e) {}
       aggiornaBadgeBacheca();
     }
   } catch(e) { console.warn('Sync error:', e); }
