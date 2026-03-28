@@ -899,12 +899,13 @@ async function caricaMargineCliente() {
     if (!perCliente[key]) perCliente[key] = { cliente:key, cliente_id:o.cliente_id, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[key];
     var fatt = prezzoConIva(o) * Number(o.litri);
-    var costo = Number(o.costo_litro) * Number(o.litri);
+    var marg = Number(o.margine) * Number(o.litri);
+    var costo = fatt - marg;
     p.ordini++;
     p.litri += Number(o.litri);
     p.fatturato += fatt;
     p.costo += costo;
-    p.margine += fatt - costo;
+    p.margine += marg;
   });
 
   var lista = Object.values(perCliente).sort(function(a,b) { return b.margine - a.margine; });
@@ -988,8 +989,8 @@ async function stampaMargineCliente() {
     var k = o.cliente||'—';
     if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[k]; p.ordini++;
-    var fatt = prezzoConIva(o)*Number(o.litri); var costo = Number(o.costo_litro)*Number(o.litri);
-    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=costo; p.margine+=fatt-costo;
+    var fatt = prezzoConIva(o)*Number(o.litri); var marg = Number(o.margine)*Number(o.litri);
+    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=fatt-marg; p.margine+=marg;
   });
   var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
   var tot = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
@@ -1025,8 +1026,8 @@ async function esportaMargineClienteExcel() {
     var k = o.cliente||'—';
     if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[k]; p.ordini++;
-    var fatt = prezzoConIva(o)*Number(o.litri); var costo = Number(o.costo_litro)*Number(o.litri);
-    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=costo; p.margine+=fatt-costo;
+    var fatt = prezzoConIva(o)*Number(o.litri); var marg = Number(o.margine)*Number(o.litri);
+    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=fatt-marg; p.margine+=marg;
   });
   var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
 
