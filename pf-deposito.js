@@ -417,6 +417,7 @@ async function eliminaRettifica(id, tipo) {
 }
 
 async function stampaRettifiche(tipo) {
+  var w = _apriReport("Rettifiche inventario"); if (!w) return;
   const sedeLabel = tipo === 'deposito' ? 'Deposito Vibo' : 'Stazione Oppido';
   const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false});
   if (!data || !data.length) { toast('Nessuna rettifica da stampare'); return; }
@@ -470,7 +471,7 @@ async function stampaRettifiche(tipo) {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('','_blank');
+  w.document.open();
   w.document.write(html);
   w.document.close();
 }
@@ -686,6 +687,7 @@ async function eliminaPrelievo(id) {
 }
 
 async function stampaPrelievi() {
+  var w = _apriReport("Prelievi autoconsumo"); if (!w) return;
   const da = document.getElementById('ac-filtro-da').value;
   const a = document.getElementById('ac-filtro-a').value;
   const filtroCamion = document.getElementById('ac-filtro-camion').value;
@@ -748,7 +750,7 @@ async function stampaPrelievi() {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('','_blank');
+  w.document.open();
   w.document.write(html);
   w.document.close();
 }

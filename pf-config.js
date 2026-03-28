@@ -228,6 +228,14 @@ function esc(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// Helper: apri finestra report PRIMA di qualsiasi await (evita blocco popup mobile)
+function _apriReport(titolo) {
+  var w = window.open('', '_blank');
+  if (!w) { toast('Popup bloccato: abilita i popup per questo sito'); return null; }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + (titolo||'Report') + '</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;color:#666"><p style="font-size:16px">⏳ Caricamento report...</p></body></html>');
+  return w;
+}
+
 // ── VALIDAZIONE ──────────────────────────────────────────────────
 function validaNumero(val, min, max, nome) {
   const n = parseFloat(val);

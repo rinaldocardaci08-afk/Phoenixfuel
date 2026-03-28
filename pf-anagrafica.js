@@ -125,10 +125,11 @@ async function annullaOrdine(ordineId) {
 
 // ── ELENCO VENDITE GIORNALIERO (stampabile) ─────────────────────
 async function generaElencoVenditeGiorno() {
+  var w = _apriReport('Elenco vendite'); if (!w) return;
   var dataFiltro = document.getElementById('filtro-data-consegne').value || oggiISO;
   var res = await sb.from('ordini').select('*').eq('data', dataFiltro).neq('stato','annullato').eq('tipo_ordine','cliente').order('cliente');
   var ordini = res.data || [];
-  if (!ordini.length) { toast('Nessun ordine vendita per questa data'); return; }
+  if (!ordini.length) { w.close(); toast('Nessun ordine vendita per questa data'); return; }
 
   var totLitri=0, totNetto=0, totIva=0, totMargine=0, totCosto=0;
   var perCliente = {};
@@ -231,7 +232,7 @@ async function generaElencoVenditeGiorno() {
   html += '<button onclick="window.close()" style="background:#E24B4A;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:bold">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('', '_blank');
+  w.document.open();
   w.document.write(html);
   w.document.close();
 }
@@ -624,6 +625,7 @@ async function caricaVenditeAnnuali() {
 
 // ── REPORT PDF DETTAGLIO ─────────────────────────────────────────
 async function stampaReportDettaglio() {
+  var w = _apriReport("Report vendite dettaglio"); if (!w) return;
   const da = document.getElementById('vdett-da').value;
   const a = document.getElementById('vdett-a').value;
   if (!da||!a) { toast('Seleziona il periodo'); return; }
@@ -657,11 +659,12 @@ async function stampaReportDettaglio() {
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
-  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 // ── REPORT PDF ANNUALE ───────────────────────────────────────────
 async function stampaReportAnnuale() {
+  var w = _apriReport("Report annuale"); if (!w) return;
   const anno = document.getElementById('vann-anno').value;
   if (!anno) { toast('Seleziona un anno'); return; }
   const tbody = document.getElementById('tabella-vend-annuale');
@@ -690,7 +693,7 @@ async function stampaReportAnnuale() {
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#639922;color:#fff">🖨️ Stampa / PDF</button>';
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
-  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 // ── CONFRONTO ANNO SU ANNO ───────────────────────────────────────
@@ -985,6 +988,7 @@ async function caricaMargineCliente() {
 }
 
 async function stampaMargineCliente() {
+  var w = _apriReport("Margine per Cliente"); if (!w) return;
   var anno = document.getElementById('mrc-anno').value;
   var mese = document.getElementById('mrc-mese')?.value || '';
   var meseNome = mese ? ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1] : 'Anno completo';
@@ -1025,7 +1029,7 @@ async function stampaMargineCliente() {
   html += '<tr class="tot"><td>TOTALE</td><td style="text-align:center">' + tot.ordini + '</td><td>' + fmtL(tot.litri) + '</td><td>' + fmtE(tot.fatturato) + '</td><td>' + fmtE(tot.costo) + '</td><td style="color:#639922">' + fmtE(tot.margine) + '</td><td>€ ' + tMl.toFixed(4) + '</td><td>' + tPct.toFixed(1) + '%</td></tr>';
   html += '</tbody></table>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
-  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 async function esportaMargineClienteExcel() {

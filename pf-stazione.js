@@ -1416,6 +1416,7 @@ async function caricaGiacenzeStazione() {
 }
 
 async function stampaReportAcquistiStazione() {
+  var w = _apriReport("Report acquisti stazione"); if (!w) return;
   // Leggi filtri
   const anno = document.getElementById('stz-acq-anno').value;
   const da = document.getElementById('stz-acq-da').value;
@@ -1505,7 +1506,7 @@ async function stampaReportAcquistiStazione() {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('','_blank');
+  w.document.open();
   w.document.write(html);
   w.document.close();
 }
@@ -1924,6 +1925,7 @@ async function caricaRegistroDifferenze() {
 }
 
 async function stampaRegistroDifferenze() {
+  var w = _apriReport("Registro differenze cassa"); if (!w) return;
   var anno = document.getElementById('diff-cassa-anno')?.value || new Date().getFullYear();
   var mese = document.getElementById('diff-cassa-mese')?.value || '';
   var meseNome = mese ? ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1] : 'Anno completo';
@@ -1959,7 +1961,7 @@ async function stampaRegistroDifferenze() {
   html += '</tbody></table>';
 
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
-  var w = window.open('', '_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 // ── OCR SCONTRINO STAZIONE ──────────────────────────────────────
@@ -2214,6 +2216,7 @@ async function confermaOcrLetture() {
 }
 
 async function stampaCassa() {
+  var w = _apriReport("Registro cassa"); if (!w) return;
   var data = document.getElementById('cassa-data').value;
   if (!data) { toast('Seleziona una data'); return; }
   var dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
@@ -2267,7 +2270,7 @@ async function stampaCassa() {
   html += '</table>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div>';
   html += '</body></html>';
-  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 function initReportStazione() {
@@ -2300,6 +2303,7 @@ async function _caricaDatiCassaMese(anno, mese) {
 }
 
 async function stampaReportCassaMensile() {
+  var w = _apriReport("Report cassa mensile"); if (!w) return;
   var anno = document.getElementById('stz-rep-cassa-anno').value;
   var mese = document.getElementById('stz-rep-cassa-mese').value;
   if (!anno || !mese) { toast('Seleziona anno e mese'); return; }
@@ -2394,7 +2398,7 @@ async function stampaReportCassaMensile() {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 async function esportaCassaExcel() {
@@ -2447,6 +2451,7 @@ async function esportaCassaExcel() {
 }
 
 async function stampaReportMensileContatori() {
+  var w = _apriReport("Report contatori mensile"); if (!w) return;
   var anno = document.getElementById('stz-rep-anno').value;
   var mese = document.getElementById('stz-rep-mese').value;
   if (!anno || !mese) { toast('Seleziona anno e mese'); return; }
@@ -2604,7 +2609,7 @@ async function stampaReportMensileContatori() {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('','_blank');
+  w.document.open();
   w.document.write(html);
   w.document.close();
 }

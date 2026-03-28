@@ -106,6 +106,7 @@ async function generaReportViaggi() {
 }
 
 async function stampaReportViaggi() {
+  var w = _apriReport("Report viaggi"); if (!w) return;
   const carichi = await _caricaDatiViaggi();
   if (carichi === null) return;
   if (!carichi.length) { toast('Nessun viaggio trovato per il periodo'); return; }
@@ -175,7 +176,7 @@ async function stampaReportViaggi() {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  var w = window.open('','_blank');
+  w.document.open();
   w.document.write(html);
   w.document.close();
 }
@@ -687,6 +688,7 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
 }
 
 async function stampaDas(dasId) {
+  var w = _apriReport("DAS"); if (!w) return;
   var { data: das } = await sb.from('das_documenti').select('*').eq('id', dasId).single();
   if (!das) { toast('DAS non trovato'); return; }
   var numDas = 'DAS-' + das.anno + '/' + String(das.numero_progressivo).padStart(4,'0');
@@ -769,7 +771,7 @@ async function stampaDas(dasId) {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div>';
   html += '</body></html>';
 
-  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 async function mostraDasOrdine(ordineId) {

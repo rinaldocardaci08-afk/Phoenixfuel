@@ -963,6 +963,7 @@ async function generaListinoPrezzi() {
 }
 
 async function stampaListinoPrezzi() {
+  var w = _apriReport("Listino prezzi"); if (!w) return;
   if (!_listinoData.length) { toast('Prima genera il listino'); return; }
   var prodotto = document.getElementById('lp-prodotto').value;
   var costo = parseFloat(document.getElementById('lp-costo').value);
@@ -979,10 +980,11 @@ async function stampaListinoPrezzi() {
   });
   html += '</tbody></table>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
-  var w = window.open('', '_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 async function generaOffertaCliente() {
+  var w = _apriReport("Conferma Ordine"); if (!w) return;
   var clienteId = document.getElementById('lp-cliente-singolo').value;
   if (!clienteId) { toast('Seleziona un cliente'); return; }
   var prodotto = document.getElementById('lp-prodotto').value;
@@ -1051,5 +1053,5 @@ async function generaOffertaCliente() {
   html += '<div style="margin-top:30px;text-align:center;font-size:8px;color:#bbb;border-top:1px solid #eee;padding-top:8px">Phoenix Fuel Srl — Documento generato il ' + dataOggi + '</div>';
 
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
-  var w = window.open('', '_blank'); w.document.write(html); w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
