@@ -1059,6 +1059,29 @@
             <tbody id="cred-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
+
+          <!-- Registro differenze cassa -->
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📊 Registro differenze cassa</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select id="diff-cassa-anno" onchange="caricaRegistroDifferenze()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
+                <select id="diff-cassa-mese" onchange="caricaRegistroDifferenze()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                  <option value="">Tutto l'anno</option>
+                  <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option>
+                  <option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                  <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
+                  <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+                </select>
+                <button class="btn-primary" style="font-size:11px;padding:5px 14px;background:#6B5FCC" onclick="stampaRegistroDifferenze()">🖨️ Stampa</button>
+              </div>
+            </div>
+            <div class="grid4" style="margin-bottom:12px" id="diff-cassa-kpi"></div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Data</th><th>Da versare</th><th>Versato</th><th>Differenza</th><th>Diff. cumulata</th></tr></thead>
+              <tbody id="diff-cassa-tabella"><tr><td colspan="5" class="loading">Seleziona un periodo...</td></tr></tbody></table>
+            </div>
+          </div>
         </div>
 
         <!-- REPORT -->

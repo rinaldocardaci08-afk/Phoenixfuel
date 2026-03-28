@@ -1549,6 +1549,7 @@ async function caricaCassa() {
   window._cassaTotVendite = totVendite;
   calcolaCassa();
   caricaCrediti();
+  caricaRegistroDifferenze();
 }
 
 async function _calcolaTotVenditeDaLetture(data) {
@@ -1822,6 +1823,143 @@ async function caricaCrediti() {
       '<td style="font-family:var(--font-mono);font-weight:600;color:' + colore + '">' + segno + ' ' + fmtE(Math.abs(imp)) + '</td>' +
       '<td style="font-size:11px;color:var(--text-muted)">' + (isPos ? 'credito netto' : 'riduzione crediti') + '</td></tr>';
   }).join('');
+}
+
+// ── REGISTRO DIFFERENZE CASSA ──
+async function caricaRegistroDifferenze() {
+  // Popola selettore anno
+  var selAnno = document.getElementById('diff-cassa-anno');
+  if (selAnno && selAnno.options.length === 0) {
+    var ac = new Date().getFullYear();
+    for (var y = ac; y >= ac - 3; y--) selAnno.innerHTML += '<option value="' + y + '"' + (y===ac?' selected':'') + '>' + y + '</option>';
+  }
+
+  var anno = selAnno ? selAnno.value : new Date().getFullYear();
+  var mese = document.getElementById('diff-cassa-mese')?.value || '';
+  var da = anno + '-' + (mese || '01') + '-01';
+  var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
+  var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2, '0');
+
+  var { data: casse } = await sb.from('stazione_cassa').select('data,contanti_da_versare,versato,differenza').gte('data', da).lte('data', a).order('data');
+
+  var tbody = document.getElementById('diff-cassa-tabella');
+  var kpiWrap = document.getElementById('diff-cassa-kpi');
+  if (!casse || !casse.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessun dato per il periodo selezionato</td></tr>';
+    kpiWrap.innerHTML = '';
+    return;
+  }
+
+  // Calcola totali e cumulata
+  var totDaVersare = 0, totVersato = 0, totDiff = 0, ggConDiff = 0, cumulata = 0;
+  var righe = casse.map(function(c) {
+    var daVers = Number(c.contanti_da_versare || 0);
+    var versato = Number(c.versato || 0);
+    var diff = Math.round((versato - daVers) * 100) / 100;
+    cumulata = Math.round((cumulata + diff) * 100) / 100;
+    totDaVersare += daVers;
+    totVersato += versato;
+    totDiff += diff;
+    if (Math.abs(diff) >= 0.01) ggConDiff++;
+    return { data: c.data, daVersare: daVers, versato: versato, diff: diff, cumulata: cumulata };
+  });
+
+  totDiff = Math.round(totDiff * 100) / 100;
+
+  // KPI
+  var diffColor = Math.abs(totDiff) < 0.01 ? '#639922' : '#E24B4A';
+  var cumColor = Math.abs(cumulata) < 0.01 ? '#639922' : '#E24B4A';
+  kpiWrap.innerHTML =
+    '<div class="kpi"><div class="kpi-label">Giorni registrati</div><div class="kpi-value">' + casse.length + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Giorni con differenza</div><div class="kpi-value" style="color:' + (ggConDiff === 0 ? '#639922' : '#E24B4A') + '">' + ggConDiff + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Diff. totale periodo</div><div class="kpi-value" style="font-family:var(--font-mono);color:' + diffColor + '">' + (totDiff >= 0 ? '+' : '') + fmtE(totDiff) + '</div></div>' +
+    '<div class="kpi" style="border:1px solid ' + cumColor + '"><div class="kpi-label">Saldo cumulato</div><div class="kpi-value" style="font-family:var(--font-mono);color:' + cumColor + '">' + (cumulata >= 0 ? '+' : '') + fmtE(cumulata) + '</div></div>';
+
+  // Tabella (più recente in cima)
+  var html = '';
+  var meseCorrente = '';
+  var righeReverse = righe.slice().reverse();
+
+  righeReverse.forEach(function(r, idx) {
+    var meseRiga = r.data.substring(0, 7);
+    // Riga riepilogo mensile se cambia mese
+    if (meseCorrente && meseRiga !== meseCorrente) {
+      var righeDelMese = righe.filter(function(x) { return x.data.startsWith(meseCorrente); });
+      var totMDa = righeDelMese.reduce(function(s, x) { return s + x.daVersare; }, 0);
+      var totMVers = righeDelMese.reduce(function(s, x) { return s + x.versato; }, 0);
+      var totMDiff = Math.round((totMVers - totMDa) * 100) / 100;
+      var mColor = Math.abs(totMDiff) < 0.01 ? '#639922' : '#E24B4A';
+      var meseNome = ['', 'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'][Number(meseCorrente.split('-')[1])];
+      html += '<tr style="background:#EEEDFE;font-weight:600"><td style="font-size:11px">📅 ' + meseNome + '</td><td style="font-family:var(--font-mono)">' + fmtE(totMDa) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totMVers) + '</td><td style="font-family:var(--font-mono);color:' + mColor + '">' + (totMDiff >= 0 ? '+' : '') + fmtE(totMDiff) + '</td><td></td></tr>';
+    }
+    meseCorrente = meseRiga;
+
+    var dColor = Math.abs(r.diff) < 0.01 ? '#639922' : '#E24B4A';
+    var cColor = Math.abs(r.cumulata) < 0.01 ? '#639922' : r.cumulata > 0 ? '#639922' : '#E24B4A';
+    var dataFmt = new Date(r.data).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' });
+
+    html += '<tr' + (idx % 2 ? ' style="background:var(--bg)"' : '') + '>' +
+      '<td style="font-weight:500;font-size:11px">' + dataFmt + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtE(r.daVersare) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtE(r.versato) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:600;color:' + dColor + '">' + (r.diff >= 0 ? '+' : '') + fmtE(r.diff) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-size:11px;color:' + cColor + '">' + (r.cumulata >= 0 ? '+' : '') + fmtE(r.cumulata) + '</td></tr>';
+  });
+
+  // Ultimo mese in corso
+  if (meseCorrente) {
+    var righeDelMese = righe.filter(function(x) { return x.data.startsWith(meseCorrente); });
+    var totMDa = righeDelMese.reduce(function(s, x) { return s + x.daVersare; }, 0);
+    var totMVers = righeDelMese.reduce(function(s, x) { return s + x.versato; }, 0);
+    var totMDiff = Math.round((totMVers - totMDa) * 100) / 100;
+    var mColor = Math.abs(totMDiff) < 0.01 ? '#639922' : '#E24B4A';
+    var meseNome = ['', 'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'][Number(meseCorrente.split('-')[1])];
+    html += '<tr style="background:#EEEDFE;font-weight:600"><td style="font-size:11px">📅 ' + meseNome + '</td><td style="font-family:var(--font-mono)">' + fmtE(totMDa) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totMVers) + '</td><td style="font-family:var(--font-mono);color:' + mColor + '">' + (totMDiff >= 0 ? '+' : '') + fmtE(totMDiff) + '</td><td></td></tr>';
+  }
+
+  // Riga totale anno
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:700"><td>TOTALE</td><td style="font-family:var(--font-mono)">' + fmtE(totDaVersare) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totVersato) + '</td><td style="font-family:var(--font-mono);color:' + diffColor + '">' + (totDiff >= 0 ? '+' : '') + fmtE(totDiff) + '</td><td style="font-family:var(--font-mono);color:' + cumColor + '">' + (cumulata >= 0 ? '+' : '') + fmtE(cumulata) + '</td></tr>';
+
+  tbody.innerHTML = html;
+}
+
+async function stampaRegistroDifferenze() {
+  var anno = document.getElementById('diff-cassa-anno')?.value || new Date().getFullYear();
+  var mese = document.getElementById('diff-cassa-mese')?.value || '';
+  var meseNome = mese ? ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1] : 'Anno completo';
+  var da = anno + '-' + (mese || '01') + '-01';
+  var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
+  var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2, '0');
+
+  var { data: casse } = await sb.from('stazione_cassa').select('data,contanti_da_versare,versato').gte('data', da).lte('data', a).order('data');
+  if (!casse || !casse.length) { toast('Nessun dato'); return; }
+
+  var cumulata = 0;
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Registro Differenze Cassa</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:8mm}@media print{@page{size:portrait;margin:6mm}.no-print{display:none!important}}table{width:100%;border-collapse:collapse}th{background:#6B5FCC;color:#fff;padding:4px 6px;font-size:8px;text-transform:uppercase;border:1px solid #5A4FBB;text-align:right}th:first-child{text-align:left}td{padding:3px 6px;border:1px solid #ddd;font-size:9px;text-align:right;font-family:Courier New,monospace}td:first-child{text-align:left;font-family:Arial;font-weight:500}.alt{background:#fafaf8}.tot{background:#f0f0f0;font-weight:bold}.tot td{border-top:2px solid #6B5FCC}.ok{color:#639922}.err{color:#E24B4A}.mese{background:#EEEDFE;font-weight:bold}</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">REGISTRO DIFFERENZE CASSA</div><div style="font-size:12px;color:#666;margin-top:2px">Stazione Oppido — ' + meseNome + ' ' + anno + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
+
+  html += '<table><thead><tr><th style="text-align:left">Data</th><th>Da versare</th><th>Versato</th><th>Differenza</th><th>Cumulata</th></tr></thead><tbody>';
+
+  var totDa = 0, totVers = 0, meseCorr = '', ggDiff = 0;
+  casse.forEach(function(c, i) {
+    var daV = Number(c.contanti_da_versare || 0);
+    var vers = Number(c.versato || 0);
+    var diff = Math.round((vers - daV) * 100) / 100;
+    cumulata = Math.round((cumulata + diff) * 100) / 100;
+    totDa += daV; totVers += vers;
+    if (Math.abs(diff) >= 0.01) ggDiff++;
+    var cls = Math.abs(diff) < 0.01 ? 'ok' : 'err';
+    html += '<tr' + (i % 2 ? ' class="alt"' : '') + '><td>' + c.data + '</td><td>' + fmtE(daV) + '</td><td>' + fmtE(vers) + '</td><td class="' + cls + '" style="font-weight:bold">' + (diff >= 0 ? '+' : '') + fmtE(diff) + '</td><td class="' + (Math.abs(cumulata) < 0.01 ? 'ok' : 'err') + '">' + (cumulata >= 0 ? '+' : '') + fmtE(cumulata) + '</td></tr>';
+  });
+
+  var totDiff = Math.round((totVers - totDa) * 100) / 100;
+  html += '<tr class="tot"><td>TOTALE (' + casse.length + ' gg, ' + ggDiff + ' con diff.)</td><td>' + fmtE(totDa) + '</td><td>' + fmtE(totVers) + '</td><td class="' + (Math.abs(totDiff) < 0.01 ? 'ok' : 'err') + '">' + (totDiff >= 0 ? '+' : '') + fmtE(totDiff) + '</td><td class="' + (Math.abs(cumulata) < 0.01 ? 'ok' : 'err') + '">' + (cumulata >= 0 ? '+' : '') + fmtE(cumulata) + '</td></tr>';
+  html += '</tbody></table>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
+  var w = window.open('', '_blank'); w.document.write(html); w.document.close();
 }
 
 async function stampaCassa() {
