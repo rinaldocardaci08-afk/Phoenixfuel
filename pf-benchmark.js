@@ -115,16 +115,23 @@ async function caricaBenchmark() {
   }
 
   // Segnale operativo
-  var segnale = '', segnaleColor = '';
+  var segnale = '', segnaleColor = '', consiglio = '';
   if (trendDir === 'salita') {
     segnale = 'ANTICIPA ACQUISTI — il prezzo di mercato sta salendo';
     segnaleColor = '#E24B4A';
+    if (vantaggioAcq > 0) {
+      consiglio = 'Il tuo CMP è ancora sotto il benchmark di € ' + vantaggioAcq.toFixed(4) + '/L — hai un vantaggio temporaneo. Conviene anticipare gli acquisti prima che il CMP si adegui al rialzo. Se hai giacenza sufficiente in deposito, usa il prodotto da magazzino finché il mercato non si stabilizza.';
+    } else {
+      consiglio = 'Il CMP è sopra il benchmark — stai pagando di più del mercato. Conviene usare il prodotto da magazzino ed evitare nuovi acquisti finché il trend non si inverte.';
+    }
   } else if (trendDir === 'discesa') {
     segnale = 'RITARDA ACQUISTI — il prezzo di mercato sta scendendo';
     segnaleColor = '#639922';
+    consiglio = 'Il mercato è in calo. Conviene ritardare i nuovi acquisti per beneficiare di prezzi più bassi nei prossimi giorni. Usa il prodotto da magazzino per le consegne correnti. Spread attuale a € ' + spread.toFixed(4) + '/L — ' + (spread >= 0.03 ? 'margine sano.' : 'attenzione, margine basso!');
   } else {
     segnale = 'MERCATO STABILE — acquista secondo il piano normale';
     segnaleColor = '#BA7517';
+    consiglio = 'Il mercato è stabile. Acquista secondo il piano normale. ' + (vantaggioAcq > 0 ? 'Il tuo CMP è sotto il benchmark di € ' + vantaggioAcq.toFixed(4) + '/L — buon posizionamento.' : 'Il CMP è allineato al mercato.') + ' Spread a € ' + spread.toFixed(4) + '/L — ' + (spread >= 0.03 ? 'margine nella norma.' : 'margine sotto soglia, valuta un ritocco prezzi.');
   }
 
   // Alert soglia spread
@@ -141,6 +148,7 @@ async function caricaBenchmark() {
         '<div style="font-size:18px;font-weight:600;color:' + trendColor + '">' + trendIcon + ' Trend in ' + trendDir + '</div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Pendenza: ' + (trend7.slope >= 0 ? '+' : '') + (trend7.slope * 1000).toFixed(2) + '‰ al giorno</div>' +
         '<div style="font-size:12px;font-weight:500;color:' + segnaleColor + ';margin-top:8px;padding:6px 10px;background:' + segnaleColor + '15;border-radius:6px">' + segnale + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;padding:8px 10px;background:var(--bg);border-radius:6px;line-height:1.5;border-left:3px solid ' + segnaleColor + '">💡 ' + consiglio + '</div>' +
       '</div>' +
       '<div style="padding:12px 16px;background:var(--bg);border-radius:8px">' +
         '<div style="font-size:11px;font-weight:500;color:var(--text-muted);margin-bottom:8px">Previsione benchmark (regressione lineare)</div>' +

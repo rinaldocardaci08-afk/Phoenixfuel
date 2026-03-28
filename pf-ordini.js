@@ -106,14 +106,19 @@ async function caricaPrezzi() {
   else query = query.limit(200); // Limite sicurezza se nessun filtro
 
   // Query parallele
-  const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
+  const [prezziRes, cisterneRes, baseDepRes, forColRes] = await Promise.all([
     query,
     sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
-    sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
+    sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle(),
+    sb.from('fornitori').select('nome,colore')
   ]);
   const data = prezziRes.data;
   const cisterne = cisterneRes.data;
   const baseDeposito = baseDepRes.data;
+  // Mappa colori fornitori
+  var _forColori = {};
+  (forColRes.data||[]).forEach(function(f) { _forColori[f.nome] = f.colore || '#FAEEDA'; });
+  _forColori['PhoenixFuel'] = '#E1F5EE';
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
@@ -143,7 +148,7 @@ async function caricaPrezzi() {
   if (container) {
     container.innerHTML = cacheProdotti.filter(p => p.attivo).map(p => {
       const tbId = tabMap[p.nome];
-      return '<div style="margin-bottom:16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:13px;font-weight:500">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
+      return '<div style="margin-bottom:24px;padding-bottom:8px;border-bottom:3px solid ' + (p.colore||'#888') + '"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="width:14px;height:14px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:16px;font-weight:600">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table style="font-size:13px"><thead><tr><th style="font-size:11px">Data</th><th style="font-size:11px">Fornitore</th><th style="font-size:11px">Base</th><th style="font-size:11px">Costo/L</th><th style="font-size:11px">Trasporto/L</th><th style="font-size:11px">Margine/L</th><th style="font-size:11px">Prezzo IVA esc.</th><th style="font-size:11px">Prezzo IVA inc.</th><th style="font-size:11px"></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
     }).join('');
   }
 
@@ -199,7 +204,9 @@ async function caricaPrezzi() {
         tdMargine = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
       }
 
-      html += '<tr><td>' + r.data + '</td><td>' + r.fornitore + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+      var forColor = _forColori[r.fornitore] || '';
+      var forStyle = forColor ? 'font-weight:700;padding:4px 8px;border-radius:4px;background:' + forColor : 'font-weight:700';
+      html += '<tr><td style="font-size:13px">' + r.data + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + giacenzaHtml + '</td><td style="font-size:13px">' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono);font-size:13px">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
     });
     tbody.innerHTML = html;
   });
@@ -985,53 +992,63 @@ async function generaOffertaCliente() {
   var trRete = parseFloat(document.getElementById('lp-trasp-rete').value) || 0.014;
   var iva = parseInt(document.getElementById('lp-iva').value) || 22;
 
-  // Carica dati cliente
   var { data: cl } = await sb.from('clienti').select('*').eq('id', clienteId).single();
   if (!cl) { toast('Cliente non trovato'); return; }
 
-  // Margine storico
   var seiMesiFa = new Date(); seiMesiFa.setMonth(seiMesiFa.getMonth() - 6);
   var { data: ordini } = await sb.from('ordini').select('litri,margine').eq('tipo_ordine','cliente').eq('prodotto',prodotto).neq('stato','annullato').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cl.nome).gte('data', seiMesiFa.toISOString().split('T')[0]);
   var totL = 0, totM = 0;
   (ordini || []).forEach(function(o) { totL += Number(o.litri); totM += Number(o.margine) * Number(o.litri); });
   var margMedioL = totL > 0 ? totM / totL : 0;
-  var isRete = cl.cliente_rete;
-  var trasporto = isRete ? trRete : trConsumo;
+  var trasporto = cl.cliente_rete ? trRete : trConsumo;
   var prezzoNetto = costo + trasporto + margMedioL;
-  var prezzoIva = prezzoNetto * (1 + iva / 100);
+  var prezzoIva = Math.round(prezzoNetto * (1 + iva / 100) * 10000) / 10000;
   var dataOggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
 
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Offerta ' + esc(cl.nome) + '</title>' +
-    '<style>body{font-family:Arial,sans-serif;font-size:12px;margin:0;padding:15mm;color:#1a1a18}@media print{.no-print{display:none!important}@page{size:A4;margin:12mm}}.box{border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:16px}</style></head><body>';
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Conferma Ordine — ' + esc(cl.nome) + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm;color:#1a1a18}@media print{.no-print{display:none!important}@page{size:A4;margin:10mm}}table{width:100%;border-collapse:collapse}th{background:#D85A30;color:#fff;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;text-align:left}td{padding:8px 10px;border-bottom:1px solid #eee;font-size:11px}</style></head><body>';
 
   // Header
-  html += '<div style="display:flex;justify-content:space-between;margin-bottom:24px"><div><div style="font-size:20px;font-weight:bold;color:#D85A30;letter-spacing:1px">PHOENIX FUEL SRL</div><div style="font-size:10px;color:#888;margin-top:2px">Porto Salvo Zona Industriale SNC — 89900 Vibo Valentia</div><div style="font-size:10px;color:#888">P.IVA IT02744150802</div></div><div style="text-align:right"><div style="font-size:14px;font-weight:bold;color:#333">OFFERTA PREZZO</div><div style="font-size:11px;color:#888;margin-top:4px">' + dataOggi + '</div></div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #D85A30">';
+  html += '<div><div style="font-size:22px;font-weight:bold;color:#D85A30;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#888;margin-top:4px;line-height:1.5">Porto Salvo Zona Industriale SNC<br>89900 Vibo Valentia (VV)<br>P.IVA IT02744150802</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:18px;font-weight:bold;color:#333">CONFERMA ORDINE</div>';
+  html += '<div style="font-size:11px;color:#888;margin-top:6px">Data: ' + dataOggi + '</div></div></div>';
 
   // Destinatario
-  html += '<div class="box"><div style="font-size:9px;text-transform:uppercase;color:#888;margin-bottom:6px;font-weight:600">Spett.le</div>';
-  html += '<div style="font-size:15px;font-weight:bold">' + esc(cl.nome) + '</div>';
-  if (cl.piva) html += '<div style="font-size:11px;color:#666">P.IVA: ' + esc(cl.piva) + '</div>';
-  if (cl.indirizzo) html += '<div style="font-size:11px;color:#666">' + esc(cl.indirizzo) + (cl.citta ? ' — ' + esc(cl.citta) : '') + (cl.provincia ? ' (' + cl.provincia + ')' : '') + '</div>';
+  html += '<div style="background:#f8f8f5;border:1px solid #eee;border-radius:8px;padding:16px;margin-bottom:20px">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:#888;margin-bottom:8px;font-weight:600;letter-spacing:0.5px">Destinatario</div>';
+  html += '<div style="font-size:16px;font-weight:bold">' + esc(cl.nome) + '</div>';
+  if (cl.piva) html += '<div style="font-size:11px;color:#555;margin-top:4px">P.IVA: ' + esc(cl.piva) + '</div>';
+  if (cl.codice_fiscale) html += '<div style="font-size:11px;color:#555">C.F.: ' + esc(cl.codice_fiscale) + '</div>';
+  if (cl.indirizzo) html += '<div style="font-size:11px;color:#555;margin-top:4px">' + esc(cl.indirizzo) + '</div>';
+  if (cl.citta) html += '<div style="font-size:11px;color:#555">' + esc(cl.citta) + (cl.provincia ? ' (' + cl.provincia + ')' : '') + '</div>';
   html += '</div>';
 
-  // Dettaglio prezzo
-  html += '<div class="box">';
-  html += '<div style="font-size:9px;text-transform:uppercase;color:#888;margin-bottom:10px;font-weight:600">Dettaglio prezzo — ' + prodotto + '</div>';
-  html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-  html += '<tr style="border-bottom:1px solid #eee"><td style="padding:8px 0;color:#666">Costo base</td><td style="text-align:right;padding:8px 0;font-family:monospace;font-weight:500">€ ' + costo.toFixed(4) + ' /L</td></tr>';
-  html += '<tr style="border-bottom:1px solid #eee"><td style="padding:8px 0;color:#666">Trasporto (' + (isRete ? 'Rete' : 'Consumo') + ')</td><td style="text-align:right;padding:8px 0;font-family:monospace;font-weight:500">€ ' + trasporto.toFixed(4) + ' /L</td></tr>';
-  html += '<tr style="border-bottom:1px solid #eee"><td style="padding:8px 0;color:#666">Margine</td><td style="text-align:right;padding:8px 0;font-family:monospace;font-weight:500">€ ' + margMedioL.toFixed(4) + ' /L</td></tr>';
-  html += '<tr style="border-bottom:1px solid #ddd"><td style="padding:10px 0;font-weight:bold;font-size:13px">Prezzo netto (IVA esclusa)</td><td style="text-align:right;padding:10px 0;font-family:monospace;font-weight:bold;font-size:15px">€ ' + prezzoNetto.toFixed(4) + ' /L</td></tr>';
-  html += '<tr><td style="padding:10px 0;font-weight:bold;font-size:14px;color:#D85A30">PREZZO IVA INCLUSA (' + iva + '%)</td><td style="text-align:right;padding:10px 0;font-family:monospace;font-weight:bold;font-size:18px;color:#D85A30">€ ' + prezzoIva.toFixed(4) + ' /L</td></tr>';
-  html += '</table></div>';
+  // Tabella ordine
+  html += '<table>';
+  html += '<thead><tr><th>Prodotto</th><th style="text-align:right">Prezzo €/L (IVA escl.)</th><th style="text-align:right">IVA</th><th style="text-align:right">Prezzo €/L (IVA incl.)</th></tr></thead>';
+  html += '<tbody>';
+  html += '<tr><td style="font-size:13px;font-weight:600">' + esc(prodotto) + '</td>';
+  html += '<td style="text-align:right;font-family:monospace;font-size:14px;font-weight:500">€ ' + prezzoNetto.toFixed(4) + '</td>';
+  html += '<td style="text-align:right;font-size:12px;color:#666">' + iva + '%</td>';
+  html += '<td style="text-align:right;font-family:monospace;font-size:16px;font-weight:bold;color:#D85A30">€ ' + prezzoIva.toFixed(4) + '</td></tr>';
+  html += '</tbody></table>';
 
   // Condizioni
-  html += '<div style="font-size:10px;color:#888;line-height:1.6;margin-top:16px">';
-  html += '<strong>Condizioni:</strong> Prezzo valido alla data di emissione · Pagamento a ' + (cl.giorni_pagamento || 30) + ' giorni · Consegna franco destino · Quantità minima ordine: concordata';
-  html += '</div>';
+  html += '<div style="margin-top:24px;padding:14px 16px;background:#f8f8f5;border-radius:8px;font-size:10px;color:#666;line-height:1.7">';
+  html += '<div style="font-weight:600;color:#333;margin-bottom:4px">Condizioni di fornitura:</div>';
+  html += 'Pagamento a <strong>' + (cl.giorni_pagamento || 30) + ' giorni</strong> data fattura · Consegna franco destino · ';
+  html += 'Prezzo valido alla data di emissione e soggetto a variazioni di mercato · ';
+  html += 'Quantità minima di ordine: da concordare</div>';
 
-  // Firma
-  html += '<div style="margin-top:40px;display:flex;justify-content:space-between"><div><div style="border-top:1px solid #ccc;width:200px;padding-top:6px;font-size:10px;color:#888">Phoenix Fuel Srl</div></div><div><div style="border-top:1px solid #ccc;width:200px;padding-top:6px;font-size:10px;color:#888">Per accettazione: ' + esc(cl.nome) + '</div></div></div>';
+  // Firme
+  html += '<div style="margin-top:50px;display:flex;justify-content:space-between">';
+  html += '<div style="text-align:center"><div style="border-top:1px solid #ccc;width:220px;padding-top:8px;font-size:10px;color:#888">Per Phoenix Fuel Srl</div></div>';
+  html += '<div style="text-align:center"><div style="border-top:1px solid #ccc;width:220px;padding-top:8px;font-size:10px;color:#888">Per accettazione</div><div style="font-size:9px;color:#aaa;margin-top:2px">' + esc(cl.nome) + '</div></div></div>';
+
+  // Footer
+  html += '<div style="margin-top:30px;text-align:center;font-size:8px;color:#bbb;border-top:1px solid #eee;padding-top:8px">Phoenix Fuel Srl — Documento generato il ' + dataOggi + '</div>';
 
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
   var w = window.open('', '_blank'); w.document.write(html); w.document.close();
