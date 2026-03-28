@@ -71,6 +71,8 @@ async function salvaPrezzo() {
   if (error) { toast('Errore: '+error.message); return; }
   toast('Prezzo salvato!');
   caricaPrezzi();
+  // Auto-aggiorna benchmark dalla media prezzi del giorno
+  _aggiornaBenchmarkAuto(data);
 }
 
 async function salvaPrezzoCliente() {
