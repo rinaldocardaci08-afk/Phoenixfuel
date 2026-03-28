@@ -410,6 +410,7 @@
           <button class="btn-primary vend-tab active" data-tab="vend-ingrosso" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px">📋 Ingrosso</button>
           <button class="btn-primary vend-tab" data-tab="vend-dettaglio" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Dettaglio</button>
           <button class="btn-primary vend-tab" data-tab="vend-annuale" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Riepilogo annuale</button>
+          <button class="btn-primary vend-tab" data-tab="vend-margine-cliente" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Margine per cliente</button>
         </div>
 
         <!-- ═══ TAB INGROSSO ═══ -->
@@ -520,6 +521,36 @@
             </div>
             <div id="confronto-anni-content">
               <div style="font-size:12px;color:var(--text-hint);padding:20px 0;text-align:center">Seleziona due anni diversi e premi Confronta</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ TAB MARGINE PER CLIENTE ═══ -->
+        <div class="vend-panel" id="vend-margine-cliente" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Marginalità per cliente — analisi redditività</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select id="mrc-anno" onchange="caricaMargineCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
+                <select id="mrc-mese" onchange="caricaMargineCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                  <option value="">Tutto l'anno</option>
+                  <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option>
+                  <option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                  <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
+                  <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+                </select>
+                <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#6B5FCC" onclick="stampaMargineCliente()">🖨️ Stampa</button>
+                <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#639922" onclick="esportaMargineClienteExcel()">📊 Excel</button>
+              </div>
+            </div>
+            <div class="grid4" style="margin-bottom:12px" id="mrc-kpi"></div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Cliente</th><th>Tipo</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Costo</th><th>Margine €</th><th>Margine/L</th><th>% Margine</th></tr></thead>
+              <tbody id="mrc-tabella"><tr><td colspan="9" class="loading">Seleziona un periodo...</td></tr></tbody></table>
+            </div>
+            <div class="grid2" style="margin-top:16px">
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Top 10 clienti per margine</div><canvas id="chart-mrc-margine" height="250"></canvas></div>
+              <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Margine medio per litro</div><canvas id="chart-mrc-marginelitro" height="250"></canvas></div>
             </div>
           </div>
         </div>

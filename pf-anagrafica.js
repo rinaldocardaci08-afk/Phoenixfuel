@@ -238,10 +238,10 @@ async function generaElencoVenditeGiorno() {
 
 // ── VENDITE ───────────────────────────────────────────────────────
 function caricaVendite() {
-  // Entry point: carica il tab attivo
   const activeTab = document.querySelector('.vend-tab.active');
   if (activeTab && activeTab.dataset.tab === 'vend-dettaglio') caricaVenditeDettaglio();
   else if (activeTab && activeTab.dataset.tab === 'vend-annuale') caricaVenditeAnnuali();
+  else if (activeTab && activeTab.dataset.tab === 'vend-margine-cliente') caricaMargineCliente();
   else caricaVenditeIngrosso();
 }
 
@@ -866,6 +866,182 @@ function stampaConfrontoAnni() {
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
   var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
+// ── MARGINALITÀ PER CLIENTE ─────────────────────────────────────
+let _chartMrcMargine = null, _chartMrcMargineLitro = null;
+
+async function caricaMargineCliente() {
+  // Popola selettori
+  var selAnno = document.getElementById('mrc-anno');
+  if (selAnno && selAnno.options.length === 0) {
+    var ac = new Date().getFullYear();
+    for (var y = ac; y >= ac - 5; y--) selAnno.innerHTML += '<option value="' + y + '"' + (y===ac?' selected':'') + '>' + y + '</option>';
+  }
+
+  var anno = selAnno ? selAnno.value : new Date().getFullYear();
+  var mese = document.getElementById('mrc-mese')?.value || '';
+  var da = anno + '-' + (mese || '01') + '-01';
+  var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
+  var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
+
+  var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+
+  // Carica info clienti per tipo
+  var { data: clientiInfo } = await sb.from('clienti').select('id,nome,tipo,cliente_rete');
+  var clientiMap = {};
+  (clientiInfo||[]).forEach(function(c) { clientiMap[c.id] = c; clientiMap[c.nome] = c; });
+
+  // Aggrega per cliente
+  var perCliente = {};
+  (ordini||[]).forEach(function(o) {
+    var key = o.cliente || '—';
+    if (!perCliente[key]) perCliente[key] = { cliente:key, cliente_id:o.cliente_id, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
+    var p = perCliente[key];
+    var fatt = prezzoConIva(o) * Number(o.litri);
+    var costo = Number(o.costo_litro) * Number(o.litri);
+    p.ordini++;
+    p.litri += Number(o.litri);
+    p.fatturato += fatt;
+    p.costo += costo;
+    p.margine += fatt - costo;
+  });
+
+  var lista = Object.values(perCliente).sort(function(a,b) { return b.margine - a.margine; });
+  var totale = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
+  lista.forEach(function(c) { totale.ordini+=c.ordini; totale.litri+=c.litri; totale.fatturato+=c.fatturato; totale.costo+=c.costo; totale.margine+=c.margine; });
+
+  // KPI
+  var kpiWrap = document.getElementById('mrc-kpi');
+  var margMedio = totale.litri > 0 ? totale.margine / totale.litri : 0;
+  var pctMarg = totale.fatturato > 0 ? (totale.margine / totale.fatturato) * 100 : 0;
+  kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + lista.length + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" style="color:#639922">' + fmtE(totale.margine) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value">€ ' + margMedio.toFixed(4) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">% margine su fatt.</div><div class="kpi-value">' + pctMarg.toFixed(1) + '%</div></div>';
+
+  // Tabella
+  var tbody = document.getElementById('mrc-tabella');
+  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun dato</td></tr>'; return; }
+
+  var html = lista.map(function(c, idx) {
+    var info = clientiMap[c.cliente_id] || clientiMap[c.cliente] || {};
+    var tipo = info.tipo || '—';
+    var ml = c.litri > 0 ? c.margine / c.litri : 0;
+    var pct = c.fatturato > 0 ? (c.margine / c.fatturato) * 100 : 0;
+    var mColor = c.margine >= 0 ? '#639922' : '#E24B4A';
+    return '<tr' + (idx % 2 ? ' style="background:var(--bg)"' : '') + '>' +
+      '<td><strong>' + esc(c.cliente) + '</strong></td>' +
+      '<td><span class="badge ' + (info.cliente_rete ? 'purple' : 'gray') + '" style="font-size:9px">' + (info.cliente_rete ? 'Rete' : 'Consumo') + '</span></td>' +
+      '<td style="text-align:center">' + c.ordini + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtL(c.litri) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtE(c.fatturato) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtE(c.costo) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:600;color:' + mColor + '">' + fmtE(c.margine) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + ml.toFixed(4) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:' + mColor + '">' + pct.toFixed(1) + '%</td></tr>';
+  }).join('');
+
+  // Riga totale
+  var tmColor = totale.margine >= 0 ? '#639922' : '#E24B4A';
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtE(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(4) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
+  tbody.innerHTML = html;
+
+  // Grafici
+  var top10 = lista.slice(0, 10);
+  var labels = top10.map(function(c) { return c.cliente.length > 15 ? c.cliente.substring(0,15) + '…' : c.cliente; });
+
+  if (_chartMrcMargine) _chartMrcMargine.destroy();
+  var ctx1 = document.getElementById('chart-mrc-margine');
+  if (ctx1) {
+    _chartMrcMargine = new Chart(ctx1, {
+      type: 'bar', data: {
+        labels: labels,
+        datasets: [{ label: 'Margine €', data: top10.map(function(c){return Math.round(c.margine*100)/100;}), backgroundColor: top10.map(function(c){return c.margine>=0?'rgba(99,153,34,0.7)':'rgba(226,75,74,0.7)';}) }]
+      }, options: { responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+    });
+  }
+
+  if (_chartMrcMargineLitro) _chartMrcMargineLitro.destroy();
+  var ctx2 = document.getElementById('chart-mrc-marginelitro');
+  if (ctx2) {
+    _chartMrcMargineLitro = new Chart(ctx2, {
+      type: 'bar', data: {
+        labels: labels,
+        datasets: [{ label: '€/L', data: top10.map(function(c){return c.litri>0?Math.round((c.margine/c.litri)*10000)/10000:0;}), backgroundColor: 'rgba(55,138,221,0.7)' }]
+      }, options: { responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+    });
+  }
+}
+
+async function stampaMargineCliente() {
+  var anno = document.getElementById('mrc-anno').value;
+  var mese = document.getElementById('mrc-mese')?.value || '';
+  var meseNome = mese ? ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][Number(mese)-1] : 'Anno completo';
+  var da = anno + '-' + (mese || '01') + '-01';
+  var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
+  var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
+
+  var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var perCliente = {};
+  (ordini||[]).forEach(function(o) {
+    var k = o.cliente||'—';
+    if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
+    var p = perCliente[k]; p.ordini++;
+    var fatt = prezzoConIva(o)*Number(o.litri); var costo = Number(o.costo_litro)*Number(o.litri);
+    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=costo; p.margine+=fatt-costo;
+  });
+  var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
+  var tot = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
+  lista.forEach(function(c){tot.ordini+=c.ordini;tot.litri+=c.litri;tot.fatturato+=c.fatturato;tot.costo+=c.costo;tot.margine+=c.margine;});
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Margine per Cliente</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:9px;margin:0;padding:8mm}@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}}table{width:100%;border-collapse:collapse}th{background:#6B5FCC;color:#fff;padding:5px 4px;font-size:8px;text-transform:uppercase;border:1px solid #5A4FBB;text-align:right}th:first-child{text-align:left}td{padding:3px 5px;border:1px solid #ddd;font-size:9px;text-align:right;font-family:Courier New,monospace}td:first-child{text-align:left;font-family:Arial;font-weight:500}.tot{background:#f0f0f0;font-weight:bold}.tot td{border-top:2px solid #6B5FCC}.alt{background:#fafaf8}</style></head><body>';
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">MARGINALITÀ PER CLIENTE</div><div style="font-size:12px;color:#666;margin-top:2px">' + meseNome + ' ' + anno + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
+  html += '<table><thead><tr><th style="text-align:left">Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Costo</th><th>Margine</th><th>€/L</th><th>%</th></tr></thead><tbody>';
+  lista.forEach(function(c,i) {
+    var ml = c.litri>0?c.margine/c.litri:0; var pct = c.fatturato>0?(c.margine/c.fatturato)*100:0;
+    html += '<tr' + (i%2?' class="alt"':'') + '><td>' + esc(c.cliente) + '</td><td style="text-align:center">' + c.ordini + '</td><td>' + fmtL(c.litri) + '</td><td>' + fmtE(c.fatturato) + '</td><td>' + fmtE(c.costo) + '</td><td style="font-weight:bold;color:' + (c.margine>=0?'#639922':'#E24B4A') + '">' + fmtE(c.margine) + '</td><td>€ ' + ml.toFixed(4) + '</td><td>' + pct.toFixed(1) + '%</td></tr>';
+  });
+  var tMl = tot.litri>0?tot.margine/tot.litri:0; var tPct = tot.fatturato>0?(tot.margine/tot.fatturato)*100:0;
+  html += '<tr class="tot"><td>TOTALE</td><td style="text-align:center">' + tot.ordini + '</td><td>' + fmtL(tot.litri) + '</td><td>' + fmtE(tot.fatturato) + '</td><td>' + fmtE(tot.costo) + '</td><td style="color:#639922">' + fmtE(tot.margine) + '</td><td>€ ' + tMl.toFixed(4) + '</td><td>' + tPct.toFixed(1) + '%</td></tr>';
+  html += '</tbody></table>';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
+  var w = window.open('','_blank'); w.document.write(html); w.document.close();
+}
+
+async function esportaMargineClienteExcel() {
+  var anno = document.getElementById('mrc-anno').value;
+  var mese = document.getElementById('mrc-mese')?.value || '';
+  var meseNome = mese ? ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][Number(mese)-1] : 'Anno';
+  var da = anno + '-' + (mese || '01') + '-01';
+  var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
+  var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
+  if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata'); return; }
+
+  var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var perCliente = {};
+  (ordini||[]).forEach(function(o) {
+    var k = o.cliente||'—';
+    if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
+    var p = perCliente[k]; p.ordini++;
+    var fatt = prezzoConIva(o)*Number(o.litri); var costo = Number(o.costo_litro)*Number(o.litri);
+    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=costo; p.margine+=fatt-costo;
+  });
+  var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
+
+  var rows = [['Cliente','Ordini','Litri','Fatturato','Costo','Margine','€/L','% Margine']];
+  lista.forEach(function(c) {
+    var ml = c.litri>0?Math.round((c.margine/c.litri)*10000)/10000:0;
+    var pct = c.fatturato>0?Math.round((c.margine/c.fatturato)*1000)/10:0;
+    rows.push([c.cliente, c.ordini, Math.round(c.litri), Math.round(c.fatturato*100)/100, Math.round(c.costo*100)/100, Math.round(c.margine*100)/100, ml, pct]);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:25},{wch:8},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Margine ' + meseNome + ' ' + anno);
+  XLSX.writeFile(wb, 'MargineCliente_' + meseNome + '_' + anno + '.xlsx');
+  toast('Excel margine clienti esportato!');
 }
 
 // ── CLIENTI ───────────────────────────────────────────────────────
