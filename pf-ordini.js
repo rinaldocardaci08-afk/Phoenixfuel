@@ -148,7 +148,7 @@ async function caricaPrezzi() {
   if (container) {
     container.innerHTML = cacheProdotti.filter(p => p.attivo).map(p => {
       const tbId = tabMap[p.nome];
-      return '<div style="margin-bottom:24px;padding-bottom:8px;border-bottom:3px solid ' + (p.colore||'#888') + '"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="width:14px;height:14px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:16px;font-weight:600">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table style="font-size:13px"><thead><tr><th style="font-size:11px">Data</th><th style="font-size:11px">Fornitore</th><th style="font-size:11px">Base</th><th style="font-size:11px">Costo/L</th><th style="font-size:11px">Trasporto/L</th><th style="font-size:11px">Margine/L</th><th style="font-size:11px">Prezzo IVA esc.</th><th style="font-size:11px">Prezzo IVA inc.</th><th style="font-size:11px"></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
+      return '<div style="margin-bottom:24px;padding-bottom:8px;border-bottom:3px solid ' + (p.colore||'#888') + '"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="width:14px;height:14px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:16px;font-weight:600">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table class="prezzi-table"><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
     }).join('');
   }
 
@@ -206,7 +206,7 @@ async function caricaPrezzi() {
 
       var forColor = _forColori[r.fornitore] || '';
       var forStyle = forColor ? 'font-weight:700;padding:4px 8px;border-radius:4px;background:' + forColor : 'font-weight:700';
-      html += '<tr><td style="font-size:13px">' + r.data + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + giacenzaHtml + '</td><td style="font-size:13px">' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono);font-size:13px">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+      html += '<tr><td>' + r.data + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
     });
     tbody.innerHTML = html;
   });

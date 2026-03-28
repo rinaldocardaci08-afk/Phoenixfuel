@@ -127,6 +127,10 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
 .hamburger:hover { background: var(--bg-kpi); }
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 99; }
 
+/* Prezzi table +15% */
+.prezzi-table { font-size: 14px; }
+.prezzi-table th { font-size: 11px; }
+
 /* ── RESPONSIVE ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .hamburger { display: block; }
@@ -251,6 +255,15 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
 
   /* Audit log: tabella scrollabile */
   #audit-log-tabella td { white-space: nowrap; }
+
+  /* Prezzi table: back to normal size on mobile */
+  .prezzi-table { font-size: 11px; }
+  .prezzi-table th { font-size: 9px; }
+
+  /* Listino: controls wrap properly */
+  #s-prezzi .card-title + .form-grid + div { flex-direction: column !important; }
+  #s-prezzi .card-title + .form-grid + div > div[style*="margin-left:auto"] { margin-left: 0 !important; width: 100%; }
+  #lp-cliente-singolo { max-width: 100% !important; width: 100% !important; }
 }
 
 @media (max-width: 480px) {
