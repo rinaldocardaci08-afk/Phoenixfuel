@@ -118,7 +118,7 @@ async function caricaPrezzi() {
   // Mappa colori fornitori
   var _forColori = {};
   (forColRes.data||[]).forEach(function(f) { _forColori[f.nome] = f.colore || '#FAEEDA'; });
-  _forColori['PhoenixFuel'] = '#E1F5EE';
+  _forColori['PhoenixFuel'] = '#FCEBEB';
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
