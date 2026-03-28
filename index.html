@@ -39,6 +39,13 @@
       /* Card padding */
       .card { padding:12px !important; }
     }
+    .nav-badge{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;font-size:10px;font-weight:700;color:#fff;background:#E24B4A;border-radius:50%;margin-left:auto;padding:0 4px;animation:badgePulse 1.5s ease-in-out infinite}
+    .nav-item{display:flex;align-items:center}
+    @keyframes badgePulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(226,75,74,0.5)}50%{transform:scale(1.15);box-shadow:0 0 8px 3px rgba(226,75,74,0.3)}}
+    .bacheca-item{padding:14px 16px;border-left:4px solid var(--border);border-radius:0 8px 8px 0;margin-bottom:8px;background:var(--bg);transition:background 0.15s}
+    .bacheca-item.non-letto{background:#FAEEDA;border-left-color:#BA7517}
+    .bacheca-item.urgente{border-left-color:#E24B4A}
+    .bacheca-item.sistema{border-left-color:#6B5FCC}
   </style>
 </head>
 <body>
@@ -1220,6 +1227,54 @@
         <div class="card"><div class="card-title">Elenco utenti</div>
           <table><thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Postazione</th><th>Cliente</th><th>Stato</th><th>Permessi</th><th></th></tr></thead>
           <tbody id="tabella-utenti"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- BACHECA AVVISI -->
+      <div class="section" id="s-bacheca">
+        <!-- Invia messaggio (per tutti) -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Invia comunicazione</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Tipo</label>
+              <select id="bac-tipo" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="comunicazione">Comunicazione</option>
+                <option value="anomalia">Anomalia</option>
+                <option value="criticita">Criticità</option>
+                <option value="richiesta">Richiesta</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Priorità</label>
+              <select id="bac-priorita" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="normale">Normale</option>
+                <option value="urgente">Urgente</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:8px"><label>Messaggio</label><textarea id="bac-messaggio" rows="3" placeholder="Scrivi il messaggio..." style="width:100%;font-size:13px;padding:10px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical;font-family:var(--font-sans)"></textarea></div>
+          <button class="btn-primary" style="margin-top:8px" onclick="inviaAvviso()">📤 Invia</button>
+        </div>
+
+        <!-- Elenco avvisi -->
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Avvisi e comunicazioni</span>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="bac-filtro" onchange="caricaBacheca()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti</option>
+                <option value="non_letto">Non letti</option>
+                <option value="comunicazione">Comunicazioni</option>
+                <option value="anomalia">Anomalie</option>
+                <option value="criticita">Criticità</option>
+                <option value="richiesta">Richieste</option>
+                <option value="sistema">Sistema</option>
+              </select>
+              <button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#639922" onclick="segnaLettiBacheca()">Segna tutti letti</button>
+            </div>
+          </div>
+          <div id="bacheca-lista" style="margin-top:8px">
+            <div class="loading">Caricamento...</div>
+          </div>
         </div>
       </div>
 

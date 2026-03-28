@@ -42,6 +42,11 @@ async function inizializza() {
     var sezioneIniziale = sezionePost[utente.postazione] || 'dashboard';
     var navItem = document.querySelector('.nav-item[onclick*="' + sezioneIniziale + '"]') || document.querySelector('.nav-item');
     setSection(sezioneIniziale, navItem);
+    // Controlla avvisi non letti (badge pulsante)
+    aggiornaBadgeBacheca();
+    setInterval(aggiornaBadgeBacheca, 60000);
+    // Scarica dati in cache per uso offline
+    _aggiornaDataCacheOffline();
   }
 }
 
@@ -85,6 +90,7 @@ async function costruisciMenu(ruolo, utenteId) {
     voci.push({ section:'Autoconsumo' });
     voci.push({ id:'autoconsumo', icon:'🛢', label:'Autoconsumo' });
     voci.push({ section:'Impostazioni' });
+    voci.push({ id:'bacheca', icon:'🔔', label:'Bacheca avvisi', badge:true });
     voci.push({ id:'utenti', icon:'🔑', label:'Utenti' });
   } else {
     const { data: permessi } = await sb.from('permessi').select('*').eq('utente_id', utenteId).eq('abilitato', true);
@@ -103,6 +109,7 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'logistica', icon:'🚛', label:'Logistica', section:'Logistica' },
       { id:'stazione', icon:'⛽', label:'Stazione Oppido', section:'Stazione' },
       { id:'autoconsumo', icon:'🛢', label:'Autoconsumo', section:'Autoconsumo' },
+      { id:'bacheca', icon:'🔔', label:'Bacheca avvisi', section:'Comunicazioni' },
     ];
     let lastSection = null;
     tutteSezioni.forEach(s => {
@@ -115,7 +122,8 @@ async function costruisciMenu(ruolo, utenteId) {
   }
   nav.innerHTML = voci.map(v => {
     if (v.section) return '<div class="nav-section-label">' + v.section + '</div>';
-    return '<div class="nav-item" onclick="setSection(\'' + v.id + '\',this)"><span class="nav-icon">' + v.icon + '</span> ' + v.label + '</div>';
+    var badgeHtml = v.badge ? '<span id="bacheca-badge" class="nav-badge" style="display:none"></span>' : '';
+    return '<div class="nav-item" onclick="setSection(\'' + v.id + '\',this)"><span class="nav-icon">' + v.icon + '</span> ' + v.label + badgeHtml + '</div>';
   }).join('');
   const prima = nav.querySelector('.nav-item');
   if (prima) prima.classList.add('active');
@@ -124,14 +132,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica' };
+const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica };
+  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
@@ -6429,7 +6437,7 @@ const SEZIONI_SISTEMA = [
   {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},{id:'deposito',label:'Deposito',icon:'🏗'},
   {id:'consegne',label:'Consegne',icon:'🚚'},{id:'vendite',label:'Vendite',icon:'📊'},
   {id:'clienti',label:'Clienti',icon:'👤'},{id:'fornitori',label:'Fornitori',icon:'🏭'},
-  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},{id:'stazione',label:'Stazione Oppido',icon:'⛽'},
+  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},{id:'stazione',label:'Stazione Oppido',icon:'⛽'},{id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},
 ];
 
 async function apriModalePermessi(utenteId, nomeUtente) {
@@ -7052,13 +7060,126 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// ── BACHECA AVVISI ──────────────────────────────────────────────
+async function caricaBacheca() {
+  var filtro = document.getElementById('bac-filtro')?.value || '';
+  var q = sb.from('bacheca_avvisi').select('*').order('created_at', { ascending: false }).limit(50);
+  if (filtro === 'non_letto') q = q.eq('letto', false);
+  else if (filtro) q = q.eq('tipo', filtro);
+  var { data: avvisi } = await q;
+  var lista = document.getElementById('bacheca-lista');
+  if (!lista) return;
+
+  if (!avvisi || !avvisi.length) {
+    lista.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Nessun avviso</div>';
+    return;
+  }
+
+  var tipoBadge = {
+    comunicazione: '<span class="badge blue">comunicazione</span>',
+    anomalia: '<span class="badge amber">anomalia</span>',
+    criticita: '<span class="badge red">criticità</span>',
+    richiesta: '<span class="badge teal">richiesta</span>',
+    sistema: '<span class="badge purple">sistema</span>'
+  };
+
+  lista.innerHTML = avvisi.map(function(a) {
+    var cls = 'bacheca-item';
+    if (!a.letto) cls += ' non-letto';
+    if (a.priorita === 'urgente') cls += ' urgente';
+    if (a.tipo === 'sistema') cls += ' sistema';
+    var dataFmt = new Date(a.created_at).toLocaleString('it-IT', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    var postLabel = { 'ufficio':'Ufficio', 'stazione_oppido':'Stazione', 'deposito_vibo':'Deposito', 'logistica':'Logistica' };
+
+    return '<div class="' + cls + '" onclick="segnaLettoAvviso(\'' + a.id + '\',this)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px">' +
+        '<div style="display:flex;align-items:center;gap:6px">' +
+          (tipoBadge[a.tipo] || '') +
+          (a.priorita === 'urgente' ? '<span class="badge red" style="font-size:9px">URGENTE</span>' : '') +
+          (!a.letto ? '<span style="width:8px;height:8px;border-radius:50%;background:#E24B4A;display:inline-block"></span>' : '') +
+        '</div>' +
+        '<span style="font-size:10px;color:var(--text-muted)">' + dataFmt + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px;line-height:1.5;margin-bottom:6px">' + esc(a.messaggio) + '</div>' +
+      '<div style="font-size:10px;color:var(--text-muted)">Da: <strong>' + esc(a.mittente_nome || 'Sistema') + '</strong>' +
+        (a.postazione ? ' · ' + (postLabel[a.postazione] || a.postazione) : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function inviaAvviso() {
+  var tipo = document.getElementById('bac-tipo').value;
+  var priorita = document.getElementById('bac-priorita').value;
+  var messaggio = document.getElementById('bac-messaggio').value.trim();
+  if (!messaggio) { toast('Scrivi un messaggio'); return; }
+
+  var record = {
+    tipo: tipo,
+    priorita: priorita,
+    messaggio: messaggio,
+    mittente_id: utenteCorrente ? utenteCorrente.id : null,
+    mittente_nome: utenteCorrente ? utenteCorrente.nome : 'Sconosciuto',
+    postazione: utenteCorrente ? utenteCorrente.postazione : null,
+    letto: false
+  };
+
+  var r = await _sbWrite('bacheca_avvisi', 'insert', [record]);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  toast(r._offline ? '⚡ Avviso salvato offline' : 'Avviso inviato!');
+  document.getElementById('bac-messaggio').value = '';
+  document.getElementById('bac-priorita').value = 'normale';
+  caricaBacheca();
+}
+
+async function segnaLettoAvviso(id, el) {
+  if (!utenteCorrente || utenteCorrente.ruolo !== 'admin') return;
+  await sb.from('bacheca_avvisi').update({ letto: true, data_lettura: new Date().toISOString() }).eq('id', id);
+  if (el) { el.classList.remove('non-letto'); }
+  aggiornaBadgeBacheca();
+}
+
+async function segnaLettiBacheca() {
+  if (!utenteCorrente || utenteCorrente.ruolo !== 'admin') { toast('Solo l\'admin può segnare come letti'); return; }
+  if (!confirm('Segnare tutti gli avvisi come letti?')) return;
+  await sb.from('bacheca_avvisi').update({ letto: true, data_lettura: new Date().toISOString() }).eq('letto', false);
+  toast('Tutti gli avvisi segnati come letti');
+  caricaBacheca();
+  aggiornaBadgeBacheca();
+}
+
+async function aggiornaBadgeBacheca() {
+  var badge = document.getElementById('bacheca-badge');
+  if (!badge) return;
+  try {
+    var { count } = await sb.from('bacheca_avvisi').select('id', { count: 'exact', head: true }).eq('letto', false);
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : count;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) { badge.style.display = 'none'; }
+}
+
+// Avviso di sistema (chiamabile da qualsiasi funzione)
+async function inviaAvvisoSistema(messaggio, tipo) {
+  await _sbWrite('bacheca_avvisi', 'insert', [{
+    tipo: tipo || 'sistema',
+    priorita: 'urgente',
+    messaggio: messaggio,
+    mittente_nome: 'Sistema PhoenixFuel',
+    postazione: null,
+    letto: false
+  }]);
+}
+
 // ── PWA OFFLINE ─────────────────────────────────────────────────
 var _isOnline = navigator.onLine;
 var _offlineQueue = [];
 var _DB_NAME = 'PhoenixFuelOffline';
-var _DB_VERSION = 1;
+var _DB_VERSION = 2;
 
-// IndexedDB per coda operazioni offline
 function _openOfflineDB() {
   return new Promise(function(resolve, reject) {
     var req = indexedDB.open(_DB_NAME, _DB_VERSION);
@@ -7067,10 +7188,55 @@ function _openOfflineDB() {
       if (!db.objectStoreNames.contains('queue')) {
         db.createObjectStore('queue', { keyPath: 'id', autoIncrement: true });
       }
+      if (!db.objectStoreNames.contains('dataCache')) {
+        db.createObjectStore('dataCache', { keyPath: 'key' });
+      }
     };
     req.onsuccess = function(e) { resolve(e.target.result); };
     req.onerror = function() { reject(req.error); };
   });
+}
+
+// ── Cache dati per consultazione offline ──
+async function _salvaCacheOffline(key, data) {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('dataCache', 'readwrite');
+    tx.objectStore('dataCache').put({ key: key, data: data, timestamp: Date.now() });
+  } catch(e) { console.warn('Cache save error:', e); }
+}
+
+async function _leggiCacheOffline(key) {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('dataCache', 'readonly');
+    return new Promise(function(resolve) {
+      var req = tx.objectStore('dataCache').get(key);
+      req.onsuccess = function() { resolve(req.result ? req.result.data : null); };
+      req.onerror = function() { resolve(null); };
+    });
+  } catch(e) { return null; }
+}
+
+// Scarica dati essenziali in cache all'avvio (se online)
+async function _aggiornaDataCacheOffline() {
+  if (!navigator.onLine) return;
+  try {
+    var [clientiR, fornitoriR, prodottiR, cisR, prezziR] = await Promise.all([
+      sb.from('clienti').select('id,nome,tipo,cliente_rete,fido_massimo,giorni_pagamento,citta,attivo').order('nome'),
+      sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').eq('attivo',true).order('nome'),
+      sb.from('prodotti').select('*').order('ordine_visualizzazione'),
+      sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
+      sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', oggiISO)
+    ]);
+    await Promise.all([
+      _salvaCacheOffline('clienti', clientiR.data || []),
+      _salvaCacheOffline('fornitori', fornitoriR.data || []),
+      _salvaCacheOffline('prodotti', prodottiR.data || []),
+      _salvaCacheOffline('cisterne_deposito', cisR.data || []),
+      _salvaCacheOffline('prezzi_oggi', prezziR.data || [])
+    ]);
+  } catch(e) { console.warn('Cache data refresh error:', e); }
 }
 
 // Wrapper Supabase write: se offline accoda, se online esegue normalmente
@@ -7162,7 +7328,12 @@ async function _syncOfflineQueue() {
       } catch(e) { console.warn('Sync failed for op', op.id, e); }
     }
 
-    if (synced > 0) toast('✅ ' + synced + ' operazioni sincronizzate!');
+    if (synced > 0) {
+      toast('✅ ' + synced + ' operazioni sincronizzate!');
+      // Notifica in bacheca
+      inviaAvvisoSistema(synced + ' operazioni offline sincronizzate con successo.', 'sistema');
+      aggiornaBadgeBacheca();
+    }
   } catch(e) { console.warn('Sync error:', e); }
 }
 
@@ -7173,9 +7344,11 @@ function _updateOnlineStatus() {
   var banner = document.getElementById('offline-banner');
   if (banner) banner.style.display = _isOnline ? 'none' : 'block';
 
-  // Torna online: sincronizza coda
+  // Torna online: sincronizza coda + aggiorna cache
   if (_isOnline && wasOffline) {
     _syncOfflineQueue();
+    _aggiornaDataCacheOffline();
+    aggiornaBadgeBacheca();
   }
 }
 
