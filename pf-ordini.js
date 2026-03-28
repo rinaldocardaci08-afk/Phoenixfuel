@@ -594,6 +594,22 @@ async function salvaOrdine() {
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
   const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+
+  // ═══ OFFLINE: salva nel backlog locale ═══
+  if (!navigator.onLine) {
+    await _salvaOrdineBacklog(record);
+    toast('⚡ Ordine salvato nel backlog offline — verrà sincronizzato al ritorno online');
+    document.getElementById('ord-trasporto-custom').value = '';
+    document.getElementById('ord-margine-custom').value = '';
+    document.getElementById('ord-prezzo-netto').value = '';
+    document.getElementById('fido-cliente-info').style.display = 'none';
+    document.getElementById('prev-fido-warn').style.display = 'none';
+    fidoClienteCorrente = null;
+    _cacheMarginClienti = {};
+    mostraBacklogOrdini();
+    return;
+  }
+
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
   _auditLog('crea_ordine', 'ordini', tipo + ' ' + clienteNome + ' ' + prezzoCorrente.prodotto + ' ' + litri + 'L');
@@ -615,6 +631,11 @@ async function salvaOrdine() {
 }
 
 async function caricaOrdini() {
+  mostraBacklogOrdini();
+  if (!navigator.onLine) {
+    document.getElementById('tabella-ordini').innerHTML = '<tr><td colspan="14" class="loading" style="color:#D85A30">⚡ Sei offline — gli ordini verranno caricati al ritorno della connessione</td></tr>';
+    return;
+  }
   await aggiornaSelezioniOrdine();
   // Carica solo gli ultimi 500 ordini per velocità (i filtri restringono ulteriormente)
   const { data } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false}).limit(500);

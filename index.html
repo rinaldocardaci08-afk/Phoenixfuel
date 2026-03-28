@@ -239,6 +239,19 @@
               <input type="date" id="filtro-a-ordini" onchange="filtraOrdini()" title="A data" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
             </div>
           </div>
+          <!-- Backlog ordini offline -->
+          <div id="ordini-backlog" style="display:none;margin-bottom:16px">
+            <div class="card" style="border-left:4px solid #D85A30">
+              <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;color:#D85A30">
+                <span>⚡ Ordini in attesa di sincronizzazione</span>
+                <button class="btn-primary" style="font-size:11px;padding:5px 14px;background:#639922" onclick="syncOrdiniBacklog()">🔄 Sincronizza ora</button>
+              </div>
+              <div style="overflow-x:auto">
+                <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Stato</th><th></th></tr></thead>
+                <tbody id="backlog-ordini-tbody"></tbody></table>
+              </div>
+            </div>
+          </div>
           <div style="overflow-x:auto">
           <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
           <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>

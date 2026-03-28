@@ -153,7 +153,7 @@ async function inviaAvvisoSistema(messaggio, tipo) {
 var _isOnline = navigator.onLine;
 var _offlineQueue = [];
 var _DB_NAME = 'PhoenixFuelOffline';
-var _DB_VERSION = 2;
+var _DB_VERSION = 3;
 
 function _openOfflineDB() {
   return new Promise(function(resolve, reject) {
@@ -165,6 +165,9 @@ function _openOfflineDB() {
       }
       if (!db.objectStoreNames.contains('dataCache')) {
         db.createObjectStore('dataCache', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('ordini_backlog')) {
+        db.createObjectStore('ordini_backlog', { keyPath: 'id', autoIncrement: true });
       }
     };
     req.onsuccess = function(e) { resolve(e.target.result); };
@@ -391,6 +394,7 @@ function _updateOnlineStatus() {
   // Torna online: sincronizza coda + aggiorna cache
   if (_isOnline && wasOffline) {
     _syncOfflineQueue();
+    syncOrdiniBacklog();
     _aggiornaDataCacheOffline();
     aggiornaBadgeBacheca();
   }
@@ -398,8 +402,141 @@ function _updateOnlineStatus() {
 
 window.addEventListener('online', _updateOnlineStatus);
 window.addEventListener('offline', _updateOnlineStatus);
-// Check iniziale
 setTimeout(_updateOnlineStatus, 1000);
+
+// ── BACKLOG ORDINI OFFLINE ──────────────────────────────────────
+async function _salvaOrdineBacklog(record) {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('ordini_backlog', 'readwrite');
+    tx.objectStore('ordini_backlog').add({
+      record: record,
+      timestamp: Date.now(),
+      synced: false
+    });
+    return new Promise(function(resolve) { tx.oncomplete = resolve; });
+  } catch(e) { console.warn('Backlog save error:', e); }
+}
+
+async function _leggiOrdiniBacklog() {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('ordini_backlog', 'readonly');
+    return new Promise(function(resolve) {
+      var req = tx.objectStore('ordini_backlog').getAll();
+      req.onsuccess = function() { resolve(req.result || []); };
+      req.onerror = function() { resolve([]); };
+    });
+  } catch(e) { return []; }
+}
+
+async function _eliminaOrdineBacklog(id) {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('ordini_backlog', 'readwrite');
+    tx.objectStore('ordini_backlog').delete(id);
+  } catch(e) {}
+}
+
+async function mostraBacklogOrdini() {
+  var backlog = await _leggiOrdiniBacklog();
+  var wrap = document.getElementById('ordini-backlog');
+  var tbody = document.getElementById('backlog-ordini-tbody');
+  if (!wrap || !tbody) return;
+
+  if (!backlog.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  var tipoLabels = { 'cliente':'cliente', 'entrata_deposito':'deposito', 'stazione_servizio':'stazione', 'autoconsumo':'autoconsumo' };
+
+  tbody.innerHTML = backlog.map(function(b) {
+    var r = b.record;
+    var dt = new Date(b.timestamp).toLocaleString('it-IT', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+    return '<tr style="background:#FDF3D0">' +
+      '<td>' + r.data + '</td>' +
+      '<td>' + badgeStato(r.tipo_ordine || 'cliente') + '</td>' +
+      '<td>' + esc(r.cliente || '—') + '</td>' +
+      '<td>' + esc(r.prodotto || '—') + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
+      '<td>' + esc(r.fornitore || '—') + '</td>' +
+      '<td><span class="badge amber">⚡ offline</span><br><span style="font-size:9px;color:var(--text-muted)">' + dt + '</span></td>' +
+      '<td><button class="btn-danger" style="font-size:10px;padding:3px 8px" onclick="eliminaOrdineBacklog(' + b.id + ')">Annulla</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function eliminaOrdineBacklog(id) {
+  if (!confirm('Eliminare questo ordine in attesa?')) return;
+  await _eliminaOrdineBacklog(id);
+  toast('Ordine rimosso dal backlog');
+  mostraBacklogOrdini();
+}
+
+async function syncOrdiniBacklog() {
+  if (!navigator.onLine) { toast('Sei offline, impossibile sincronizzare'); return; }
+  var backlog = await _leggiOrdiniBacklog();
+  if (!backlog.length) { toast('Nessun ordine da sincronizzare'); return; }
+
+  toast('Sincronizzazione ' + backlog.length + ' ordini...');
+  var synced = 0, fidoAlerts = [];
+
+  for (var i = 0; i < backlog.length; i++) {
+    var b = backlog[i];
+    var record = b.record;
+    try {
+      // Inserisci ordine nel DB
+      var { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
+      if (error) {
+        console.warn('Sync ordine fallito:', error.message);
+        continue;
+      }
+      synced++;
+      _auditLog('sync_ordine_offline', 'ordini', record.tipo_ordine + ' ' + record.cliente + ' ' + record.prodotto + ' ' + fmtL(record.litri));
+
+      // Uscita deposito automatica se PhoenixFuel
+      if (record.fornitore && record.fornitore.toLowerCase().indexOf('phoenix') >= 0 && (record.tipo_ordine === 'cliente' || record.tipo_ordine === 'stazione_servizio')) {
+        try { await confermaUscitaDeposito(nuovoOrdine.id); } catch(e) {}
+      }
+
+      // Check fido post-sync
+      if (record.tipo_ordine === 'cliente' && record.cliente_id) {
+        try {
+          var { data: cl } = await sb.from('clienti').select('fido_massimo,giorni_pagamento,nome').eq('id', record.cliente_id).single();
+          if (cl && Number(cl.fido_massimo) > 0) {
+            var { data: ordNP } = await sb.from('ordini').select('data,costo_litro,trasporto_litro,margine,iva,litri,giorni_pagamento').or('cliente_id.eq.' + record.cliente_id + ',cliente.eq.' + cl.nome).neq('stato','annullato').eq('pagato',false);
+            var usato = 0;
+            (ordNP||[]).forEach(function(o) {
+              var scad = new Date(o.data); scad.setDate(scad.getDate() + (o.giorni_pagamento || cl.giorni_pagamento || 30));
+              if (scad > oggi) usato += prezzoConIva(o) * Number(o.litri);
+            });
+            var pctFido = Math.round((usato / Number(cl.fido_massimo)) * 100);
+            if (pctFido >= 100) {
+              fidoAlerts.push(cl.nome + ' — fido SUPERATO al ' + pctFido + '% (' + fmtE(usato) + '/' + fmtE(cl.fido_massimo) + ') — Ordine ' + record.prodotto + ' ' + fmtL(record.litri));
+            } else if (pctFido >= 80) {
+              fidoAlerts.push(cl.nome + ' — fido al ' + pctFido + '% (' + fmtE(usato) + '/' + fmtE(cl.fido_massimo) + ')');
+            }
+          }
+        } catch(e) {}
+      }
+
+      // Rimuovi dal backlog
+      await _eliminaOrdineBacklog(b.id);
+    } catch(e) { console.warn('Sync ordine err:', e); }
+  }
+
+  if (synced > 0) toast('✅ ' + synced + ' ordini sincronizzati!');
+
+  // Invia alert fido in bacheca
+  if (fidoAlerts.length) {
+    var msg = '⚠ ALERT FIDO dopo sync ordini offline:\n' + fidoAlerts.join('\n');
+    inviaAvvisoSistema(msg, 'sistema');
+    aggiornaBadgeBacheca();
+  }
+
+  mostraBacklogOrdini();
+  // Ricarica ordini se siamo nella sezione
+  if (document.getElementById('s-ordini').classList.contains('active')) caricaOrdini();
+}
 
 // ── AVVIO ─────────────────────────────────────────────────────────
 inizializza();
