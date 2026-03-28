@@ -1,0 +1,1 @@
+ALTER TABLE fornitori ADD COLUMN IF NOT EXISTS colore text DEFAULT '#FAEEDA';
