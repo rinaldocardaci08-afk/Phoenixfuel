@@ -1,13 +1,21 @@
-var CACHE_NAME = 'phoenixfuel-v2';
+var CACHE_NAME = 'phoenixfuel-v3';
 var APP_SHELL = [
   '/',
   '/index.html',
   '/login.html',
   '/style.css',
-  '/app.js',
+  '/pf-config.js',
+  '/pf-ordini.js',
+  '/pf-deposito.js',
+  '/pf-anagrafica.js',
+  '/pf-stazione.js',
+  '/pf-logistica.js',
+  '/pf-admin.js',
+  '/pf-dashboard.js',
+  '/pf-system.js',
   '/manifest.json'
 ];
-var CDN_CACHE = 'phoenixfuel-cdn-v2';
+var CDN_CACHE = 'phoenixfuel-cdn-v3';
 var CDN_URLS = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdn.jsdelivr.net/npm/chart.js@4',

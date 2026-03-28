@@ -879,6 +879,7 @@ async function salvaOrdine() {
   const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
   const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
+  _auditLog('crea_ordine', 'ordini', tipo + ' ' + clienteNome + ' ' + prezzoCorrente.prodotto + ' ' + litri + 'L');
   if (prezzoCorrente._isDeposito && tipo === 'cliente') {
     await confermaUscitaDeposito(nuovoOrdine.id);
     toast('Ordine salvato e deposito aggiornato!');
@@ -1111,6 +1112,7 @@ async function editaCella(td, tabella, campo, id, val) {
 async function eliminaRecord(tabella, id, callback) {
   if (!confirm('Eliminare questo record?')) return;
   await sb.from(tabella).delete().eq('id', id);
+  _auditLog('elimina', tabella, 'ID: ' + id);
   toast('Eliminato'); callback();
 }
 
@@ -1315,6 +1317,7 @@ async function confermaCaricoDeposito(ordineId) {
     if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, Number(ordine.costo_litro||0) + Number(ordine.trasporto_litro||0));
   }
   await sb.from('ordini').update({ stato:'confermato', caricato_deposito:true }).eq('id', ordineId);
+  _auditLog('carico_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' da ' + ordine.fornitore);
   toast('Carico confermato! Cisterne aggiornate.');
   chiudiModalePermessi();
   caricaDeposito();
@@ -1332,6 +1335,7 @@ async function confermaUscitaDeposito(ordineId) {
   if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
   await aggiornaCisterna(cis.id, ordine.litri, 'uscita', ordineId, ordine.data);
   await sb.from('ordini').update({ stato:'confermato', cisterna_id:cis.id }).eq('id', ordineId);
+  _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente);
   toast('Uscita registrata! Cisterna aggiornata.');
   caricaDeposito();
   caricaOrdini();
@@ -2697,6 +2701,7 @@ async function salvaCliente(id=null) {
     if (res.data) clienteId = res.data.id;
   }
   if (error) { toast('Errore: '+error.message); return; }
+  if (isAdmin && record.fido_massimo !== undefined) _auditLog('modifica_fido', 'clienti', record.nome + ' fido: ' + fmtE(record.fido_massimo));
   // Salva sedi di scarico
   if (clienteId) await salvaSediCliente(clienteId);
   toast(id?'Cliente aggiornato!':'Cliente salvato!');
@@ -5269,6 +5274,7 @@ async function salvaCassa() {
     }
   }
 
+  _auditLog('salva_cassa', 'stazione_cassa', data + ' vendite:' + fmtE(totVendite) + ' versato:' + fmtE(versato));
   toast('Registro cassa salvato!');
   calcolaCassa();
   caricaCrediti();
@@ -6528,6 +6534,7 @@ async function caricaUtentiCompleto() {
     const postSelect = r.ruolo==='cliente' ? '<span style="font-size:11px;color:var(--text-muted)">—</span>' : '<select onchange="cambiaPostazione(\''+r.id+'\',this.value)" style="font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + postOptions.replace('value="'+post+'"','value="'+post+'" selected') + '</select>';
     return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td>' + postSelect + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>';
   }).join('');
+  caricaAuditLog();
 }
 
 // ── GIACENZE FINE ANNO ───────────────────────────────────────────
@@ -6860,8 +6867,8 @@ async function caricaDashboard() {
   const{data:rec}=await sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5);
   const tbody=document.getElementById('dashboard-ordini');
   tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
-  // Giacenza deposito + grafici in parallelo
-  await Promise.all([caricaGiacenzaDashboard(), caricaGraficiDashboard()]);
+  // Giacenza deposito + grafici + cockpit in parallelo
+  await Promise.all([caricaGiacenzaDashboard(), caricaGraficiDashboard(), caricaCockpit(), caricaAlertOperativi()]);
 }
 
 async function caricaGiacenzaDashboard() {
@@ -6895,6 +6902,103 @@ async function caricaGiacenzaDashboard() {
     html += '</div>';
   });
   wrap.innerHTML = html;
+}
+
+// ── COCKPIT: confronto mese corrente vs precedente ──
+async function caricaCockpit() {
+  var inizioMese = oggiISO.substring(0,8) + '01';
+  var mesePrev = new Date(oggi.getFullYear(), oggi.getMonth()-1, 1);
+  var inizioMesePrev = mesePrev.toISOString().split('T')[0].substring(0,8) + '01';
+  var fineMesePrev = new Date(oggi.getFullYear(), oggi.getMonth(), 0).toISOString().split('T')[0];
+
+  var [meseRes, prevRes] = await Promise.all([
+    sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',inizioMese).lte('data',oggiISO),
+    sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',inizioMesePrev).lte('data',fineMesePrev)
+  ]);
+  var ordMese = meseRes.data || [], ordPrev = prevRes.data || [];
+
+  function calcTotali(arr) {
+    var f=0, l=0, m=0;
+    arr.forEach(function(r) { f += prezzoConIva(r)*Number(r.litri); l += Number(r.litri); m += Number(r.margine); });
+    return { fatturato:f, litri:l, margine: arr.length>0 ? m/arr.length : 0, ordini:arr.length };
+  }
+  var mc = calcTotali(ordMese), pc = calcTotali(ordPrev);
+
+  document.getElementById('ck-fatt-mese').textContent = fmtE(mc.fatturato);
+  document.getElementById('ck-litri-mese').textContent = fmtL(mc.litri);
+  document.getElementById('ck-margine-medio').textContent = mc.ordini > 0 ? '€ ' + mc.margine.toFixed(4) + '/L' : '—';
+  document.getElementById('ck-ordini-mese').textContent = mc.ordini;
+
+  function renderDelta(elId, curr, prev) {
+    var el = document.getElementById(elId);
+    if (!el || prev === 0) { if(el) el.textContent=''; return; }
+    var pct = Math.round(((curr - prev) / Math.abs(prev)) * 100);
+    el.textContent = (pct >= 0 ? '+' : '') + pct + '% vs mese prec.';
+    el.style.color = pct >= 0 ? '#639922' : '#E24B4A';
+  }
+  renderDelta('ck-fatt-delta', mc.fatturato, pc.fatturato);
+  renderDelta('ck-litri-delta', mc.litri, pc.litri);
+  renderDelta('ck-margine-delta', mc.margine, pc.margine);
+  renderDelta('ck-ordini-delta', mc.ordini, pc.ordini);
+}
+
+// ── ALERT OPERATIVI DASHBOARD ──
+async function caricaAlertOperativi() {
+  var alerts = [];
+  try {
+    // 1. Giacenze critiche (sotto 20%)
+    var { data: cist } = await sb.from('cisterne').select('nome,prodotto,livello_attuale,capacita_max').eq('sede','deposito_vibo');
+    (cist||[]).forEach(function(c) {
+      var pct = Number(c.capacita_max) > 0 ? (Number(c.livello_attuale) / Number(c.capacita_max)) * 100 : 100;
+      if (pct < 20) alerts.push({ tipo:'danger', icon:'🛢', testo: c.nome + ' (' + c.prodotto + ') al ' + Math.round(pct) + '% — ' + fmtL(c.livello_attuale) + ' rimanenti' });
+    });
+
+    // 2. Clienti con fido oltre 80%
+    var { data: clFido } = await sb.from('clienti').select('id,nome,fido_massimo,giorni_pagamento').gt('fido_massimo', 0);
+    if (clFido && clFido.length) {
+      var { data: ordNP } = await sb.from('ordini').select('cliente,cliente_id,data,costo_litro,trasporto_litro,margine,iva,litri,giorni_pagamento').neq('stato','annullato').eq('pagato',false);
+      clFido.forEach(function(cl) {
+        var usato = 0;
+        (ordNP||[]).filter(function(o){return o.cliente_id===cl.id||o.cliente===cl.nome;}).forEach(function(o) {
+          var scad = new Date(o.data); scad.setDate(scad.getDate() + (o.giorni_pagamento||cl.giorni_pagamento||30));
+          if (scad > oggi) usato += prezzoConIva(o) * Number(o.litri);
+        });
+        var pctF = Math.round((usato / Number(cl.fido_massimo)) * 100);
+        if (pctF >= 80) alerts.push({ tipo: pctF >= 100 ? 'danger' : 'warning', icon:'💰', testo: cl.nome + ' — fido al ' + pctF + '% (' + fmtE(usato) + ' / ' + fmtE(cl.fido_massimo) + ')' });
+      });
+    }
+
+    // 3. Ordini in attesa da più di 3 giorni
+    var treGg = new Date(oggi); treGg.setDate(treGg.getDate()-3);
+    var { data: ordP } = await sb.from('ordini').select('id').eq('stato','in attesa').lte('data',treGg.toISOString().split('T')[0]);
+    if (ordP && ordP.length) alerts.push({ tipo:'warning', icon:'📋', testo: ordP.length + ' ordini in attesa da più di 3 giorni' });
+
+    // 4. Cassa mancante ieri (esclusa domenica)
+    var ieri = new Date(oggi); ieri.setDate(ieri.getDate()-1);
+    if (ieri.getDay() !== 0) {
+      var { data: cassaI } = await sb.from('stazione_cassa').select('id').eq('data',ieri.toISOString().split('T')[0]).maybeSingle();
+      if (!cassaI) alerts.push({ tipo:'info', icon:'💵', testo: 'Cassa del ' + ieri.toISOString().split('T')[0] + ' non ancora registrata' });
+    }
+  } catch(e) { console.warn('Alert err:', e); }
+
+  var wrap = document.getElementById('dash-alert-operativi');
+  if (!wrap) return;
+  if (!alerts.length) { wrap.innerHTML=''; wrap.style.display='none'; return; }
+
+  var colori = { danger:'border-left:4px solid #E24B4A;background:#FCEBEB', warning:'border-left:4px solid #BA7517;background:#FAEEDA', info:'border-left:4px solid #378ADD;background:#E6F1FB' };
+  wrap.style.display = 'block';
+  wrap.innerHTML = '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500;margin-bottom:6px">⚠ Alert operativi</div>' +
+    alerts.map(function(a) { return '<div style="' + (colori[a.tipo]||colori.info) + ';padding:10px 14px;border-radius:0 8px 8px 0;margin-bottom:6px;font-size:12px;display:flex;align-items:center;gap:8px"><span>' + a.icon + '</span><span>' + a.testo + '</span></div>'; }).join('');
+
+  // Invia alert critici in bacheca (solo 1 volta al giorno per sessione)
+  if (utenteCorrente && utenteCorrente.ruolo === 'admin') {
+    var alertKey = 'pf_alert_' + oggiISO;
+    if (!sessionStorage.getItem(alertKey)) {
+      var critici = alerts.filter(function(a){return a.tipo==='danger';});
+      if (critici.length) inviaAvvisoSistema('Alert operativi:\n' + critici.map(function(a){return a.icon+' '+a.testo;}).join('\n'), 'sistema');
+      sessionStorage.setItem(alertKey, '1');
+    }
+  }
 }
 
 // ── GRAFICI DASHBOARD ────────────────────────────────────────────
@@ -7239,6 +7343,68 @@ async function _aggiornaDataCacheOffline() {
       _salvaCacheOffline('prezzi_oggi', prezziR.data || [])
     ]);
   } catch(e) { console.warn('Cache data refresh error:', e); }
+}
+
+// ── AUDIT LOG ────────────────────────────────────────────────────
+async function _auditLog(azione, tabella, dettaglio) {
+  try {
+    await sb.from('audit_log').insert([{
+      utente_id: utenteCorrente ? utenteCorrente.id : null,
+      utente_nome: utenteCorrente ? utenteCorrente.nome : 'Sistema',
+      postazione: utenteCorrente ? utenteCorrente.postazione : null,
+      azione: azione,
+      tabella: tabella,
+      dettaglio: typeof dettaglio === 'string' ? dettaglio : JSON.stringify(dettaglio).substring(0, 500)
+    }]);
+  } catch(e) {} // Non bloccare mai per errore log
+}
+
+async function caricaAuditLog() {
+  var { data: logs } = await sb.from('audit_log').select('*').order('created_at',{ascending:false}).limit(50);
+  var tbody = document.getElementById('audit-log-tabella');
+  if (!tbody) return;
+  if (!logs || !logs.length) { tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessuna attività registrata</td></tr>'; return; }
+  tbody.innerHTML = logs.map(function(r) {
+    var dt = new Date(r.created_at).toLocaleString('it-IT', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+    return '<tr><td style="font-size:10px;white-space:nowrap">' + dt + '</td><td style="font-size:11px;font-weight:500">' + esc(r.utente_nome||'—') + '</td><td><span class="badge gray" style="font-size:9px">' + esc(r.azione) + '</span></td><td style="font-size:10px">' + esc(r.tabella) + '</td><td style="font-size:10px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.dettaglio||'') + '</td></tr>';
+  }).join('');
+}
+
+async function esportaBackup() {
+  toast('Generazione backup...');
+  if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata'); return; }
+  try {
+    var [ordR, cliR, forR, cisR, cassR, letR, preR, cosR, prelR, versR, credR] = await Promise.all([
+      sb.from('ordini').select('*').order('data',{ascending:false}).limit(5000),
+      sb.from('clienti').select('*').order('nome'),
+      sb.from('fornitori').select('*').order('nome'),
+      sb.from('cisterne').select('*').order('sede').order('nome'),
+      sb.from('stazione_cassa').select('*').order('data',{ascending:false}).limit(365),
+      sb.from('stazione_letture').select('*').order('data',{ascending:false}).limit(3000),
+      sb.from('stazione_prezzi').select('*').order('data',{ascending:false}).limit(1000),
+      sb.from('stazione_costi').select('*').order('data',{ascending:false}).limit(1000),
+      sb.from('prelievi_autoconsumo').select('*').order('data',{ascending:false}).limit(2000),
+      sb.from('stazione_versamenti').select('*').order('data',{ascending:false}).limit(1000),
+      sb.from('stazione_crediti').select('*').order('data_emissione',{ascending:false}).limit(500)
+    ]);
+    var wb = XLSX.utils.book_new();
+    var tables = [
+      ['Ordini', ordR.data], ['Clienti', cliR.data], ['Fornitori', forR.data],
+      ['Cisterne', cisR.data], ['Cassa', cassR.data], ['Letture', letR.data],
+      ['PrezziPompa', preR.data], ['Costi', cosR.data], ['Prelievi', prelR.data],
+      ['Versamenti', versR.data], ['Crediti', credR.data]
+    ];
+    tables.forEach(function(t) {
+      if (t[1] && t[1].length) {
+        var ws = XLSX.utils.json_to_sheet(t[1]);
+        XLSX.utils.book_append_sheet(wb, ws, t[0]);
+      }
+    });
+    var dataStr = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, 'Backup_PhoenixFuel_' + dataStr + '.xlsx');
+    _auditLog('backup_export', 'sistema', tables.length + ' tabelle esportate');
+    toast('Backup esportato con successo!');
+  } catch(e) { toast('Errore backup: ' + e.message); }
 }
 
 // Wrapper Supabase write: se offline accoda, se online esegue normalmente

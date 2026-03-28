@@ -104,6 +104,18 @@
           <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Movimenti interni oggi</div><div class="kpi-value" id="kpi-mov-interni">—</div></div>
         </div>
 
+        <!-- COCKPIT: confronto mese e alert operativi -->
+        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📊 Cockpit — confronto mese corrente vs precedente</div>
+        <div class="grid4" style="margin-bottom:12px">
+          <div class="kpi"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="ck-fatt-mese">—</div><div id="ck-fatt-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="ck-litri-mese">—</div><div id="ck-litri-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value" id="ck-margine-medio">—</div><div id="ck-margine-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="ck-ordini-mese">—</div><div id="ck-ordini-delta" style="font-size:10px;margin-top:2px"></div></div>
+        </div>
+
+        <!-- Alert operativi -->
+        <div id="dash-alert-operativi" style="margin-bottom:16px"></div>
+
         <!-- GIACENZA DEPOSITO -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Giacenza deposito</div>
@@ -1228,6 +1240,22 @@
           <table><thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Postazione</th><th>Cliente</th><th>Stato</th><th>Permessi</th><th></th></tr></thead>
           <tbody id="tabella-utenti"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
         </div>
+        <!-- Backup e Audit -->
+        <div class="grid2" style="margin-top:16px">
+          <div class="card">
+            <div class="card-title">Backup dati</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Esporta un backup completo delle tabelle critiche in formato Excel.</div>
+            <button class="btn-primary" style="background:#639922" onclick="esportaBackup()">💾 Esporta backup completo</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Registro attività (Audit log)</div>
+            <div style="overflow-x:auto;max-height:300px;overflow-y:auto">
+              <table><thead><tr><th>Data/ora</th><th>Utente</th><th>Azione</th><th>Tabella</th><th>Dettaglio</th></tr></thead>
+              <tbody id="audit-log-tabella"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+            <button class="btn-primary" style="margin-top:8px;font-size:11px;padding:5px 12px" onclick="caricaAuditLog()">Aggiorna</button>
+          </div>
+        </div>
       </div>
 
       <!-- BACHECA AVVISI -->
@@ -1349,7 +1377,15 @@
     <div id="modal-permessi-content"></div>
   </div>
 </div>
-<script src="app.js"></script>
+<script src="pf-config.js"></script>
+<script src="pf-ordini.js"></script>
+<script src="pf-deposito.js"></script>
+<script src="pf-anagrafica.js"></script>
+<script src="pf-stazione.js"></script>
+<script src="pf-logistica.js"></script>
+<script src="pf-admin.js"></script>
+<script src="pf-dashboard.js"></script>
+<script src="pf-system.js"></script>
 <script src="stz-sortable.js"></script>
 <script>
 if ('serviceWorker' in navigator) {

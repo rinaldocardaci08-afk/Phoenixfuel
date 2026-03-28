@@ -1,0 +1,835 @@
+// PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// ── AREA CLIENTE ──────────────────────────────────────────────────
+async function caricaAreaCliente() {
+  if (!utenteCorrente?.cliente_id) return;
+  const clienteId = utenteCorrente.cliente_id;
+  const { data: prezzi } = await sb.from('prezzi_cliente').select('*').eq('cliente_id', clienteId).eq('data', oggiISO);
+  const tbPrezzi = document.getElementById('cl-prezzi-oggi');
+  if (!prezzi||!prezzi.length) {
+    tbPrezzi.innerHTML = '<tr><td colspan="5" class="loading">Nessun prezzo disponibile oggi</td></tr>';
+  } else {
+    tbPrezzi.innerHTML = prezzi.map(p => {
+      const noiva = Number(p.prezzo_litro);
+      const coniva = noiva * (1 + Number(p.iva)/100);
+      return '<tr><td>' + p.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmt(noiva) + '</td><td style="font-family:var(--font-mono)">' + fmt(coniva) + '</td><td>' + p.iva + '%</td><td>' + (p.note||'—') + '</td></tr>';
+    }).join('');
+  }
+  const { data: ordini } = await sb.from('ordini').select('data,prodotto,litri,costo_litro,trasporto_litro,margine,iva,stato').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + utenteCorrente.nome).order('data',{ascending:false}).limit(200);
+  const tbStorico = document.getElementById('cl-storico');
+  if (!ordini||!ordini.length) {
+    tbStorico.innerHTML = '<tr><td colspan="6" class="loading">Nessun acquisto</td></tr>';
+  } else {
+    tbStorico.innerHTML = ordini.map(r => '<tr><td>' + r.data + '</td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmtE(prezzoConIva(r)*r.litri) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+    const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
+    const mese = ordini.filter(r=>r.data>=inizio);
+    document.getElementById('cl-mese-litri').textContent = fmtL(mese.reduce((s,r)=>s+Number(r.litri),0));
+    document.getElementById('cl-mese-spesa').textContent = fmtE(mese.reduce((s,r)=>s+prezzoConIva(r)*Number(r.litri),0));
+  }
+}
+
+// ── PREZZI GIORNALIERI ────────────────────────────────────────────
+function aggiornaPrev() {
+  const c=parseFloat(document.getElementById('pr-costo').value)||0;
+  const t=parseFloat(document.getElementById('pr-trasporto').value)||0;
+  const m=parseFloat(document.getElementById('pr-margine').value)||0;
+  const iva=parseInt(document.getElementById('pr-iva').value)||22;
+  const noiva=c+t+m;
+  document.getElementById('calc-noiva').textContent = '€ ' + noiva.toFixed(4);
+  document.getElementById('calc-iva').textContent = '€ ' + (noiva*(1+iva/100)).toFixed(4);
+}
+
+async function caricaBasiPerFornitore() {
+  const fornitoreId = document.getElementById('pr-fornitore').value;
+  const sel = document.getElementById('pr-base');
+  sel.innerHTML = '<option value="">Nessuna (opzionale)</option>';
+  if (!fornitoreId) return;
+  const { data } = await sb.from('fornitori_basi').select('base_carico_id, basi_carico(id,nome)').eq('fornitore_id', fornitoreId);
+  if (data && data.length) {
+    data.forEach(r => { if (r.basi_carico) sel.innerHTML += '<option value="' + r.basi_carico.id + '">' + r.basi_carico.nome + '</option>'; });
+  } else {
+    const { data: tutteBasi } = await sb.from('basi_carico').select('id,nome').eq('attivo',true).order('nome');
+    if (tutteBasi) tutteBasi.forEach(b => sel.innerHTML += '<option value="' + b.id + '">' + b.nome + '</option>');
+  }
+}
+
+async function salvaPrezzo() {
+  const selFor = document.getElementById('pr-fornitore');
+  const fornitoreNome = selFor.options[selFor.selectedIndex]?.text || '';
+  const fornitoreId = selFor.value;
+  const baseId = document.getElementById('pr-base').value || null;
+  const costo = parseFloat(document.getElementById('pr-costo').value);
+  const trasporto = parseFloat(document.getElementById('pr-trasporto').value)||0;
+  const margine = parseFloat(document.getElementById('pr-margine').value)||0;
+  const data = document.getElementById('pr-data').value;
+  const prodotto = document.getElementById('pr-prodotto').value;
+  if (!data) { toast('Inserisci la data'); return; }
+  if (!fornitoreNome || fornitoreNome === 'Seleziona...') { toast('Seleziona un fornitore'); return; }
+  if (!prodotto) { toast('Seleziona un prodotto'); return; }
+  if (isNaN(costo)||costo<=0) { toast('Inserisci il costo per litro'); return; }
+  const record = { data, fornitore:fornitoreNome, fornitore_id:fornitoreId||null, base_carico_id:baseId, prodotto, costo_litro:costo, trasporto_litro:trasporto, margine, iva:parseInt(document.getElementById('pr-iva').value) };
+  const { error } = await sb.from('prezzi').insert([record]);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('Prezzo salvato!');
+  caricaPrezzi();
+}
+
+async function salvaPrezzoCliente() {
+  const clienteId = document.getElementById('pc-cliente').value;
+  const prodotto = document.getElementById('pc-prodotto').value;
+  const prezzo = parseFloat(document.getElementById('pc-prezzo').value);
+  const data = document.getElementById('pc-data').value;
+  if (!clienteId||!prodotto||!data||isNaN(prezzo)) { toast('Compila tutti i campi'); return; }
+  const { error } = await sb.from('prezzi_cliente').insert([{ data, cliente_id:clienteId, prodotto, prezzo_litro:prezzo, iva:parseInt(document.getElementById('pc-iva').value), note:document.getElementById('pc-note').value }]);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('Prezzo cliente salvato!');
+}
+
+function scorriGiornoPrezzi(dir) {
+  var input = document.getElementById('filtro-data-prezzi');
+  if (!input) return;
+  var current = input.value ? new Date(input.value) : new Date();
+  current.setDate(current.getDate() + dir);
+  input.value = current.toISOString().split('T')[0];
+  caricaPrezzi();
+}
+
+async function caricaPrezzi() {
+  // Carica fornitori/clienti solo se cache vuota
+  if (!cacheFornitori.length) await caricaSelectFornitori('pr-fornitore');
+  else { const s=document.getElementById('pr-fornitore'); if(s&&s.options.length<=1) { s.innerHTML='<option value="">Seleziona...</option>'+cacheFornitori.map(f=>'<option value="'+f.id+'">'+f.nome+'</option>').join(''); } }
+  if (!cacheClienti.length) await caricaSelectClienti('pc-cliente');
+  const filtroData = document.getElementById('filtro-data-prezzi').value;
+  let query = sb.from('prezzi').select('*, basi_carico(nome)').order('data',{ascending:false}).order('fornitore');
+  if (filtroData) query = query.eq('data', filtroData);
+  else query = query.limit(200); // Limite sicurezza se nessun filtro
+
+  // Query parallele
+  const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
+    query,
+    sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
+    sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
+  ]);
+  const data = prezziRes.data;
+  const cisterne = cisterneRes.data;
+  const baseDeposito = baseDepRes.data;
+  let righeDeposito = [];
+  if (cisterne && baseDeposito) {
+    const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
+    prodotti.forEach(prodotto => {
+      const cis = cisterne.filter(c=>c.prodotto===prodotto);
+      const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
+      if (totLitri > 0) {
+        const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
+        const prodInfo = cacheProdotti.find(p=>p.nome===prodotto);
+        const ovr = _depositoOverrides[prodotto] || {};
+        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
+      }
+    });
+  }
+
+  const tuttiPrezzi = [...righeDeposito, ...(data||[])];
+  const best = {};
+  tuttiPrezzi.forEach(r => { const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
+
+  // Genera tabelle prezzi dinamicamente dai prodotti
+  const container = document.getElementById('container-tabelle-prezzi');
+  const tabMap = {};
+  cacheProdotti.filter(p => p.attivo).forEach(p => {
+    const tbId = 'tabella-prezzi-' + (p.tipo_cisterna || p.nome.toLowerCase().replace(/\s+/g,'-'));
+    tabMap[p.nome] = tbId;
+  });
+  if (container) {
+    container.innerHTML = cacheProdotti.filter(p => p.attivo).map(p => {
+      const tbId = tabMap[p.nome];
+      return '<div style="margin-bottom:16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="width:10px;height:10px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:13px;font-weight:500">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
+    }).join('');
+  }
+
+  // Raggruppa per prodotto
+  const perProdotto = {};
+  Object.keys(tabMap).forEach(p => { perProdotto[p] = []; });
+  tuttiPrezzi.forEach(r => {
+    if (tabMap[r.prodotto]) perProdotto[r.prodotto].push(r);
+  });
+
+  // Renderizza ogni tabella
+  Object.entries(tabMap).forEach(([prodotto, tbId]) => {
+    const tbody = document.getElementById(tbId);
+    if (!tbody) return;
+    const righe = perProdotto[prodotto];
+    if (!righe || !righe.length) { tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun prezzo</td></tr>'; return; }
+
+    let html = '';
+    righe.forEach(r => {
+      const isBest = best[r.data+'_'+r.prodotto]?.id === r.id;
+      const basNome = r.basi_carico ? r.basi_carico.nome : '—';
+      const giacenzaHtml = r._giacenza ? ' <span style="font-size:10px;color:var(--text-hint)">(' + fmtL(r._giacenza) + ')</span>' : '';
+
+      // Azioni
+      let azione = '';
+      if (r._isDeposito) {
+        azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<span class="badge teal" style="font-size:9px">Deposito</span>';
+      } else {
+        azione = (isBest ? '<span class="badge green" style="font-size:9px">Best</span> ' : '') + '<button class="btn-danger" onclick="eliminaRecord(\'prezzi\',\'' + r.id + '\',caricaPrezzi)">x</button>';
+      }
+
+      // Costo - editabile per tutti, con logica speciale per deposito
+      let tdCosto;
+      if (r._isDeposito) {
+        tdCosto = '<td class="editable" onclick="editaCostoDeposito(this,\'' + r.prodotto + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>';
+      } else {
+        tdCosto = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'costo_litro\',\'' + r.id + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td>';
+      }
+
+      // Trasporto - editabile per tutti
+      let tdTrasporto;
+      if (r._isDeposito) {
+        tdTrasporto = '<td class="editable" onclick="editaDepositoValore(this,\'trasporto\',\'' + r.prodotto + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td>';
+      } else {
+        tdTrasporto = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td>';
+      }
+
+      // Margine - editabile per tutti
+      let tdMargine;
+      if (r._isDeposito) {
+        tdMargine = '<td class="editable" onclick="editaDepositoValore(this,\'margine\',\'' + r.prodotto + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
+      } else {
+        tdMargine = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
+      }
+
+      html += '<tr><td>' + r.data + '</td><td>' + r.fornitore + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+    });
+    tbody.innerHTML = html;
+  });
+}
+
+// Valori deposito (trasporto/margine) — persistenti
+let _depositoOverrides = {};
+try { _depositoOverrides = JSON.parse(localStorage.getItem('phoenix_dep_overrides') || '{}'); } catch(e) {}
+function _salvaDepOverrides() { try { localStorage.setItem('phoenix_dep_overrides', JSON.stringify(_depositoOverrides)); } catch(e) {} }
+
+function editaDepositoValore(td, campo, prodotto, valAttuale) {
+  const input = document.createElement('input');
+  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=valAttuale;
+  td.innerHTML=''; td.appendChild(input); input.focus();
+  input.onblur = () => {
+    const nv = parseFloat(input.value);
+    if (!isNaN(nv)) {
+      if (!_depositoOverrides[prodotto]) _depositoOverrides[prodotto] = {};
+      _depositoOverrides[prodotto][campo] = nv;
+      _salvaDepOverrides();
+      toast(campo + ' deposito ' + esc(prodotto) + ' impostato a ' + fmt(nv));
+    }
+    caricaPrezzi();
+  };
+  input.onkeydown = e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape') caricaPrezzi(); };
+}
+
+async function editaCostoDeposito(td, prodotto, valAttuale) {
+  const input = document.createElement('input');
+  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=valAttuale;
+  td.innerHTML=''; td.appendChild(input); input.focus();
+  input.onblur = async () => {
+    const nv = parseFloat(input.value);
+    if (isNaN(nv) || nv === valAttuale) { caricaPrezzi(); return; }
+
+    // Mostra modale conferma modifica costo medio deposito
+    let html = '<div style="font-size:15px;font-weight:500;margin-bottom:8px">Modifica costo medio deposito</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Stai modificando il costo medio di <strong>' + prodotto + '</strong> da <strong>' + fmt(valAttuale) + '</strong> a <strong>' + fmt(nv) + '</strong>.</div>';
+    html += '<div style="background:#FAEEDA;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#633806">';
+    html += '⚠ Questa modifica aggiornerà il <strong>costo medio ponderato</strong> di tutte le cisterne di ' + prodotto + ' nel deposito. Il nuovo valore verrà usato come base per il calcolo dei prezzi futuri.</div>';
+    html += '<div class="form-grid" style="margin-bottom:14px">';
+    html += '<div class="form-group"><label>Nuovo costo medio/L</label><input type="number" id="dep-nuovo-costo" step="0.0001" value="' + nv.toFixed(4) + '" /></div>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:8px">';
+    html += '<button class="btn-primary" style="flex:1" onclick="confermaCostoDeposito(\'' + prodotto + '\')">Conferma modifica</button>';
+    html += '<button onclick="chiudiModalePermessi();caricaPrezzi()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+    html += '</div>';
+    apriModal(html);
+  };
+  input.onkeydown = e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape') caricaPrezzi(); };
+}
+
+async function confermaCostoDeposito(prodotto) {
+  const nuovoCosto = parseFloat(document.getElementById('dep-nuovo-costo').value);
+  if (isNaN(nuovoCosto) || nuovoCosto <= 0) { toast('Inserisci un costo valido'); return; }
+
+  // Aggiorna costo_medio di tutte le cisterne di quel prodotto
+  const prodottoMap = getProdottoTipoCisterna();
+  const tipo = prodottoMap[prodotto] || 'autotrazione';
+
+  const { error } = await sb.from('cisterne').update({ costo_medio: nuovoCosto, updated_at: new Date().toISOString() }).eq('tipo', tipo);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Invalida cache cisterne
+  _cacheCisterne = null;
+
+  toast('Costo medio ' + prodotto + ' aggiornato a ' + fmt(nuovoCosto));
+  chiudiModalePermessi();
+  caricaPrezzi();
+}
+
+// ── ORDINI ────────────────────────────────────────────────────────
+let prezzoCorrente=null, prezziDelGiorno=[];
+let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false;
+
+function toggleTipoOrdine() {
+  const tipo = document.getElementById('ord-tipo').value;
+  const isCliente = tipo === 'cliente';
+  document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
+  if (!isCliente) {
+    const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
+    document.getElementById('ord-note').placeholder = lbl[tipo] || '';
+  } else {
+    document.getElementById('ord-note').placeholder = '';
+  }
+  // Ricalcola fornitori e prodotti (filtra PhoenixFuel per entrata_deposito)
+  aggiornaSelezioniOrdine();
+}
+
+async function aggiornaSelezioniOrdine() {
+  const data = document.getElementById('ord-data')?.value; if (!data) return;
+
+  // Esegui query in parallelo
+  const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
+    sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', data),
+    _cacheCisterne ? Promise.resolve({data:_cacheCisterne}) : sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
+    _cacheBaseDepositoLoaded ? Promise.resolve({data:_cacheBaseDeposito}) : sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
+  ]);
+
+  prezziDelGiorno = prezziRes.data || [];
+  const cisterne = cisterneRes.data; _cacheCisterne = cisterne;
+  const baseDeposito = baseDepRes.data; _cacheBaseDeposito = baseDeposito; _cacheBaseDepositoLoaded = true;
+
+  // Aggiunge PhoenixFuel sempre disponibile con costo medio deposito
+  if (cisterne && baseDeposito) {
+    const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
+    prodotti.forEach(prodotto => {
+      const cis = cisterne.filter(c=>c.prodotto===prodotto&&Number(c.livello_attuale)>0);
+      if (cis.length) {
+        const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
+        const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
+        const prodI = cacheProdotti.find(pp=>pp.nome===prodotto);
+        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'PhoenixFuel', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
+      }
+    });
+  }
+
+  var fornitori = [...new Map(prezziDelGiorno.map(p=>[p.fornitore,{nome:p.fornitore}])).values()];
+  // Per entrata deposito: escludi PhoenixFuel (non puoi caricare dal tuo stesso deposito)
+  var tipoOrd = document.getElementById('ord-tipo').value;
+  if (tipoOrd === 'entrata_deposito') {
+    fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('phoenix') === -1; });
+  }
+  const selFor = document.getElementById('ord-fornitore');
+  selFor.innerHTML = '<option value="">Seleziona fornitore...</option>' + fornitori.map(f=>'<option value="'+f.nome+'">'+f.nome+'</option>').join('');
+  document.getElementById('ord-base').innerHTML = '<option value="">— Prima seleziona fornitore —</option>';
+  document.getElementById('ord-prodotto').innerHTML = '<option value="">— Prima seleziona fornitore —</option>';
+  prezzoCorrente = null;
+  // Reset campi custom
+  document.getElementById('ord-trasporto-custom').value = '';
+  document.getElementById('ord-margine-custom').value = '';
+  document.getElementById('ord-prezzo-netto').value = '';
+  document.getElementById('fido-cliente-info').style.display = 'none';
+  document.getElementById('prev-fido-warn').style.display = 'none';
+  fidoClienteCorrente = null;
+  // Carica clienti solo se cache vuota
+  if (!cacheClienti.length) await caricaSelectClienti('ord-cliente');
+}
+
+function aggiornaBasiOrdine() {
+  const fornitore = document.getElementById('ord-fornitore').value;
+  const prezziFor = prezziDelGiorno.filter(p=>p.fornitore===fornitore);
+  const basi = [...new Map(prezziFor.filter(p=>p.basi_carico).map(p=>[p.basi_carico.id,p.basi_carico])).values()];
+  const selBase = document.getElementById('ord-base');
+  if (basi.length) {
+    selBase.innerHTML = '<option value="">Seleziona base...</option>' + basi.map(b=>'<option value="'+b.id+'">'+b.nome+'</option>').join('');
+    document.getElementById('ord-prodotto').innerHTML = '<option value="">— Prima seleziona base —</option>';
+  } else {
+    selBase.innerHTML = '<option value="">Nessuna base specificata</option>';
+    aggiornaProdottiOrdine();
+  }
+  prezzoCorrente = null;
+}
+
+let _cacheProdottiStazione = null;
+
+async function aggiornaProdottiOrdine() {
+  const fornitore = document.getElementById('ord-fornitore').value;
+  const baseId = document.getElementById('ord-base').value;
+  const tipo = document.getElementById('ord-tipo').value;
+  let prodotti = [...new Set(prezziDelGiorno.filter(p=>p.fornitore===fornitore&&(baseId?p.base_carico_id===baseId:true)).map(p=>p.prodotto))];
+  // Per stazione Oppido: solo prodotti delle pompe attive (cached)
+  if (tipo === 'stazione_servizio') {
+    if (!_cacheProdottiStazione) {
+      const { data: pompe } = await sb.from('stazione_pompe').select('prodotto').eq('attiva',true);
+      _cacheProdottiStazione = [...new Set((pompe||[]).map(p => p.prodotto))];
+    }
+    prodotti = prodotti.filter(p => _cacheProdottiStazione.includes(p));
+  }
+  // Ordina per ordine_visualizzazione (Gasolio Autotrazione=1, Benzina=2, etc)
+  prodotti.sort((a,b) => {
+    const pa = cacheProdotti.find(p=>p.nome===a);
+    const pb = cacheProdotti.find(p=>p.nome===b);
+    return (pa?pa.ordine_visualizzazione:99) - (pb?pb.ordine_visualizzazione:99);
+  });
+  const selProd = document.getElementById('ord-prodotto');
+  selProd.innerHTML = '<option value="">Seleziona prodotto...</option>' + prodotti.map(p=>'<option value="'+p+'">'+p+'</option>').join('');
+  prezzoCorrente = null;
+}
+
+let _cacheMarginClienti = {};
+
+async function caricaPrezzoPerOrdine() {
+  const fornitore = document.getElementById('ord-fornitore').value;
+  const baseId = document.getElementById('ord-base').value;
+  const prodotto = document.getElementById('ord-prodotto').value;
+  if (!fornitore||!prodotto) return;
+  const match = prezziDelGiorno.find(p=>p.fornitore===fornitore&&p.prodotto===prodotto&&(baseId?p.base_carico_id===baseId:true));
+  if (match) {
+    prezzoCorrente = match;
+    document.getElementById('prev-costo').textContent = fmt(match.costo_litro);
+    const trInput = document.getElementById('ord-trasporto-custom');
+    const mgInput = document.getElementById('ord-margine-custom');
+    const pnInput = document.getElementById('ord-prezzo-netto');
+    trInput.value = match.trasporto_litro;
+
+    // Calcola media margine (con cache per evitare query ripetute)
+    let margineDaUsare = Number(match.margine);
+    const clienteId = document.getElementById('ord-cliente').value;
+    if (clienteId) {
+      const cacheKey = clienteId + '_' + prodotto;
+      if (_cacheMarginClienti[cacheKey] !== undefined) {
+        margineDaUsare = _cacheMarginClienti[cacheKey];
+      } else {
+        const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
+        if (clienteNome) {
+          const { data: ordPrec } = await sb.from('ordini').select('margine').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente').gt('margine',0).order('data',{ascending:false}).limit(10);
+          if (ordPrec && ordPrec.length > 0) {
+            margineDaUsare = ordPrec.reduce((s, o) => s + Number(o.margine), 0) / ordPrec.length;
+          }
+          _cacheMarginClienti[cacheKey] = margineDaUsare;
+        }
+      }
+    }
+
+    mgInput.value = margineDaUsare.toFixed(4);
+    const noIva = Number(match.costo_litro) + Number(match.trasporto_litro) + margineDaUsare;
+    pnInput.value = noIva.toFixed(4);
+    aggiornaPrevOrdine();
+  } else {
+    prezzoCorrente = null;
+    ['prev-costo','prev-trasporto','prev-margine','prev-prezzo-netto','prev-prezzo','prev-totale'].forEach(id => document.getElementById(id).textContent = '—');
+  }
+}
+
+// Aggiorna da margine → calcola prezzo netto
+function aggiornaPrevDaMargine() {
+  if (!prezzoCorrente) return;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+  aggiornaPrevOrdine();
+}
+
+// Aggiorna da trasporto → calcola prezzo netto
+function aggiornaPrevDaTrasporto() {
+  if (!prezzoCorrente) return;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+  aggiornaPrevOrdine();
+}
+
+// Aggiorna da prezzo netto → calcola margine
+function aggiornaPrevDaPrezzo() {
+  if (!prezzoCorrente) return;
+  const prezzoNetto = parseFloat(document.getElementById('ord-prezzo-netto').value) || 0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = prezzoNetto - Number(prezzoCorrente.costo_litro) - trasporto;
+  document.getElementById('ord-margine-custom').value = margine.toFixed(4);
+  aggiornaPrevOrdine();
+}
+
+function aggiornaPrevOrdine() {
+  if (!prezzoCorrente) return;
+  const litri = parseFloat(document.getElementById('ord-litri').value)||0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
+  document.getElementById('prev-trasporto').textContent = fmt(trasporto);
+  document.getElementById('prev-margine').textContent = fmt(margine);
+  document.getElementById('prev-prezzo-netto').textContent = fmt(noIva);
+  document.getElementById('prev-prezzo').textContent = fmt(conIva);
+  document.getElementById('prev-totale').textContent = fmtE(conIva * litri);
+  // Aggiorna avviso fido in tempo reale
+  aggiornaAvvisoFido();
+}
+
+// ── FIDO CLIENTE ─────────────────────────────────────────────────
+let fidoClienteCorrente = null;
+
+async function controllaFidoCliente() {
+  const clienteId = document.getElementById('ord-cliente').value;
+  const infoDiv = document.getElementById('fido-cliente-info');
+  fidoClienteCorrente = null;
+  if (!clienteId) { infoDiv.style.display = 'none'; return; }
+
+  // Carica dati cliente
+  const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
+  if (!cliente) { infoDiv.style.display = 'none'; return; }
+
+  // Fido
+  const fidoMax = Number(cliente.fido_massimo || 0);
+  if (fidoMax <= 0) { infoDiv.style.display = 'none'; return; }
+
+  // Carica ordini non pagati del cliente per fido
+  const { data: ordini } = await sb.from('ordini').select('data,costo_litro,trasporto_litro,margine,iva,litri,giorni_pagamento').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + cliente.nome).neq('stato','annullato').eq('pagato',false);
+
+  const ggPag = cliente.giorni_pagamento || 30;
+  let fidoUsato = 0;
+  (ordini||[]).forEach(o => {
+    const scad = new Date(o.data);
+    scad.setDate(scad.getDate() + (o.giorni_pagamento || ggPag));
+    if (scad > oggi) fidoUsato += prezzoConIva(o) * Number(o.litri);
+  });
+
+  const fidoResiduo = fidoMax - fidoUsato;
+  const pctUsato = Math.round((fidoUsato / fidoMax) * 100);
+
+  fidoClienteCorrente = { nome: cliente.nome, fidoMax, fidoUsato, fidoResiduo, pctUsato };
+
+  // Mostra info fido
+  let bgColor, textColor, icon;
+  if (pctUsato >= 100) {
+    bgColor = '#FCEBEB'; textColor = '#791F1F'; icon = '🔴';
+  } else if (pctUsato >= 90) {
+    bgColor = '#FAEEDA'; textColor = '#633806'; icon = '🟡';
+  } else {
+    bgColor = '#EAF3DE'; textColor = '#27500A'; icon = '🟢';
+  }
+
+  infoDiv.style.display = 'block';
+  infoDiv.style.background = bgColor;
+  infoDiv.style.color = textColor;
+  infoDiv.innerHTML = icon + ' <strong>Fido ' + cliente.nome + ':</strong> ' +
+    'Massimo: <strong>' + fmtE(fidoMax) + '</strong> · ' +
+    'Utilizzato: <strong>' + fmtE(fidoUsato) + '</strong> (' + pctUsato + '%) · ' +
+    'Residuo: <strong>' + fmtE(fidoResiduo) + '</strong>';
+
+  aggiornaAvvisoFido();
+}
+
+function aggiornaAvvisoFido() {
+  const warnEl = document.getElementById('prev-fido-warn');
+  if (!fidoClienteCorrente || !prezzoCorrente) { warnEl.style.display = 'none'; return; }
+
+  const litri = parseFloat(document.getElementById('ord-litri').value) || 0;
+  const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+  const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
+  const totaleOrdine = conIva * litri;
+
+  const nuovoUsato = fidoClienteCorrente.fidoUsato + totaleOrdine;
+  const nuovaPct = Math.round((nuovoUsato / fidoClienteCorrente.fidoMax) * 100);
+
+  if (nuovoUsato > fidoClienteCorrente.fidoMax) {
+    warnEl.style.display = 'inline';
+    warnEl.style.color = '#A32D2D';
+    warnEl.innerHTML = '🔴 FIDO SUPERATO! Dopo questo ordine: ' + fmtE(nuovoUsato) + ' / ' + fmtE(fidoClienteCorrente.fidoMax) + ' (' + nuovaPct + '%)';
+  } else if (nuovaPct >= 90) {
+    warnEl.style.display = 'inline';
+    warnEl.style.color = '#BA7517';
+    warnEl.innerHTML = '🟡 Attenzione fido al ' + nuovaPct + '% dopo questo ordine (' + fmtE(nuovoUsato) + ' / ' + fmtE(fidoClienteCorrente.fidoMax) + ')';
+  } else {
+    warnEl.style.display = 'none';
+  }
+}
+
+async function salvaOrdine() {
+  if (!prezzoCorrente) { toast('Seleziona data/fornitore/prodotto disponibili'); return; }
+  const litri = validaNumero(document.getElementById('ord-litri').value, 1, 100000, 'Litri');
+  if (litri === null) return;
+  const tipo = document.getElementById('ord-tipo').value;
+  const clienteId = document.getElementById('ord-cliente').value;
+  let clienteNome;
+  if (tipo === 'cliente') {
+    if (!clienteId) { toast('Seleziona un cliente'); return; }
+    clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'';
+  } else {
+    clienteNome = 'Phoenix Fuel Srl';
+  }
+  const trasporto = validaNumero(document.getElementById('ord-trasporto-custom').value || '0', 0, 1, 'Trasporto');
+  if (trasporto === null) return;
+  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  if (margine <= 0 && tipo === 'cliente') {
+    if (!confirm('Il margine è zero o negativo. Vuoi procedere comunque?')) return;
+  }
+
+  // Controllo fido cliente
+  if (fidoClienteCorrente && tipo === 'cliente') {
+    const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
+    const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
+    const totaleOrdine = conIva * litri;
+    const nuovoUsato = fidoClienteCorrente.fidoUsato + totaleOrdine;
+
+    if (nuovoUsato > fidoClienteCorrente.fidoMax) {
+      const superamento = nuovoUsato - fidoClienteCorrente.fidoMax;
+      if (!confirm('⚠ ATTENZIONE: questo ordine supera il fido del cliente di ' + fmtE(superamento) + '!\n\n' +
+        'Fido massimo: ' + fmtE(fidoClienteCorrente.fidoMax) + '\n' +
+        'Già utilizzato: ' + fmtE(fidoClienteCorrente.fidoUsato) + '\n' +
+        'Questo ordine: ' + fmtE(totaleOrdine) + '\n' +
+        'Nuovo totale: ' + fmtE(nuovoUsato) + '\n\n' +
+        'Vuoi procedere comunque?')) return;
+    } else if (Math.round((nuovoUsato / fidoClienteCorrente.fidoMax) * 100) >= 90) {
+      toast('⚠ Fido cliente al ' + Math.round((nuovoUsato / fidoClienteCorrente.fidoMax) * 100) + '% dopo questo ordine');
+    }
+  }
+
+  const ggPag = parseInt(document.getElementById('ord-gg').value);
+  const dataOrdine = new Date(document.getElementById('ord-data').value);
+  const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  const { data: nuovoOrdine, error } = await sb.from('ordini').insert([record]).select().single();
+  if (error) { toast('Errore: '+error.message); return; }
+  _auditLog('crea_ordine', 'ordini', tipo + ' ' + clienteNome + ' ' + prezzoCorrente.prodotto + ' ' + litri + 'L');
+  if (prezzoCorrente._isDeposito && tipo === 'cliente') {
+    await confermaUscitaDeposito(nuovoOrdine.id);
+    toast('Ordine salvato e deposito aggiornato!');
+  } else {
+    toast('Ordine salvato!');
+  }
+  // Reset
+  document.getElementById('ord-trasporto-custom').value = '';
+  document.getElementById('ord-margine-custom').value = '';
+  document.getElementById('ord-prezzo-netto').value = '';
+  document.getElementById('fido-cliente-info').style.display = 'none';
+  document.getElementById('prev-fido-warn').style.display = 'none';
+  fidoClienteCorrente = null;
+  _cacheMarginClienti = {};
+  caricaOrdini();
+}
+
+async function caricaOrdini() {
+  await aggiornaSelezioniOrdine();
+  // Carica solo gli ultimi 500 ordini per velocità (i filtri restringono ulteriormente)
+  const { data } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false}).limit(500);
+  const tbody = document.getElementById('tabella-ordini');
+  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
+  let html = '';
+  data.forEach(r => {
+    const pL = prezzoConIva(r), tot = pL*r.litri;
+    const basNome = r.basi_carico ? r.basi_carico.nome : '—';
+    const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
+    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
+    let btnCisterna = '';
+    if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> ';
+    else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
+    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+// Dati ordini per filtro client-side
+let _ordiniCache = [];
+
+function filtraOrdini() {
+  const q = (document.getElementById('search-ordini').value||'').toLowerCase();
+  const prodotto = document.getElementById('filtro-prodotto-ordini').value;
+  const stato = document.getElementById('filtro-stato-ordini').value;
+  const tipoFiltro = document.getElementById('filtro-tipo-ordini').value;
+  const da = document.getElementById('filtro-da-ordini').value;
+  const a = document.getElementById('filtro-a-ordini').value;
+  const tipoLabels = { 'cliente':'cliente','entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
+  const righe = document.querySelectorAll('#tabella-ordini tr');
+  righe.forEach(tr => {
+    const celle = tr.querySelectorAll('td');
+    if (!celle.length) return;
+    const dataOrd = celle[0]?.textContent || '';
+    const tipoBadge = celle[1]?.textContent?.trim() || '';
+    const cliente = celle[2]?.textContent?.toLowerCase() || '';
+    const prod = celle[3]?.textContent || '';
+    const st = celle[12]?.textContent || '';
+    let vis = true;
+    if (q && !cliente.includes(q)) vis = false;
+    if (prodotto && prod !== prodotto) vis = false;
+    if (stato && st !== stato) vis = false;
+    if (tipoFiltro && tipoBadge !== (tipoLabels[tipoFiltro]||tipoFiltro)) vis = false;
+    if (da && dataOrd < da) vis = false;
+    if (a && dataOrd > a) vis = false;
+    tr.style.display = vis ? '' : 'none';
+  });
+}
+
+// ── MODIFICA ORDINE ───────────────────────────────────────────────
+async function apriModaleOrdine(id) {
+  const { data: r } = await sb.from('ordini').select('*').eq('id', id).single();
+  if (!r) return;
+
+  // Carica documenti esistenti
+  const { data: docs } = await sb.from('documenti_ordine').select('*').eq('ordine_id', id).order('created_at',{ascending:false});
+
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica ordine</div>';
+  html += '<div class="form-grid">';
+  html += '<div class="form-group"><label>Stato</label><select id="mod-stato">';
+  ['in attesa','confermato','programmato','annullato'].forEach(s => { html += '<option value="' + s + '"' + (r.stato===s?' selected':'') + '>' + s + '</option>'; });
+  html += '</select></div>';
+  html += '<div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="' + r.litri + '" /></div>';
+  html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.0001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.0001" value="' + r.trasporto_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Margine/L</label><input type="number" id="mod-margine" step="0.0001" value="' + r.margine + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Prezzo netto/L</label><input type="number" id="mod-prezzo-netto" step="0.0001" value="' + (Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine)).toFixed(4) + '" onchange="aggiornaMargineDaPrezzo()" /></div>';
+  html += '<div class="form-group"><label>Giorni pagamento</label><select id="mod-gg">';
+  [30,45,60].forEach(g => { html += '<option value="' + g + '"' + (r.giorni_pagamento==g?' selected':'') + '>' + g + ' gg</option>'; });
+  html += '</select></div>';
+  html += '<div class="form-group"><label>IVA %</label><select id="mod-iva"><option value="22"' + (r.iva==22?' selected':'') + '>22%</option><option value="10"' + (r.iva==10?' selected':'') + '>10%</option><option value="4"' + (r.iva==4?' selected':'') + '>4%</option></select></div>';
+  html += '<div class="form-group" style="grid-column:1/-1"><label>Note</label><input type="text" id="mod-note" value="' + esc(r.note||'') + '" /></div>';
+  html += '</div>';
+
+  // Preview prezzo
+  const prezzoNetto = Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine);
+  const prezzoIva = prezzoNetto * (1 + Number(r.iva)/100);
+  const totale = prezzoIva * Number(r.litri);
+  html += '<div class="form-preview" id="mod-preview"><span>Costo: <strong>' + fmt(r.costo_litro) + '</strong></span><span>Prezzo netto: <strong>' + fmt(prezzoNetto) + '</strong></span><span>Prezzo IVA: <strong>' + fmt(prezzoIva) + '</strong></span><span>Totale: <strong>' + fmtE(totale) + '</strong></span></div>';
+  html += '<div class="form-preview"><span>Fornitore: <strong>' + esc(r.fornitore) + '</strong></span><span>Prodotto: <strong>' + esc(r.prodotto) + '</strong></span><span>Cliente: <strong>' + esc(r.cliente) + '</strong></span></div>';
+
+  // Sezione documenti
+  html += '<div style="margin-top:16px;border-top:0.5px solid var(--border);padding-top:14px">';
+  html += '<div style="font-size:13px;font-weight:500;margin-bottom:10px">Documenti allegati</div>';
+
+  // Lista documenti esistenti
+  if (docs && docs.length) {
+    html += '<div style="margin-bottom:10px">';
+    docs.forEach(d => {
+      const url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
+      const tipoLabel = d.tipo === 'das' ? '<span class="badge amber">DAS</span>' : d.tipo === 'conferma' ? '<span class="badge blue">Conferma</span>' : '<span class="badge gray">' + d.tipo + '</span>';
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-kpi);border-radius:6px;margin-bottom:4px;font-size:12px">';
+      html += tipoLabel + ' ';
+      html += '<a href="' + url + '" target="_blank" style="flex:1;color:var(--accent);text-decoration:none">' + d.nome_file + '</a>';
+      html += '<span style="font-size:10px;color:var(--text-hint)">' + new Date(d.created_at).toLocaleDateString('it-IT') + '</span>';
+      html += '<button class="btn-danger" style="font-size:12px" onclick="eliminaDocumento(\'' + d.id + '\',\'' + d.percorso_storage + '\',\'' + id + '\')">x</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:10px">Nessun documento allegato</div>';
+  }
+
+  // Upload nuovo documento
+  html += '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">';
+  html += '<div class="form-group" style="flex:1"><label>Carica documento (PDF)</label><input type="file" id="doc-file" accept=".pdf" style="font-size:12px" /></div>';
+  html += '<div class="form-group"><label>Tipo</label><select id="doc-tipo" style="font-size:12px"><option value="das">DAS</option><option value="conferma">Conferma</option><option value="fattura">Fattura</option><option value="altro">Altro</option></select></div>';
+  html += '<button class="btn-primary" style="padding:8px 14px;font-size:12px;margin-bottom:5px" onclick="uploadDocumento(\'' + id + '\')">Carica</button>';
+  html += '</div></div>';
+
+  html += '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn-primary" style="flex:1" onclick="salvaModificaOrdine(\'' + id + '\')">Salva modifiche</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
+  apriModal(html);
+}
+
+async function salvaModificaOrdine(id) {
+  const litri = parseFloat(document.getElementById('mod-litri').value);
+  const costo = parseFloat(document.getElementById('mod-costo').value);
+  const trasporto = parseFloat(document.getElementById('mod-trasporto').value);
+  const margine = parseFloat(document.getElementById('mod-margine').value);
+  const iva = parseInt(document.getElementById('mod-iva').value);
+  const ggPag = parseInt(document.getElementById('mod-gg').value);
+  const { data: ordine } = await sb.from('ordini').select('data').eq('id', id).single();
+  const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
+  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value }).eq('id', id);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('Ordine aggiornato!');
+  chiudiModalePermessi();
+  caricaOrdini();
+}
+
+// Aggiorna preview nella modale modifica
+function aggiornaPreviewModifica() {
+  const costo = parseFloat(document.getElementById('mod-costo').value) || 0;
+  const trasporto = parseFloat(document.getElementById('mod-trasporto').value) || 0;
+  const margine = parseFloat(document.getElementById('mod-margine').value) || 0;
+  const iva = parseInt(document.getElementById('mod-iva')?.value || 22);
+  const litri = parseFloat(document.getElementById('mod-litri').value) || 0;
+  const prezzoNetto = costo + trasporto + margine;
+  const prezzoIva = prezzoNetto * (1 + iva/100);
+  const totale = prezzoIva * litri;
+  document.getElementById('mod-prezzo-netto').value = prezzoNetto.toFixed(4);
+  const prev = document.getElementById('mod-preview');
+  if (prev) prev.innerHTML = '<span>Costo: <strong>' + fmt(costo) + '</strong></span><span>Prezzo netto: <strong>' + fmt(prezzoNetto) + '</strong></span><span>Prezzo IVA: <strong>' + fmt(prezzoIva) + '</strong></span><span>Totale: <strong>' + fmtE(totale) + '</strong></span>';
+}
+
+// Calcola margine dal prezzo netto inserito
+function aggiornaMargineDaPrezzo() {
+  const costo = parseFloat(document.getElementById('mod-costo').value) || 0;
+  const trasporto = parseFloat(document.getElementById('mod-trasporto').value) || 0;
+  const prezzoNetto = parseFloat(document.getElementById('mod-prezzo-netto').value) || 0;
+  const margine = prezzoNetto - costo - trasporto;
+  document.getElementById('mod-margine').value = margine.toFixed(4);
+  aggiornaPreviewModifica();
+}
+
+// ── DOCUMENTI ORDINE ─────────────────────────────────────────────
+async function uploadDocumento(ordineId) {
+  const fileInput = document.getElementById('doc-file');
+  const tipo = document.getElementById('doc-tipo').value;
+  if (!fileInput.files.length) { toast('Seleziona un file PDF'); return; }
+  const file = fileInput.files[0];
+  if (file.type !== 'application/pdf') { toast('Solo file PDF ammessi'); return; }
+  if (file.size > 10 * 1024 * 1024) { toast('File troppo grande (max 10MB)'); return; }
+
+  const nomeFile = file.name;
+  const percorso = ordineId + '/' + Date.now() + '_' + nomeFile.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  toast('Caricamento in corso...');
+
+  // Upload su Supabase Storage
+  const { error: errUpload } = await sb.storage.from('Das').upload(percorso, file, { contentType: 'application/pdf' });
+  if (errUpload) { toast('Errore upload: ' + errUpload.message); return; }
+
+  // Salva riferimento nel database
+  const { error: errDb } = await sb.from('documenti_ordine').insert([{
+    ordine_id: ordineId,
+    nome_file: nomeFile,
+    tipo: tipo,
+    percorso_storage: percorso
+  }]);
+  if (errDb) { toast('Errore salvataggio: ' + errDb.message); return; }
+
+  toast('Documento caricato!');
+  // Riapri la modale per vedere il documento aggiunto
+  apriModaleOrdine(ordineId);
+}
+
+async function eliminaDocumento(docId, percorso, ordineId) {
+  if (!confirm('Eliminare questo documento?')) return;
+  // Elimina da storage
+  await sb.storage.from('Das').remove([percorso]);
+  // Elimina dal database
+  await sb.from('documenti_ordine').delete().eq('id', docId);
+  toast('Documento eliminato');
+  apriModaleOrdine(ordineId);
+}
+
+// ── MODIFICA INLINE ───────────────────────────────────────────────
+async function editaCella(td, tabella, campo, id, val) {
+  const input = document.createElement('input');
+  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=val;
+  td.innerHTML=''; td.appendChild(input); input.focus();
+  input.onblur = async () => {
+    const nv=parseFloat(input.value);
+    if (!isNaN(nv)) { const{error}=await sb.from(tabella).update({[campo]:nv}).eq('id',id); toast(error?'Errore':'Aggiornato!'); }
+    if (tabella==='ordini') caricaOrdini(); else caricaPrezzi();
+  };
+  input.onkeydown = e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape'){if(tabella==='ordini') caricaOrdini(); else caricaPrezzi();} };
+}
+
+async function eliminaRecord(tabella, id, callback) {
+  if (!confirm('Eliminare questo record?')) return;
+  await sb.from(tabella).delete().eq('id', id);
+  _auditLog('elimina', tabella, 'ID: ' + id);
+  toast('Eliminato'); callback();
+}
+
