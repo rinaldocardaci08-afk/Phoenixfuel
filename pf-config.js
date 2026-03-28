@@ -140,7 +140,7 @@ function setSection(id, el) {
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca };
+  const loaders = { dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
