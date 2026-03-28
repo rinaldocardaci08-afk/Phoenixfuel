@@ -630,21 +630,23 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
   var anno = new Date(data).getFullYear();
   var dasInserts = [];
 
+  // Precarica tutti i clienti necessari in una sola query
+  var clientiIds = ordini.map(function(o){return o.cliente_id;}).filter(Boolean);
+  var clientiMap = {};
+  if (clientiIds.length) {
+    var { data: clientiData } = await sb.from('clienti').select('id,piva,nome,indirizzo,citta,provincia').in('id', clientiIds);
+    (clientiData||[]).forEach(function(c) { clientiMap[c.id] = c; });
+  }
+
   for (var i = 0; i < ordini.length; i++) {
     var o = ordini[i];
-    // Carica dati destinatario
-    var dest = { piva:'', ragsoc: o.cliente || '', indirizzo:'', citta:'' };
-    if (o.cliente_id) {
-      try {
-        var { data: cl } = await sb.from('clienti').select('piva,nome,indirizzo,citta,provincia').eq('id', o.cliente_id).single();
-        if (cl) {
-          dest.piva = cl.piva || '';
-          dest.ragsoc = cl.nome;
-          dest.indirizzo = cl.indirizzo || '';
-          dest.citta = (cl.citta || '') + (cl.provincia ? ' (' + cl.provincia + ')' : '');
-        }
-      } catch(e) {}
-    }
+    var cl = o.cliente_id ? clientiMap[o.cliente_id] : null;
+    var dest = {
+      piva: cl ? (cl.piva||'') : '',
+      ragsoc: cl ? cl.nome : (o.cliente||''),
+      indirizzo: cl ? (cl.indirizzo||'') : '',
+      citta: cl ? ((cl.citta||'') + (cl.provincia ? ' (' + cl.provincia + ')' : '')) : ''
+    };
     // Sede scarico se presente
     if (o.sede_scarico_nome) {
       dest.indirizzo = o.sede_scarico_nome;
