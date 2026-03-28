@@ -210,6 +210,47 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
 
   /* ── BOTTONI AZIONE nelle tabelle ── */
   .btn-edit, .btn-danger { font-size: 13px; padding: 4px; }
+
+  /* ── NUOVE SEZIONI: mobile fixes ── */
+
+  /* Benchmark: soglia input su riga propria */
+  #bench-soglia-wrap { margin-left: 0 !important; width: 100%; }
+
+  /* Benchmark: barra posizionamento nascosta su mobile (troppo stretta) */
+  #bench-posizionamento > div:first-child + div { min-height: 80px; }
+
+  /* Benchmark: spread cards impilate */
+  #bench-posizionamento .grid3,
+  [style*="grid-template-columns:1fr 1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+  /* Benchmark: analisi trend impilata */
+  #bench-analisi [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+  /* Benchmark: previsioni scrollabili */
+  #bench-analisi [style*="display:flex;gap:8px;flex-wrap:wrap"] { overflow-x: auto; flex-wrap: nowrap !important; padding-bottom: 4px; }
+
+  /* Vendite: 4 tab → 2 per riga */
+  .vend-tab { flex: 1 1 calc(50% - 4px) !important; min-width: 0; font-size: 11px !important; padding: 7px 6px !important; text-align: center; }
+
+  /* Cockpit: delta text più piccolo */
+  #ck-fatt-delta, #ck-litri-delta, #ck-margine-delta, #ck-ordini-delta { font-size: 9px !important; }
+
+  /* Backlog ordini: card compatta */
+  #ordini-backlog .card-title { font-size: 11px; }
+  #ordini-backlog .card-title button { font-size: 10px !important; padding: 4px 10px !important; }
+
+  /* Alert operativi: testo più piccolo */
+  #dash-alert-operativi div[style*="font-size:12px"] { font-size: 11px !important; }
+
+  /* Margine cliente: selettori e bottoni wrap */
+  #vend-margine-cliente .card-title > div { width: 100%; }
+  #vend-margine-cliente .card-title select { flex: 1; min-width: 0; }
+
+  /* DAS: pulsante nella tabella ordini */
+  td .btn-edit[title="DAS"] { font-size: 12px; }
+
+  /* Audit log: tabella scrollabile */
+  #audit-log-tabella td { white-space: nowrap; }
 }
 
 @media (max-width: 480px) {
@@ -226,6 +267,18 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
 
   /* KPI mono sfonda: riduci font */
   .kpi-value { font-size: 13px; word-break: break-all; }
+
+  /* Vendite: 4 tab su 480px */
+  .vend-tab { font-size: 10px !important; padding: 6px 4px !important; }
+
+  /* Cockpit: delta nascosto su 480px */
+  #ck-fatt-delta, #ck-litri-delta, #ck-margine-delta, #ck-ordini-delta { display: none; }
+
+  /* Benchmark: spread cards più compatte */
+  #bench-posizionamento [style*="font-size:15px"] { font-size: 12px !important; }
+
+  /* Benchmark: barra posizionamento nascosta */
+  #bench-posizionamento > div > div[style*="position:relative;height:65px"] { display: none; }
 }
 
 @media (min-width: 769px) {
