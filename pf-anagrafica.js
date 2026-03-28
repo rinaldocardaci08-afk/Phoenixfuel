@@ -993,8 +993,16 @@ async function stampaMargineCliente() {
   var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
 
   var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
+  var ordFiltrati = ordini || [];
+  if (sottogruppo) {
+    var { data: clInfo } = await sb.from('clienti').select('id,nome,cliente_rete');
+    var clMap = {}; (clInfo||[]).forEach(function(c){clMap[c.id]=c;clMap[c.nome]=c;});
+    ordFiltrati = ordFiltrati.filter(function(o) { var i = clMap[o.cliente_id]||clMap[o.cliente]; return sottogruppo==='rete'?(i&&i.cliente_rete):(!i||!i.cliente_rete); });
+  }
+  var sottLabel = sottogruppo === 'rete' ? ' — Solo Rete' : sottogruppo === 'consumo' ? ' — Solo Consumo' : '';
   var perCliente = {};
-  (ordini||[]).forEach(function(o) {
+  ordFiltrati.forEach(function(o) {
     var k = o.cliente||'—';
     if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[k]; p.ordini++;
@@ -1007,7 +1015,7 @@ async function stampaMargineCliente() {
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Margine per Cliente</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:9px;margin:0;padding:8mm}@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}}table{width:100%;border-collapse:collapse}th{background:#6B5FCC;color:#fff;padding:5px 4px;font-size:8px;text-transform:uppercase;border:1px solid #5A4FBB;text-align:right}th:first-child{text-align:left}td{padding:3px 5px;border:1px solid #ddd;font-size:9px;text-align:right;font-family:Courier New,monospace}td:first-child{text-align:left;font-family:Arial;font-weight:500}.tot{background:#f0f0f0;font-weight:bold}.tot td{border-top:2px solid #6B5FCC}.alt{background:#fafaf8}</style></head><body>';
-  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">MARGINALITÀ PER CLIENTE</div><div style="font-size:12px;color:#666;margin-top:2px">' + meseNome + ' ' + anno + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #6B5FCC;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:16px;font-weight:bold;color:#6B5FCC">MARGINALITÀ PER CLIENTE</div><div style="font-size:12px;color:#666;margin-top:2px">' + meseNome + ' ' + anno + sottLabel + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
   html += '<table><thead><tr><th style="text-align:left">Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Costo</th><th>Margine</th><th>€/L</th><th>%</th></tr></thead><tbody>';
   lista.forEach(function(c,i) {
     var ml = c.litri>0?c.margine/c.litri:0; var pct = c.fatturato>0?(c.margine/c.fatturato)*100:0;
@@ -1030,8 +1038,16 @@ async function esportaMargineClienteExcel() {
   if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata'); return; }
 
   var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
+  var ordFiltrati = ordini || [];
+  if (sottogruppo) {
+    var { data: clInfo } = await sb.from('clienti').select('id,nome,cliente_rete');
+    var clMap = {}; (clInfo||[]).forEach(function(c){clMap[c.id]=c;clMap[c.nome]=c;});
+    ordFiltrati = ordFiltrati.filter(function(o) { var i = clMap[o.cliente_id]||clMap[o.cliente]; return sottogruppo==='rete'?(i&&i.cliente_rete):(!i||!i.cliente_rete); });
+  }
+  var sottLabel = sottogruppo === 'rete' ? '_Rete' : sottogruppo === 'consumo' ? '_Consumo' : '';
   var perCliente = {};
-  (ordini||[]).forEach(function(o) {
+  ordFiltrati.forEach(function(o) {
     var k = o.cliente||'—';
     if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[k]; p.ordini++;
@@ -1050,7 +1066,7 @@ async function esportaMargineClienteExcel() {
   ws['!cols'] = [{wch:25},{wch:8},{wch:12},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Margine ' + meseNome + ' ' + anno);
-  XLSX.writeFile(wb, 'MargineCliente_' + meseNome + '_' + anno + '.xlsx');
+  XLSX.writeFile(wb, 'MargineCliente_' + meseNome + '_' + anno + sottLabel + '.xlsx');
   toast('Excel margine clienti esportato!');
 }
 

@@ -163,7 +163,7 @@ async function caricaAlertOperativi() {
     var { data: cist } = await sb.from('cisterne').select('nome,prodotto,livello_attuale,capacita_max').eq('sede','deposito_vibo');
     (cist||[]).forEach(function(c) {
       var pct = Number(c.capacita_max) > 0 ? (Number(c.livello_attuale) / Number(c.capacita_max)) * 100 : 100;
-      if (pct < 20) alerts.push({ tipo:'danger', icon:'🛢', testo: c.nome + ' (' + c.prodotto + ') al ' + Math.round(pct) + '% — ' + fmtL(c.livello_attuale) + ' rimanenti' });
+      if (pct < 5) alerts.push({ tipo:'danger', icon:'🛢', testo: c.nome + ' (' + c.prodotto + ') al ' + Math.round(pct) + '% — ' + fmtL(c.livello_attuale) + ' rimanenti' });
     });
 
     // 2. Clienti con fido oltre 80%

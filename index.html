@@ -317,6 +317,34 @@
           <button class="btn-primary" onclick="salvaPrezzoCliente()">Salva prezzo cliente</button>
         </div>
 
+        <!-- GENERATORE LISTINO PREZZI -->
+        <div class="card">
+          <div class="card-title">📋 Generatore listino prezzi clienti</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Prodotto</label>
+              <select id="lp-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="Gasolio Autotrazione">Gasolio Autotrazione</option>
+                <option value="Benzina">Benzina</option>
+                <option value="Gasolio Agricolo">Gasolio Agricolo</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Costo base €/L</label><input type="number" id="lp-costo" step="0.0001" placeholder="1.5800" style="font-family:var(--font-mono);font-size:16px" /></div>
+            <div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lp-trasp-consumo" step="0.0001" value="0.0190" style="font-family:var(--font-mono)" /></div>
+            <div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lp-trasp-rete" step="0.0001" value="0.0140" style="font-family:var(--font-mono)" /></div>
+            <div class="form-group"><label>IVA %</label><select id="lp-iva"><option value="22">22%</option><option value="10">10%</option></select></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <button class="btn-primary" onclick="generaListinoPrezzi()">📋 Genera listino Top 20</button>
+            <button class="btn-primary" style="background:#6B5FCC" onclick="stampaListinoPrezzi()">🖨️ Stampa</button>
+            <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
+              <label style="font-size:11px;color:var(--text-muted)">Offerta singolo cliente:</label>
+              <select id="lp-cliente-singolo" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);max-width:200px"><option value="">Seleziona...</option></select>
+              <button class="btn-primary" style="background:#639922;font-size:12px;padding:6px 14px" onclick="generaOffertaCliente()">📄 Genera offerta</button>
+            </div>
+          </div>
+          <div id="lp-risultato" style="margin-top:16px"></div>
+        </div>
+
       </div>
 
       <!-- DEPOSITO -->
