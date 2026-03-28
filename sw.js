@@ -1,4 +1,4 @@
-var CACHE_NAME = 'phoenixfuel-v3';
+var CACHE_NAME = 'phoenixfuel-v4';
 var APP_SHELL = [
   '/',
   '/index.html',
@@ -12,10 +12,11 @@ var APP_SHELL = [
   '/pf-logistica.js',
   '/pf-admin.js',
   '/pf-dashboard.js',
+  '/pf-benchmark.js',
   '/pf-system.js',
   '/manifest.json'
 ];
-var CDN_CACHE = 'phoenixfuel-cdn-v3';
+var CDN_CACHE = 'phoenixfuel-cdn-v4';
 var CDN_URLS = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdn.jsdelivr.net/npm/chart.js@4',

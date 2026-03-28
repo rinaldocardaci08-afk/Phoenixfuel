@@ -294,7 +294,10 @@
             <div class="form-group"><label>IVA %</label><select id="pr-iva" onchange="aggiornaPrev()"><option value="22">22%</option><option value="10">10%</option><option value="4">4%</option></select></div>
           </div>
           <div class="form-preview">Prezzo IVA esclusa: <strong id="calc-noiva">€ —</strong> &nbsp;|&nbsp; Prezzo IVA inclusa: <strong id="calc-iva">€ —</strong></div>
-          <button class="btn-primary" onclick="salvaPrezzo()">Salva prezzo</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn-primary" onclick="salvaPrezzo()">Salva prezzo</button>
+            <button class="btn-primary" style="background:#6B5FCC" onclick="aggiornaBenchmarkDaPrezzi()">📈 Aggiorna benchmark</button>
+          </div>
         </div>
 
         <div class="card">
@@ -552,6 +555,65 @@
               <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Top 10 clienti per margine</div><canvas id="chart-mrc-margine" height="250"></canvas></div>
               <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Margine medio per litro</div><canvas id="chart-mrc-marginelitro" height="250"></canvas></div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BENCHMARK MERCATO -->
+      <div class="section" id="s-benchmark">
+        <!-- Input giornaliero -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Inserisci prezzo di riferimento</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Data</label><input type="date" id="bench-data" /></div>
+            <div class="form-group"><label>Prodotto</label>
+              <select id="bench-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="Gasolio Autotrazione">Gasolio Autotrazione</option>
+                <option value="Benzina">Benzina</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Prezzo benchmark €/L</label><input type="number" id="bench-prezzo" step="0.0001" placeholder="1.6000" style="font-family:var(--font-mono);font-size:16px" /></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn-primary" onclick="salvaBenchmark()">💾 Salva</button>
+            <div id="bench-soglia-wrap" style="display:flex;align-items:center;gap:6px;margin-left:auto">
+              <label style="font-size:11px;color:var(--text-muted)">Alert spread min €/L:</label>
+              <input type="number" id="bench-soglia" step="0.001" value="0.030" style="width:80px;font-family:var(--font-mono);font-size:13px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);text-align:right" />
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI posizionamento -->
+        <div class="grid4" style="margin-bottom:12px" id="bench-kpi"></div>
+
+        <!-- Barra posizionamento -->
+        <div class="card" style="margin-bottom:16px">
+          <div id="bench-posizionamento"></div>
+        </div>
+
+        <!-- Analisi trend -->
+        <div class="card" style="margin-bottom:16px">
+          <div id="bench-analisi"></div>
+        </div>
+
+        <!-- Grafico storico -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Storico andamento prezzi</div>
+          <canvas id="chart-benchmark" height="280"></canvas>
+        </div>
+
+        <!-- Tabella storico -->
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Storico giornaliero</span>
+            <select id="bench-filtro-prodotto" onchange="caricaBenchmark()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="Gasolio Autotrazione">Gasolio</option>
+              <option value="Benzina">Benzina</option>
+            </select>
+          </div>
+          <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th style="color:#BA7517">Benchmark</th><th style="color:#639922">CMP</th><th style="color:#378ADD">Vendita</th><th style="color:#6B5FCC">Spread</th><th>MA7</th><th>MA30</th><th>Var. gg</th></tr></thead>
+            <tbody id="bench-tabella"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
       </div>
@@ -1429,6 +1491,7 @@
 <script src="pf-logistica.js"></script>
 <script src="pf-admin.js"></script>
 <script src="pf-dashboard.js"></script>
+<script src="pf-benchmark.js"></script>
 <script src="pf-system.js"></script>
 <script src="stz-sortable.js"></script>
 <script>

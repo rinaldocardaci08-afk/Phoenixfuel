@@ -79,6 +79,8 @@ async function costruisciMenu(ruolo, utenteId) {
       const map = { dashboard:{icon:'▦',label:'Dashboard'}, ordini:{icon:'📋',label:'Ordini'}, prezzi:{icon:'💰',label:'Prezzi giornalieri'}, deposito:{icon:'🏗',label:'Deposito'}, consegne:{icon:'🚚',label:'Consegne'}, vendite:{icon:'📊',label:'Vendite'} };
       voci.push({ id, ...map[id] });
     });
+    voci.push({ section:'Analisi' });
+    voci.push({ id:'benchmark', icon:'📈', label:'Benchmark mercato' });
     voci.push({ section:'Anagrafica' });
     ['clienti','fornitori','basi','prodotti'].forEach(id => {
       const map = { clienti:{icon:'👤',label:'Clienti'}, fornitori:{icon:'🏭',label:'Fornitori'}, basi:{icon:'📍',label:'Basi di carico'}, prodotti:{icon:'📦',label:'Prodotti'} };
@@ -103,6 +105,7 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'deposito', icon:'🏗', label:'Deposito' },
       { id:'consegne', icon:'🚚', label:'Consegne' },
       { id:'vendite', icon:'📊', label:'Vendite' },
+      { id:'benchmark', icon:'📈', label:'Benchmark mercato', section:'Analisi' },
       { id:'clienti', icon:'👤', label:'Clienti', section:'Anagrafica' },
       { id:'fornitori', icon:'🏭', label:'Fornitori' },
       { id:'basi', icon:'📍', label:'Basi di carico' },
@@ -133,14 +136,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi' };
+const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi', benchmark:'Benchmark mercato' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca };
+  const loaders = { dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca, benchmark:caricaBenchmark };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
