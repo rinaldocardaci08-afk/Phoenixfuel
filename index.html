@@ -542,6 +542,11 @@
                   <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
                   <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
                 </select>
+                <select id="mrc-sottogruppo" onchange="caricaMargineCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                  <option value="">Rete + Consumo</option>
+                  <option value="rete">Solo Rete</option>
+                  <option value="consumo">Solo Consumo</option>
+                </select>
                 <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#6B5FCC" onclick="stampaMargineCliente()">🖨️ Stampa</button>
                 <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#639922" onclick="esportaMargineClienteExcel()">📊 Excel</button>
               </div>

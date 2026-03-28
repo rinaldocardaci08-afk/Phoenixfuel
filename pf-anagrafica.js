@@ -892,9 +892,18 @@ async function caricaMargineCliente() {
   var clientiMap = {};
   (clientiInfo||[]).forEach(function(c) { clientiMap[c.id] = c; clientiMap[c.nome] = c; });
 
+  // Filtra per sottogruppo rete/consumo
+  var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
+  var ordiniFiltrati = (ordini||[]);
+  if (sottogruppo === 'rete') {
+    ordiniFiltrati = ordiniFiltrati.filter(function(o) { var info = clientiMap[o.cliente_id] || clientiMap[o.cliente]; return info && info.cliente_rete; });
+  } else if (sottogruppo === 'consumo') {
+    ordiniFiltrati = ordiniFiltrati.filter(function(o) { var info = clientiMap[o.cliente_id] || clientiMap[o.cliente]; return !info || !info.cliente_rete; });
+  }
+
   // Aggrega per cliente
   var perCliente = {};
-  (ordini||[]).forEach(function(o) {
+  ordiniFiltrati.forEach(function(o) {
     var key = o.cliente || '—';
     if (!perCliente[key]) perCliente[key] = { cliente:key, cliente_id:o.cliente_id, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[key];
