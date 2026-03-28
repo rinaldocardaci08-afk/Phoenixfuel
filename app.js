@@ -1668,14 +1668,14 @@ async function salvaPrelievoAutoconsumo() {
   if (Number(cis.livello_attuale) < litri) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
 
   // Registra prelievo
-  const { error } = await sb.from('prelievi_autoconsumo').insert([{ data, mezzo_id: mezzoId, mezzo_targa: mezzoTarga, litri, note }]);
-  if (error) { toast('Errore: ' + error.message); return; }
+  const r1 = await _sbWrite('prelievi_autoconsumo', 'insert', [{ data, mezzo_id: mezzoId, mezzo_targa: mezzoTarga, litri, note }]);
+  if (r1.error) { toast('Errore: ' + r1.error.message); return; }
 
   // Scala dalla cisterna
   const nuovoLivello = Number(cis.livello_attuale) - litri;
-  await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
+  await _sbWrite('cisterne', 'update', { livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }, { id: cis.id });
 
-  toast('⛽ Prelievo di ' + fmtL(litri) + ' L registrato per ' + mezzoTarga);
+  toast(r1._offline ? '⚡ Prelievo ' + fmtL(litri) + ' L salvato offline' : '⛽ Prelievo di ' + fmtL(litri) + ' L registrato per ' + mezzoTarga);
   document.getElementById('ac-litri').value = '';
   document.getElementById('ac-note').value = '';
   caricaAutoconsumo();
@@ -4054,7 +4054,7 @@ async function salvaLetture() {
   const data = document.getElementById('stz-data-lettura').value;
   if (!data) { toast('Seleziona una data'); return; }
   const inputs = document.querySelectorAll('.stz-lettura-input');
-  var upserts = [], cpOps = [];
+  var upserts = [], cpOps = [], _offlineBatch = [];
   for (const inp of inputs) {
     const val = parseFloat(inp.value);
     if (isNaN(val)) continue;
@@ -4064,21 +4064,21 @@ async function salvaLetture() {
     const inputPD = document.querySelector('.stz-prezzo-div[data-pompa="' + pompaId + '"]');
     const litriPD = inputLD ? parseFloat(inputLD.value) || 0 : 0;
     const prezzoPD = inputPD ? parseFloat(inputPD.value) || 0 : 0;
-    upserts.push(sb.from('stazione_letture').upsert({ pompa_id:pompaId, data, lettura:val, litri_prezzo_diverso:litriPD, prezzo_diverso:prezzoPD }, { onConflict:'pompa_id,data' }));
-    // Cambio prezzo nello storico prezzi pompa
+    upserts.push(_sbWrite('stazione_letture', 'upsert', { pompa_id:pompaId, data, lettura:val, litri_prezzo_diverso:litriPD, prezzo_diverso:prezzoPD }, 'pompa_id,data'));
     const cpKey = prodotto + ' (cambio prezzo)';
     if (litriPD > 0 && prezzoPD > 0) {
-      cpOps.push(sb.from('stazione_prezzi').upsert({ data, prodotto:cpKey, prezzo_litro:prezzoPD }, { onConflict:'data,prodotto' }));
+      cpOps.push(_sbWrite('stazione_prezzi', 'upsert', { data, prodotto:cpKey, prezzo_litro:prezzoPD }, 'data,prodotto'));
     } else {
-      cpOps.push(sb.from('stazione_prezzi').delete().eq('data',data).eq('prodotto',cpKey));
+      cpOps.push(_sbWrite('stazione_prezzi', 'delete', null, { data: data, prodotto: cpKey }));
     }
   }
   if (!upserts.length) { toast('Inserisci almeno una lettura'); return; }
   var results = await Promise.all(upserts);
+  var anyOffline = results.some(function(r) { return r._offline; });
   var errore = results.find(r => r.error);
   if (errore) { toast('Errore: ' + errore.error.message); return; }
   await Promise.all(cpOps);
-  toast(upserts.length + ' letture salvate!');
+  toast(anyOffline ? '⚡ ' + upserts.length + ' letture salvate offline' : upserts.length + ' letture salvate!');
 
   // ═══ Auto-crea prezzi pompa per giorno successivo ═══
   try {
@@ -4575,19 +4575,23 @@ function calcolaMargini() {
 
 async function salvaCostiMarg() {
   var inputs = document.querySelectorAll('.marg-costo');
-  var salvati = {};
+  var salvati = {}, anyOffline = false;
+  var ops = [];
   for (var i = 0; i < inputs.length; i++) {
     var inp = inputs[i];
     var costo = parseFloat(inp.value);
     if (isNaN(costo) || costo <= 0) continue;
     var key = inp.dataset.data + '_' + inp.dataset.prodotto;
     if (salvati[key]) continue;
-    var { error } = await sb.from('stazione_costi').upsert({ data:inp.dataset.data, prodotto:inp.dataset.prodotto, costo_litro:costo }, { onConflict:'data,prodotto' });
-    if (error) { toast('Errore: ' + error.message); return; }
+    ops.push(_sbWrite('stazione_costi', 'upsert', { data:inp.dataset.data, prodotto:inp.dataset.prodotto, costo_litro:costo }, 'data,prodotto'));
     salvati[key] = true;
   }
+  if (!ops.length) { toast('Inserisci almeno un costo'); return; }
+  var results = await Promise.all(ops);
+  anyOffline = results.some(function(r) { return r._offline; });
+  var errore = results.find(function(r) { return r.error; });
+  if (errore) { toast('Errore: ' + errore.error.message); return; }
   var count = Object.keys(salvati).length;
-  if (count === 0) { toast('Inserisci almeno un costo'); return; }
   // Aggiorna cache
   var m = window._margData;
   if (m) {
@@ -4597,7 +4601,7 @@ async function salvaCostiMarg() {
       if (inp2) m.costiMap[d+'_'+p] = parseFloat(inp2.value);
     }
   }
-  toast(count + ' costi salvati!');
+  toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati!');
 
   // ═══ Auto-crea costi per giorno successivo da CMP cisterne ═══
   try {
@@ -4652,18 +4656,20 @@ async function salvaPrezziPompa() {
   const gasolio = parseFloat(document.getElementById('stz-prezzo-gasolio').value);
   const benzina = parseFloat(document.getElementById('stz-prezzo-benzina').value);
   if (isNaN(gasolio) && isNaN(benzina)) { toast('Inserisci almeno un prezzo'); return; }
-  let salvati = 0;
+  let salvati = 0, anyOffline = false;
   if (!isNaN(gasolio)) {
-    const { error } = await sb.from('stazione_prezzi').upsert({ data, prodotto:'Gasolio Autotrazione', prezzo_litro:gasolio }, { onConflict:'data,prodotto' });
-    if (error) { toast('Errore: '+error.message); return; }
+    const r = await _sbWrite('stazione_prezzi', 'upsert', { data, prodotto:'Gasolio Autotrazione', prezzo_litro:gasolio }, 'data,prodotto');
+    if (r.error) { toast('Errore: '+r.error.message); return; }
+    if (r._offline) anyOffline = true;
     salvati++;
   }
   if (!isNaN(benzina)) {
-    const { error } = await sb.from('stazione_prezzi').upsert({ data, prodotto:'Benzina', prezzo_litro:benzina }, { onConflict:'data,prodotto' });
-    if (error) { toast('Errore: '+error.message); return; }
+    const r = await _sbWrite('stazione_prezzi', 'upsert', { data, prodotto:'Benzina', prezzo_litro:benzina }, 'data,prodotto');
+    if (r.error) { toast('Errore: '+r.error.message); return; }
+    if (r._offline) anyOffline = true;
     salvati++;
   }
-  toast(salvati + ' prezzi salvati!');
+  toast(anyOffline ? '⚡ ' + salvati + ' prezzi salvati offline' : salvati + ' prezzi salvati!');
   document.getElementById('stz-prezzo-gasolio').value = '';
   document.getElementById('stz-prezzo-benzina').value = '';
   caricaStoricoPrezzi();
@@ -4706,9 +4712,9 @@ async function salvaVersamento() {
   const pos = parseFloat(document.getElementById('stz-vers-pos-input').value) || 0;
   if (contanti === 0 && pos === 0) { toast('Inserisci almeno un importo'); return; }
   const note = document.getElementById('stz-vers-note').value.trim();
-  const { error } = await sb.from('stazione_versamenti').insert([{ data, contanti, pos, note: note || null }]);
-  if (error) { toast('Errore: '+error.message); return; }
-  toast('Versamento salvato! Totale: ' + fmtE(contanti+pos));
+  const r = await _sbWrite('stazione_versamenti', 'insert', [{ data, contanti, pos, note: note || null }]);
+  if (r.error) { toast('Errore: '+r.error.message); return; }
+  toast(r._offline ? '⚡ Versamento salvato offline' : 'Versamento salvato! Totale: ' + fmtE(contanti+pos));
   document.getElementById('stz-vers-cash').value = '';
   document.getElementById('stz-vers-pos-input').value = '';
   document.getElementById('stz-vers-note').value = '';
@@ -5184,6 +5190,32 @@ async function salvaCassa() {
     rimborsi_giorni_prec: rimborsiPrec, crediti_da_rimborsare: creditiDaRimborsare,
     contanti_da_versare: daVersare, versato, differenza
   };
+
+  // Se offline: accoda tutto e esci
+  if (!navigator.onLine) {
+    await _sbWrite('stazione_cassa', 'upsert', record, 'data');
+    // Spese
+    var speseOff = [];
+    document.querySelectorAll('#cassa-spese-lista > div').forEach(function(row) {
+      var nota = row.querySelector('.cassa-spesa-nota').value;
+      var imp = parseFloat(row.querySelector('.cassa-spesa-importo').value) || 0;
+      if (imp > 0) speseOff.push({ data: data, nota: nota, importo: imp });
+    });
+    if (speseOff.length) await _sbWrite('stazione_spese_contanti', 'insert', speseOff);
+    // Crediti
+    var saldoOff = Math.round((creditiEmessi - rimborsi - rimborsiPrec) * 100) / 100;
+    if (saldoOff !== 0 || creditiEmessi > 0 || rimborsi > 0 || rimborsiPrec > 0) {
+      await _sbWrite('stazione_crediti', 'upsert', { data_emissione: data, importo: saldoOff, nota: 'Crediti: ' + fmtE(creditiEmessi) + ' | Rimborsi: ' + fmtE(rimborsi) + ' | Rimb.prec: ' + fmtE(rimborsiPrec) }, 'data_emissione');
+    }
+    // Versamento
+    var totCarteOff = Math.round((bancomat + nexi + aziendali) * 100) / 100;
+    if (versato > 0 || totCarteOff > 0) {
+      await _sbWrite('stazione_versamenti', 'insert', [{ data: data, contanti: versato, pos: totCarteOff, note: 'Da registro cassa' }]);
+    }
+    toast('⚡ Registro cassa salvato offline');
+    calcolaCassa();
+    return;
+  }
 
   // Controlla se esiste già un registro per questa data
   var { data: cassaEsistente } = await sb.from('stazione_cassa').select('id').eq('data', data).maybeSingle();
@@ -7040,6 +7072,43 @@ function _openOfflineDB() {
     req.onerror = function() { reject(req.error); };
   });
 }
+
+// Wrapper Supabase write: se offline accoda, se online esegue normalmente
+// Se online ma fallisce per rete → accoda
+async function _sbWrite(table, action, data, conflictOrMatch) {
+  if (!navigator.onLine) {
+    await _addToOfflineQueue({ table: table, action: action, data: data, match: conflictOrMatch || null });
+    return { data: null, error: null, _offline: true };
+  }
+  try {
+    var q = sb.from(table);
+    if (action === 'insert') return await q.insert(Array.isArray(data) ? data : [data]);
+    if (action === 'upsert') return await q.upsert(data, { onConflict: conflictOrMatch || '' });
+    if (action === 'update' && conflictOrMatch) {
+      q = q.update(data);
+      Object.entries(conflictOrMatch).forEach(function(e) { q = q.eq(e[0], e[1]); });
+      return await q;
+    }
+    if (action === 'delete' && conflictOrMatch) {
+      q = q.delete();
+      Object.entries(conflictOrMatch).forEach(function(e) { q = q.eq(e[0], e[1]); });
+      return await q;
+    }
+    return { data: null, error: { message: 'Azione non riconosciuta' } };
+  } catch(err) {
+    // Errore rete → accoda
+    if (!navigator.onLine || (err.message && (err.message.indexOf('fetch') >= 0 || err.message.indexOf('network') >= 0 || err.message.indexOf('Failed') >= 0))) {
+      _isOnline = false;
+      _updateOnlineStatus();
+      await _addToOfflineQueue({ table: table, action: action, data: data, match: conflictOrMatch || null });
+      return { data: null, error: null, _offline: true };
+    }
+    return { data: null, error: err };
+  }
+}
+
+// Contatore operazioni offline per toast unico
+var _offlineOpsCount = 0;
 
 async function _addToOfflineQueue(operation) {
   try {
