@@ -1,46 +1,68 @@
-const CACHE_NAME = 'phoenixfuel-v1';
-const CACHE_URLS = [
+var CACHE_NAME = 'phoenixfuel-v2';
+var APP_SHELL = [
   '/',
   '/index.html',
   '/login.html',
   '/style.css',
   '/app.js',
-  '/logo_png.jpeg'
+  '/manifest.json'
+];
+var CDN_CACHE = 'phoenixfuel-cdn-v2';
+var CDN_URLS = [
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+  'https://cdn.jsdelivr.net/npm/chart.js@4',
+  'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
 ];
 
-// Install: cache risorse base
-self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(CACHE_URLS))
+self.addEventListener('install', function(e) {
+  e.waitUntil(
+    Promise.all([
+      caches.open(CACHE_NAME).then(function(cache) { return cache.addAll(APP_SHELL); }),
+      caches.open(CDN_CACHE).then(function(cache) { return cache.addAll(CDN_URLS); })
+    ]).then(function() { self.skipWaiting(); })
   );
-  self.skipWaiting();
 });
 
-// Activate: pulisci cache vecchie
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys => Promise.all(
-      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-    ))
+self.addEventListener('activate', function(e) {
+  e.waitUntil(
+    caches.keys().then(function(names) {
+      return Promise.all(
+        names.filter(function(n) { return n !== CACHE_NAME && n !== CDN_CACHE; })
+             .map(function(n) { return caches.delete(n); })
+      );
+    }).then(function() { self.clients.claim(); })
   );
-  self.clients.claim();
 });
 
-// Fetch: network first, fallback cache
-self.addEventListener('fetch', event => {
-  // Non cachare le chiamate API Supabase
-  if (event.request.url.includes('supabase.co')) return;
-  
-  event.respondWith(
-    fetch(event.request)
-      .then(response => {
-        // Salva in cache solo risposte valide
-        if (response.ok && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
+self.addEventListener('fetch', function(e) {
+  var url = new URL(e.request.url);
+  if (url.hostname.includes('supabase')) return;
+  if (url.hostname.includes('cdn.jsdelivr.net') || url.hostname.includes('cdnjs.cloudflare.com')) {
+    e.respondWith(
+      caches.match(e.request).then(function(cached) {
+        return cached || fetch(e.request).then(function(resp) {
+          var clone = resp.clone();
+          caches.open(CDN_CACHE).then(function(c) { c.put(e.request, clone); });
+          return resp;
+        });
       })
-      .catch(() => caches.match(event.request))
-  );
+    );
+    return;
+  }
+  if (url.origin === self.location.origin) {
+    e.respondWith(
+      fetch(e.request).then(function(resp) {
+        if (resp.status === 200) {
+          var clone = resp.clone();
+          caches.open(CACHE_NAME).then(function(c) { c.put(e.request, clone); });
+        }
+        return resp;
+      }).catch(function() {
+        return caches.match(e.request).then(function(cached) {
+          return cached || caches.match('/index.html');
+        });
+      })
+    );
+    return;
+  }
 });

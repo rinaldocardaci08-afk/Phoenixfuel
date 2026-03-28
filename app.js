@@ -30,9 +30,19 @@ async function inizializza() {
   utenteCorrente = utente;
   document.getElementById('utente-nome').textContent = utente.nome;
   document.getElementById('utente-ruolo').textContent = utente.ruolo;
+  var postLabelsInit = { 'ufficio':'🏢 Ufficio', 'stazione_oppido':'⛽ Stazione Oppido', 'deposito_vibo':'🏭 Deposito Vibo', 'logistica':'🚛 Logistica' };
+  document.getElementById('utente-postazione').textContent = postLabelsInit[utente.postazione] || '';
   await costruisciMenu(utente.ruolo, utente.id);
   if (utente.ruolo === 'cliente') { setSection('cliente', document.querySelector('.nav-item')); }
-  else { await Promise.all([caricaCacheProdotti(), caricaSelectClienti('ord-cliente')]); caricaDashboard(); initForms(); aggiornaSelezioniOrdine(); }
+  else {
+    await Promise.all([caricaCacheProdotti(), caricaSelectClienti('ord-cliente')]);
+    initForms(); aggiornaSelezioniOrdine();
+    // Apri sezione in base alla postazione
+    var sezionePost = { 'stazione_oppido':'stazione', 'deposito_vibo':'deposito', 'logistica':'logistica' };
+    var sezioneIniziale = sezionePost[utente.postazione] || 'dashboard';
+    var navItem = document.querySelector('.nav-item[onclick*="' + sezioneIniziale + '"]') || document.querySelector('.nav-item');
+    setSection(sezioneIniziale, navItem);
+  }
 }
 
 async function caricaCacheProdotti() {
@@ -6973,6 +6983,137 @@ async function caricaNotificheDashboard() {
   html += '</tbody></table></div></div>';
   wrap.innerHTML = html;
 }
+
+// ── POSTAZIONE — SWITCH RAPIDO ──────────────────────────────────
+function togglePostazione() {
+  var dd = document.getElementById('postazione-dropdown');
+  if (dd) dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+
+async function switchPostazione(nuova) {
+  document.getElementById('postazione-dropdown').style.display = 'none';
+  if (!utenteCorrente) return;
+  if (utenteCorrente.postazione === nuova) return;
+
+  // Aggiorna in DB
+  await sb.from('utenti').update({ postazione: nuova }).eq('id', utenteCorrente.id);
+  utenteCorrente.postazione = nuova;
+
+  // Aggiorna label
+  var postLabels = { 'ufficio':'🏢 Ufficio', 'stazione_oppido':'⛽ Stazione Oppido', 'deposito_vibo':'🏭 Deposito Vibo', 'logistica':'🚛 Logistica' };
+  document.getElementById('utente-postazione').textContent = postLabels[nuova] || '';
+
+  // Naviga alla sezione relativa
+  var sezionePost = { 'stazione_oppido':'stazione', 'deposito_vibo':'deposito', 'logistica':'logistica' };
+  var sez = sezionePost[nuova] || 'dashboard';
+  var navItem = document.querySelector('.nav-item[onclick*="' + sez + '"]') || document.querySelector('.nav-item');
+  setSection(sez, navItem);
+  toast('Postazione: ' + (postLabels[nuova] || nuova));
+}
+
+// Chiudi dropdown cliccando fuori
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('postazione-dropdown');
+  var post = document.getElementById('utente-postazione');
+  if (dd && dd.style.display !== 'none' && !dd.contains(e.target) && e.target !== post) {
+    dd.style.display = 'none';
+  }
+});
+
+// ── PWA OFFLINE ─────────────────────────────────────────────────
+var _isOnline = navigator.onLine;
+var _offlineQueue = [];
+var _DB_NAME = 'PhoenixFuelOffline';
+var _DB_VERSION = 1;
+
+// IndexedDB per coda operazioni offline
+function _openOfflineDB() {
+  return new Promise(function(resolve, reject) {
+    var req = indexedDB.open(_DB_NAME, _DB_VERSION);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains('queue')) {
+        db.createObjectStore('queue', { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = function(e) { resolve(e.target.result); };
+    req.onerror = function() { reject(req.error); };
+  });
+}
+
+async function _addToOfflineQueue(operation) {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('queue', 'readwrite');
+    tx.objectStore('queue').add({
+      timestamp: Date.now(),
+      table: operation.table,
+      action: operation.action, // 'insert','update','upsert','delete'
+      data: operation.data,
+      match: operation.match || null
+    });
+    return new Promise(function(resolve) { tx.oncomplete = resolve; });
+  } catch(e) { console.warn('Offline queue error:', e); }
+}
+
+async function _syncOfflineQueue() {
+  try {
+    var db = await _openOfflineDB();
+    var tx = db.transaction('queue', 'readonly');
+    var store = tx.objectStore('queue');
+    var all = await new Promise(function(resolve) {
+      var req = store.getAll();
+      req.onsuccess = function() { resolve(req.result); };
+    });
+
+    if (!all || !all.length) return;
+    toast('Sincronizzazione ' + all.length + ' operazioni offline...');
+
+    var synced = 0;
+    for (var i = 0; i < all.length; i++) {
+      var op = all[i];
+      try {
+        if (op.action === 'insert') {
+          await sb.from(op.table).insert(op.data);
+        } else if (op.action === 'update' && op.match) {
+          var q = sb.from(op.table).update(op.data);
+          Object.entries(op.match).forEach(function(entry) { q = q.eq(entry[0], entry[1]); });
+          await q;
+        } else if (op.action === 'upsert') {
+          await sb.from(op.table).upsert(op.data, { onConflict: op.match || '' });
+        } else if (op.action === 'delete' && op.match) {
+          var dq = sb.from(op.table).delete();
+          Object.entries(op.match).forEach(function(entry) { dq = dq.eq(entry[0], entry[1]); });
+          await dq;
+        }
+        synced++;
+        // Rimuovi dalla coda
+        var delTx = db.transaction('queue', 'readwrite');
+        delTx.objectStore('queue').delete(op.id);
+      } catch(e) { console.warn('Sync failed for op', op.id, e); }
+    }
+
+    if (synced > 0) toast('✅ ' + synced + ' operazioni sincronizzate!');
+  } catch(e) { console.warn('Sync error:', e); }
+}
+
+// Online/Offline detection
+function _updateOnlineStatus() {
+  var wasOffline = !_isOnline;
+  _isOnline = navigator.onLine;
+  var banner = document.getElementById('offline-banner');
+  if (banner) banner.style.display = _isOnline ? 'none' : 'block';
+
+  // Torna online: sincronizza coda
+  if (_isOnline && wasOffline) {
+    _syncOfflineQueue();
+  }
+}
+
+window.addEventListener('online', _updateOnlineStatus);
+window.addEventListener('offline', _updateOnlineStatus);
+// Check iniziale
+setTimeout(_updateOnlineStatus, 1000);
 
 // ── AVVIO ─────────────────────────────────────────────────────────
 inizializza();

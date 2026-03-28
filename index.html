@@ -56,12 +56,19 @@
       <!-- popolato da JS in base al ruolo -->
     </nav>
     <div class="sidebar-footer">
-      <span id="utente-nome">—</span>
+      <div><span id="utente-nome">—</span><div id="utente-postazione" style="font-size:10px;color:var(--text-hint);margin-top:2px;cursor:pointer" onclick="togglePostazione()" title="Cambia postazione"></div></div>
+      <div id="postazione-dropdown" style="display:none;position:absolute;bottom:50px;left:12px;right:12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:6px;z-index:100;box-shadow:0 -4px 12px rgba(0,0,0,0.15)">
+        <div onclick="switchPostazione('ufficio')" style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">🏢 Ufficio</div>
+        <div onclick="switchPostazione('stazione_oppido')" style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">⛽ Stazione Oppido</div>
+        <div onclick="switchPostazione('deposito_vibo')" style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">🏭 Deposito Vibo</div>
+        <div onclick="switchPostazione('logistica')" style="padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">🚛 Logistica</div>
+      </div>
       <button onclick="logout()" style="background:none;border:none;color:var(--text-hint);cursor:pointer;font-size:11px;margin-left:8px">Esci</button>
     </div>
   </aside>
 
   <div class="main">
+    <div id="offline-banner" style="display:none;background:#E24B4A;color:#fff;text-align:center;padding:8px 16px;font-size:12px;font-weight:500;position:sticky;top:0;z-index:50">⚡ Modalità offline — Le modifiche verranno sincronizzate quando torni online</div>
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px">
         <button class="hamburger no-desktop" onclick="toggleSidebar()">☰</button>
@@ -1289,5 +1296,17 @@
 </div>
 <script src="app.js"></script>
 <script src="stz-sortable.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(function(reg) {
+    reg.addEventListener('updatefound', function() {
+      var w = reg.installing;
+      w.addEventListener('statechange', function() {
+        if (w.state === 'activated') console.log('PhoenixFuel PWA aggiornata');
+      });
+    });
+  });
+}
+</script>
 </body>
 </html>
