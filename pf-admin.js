@@ -12,6 +12,8 @@ const SEZIONI_SISTEMA = [
     {id:'vendite.annuale',label:'Riepilogo annuale'},
     {id:'vendite.margine-cliente',label:'Margine per cliente'}
   ]},
+  {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
+  {id:'finanze',label:'Finanze',icon:'🏦'},
   {id:'clienti',label:'Clienti',icon:'👤'},
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
   {id:'basi',label:'Basi di carico',icon:'📍'},
@@ -25,8 +27,12 @@ const SEZIONI_SISTEMA = [
     {id:'stazione.magazzino',label:'Magazzino'},
     {id:'stazione.marginalita',label:'Marginalità'},
     {id:'stazione.cassa',label:'Cassa'},
+    {id:'stazione.foglio',label:'Foglio giornaliero'},
+    {id:'stazione.giacenze',label:'Giacenze mensili'},
+    {id:'stazione.allegati',label:'Allegati'},
     {id:'stazione.report',label:'Report'}
   ]},
+  {id:'autoconsumo',label:'Autoconsumo',icon:'🛢'},
   {id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},
   {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
   {id:'finanze',label:'Finanze',icon:'🏦'},
