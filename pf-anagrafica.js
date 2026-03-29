@@ -302,7 +302,7 @@ async function caricaVenditeIngrosso() {
   let fatturato=0, litri=0, margine=0;
   const pf={}, pc={};
   data.forEach(r => {
-    const tot = prezzoConIva(r) * r.litri;
+    const tot = prezzoNoIva(r) * Number(r.litri);
     const marg = Number(r.margine) * Number(r.litri);
     fatturato += tot; litri += Number(r.litri); margine += marg;
     // Per fornitore
@@ -892,7 +892,19 @@ async function caricaMargineCliente() {
   var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
   var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
 
-  var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var { data: ordiniRaw } = await sb.from('ordini').select('cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(0,999);
+  // Paginazione: carica TUTTI gli ordini (fix >1000 righe)
+  var ordini = ordiniRaw || [];
+  if (ordini.length === 1000) {
+    var from = 1000;
+    while (true) {
+      var { data: batch } = await sb.from('ordini').select('cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(from, from + 999);
+      if (!batch || !batch.length) break;
+      ordini = ordini.concat(batch);
+      if (batch.length < 1000) break;
+      from += 1000;
+    }
+  }
 
   // Carica info clienti per tipo
   var { data: clientiInfo } = await sb.from('clienti').select('id,nome,tipo,cliente_rete');
@@ -914,9 +926,9 @@ async function caricaMargineCliente() {
     var key = o.cliente || '—';
     if (!perCliente[key]) perCliente[key] = { cliente:key, cliente_id:o.cliente_id, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[key];
-    var fatt = prezzoConIva(o) * Number(o.litri);
+    var fatt = prezzoNoIva(o) * Number(o.litri);
     var marg = Number(o.margine) * Number(o.litri);
-    var costo = fatt - marg;
+    var costo = (Number(o.costo_litro) + Number(o.trasporto_litro)) * Number(o.litri);
     p.ordini++;
     p.litri += Number(o.litri);
     p.fatturato += fatt;
@@ -1000,7 +1012,18 @@ async function stampaMargineCliente() {
   var ultimoGg = mese ? new Date(Number(anno), Number(mese), 0).getDate() : 31;
   var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
 
-  var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var { data: ordiniRaw } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(0,999);
+  var ordini = ordiniRaw || [];
+  if (ordini.length === 1000) {
+    var from = 1000;
+    while (true) {
+      var { data: batch } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(from, from + 999);
+      if (!batch || !batch.length) break;
+      ordini = ordini.concat(batch);
+      if (batch.length < 1000) break;
+      from += 1000;
+    }
+  }
   var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
   var ordFiltrati = ordini || [];
   if (sottogruppo) {
@@ -1014,8 +1037,8 @@ async function stampaMargineCliente() {
     var k = o.cliente||'—';
     if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[k]; p.ordini++;
-    var fatt = prezzoConIva(o)*Number(o.litri); var marg = Number(o.margine)*Number(o.litri);
-    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=fatt-marg; p.margine+=marg;
+    var fatt = prezzoNoIva(o)*Number(o.litri); var marg = Number(o.margine)*Number(o.litri);
+    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=(Number(o.costo_litro)+Number(o.trasporto_litro))*Number(o.litri); p.margine+=marg;
   });
   var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
   var tot = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
@@ -1045,7 +1068,18 @@ async function esportaMargineClienteExcel() {
   var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
   if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata'); return; }
 
-  var { data: ordini } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a);
+  var { data: ordiniRaw } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(0,999);
+  var ordini = ordiniRaw || [];
+  if (ordini.length === 1000) {
+    var from = 1000;
+    while (true) {
+      var { data: batch } = await sb.from('ordini').select('cliente,cliente_id,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(from, from + 999);
+      if (!batch || !batch.length) break;
+      ordini = ordini.concat(batch);
+      if (batch.length < 1000) break;
+      from += 1000;
+    }
+  }
   var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
   var ordFiltrati = ordini || [];
   if (sottogruppo) {
@@ -1059,8 +1093,8 @@ async function esportaMargineClienteExcel() {
     var k = o.cliente||'—';
     if (!perCliente[k]) perCliente[k] = { cliente:k, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
     var p = perCliente[k]; p.ordini++;
-    var fatt = prezzoConIva(o)*Number(o.litri); var marg = Number(o.margine)*Number(o.litri);
-    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=fatt-marg; p.margine+=marg;
+    var fatt = prezzoNoIva(o)*Number(o.litri); var marg = Number(o.margine)*Number(o.litri);
+    p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=(Number(o.costo_litro)+Number(o.trasporto_litro))*Number(o.litri); p.margine+=marg;
   });
   var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
 
