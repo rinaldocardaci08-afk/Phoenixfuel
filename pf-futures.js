@@ -7,23 +7,8 @@ var LITRI_PER_TONNELLATA = 1175;
 var CARICO_STANDARD = 35000;
 
 async function _fetchYahoo(ticker, range, interval) {
-  var proxies = [
-    function(u) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(u); },
-    function(u) { return 'https://thingproxy.freeboard.io/fetch/' + u; },
-    function(u) { return 'https://corsproxy.org/?' + encodeURIComponent(u); }
-  ];
-  var baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=' + (interval||'1d') + '&range=' + (range||'1mo');
-  for (var p = 0; p < proxies.length; p++) {
-    try {
-      var url = proxies[p](baseUrl);
-      var res = await fetch(url);
-      if (!res.ok) continue;
-      var raw = await res.json();
-      var json = raw.contents ? JSON.parse(raw.contents) : raw;
-      if (json.chart && json.chart.result) return json.chart.result[0];
-    } catch (e) { continue; }
-  }
-  console.warn('Yahoo fetch failed for ' + ticker + ' (all proxies)');
+  // Yahoo Finance richiede un backend proxy (Edge Function) per CORS
+  // Per ora disabilitato — usare inserimento manuale
   return null;
 }
 
@@ -61,9 +46,8 @@ async function _fetchDatiFutures() {
 
 async function renderFutures() {
   var wrap = document.getElementById('futures-wrap'); if (!wrap) return;
-  wrap.innerHTML = '<div class="loading" style="padding:40px;text-align:center">Caricamento dati ICE Gasoil + EUR/USD...</div>';
   var dati = await _fetchDatiFutures(); _futuresDati = dati;
-  if (!dati) { wrap.innerHTML = '<div class="card" style="padding:20px;text-align:center;color:var(--text-muted)">Impossibile caricare i dati da Yahoo Finance.<br/><button class="btn-primary" style="margin-top:12px" onclick="renderFutures()">Riprova</button></div>'; return; }
+  if (!dati) { _renderFuturesManuale(wrap); return; }
   _salvaFuturesStorico(dati);
   var sC = dati.segnale==='rialzo'?'#E24B4A':dati.segnale==='ribasso'?'#639922':'#BA7517';
   var sI = dati.segnale==='rialzo'?'🔴':dati.segnale==='ribasso'?'🟢':'🟡';
@@ -126,20 +110,24 @@ async function _caricaStoricoFuturesDB() {
   tb.innerHTML=storico.map(function(r,i){var c=r.segnale==='rialzo'?'#E24B4A':r.segnale==='ribasso'?'#639922':'#BA7517';var ic=r.segnale==='rialzo'?'🔴':r.segnale==='ribasso'?'🟢':'🟡';var imp=Number(r.var_euro_litro||0)*CARICO_STANDARD;return '<tr'+(i%2?' style="background:var(--bg)"':'')+'><td style="font-weight:500">'+r.data+'</td><td style="text-align:right;font-family:var(--font-mono);color:#BA7517">'+Number(r.prezzo_euro_litro).toFixed(4)+'</td><td style="text-align:right;font-family:var(--font-mono);color:'+c+'">'+(Number(r.var_euro_litro)>=0?'+':'')+Number(r.var_euro_litro).toFixed(4)+'</td><td style="text-align:right;font-family:var(--font-mono)">'+Number(r.lgo_usd).toFixed(2)+'</td><td style="text-align:right;font-family:var(--font-mono)">'+Number(r.eurusd).toFixed(4)+'</td><td style="text-align:center">'+ic+'</td><td style="text-align:right;font-family:var(--font-mono);color:'+c+'">'+(imp>=0?'+':'−')+' '+fmtE(Math.abs(imp))+'</td></tr>';}).join('');
 }
 
-// Alert dashboard dopo le 17:30
+// Alert dashboard dopo le 17:30 — usa dati salvati nel DB
 async function caricaAlertFutures() {
   var w=document.getElementById('dash-alert-futures');if(!w)return;
   var ora=new Date();
   if(ora.getHours()<17||(ora.getHours()===17&&ora.getMinutes()<30)){w.style.display='none';return;}
   var key='pf_fut_dismissed_'+ora.toISOString().split('T')[0];
   try{if(localStorage.getItem(key)){w.style.display='none';return;}}catch(e){}
-  var dati=await _fetchDatiFutures();if(!dati){w.style.display='none';return;}
-  var c=dati.segnale==='rialzo'?'#E24B4A':dati.segnale==='ribasso'?'#639922':'#BA7517';
-  var ic=dati.segnale==='rialzo'?'🔴':dati.segnale==='ribasso'?'🟢':'🟡';
-  var tx=dati.segnale==='rialzo'?'Probabile rialzo gasolio domani':dati.segnale==='ribasso'?'Probabile ribasso gasolio domani':'Mercato gasolio stabile';
-  var imp=dati.impatto;
+  // Leggi ultimo dato dal DB
+  var {data:ultimo}=await sb.from('futures_storico').select('*').order('data',{ascending:false}).limit(1).maybeSingle();
+  if(!ultimo||!ultimo.segnale){w.style.display='none';return;}
+  // Solo se il dato è di oggi
+  if(ultimo.data!==oggiISO){w.style.display='none';return;}
+  var c=ultimo.segnale==='rialzo'?'#E24B4A':ultimo.segnale==='ribasso'?'#639922':'#BA7517';
+  var ic=ultimo.segnale==='rialzo'?'🔴':ultimo.segnale==='ribasso'?'🟢':'🟡';
+  var tx=ultimo.segnale==='rialzo'?'Probabile rialzo gasolio domani':ultimo.segnale==='ribasso'?'Probabile ribasso gasolio domani':'Mercato gasolio stabile';
+  var imp=Number(ultimo.var_euro_litro||0)*CARICO_STANDARD;
   w.style.display='';
-  w.innerHTML='<div onclick="_futuresAlertClick()" style="padding:12px 16px;border:2px solid '+c+';border-radius:12px;background:'+c+'08;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px"><div style="display:flex;align-items:center;gap:10px;flex:1"><span style="font-size:20px">'+ic+'</span><div><div style="font-size:13px;font-weight:500;color:'+c+'">'+tx+'</div><div style="font-size:11px;color:var(--text-muted)">€/L: '+dati.euroLitroOggi.toFixed(3)+' ('+(dati.varEuroLitro>=0?'+':'')+dati.varEuroLitro.toFixed(3)+') · Impatto: <strong style="color:'+c+'">'+(imp>=0?'+':'−')+' '+fmtE(Math.abs(imp))+'</strong> · <em>Clicca per dettagli</em></div></div></div><span style="font-size:18px;color:var(--text-hint)">›</span></div>';
+  w.innerHTML='<div onclick="_futuresAlertClick()" style="padding:12px 16px;border:2px solid '+c+';border-radius:12px;background:'+c+'08;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px"><div style="display:flex;align-items:center;gap:10px;flex:1"><span style="font-size:20px">'+ic+'</span><div><div style="font-size:13px;font-weight:500;color:'+c+'">'+tx+'</div><div style="font-size:11px;color:var(--text-muted)">€/L: '+Number(ultimo.prezzo_euro_litro).toFixed(3)+' ('+(Number(ultimo.var_euro_litro)>=0?'+':'')+Number(ultimo.var_euro_litro).toFixed(3)+') · Impatto: <strong style="color:'+c+'">'+(imp>=0?'+':'−')+' '+fmtE(Math.abs(imp))+'</strong> · <em>Clicca per dettagli</em></div></div></div><span style="font-size:18px;color:var(--text-hint)">›</span></div>';
 }
 
 function _futuresAlertClick() {
@@ -149,4 +137,74 @@ function _futuresAlertClick() {
   setTimeout(function(){var t=document.getElementById('tab-futures');if(t)t.click();},350);
 }
 
-setInterval(function(){var t=new Date();if(t.getHours()===17&&t.getMinutes()===30){var d=document.getElementById('dash-alert-futures');if(d)caricaAlertFutures();var f=document.getElementById('futures-wrap');if(f&&f.offsetParent!==null)renderFutures();}},60000);
+// Polling rimosso — dati inseriti manualmente
+
+// ═══ INSERIMENTO MANUALE (fallback quando Yahoo non disponibile) ═══
+function _renderFuturesManuale(wrap) {
+  var h = '<div class="card" style="margin-bottom:16px">';
+  h += '<div class="card-title">Inserimento manuale — ICE Gasoil + EUR/USD</div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci i dati da <a href="https://www.ice.com/products/34361831/Low-Sulphur-Gasoil-Futures" target="_blank" style="color:#378ADD">ICE Exchange</a> e <a href="https://www.google.com/finance/quote/EUR-USD" target="_blank" style="color:#378ADD">Google Finance EUR/USD</a></div>';
+  h += '<div class="form-grid">';
+  h += '<div class="form-group"><label>Data</label><input type="date" id="fut-m-data" value="' + oggiISO + '" /></div>';
+  h += '<div class="form-group"><label>LGO=F ($/tonnellata)</label><input type="number" id="fut-m-lgo" step="0.01" placeholder="Es. 691.00" style="font-family:var(--font-mono);font-size:16px" /></div>';
+  h += '<div class="form-group"><label>EUR/USD</label><input type="number" id="fut-m-eurusd" step="0.0001" placeholder="Es. 1.0832" style="font-family:var(--font-mono);font-size:16px" /></div>';
+  h += '</div>';
+  h += '<div id="fut-m-preview" style="margin-top:12px"></div>';
+  h += '<div style="display:flex;gap:8px;margin-top:10px">';
+  h += '<button class="btn-primary" onclick="_calcolaFuturesManuale()">📊 Calcola</button>';
+  h += '<button class="btn-primary" style="background:#639922" onclick="_salvaFuturesManuale()">💾 Salva</button>';
+  h += '</div></div>';
+  // Storico
+  h += '<div class="card"><div class="card-title">Storico giornaliero</div><div style="overflow-x:auto"><table><thead><tr><th>Data</th><th style="text-align:right">€/litro</th><th style="text-align:right">Var. €/L</th><th style="text-align:right">LGO $/t</th><th style="text-align:right">EUR/USD</th><th style="text-align:center">Segnale</th><th style="text-align:right">Impatto ' + _sep((CARICO_STANDARD).toLocaleString('it-IT')) + 'L</th></tr></thead><tbody id="fut-storico-tabella"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
+  wrap.innerHTML = h;
+  _caricaStoricoFuturesDB();
+}
+
+function _calcolaFuturesManuale() {
+  var lgo = parseFloat(document.getElementById('fut-m-lgo').value);
+  var eur = parseFloat(document.getElementById('fut-m-eurusd').value);
+  if (!lgo || !eur) { toast('Inserisci LGO e EUR/USD'); return; }
+  var euroL = (lgo / eur) / LITRI_PER_TONNELLATA;
+  // Prendi ieri dal DB per calcolare variazione
+  var prev = document.getElementById('fut-storico-tabella');
+  var primaRiga = prev ? prev.querySelector('tr td:nth-child(2)') : null;
+  var ieriEL = primaRiga ? parseFloat(primaRiga.textContent) : 0;
+  var varEL = ieriEL > 0 ? euroL - ieriEL : 0;
+  var varPct = ieriEL > 0 ? (varEL / ieriEL) * 100 : 0;
+  var segnale = varPct > 1.5 ? 'rialzo' : varPct < -1.5 ? 'ribasso' : 'stabile';
+  var sC = segnale === 'rialzo' ? '#E24B4A' : segnale === 'ribasso' ? '#639922' : '#BA7517';
+  var sI = segnale === 'rialzo' ? '🔴' : segnale === 'ribasso' ? '🟢' : '🟡';
+  var sT = segnale === 'rialzo' ? 'Probabile rialzo' : segnale === 'ribasso' ? 'Probabile ribasso' : 'Stabile';
+  var impatto = varEL * CARICO_STANDARD;
+  var impS = impatto >= 0 ? '+' : '−';
+  var impC = impatto >= 0 ? '#E24B4A' : '#639922';
+
+  var ph = '<div style="padding:14px 18px;border:2px solid ' + sC + ';border-radius:12px;background:' + sC + '08;margin-bottom:12px">';
+  ph += '<div style="font-size:16px;font-weight:500;color:' + sC + '">' + sI + ' ' + sT + '</div>';
+  ph += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Prezzo: <strong style="font-family:var(--font-mono)">' + euroL.toFixed(4) + ' €/L</strong>';
+  if (ieriEL > 0) ph += ' · Var: <span style="color:' + sC + '">' + (varEL >= 0 ? '+' : '') + varEL.toFixed(4) + ' (' + (varPct >= 0 ? '+' : '') + varPct.toFixed(1) + '%)</span>';
+  ph += '</div></div>';
+  ph += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+  ph += '<div class="kpi"><div class="kpi-label">€/litro</div><div class="kpi-value" style="font-family:var(--font-mono);color:#BA7517">' + euroL.toFixed(4) + '</div></div>';
+  ph += '<div class="kpi"><div class="kpi-label">Impatto carico ' + _sep((CARICO_STANDARD).toLocaleString('it-IT')) + 'L</div><div class="kpi-value" style="font-family:var(--font-mono);color:' + impC + '">' + impS + ' ' + fmtE(Math.abs(impatto)) + '</div></div>';
+  ph += '<div class="kpi"><div class="kpi-label">Segnale</div><div class="kpi-value" style="color:' + sC + '">' + sT + '</div></div>';
+  ph += '</div>';
+  document.getElementById('fut-m-preview').innerHTML = ph;
+
+  // Salva per il salvataggio
+  window._futManuale = { lgo: lgo, eur: eur, euroL: euroL, varEL: varEL, segnale: segnale, varPct: varPct };
+}
+
+async function _salvaFuturesManuale() {
+  if (!window._futManuale) { _calcolaFuturesManuale(); if (!window._futManuale) return; }
+  var data = document.getElementById('fut-m-data').value;
+  if (!data) { toast('Seleziona data'); return; }
+  var d = window._futManuale;
+  await sb.from('futures_storico').upsert({
+    data: data, lgo_usd: Math.round(d.lgo * 100) / 100, eurusd: Math.round(d.eur * 10000) / 10000,
+    prezzo_euro_litro: Math.round(d.euroL * 100000) / 100000, var_euro_litro: Math.round(d.varEL * 100000) / 100000,
+    segnale: d.segnale, impatto_pct: Math.round(d.varPct * 100) / 100
+  }, { onConflict: 'data' });
+  toast('Dati futures salvati!');
+  _caricaStoricoFuturesDB();
+}
