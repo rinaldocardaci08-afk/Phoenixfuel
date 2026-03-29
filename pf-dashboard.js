@@ -82,6 +82,7 @@ async function caricaDashboard() {
   tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
   // Giacenza deposito + grafici + cockpit in parallelo
   await Promise.all([caricaGiacenzaDashboard(), caricaGraficiDashboard(), caricaCockpit(), caricaAlertOperativi()]);
+  if (typeof caricaAlertFutures === 'function') caricaAlertFutures();
 }
 
 async function caricaGiacenzaDashboard() {

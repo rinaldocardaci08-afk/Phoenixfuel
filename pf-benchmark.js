@@ -290,3 +290,17 @@ function _regressione(arr) {
   var intercept = (sumY - slope * sumX) / n;
   return { slope: slope, intercept: intercept };
 }
+
+// ── Tab switcher Benchmark / Futures ──
+function _switchBenchTab(tab) {
+  var isStd = tab === 'std';
+  var wStd = document.getElementById('bench-std-wrap');
+  var wFut = document.getElementById('futures-wrap');
+  var tStd = document.getElementById('tab-benchmark-std');
+  var tFut = document.getElementById('tab-futures');
+  if (wStd) wStd.style.display = isStd ? '' : 'none';
+  if (wFut) wFut.style.display = isStd ? 'none' : '';
+  if (tStd) { tStd.style.color = isStd ? 'var(--primary)' : 'var(--text-muted)'; tStd.style.borderBottomColor = isStd ? 'var(--primary)' : 'transparent'; tStd.style.fontWeight = isStd ? '600' : '500'; }
+  if (tFut) { tFut.style.color = isStd ? 'var(--text-muted)' : 'var(--primary)'; tFut.style.borderBottomColor = isStd ? 'transparent' : 'var(--primary)'; tFut.style.fontWeight = isStd ? '500' : '600'; }
+  if (!isStd) renderFutures();
+}
