@@ -436,3 +436,138 @@ async function convalidaGiacenze(sede) {
   calcolaGiacenzeAnno(sede);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// STORICO CHIUSURE FINE ANNO — Report stampabile
+// ═══════════════════════════════════════════════════════════════════
+async function stampaStoricoChiusure(sede) {
+  var sedeLabel = { deposito_vibo:'Deposito Vibo', stazione_oppido:'Stazione Oppido', autoconsumo:'Autoconsumo' };
+  var w = _apriReport('Storico chiusure ' + (sedeLabel[sede]||sede)); if (!w) return;
+
+  // Carica tutti gli anni
+  var { data: tutti } = await sb.from('giacenze_annuali').select('*').eq('sede', sede).order('anno', { ascending: false });
+  if (!tutti || !tutti.length) { w.close(); toast('Nessuna chiusura salvata per ' + (sedeLabel[sede]||sede)); return; }
+
+  // Raggruppa per anno
+  var perAnno = {};
+  tutti.forEach(function(g) {
+    if (!perAnno[g.anno]) perAnno[g.anno] = {};
+    perAnno[g.anno][g.prodotto] = g;
+  });
+  var anni = Object.keys(perAnno).sort(function(a,b) { return Number(b) - Number(a); });
+
+  // Raccogli tutti i prodotti
+  var prodottiSet = {};
+  tutti.forEach(function(g) { prodottiSet[g.prodotto] = true; });
+  var prodotti = Object.keys(prodottiSet).sort();
+
+  // CSS
+  var css = '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;background:#fff}' +
+    '.page{width:297mm;min-height:210mm;padding:12mm;margin:0 auto}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    '@media screen{.page{box-shadow:0 2px 12px rgba(0,0,0,0.08);margin:10px auto}body{background:#f5f4f0}}' +
+    '@media(max-width:600px){.page{padding:4mm!important;width:auto!important}table{font-size:8px!important}th,td{padding:3px 2px!important}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#6B5FCC;color:#fff;padding:7px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #5A4FBB;text-align:center}' +
+    'td{padding:6px 8px;border:1px solid #ddd;font-size:11px}' +
+    '.m{font-family:"Courier New",monospace;text-align:right}' +
+    '.tot{border-top:3px solid #6B5FCC;font-weight:bold;background:#EEEDFE}' +
+    '.conv{color:#639922;font-weight:600}.noconv{color:#BA7517}' +
+    '</style>';
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Storico Chiusure — ' + (sedeLabel[sede]||sede) + '</title>' + css + '</head><body><div class="page">';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #6B5FCC;padding-bottom:10px;margin-bottom:16px">';
+  html += '<div><div style="font-size:20px;font-weight:bold;color:#6B5FCC">STORICO CHIUSURE GIACENZE</div>';
+  html += '<div style="font-size:13px;color:#666;margin-top:4px">Sede: <strong>' + (sedeLabel[sede]||sede) + '</strong> — Anni: ' + anni[anni.length-1] + ' – ' + anni[0] + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  // Per ogni prodotto: tabella con tutti gli anni
+  prodotti.forEach(function(prod) {
+    var pi = cacheProdotti ? cacheProdotti.find(function(p) { return p.nome === prod; }) : null;
+    var col = pi ? pi.colore : '#6B5FCC';
+
+    html += '<div style="font-size:13px;font-weight:bold;color:' + col + ';text-transform:uppercase;letter-spacing:0.5px;margin:18px 0 8px;border-bottom:2px solid ' + col + ';padding-bottom:4px">';
+    html += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + prod + '</div>';
+
+    html += '<table><thead><tr>';
+    html += '<th>Anno</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Diff. %</th><th>Stato</th><th>Convalidata da</th><th>Data convalida</th></tr></thead><tbody>';
+
+    anni.forEach(function(anno, idx) {
+      var g = perAnno[anno][prod];
+      if (!g) {
+        html += '<tr style="opacity:0.4"><td style="font-weight:500">' + anno + '</td><td colspan="10" style="text-align:center;color:#999">Nessun dato</td></tr>';
+        return;
+      }
+      var inizio = Number(g.giacenza_inizio || 0);
+      var entrate = Number(g.totale_entrate || 0);
+      var uscite = Number(g.totale_uscite || 0);
+      var stimata = Number(g.giacenza_stimata || 0);
+      var reale = g.giacenza_reale !== null ? Number(g.giacenza_reale) : null;
+      var diff = g.differenza !== null ? Number(g.differenza) : (reale !== null ? reale - stimata : null);
+      var diffPct = stimata > 0 && diff !== null ? (diff / stimata * 100) : null;
+      var diffColor = diff !== null ? (diff >= 0 ? '#639922' : '#A32D2D') : '#999';
+      var isConv = g.convalidata;
+      var bg = idx % 2 ? 'background:#f9f9f6' : '';
+
+      html += '<tr style="' + bg + '">';
+      html += '<td style="font-weight:600;font-size:13px">' + anno + '</td>';
+      html += '<td class="m">' + (inizio > 0 ? fmtL(inizio) : '—') + '</td>';
+      html += '<td class="m" style="color:#639922">' + (entrate > 0 ? fmtL(entrate) : '—') + '</td>';
+      html += '<td class="m" style="color:#A32D2D">' + (uscite > 0 ? fmtL(uscite) : '—') + '</td>';
+      html += '<td class="m" style="font-weight:500">' + (stimata > 0 ? fmtL(stimata) : '—') + '</td>';
+      html += '<td class="m" style="font-weight:600;color:' + (isConv ? '#639922' : '#BA7517') + '">' + (reale !== null ? fmtL(reale) : '—') + '</td>';
+      html += '<td class="m" style="color:' + diffColor + ';font-weight:500">' + (diff !== null ? (diff >= 0 ? '+' : '') + fmtL(diff) : '—') + '</td>';
+      html += '<td class="m" style="color:' + diffColor + '">' + (diffPct !== null ? (diffPct >= 0 ? '+' : '') + diffPct.toFixed(2) + '%' : '—') + '</td>';
+      html += '<td style="text-align:center">' + (isConv ? '<span style="color:#639922;font-weight:600">Convalidata</span>' : '<span style="color:#BA7517">Da convalidare</span>') + '</td>';
+      html += '<td style="font-size:10px;color:#666">' + (g.convalidata_da || '—') + '</td>';
+      html += '<td style="font-size:10px;color:#666">' + (g.convalidata_il ? new Date(g.convalidata_il).toLocaleDateString('it-IT') : '—') + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+  });
+
+  // Grafico comparativo giacenze reali per anno
+  if (prodotti.length && anni.length >= 2) {
+    html += '<div style="margin-top:20px;page-break-before:auto">';
+    html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:8px">Andamento giacenze reali per anno</div>';
+    html += '<table style="width:auto"><thead><tr><th>Prodotto</th>';
+    anni.slice().reverse().forEach(function(a) { html += '<th>' + a + '</th>'; });
+    html += '<th>Trend</th></tr></thead><tbody>';
+    prodotti.forEach(function(prod) {
+      html += '<tr><td style="font-weight:500">' + prod + '</td>';
+      var valori = [];
+      anni.slice().reverse().forEach(function(a) {
+        var g = perAnno[a] && perAnno[a][prod];
+        var reale = g && g.giacenza_reale !== null ? Number(g.giacenza_reale) : null;
+        valori.push(reale);
+        html += '<td class="m" style="font-weight:500">' + (reale !== null ? fmtL(reale) : '—') + '</td>';
+      });
+      // Trend semplice
+      var validi = valori.filter(function(v) { return v !== null; });
+      var trend = '—';
+      if (validi.length >= 2) {
+        var primo = validi[0], ultimo = validi[validi.length - 1];
+        var diff = ultimo - primo;
+        trend = diff > 0 ? '<span style="color:#639922;font-weight:500">+' + fmtL(diff) + ' ↑</span>' : diff < 0 ? '<span style="color:#A32D2D;font-weight:500">' + fmtL(diff) + ' ↓</span>' : '<span style="color:#BA7517">= stabile</span>';
+      }
+      html += '<td>' + trend + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Footer
+  html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:8px;margin-top:16px">PhoenixFuel Srl — Storico chiusure giacenze — ' + (sedeLabel[sede]||sede) + '</div>';
+  html += '</div>';
+
+  // Bottoni stampa
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
+  html += '</div></body></html>';
+
+  w.document.open(); w.document.write(html); w.document.close();
+}

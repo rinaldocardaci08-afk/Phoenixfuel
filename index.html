@@ -375,6 +375,7 @@
                 <select id="giac-dep-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('deposito_vibo')">🔄 Calcola</button>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('deposito_vibo')">✅ Convalida</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaStoricoChiusure('deposito_vibo')">📊 Storico</button>
               </div>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Calcola entrate/uscite dell'anno per prodotto. Inserisci la giacenza reale rilevata e convalida per fissare il saldo di partenza dell'anno successivo.</div>
@@ -1042,6 +1043,7 @@
                 <select id="giac-stz-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('stazione_oppido')">🔄 Calcola</button>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('stazione_oppido')">✅ Convalida</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaStoricoChiusure('stazione_oppido')">📊 Storico</button>
               </div>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Entrate da ordini stazione. Uscite da letture pompe. Inserisci giacenza reale e convalida.</div>
@@ -1266,6 +1268,7 @@
                 <select id="gm-anno" onchange="caricaGiacenzeMensili()" style="font-size:14px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="salvaGiacenzeMensili()">💾 Salva</button>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaGiacenzeMensili()">🖨️ Stampa</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#D85A30" onclick="chiusuraAnno()">📋 Chiusura anno</button>
               </div>
             </div>
             <!-- Trimestri tabs -->
@@ -1627,6 +1630,7 @@
               <select id="giac-ac-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
               <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('autoconsumo')">🔄 Calcola</button>
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('autoconsumo')">✅ Convalida</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaStoricoChiusure('autoconsumo')">📊 Storico</button>
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Entrate da ordini autoconsumo ricevuti. Uscite da prelievi registrati. Convalida per fissare il saldo di partenza dell'anno successivo.</div>
