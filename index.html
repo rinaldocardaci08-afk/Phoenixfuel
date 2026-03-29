@@ -1687,6 +1687,22 @@
             <button class="btn-primary" style="margin-top:8px;font-size:11px;padding:5px 12px" onclick="caricaAuditLog()">Aggiorna</button>
           </div>
         </div>
+        <!-- Test e Notifiche Push -->
+        <div class="grid2" style="margin-top:16px">
+          <div class="card">
+            <div class="card-title">Test automatizzati sistema</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Esegue 20+ test su calcoli prezzi, CMP, fido, marginalità, accesso DB e coerenza dati.</div>
+            <button class="btn-primary" style="background:#6B5FCC" onclick="eseguiTestAutomatizzati()">🧪 Esegui test</button>
+            <div id="test-risultati" style="margin-top:12px"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Notifiche push</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Ricevi notifiche sul browser quando ci sono avvisi urgenti (fido superato, alert futures, anomalie).</div>
+            <button class="btn-primary" style="background:#378ADD" onclick="richiediPermessoPush()">🔔 Attiva notifiche push</button>
+            <div id="push-stato" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
+          </div>
+        </div>
+
       </div>
 
       <!-- BACHECA AVVISI -->
@@ -1832,6 +1848,8 @@
 <script src="pf-dashboard.js"></script>
 <script src="pf-benchmark.js"></script>
 <script src="pf-futures.js"></script>
+<script src="pf-test.js"></script>
+<script src="pf-push.js"></script>
 <script src="pf-finanze.js"></script>
 <script src="pf-allegati.js"></script>
 <script src="pf-system.js"></script>
