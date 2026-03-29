@@ -1,22 +1,95 @@
 // PhoenixFuel — Admin, Permessi, Utenti, Giacenze
 // ── PERMESSI ──────────────────────────────────────────────────────
 const SEZIONI_SISTEMA = [
-  {id:'dashboard',label:'Dashboard',icon:'▦'},{id:'ordini',label:'Ordini',icon:'📋'},
-  {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},{id:'deposito',label:'Deposito',icon:'🏗'},
-  {id:'consegne',label:'Consegne',icon:'🚚'},{id:'vendite',label:'Vendite',icon:'📊'},
-  {id:'clienti',label:'Clienti',icon:'👤'},{id:'fornitori',label:'Fornitori',icon:'🏭'},
-  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},{id:'stazione',label:'Stazione Oppido',icon:'⛽'},{id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},{id:'benchmark',label:'Benchmark mercato',icon:'📈'},{id:'finanze',label:'Finanze',icon:'🏦'},
+  {id:'dashboard',label:'Dashboard',icon:'▦'},
+  {id:'ordini',label:'Ordini',icon:'📋'},
+  {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},
+  {id:'deposito',label:'Deposito',icon:'🏗'},
+  {id:'consegne',label:'Consegne',icon:'🚚'},
+  {id:'vendite',label:'Vendite',icon:'📊', sub:[
+    {id:'vendite.ingrosso',label:'Ingrosso'},
+    {id:'vendite.dettaglio',label:'Dettaglio stazione'},
+    {id:'vendite.annuale',label:'Riepilogo annuale'},
+    {id:'vendite.margine-cliente',label:'Margine per cliente'}
+  ]},
+  {id:'clienti',label:'Clienti',icon:'👤'},
+  {id:'fornitori',label:'Fornitori',icon:'🏭'},
+  {id:'basi',label:'Basi di carico',icon:'📍'},
+  {id:'prodotti',label:'Prodotti',icon:'📦'},
+  {id:'logistica',label:'Logistica',icon:'🚛'},
+  {id:'stazione',label:'Stazione Oppido',icon:'⛽', sub:[
+    {id:'stazione.dashboard',label:'Dashboard'},
+    {id:'stazione.letture',label:'Letture contatori'},
+    {id:'stazione.prezzi',label:'Prezzi pompa'},
+    {id:'stazione.versamenti',label:'Versamenti'},
+    {id:'stazione.magazzino',label:'Magazzino'},
+    {id:'stazione.marginalita',label:'Marginalità'},
+    {id:'stazione.cassa',label:'Cassa'},
+    {id:'stazione.report',label:'Report'}
+  ]},
+  {id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},
+  {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
+  {id:'finanze',label:'Finanze',icon:'🏦'},
 ];
+
+// Cache permessi utente corrente (caricati al login)
+var _permessiUtente = null;
+
+function _haPermesso(sezione) {
+  if (!utenteCorrente) return false;
+  if (utenteCorrente.ruolo === 'admin') return true;
+  if (!_permessiUtente) return false;
+  // Permesso sezione principale
+  if (_permessiUtente[sezione]) return true;
+  // Sottosezione: check "stazione.cassa" → serve anche "stazione" abilitato
+  if (sezione.indexOf('.') >= 0) {
+    var parent = sezione.split('.')[0];
+    return _permessiUtente[parent] && _permessiUtente[sezione] !== false;
+  }
+  return false;
+}
+
+function _haPermessoSub(sottosezione) {
+  if (!utenteCorrente) return false;
+  if (utenteCorrente.ruolo === 'admin') return true;
+  if (!_permessiUtente) return true; // Default: se non ci sono permessi sub, mostra tutto
+  // Se il permesso sub esiste ed è false → nascondi
+  if (_permessiUtente[sottosezione] === false) return false;
+  // Se il permesso sub non è mai stato settato → mostra (default visibile)
+  return true;
+}
+
+async function _caricaPermessiUtente(utenteId) {
+  var { data } = await sb.from('permessi').select('sezione,abilitato').eq('utente_id', utenteId);
+  _permessiUtente = {};
+  (data || []).forEach(function(p) { _permessiUtente[p.sezione] = p.abilitato; });
+}
 
 async function apriModalePermessi(utenteId, nomeUtente) {
   const { data: permessiEsistenti } = await sb.from('permessi').select('*').eq('utente_id', utenteId);
   const map = {};
   (permessiEsistenti||[]).forEach(p => map[p.sezione]=p.abilitato);
+
   let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Permessi per ' + nomeUtente + '</div>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">';
+  html += '<div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:20px">';
+
   SEZIONI_SISTEMA.forEach(s => {
-    html += '<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-kpi);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" value="' + s.id + '"' + (map[s.id]?' checked':'') + ' onchange="aggiornaPermesso(\'' + utenteId + '\',\'' + s.id + '\',this.checked)" /><span>' + s.icon + ' ' + s.label + '</span></label>';
+    var checked = map[s.id] ? ' checked' : '';
+    html += '<div style="background:var(--bg-kpi);border-radius:8px;padding:10px 12px">';
+    html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500"><input type="checkbox" value="' + s.id + '"' + checked + ' onchange="aggiornaPermesso(\'' + utenteId + '\',\'' + s.id + '\',this.checked)" /><span>' + s.icon + ' ' + s.label + '</span></label>';
+
+    // Sottosezioni
+    if (s.sub && s.sub.length) {
+      html += '<div style="margin-left:28px;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px">';
+      s.sub.forEach(function(sub) {
+        var subChecked = map[sub.id] !== false ? ' checked' : '';
+        html += '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-muted);padding:4px 8px;background:var(--bg);border-radius:6px"><input type="checkbox" value="' + sub.id + '"' + subChecked + ' onchange="aggiornaPermesso(\'' + utenteId + '\',\'' + sub.id + '\',this.checked)" /><span>' + sub.label + '</span></label>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
   });
+
   html += '</div><button class="btn-primary" style="width:100%" onclick="chiudiModalePermessi()">Chiudi</button>';
   apriModal(html);
 }
@@ -79,8 +152,19 @@ async function caricaUtentiCompleto() {
   const grp = document.getElementById('grp-ut-permessi');
   if (grp) {
     let html = '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;margin-top:12px">Sezioni accessibili</div>';
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
-    SEZIONI_SISTEMA.forEach(s => { html += '<label class="check-label"><input type="checkbox" value="' + s.id + '" checked /> ' + s.icon + ' ' + s.label + '</label>'; });
+    html += '<div style="display:grid;grid-template-columns:1fr;gap:6px">';
+    SEZIONI_SISTEMA.forEach(s => {
+      html += '<div style="background:var(--bg-kpi);border-radius:6px;padding:6px 10px">';
+      html += '<label class="check-label"><input type="checkbox" value="' + s.id + '" checked /> ' + s.icon + ' ' + s.label + '</label>';
+      if (s.sub && s.sub.length) {
+        html += '<div style="margin-left:24px;margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:3px">';
+        s.sub.forEach(function(sub) {
+          html += '<label class="check-label" style="font-size:10px;padding:3px 6px"><input type="checkbox" value="' + sub.id + '" checked /> ' + sub.label + '</label>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+    });
     html += '</div>';
     grp.innerHTML = html;
   }

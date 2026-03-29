@@ -239,6 +239,10 @@ async function generaElencoVenditeGiorno() {
 
 // ── VENDITE ───────────────────────────────────────────────────────
 function caricaVendite() {
+  _applicaPermessiTab('vendite', '.vend-tab', {
+    'vend-ingrosso':'vendite.ingrosso', 'vend-dettaglio':'vendite.dettaglio',
+    'vend-annuale':'vendite.annuale', 'vend-margine-cliente':'vendite.margine-cliente'
+  });
   const activeTab = document.querySelector('.vend-tab.active');
   if (activeTab && activeTab.dataset.tab === 'vend-dettaglio') caricaVenditeDettaglio();
   else if (activeTab && activeTab.dataset.tab === 'vend-annuale') caricaVenditeAnnuali();

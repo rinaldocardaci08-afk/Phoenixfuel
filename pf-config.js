@@ -33,6 +33,10 @@ async function inizializza() {
   document.getElementById('utente-ruolo').textContent = utente.ruolo;
   var postLabelsInit = { 'ufficio':'🏢 Ufficio', 'stazione_oppido':'⛽ Stazione Oppido', 'deposito_vibo':'🏭 Deposito Vibo', 'logistica':'🚛 Logistica' };
   document.getElementById('utente-postazione').textContent = postLabelsInit[utente.postazione] || '';
+  // Carica permessi sottosezioni
+  if (utente.ruolo !== 'admin' && utente.ruolo !== 'cliente') {
+    await _caricaPermessiUtente(utente.id);
+  }
   await costruisciMenu(utente.ruolo, utente.id);
   if (utente.ruolo === 'cliente') { setSection('cliente', document.querySelector('.nav-item')); }
   else {
@@ -152,6 +156,31 @@ function setSection(id, el) {
   if (window.innerWidth <= 768) {
     document.querySelector('.sidebar').classList.remove('open');
     document.querySelector('.sidebar-overlay').classList.remove('show');
+  }
+}
+
+// ── PERMESSI SOTTOSEZIONI ────────────────────────────────────────
+// Nasconde i tab per cui l'utente non ha permesso
+function _applicaPermessiTab(sezione, tabSelector, mapTabPermesso) {
+  if (!utenteCorrente || utenteCorrente.ruolo === 'admin') return;
+  var tabs = document.querySelectorAll(tabSelector);
+  var primoVisibile = null;
+  tabs.forEach(function(btn) {
+    var tabId = btn.dataset.tab;
+    var permKey = mapTabPermesso[tabId];
+    if (permKey && !_haPermessoSub(permKey)) {
+      btn.style.display = 'none';
+      // Nascondi anche il pannello
+      var panel = document.getElementById(tabId);
+      if (panel) panel.style.display = 'none';
+    } else {
+      if (!primoVisibile) primoVisibile = btn;
+    }
+  });
+  // Attiva il primo tab visibile se l'attivo è nascosto
+  var activeTab = document.querySelector(tabSelector + '.active');
+  if (activeTab && activeTab.style.display === 'none' && primoVisibile) {
+    primoVisibile.click();
   }
 }
 

@@ -10,6 +10,13 @@ function switchStazioneTab(btn) {
 }
 
 async function caricaStazione() {
+  // Nascondi tab senza permesso
+  _applicaPermessiTab('stazione', '.stz-tab', {
+    'stz-dashboard':'stazione.dashboard', 'stz-letture':'stazione.letture',
+    'stz-prezzi':'stazione.prezzi', 'stz-versamenti':'stazione.versamenti',
+    'stz-magazzino':'stazione.magazzino', 'stz-marginalita':'stazione.marginalita',
+    'stz-cassa':'stazione.cassa', 'stz-report':'stazione.report'
+  });
   // Init date fields
   document.getElementById('stz-data-lettura').value = oggiISO;
   document.getElementById('stz-data-lettura').onchange = function() { caricaFormLetture(); };
