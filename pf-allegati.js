@@ -1,6 +1,7 @@
 // PhoenixFuel — Allegati: Scontrini + DAS ricevuti (Storage Supabase)
 
 var BUCKET_ALLEGATI = 'allegati';
+var STORAGE_LIMIT_MB = 1024; // Piano Free Supabase = 1 GB
 
 // ── TAB SWITCHING ALLEGATI ──────────────────────────────────────
 function switchAllegatiTab(btn) {
@@ -21,6 +22,60 @@ function caricaAllegati() {
   _initAnnoScontrini();
   _initAnnoDasRic();
   caricaRegistroScontrini();
+  aggiornaIndicatoreStorage();
+}
+
+// ── INDICATORE SPAZIO STORAGE ───────────────────────────────────
+async function aggiornaIndicatoreStorage() {
+  var container = document.getElementById('storage-usage-bar');
+  if (!container) return;
+
+  // Somma dimensioni da tabella allegati (nuovi) + documenti_ordine (vecchi)
+  var [resAll, resDoc] = await Promise.all([
+    sb.from('allegati').select('dimensione_bytes'),
+    sb.from('documenti_ordine').select('id')  // non ha dimensione, stimiamo
+  ]);
+
+  var totBytes = 0;
+  (resAll.data || []).forEach(function(r) { totBytes += Number(r.dimensione_bytes || 0); });
+
+  // Stima vecchi documenti ordine: ~300KB ciascuno (PDF medi)
+  var nDocOrdine = (resDoc.data || []).length;
+  totBytes += nDocOrdine * 300000;
+
+  var usatoMB = totBytes / (1024 * 1024);
+  var pct = Math.min(100, Math.round((usatoMB / STORAGE_LIMIT_MB) * 100));
+
+  // Colori: verde < 60%, giallo 60-80%, rosso > 80%
+  var barColor, textColor, bgColor;
+  if (pct < 60) {
+    barColor = '#639922'; textColor = '#27500A'; bgColor = '#EAF3DE';
+  } else if (pct < 80) {
+    barColor = '#BA7517'; textColor = '#633806'; bgColor = '#FAEEDA';
+  } else {
+    barColor = '#E24B4A'; textColor = '#791F1F'; bgColor = '#FCEBEB';
+  }
+
+  var usatoLabel = usatoMB < 1 ? Math.round(usatoMB * 1024) + ' KB' : usatoMB.toFixed(1) + ' MB';
+  var limiteLabel = STORAGE_LIMIT_MB >= 1024 ? (STORAGE_LIMIT_MB / 1024).toFixed(0) + ' GB' : STORAGE_LIMIT_MB + ' MB';
+
+  var nAllegati = (resAll.data || []).length;
+  var totFiles = nAllegati + nDocOrdine;
+
+  container.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:' + bgColor + ';border-radius:10px;border:0.5px solid ' + barColor + '33">' +
+      '<div style="font-size:18px">💾</div>' +
+      '<div style="flex:1">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
+          '<span style="font-size:12px;font-weight:600;color:' + textColor + '">Spazio storage</span>' +
+          '<span style="font-size:11px;color:' + textColor + '">' + totFiles + ' file · ' + usatoLabel + ' / ' + limiteLabel + '</span>' +
+        '</div>' +
+        '<div style="height:8px;background:rgba(0,0,0,0.08);border-radius:4px;overflow:hidden">' +
+          '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;transition:width 0.4s"></div>' +
+        '</div>' +
+        (pct >= 80 ? '<div style="font-size:10px;color:#A32D2D;margin-top:3px;font-weight:500">⚠️ Spazio quasi esaurito — valuta upgrade a piano Pro</div>' : '') +
+      '</div>' +
+    '</div>';
 }
 
 function _initAnnoScontrini() {
@@ -81,6 +136,7 @@ async function uploadScontrinoCassa(input) {
   input.value = '';
   toast('Scontrino/i caricati!');
   caricaScontriniCassaPreview(data);
+  aggiornaIndicatoreStorage();
 }
 
 async function caricaScontriniCassaPreview(data) {
@@ -125,6 +181,7 @@ async function uploadScontrinoRegistro(input) {
   input.value = '';
   toast('Scontrino/i caricati!');
   caricaRegistroScontrini();
+  aggiornaIndicatoreStorage();
 }
 
 async function caricaRegistroScontrini() {
@@ -246,6 +303,7 @@ async function salvaDasRicevuto() {
 
   _auditLog('registra_das_ricevuto', 'allegati', 'DAS ' + numero + ' da ' + fornitore + ' — ' + litri + 'L ' + prodotto);
   toast('DAS ricevuto registrato!');
+  aggiornaIndicatoreStorage();
 
   // Reset form
   document.getElementById('das-ric-numero').value = '';
@@ -368,6 +426,7 @@ async function eliminaAllegato(id, pathStorage, callback) {
   // Elimina record
   await sb.from('allegati').delete().eq('id', id);
   toast('Allegato eliminato');
+  aggiornaIndicatoreStorage();
 
   if (typeof callback === 'function') callback();
 }
