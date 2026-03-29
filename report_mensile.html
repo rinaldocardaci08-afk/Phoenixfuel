@@ -185,8 +185,8 @@ async function generaReport() {
     totLitri += m.litri; totFattNetto += m.fattNetto; totFattIva += m.fattIva;
     totCostoAcq += m.costoAcquisto; totCostoTrasp += m.costoTrasporto;
   });
-  const margineTotale = totFattNetto - totCostoAcq; // Fatturato netto - Costo acquisto
-  const primoMargine = totFattNetto - totCostoAcq - totCostoTrasp; // Fatturato netto - Costo acquisto - Trasporto
+  const margineTotale = totFattNetto - totCostoAcq - totCostoTrasp; // Margine REALE (dopo trasporto)
+  const margineLordo = totFattNetto - totCostoAcq; // Margine lordo (prima del trasporto)
 
   // Genera HTML report
   let html = '';
@@ -204,23 +204,23 @@ async function generaReport() {
   html += '<div class="t-cell"><div class="t-head">Totale IVA inclusa</div><div class="t-val">' + fmtE(totFattIva) + '</div></div>';
   html += '<div class="t-cell"><div class="t-head">Costo acquisto</div><div class="t-val" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</div></div>';
   html += '<div class="t-cell"><div class="t-head">Costo trasporto</div><div class="t-val">' + fmtE(totCostoTrasp) + '</div></div>';
-  html += '<div class="t-cell"><div class="t-head">Margine Totale</div><div class="t-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Margine netto</div><div class="t-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
   html += '</div>';
 
   // Margini extra
   html += '<div class="margine-extra">';
-  html += '<div class="margine-box"><div class="m-label">Primo Margine (Fatt. - Acquisto - Trasporto)</div><div class="m-val">' + fmtE(primoMargine) + '</div></div>';
-  html += '<div class="margine-box"><div class="m-label">Margine Totale (Fatt. - Acquisto)</div><div class="m-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
+  html += '<div class="margine-box"><div class="m-label">Margine lordo (Fatt. - Acquisto)</div><div class="m-val" style="color:#6B5FCC">' + fmtE(margineLordo) + '</div></div>';
+  html += '<div class="margine-box" style="background:#EAF3DE;border-color:#97C459"><div class="m-label">Margine netto (Fatt. - Acquisto - Trasporto)</div><div class="m-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
   html += '</div>';
 
   // Tabella mesi
   html += '<table>';
-  html += '<thead><tr><th>Mese</th><th>Litri</th><th>Fatturato netto</th><th>Totale IVA inclusa</th><th>Costo acquisto</th><th>Costo trasporto</th><th>Primo Margine</th><th>Margine Totale</th></tr></thead>';
+  html += '<thead><tr><th>Mese</th><th>Litri</th><th>Fatturato netto</th><th>Totale IVA inclusa</th><th>Costo acquisto</th><th>Costo trasporto</th><th>Margine netto</th><th>Margine lordo</th></tr></thead>';
   html += '<tbody>';
   for (let m = 1; m <= 12; m++) {
     const d = mesi[m];
-    const pm = d.fattNetto - d.costoAcquisto - d.costoTrasporto;
-    const mt = d.fattNetto - d.costoAcquisto;
+    const pm = d.fattNetto - d.costoAcquisto - d.costoTrasporto; // netto
+    const mt = d.fattNetto - d.costoAcquisto; // lordo
     const hasData = d.litri > 0;
     html += '<tr' + (!hasData ? ' style="opacity:0.4"' : '') + '>';
     html += '<td class="mese-col">' + m + '</td>';
@@ -241,8 +241,8 @@ async function generaReport() {
   html += '<td class="mono">' + fmtE(totFattIva) + '</td>';
   html += '<td class="mono" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</td>';
   html += '<td class="mono">' + fmtE(totCostoTrasp) + '</td>';
-  html += '<td class="mono" style="color:#6B5FCC">' + fmtE(primoMargine) + '</td>';
-  html += '<td class="mono" style="color:#639922;font-size:12px">' + fmtE(margineTotale) + '</td>';
+  html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtE(margineTotale) + '</td>';
+  html += '<td class="mono" style="color:#6B5FCC">' + fmtE(margineLordo) + '</td>';
   html += '</tr></tbody></table>';
 
   // Grafici
