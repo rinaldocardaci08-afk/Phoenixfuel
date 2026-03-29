@@ -1,6 +1,18 @@
 // PhoenixFuel — Deposito, Rettifiche, Autoconsumo
 // ── DEPOSITO ─────────────────────────────────────────────────────
 
+function switchDepositoTab(btn) {
+  document.querySelectorAll('.dep-tab').forEach(function(t) {
+    t.style.background = 'var(--bg)'; t.style.color = 'var(--text)';
+    t.style.border = '0.5px solid var(--border)'; t.classList.remove('active');
+  });
+  btn.style.background = ''; btn.style.color = ''; btn.style.border = '';
+  btn.classList.add('active');
+  document.querySelectorAll('.dep-panel').forEach(function(p) { p.style.display = 'none'; });
+  document.getElementById(btn.dataset.tab).style.display = '';
+  if (btn.dataset.tab === 'dep-ricezione-das') caricaDasOrdiniDeposito();
+}
+
 function cisternasvg(pct, colore) {
   const altMax=80, liv=Math.round((pct/100)*altMax), y=10+(altMax-liv);
   const fill = pct<20?'#E24B4A':pct<35?'#BA7517':colore;
@@ -90,7 +102,6 @@ async function caricaDeposito() {
   tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
   caricaRettifiche('deposito');
   _popolaSelAnnoGiac('giac-dep-anno');
-  caricaDasOrdiniDeposito();
 }
 
 async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLitro) {

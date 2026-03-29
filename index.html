@@ -334,60 +334,71 @@
 
       <!-- DEPOSITO -->
       <div class="section" id="s-deposito">
-        <div class="grid4" style="margin-bottom:20px">
-          <div class="kpi"><div class="kpi-label">Capacità totale</div><div class="kpi-value" id="dep-capacita">—</div></div>
-          <div class="kpi"><div class="kpi-label">Stoccaggio attuale</div><div class="kpi-value" id="dep-totale">—</div></div>
-          <div class="kpi"><div class="kpi-label">Riempimento %</div><div class="kpi-value" id="dep-pct">—</div></div>
-          <div class="kpi"><div class="kpi-label">Cisterne in allerta</div><div class="kpi-value" id="dep-allerta">—</div></div>
-        </div>
-        <div id="container-deposito-prodotti"></div>
-        <div class="card"><div class="card-title">Movimenti recenti</div><table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table></div>
-
-        <!-- DAS RICEVUTI DEPOSITO -->
-        <div class="card" style="margin-top:16px">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span>📄 DAS ricevuti — allega documento fornitore</span>
-            <select id="das-dep-filtro-stato" onchange="caricaDasOrdiniDeposito()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-              <option value="senza_das">Senza DAS allegato</option>
-              <option value="con_das">Con DAS allegato</option>
-              <option value="">Tutti</option>
-            </select>
-          </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ordini entrata deposito: scatta una foto o carica il PDF del DAS ricevuto dal fornitore.</div>
-          <div id="das-ordini-deposito-lista">
-            <div class="loading">Caricamento ordini...</div>
-          </div>
+        <!-- TAB DEPOSITO -->
+        <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn-primary dep-tab active" data-tab="dep-principale" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px">🏗 Deposito</button>
+          <button class="btn-primary dep-tab" data-tab="dep-ricezione-das" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📄 Ricezione DAS</button>
         </div>
 
-        <!-- RETTIFICHE DEPOSITO -->
-        <div class="card" style="margin-top:16px">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span>📋 Rettifiche inventario deposito</span>
-            <div style="display:flex;gap:6px">
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('deposito')">+ Nuova rettifica</button>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="stampaRettifiche('deposito')">🖨️ Stampa</button>
+        <!-- PANEL: DEPOSITO PRINCIPALE -->
+        <div class="dep-panel" id="dep-principale">
+          <div class="grid4" style="margin-bottom:20px">
+            <div class="kpi"><div class="kpi-label">Capacità totale</div><div class="kpi-value" id="dep-capacita">—</div></div>
+            <div class="kpi"><div class="kpi-label">Stoccaggio attuale</div><div class="kpi-value" id="dep-totale">—</div></div>
+            <div class="kpi"><div class="kpi-label">Riempimento %</div><div class="kpi-value" id="dep-pct">—</div></div>
+            <div class="kpi"><div class="kpi-label">Cisterne in allerta</div><div class="kpi-value" id="dep-allerta">—</div></div>
+          </div>
+          <div id="container-deposito-prodotti"></div>
+          <div class="card"><div class="card-title">Movimenti recenti</div><table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table></div>
+
+          <!-- RETTIFICHE DEPOSITO -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📋 Rettifiche inventario deposito</span>
+              <div style="display:flex;gap:6px">
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('deposito')">+ Nuova rettifica</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="stampaRettifiche('deposito')">🖨️ Stampa</button>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Data</th><th>Cisterna</th><th>Sistema</th><th>Rilevata</th><th>Diff.</th><th>Note</th><th>Stato</th><th></th></tr></thead>
+            <tbody id="rett-deposito-storico"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
-          <div style="overflow-x:auto">
-          <table><thead><tr><th>Data</th><th>Cisterna</th><th>Sistema</th><th>Rilevata</th><th>Diff.</th><th>Note</th><th>Stato</th><th></th></tr></thead>
-          <tbody id="rett-deposito-storico"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
+
+          <!-- GIACENZE FINE ANNO DEPOSITO -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📊 Chiusura giacenze fine anno</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select id="giac-dep-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('deposito_vibo')">🔄 Calcola</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('deposito_vibo')">✅ Convalida</button>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Calcola entrate/uscite dell'anno per prodotto. Inserisci la giacenza reale rilevata e convalida per fissare il saldo di partenza dell'anno successivo.</div>
+            <div style="overflow-x:auto">
+            <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
+            <tbody id="giac-dep-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+            </div>
           </div>
         </div>
 
-        <!-- GIACENZE FINE ANNO DEPOSITO -->
-        <div class="card" style="margin-top:16px">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <span>📊 Chiusura giacenze fine anno</span>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <select id="giac-dep-anno" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="calcolaGiacenzeAnno('deposito_vibo')">🔄 Calcola</button>
-              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="convalidaGiacenze('deposito_vibo')">✅ Convalida</button>
+        <!-- PANEL: RICEZIONE DAS -->
+        <div class="dep-panel" id="dep-ricezione-das" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📄 DAS ricevuti — allega documento fornitore</span>
+              <select id="das-dep-filtro-stato" onchange="caricaDasOrdiniDeposito()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="senza_das">Senza DAS allegato</option>
+                <option value="con_das">Con DAS allegato</option>
+                <option value="">Tutti</option>
+              </select>
             </div>
-          </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Calcola entrate/uscite dell'anno per prodotto. Inserisci la giacenza reale rilevata e convalida per fissare il saldo di partenza dell'anno successivo.</div>
-          <div style="overflow-x:auto">
-          <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
-          <tbody id="giac-dep-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ordini entrata deposito: scatta una foto o carica il PDF del DAS ricevuto dal fornitore.</div>
+            <div id="das-ordini-deposito-lista">
+              <div class="loading">Caricamento ordini...</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1367,108 +1378,122 @@
 
       <!-- LOGISTICA -->
       <div class="section" id="s-logistica">
-
-        <!-- PIANIFICAZIONE CARICO -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Pianifica nuovo carico</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" onchange="caricaOrdiniPerCarico()" /></div>
-            <div class="form-group"><label>Vettore</label><select id="car-trasportatore" onchange="aggiornaVeicoliVettore()"><option value="">Nostro mezzo</option></select></div>
-            <div class="form-group"><label>Mezzo</label><select id="car-mezzo"><option value="">Seleziona mezzo...</option></select></div>
-            <div class="form-group"><label>Autista</label><select id="car-autista"><option value="">Seleziona autista...</option></select></div>
-          </div>
-          <div style="margin-bottom:12px">
-            <div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Ordini da caricare</div>
-            <div id="ordini-per-carico"><div class="loading">Seleziona una data</div></div>
-            <div style="margin-top:8px;font-size:12px;color:var(--text-muted)" id="car-tot-ordini">0 ordini selezionati</div>
-          </div>
-          <button class="btn-primary" onclick="creaNuovoCarico()">🚛 Crea carico</button>
+        <!-- TAB LOGISTICA -->
+        <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn-primary log-tab active" data-tab="log-carichi" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px">🚛 Carichi</button>
+          <button class="btn-primary log-tab" data-tab="log-mezzi-propri" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🚗 Mezzi propri</button>
+          <button class="btn-primary log-tab" data-tab="log-vettori" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏭 Crea Vettori</button>
         </div>
 
-        <!-- CARICHI PIANIFICATI -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Carichi pianificati</div>
-          <table><thead><tr><th>Data</th><th>Mezzo</th><th>Autista</th><th>Litri tot.</th><th>Prodotti</th><th>Consegne</th><th>Stato</th></tr></thead>
-          <tbody id="tabella-carichi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+        <!-- PANEL: CARICHI -->
+        <div class="log-panel" id="log-carichi">
+          <!-- PIANIFICAZIONE CARICO -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Pianifica nuovo carico</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" onchange="caricaOrdiniPerCarico()" /></div>
+              <div class="form-group"><label>Vettore</label><select id="car-trasportatore" onchange="aggiornaVeicoliVettore()"><option value="">Nostro mezzo</option></select></div>
+              <div class="form-group"><label>Mezzo</label><select id="car-mezzo"><option value="">Seleziona mezzo...</option></select></div>
+              <div class="form-group"><label>Autista</label><select id="car-autista"><option value="">Seleziona autista...</option></select></div>
+            </div>
+            <div style="margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Ordini da caricare</div>
+              <div id="ordini-per-carico"><div class="loading">Seleziona una data</div></div>
+              <div style="margin-top:8px;font-size:12px;color:var(--text-muted)" id="car-tot-ordini">0 ordini selezionati</div>
+            </div>
+            <button class="btn-primary" onclick="creaNuovoCarico()">🚛 Crea carico</button>
+          </div>
+
+          <!-- CARICHI PIANIFICATI -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Carichi pianificati</div>
+            <table><thead><tr><th>Data</th><th>Mezzo</th><th>Autista</th><th>Litri tot.</th><th>Prodotti</th><th>Consegne</th><th>Stato</th></tr></thead>
+            <tbody id="tabella-carichi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+
+          <!-- REPORT VIAGGI PER VETTORE -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Report viaggi per vettore</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
+              <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" /></div>
+              <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" /></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+              <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
+              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
+            </div>
+            <div id="report-viaggi-content" style="margin-top:16px"></div>
+          </div>
         </div>
 
-        <!-- REPORT VIAGGI PER VETTORE -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Report viaggi per vettore</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
-            <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" /></div>
-            <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" /></div>
+        <!-- PANEL: MEZZI PROPRI -->
+        <div class="log-panel" id="log-mezzi-propri" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Aggiungi mezzo proprio</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Targa</label><input type="text" id="mz-targa" placeholder="Es. CS 384 AC" /></div>
+              <div class="form-group"><label>Descrizione</label><input type="text" id="mz-descr" placeholder="Es. Cisternetta 3 scomp." /></div>
+              <div class="form-group"><label>Capacità totale (L)</label><input type="number" id="mz-cap" placeholder="0" /></div>
+              <div class="form-group"><label>Autista default</label><input type="text" id="mz-autista" /></div>
+            </div>
+            <div style="margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Scomparti cisterna</div>
+              <div id="scomparti-wrap"></div>
+              <button type="button" onclick="aggiungiScomparto()" style="background:none;border:0.5px dashed var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text-muted);cursor:pointer;width:100%;margin-top:4px">+ Aggiungi scomparto</button>
+            </div>
+            <button class="btn-primary" onclick="salvaMezzo()">Salva mezzo</button>
           </div>
-          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-            <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
-            <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
+          <div class="card">
+            <div class="card-title">Mezzi propri</div>
+            <table><thead><tr><th>Targa</th><th>Descrizione</th><th>Capacità</th><th>Autista</th><th>Scomparti</th><th></th></tr></thead>
+            <tbody id="tabella-mezzi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
-          <div id="report-viaggi-content" style="margin-top:16px"></div>
         </div>
 
-        <!-- MEZZI PROPRI -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Aggiungi mezzo proprio</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Targa</label><input type="text" id="mz-targa" placeholder="Es. CS 384 AC" /></div>
-            <div class="form-group"><label>Descrizione</label><input type="text" id="mz-descr" placeholder="Es. Cisternetta 3 scomp." /></div>
-            <div class="form-group"><label>Capacità totale (L)</label><input type="number" id="mz-cap" placeholder="0" /></div>
-            <div class="form-group"><label>Autista default</label><input type="text" id="mz-autista" /></div>
+        <!-- PANEL: CREA VETTORI -->
+        <div class="log-panel" id="log-vettori" style="display:none">
+          <!-- TRASPORTATORI ESTERNI -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Aggiungi trasportatore esterno</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Nome azienda</label><input type="text" id="tr-nome" /></div>
+              <div class="form-group"><label>P.IVA</label><input type="text" id="tr-piva" /></div>
+              <div class="form-group"><label>Telefono</label><input type="text" id="tr-tel" /></div>
+              <div class="form-group"><label>Email</label><input type="email" id="tr-email" /></div>
+              <div class="form-group"><label>Note</label><input type="text" id="tr-note" /></div>
+            </div>
+            <button class="btn-primary" onclick="salvaTrasportatore()">Salva trasportatore</button>
           </div>
-          <div style="margin-bottom:12px">
-            <div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Scomparti cisterna</div>
-            <div id="scomparti-wrap"></div>
-            <button type="button" onclick="aggiungiScomparto()" style="background:none;border:0.5px dashed var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text-muted);cursor:pointer;width:100%;margin-top:4px">+ Aggiungi scomparto</button>
-          </div>
-          <button class="btn-primary" onclick="salvaMezzo()">Salva mezzo</button>
-        </div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Mezzi propri</div>
-          <table><thead><tr><th>Targa</th><th>Descrizione</th><th>Capacità</th><th>Autista</th><th>Scomparti</th><th></th></tr></thead>
-          <tbody id="tabella-mezzi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
-        </div>
 
-        <!-- TRASPORTATORI ESTERNI -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Aggiungi trasportatore esterno</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Nome azienda</label><input type="text" id="tr-nome" /></div>
-            <div class="form-group"><label>P.IVA</label><input type="text" id="tr-piva" /></div>
-            <div class="form-group"><label>Telefono</label><input type="text" id="tr-tel" /></div>
-            <div class="form-group"><label>Email</label><input type="email" id="tr-email" /></div>
-            <div class="form-group"><label>Note</label><input type="text" id="tr-note" /></div>
+          <!-- AUTISTI ESTERNI -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Aggiungi autista</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Trasportatore</label><select id="at-trasportatore"><option value="">Seleziona...</option></select></div>
+              <div class="form-group"><label>Nome autista</label><input type="text" id="at-nome" /></div>
+              <div class="form-group"><label>Telefono</label><input type="text" id="at-tel" /></div>
+              <div class="form-group"><label>N. Patente</label><input type="text" id="at-patente" /></div>
+            </div>
+            <button class="btn-primary" onclick="salvaAutista()">Salva autista</button>
           </div>
-          <button class="btn-primary" onclick="salvaTrasportatore()">Salva trasportatore</button>
-        </div>
 
-        <!-- AUTISTI ESTERNI -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Aggiungi autista</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Trasportatore</label><select id="at-trasportatore"><option value="">Seleziona...</option></select></div>
-            <div class="form-group"><label>Nome autista</label><input type="text" id="at-nome" /></div>
-            <div class="form-group"><label>Telefono</label><input type="text" id="at-tel" /></div>
-            <div class="form-group"><label>N. Patente</label><input type="text" id="at-patente" /></div>
+          <!-- MEZZI ESTERNI -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Aggiungi mezzo esterno</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Trasportatore</label><select id="me-trasportatore"><option value="">Seleziona...</option></select></div>
+              <div class="form-group"><label>Targa</label><input type="text" id="me-targa" /></div>
+              <div class="form-group"><label>Descrizione</label><input type="text" id="me-descr" /></div>
+              <div class="form-group"><label>Capacità (L)</label><input type="number" id="me-cap" /></div>
+            </div>
+            <button class="btn-primary" onclick="salvaMezzoEsterno()">Salva mezzo esterno</button>
           </div>
-          <button class="btn-primary" onclick="salvaAutista()">Salva autista</button>
-        </div>
-
-        <!-- MEZZI ESTERNI -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Aggiungi mezzo esterno</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Trasportatore</label><select id="me-trasportatore"><option value="">Seleziona...</option></select></div>
-            <div class="form-group"><label>Targa</label><input type="text" id="me-targa" /></div>
-            <div class="form-group"><label>Descrizione</label><input type="text" id="me-descr" /></div>
-            <div class="form-group"><label>Capacità (L)</label><input type="number" id="me-cap" /></div>
+          <div class="card">
+            <div class="card-title">Trasportatori e flotta esterna</div>
+            <table><thead><tr><th>Nome</th><th>Telefono</th><th>Autisti</th><th>Mezzi</th><th></th></tr></thead>
+            <tbody id="tabella-trasportatori"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
-          <button class="btn-primary" onclick="salvaMezzoEsterno()">Salva mezzo esterno</button>
-        </div>
-        <div class="card">
-          <div class="card-title">Trasportatori e flotta esterna</div>
-          <table><thead><tr><th>Nome</th><th>Telefono</th><th>Autisti</th><th>Mezzi</th><th></th></tr></thead>
-          <tbody id="tabella-trasportatori"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
         </div>
 
       </div>

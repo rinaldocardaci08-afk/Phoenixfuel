@@ -1,5 +1,17 @@
 // PhoenixFuel — Logistica
 // ── LOGISTICA ─────────────────────────────────────────────────────
+
+function switchLogisticaTab(btn) {
+  document.querySelectorAll('.log-tab').forEach(function(t) {
+    t.style.background = 'var(--bg)'; t.style.color = 'var(--text)';
+    t.style.border = '0.5px solid var(--border)'; t.classList.remove('active');
+  });
+  btn.style.background = ''; btn.style.color = ''; btn.style.border = '';
+  btn.classList.add('active');
+  document.querySelectorAll('.log-panel').forEach(function(p) { p.style.display = 'none'; });
+  document.getElementById(btn.dataset.tab).style.display = '';
+}
+
 async function caricaLogistica() {
   await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
   // Carica trasportatori nel dropdown
