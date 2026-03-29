@@ -50,6 +50,16 @@ async function caricaBacheca() {
     return;
   }
 
+  // Conta ripetizioni per chiave_dedup
+  var contaDedup = {};
+  avvisi.forEach(function(a) {
+    if (a.chiave_dedup) contaDedup[a.chiave_dedup] = (contaDedup[a.chiave_dedup] || 0) + 1;
+  });
+  // Carica chiavi silenziate
+  var { data: silList } = await sb.from('avvisi_silenziati').select('chiave');
+  var silKeys = {};
+  (silList || []).forEach(function(s) { silKeys[s.chiave] = true; });
+
   var tipoBadge = {
     comunicazione: '<span class="badge blue">comunicazione</span>',
     anomalia: '<span class="badge amber">anomalia</span>',
@@ -78,7 +88,10 @@ async function caricaBacheca() {
       '<div style="font-size:13px;line-height:1.5;margin-bottom:6px">' + esc(a.messaggio) + '</div>' +
       '<div style="font-size:10px;color:var(--text-muted)">Da: <strong>' + esc(a.mittente_nome || 'Sistema') + '</strong>' +
         (a.postazione ? ' · ' + (postLabel[a.postazione] || a.postazione) : '') +
+        (a.chiave_dedup && contaDedup[a.chiave_dedup] >= 3 ? ' · <span style="color:#BA7517">ripetuto ' + contaDedup[a.chiave_dedup] + 'x</span>' : '') +
       '</div>' +
+      (a.chiave_dedup && contaDedup[a.chiave_dedup] >= 5 && !silKeys[a.chiave_dedup] ?
+        '<button onclick="event.stopPropagation();silenziaAvviso(\'' + esc(a.chiave_dedup) + '\',\'' + esc(a.messaggio.substring(0,60).replace(/'/g, '')) + '\')" style="margin-top:6px;padding:4px 12px;font-size:10px;border:0.5px solid #BA7517;border-radius:6px;background:#FAEEDA;color:#854F0B;cursor:pointer;font-weight:500">🔇 Silenzia questa ripetizione</button>' : '') +
     '</div>';
   }).join('');
 }
@@ -114,6 +127,39 @@ async function segnaLettoAvviso(id, el) {
   aggiornaBadgeBacheca();
 }
 
+async function silenziaAvviso(chiave, esempio) {
+  if (!confirm('Silenziare questo tipo di avviso? Non verrà più ripetuto.\nPotrai riattivarlo dalla sezione Admin.')) return;
+  await sb.from('avvisi_silenziati').upsert({
+    chiave: chiave,
+    messaggio_esempio: esempio || '',
+    silenziato_da: utenteCorrente ? utenteCorrente.nome : 'admin'
+  }, { onConflict: 'chiave' });
+  toast('Avviso silenziato! Non verrà più ripetuto.');
+  caricaBacheca();
+}
+
+async function riattivaAvvisi() {
+  var { data: sil } = await sb.from('avvisi_silenziati').select('*').order('created_at', { ascending: false });
+  if (!sil || !sil.length) { toast('Nessun avviso silenziato'); return; }
+  var h = '<div style="font-size:15px;font-weight:500;margin-bottom:12px">Avvisi silenziati (' + sil.length + ')</div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Clicca 🔔 per riattivare un avviso</div>';
+  sil.forEach(function(s) {
+    h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg)">';
+    h += '<div style="flex:1;font-size:12px">' + esc(s.messaggio_esempio || s.chiave) + '<br/><span style="font-size:10px;color:var(--text-muted)">Silenziato da ' + esc(s.silenziato_da || '—') + ' il ' + new Date(s.created_at).toLocaleDateString('it-IT') + '</span></div>';
+    h += '<button onclick="riattivaAvvisoSingolo(\'' + s.chiave + '\')" style="padding:4px 12px;font-size:11px;border:0.5px solid #639922;border-radius:6px;background:#EAF3DE;color:#27500A;cursor:pointer;font-weight:500;white-space:nowrap">🔔 Riattiva</button>';
+    h += '</div>';
+  });
+  h += '<div style="display:flex;gap:8px;margin-top:12px"><button onclick="chiudiModal()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  apriModal(h);
+}
+
+async function riattivaAvvisoSingolo(chiave) {
+  await sb.from('avvisi_silenziati').delete().eq('chiave', chiave);
+  toast('Avviso riattivato!');
+  chiudiModal();
+  riattivaAvvisi();
+}
+
 async function segnaLettiBacheca() {
   if (!utenteCorrente || utenteCorrente.ruolo !== 'admin') { toast('Solo l\'admin può segnare come letti'); return; }
   if (!confirm('Segnare tutti gli avvisi come letti?')) return;
@@ -139,13 +185,33 @@ async function aggiornaBadgeBacheca() {
 
 // Avviso di sistema (chiamabile da qualsiasi funzione)
 async function inviaAvvisoSistema(messaggio, tipo) {
+  // Genera chiave dedup (normalizza: rimuovi date, importi, spazi)
+  var chiave = messaggio.toLowerCase().trim()
+    .replace(/\d{2}\/\d{2}\/\d{4}/g, '')
+    .replace(/€\s*[\d\.,]+/g, '')
+    .replace(/\s+/g, ' ').trim();
+  // Hash semplice
+  var hash = 0;
+  for (var i = 0; i < chiave.length; i++) { hash = ((hash << 5) - hash) + chiave.charCodeAt(i); hash |= 0; }
+  var dedupKey = 'dedup_' + Math.abs(hash).toString(36);
+
+  // Controlla se silenziato
+  var { data: sil } = await sb.from('avvisi_silenziati').select('id').eq('chiave', dedupKey).limit(1);
+  if (sil && sil.length) return; // Silenziato, non inviare
+
+  // Controlla se esiste già nelle ultime 24h
+  var ieri = new Date(Date.now() - 86400000).toISOString();
+  var { data: recenti } = await sb.from('bacheca_avvisi').select('id').eq('chiave_dedup', dedupKey).gte('created_at', ieri).limit(1);
+  if (recenti && recenti.length) return; // Già inviato nelle ultime 24h
+
   await _sbWrite('bacheca_avvisi', 'insert', [{
     tipo: tipo || 'sistema',
     priorita: 'urgente',
     messaggio: messaggio,
     mittente_nome: 'Sistema PhoenixFuel',
     postazione: null,
-    letto: false
+    letto: false,
+    chiave_dedup: dedupKey
   }]);
 }
 
