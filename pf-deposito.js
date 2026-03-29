@@ -90,6 +90,7 @@ async function caricaDeposito() {
   tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
   caricaRettifiche('deposito');
   _popolaSelAnnoGiac('giac-dep-anno');
+  caricaDasOrdiniDeposito();
 }
 
 async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLitro) {

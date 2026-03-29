@@ -342,6 +342,22 @@
         <div id="container-deposito-prodotti"></div>
         <div class="card"><div class="card-title">Movimenti recenti</div><table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table></div>
 
+        <!-- DAS RICEVUTI DEPOSITO -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📄 DAS ricevuti — allega documento fornitore</span>
+            <select id="das-dep-filtro-stato" onchange="caricaDasOrdiniDeposito()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+              <option value="senza_das">Senza DAS allegato</option>
+              <option value="con_das">Con DAS allegato</option>
+              <option value="">Tutti</option>
+            </select>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ordini entrata deposito: scatta una foto o carica il PDF del DAS ricevuto dal fornitore.</div>
+          <div id="das-ordini-deposito-lista">
+            <div class="loading">Caricamento ordini...</div>
+          </div>
+        </div>
+
         <!-- RETTIFICHE DEPOSITO -->
         <div class="card" style="margin-top:16px">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -1174,39 +1190,42 @@
 
           <!-- PANEL DAS RICEVUTI -->
           <div class="all-panel" id="all-das" style="display:none">
+            <!-- Ordini in arrivo che attendono DAS -->
             <div class="card" style="margin-bottom:16px">
-              <div class="card-title">📄 Registra DAS ricevuto da fornitore</div>
-              <div class="form-grid">
-                <div class="form-group"><label>Data ricezione</label><input type="date" id="das-ric-data" /></div>
-                <div class="form-group"><label>Fornitore</label><select id="das-ric-fornitore"><option value="">Seleziona...</option></select></div>
-                <div class="form-group"><label>Prodotto</label><select id="das-ric-prodotto"><option value="">Seleziona...</option></select></div>
-                <div class="form-group"><label>Numero DAS</label><input type="text" id="das-ric-numero" placeholder="Es. DAS-2026/0042" /></div>
-                <div class="form-group"><label>Litri dichiarati</label><input type="number" id="das-ric-litri" placeholder="0" /></div>
-                <div class="form-group"><label>Documento (foto/PDF)</label><input type="file" id="das-ric-file" accept="image/*,.pdf" style="font-size:12px" /></div>
-                <div class="form-group"><label>Note</label><input type="text" id="das-ric-note" placeholder="Facoltativo" /></div>
+              <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <span>📄 Ordini in arrivo — allega DAS fornitore</span>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <select id="das-ric-filtro-stato" onchange="caricaDasOrdiniStazione()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                    <option value="senza_das">Senza DAS allegato</option>
+                    <option value="con_das">Con DAS allegato</option>
+                    <option value="">Tutti</option>
+                  </select>
+                </div>
               </div>
-              <button class="btn-primary" onclick="salvaDasRicevuto()">📄 Registra DAS</button>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Quando il fornitore consegna, scatta una foto o carica il PDF del DAS ricevuto e allegalo all'ordine corrispondente.</div>
+              <div id="das-ordini-stazione-lista">
+                <div class="loading">Caricamento ordini...</div>
+              </div>
             </div>
+
+            <!-- Storico DAS allegati -->
             <div class="card">
               <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-                <span>Elenco DAS ricevuti</span>
+                <span>📋 Storico DAS allegati</span>
                 <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                  <select id="das-ric-filtro-anno" onchange="caricaRegistroDasRicevuti()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
-                  <select id="das-ric-filtro-mese" onchange="caricaRegistroDasRicevuti()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                  <select id="das-ric-filtro-anno" onchange="caricaStoricoDasStazione()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
+                  <select id="das-ric-filtro-mese" onchange="caricaStoricoDasStazione()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
                     <option value="">Tutti i mesi</option>
                     <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option>
                     <option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
                     <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
                     <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
                   </select>
-                  <select id="das-ric-filtro-fornitore" onchange="caricaRegistroDasRicevuti()" style="font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                    <option value="">Tutti i fornitori</option>
-                  </select>
                 </div>
               </div>
               <div style="overflow-x:auto">
-                <table><thead><tr><th>Data</th><th>Fornitore</th><th>Prodotto</th><th>N. DAS</th><th>Litri</th><th>Note</th><th>Allegato</th><th></th></tr></thead>
-                <tbody id="das-ric-tabella"><tr><td colspan="8" class="loading">Seleziona periodo...</td></tr></tbody></table>
+                <table><thead><tr><th>Data</th><th>Fornitore</th><th>Prodotto</th><th>Litri</th><th>DAS allegato</th><th>Caricato</th></tr></thead>
+                <tbody id="das-storico-stazione-tabella"><tr><td colspan="6" class="loading">Seleziona periodo...</td></tr></tbody></table>
               </div>
             </div>
           </div>

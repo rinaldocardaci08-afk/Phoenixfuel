@@ -1,15 +1,15 @@
 -- ═══════════════════════════════════════════════════════════════════
--- PhoenixFuel — Setup A: Storage allegati scontrini + DAS
+-- PhoenixFuel — Setup A: Storage allegati scontrini
 -- Eseguire su Supabase SQL Editor
 -- ═══════════════════════════════════════════════════════════════════
 
--- 1. TABELLA ALLEGATI
--- Traccia tutti i file caricati (scontrini, DAS ricevuti, documenti ordine)
+-- 1. TABELLA ALLEGATI (scontrini e altri documenti generici)
+--    I DAS fornitore vanno nella tabella documenti_ordine già esistente
 CREATE TABLE IF NOT EXISTS allegati (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  tipo text NOT NULL CHECK (tipo IN ('scontrino','das_ricevuto','documento_ordine','altro')),
-  riferimento_id text,                -- chiave del record collegato (data per cassa, uuid per ordine)
-  riferimento_tabella text,           -- 'stazione_cassa', 'ordini', 'carichi'
+  tipo text NOT NULL CHECK (tipo IN ('scontrino','altro')),
+  riferimento_id text,                -- chiave del record collegato (es. data per cassa)
+  riferimento_tabella text,           -- 'stazione_cassa'
   data date NOT NULL,
   nome_file text NOT NULL,
   path_storage text NOT NULL,         -- percorso nel bucket es. scontrini/2026/03/xxx.jpg
@@ -17,10 +17,6 @@ CREATE TABLE IF NOT EXISTS allegati (
   dimensione_bytes integer,
   mime_type text,
   note text,
-  fornitore text,                     -- solo per das_ricevuto
-  numero_das text,                    -- solo per das_ricevuto: numero documento fornitore
-  litri_das numeric,                  -- solo per das_ricevuto: litri dichiarati
-  prodotto text,                      -- solo per das_ricevuto
   caricato_da text,                   -- nome utente che ha caricato
   created_at timestamptz DEFAULT now()
 );
@@ -28,7 +24,6 @@ CREATE TABLE IF NOT EXISTS allegati (
 CREATE INDEX IF NOT EXISTS idx_allegati_tipo ON allegati(tipo);
 CREATE INDEX IF NOT EXISTS idx_allegati_data ON allegati(data DESC);
 CREATE INDEX IF NOT EXISTS idx_allegati_rif ON allegati(riferimento_tabella, riferimento_id);
-CREATE INDEX IF NOT EXISTS idx_allegati_fornitore ON allegati(fornitore) WHERE fornitore IS NOT NULL;
 
 -- 2. RLS POLICIES
 ALTER TABLE allegati ENABLE ROW LEVEL SECURITY;
@@ -48,34 +43,23 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- 3. STORAGE BUCKET
+-- 3. STORAGE BUCKETS
 -- ⚠️ IMPORTANTE: Creare il bucket dalla Dashboard Supabase:
+--
+-- BUCKET "allegati" (per scontrini):
 --   → Storage → New Bucket → Nome: "allegati" → Public: ON
+--   → Policies: SELECT/INSERT/DELETE per authenticated
 --
--- Poi aggiungere queste policies di storage:
+-- BUCKET "Das" (per DAS ordini — probabilmente esiste già):
+--   → Verificare che accetti anche immagini, non solo PDF
+--   → Se non esiste, crearlo con le stesse policies
 --
--- Policy SELECT (download): allow all authenticated
---   Target roles: authenticated
---   SELECT using: true
---
--- Policy INSERT (upload): allow all authenticated
---   Target roles: authenticated
---   INSERT with check: true
---
--- Policy DELETE (cancella): allow all authenticated
---   Target roles: authenticated
---   DELETE using: true
---
--- Oppure eseguire da SQL (se supportato dalla versione):
+-- Per creare policies da SQL (alternativa):
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('allegati', 'allegati', true)
 -- ON CONFLICT (id) DO NOTHING;
---
--- CREATE POLICY "allegati_storage_select" ON storage.objects FOR SELECT
---   USING (bucket_id = 'allegati');
--- CREATE POLICY "allegati_storage_insert" ON storage.objects FOR INSERT
---   WITH CHECK (bucket_id = 'allegati');
--- CREATE POLICY "allegati_storage_delete" ON storage.objects FOR DELETE
---   USING (bucket_id = 'allegati');
+-- CREATE POLICY "allegati_storage_all" ON storage.objects
+--   FOR ALL USING (bucket_id = 'allegati') WITH CHECK (bucket_id = 'allegati');
 
 -- 4. VERIFICA
--- SELECT * FROM allegati LIMIT 0;  -- verifica struttura
+-- SELECT * FROM allegati LIMIT 0;
+-- SELECT * FROM documenti_ordine LIMIT 5;  -- DAS vanno qui

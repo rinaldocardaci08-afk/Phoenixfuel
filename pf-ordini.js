@@ -767,7 +767,7 @@ async function apriModaleOrdine(id) {
 
   // Upload nuovo documento
   html += '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">';
-  html += '<div class="form-group" style="flex:1"><label>Carica documento (PDF)</label><input type="file" id="doc-file" accept=".pdf" style="font-size:12px" /></div>';
+  html += '<div class="form-group" style="flex:1"><label>Carica documento (PDF/foto)</label><input type="file" id="doc-file" accept="image/*,.pdf" style="font-size:12px" /></div>';
   html += '<div class="form-group"><label>Tipo</label><select id="doc-tipo" style="font-size:12px"><option value="das">DAS</option><option value="conferma">Conferma</option><option value="fattura">Fattura</option><option value="altro">Altro</option></select></div>';
   html += '<button class="btn-primary" style="padding:8px 14px;font-size:12px;margin-bottom:5px" onclick="uploadDocumento(\'' + id + '\')">Carica</button>';
   html += '</div></div>';
@@ -821,10 +821,11 @@ function aggiornaMargineDaPrezzo() {
 async function uploadDocumento(ordineId) {
   const fileInput = document.getElementById('doc-file');
   const tipo = document.getElementById('doc-tipo').value;
-  if (!fileInput.files.length) { toast('Seleziona un file PDF'); return; }
+  if (!fileInput.files.length) { toast('Seleziona un file'); return; }
   const file = fileInput.files[0];
-  if (file.type !== 'application/pdf') { toast('Solo file PDF ammessi'); return; }
-  if (file.size > 10 * 1024 * 1024) { toast('File troppo grande (max 10MB)'); return; }
+  var tipiAmmessi = ['application/pdf','image/jpeg','image/png','image/gif','image/webp'];
+  if (tipiAmmessi.indexOf(file.type) < 0) { toast('Solo PDF o immagini ammessi'); return; }
+  if (file.size > 15 * 1024 * 1024) { toast('File troppo grande (max 15MB)'); return; }
 
   const nomeFile = file.name;
   const percorso = ordineId + '/' + Date.now() + '_' + nomeFile.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -832,7 +833,7 @@ async function uploadDocumento(ordineId) {
   toast('Caricamento in corso...');
 
   // Upload su Supabase Storage
-  const { error: errUpload } = await sb.storage.from('Das').upload(percorso, file, { contentType: 'application/pdf' });
+  const { error: errUpload } = await sb.storage.from('Das').upload(percorso, file, { contentType: file.type });
   if (errUpload) { toast('Errore upload: ' + errUpload.message); return; }
 
   // Salva riferimento nel database

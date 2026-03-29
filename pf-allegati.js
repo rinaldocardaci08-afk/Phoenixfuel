@@ -1,4 +1,4 @@
-// PhoenixFuel — Allegati: Scontrini + DAS ricevuti (Storage Supabase)
+// PhoenixFuel — Allegati: Scontrini + DAS ricevuti (collegati a ordini)
 
 var BUCKET_ALLEGATI = 'allegati';
 var STORAGE_LIMIT_MB = 1024; // Piano Free Supabase = 1 GB
@@ -14,15 +14,39 @@ function switchAllegatiTab(btn) {
   document.querySelectorAll('.all-panel').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById(btn.dataset.tab).style.display = '';
   if (btn.dataset.tab === 'all-scontrini') caricaRegistroScontrini();
-  else if (btn.dataset.tab === 'all-das') caricaRegistroDasRicevuti();
+  else if (btn.dataset.tab === 'all-das') { caricaDasOrdiniStazione(); caricaStoricoDasStazione(); }
 }
 
 // ── CARICA TAB ALLEGATI ─────────────────────────────────────────
 function caricaAllegati() {
   _initAnnoScontrini();
-  _initAnnoDasRic();
+  _initAnnoStoricoDas();
   caricaRegistroScontrini();
   aggiornaIndicatoreStorage();
+}
+
+function _initAnnoScontrini() {
+  var sel = document.getElementById('all-sco-anno');
+  if (!sel || sel.options.length > 1) return;
+  var anno = new Date().getFullYear();
+  sel.innerHTML = '';
+  for (var a = anno; a >= anno - 3; a--) {
+    sel.innerHTML += '<option value="' + a + '"' + (a === anno ? ' selected' : '') + '>' + a + '</option>';
+  }
+  var mesSel = document.getElementById('all-sco-mese');
+  if (mesSel) mesSel.value = String(new Date().getMonth() + 1).padStart(2, '0');
+}
+
+function _initAnnoStoricoDas() {
+  var sel = document.getElementById('das-ric-filtro-anno');
+  if (!sel || sel.options.length > 1) return;
+  var anno = new Date().getFullYear();
+  sel.innerHTML = '';
+  for (var a = anno; a >= anno - 3; a--) {
+    sel.innerHTML += '<option value="' + a + '"' + (a === anno ? ' selected' : '') + '>' + a + '</option>';
+  }
+  var mesSel = document.getElementById('das-ric-filtro-mese');
+  if (mesSel) mesSel.value = String(new Date().getMonth() + 1).padStart(2, '0');
 }
 
 // ── INDICATORE SPAZIO STORAGE ───────────────────────────────────
@@ -30,23 +54,19 @@ async function aggiornaIndicatoreStorage() {
   var container = document.getElementById('storage-usage-bar');
   if (!container) return;
 
-  // Somma dimensioni da tabella allegati (nuovi) + documenti_ordine (vecchi)
   var [resAll, resDoc] = await Promise.all([
     sb.from('allegati').select('dimensione_bytes'),
-    sb.from('documenti_ordine').select('id')  // non ha dimensione, stimiamo
+    sb.from('documenti_ordine').select('id')
   ]);
 
   var totBytes = 0;
   (resAll.data || []).forEach(function(r) { totBytes += Number(r.dimensione_bytes || 0); });
-
-  // Stima vecchi documenti ordine: ~300KB ciascuno (PDF medi)
   var nDocOrdine = (resDoc.data || []).length;
   totBytes += nDocOrdine * 300000;
 
   var usatoMB = totBytes / (1024 * 1024);
   var pct = Math.min(100, Math.round((usatoMB / STORAGE_LIMIT_MB) * 100));
 
-  // Colori: verde < 60%, giallo 60-80%, rosso > 80%
   var barColor, textColor, bgColor;
   if (pct < 60) {
     barColor = '#639922'; textColor = '#27500A'; bgColor = '#EAF3DE';
@@ -58,7 +78,6 @@ async function aggiornaIndicatoreStorage() {
 
   var usatoLabel = usatoMB < 1 ? Math.round(usatoMB * 1024) + ' KB' : usatoMB.toFixed(1) + ' MB';
   var limiteLabel = STORAGE_LIMIT_MB >= 1024 ? (STORAGE_LIMIT_MB / 1024).toFixed(0) + ' GB' : STORAGE_LIMIT_MB + ' MB';
-
   var nAllegati = (resAll.data || []).length;
   var totFiles = nAllegati + nDocOrdine;
 
@@ -76,47 +95,6 @@ async function aggiornaIndicatoreStorage() {
         (pct >= 80 ? '<div style="font-size:10px;color:#A32D2D;margin-top:3px;font-weight:500">⚠️ Spazio quasi esaurito — valuta upgrade a piano Pro</div>' : '') +
       '</div>' +
     '</div>';
-}
-
-function _initAnnoScontrini() {
-  var sel = document.getElementById('all-sco-anno');
-  if (!sel || sel.options.length > 1) return;
-  var anno = new Date().getFullYear();
-  sel.innerHTML = '';
-  for (var a = anno; a >= anno - 3; a--) {
-    sel.innerHTML += '<option value="' + a + '"' + (a === anno ? ' selected' : '') + '>' + a + '</option>';
-  }
-  var mesSel = document.getElementById('all-sco-mese');
-  if (mesSel) mesSel.value = String(new Date().getMonth() + 1).padStart(2, '0');
-}
-
-function _initAnnoDasRic() {
-  var sel = document.getElementById('das-ric-filtro-anno');
-  if (!sel || sel.options.length > 1) return;
-  var anno = new Date().getFullYear();
-  sel.innerHTML = '';
-  for (var a = anno; a >= anno - 3; a--) {
-    sel.innerHTML += '<option value="' + a + '"' + (a === anno ? ' selected' : '') + '>' + a + '</option>';
-  }
-  var mesSel = document.getElementById('das-ric-filtro-mese');
-  if (mesSel) mesSel.value = String(new Date().getMonth() + 1).padStart(2, '0');
-  // Data form
-  var dRic = document.getElementById('das-ric-data');
-  if (dRic && !dRic.value) dRic.value = oggiISO;
-  // Popola dropdown fornitore nel form
-  _popolaFornitoreDasRic();
-  // Popola prodotto
-  popolaDropdownProdotti('das-ric-prodotto', false);
-}
-
-async function _popolaFornitoreDasRic() {
-  var { data: fornitori } = await sb.from('fornitori').select('nome').eq('attivo', true).order('nome');
-  var selForm = document.getElementById('das-ric-fornitore');
-  var selFiltro = document.getElementById('das-ric-filtro-fornitore');
-  (fornitori || []).forEach(function(f) {
-    if (selForm) selForm.innerHTML += '<option>' + esc(f.nome) + '</option>';
-    if (selFiltro) selFiltro.innerHTML += '<option>' + esc(f.nome) + '</option>';
-  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -207,7 +185,6 @@ async function caricaRegistroScontrini() {
     return;
   }
 
-  // Raggruppa per data
   var perData = {};
   allegati.forEach(function(a) {
     if (!perData[a.data]) perData[a.data] = [];
@@ -239,86 +216,164 @@ async function caricaRegistroScontrini() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// DAS RICEVUTI — Registrazione e registro
+// DAS RICEVUTI — Collegati a ordini (Stazione + Deposito)
 // ═══════════════════════════════════════════════════════════════════
 
-async function salvaDasRicevuto() {
-  var data = document.getElementById('das-ric-data').value;
-  var fornitore = document.getElementById('das-ric-fornitore').value;
-  var prodotto = document.getElementById('das-ric-prodotto').value;
-  var numero = document.getElementById('das-ric-numero').value.trim();
-  var litri = parseFloat(document.getElementById('das-ric-litri').value) || 0;
-  var note = document.getElementById('das-ric-note').value.trim();
-  var fileInput = document.getElementById('das-ric-file');
+// Funzione generica: carica ordini in attesa di DAS per un tipo_ordine
+async function _caricaDasOrdini(tipoOrdine, containerId, filtroStatoId) {
+  var filtro = document.getElementById(filtroStatoId);
+  var filtroVal = filtro ? filtro.value : 'senza_das';
 
-  if (!data) { toast('Inserisci la data'); return; }
-  if (!fornitore) { toast('Seleziona il fornitore'); return; }
-  if (!prodotto) { toast('Seleziona il prodotto'); return; }
-  if (!numero) { toast('Inserisci il numero DAS'); return; }
-  if (litri <= 0) { toast('Inserisci i litri dichiarati'); return; }
+  // Carica ordini recenti (ultimi 60gg) del tipo richiesto
+  var daData = new Date();
+  daData.setDate(daData.getDate() - 60);
+  var daISO = daData.toISOString().split('T')[0];
 
-  toast('Salvataggio in corso...');
+  var query = sb.from('ordini').select('id,data,fornitore,prodotto,litri,stato,note')
+    .eq('tipo_ordine', tipoOrdine).neq('stato', 'annullato')
+    .gte('data', daISO).order('data', { ascending: false });
 
-  var pathStorage = null;
-  var nomeFile = null;
-  var mimeType = null;
-  var dimBytes = null;
+  var [ordiniRes, docsRes] = await Promise.all([
+    query,
+    sb.from('documenti_ordine').select('ordine_id,nome_file,percorso_storage,tipo,created_at')
+      .eq('tipo', 'das').order('created_at', { ascending: false })
+  ]);
 
-  // Upload file se presente
-  if (fileInput.files && fileInput.files.length) {
-    var file = fileInput.files[0];
-    if (file.size > 15 * 1024 * 1024) { toast('File troppo grande (max 15MB)'); return; }
-    nomeFile = file.name;
-    mimeType = file.type;
-    dimBytes = file.size;
-    var mm = String(new Date(data).getMonth() + 1).padStart(2, '0');
-    var yyyy = data.substring(0, 4);
-    var safeName = nomeFile.replace(/[^a-zA-Z0-9._-]/g, '_');
-    pathStorage = 'das-ricevuti/' + yyyy + '/' + mm + '/' + Date.now() + '_' + safeName;
+  var ordini = ordiniRes.data || [];
+  var docs = docsRes.data || [];
 
-    var { error: errUp } = await sb.storage.from(BUCKET_ALLEGATI).upload(pathStorage, file, { contentType: mimeType });
-    if (errUp) { toast('Errore upload: ' + errUp.message); return; }
+  // Mappa ordineId → documenti DAS
+  var docMap = {};
+  docs.forEach(function(d) {
+    if (!docMap[d.ordine_id]) docMap[d.ordine_id] = [];
+    docMap[d.ordine_id].push(d);
+  });
+
+  // Filtra
+  if (filtroVal === 'senza_das') {
+    ordini = ordini.filter(function(o) { return !docMap[o.id] || !docMap[o.id].length; });
+  } else if (filtroVal === 'con_das') {
+    ordini = ordini.filter(function(o) { return docMap[o.id] && docMap[o.id].length; });
   }
 
-  var record = {
-    tipo: 'das_ricevuto',
-    data: data,
-    fornitore: fornitore,
-    prodotto: prodotto,
-    numero_das: numero,
-    litri_das: litri,
-    note: note || null,
-    nome_file: nomeFile || 'nessun file',
-    path_storage: pathStorage || '',
-    bucket: BUCKET_ALLEGATI,
-    mime_type: mimeType,
-    dimensione_bytes: dimBytes,
-    riferimento_tabella: 'stazione',
-    riferimento_id: data,
-    caricato_da: utenteCorrente ? utenteCorrente.nome : null
-  };
+  var container = document.getElementById(containerId);
+  if (!container) return;
 
-  var { error } = await sb.from('allegati').insert([record]);
-  if (error) { toast('Errore: ' + error.message); return; }
+  if (!ordini.length) {
+    var msgVuoto = filtroVal === 'senza_das'
+      ? '✅ Tutti gli ordini recenti hanno il DAS allegato'
+      : 'Nessun ordine trovato per questo filtro';
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-hint);font-size:13px">' + msgVuoto + '</div>';
+    return;
+  }
 
-  _auditLog('registra_das_ricevuto', 'allegati', 'DAS ' + numero + ' da ' + fornitore + ' — ' + litri + 'L ' + prodotto);
-  toast('DAS ricevuto registrato!');
-  aggiornaIndicatoreStorage();
+  var html = '';
+  ordini.forEach(function(o) {
+    var hasDas = docMap[o.id] && docMap[o.id].length;
+    var borderColor = hasDas ? '#639922' : '#BA7517';
+    var bgColor = hasDas ? '#EAF3DE' : '#FAEEDA';
+    var inputId = 'das-file-' + o.id;
 
-  // Reset form
-  document.getElementById('das-ric-numero').value = '';
-  document.getElementById('das-ric-litri').value = '';
-  document.getElementById('das-ric-note').value = '';
-  if (fileInput) fileInput.value = '';
+    html += '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:' + bgColor + ';border-left:4px solid ' + borderColor + ';border-radius:0 10px 10px 0;margin-bottom:6px;flex-wrap:wrap">';
 
-  caricaRegistroDasRicevuti();
+    // Info ordine
+    html += '<div style="flex:1;min-width:200px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+    html += '<span style="font-family:var(--font-mono);font-weight:600;font-size:13px">' + o.data + '</span>';
+    html += '<span style="font-weight:600">' + esc(o.fornitore) + '</span>';
+    html += '<span class="badge blue" style="font-size:9px">' + esc(o.prodotto) + '</span>';
+    html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:500">' + fmtL(o.litri) + '</span>';
+    html += badgeStato(o.stato);
+    html += '</div>';
+
+    // DAS già allegati
+    if (hasDas) {
+      docMap[o.id].forEach(function(d) {
+        var url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
+        var isImg = _isImmagine(_getMimeFromName(d.nome_file));
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px">';
+        html += '<span style="color:#639922;font-weight:600">✅ DAS:</span>';
+        if (isImg) {
+          html += '<img src="' + url + '" onclick="apriLightbox(\'' + url + '\')" style="width:32px;height:32px;object-fit:cover;border-radius:4px;cursor:zoom-in;border:0.5px solid var(--border)" />';
+        }
+        html += '<a href="' + url + '" target="_blank" style="color:var(--accent);text-decoration:none">' + esc(d.nome_file) + '</a>';
+        html += '<span style="color:var(--text-hint)">' + new Date(d.created_at).toLocaleDateString('it-IT') + '</span>';
+        html += '<button onclick="eliminaDocDas(\'' + d.ordine_id + '\',\'' + esc(d.percorso_storage) + '\',\'' + tipoOrdine + '\')" class="btn-danger" style="font-size:10px;padding:1px 6px">x</button>';
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+
+    // Upload
+    html += '<div style="display:flex;gap:6px;align-items:center">';
+    html += '<input type="file" id="' + inputId + '" accept="image/*,.pdf" style="display:none" onchange="uploadDasOrdine(\'' + o.id + '\',\'' + inputId + '\',\'' + tipoOrdine + '\')" />';
+    html += '<button class="btn-primary" style="font-size:12px;padding:7px 14px;white-space:nowrap" onclick="document.getElementById(\'' + inputId + '\').click()">' + (hasDas ? '📎 Aggiungi altro' : '📷 Allega DAS') + '</button>';
+    html += '</div>';
+
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
 }
 
-async function caricaRegistroDasRicevuti() {
+// Wrapper per Stazione
+function caricaDasOrdiniStazione() {
+  _caricaDasOrdini('stazione_servizio', 'das-ordini-stazione-lista', 'das-ric-filtro-stato');
+}
+
+// Wrapper per Deposito
+function caricaDasOrdiniDeposito() {
+  _caricaDasOrdini('entrata_deposito', 'das-ordini-deposito-lista', 'das-dep-filtro-stato');
+}
+
+// ── UPLOAD DAS A ORDINE ─────────────────────────────────────────
+// Usa la stessa tabella documenti_ordine + bucket Das (compatibile con admin)
+async function uploadDasOrdine(ordineId, inputId, tipoOrdine) {
+  var fileInput = document.getElementById(inputId);
+  if (!fileInput || !fileInput.files.length) { toast('Seleziona un file'); return; }
+  var file = fileInput.files[0];
+  if (file.size > 15 * 1024 * 1024) { toast('File troppo grande (max 15MB)'); return; }
+
+  var nomeFile = file.name;
+  var safeName = nomeFile.replace(/[^a-zA-Z0-9._-]/g, '_');
+  var percorso = ordineId + '/' + Date.now() + '_' + safeName;
+
+  toast('Caricamento DAS...');
+
+  var { error: errUp } = await sb.storage.from('Das').upload(percorso, file, { contentType: file.type });
+  if (errUp) { toast('Errore upload: ' + errUp.message); return; }
+
+  var { error: errDb } = await sb.from('documenti_ordine').insert([{
+    ordine_id: ordineId,
+    nome_file: nomeFile,
+    tipo: 'das',
+    percorso_storage: percorso
+  }]);
+  if (errDb) { toast('Errore salvataggio: ' + errDb.message); return; }
+
+  _auditLog('upload_das_fornitore', 'documenti_ordine', 'DAS allegato a ordine ' + ordineId + ' — ' + nomeFile);
+  toast('DAS allegato all\'ordine!');
+  fileInput.value = '';
+
+  // Ricarica la lista corretta
+  if (tipoOrdine === 'stazione_servizio') caricaDasOrdiniStazione();
+  else caricaDasOrdiniDeposito();
+}
+
+// ── ELIMINA DAS DA ORDINE ───────────────────────────────────────
+async function eliminaDocDas(ordineId, percorso, tipoOrdine) {
+  if (!confirm('Eliminare questo DAS allegato?')) return;
+  await sb.storage.from('Das').remove([percorso]);
+  await sb.from('documenti_ordine').delete().eq('ordine_id', ordineId).eq('percorso_storage', percorso);
+  toast('DAS eliminato');
+  if (tipoOrdine === 'stazione_servizio') caricaDasOrdiniStazione();
+  else caricaDasOrdiniDeposito();
+}
+
+// ── STORICO DAS STAZIONE ────────────────────────────────────────
+async function caricaStoricoDasStazione() {
   var anno = (document.getElementById('das-ric-filtro-anno') || {}).value || new Date().getFullYear();
   var mese = (document.getElementById('das-ric-filtro-mese') || {}).value || '';
-  var fornitore = (document.getElementById('das-ric-filtro-fornitore') || {}).value || '';
-
   var daISO, aISO;
   if (mese) {
     daISO = anno + '-' + mese + '-01';
@@ -329,57 +384,46 @@ async function caricaRegistroDasRicevuti() {
     aISO = anno + '-12-31';
   }
 
-  var query = sb.from('allegati').select('*')
-    .eq('tipo', 'das_ricevuto').gte('data', daISO).lte('data', aISO)
-    .order('data', { ascending: false });
+  var { data: ordini } = await sb.from('ordini').select('id,data,fornitore,prodotto,litri')
+    .eq('tipo_ordine', 'stazione_servizio').neq('stato', 'annullato')
+    .gte('data', daISO).lte('data', aISO).order('data', { ascending: false });
 
-  if (fornitore) query = query.eq('fornitore', fornitore);
-
-  var { data: allegati } = await query;
-  var tbody = document.getElementById('das-ric-tabella');
-
-  if (!allegati || !allegati.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-hint);padding:20px">Nessun DAS ricevuto per il periodo selezionato</td></tr>';
+  if (!ordini || !ordini.length) {
+    document.getElementById('das-storico-stazione-tabella').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-hint);padding:20px">Nessun ordine per il periodo</td></tr>';
     return;
   }
 
-  var html = '';
-  var totLitri = 0;
-  allegati.forEach(function(a) {
-    var url = a.path_storage ? _getPublicUrl(a.path_storage) : '';
-    var isImage = _isImmagine(a.mime_type);
-    totLitri += Number(a.litri_das || 0);
-
-    html += '<tr>';
-    html += '<td>' + a.data + '</td>';
-    html += '<td style="font-weight:600">' + esc(a.fornitore || '') + '</td>';
-    html += '<td>' + esc(a.prodotto || '') + '</td>';
-    html += '<td style="font-family:var(--font-mono);font-weight:500">' + esc(a.numero_das || '') + '</td>';
-    html += '<td style="font-family:var(--font-mono)">' + fmtL(a.litri_das || 0) + '</td>';
-    html += '<td style="font-size:11px;color:var(--text-muted)">' + esc(a.note || '') + '</td>';
-
-    // Allegato
-    if (url) {
-      if (isImage) {
-        html += '<td><img src="' + url + '" onclick="apriLightbox(\'' + url + '\')" style="width:40px;height:40px;object-fit:cover;border-radius:6px;cursor:zoom-in;border:0.5px solid var(--border)" /></td>';
-      } else {
-        html += '<td><a href="' + url + '" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px">📄 Apri</a></td>';
-      }
-    } else {
-      html += '<td style="font-size:10px;color:var(--text-hint)">—</td>';
-    }
-
-    // Azioni
-    html += '<td>';
-    if (url) html += '<a href="' + url + '" download target="_blank" class="btn-edit" title="Scarica">⬇</a>';
-    html += '<button class="btn-danger" onclick="eliminaAllegato(\'' + a.id + '\',\'' + esc(a.path_storage) + '\',caricaRegistroDasRicevuti)">x</button>';
-    html += '</td></tr>';
+  var ids = ordini.map(function(o) { return o.id; });
+  var { data: docs } = await sb.from('documenti_ordine').select('*').eq('tipo', 'das').in('ordine_id', ids);
+  var docMap = {};
+  (docs || []).forEach(function(d) {
+    if (!docMap[d.ordine_id]) docMap[d.ordine_id] = [];
+    docMap[d.ordine_id].push(d);
   });
 
-  // Riga totale
-  html += '<tr style="font-weight:700;background:var(--bg)"><td colspan="4">TOTALE (' + allegati.length + ' DAS)</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td colspan="3"></td></tr>';
-
-  tbody.innerHTML = html;
+  var html = '';
+  ordini.forEach(function(o) {
+    var dasLista = docMap[o.id] || [];
+    if (!dasLista.length) {
+      html += '<tr><td>' + o.data + '</td><td>' + esc(o.fornitore) + '</td><td>' + esc(o.prodotto) + '</td>';
+      html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
+      html += '<td style="color:var(--text-hint);font-size:11px">—</td><td></td></tr>';
+    } else {
+      dasLista.forEach(function(d) {
+        var url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
+        var isImg = _isImmagine(_getMimeFromName(d.nome_file));
+        html += '<tr><td>' + o.data + '</td><td style="font-weight:600">' + esc(o.fornitore) + '</td><td>' + esc(o.prodotto) + '</td>';
+        html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
+        html += '<td>';
+        if (isImg) {
+          html += '<img src="' + url + '" onclick="apriLightbox(\'' + url + '\')" style="width:36px;height:36px;object-fit:cover;border-radius:4px;cursor:zoom-in;border:0.5px solid var(--border);vertical-align:middle;margin-right:6px" />';
+        }
+        html += '<a href="' + url + '" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px">' + esc(d.nome_file) + '</a></td>';
+        html += '<td style="font-size:10px;color:var(--text-hint)">' + new Date(d.created_at).toLocaleDateString('it-IT') + '</td></tr>';
+      });
+    }
+  });
+  document.getElementById('das-storico-stazione-tabella').innerHTML = html;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -391,7 +435,7 @@ async function _uploadAllegato(file, tipo, data, rifId, rifTabella, extra) {
 
   var mm = String(new Date(data).getMonth() + 1).padStart(2, '0');
   var yyyy = data.substring(0, 4);
-  var cartella = tipo === 'scontrino' ? 'scontrini' : tipo === 'das_ricevuto' ? 'das-ricevuti' : 'altri';
+  var cartella = tipo === 'scontrino' ? 'scontrini' : 'altri';
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   var pathStorage = cartella + '/' + yyyy + '/' + mm + '/' + Date.now() + '_' + safeName;
 
@@ -418,16 +462,12 @@ async function _uploadAllegato(file, tipo, data, rifId, rifTabella, extra) {
 
 async function eliminaAllegato(id, pathStorage, callback) {
   if (!confirm('Eliminare questo allegato?')) return;
-
-  // Elimina da storage (solo se path valido)
   if (pathStorage) {
     await sb.storage.from(BUCKET_ALLEGATI).remove([pathStorage]);
   }
-  // Elimina record
   await sb.from('allegati').delete().eq('id', id);
   toast('Allegato eliminato');
   aggiornaIndicatoreStorage();
-
   if (typeof callback === 'function') callback();
 }
 
@@ -438,6 +478,13 @@ function _getPublicUrl(path) {
 
 function _isImmagine(mimeType) {
   return mimeType && (mimeType.indexOf('image/') === 0);
+}
+
+function _getMimeFromName(nome) {
+  if (!nome) return '';
+  var ext = nome.split('.').pop().toLowerCase();
+  var map = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf' };
+  return map[ext] || '';
 }
 
 // ── LIGHTBOX ────────────────────────────────────────────────────
@@ -452,7 +499,6 @@ function chiudiLightbox(event) {
   document.getElementById('lightbox-img').src = '';
 }
 
-// Chiudi con Escape
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape' && document.getElementById('lightbox-overlay').style.display === 'flex') {
     chiudiLightbox();
