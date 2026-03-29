@@ -8,7 +8,8 @@ var CARICO_STANDARD = 35000;
 
 async function _fetchYahoo(ticker, range, interval) {
   try {
-    var url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=' + (interval||'1d') + '&range=' + (range||'1mo');
+    var baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=' + (interval||'1d') + '&range=' + (range||'1mo');
+    var url = 'https://corsproxy.io/?' + encodeURIComponent(baseUrl);
     var res = await fetch(url);
     var json = await res.json();
     if (!json.chart || !json.chart.result) return null;

@@ -161,9 +161,9 @@ async function caricaBenchmark() {
       '</div>' +
     '</div>' +
     '<div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:6px">' +
-      '<strong>MA7:</strong> € ' + (ma7.length ? ma7[ma7.length - 1].toFixed(4) : '—') +
-      ' · <strong>MA30:</strong> € ' + (ma30.length ? ma30[ma30.length - 1].toFixed(4) : '—') +
-      (ma7.length && ma30.length ? (ma7[ma7.length - 1] > ma30[ma30.length - 1] ? ' · <span style="color:#E24B4A">MA7 > MA30 (trend rialzista)</span>' : ' · <span style="color:#639922">MA7 < MA30 (trend ribassista)</span>') : '') +
+      '<strong>MA7:</strong> € ' + (ma7.length && ma7[ma7.length - 1] !== null ? ma7[ma7.length - 1].toFixed(4) : '—') +
+      ' · <strong>MA30:</strong> € ' + (ma30.length && ma30[ma30.length - 1] !== null ? ma30[ma30.length - 1].toFixed(4) : '—') +
+      (ma7.length && ma30.length && ma7[ma7.length - 1] !== null && ma30[ma30.length - 1] !== null ? (ma7[ma7.length - 1] > ma30[ma30.length - 1] ? ' · <span style="color:#E24B4A">MA7 > MA30 (trend rialzista)</span>' : ' · <span style="color:#639922">MA7 < MA30 (trend ribassista)</span>') : '') +
     '</div>';
 
   // ═══ GRAFICO ═══
