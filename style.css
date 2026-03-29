@@ -260,6 +260,10 @@ td input.inline-edit { border: none; background: var(--bg-kpi); border-radius: 4
   .prezzi-table { font-size: 11px; }
   .prezzi-table th { font-size: 9px; }
 
+  /* Calendario finanze: scroll orizzontale su mobile */
+  #fin-calendario > div { min-width: 700px; }
+  #fin-calendario { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
   /* Listino: controls wrap properly */
   #s-prezzi .card-title + .form-grid + div { flex-direction: column !important; }
   #s-prezzi .card-title + .form-grid + div > div[style*="margin-left:auto"] { margin-left: 0 !important; width: 100%; }

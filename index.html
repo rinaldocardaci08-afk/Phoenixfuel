@@ -576,6 +576,39 @@
         </div>
       </div>
 
+      <!-- FINANZE -->
+      <div class="section" id="s-finanze">
+        <!-- KPI mensili -->
+        <div class="grid4" style="margin-bottom:12px" id="fin-kpi"></div>
+
+        <!-- Filtri calendario -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📅 Calendario Entrate / Uscite</span>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button onclick="finCalMese(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+              <span id="fin-cal-mese-label" style="font-size:15px;font-weight:600;min-width:160px;text-align:center"></span>
+              <button onclick="finCalMese(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+              <select id="fin-cal-filtro" onchange="renderCalendarioFinanze()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutto</option>
+                <option value="entrate">Solo entrate</option>
+                <option value="uscite">Solo uscite</option>
+                <option value="ingrosso">Solo ingrosso</option>
+                <option value="stazione">Solo stazione</option>
+              </select>
+            </div>
+          </div>
+          <!-- Legenda -->
+          <div style="display:flex;gap:14px;font-size:11px;color:var(--text-muted);margin-bottom:12px;flex-wrap:wrap">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#639922;vertical-align:middle;margin-right:4px"></span>Entrate ingrosso</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#378ADD;vertical-align:middle;margin-right:4px"></span>Entrate stazione</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#E24B4A;vertical-align:middle;margin-right:4px"></span>Uscite fornitori</span>
+          </div>
+          <!-- Grid calendario -->
+          <div id="fin-calendario" style="overflow-x:auto"></div>
+        </div>
+      </div>
+
       <!-- BENCHMARK MERCATO -->
       <div class="section" id="s-benchmark">
         <!-- Input giornaliero -->
@@ -1536,6 +1569,7 @@
 <script src="pf-admin.js"></script>
 <script src="pf-dashboard.js"></script>
 <script src="pf-benchmark.js"></script>
+<script src="pf-finanze.js"></script>
 <script src="pf-system.js"></script>
 <script src="stz-sortable.js"></script>
 <script>

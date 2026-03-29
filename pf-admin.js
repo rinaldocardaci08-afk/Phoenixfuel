@@ -5,7 +5,7 @@ const SEZIONI_SISTEMA = [
   {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},{id:'deposito',label:'Deposito',icon:'🏗'},
   {id:'consegne',label:'Consegne',icon:'🚚'},{id:'vendite',label:'Vendite',icon:'📊'},
   {id:'clienti',label:'Clienti',icon:'👤'},{id:'fornitori',label:'Fornitori',icon:'🏭'},
-  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},{id:'stazione',label:'Stazione Oppido',icon:'⛽'},{id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},{id:'benchmark',label:'Benchmark mercato',icon:'📈'},
+  {id:'basi',label:'Basi di carico',icon:'📍'},{id:'prodotti',label:'Prodotti',icon:'📦'},{id:'logistica',label:'Logistica',icon:'🚛'},{id:'stazione',label:'Stazione Oppido',icon:'⛽'},{id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},{id:'benchmark',label:'Benchmark mercato',icon:'📈'},{id:'finanze',label:'Finanze',icon:'🏦'},
 ];
 
 async function apriModalePermessi(utenteId, nomeUtente) {
