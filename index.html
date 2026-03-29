@@ -117,6 +117,7 @@
 
         <!-- Alert operativi -->
         <div id="dash-alert-operativi" style="margin-bottom:16px"></div>
+        <div id="dash-alert-futures" style="display:none;margin-bottom:8px"></div>
 
         <!-- GIACENZA DEPOSITO -->
         <div class="card" style="margin-bottom:16px">
@@ -639,6 +640,21 @@
 
       <!-- BENCHMARK MERCATO -->
       <div class="section" id="s-benchmark">
+
+        <!-- Tab Benchmark / Futures -->
+        <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px" id="benchmark-tabs">
+          <button id="tab-benchmark-std" onclick="_switchBenchTab('std')"
+            style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--primary);border-bottom:2px solid var(--primary)">
+            📈 Benchmark mercato
+          </button>
+          <button id="tab-futures" onclick="_switchBenchTab('futures')"
+            style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent">
+            📡 Futures ICE
+          </button>
+        </div>
+
+        <!-- Contenuto Benchmark standard -->
+        <div id="bench-std-wrap">
         <!-- Input giornaliero -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Inserisci prezzo di riferimento</div>
@@ -694,6 +710,11 @@
             <tbody id="bench-tabella"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
+        </div><!-- fine bench-std-wrap -->
+
+        <!-- Contenuto Futures ICE -->
+        <div id="futures-wrap" style="display:none"></div>
+
       </div>
 
       <!-- CLIENTI -->
@@ -1798,18 +1819,12 @@
 <script src="pf-ordini.js"></script>
 <script src="pf-deposito.js"></script>
 <script src="pf-anagrafica.js"></script>
-<script src="pf-stz-core.js"></script>
-<script src="pf-stz-letture.js"></script>
-<script src="pf-stz-marginalita.js"></script>
-<script src="pf-stz-magazzino.js"></script>
-<script src="pf-stz-cassa.js"></script>
-<script src="pf-stz-report.js"></script>
-<script src="pf-stz-foglio.js"></script>
-<script src="pf-stz-giacenze.js"></script>
+<script src="pf-stazione.js"></script>
 <script src="pf-logistica.js"></script>
 <script src="pf-admin.js"></script>
 <script src="pf-dashboard.js"></script>
 <script src="pf-benchmark.js"></script>
+<script src="pf-futures.js"></script>
 <script src="pf-finanze.js"></script>
 <script src="pf-allegati.js"></script>
 <script src="pf-system.js"></script>
