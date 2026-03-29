@@ -30,6 +30,7 @@
       .grid2, .grid4, [style*="grid-template-columns:1fr 1fr 1fr"], [style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
       /* Cassa incassi */
       #stz-cassa .grid2 { grid-template-columns:1fr !important; }
+      #fg-grid-mobile { grid-template-columns:1fr !important; }
       /* Tables scroll */
       table { font-size:11px; }
       th, td { padding:4px 6px !important; }
@@ -828,6 +829,7 @@
           <button class="btn-primary stz-tab" data-tab="stz-magazzino" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Magazzino</button>
           <button class="btn-primary stz-tab" data-tab="stz-marginalita" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Marginalità</button>
           <button class="btn-primary stz-tab" data-tab="stz-cassa" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏧 Cassa</button>
+          <button class="btn-primary stz-tab" data-tab="stz-foglio" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Foglio giornaliero</button>
           <button class="btn-primary stz-tab" data-tab="stz-allegati" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📎 Allegati</button>
           <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
         </div>
@@ -1149,6 +1151,75 @@
             <div style="overflow-x:auto">
               <table><thead><tr><th>Data</th><th>Da versare</th><th>Versato</th><th>Differenza</th><th>Diff. cumulata</th></tr></thead>
               <tbody id="diff-cassa-tabella"><tr><td colspan="5" class="loading">Seleziona un periodo...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- FOGLIO GIORNALIERO STAZIONE -->
+        <div class="stz-panel" id="stz-foglio" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📋 Foglio giornaliero stazione</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button onclick="fgGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+                <input type="date" id="fg-data" onchange="caricaFoglioGiornaliero()" style="font-size:16px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:700;text-align:center;min-width:160px" />
+                <button onclick="fgGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+              </div>
+            </div>
+
+            <!-- LETTURE POMPE (auto) -->
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;border-bottom:2px solid #D85A30;padding-bottom:4px;color:#D85A30">⛽ Letture contatori pompe</div>
+            <div id="fg-pompe-tabella"><div class="loading">Caricamento...</div></div>
+
+            <!-- RIEPILOGO VENDITE (auto) -->
+            <div id="fg-riepilogo-vendite" style="margin-top:8px"></div>
+
+            <!-- 3 COLONNE: carte / crediti / contanti per taglio -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px" id="fg-grid-mobile">
+
+              <!-- Vendite carte (auto) -->
+              <div>
+                <div style="font-size:10px;font-weight:600;color:#D85A30;text-transform:uppercase;letter-spacing:0.3px;border-bottom:2px solid #D85A30;padding-bottom:3px;margin-bottom:5px">💳 Vendite carte</div>
+                <div id="fg-carte-auto"><div class="loading">—</div></div>
+              </div>
+
+              <!-- Crediti / rimborsi (auto) -->
+              <div>
+                <div style="font-size:10px;font-weight:600;color:#D85A30;text-transform:uppercase;letter-spacing:0.3px;border-bottom:2px solid #D85A30;padding-bottom:3px;margin-bottom:5px">📋 Crediti e rimborsi</div>
+                <div id="fg-crediti-auto"><div class="loading">—</div></div>
+              </div>
+
+              <!-- Conteggio contanti per taglio (MANUALE) -->
+              <div>
+                <div style="font-size:10px;font-weight:600;color:#D85A30;text-transform:uppercase;letter-spacing:0.3px;border-bottom:2px solid #D85A30;padding-bottom:3px;margin-bottom:5px">💶 Incassi contanti</div>
+                <table style="width:100%;border-collapse:collapse;font-size:10px">
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 100</td><td style="padding:2px 3px;border:1px solid var(--border);width:40px"><input type="number" id="fg-b100" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b100-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 50</td><td style="padding:2px 3px;border:1px solid var(--border)"><input type="number" id="fg-b50" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b50-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 20</td><td style="padding:2px 3px;border:1px solid var(--border)"><input type="number" id="fg-b20" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b20-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 10</td><td style="padding:2px 3px;border:1px solid var(--border)"><input type="number" id="fg-b10" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b10-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 5</td><td style="padding:2px 3px;border:1px solid var(--border)"><input type="number" id="fg-b5" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b5-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 2</td><td style="padding:2px 3px;border:1px solid var(--border)"><input type="number" id="fg-b2" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b2-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">€ 1</td><td style="padding:2px 3px;border:1px solid var(--border)"><input type="number" id="fg-b1" min="0" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-b1-tot">€ 0</td></tr>
+                  <tr><td style="padding:2px 5px;border:1px solid var(--border);background:var(--bg);font-weight:500">Monete</td><td style="padding:2px 3px;border:1px solid var(--border)" colspan="1"><input type="number" id="fg-monete" min="0" step="0.01" value="0" oninput="fgCalcola()" style="width:100%;font-family:var(--font-mono);font-size:13px;text-align:center;border:none;background:transparent;color:var(--text);padding:2px" /></td><td style="padding:2px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right" id="fg-monete-tot">€ 0</td></tr>
+                  <tr style="background:#EAF3DE;font-weight:bold"><td style="padding:3px 5px;border:1px solid var(--border)" colspan="2">Totale contanti</td><td style="padding:3px 5px;border:1px solid var(--border);font-family:var(--font-mono);text-align:right;color:#639922;font-size:11px" id="fg-contanti-totale">€ 0</td></tr>
+                </table>
+              </div>
+
+            </div>
+
+            <!-- SPESE CONTANTI (MANUALE) -->
+            <div style="font-size:10px;font-weight:600;color:#D85A30;text-transform:uppercase;letter-spacing:0.3px;border-bottom:2px solid #D85A30;padding-bottom:3px;margin:14px 0 5px">📝 Spese per contanti</div>
+            <div id="fg-spese-lista"></div>
+            <button type="button" onclick="fgAggiungiSpesa()" style="background:none;border:0.5px dashed var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text-muted);cursor:pointer;width:100%;margin-top:4px">+ Aggiungi spesa</button>
+
+            <!-- QUADRATURA (auto-calcolata) -->
+            <div style="font-size:10px;font-weight:600;color:#D85A30;text-transform:uppercase;letter-spacing:0.3px;border-bottom:2px solid #D85A30;padding-bottom:3px;margin:14px 0 5px">✅ Quadratura giornata</div>
+            <div id="fg-quadratura"></div>
+
+            <!-- BOTTONI -->
+            <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn-primary" style="flex:1;background:#639922" onclick="salvaFoglioGiornaliero()">💾 Salva foglio</button>
+              <button class="btn-primary" style="background:#D85A30" onclick="stampaFoglioGiornaliero()">🖨️ Stampa / PDF</button>
             </div>
           </div>
         </div>
