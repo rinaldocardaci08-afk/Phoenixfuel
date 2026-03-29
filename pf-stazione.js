@@ -5,7 +5,7 @@ function switchStazioneTab(btn) {
   btn.style.background=''; btn.style.color=''; btn.style.border=''; btn.classList.add('active');
   document.querySelectorAll('.stz-panel').forEach(p => p.style.display='none');
   document.getElementById(btn.dataset.tab).style.display='';
-  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-marginalita':caricaMarginalita, 'stz-cassa':caricaCassa, 'stz-report':initReportStazione };
+  const loaders = { 'stz-dashboard':caricaStazioneDashboard, 'stz-letture':caricaTabLetture, 'stz-prezzi':caricaTabPrezzi, 'stz-versamenti':caricaTabVersamenti, 'stz-magazzino':caricaMagazzinoStazione, 'stz-marginalita':caricaMarginalita, 'stz-cassa':caricaCassa, 'stz-allegati':caricaAllegati, 'stz-report':initReportStazione };
   if (loaders[btn.dataset.tab]) loaders[btn.dataset.tab]();
 }
 
@@ -1558,6 +1558,7 @@ async function caricaCassa() {
   calcolaCassa();
   caricaCrediti();
   caricaRegistroDifferenze();
+  caricaScontriniCassaPreview(data);
 }
 
 async function _calcolaTotVenditeDaLetture(data) {
