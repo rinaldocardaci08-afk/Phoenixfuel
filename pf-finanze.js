@@ -1,8 +1,9 @@
 // PhoenixFuel — Finanze: Calendario Entrate/Uscite
 
 var _finCalAnno = new Date().getFullYear();
-var _finCalMese = new Date().getMonth(); // 0-based
+var _finCalMese = new Date().getMonth();
 var _finCalDati = null;
+var _finForColori = {};
 
 function finCalMese(dir) {
   _finCalMese += dir;
@@ -15,89 +16,74 @@ async function caricaFinanze() {
   var meseLabel = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][_finCalMese];
   document.getElementById('fin-cal-mese-label').textContent = meseLabel + ' ' + _finCalAnno;
 
-  // Range mese con margine per catturare scadenze spostate
   var inizioMese = new Date(_finCalAnno, _finCalMese, 1);
   var fineMese = new Date(_finCalAnno, _finCalMese + 1, 0);
-  // Carica ordini con scadenza nel range + margine 7 giorni prima (per sab/dom shift)
   var daISO = new Date(_finCalAnno, _finCalMese, -7).toISOString().split('T')[0];
   var aISO = new Date(_finCalAnno, _finCalMese + 1, 7).toISOString().split('T')[0];
   var inizioMeseISO = inizioMese.toISOString().split('T')[0];
   var fineMeseISO = fineMese.toISOString().split('T')[0];
 
-  // Query parallele
   var [ordCliRes, ordForRes, cassaRes, fornitoriRes] = await Promise.all([
-    // Entrate ingrosso: ordini clienti non pagati con scadenza nel range
     sb.from('ordini').select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,data_scadenza,giorni_pagamento,pagato')
       .eq('tipo_ordine','cliente').neq('stato','annullato').eq('pagato',false)
       .gte('data_scadenza',daISO).lte('data_scadenza',aISO),
-    // Uscite fornitori: ordini non pagati al fornitore
     sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore')
-      .neq('stato','annullato').eq('pagato_fornitore',false)
-      .gte('data',daISO),
-    // Entrate stazione: cassa del mese
+      .neq('stato','annullato').eq('pagato_fornitore',false).gte('data',daISO),
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
       .gte('data',inizioMeseISO).lte('data',fineMeseISO).order('data'),
-    // Fornitori per giorni pagamento
-    sb.from('fornitori').select('nome,giorni_pagamento')
+    sb.from('fornitori').select('nome,giorni_pagamento,colore')
   ]);
 
   var ordClienti = ordCliRes.data || [];
   var ordFornitori = ordForRes.data || [];
   var cassaDati = cassaRes.data || [];
   var fornitoriMap = {};
-  (fornitoriRes.data || []).forEach(function(f) { fornitoriMap[f.nome] = f; });
+  _finForColori = {};
+  (fornitoriRes.data || []).forEach(function(f) {
+    fornitoriMap[f.nome] = f;
+    _finForColori[f.nome] = f.colore || '#FAEEDA';
+  });
 
-  // Costruisci mappa giorno → eventi
-  var giornoMap = {}; // { '2026-03-05': { entrate:[], uscite:[], stazione:0 } }
-
+  var giornoMap = {};
   function getGiorno(data) {
-    if (!giornoMap[data]) giornoMap[data] = { entrate: [], uscite: [], stazione: 0, stazioneDettaglio: null };
+    if (!giornoMap[data]) giornoMap[data] = { entrateDettaglio: [], usciteDettaglio: [], stazione: 0, stazioneDettaglio: null };
     return giornoMap[data];
   }
 
-  // Sposta sabato/domenica a lunedì (solo ingrosso)
   function spostaAlLunedi(dataStr) {
     var d = new Date(dataStr + 'T12:00:00');
-    var giorno = d.getDay(); // 0=dom, 6=sab
-    if (giorno === 6) d.setDate(d.getDate() + 2); // sab → lun
-    if (giorno === 0) d.setDate(d.getDate() + 1); // dom → lun
+    var giorno = d.getDay();
+    if (giorno === 6) d.setDate(d.getDate() + 2);
+    if (giorno === 0) d.setDate(d.getDate() + 1);
     return d.toISOString().split('T')[0];
   }
 
-  // 1. Entrate ingrosso (da scadenza ordini clienti → spostati al lunedì)
+  // 1. Entrate ingrosso
   ordClienti.forEach(function(o) {
     if (!o.data_scadenza) return;
     var scadEffettiva = spostaAlLunedi(o.data_scadenza);
-    var importo = prezzoConIva(o) * Number(o.litri);
-    getGiorno(scadEffettiva).entrate.push({
-      tipo: 'ingrosso',
-      label: o.cliente,
-      importo: importo,
-      dettaglio: o.prodotto + ' ' + fmtL(o.litri)
+    getGiorno(scadEffettiva).entrateDettaglio.push({
+      cliente: o.cliente, importo: prezzoConIva(o) * Number(o.litri),
+      prodotto: o.prodotto, litri: Number(o.litri)
     });
   });
 
-  // 2. Uscite fornitori (data + giorni_pagamento fornitore → spostati al lunedì)
+  // 2. Uscite fornitori
   ordFornitori.forEach(function(o) {
     if (!o.data || !o.fornitore) return;
-    // Escludi PhoenixFuel (movimenti interni)
     if (o.fornitore.toLowerCase().indexOf('phoenix') >= 0) return;
     var ggPag = o.giorni_pagamento || (fornitoriMap[o.fornitore] ? fornitoriMap[o.fornitore].giorni_pagamento : 30) || 30;
     var scad = new Date(o.data + 'T12:00:00');
     scad.setDate(scad.getDate() + ggPag);
-    var scadISO = scad.toISOString().split('T')[0];
-    var scadEffettiva = spostaAlLunedi(scadISO);
-    var importo = (Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * Number(o.litri);
-    // Aggiungi IVA
-    importo = importo * (1 + Number(o.iva || 22) / 100);
-    getGiorno(scadEffettiva).uscite.push({
-      label: o.fornitore,
-      importo: importo,
-      dettaglio: o.prodotto + ' ' + fmtL(o.litri)
+    var scadEffettiva = spostaAlLunedi(scad.toISOString().split('T')[0]);
+    var importo = (Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * Number(o.litri) * (1 + Number(o.iva || 22) / 100);
+    getGiorno(scadEffettiva).usciteDettaglio.push({
+      fornitore: o.fornitore, importo: importo,
+      prodotto: o.prodotto, litri: Number(o.litri)
     });
   });
 
-  // 3. Entrate stazione (incasso giornaliero, nessuno spostamento)
+  // 3. Entrate stazione
   cassaDati.forEach(function(c) {
     var totIncasso = Number(c.bancomat || 0) + Number(c.carte_nexi || 0) + Number(c.carte_aziendali || 0) + Number(c.versato || 0);
     if (totIncasso > 0) {
@@ -111,21 +97,19 @@ async function caricaFinanze() {
 
   _finCalDati = giornoMap;
 
-  // KPI mensili
+  // KPI
   var totEntrate = 0, totUscite = 0, totStazione = 0, totFattCli = 0;
   Object.keys(giornoMap).forEach(function(data) {
     if (data >= inizioMeseISO && data <= fineMeseISO) {
       var g = giornoMap[data];
-      g.entrate.forEach(function(e) { if (e.tipo === 'ingrosso') totFattCli += e.importo; });
+      g.entrateDettaglio.forEach(function(e) { totFattCli += e.importo; });
       totStazione += g.stazione;
-      g.uscite.forEach(function(u) { totUscite += u.importo; });
+      g.usciteDettaglio.forEach(function(u) { totUscite += u.importo; });
     }
   });
   totEntrate = totFattCli + totStazione;
-
-  var kpiWrap = document.getElementById('fin-kpi');
   var saldoColor = (totEntrate - totUscite) >= 0 ? '#639922' : '#E24B4A';
-  kpiWrap.innerHTML =
+  document.getElementById('fin-kpi').innerHTML =
     '<div class="kpi"><div class="kpi-label">Entrate ingrosso</div><div class="kpi-value" style="color:#639922">' + fmtE(totFattCli) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Entrate stazione</div><div class="kpi-value" style="color:#378ADD">' + fmtE(totStazione) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Uscite fornitori</div><div class="kpi-value" style="color:#E24B4A">' + fmtE(totUscite) + '</div></div>' +
@@ -137,97 +121,136 @@ async function caricaFinanze() {
 function renderCalendarioFinanze() {
   var filtro = document.getElementById('fin-cal-filtro')?.value || '';
   var giornoMap = _finCalDati || {};
-
-  // Calcola griglia calendario
   var primoGiorno = new Date(_finCalAnno, _finCalMese, 1);
-  var ultimoGiorno = new Date(_finCalAnno, _finCalMese + 1, 0);
   var inizioGriglia = new Date(primoGiorno);
-  var offset = (primoGiorno.getDay() + 6) % 7; // Lunedì = 0
+  var offset = (primoGiorno.getDay() + 6) % 7;
   inizioGriglia.setDate(inizioGriglia.getDate() - offset);
-
   var oggiStr = new Date().toISOString().split('T')[0];
 
   var html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
-
-  // Header giorni
   ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(function(g) {
     html += '<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text-hint);text-transform:uppercase;padding:6px 0;letter-spacing:0.5px">' + g + '</div>';
   });
 
-  // Celle
   var corrente = new Date(inizioGriglia);
   for (var i = 0; i < 42; i++) {
     var dataStr = corrente.toISOString().split('T')[0];
     var isThisMonth = corrente.getMonth() === _finCalMese;
     var isToday = dataStr === oggiStr;
     var isWeekend = corrente.getDay() === 0 || corrente.getDay() === 6;
-    var g = giornoMap[dataStr] || { entrate: [], uscite: [], stazione: 0 };
+    var g = giornoMap[dataStr] || { entrateDettaglio: [], usciteDettaglio: [], stazione: 0 };
 
-    // Filtro
-    var entrateVis = g.entrate;
-    var usciteVis = g.uscite;
-    var stazioneVis = g.stazione;
-    if (filtro === 'entrate') { usciteVis = []; }
-    if (filtro === 'uscite') { entrateVis = []; stazioneVis = 0; }
-    if (filtro === 'ingrosso') { usciteVis = []; stazioneVis = 0; }
-    if (filtro === 'stazione') { entrateVis = []; usciteVis = []; }
+    // Aggrega uscite per fornitore
+    var uscitePerFor = {};
+    g.usciteDettaglio.forEach(function(u) {
+      if (!uscitePerFor[u.fornitore]) uscitePerFor[u.fornitore] = 0;
+      uscitePerFor[u.fornitore] += u.importo;
+    });
+    var totEntrateGiorno = g.entrateDettaglio.reduce(function(s, e) { return s + e.importo; }, 0);
+
+    var mostraEntrate = filtro === '' || filtro === 'entrate' || filtro === 'ingrosso';
+    var mostraStazione = filtro === '' || filtro === 'entrate' || filtro === 'stazione';
+    var mostraUscite = filtro === '' || filtro === 'uscite';
 
     var bgStyle = isToday ? 'border:2px solid #D85A30;' : 'border:1px solid #e8e7e3;';
-    if (isWeekend) bgStyle += 'background:#fafaf8;';
-    else bgStyle += 'background:#fff;';
+    bgStyle += isWeekend ? 'background:#fafaf8;' : 'background:#fff;';
     if (!isThisMonth) bgStyle += 'opacity:0.3;';
 
-    html += '<div style="' + bgStyle + 'border-radius:10px;min-height:110px;padding:6px;position:relative">';
+    html += '<div style="' + bgStyle + 'border-radius:10px;min-height:110px;padding:6px">';
     html += '<div style="font-size:13px;font-weight:600;color:' + (isToday ? '#D85A30' : 'var(--text)') + ';margin-bottom:4px">' + corrente.getDate() + '</div>';
 
-    // Entrate ingrosso
-    entrateVis.forEach(function(e) {
-      html += '<div style="font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#EAF3DE;color:#27500A;border-left:2px solid #639922">';
-      html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">' + esc(e.label) + '</span>';
-      html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + _fmtCompact(e.importo) + '</span></div>';
-    });
-
-    // Stazione
-    if (stazioneVis > 0) {
-      html += '<div style="font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#E6F1FB;color:#0C447C;border-left:2px solid #378ADD">';
-      html += '<span>Stazione</span>';
-      html += '<span style="font-family:var(--font-mono);font-weight:600">' + _fmtCompact(stazioneVis) + '</span></div>';
+    // Entrate ingrosso (totale, cliccabile)
+    if (mostraEntrate && totEntrateGiorno > 0) {
+      html += '<div onclick="mostraDettaglioFinanze(\'' + dataStr + '\',\'entrate\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#EAF3DE;color:#27500A;border-left:2px solid #639922">';
+      html += '<span>Entrate</span><span style="font-family:var(--font-mono);font-weight:600">' + _fmtCompact(totEntrateGiorno) + '</span></div>';
     }
 
-    // Uscite
-    usciteVis.forEach(function(u) {
-      html += '<div style="font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#FCEBEB;color:#791F1F;border-left:2px solid #E24B4A">';
-      html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">' + esc(u.label) + '</span>';
-      html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + _fmtCompact(u.importo) + '</span></div>';
-    });
+    // Stazione
+    if (mostraStazione && g.stazione > 0) {
+      html += '<div style="font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#E6F1FB;color:#0C447C;border-left:2px solid #378ADD">';
+      html += '<span>Stazione</span><span style="font-family:var(--font-mono);font-weight:600">' + _fmtCompact(g.stazione) + '</span></div>';
+    }
+
+    // Uscite per fornitore (cliccabili, con colore)
+    if (mostraUscite) {
+      Object.keys(uscitePerFor).forEach(function(fornitore) {
+        var col = _finForColori[fornitore] || '#FAEEDA';
+        html += '<div onclick="mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + col + ';color:#791F1F;border-left:2px solid #E24B4A">';
+        html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600">' + esc(fornitore) + '</span>';
+        html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + _fmtCompact(uscitePerFor[fornitore]) + '</span></div>';
+      });
+    }
 
     // Totali giorno
-    var totE = entrateVis.reduce(function(s, e) { return s + e.importo; }, 0) + stazioneVis;
-    var totU = usciteVis.reduce(function(s, u) { return s + u.importo; }, 0);
+    var totE = (mostraEntrate ? totEntrateGiorno : 0) + (mostraStazione ? g.stazione : 0);
+    var totU = mostraUscite ? Object.values(uscitePerFor).reduce(function(s, v) { return s + v; }, 0) : 0;
     if (totE > 0 || totU > 0) {
       var netto = totE - totU;
+      var nColor = netto >= 0 ? 'background:#EEEDFE;color:#26215C' : 'background:#FCEBEB;color:#791F1F';
       html += '<div style="display:flex;gap:3px;margin-top:3px;padding-top:3px;border-top:1px dashed #e8e7e3">';
       if (totE > 0) html += '<div style="flex:1;text-align:center;font-size:7px;font-weight:600;padding:1px 0;border-radius:2px;background:#EAF3DE;color:#27500A">+' + _fmtCompact(totE) + '</div>';
       if (totU > 0) html += '<div style="flex:1;text-align:center;font-size:7px;font-weight:600;padding:1px 0;border-radius:2px;background:#FCEBEB;color:#791F1F">-' + _fmtCompact(totU) + '</div>';
-      if (totE > 0 || totU > 0) {
-        var nColor = netto >= 0 ? 'background:#EEEDFE;color:#26215C' : 'background:#FCEBEB;color:#791F1F';
-        html += '<div style="flex:1;text-align:center;font-size:7px;font-weight:700;padding:1px 0;border-radius:2px;' + nColor + '">' + (netto >= 0 ? '+' : '') + _fmtCompact(netto) + '</div>';
-      }
+      html += '<div style="flex:1;text-align:center;font-size:7px;font-weight:700;padding:1px 0;border-radius:2px;' + nColor + '">' + (netto >= 0 ? '+' : '') + _fmtCompact(netto) + '</div>';
       html += '</div>';
     }
 
     html += '</div>';
-
     corrente.setDate(corrente.getDate() + 1);
-    // Stop after ultimo giorno + rest of week
     if (i >= 27 && corrente.getMonth() !== _finCalMese && corrente.getDay() === 1) break;
   }
-
   html += '</div>';
   document.getElementById('fin-calendario').innerHTML = html;
 }
 
-// Formato compatto per importi in calendario
+function mostraDettaglioFinanze(dataStr, tipo) {
+  var g = (_finCalDati || {})[dataStr];
+  if (!g) return;
+  var dataFmt = new Date(dataStr + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">' + (tipo === 'entrate' ? '🟢 Dettaglio entrate' : '🔴 Dettaglio uscite fornitori') + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + dataFmt + '</div>';
+
+  if (tipo === 'entrate') {
+    var perCliente = {};
+    g.entrateDettaglio.forEach(function(e) {
+      if (!perCliente[e.cliente]) perCliente[e.cliente] = { importo: 0, dettagli: [] };
+      perCliente[e.cliente].importo += e.importo;
+      perCliente[e.cliente].dettagli.push(e.prodotto + ' ' + fmtL(e.litri));
+    });
+    var totale = 0;
+    html += '<div style="max-height:400px;overflow-y:auto">';
+    Object.keys(perCliente).sort(function(a, b) { return perCliente[b].importo - perCliente[a].importo; }).forEach(function(cl) {
+      var c = perCliente[cl];
+      totale += c.importo;
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-left:3px solid #639922;border-radius:0 8px 8px 0;margin-bottom:4px">';
+      html += '<div><div style="font-weight:500">' + esc(cl) + '</div><div style="font-size:10px;color:var(--text-muted)">' + c.dettagli.join(' · ') + '</div></div>';
+      html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:14px;color:#639922;white-space:nowrap;margin-left:10px">' + fmtE(c.importo) + '</div></div>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:12px;margin-top:8px;background:#EAF3DE;border-radius:8px;font-weight:700"><span>TOTALE ENTRATE</span><span style="font-family:var(--font-mono);color:#27500A;font-size:16px">' + fmtE(totale) + '</span></div>';
+  } else {
+    var perFornitore = {};
+    g.usciteDettaglio.forEach(function(u) {
+      if (!perFornitore[u.fornitore]) perFornitore[u.fornitore] = { importo: 0, dettagli: [] };
+      perFornitore[u.fornitore].importo += u.importo;
+      perFornitore[u.fornitore].dettagli.push(u.prodotto + ' ' + fmtL(u.litri));
+    });
+    var totale = 0;
+    html += '<div style="max-height:400px;overflow-y:auto">';
+    Object.keys(perFornitore).sort(function(a, b) { return perFornitore[b].importo - perFornitore[a].importo; }).forEach(function(fo) {
+      var f = perFornitore[fo];
+      totale += f.importo;
+      var col = _finForColori[fo] || '#FAEEDA';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:' + col + ';border-left:3px solid #E24B4A;border-radius:0 8px 8px 0;margin-bottom:4px">';
+      html += '<div><div style="font-weight:600">' + esc(fo) + '</div><div style="font-size:10px;color:var(--text-muted)">' + f.dettagli.join(' · ') + '</div></div>';
+      html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:14px;color:#E24B4A;white-space:nowrap;margin-left:10px">' + fmtE(f.importo) + '</div></div>';
+    });
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:12px;margin-top:8px;background:#FCEBEB;border-radius:8px;font-weight:700"><span>TOTALE USCITE</span><span style="font-family:var(--font-mono);color:#791F1F;font-size:16px">' + fmtE(totale) + '</span></div>';
+  }
+  apriModal(html);
+}
+
 function _fmtCompact(n) {
   if (Math.abs(n) >= 1000) return '€' + Math.round(n / 1000) + 'k';
   return '€' + Math.round(n);
