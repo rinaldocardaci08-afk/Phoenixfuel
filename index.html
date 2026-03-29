@@ -841,6 +841,7 @@
           <button class="btn-primary stz-tab" data-tab="stz-marginalita" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Marginalità</button>
           <button class="btn-primary stz-tab" data-tab="stz-cassa" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏧 Cassa</button>
           <button class="btn-primary stz-tab" data-tab="stz-foglio" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Foglio giornaliero</button>
+          <button class="btn-primary stz-tab" data-tab="stz-giacenze" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze mensili</button>
           <button class="btn-primary stz-tab" data-tab="stz-allegati" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📎 Allegati</button>
           <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
         </div>
@@ -1232,6 +1233,38 @@
               <button class="btn-primary" style="flex:1;background:#639922" onclick="salvaFoglioGiornaliero()">💾 Salva foglio</button>
               <button class="btn-primary" style="background:#D85A30" onclick="stampaFoglioGiornaliero()">🖨️ Stampa / PDF</button>
             </div>
+          </div>
+        </div>
+
+        <!-- GIACENZE MENSILI -->
+        <div class="stz-panel" id="stz-giacenze" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📊 Giacenze mensili stazione</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select id="gm-anno" onchange="caricaGiacenzeMensili()" style="font-size:14px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600"></select>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="salvaGiacenzeMensili()">💾 Salva</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaGiacenzeMensili()">🖨️ Stampa</button>
+              </div>
+            </div>
+            <!-- Trimestri tabs -->
+            <div style="display:flex;gap:4px;margin:10px 0;flex-wrap:wrap">
+              <button class="btn-primary gm-trim active" data-trim="1" onclick="switchTrimestre(this)" style="font-size:12px;padding:7px 14px">Gen — Mar</button>
+              <button class="btn-primary gm-trim" data-trim="2" onclick="switchTrimestre(this)" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Apr — Giu</button>
+              <button class="btn-primary gm-trim" data-trim="3" onclick="switchTrimestre(this)" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Lug — Set</button>
+              <button class="btn-primary gm-trim" data-trim="4" onclick="switchTrimestre(this)" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Ott — Dic</button>
+              <button class="btn-primary gm-trim" data-trim="0" onclick="switchTrimestre(this)" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid #639922;color:#639922">Totali anno</button>
+            </div>
+            <!-- Legenda -->
+            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--text-muted);margin-bottom:8px">
+              <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#E6F1FB;border:0.5px solid var(--border);vertical-align:middle;margin-right:3px"></span>Auto</span>
+              <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FAEEDA;border:0.5px solid var(--border);vertical-align:middle;margin-right:3px"></span>Manuale</span>
+              <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#EEEDFE;border:0.5px solid var(--border);vertical-align:middle;margin-right:3px"></span>Suggerito</span>
+              <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#EAF3DE;border:0.5px solid var(--border);vertical-align:middle;margin-right:3px"></span>Risultato</span>
+              <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FCEBEB;border:0.5px solid var(--border);vertical-align:middle;margin-right:3px"></span>Differenza</span>
+            </div>
+            <!-- Contenuto dinamico -->
+            <div id="gm-contenuto"><div class="loading">Caricamento...</div></div>
           </div>
         </div>
 
