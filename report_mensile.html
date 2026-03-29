@@ -215,7 +215,7 @@ async function generaReport() {
 
   // Tabella mesi
   html += '<table>';
-  html += '<thead><tr><th>Mese</th><th>Litri</th><th>Fatturato netto</th><th>Totale IVA inclusa</th><th>Costo acquisto</th><th>Costo trasporto</th><th>Margine netto</th><th>Margine lordo</th></tr></thead>';
+  html += '<thead><tr><th>Mese</th><th>Litri</th><th>Fatturato netto</th><th>Totale IVA inclusa</th><th>Costo acquisto</th><th>Costo trasporto</th><th>Margine lordo</th><th>Margine netto</th></tr></thead>';
   html += '<tbody>';
   for (let m = 1; m <= 12; m++) {
     const d = mesi[m];
@@ -229,8 +229,8 @@ async function generaReport() {
     html += '<td class="mono">' + fmtE(d.fattIva) + '</td>';
     html += '<td class="mono" style="color:#A32D2D">' + fmtE(d.costoAcquisto) + '</td>';
     html += '<td class="mono">' + fmtE(d.costoTrasporto) + '</td>';
-    html += '<td class="mono" style="color:#6B5FCC">' + fmtE(pm) + '</td>';
-    html += '<td class="mono" style="color:#639922;font-size:12px">' + fmtE(mt) + '</td>';
+    html += '<td class="mono" style="color:#6B5FCC">' + fmtE(mt) + '</td>';
+    html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtE(pm) + '</td>';
     html += '</tr>';
   }
   // Riga totali
@@ -241,8 +241,8 @@ async function generaReport() {
   html += '<td class="mono">' + fmtE(totFattIva) + '</td>';
   html += '<td class="mono" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</td>';
   html += '<td class="mono">' + fmtE(totCostoTrasp) + '</td>';
-  html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtE(margineTotale) + '</td>';
   html += '<td class="mono" style="color:#6B5FCC">' + fmtE(margineLordo) + '</td>';
+  html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtE(margineTotale) + '</td>';
   html += '</tr></tbody></table>';
 
   // Grafici
