@@ -7,15 +7,24 @@ var LITRI_PER_TONNELLATA = 1175;
 var CARICO_STANDARD = 35000;
 
 async function _fetchYahoo(ticker, range, interval) {
-  try {
-    var baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=' + (interval||'1d') + '&range=' + (range||'1mo');
-    var url = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(baseUrl);
-    var res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var json = await res.json();
-    if (!json.chart || !json.chart.result) return null;
-    return json.chart.result[0];
-  } catch (e) { console.warn('Yahoo fetch error ' + ticker + ':', e); return null; }
+  var proxies = [
+    function(u) { return 'https://api.allorigins.win/get?url=' + encodeURIComponent(u); },
+    function(u) { return 'https://thingproxy.freeboard.io/fetch/' + u; },
+    function(u) { return 'https://corsproxy.org/?' + encodeURIComponent(u); }
+  ];
+  var baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=' + (interval||'1d') + '&range=' + (range||'1mo');
+  for (var p = 0; p < proxies.length; p++) {
+    try {
+      var url = proxies[p](baseUrl);
+      var res = await fetch(url);
+      if (!res.ok) continue;
+      var raw = await res.json();
+      var json = raw.contents ? JSON.parse(raw.contents) : raw;
+      if (json.chart && json.chart.result) return json.chart.result[0];
+    } catch (e) { continue; }
+  }
+  console.warn('Yahoo fetch failed for ' + ticker + ' (all proxies)');
+  return null;
 }
 
 async function _fetchDatiFutures() {
