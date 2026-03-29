@@ -1,22 +1,22 @@
--- PhoenixFuel — Tabella Futures ICE
-CREATE TABLE IF NOT EXISTS futures_prezzi (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  data date NOT NULL,
-  prodotto text NOT NULL DEFAULT 'Gasolio Autotrazione',
-  scadenza text NOT NULL,
-  prezzo numeric(10,4) NOT NULL,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(data, prodotto, scadenza)
+-- PhoenixFuel — Tabella storico futures ICE Gasoil
+CREATE TABLE IF NOT EXISTS futures_storico (
+  id bigint generated always as identity primary key,
+  data date not null unique,
+  lgo_usd numeric(10,2),
+  eurusd numeric(8,4),
+  prezzo_euro_litro numeric(10,5),
+  var_euro_litro numeric(10,5),
+  segnale text check (segnale in ('rialzo','ribasso','stabile')),
+  impatto_pct numeric(6,2),
+  created_at timestamptz default now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_futures_data ON futures_prezzi(data DESC, prodotto);
+CREATE INDEX IF NOT EXISTS idx_futures_storico_data ON futures_storico (data desc);
 
-ALTER TABLE futures_prezzi ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS futures_select ON futures_prezzi;
-DROP POLICY IF EXISTS futures_insert ON futures_prezzi;
-DROP POLICY IF EXISTS futures_update ON futures_prezzi;
-DROP POLICY IF EXISTS futures_delete ON futures_prezzi;
-CREATE POLICY futures_select ON futures_prezzi FOR SELECT USING (get_ruolo()='admin' OR ha_permesso('benchmark') OR ha_permesso('prezzi'));
-CREATE POLICY futures_insert ON futures_prezzi FOR INSERT WITH CHECK (get_ruolo()='admin' OR ha_permesso('benchmark') OR ha_permesso('prezzi'));
-CREATE POLICY futures_update ON futures_prezzi FOR UPDATE USING (get_ruolo()='admin' OR ha_permesso('benchmark'));
-CREATE POLICY futures_delete ON futures_prezzi FOR DELETE USING (get_ruolo()='admin');
+ALTER TABLE futures_storico ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS futures_select ON futures_storico;
+DROP POLICY IF EXISTS futures_insert ON futures_storico;
+DROP POLICY IF EXISTS futures_update ON futures_storico;
+CREATE POLICY futures_select ON futures_storico FOR SELECT USING (true);
+CREATE POLICY futures_insert ON futures_storico FOR INSERT WITH CHECK (true);
+CREATE POLICY futures_update ON futures_storico FOR UPDATE USING (true);

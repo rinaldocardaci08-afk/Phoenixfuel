@@ -1,275 +1,141 @@
-// PhoenixFuel — Futures ICE Gasoil
-// Analisi curve futures, contango/backwardation, segnali operativi
+// PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// Fetch live da Yahoo Finance, calcolo prezzo euro/litro, semaforo, alert dashboard
 
-var _chartFutures = null;
-var _chartFuturesStorico = null;
+var _chartFutEuro = null, _chartFutLgo = null, _chartFutEurusd = null;
+var _futuresDati = null;
+var LITRI_PER_TONNELLATA = 1175;
+var CARICO_STANDARD = 35000;
 
-function _getMesiFutures() {
-  var mesi = [];
-  var now = new Date();
-  for (var i = 0; i < 6; i++) {
-    var d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    var label = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][d.getMonth()] + ' ' + d.getFullYear();
-    var value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    mesi.push({ label: label, value: value });
+async function _fetchYahoo(ticker, range, interval) {
+  try {
+    var url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=' + (interval||'1d') + '&range=' + (range||'1mo');
+    var res = await fetch(url);
+    var json = await res.json();
+    if (!json.chart || !json.chart.result) return null;
+    return json.chart.result[0];
+  } catch (e) { console.warn('Yahoo fetch error ' + ticker + ':', e); return null; }
+}
+
+async function _fetchDatiFutures() {
+  var [lgoData, eurData] = await Promise.all([_fetchYahoo('LGO=F','1mo','1d'), _fetchYahoo('EURUSD=X','1mo','1d')]);
+  if (!lgoData || !eurData) return null;
+  var lM = lgoData.meta, eM = eurData.meta;
+  var lgoOggi = lM.regularMarketPrice, lgoPrec = lM.chartPreviousClose || lM.previousClose;
+  var eurOggi = eM.regularMarketPrice, eurPrec = eM.chartPreviousClose || eM.previousClose;
+  var euroLOggi = (lgoOggi / eurOggi) / LITRI_PER_TONNELLATA;
+  var euroLIeri = (lgoPrec / eurPrec) / LITRI_PER_TONNELLATA;
+  var varEL = euroLOggi - euroLIeri;
+  var varPct = euroLIeri > 0 ? (varEL / euroLIeri) * 100 : 0;
+  var varLgo = lgoOggi - lgoPrec, varLgoPct = lgoPrec > 0 ? (varLgo / lgoPrec) * 100 : 0;
+  var varEur = eurOggi - eurPrec;
+  var segnale = varPct > 1.5 ? 'rialzo' : varPct < -1.5 ? 'ribasso' : 'stabile';
+  var impatto = varEL * CARICO_STANDARD;
+
+  var lTs = lgoData.timestamp||[], eTs = eurData.timestamp||[];
+  var lC = (lgoData.indicators&&lgoData.indicators.quote&&lgoData.indicators.quote[0]) ? lgoData.indicators.quote[0].close : [];
+  var eC = (eurData.indicators&&eurData.indicators.quote&&eurData.indicators.quote[0]) ? eurData.indicators.quote[0].close : [];
+  var dateComuni=[], serieEuroL=[], serieLgo=[], serieEurusd=[];
+  for (var i = 0; i < lTs.length; i++) {
+    var dL = new Date(lTs[i]*1000).toISOString().split('T')[0];
+    var lV = lC[i]; if (!lV) continue;
+    var eV = null;
+    for (var j = 0; j < eTs.length; j++) { if (new Date(eTs[j]*1000).toISOString().split('T')[0] === dL && eC[j]) { eV = eC[j]; break; } }
+    if (!eV) continue;
+    dateComuni.push(dL); serieLgo.push(Math.round(lV*100)/100);
+    serieEurusd.push(Math.round(eV*10000)/10000);
+    serieEuroL.push(Math.round((lV/eV/LITRI_PER_TONNELLATA)*100000)/100000);
   }
-  return mesi;
+  return { lgoOggi:lgoOggi, lgoPrec:lgoPrec, varLgo:varLgo, varLgoPct:varLgoPct, eurOggi:eurOggi, eurPrec:eurPrec, varEur:varEur, euroLitroOggi:euroLOggi, euroLitroIeri:euroLIeri, varEuroLitro:varEL, varPct:varPct, segnale:segnale, impatto:impatto, dateComuni:dateComuni, serieEuroL:serieEuroL, serieLgo:serieLgo, serieEurusd:serieEurusd, aggiornato:new Date(lM.regularMarketTime*1000).toLocaleString('it-IT') };
 }
 
 async function renderFutures() {
-  var wrap = document.getElementById('futures-wrap');
-  if (!wrap) return;
-  var prodotto = 'Gasolio Autotrazione';
-  var mesi = _getMesiFutures();
-
-  // Input form
-  var html = '<div class="card" style="margin-bottom:16px">';
-  html += '<div class="card-title">Inserisci quotazioni Futures ICE Gasoil</div>';
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci i prezzi dei contratti futures ICE Gasoil (€/tonnellata o €/litro) per le prossime scadenze. Fonte: <a href="https://www.theice.com/products/34361831/Low-Sulphur-Gasoil-Futures" target="_blank" style="color:#378ADD">ICE Exchange</a></div>';
-  html += '<div class="form-grid">';
-  html += '<div class="form-group"><label>Data rilevazione</label><input type="date" id="fut-data" value="' + oggiISO + '" /></div>';
-  html += '<div class="form-group"><label>Prodotto</label><select id="fut-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)"><option value="Gasolio Autotrazione">Gasolio ICE</option><option value="Benzina">Benzina RBOB</option></select></div>';
-  html += '</div>';
-  html += '<div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin:10px 0 6px">Scadenze contratti (€/litro o $/tonn)</div>';
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">';
-  mesi.forEach(function(m) {
-    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 10px;text-align:center">';
-    html += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">' + m.label + '</div>';
-    html += '<input type="number" class="fut-scad-input" data-scadenza="' + m.value + '" step="0.0001" placeholder="0.0000" style="width:100%;font-family:var(--font-mono);font-size:14px;text-align:center;border:0.5px solid var(--border);border-radius:6px;padding:6px;background:var(--bg);color:var(--text)" />';
-    html += '</div>';
-  });
-  html += '</div>';
-  html += '<button class="btn-primary" onclick="salvaFutures()" style="margin-top:10px">💾 Salva quotazioni futures</button>';
-  html += '</div>';
-
-  // KPI + Curva + Analisi
-  html += '<div class="grid4" style="margin-bottom:12px" id="fut-kpi"></div>';
-  html += '<div class="card" style="margin-bottom:16px"><div class="card-title">Curva futures (struttura a termine)</div><canvas id="chart-futures" height="260"></canvas></div>';
-  html += '<div class="card" style="margin-bottom:16px" id="fut-analisi"></div>';
-  html += '<div class="card" style="margin-bottom:16px"><div class="card-title">Storico front-month</div><canvas id="chart-futures-storico" height="240"></canvas></div>';
-  html += '<div class="card"><div class="card-title">Storico quotazioni</div><div style="overflow-x:auto"><table><thead><tr><th>Data</th>';
-  mesi.forEach(function(m) { html += '<th style="text-align:right">' + m.label + '</th>'; });
-  html += '<th>Struttura</th></tr></thead><tbody id="fut-tabella"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
-
-  wrap.innerHTML = html;
-
-  // Carica dati salvati
-  await _caricaDatiFutures();
-}
-
-async function _caricaDatiFutures() {
-  var prodotto = document.getElementById('fut-prodotto')?.value || 'Gasolio Autotrazione';
-  var { data: tutti } = await sb.from('futures_prezzi').select('*').eq('prodotto', prodotto).order('data', { ascending: false }).limit(500);
-  if (!tutti || !tutti.length) {
-    document.getElementById('fut-kpi').innerHTML = '';
-    document.getElementById('fut-analisi').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Inserisci le prime quotazioni futures per attivare l\'analisi</div>';
-    document.getElementById('fut-tabella').innerHTML = '<tr><td colspan="8" class="loading">Nessun dato</td></tr>';
-    return;
-  }
-
-  // Raggruppa per data
-  var perData = {};
-  tutti.forEach(function(f) {
-    if (!perData[f.data]) perData[f.data] = {};
-    perData[f.data][f.scadenza] = Number(f.prezzo);
-  });
-  var dateOrd = Object.keys(perData).sort().reverse();
-  var mesi = _getMesiFutures();
-
-  // Popola input con ultima data
-  var ultimaData = dateOrd[0];
-  var ultimiPrezzi = perData[ultimaData];
-  document.querySelectorAll('.fut-scad-input').forEach(function(inp) {
-    var scad = inp.dataset.scadenza;
-    if (ultimiPrezzi[scad]) inp.value = ultimiPrezzi[scad];
-  });
-
-  // Analisi curva corrente
-  var scadenze = mesi.map(function(m) { return m.value; });
-  var prezziCurva = scadenze.map(function(s) { return ultimiPrezzi[s] || null; });
-  var prezziValidi = prezziCurva.filter(function(p) { return p !== null; });
-
-  if (prezziValidi.length < 2) {
-    document.getElementById('fut-analisi').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Serve almeno 2 scadenze per analizzare la curva</div>';
-    return;
-  }
-
-  var frontMonth = prezziValidi[0];
-  var backMonth = prezziValidi[prezziValidi.length - 1];
-  var spread = backMonth - frontMonth;
-  var isContango = spread > 0.001;
-  var isBackwardation = spread < -0.001;
-  var struttura = isContango ? 'CONTANGO' : isBackwardation ? 'BACKWARDATION' : 'FLAT';
-  var strutturaColor = isContango ? '#E24B4A' : isBackwardation ? '#639922' : '#BA7517';
-
-  // CMP corrente dal benchmark
-  var { data: cmpData } = await sb.from('stazione_costi').select('costo_litro').eq('prodotto', prodotto).order('data', { ascending: false }).limit(1);
-  var cmp = cmpData && cmpData.length ? Number(cmpData[0].costo_litro) : 0;
-  var deltaFutCmp = cmp > 0 ? frontMonth - cmp : 0;
-
-  // Variazione front-month vs settimana scorsa
-  var varSettimanale = 0;
-  if (dateOrd.length >= 2) {
-    var settimanaPrima = dateOrd.find(function(d) { return d <= new Date(new Date(ultimaData).getTime() - 5 * 86400000).toISOString().split('T')[0]; });
-    if (settimanaPrima && perData[settimanaPrima]) {
-      var frontPrec = null;
-      scadenze.forEach(function(s) { if (frontPrec === null && perData[settimanaPrima][s]) frontPrec = perData[settimanaPrima][s]; });
-      if (frontPrec) varSettimanale = frontMonth - frontPrec;
-    }
-  }
-
+  var wrap = document.getElementById('futures-wrap'); if (!wrap) return;
+  wrap.innerHTML = '<div class="loading" style="padding:40px;text-align:center">Caricamento dati ICE Gasoil + EUR/USD...</div>';
+  var dati = await _fetchDatiFutures(); _futuresDati = dati;
+  if (!dati) { wrap.innerHTML = '<div class="card" style="padding:20px;text-align:center;color:var(--text-muted)">Impossibile caricare i dati da Yahoo Finance.<br/><button class="btn-primary" style="margin-top:12px" onclick="renderFutures()">Riprova</button></div>'; return; }
+  _salvaFuturesStorico(dati);
+  var sC = dati.segnale==='rialzo'?'#E24B4A':dati.segnale==='ribasso'?'#639922':'#BA7517';
+  var sI = dati.segnale==='rialzo'?'🔴':dati.segnale==='ribasso'?'🟢':'🟡';
+  var sT = dati.segnale==='rialzo'?'Probabile rialzo prezzi domani':dati.segnale==='ribasso'?'Probabile ribasso prezzi domani':'Mercato stabile';
+  var vS = dati.varEuroLitro>=0?'+':'';
+  var h = '';
+  // Semaforo
+  h += '<div style="padding:16px 20px;border:2px solid '+sC+';border-radius:12px;margin-bottom:16px;background:'+sC+'08"><div style="display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap"><div><div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Segnale mercato · ICE Gasoil + EUR/USD</div><div style="font-size:18px;font-weight:500;color:'+sC+';margin-top:4px">'+sI+' '+sT+'</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">Gasoil '+(dati.varLgoPct>=0?'+':'')+dati.varLgoPct.toFixed(1)+'% in USD · EUR/USD '+(dati.varEur>=0?'+':'')+((dati.varEur/dati.eurPrec)*100).toFixed(1)+'% · Impatto netto <span style="color:'+sC+';font-weight:500">'+(dati.varPct>=0?'+':'')+dati.varPct.toFixed(1)+'%</span> in euro</div></div><div style="text-align:right;font-size:11px;color:var(--text-muted)">'+dati.aggiornato+'<br/>Aggiorn. auto</div></div></div>';
   // KPI
-  document.getElementById('fut-kpi').innerHTML =
-    '<div class="kpi"><div class="kpi-label">Front-month</div><div class="kpi-value" style="color:#BA7517">€ ' + frontMonth.toFixed(4) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Var. settimanale</div><div class="kpi-value" style="color:' + (varSettimanale >= 0 ? '#E24B4A' : '#639922') + '">' + (varSettimanale >= 0 ? '+' : '') + varSettimanale.toFixed(4) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Struttura</div><div class="kpi-value" style="color:' + strutturaColor + '">' + struttura + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Spread curva</div><div class="kpi-value" style="color:' + strutturaColor + '">' + (spread >= 0 ? '+' : '') + spread.toFixed(4) + '</div></div>';
-
-  // Segnale operativo
-  var segnale = '', consiglio = '';
-  if (isContango) {
-    segnale = '📈 CONTANGO — i prezzi futuri sono superiori ai prezzi spot';
-    consiglio = 'Il mercato si aspetta prezzi in salita. Valuta di anticipare gli acquisti e aumentare le scorte di deposito. Lo spread contango di € ' + spread.toFixed(4) + '/L suggerisce che comprare ora è vantaggioso rispetto ad aspettare.';
-  } else if (isBackwardation) {
-    segnale = '📉 BACKWARDATION — i prezzi futuri sono inferiori ai prezzi spot';
-    consiglio = 'Il mercato si aspetta prezzi in discesa. Puoi ritardare gli acquisti non urgenti e ridurre le scorte. Lo spread di € ' + Math.abs(spread).toFixed(4) + '/L indica che i prezzi dovrebbero scendere nei prossimi mesi.';
-  } else {
-    segnale = '➡️ FLAT — la curva futures è piatta';
-    consiglio = 'Il mercato non prevede variazioni significative. Procedi con gli acquisti pianificati normalmente.';
-  }
-
-  document.getElementById('fut-analisi').innerHTML =
-    '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Analisi curva futures</div>' +
-    '<div style="padding:12px 16px;border-left:4px solid ' + strutturaColor + ';background:var(--bg);border-radius:0 8px 8px 0;margin-bottom:12px">' +
-      '<div style="font-size:14px;font-weight:600;color:' + strutturaColor + '">' + segnale + '</div>' +
-      '<div style="font-size:12px;color:var(--text);margin-top:6px;line-height:1.6">' + consiglio + '</div>' +
-    '</div>' +
-    (cmp > 0 ? '<div style="padding:10px 14px;background:var(--bg);border-radius:8px;font-size:12px"><strong>Tuo CMP:</strong> € ' + cmp.toFixed(4) + ' · <strong>Front-month:</strong> € ' + frontMonth.toFixed(4) + ' · <strong>Delta:</strong> <span style="color:' + (deltaFutCmp >= 0 ? '#E24B4A' : '#639922') + ';font-weight:600">' + (deltaFutCmp >= 0 ? '+' : '') + deltaFutCmp.toFixed(4) + '</span>' + (deltaFutCmp < 0 ? ' (stai comprando sotto il futures — buon posizionamento)' : ' (il futures è sopra il tuo CMP — il mercato prevede rialzi)') + '</div>' : '');
-
-  // Grafico curva
-  var ctx = document.getElementById('chart-futures');
-  if (ctx && prezziValidi.length >= 2) {
-    if (_chartFutures) _chartFutures.destroy();
-    var labelsCurva = mesi.filter(function(m, i) { return prezziCurva[i] !== null; }).map(function(m) { return m.label; });
-    _chartFutures = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labelsCurva,
-        datasets: [
-          { label: 'Futures ' + prodotto, data: prezziValidi, borderColor: strutturaColor, backgroundColor: strutturaColor + '20', borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: 5, pointBackgroundColor: strutturaColor },
-          cmp > 0 ? { label: 'Tuo CMP', data: Array(labelsCurva.length).fill(cmp), borderColor: '#639922', borderWidth: 1.5, borderDash: [5, 3], fill: false, pointRadius: 0 } : null
-        ].filter(Boolean)
-      },
-      options: { responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } }, scales: { y: { beginAtZero: false } } }
-    });
-  }
-
-  // Grafico storico front-month
-  var ctxS = document.getElementById('chart-futures-storico');
-  if (ctxS && dateOrd.length >= 3) {
-    if (_chartFuturesStorico) _chartFuturesStorico.destroy();
-    var storicoDate = dateOrd.slice(0, 60).reverse();
-    var storicoValori = storicoDate.map(function(d) {
-      var pd = perData[d];
-      for (var i = 0; i < scadenze.length; i++) { if (pd[scadenze[i]]) return pd[scadenze[i]]; }
-      return null;
-    });
-    _chartFuturesStorico = new Chart(ctxS, {
-      type: 'line',
-      data: {
-        labels: storicoDate.map(function(d) { return d.substring(5); }),
-        datasets: [{ label: 'Front-month', data: storicoValori, borderColor: '#BA7517', backgroundColor: 'rgba(186,117,23,0.1)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 1 }]
-      },
-      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false }, x: { ticks: { maxTicksLimit: 15, font: { size: 9 } } } } }
-    });
-  }
-
-  // Tabella storico
-  var tbody = document.getElementById('fut-tabella');
-  var maxRighe = Math.min(dateOrd.length, 30);
-  var righeHtml = '';
-  for (var i = 0; i < maxRighe; i++) {
-    var d = dateOrd[i];
-    var pd = perData[d];
-    var valori = scadenze.map(function(s) { return pd[s] || null; });
-    var validi = valori.filter(function(v) { return v !== null; });
-    var strut = '—';
-    if (validi.length >= 2) {
-      var sp = validi[validi.length - 1] - validi[0];
-      strut = sp > 0.001 ? '<span style="color:#E24B4A">Contango</span>' : sp < -0.001 ? '<span style="color:#639922">Backw.</span>' : '<span style="color:#BA7517">Flat</span>';
-    }
-    righeHtml += '<tr' + (i % 2 ? ' style="background:var(--bg)"' : '') + '><td style="font-weight:500">' + d + '</td>';
-    valori.forEach(function(v) {
-      righeHtml += '<td style="text-align:right;font-family:var(--font-mono)">' + (v !== null ? '€ ' + v.toFixed(4) : '—') + '</td>';
-    });
-    righeHtml += '<td style="text-align:center;font-size:11px;font-weight:500">' + strut + '</td></tr>';
-  }
-  tbody.innerHTML = righeHtml || '<tr><td colspan="8" class="loading">Nessun dato</td></tr>';
+  h += '<div class="grid4" style="margin-bottom:14px">';
+  h += '<div class="kpi"><div class="kpi-label">Gasolio ieri</div><div class="kpi-value" style="font-family:var(--font-mono)">'+dati.euroLitroIeri.toFixed(3)+' <small>€/L</small></div><div style="font-size:10px;color:var(--text-muted)">riferimento chiusura</div></div>';
+  h += '<div class="kpi"><div class="kpi-label">Gasolio oggi</div><div class="kpi-value" style="font-family:var(--font-mono);color:'+sC+'">'+dati.euroLitroOggi.toFixed(3)+' <small>€/L</small></div><div style="font-size:10px;color:'+sC+'">'+(dati.varEuroLitro>=0?'▲':'▼')+' '+vS+dati.varEuroLitro.toFixed(3)+' €/L ('+vS+dati.varPct.toFixed(1)+'%)</div></div>';
+  h += '<div class="kpi"><div class="kpi-label">LGO=F (ICE)</div><div class="kpi-value" style="font-family:var(--font-mono)">'+Math.round(dati.lgoOggi)+' <small>$/t</small></div><div style="font-size:10px;color:'+(dati.varLgo>=0?'#E24B4A':'#639922')+'">'+(dati.varLgo>=0?'▲':'▼')+' '+(dati.varLgo>=0?'+':'')+dati.varLgo.toFixed(1)+' $/t</div></div>';
+  h += '<div class="kpi"><div class="kpi-label">EUR/USD</div><div class="kpi-value" style="font-family:var(--font-mono)">'+dati.eurOggi.toFixed(4)+'</div><div style="font-size:10px;color:'+(dati.varEur>=0?'#639922':'#E24B4A')+'">'+(dati.varEur>=0?'▼':'▲')+' '+(dati.varEur>=0?'+':'')+dati.varEur.toFixed(4)+' '+(dati.varEur>=0?'(rafforz.)':'(indebol.)')+'</div></div>';
+  h += '</div>';
+  // Impatto carico
+  var impA = Math.abs(dati.impatto), impC = dati.impatto>=0?'#E24B4A':'#639922', impS = dati.impatto>=0?'+':'−';
+  var cons = dati.segnale==='rialzo'?'Valuta di anticipare l\'ordine o aggiornare il listino clienti':dati.segnale==='ribasso'?'Puoi ritardare gli acquisti non urgenti':'Procedi con gli acquisti pianificati';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">';
+  h += '<div class="card" style="text-align:center;border-left:4px solid '+impC+';border-radius:0 12px 12px 0"><div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">Impatto su carico ('+_sep((CARICO_STANDARD).toLocaleString('it-IT'))+' L)</div><div style="font-size:28px;font-weight:500;color:'+impC+';font-family:var(--font-mono)">'+impS+' '+_sep(Math.round(impA).toLocaleString('it-IT'))+',00 €</div><div style="font-size:10px;color:var(--text-muted);margin-top:4px">Rispetto all\'acquisto di ieri</div></div>';
+  h += '<div class="card" style="text-align:center"><div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">Dettaglio calcolo</div><div style="font-size:13px;font-family:var(--font-mono);color:var(--text);line-height:2">'+_sep((CARICO_STANDARD).toLocaleString('it-IT'))+' L × '+dati.varEuroLitro.toFixed(3)+' €/L<br/>= <strong style="color:'+impC+'">'+_sep(Math.round(impA).toLocaleString('it-IT'))+' € in '+(dati.impatto>=0?'più':'meno')+'</strong></div></div>';
+  h += '<div class="card" style="text-align:center"><div style="font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">Consiglio operativo</div><div style="font-size:14px;font-weight:500;color:'+sC+';margin-top:12px;font-style:italic">'+cons+'</div></div>';
+  h += '</div>';
+  // Grafici
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:16px">';
+  h += '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">Trend €/litro — ultimi 14 giorni <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:'+sC+'18;color:'+sC+';font-weight:500">'+(dati.varPct>=0?'▲':'▼')+' '+(dati.varPct>=0?'+':'')+dati.varPct.toFixed(1)+'%</span></div><div style="position:relative;height:220px"><canvas id="chart-fut-euro"></canvas></div></div>';
+  h += '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">LGO=F <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:'+(dati.varLgoPct>=0?'#E24B4A':'#639922')+'18;color:'+(dati.varLgoPct>=0?'#E24B4A':'#639922')+';font-weight:500">'+(dati.varLgoPct>=0?'▲':'▼')+' '+(dati.varLgoPct>=0?'+':'')+dati.varLgoPct.toFixed(1)+'%</span></div><div style="position:relative;height:220px"><canvas id="chart-fut-lgo"></canvas></div></div>';
+  h += '<div class="card"><div class="card-title" style="display:flex;justify-content:space-between;align-items:center">EUR/USD <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:'+(dati.varEur>=0?'#639922':'#E24B4A')+'18;color:'+(dati.varEur>=0?'#639922':'#E24B4A')+';font-weight:500">'+(dati.varEur>=0?'▼':'▲')+' '+((dati.varEur/dati.eurPrec)*100>=0?'+':'')+((dati.varEur/dati.eurPrec)*100).toFixed(1)+'%</span></div><div style="position:relative;height:220px"><canvas id="chart-fut-eurusd"></canvas></div></div>';
+  h += '</div>';
+  // Storico
+  h += '<div class="card"><div class="card-title">Storico giornaliero (salvato)</div><div style="overflow-x:auto"><table><thead><tr><th>Data</th><th style="text-align:right">€/litro</th><th style="text-align:right">Var. €/L</th><th style="text-align:right">LGO $/t</th><th style="text-align:right">EUR/USD</th><th style="text-align:center">Segnale</th><th style="text-align:right">Impatto</th></tr></thead><tbody id="fut-storico-tabella"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
+  wrap.innerHTML = h;
+  _renderGraficiFutures(dati);
+  _caricaStoricoFuturesDB();
 }
 
-async function salvaFutures() {
-  var data = document.getElementById('fut-data').value;
-  var prodotto = document.getElementById('fut-prodotto').value;
-  if (!data) { toast('Seleziona una data'); return; }
-
-  var inputs = document.querySelectorAll('.fut-scad-input');
-  var records = [];
-  inputs.forEach(function(inp) {
-    var prezzo = parseFloat(inp.value);
-    if (prezzo > 0) {
-      records.push({ data: data, prodotto: prodotto, scadenza: inp.dataset.scadenza, prezzo: prezzo });
-    }
-  });
-
-  if (!records.length) { toast('Inserisci almeno un prezzo'); return; }
-
-  for (var i = 0; i < records.length; i++) {
-    await sb.from('futures_prezzi').upsert(records[i], { onConflict: 'data,prodotto,scadenza' });
-  }
-
-  _auditLog('salva_futures', 'futures_prezzi', data + ' — ' + prodotto + ' — ' + records.length + ' scadenze');
-  toast('Quotazioni futures salvate!');
-  await _caricaDatiFutures();
+function _renderGraficiFutures(dati) {
+  var bO = { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false},ticks:{font:{size:9},maxTicksLimit:8}},y:{beginAtZero:false,ticks:{font:{size:9}}}}, elements:{point:{radius:1.5,hoverRadius:5}} };
+  var lb = dati.dateComuni.map(function(d){return d.substring(5).replace('-','/');});
+  if (_chartFutEuro) _chartFutEuro.destroy();
+  if (_chartFutLgo) _chartFutLgo.destroy();
+  if (_chartFutEurusd) _chartFutEurusd.destroy();
+  var c1=document.getElementById('chart-fut-euro');
+  if(c1)_chartFutEuro=new Chart(c1,{type:'line',data:{labels:lb,datasets:[{data:dati.serieEuroL,borderColor:'#BA7517',backgroundColor:'rgba(186,117,23,0.10)',fill:true,tension:0.4,borderWidth:2}]},options:Object.assign({},bO,{plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '€ '+c.raw.toFixed(4)+'/L';}}}}})});
+  var c2=document.getElementById('chart-fut-lgo');
+  if(c2)_chartFutLgo=new Chart(c2,{type:'line',data:{labels:lb,datasets:[{data:dati.serieLgo,borderColor:'#378ADD',backgroundColor:'rgba(55,138,221,0.08)',fill:true,tension:0.4,borderWidth:2}]},options:Object.assign({},bO,{plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$ '+c.raw.toFixed(2)+'/t';}}}}})});
+  var c3=document.getElementById('chart-fut-eurusd');
+  if(c3)_chartFutEurusd=new Chart(c3,{type:'line',data:{labels:lb,datasets:[{data:dati.serieEurusd,borderColor:'#6B5FCC',backgroundColor:'rgba(107,95,204,0.07)',fill:true,tension:0.4,borderWidth:2}]},options:Object.assign({},bO,{plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.raw.toFixed(4);}}}}})});
 }
 
-// Alert futures per dashboard
+async function _salvaFuturesStorico(dati) {
+  var oggi = new Date().toISOString().split('T')[0];
+  await sb.from('futures_storico').upsert({ data:oggi, lgo_usd:Math.round(dati.lgoOggi*100)/100, eurusd:Math.round(dati.eurOggi*10000)/10000, prezzo_euro_litro:Math.round(dati.euroLitroOggi*100000)/100000, var_euro_litro:Math.round(dati.varEuroLitro*100000)/100000, segnale:dati.segnale, impatto_pct:Math.round(dati.varPct*100)/100 }, {onConflict:'data'});
+}
+
+async function _caricaStoricoFuturesDB() {
+  var {data:storico}=await sb.from('futures_storico').select('*').order('data',{ascending:false}).limit(30);
+  var tb=document.getElementById('fut-storico-tabella');if(!tb)return;
+  if(!storico||!storico.length){tb.innerHTML='<tr><td colspan="7" class="loading">Nessuno storico</td></tr>';return;}
+  tb.innerHTML=storico.map(function(r,i){var c=r.segnale==='rialzo'?'#E24B4A':r.segnale==='ribasso'?'#639922':'#BA7517';var ic=r.segnale==='rialzo'?'🔴':r.segnale==='ribasso'?'🟢':'🟡';var imp=Number(r.var_euro_litro||0)*CARICO_STANDARD;return '<tr'+(i%2?' style="background:var(--bg)"':'')+'><td style="font-weight:500">'+r.data+'</td><td style="text-align:right;font-family:var(--font-mono);color:#BA7517">'+Number(r.prezzo_euro_litro).toFixed(4)+'</td><td style="text-align:right;font-family:var(--font-mono);color:'+c+'">'+(Number(r.var_euro_litro)>=0?'+':'')+Number(r.var_euro_litro).toFixed(4)+'</td><td style="text-align:right;font-family:var(--font-mono)">'+Number(r.lgo_usd).toFixed(2)+'</td><td style="text-align:right;font-family:var(--font-mono)">'+Number(r.eurusd).toFixed(4)+'</td><td style="text-align:center">'+ic+'</td><td style="text-align:right;font-family:var(--font-mono);color:'+c+'">'+(imp>=0?'+':'−')+' '+fmtE(Math.abs(imp))+'</td></tr>';}).join('');
+}
+
+// Alert dashboard dopo le 17:30
 async function caricaAlertFutures() {
-  var el = document.getElementById('dash-alert-futures');
-  if (!el) return;
-
-  var { data: ultimi } = await sb.from('futures_prezzi').select('data,scadenza,prezzo,prodotto')
-    .eq('prodotto', 'Gasolio Autotrazione').order('data', { ascending: false }).limit(20);
-
-  if (!ultimi || ultimi.length < 2) { el.style.display = 'none'; return; }
-
-  // Raggruppa per data
-  var perData = {};
-  ultimi.forEach(function(f) {
-    if (!perData[f.data]) perData[f.data] = {};
-    perData[f.data][f.scadenza] = Number(f.prezzo);
-  });
-  var dateOrd = Object.keys(perData).sort().reverse();
-  if (!dateOrd.length) { el.style.display = 'none'; return; }
-
-  var ultimaData = dateOrd[0];
-  var pd = perData[ultimaData];
-  var scadenze = Object.keys(pd).sort();
-  if (scadenze.length < 2) { el.style.display = 'none'; return; }
-
-  var front = pd[scadenze[0]];
-  var back = pd[scadenze[scadenze.length - 1]];
-  var spread = back - front;
-  var isContango = spread > 0.001;
-  var isBackwardation = spread < -0.001;
-
-  if (!isContango && !isBackwardation) { el.style.display = 'none'; return; }
-
-  var colore = isContango ? '#E24B4A' : '#639922';
-  var icona = isContango ? '📈' : '📉';
-  var testo = isContango
-    ? 'Futures in CONTANGO (+€ ' + spread.toFixed(4) + '/L) — il mercato prevede rialzi, valuta anticipare acquisti'
-    : 'Futures in BACKWARDATION (€ ' + spread.toFixed(4) + '/L) — il mercato prevede ribassi';
-
-  el.style.display = '';
-  el.innerHTML = '<div style="padding:10px 14px;background:' + colore + '12;border-left:4px solid ' + colore + ';border-radius:0 8px 8px 0;font-size:12px;color:' + colore + ';font-weight:500">' + icona + ' ' + testo + '</div>';
+  var w=document.getElementById('dash-alert-futures');if(!w)return;
+  var ora=new Date();
+  if(ora.getHours()<17||(ora.getHours()===17&&ora.getMinutes()<30)){w.style.display='none';return;}
+  var key='pf_fut_dismissed_'+ora.toISOString().split('T')[0];
+  try{if(localStorage.getItem(key)){w.style.display='none';return;}}catch(e){}
+  var dati=await _fetchDatiFutures();if(!dati){w.style.display='none';return;}
+  var c=dati.segnale==='rialzo'?'#E24B4A':dati.segnale==='ribasso'?'#639922':'#BA7517';
+  var ic=dati.segnale==='rialzo'?'🔴':dati.segnale==='ribasso'?'🟢':'🟡';
+  var tx=dati.segnale==='rialzo'?'Probabile rialzo gasolio domani':dati.segnale==='ribasso'?'Probabile ribasso gasolio domani':'Mercato gasolio stabile';
+  var imp=dati.impatto;
+  w.style.display='';
+  w.innerHTML='<div onclick="_futuresAlertClick()" style="padding:12px 16px;border:2px solid '+c+';border-radius:12px;background:'+c+'08;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px"><div style="display:flex;align-items:center;gap:10px;flex:1"><span style="font-size:20px">'+ic+'</span><div><div style="font-size:13px;font-weight:500;color:'+c+'">'+tx+'</div><div style="font-size:11px;color:var(--text-muted)">€/L: '+dati.euroLitroOggi.toFixed(3)+' ('+(dati.varEuroLitro>=0?'+':'')+dati.varEuroLitro.toFixed(3)+') · Impatto: <strong style="color:'+c+'">'+(imp>=0?'+':'−')+' '+fmtE(Math.abs(imp))+'</strong> · <em>Clicca per dettagli</em></div></div></div><span style="font-size:18px;color:var(--text-hint)">›</span></div>';
 }
+
+function _futuresAlertClick() {
+  try{localStorage.setItem('pf_fut_dismissed_'+new Date().toISOString().split('T')[0],'1');}catch(e){}
+  var w=document.getElementById('dash-alert-futures');if(w)w.style.display='none';
+  setSection('benchmark');
+  setTimeout(function(){var t=document.getElementById('tab-futures');if(t)t.click();},350);
+}
+
+setInterval(function(){var t=new Date();if(t.getHours()===17&&t.getMinutes()===30){var d=document.getElementById('dash-alert-futures');if(d)caricaAlertFutures();var f=document.getElementById('futures-wrap');if(f&&f.offsetParent!==null)renderFutures();}},60000);
