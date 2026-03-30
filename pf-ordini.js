@@ -1059,3 +1059,209 @@ async function generaOffertaCliente() {
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// EXPORT ORDINI → DANEA EASYFATT XML
+// ═══════════════════════════════════════════════════════════════════
+
+async function esportaDaneaXml() {
+  var da = document.getElementById('danea-da')?.value;
+  var a = document.getElementById('danea-a')?.value;
+  var tipoFiltro = document.getElementById('danea-tipo')?.value || 'tutti';
+  if (!da || !a) { toast('Seleziona il periodo di export'); return; }
+
+  // Tipi da esportare (escluso stazione_servizio = mov interno)
+  var tipiDaEsportare = [];
+  if (tipoFiltro === 'tutti') tipiDaEsportare = ['cliente','entrata_deposito','autoconsumo'];
+  else tipiDaEsportare = [tipoFiltro];
+
+  // Carica ordini
+  var allOrdini = [], from = 0, hasMore = true;
+  while (hasMore) {
+    var { data: batch } = await sb.from('ordini').select('*')
+      .in('tipo_ordine', tipiDaEsportare).neq('stato','annullato')
+      .gte('data', da).lte('data', a).order('data').order('cliente')
+      .range(from, from + 999);
+    if (batch && batch.length) { allOrdini = allOrdini.concat(batch); from += 1000; } else { hasMore = false; }
+  }
+  if (!allOrdini.length) { toast('Nessun ordine nel periodo selezionato'); return; }
+
+  // Carica anagrafiche clienti
+  var clienteIds = [...new Set(allOrdini.map(function(o){ return o.cliente_id; }).filter(Boolean))];
+  var clientiMap = {};
+  for (var i = 0; i < clienteIds.length; i += 50) {
+    var chunk = clienteIds.slice(i, i + 50);
+    var { data: cls } = await sb.from('clienti').select('*').in('id', chunk);
+    (cls||[]).forEach(function(c) { clientiMap[c.id] = c; });
+  }
+
+  // Carica fornitori
+  var { data: fornitori } = await sb.from('fornitori').select('*');
+  var fornitoriMap = {};
+  (fornitori||[]).forEach(function(f) { fornitoriMap[f.nome] = f; });
+
+  // Carica sedi scarico
+  var { data: sedi } = await sb.from('sedi_scarico').select('*');
+  var sediMap = {};
+  (sedi||[]).forEach(function(s) { sediMap[s.id] = s; });
+
+  // XML
+  var xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  xml += '<EasyfattDocuments AppVersion="2" Creator="PhoenixFuel" CreatorUrl="phoenixfuel.onrender.com">\n';
+  xml += '  <Company>\n    <n>Phoenix Fuel Srl</n>\n    <City>Vibo Valentia</City>\n    <Province>VV</Province>\n    <Country>Italia</Country>\n  </Company>\n';
+  xml += '  <Documents>\n';
+
+  var numCl = 0, numForn = 0, numAuto = 0;
+
+  allOrdini.forEach(function(o) {
+    if (o.tipo_ordine === 'cliente') { numCl++; _daneaCliente(o, numCl); }
+    else if (o.tipo_ordine === 'entrata_deposito') { numForn++; _daneaFornitore(o, numForn); }
+    else if (o.tipo_ordine === 'autoconsumo') { numAuto++; _daneaAutofattura(o, numAuto); }
+  });
+
+  function _daneaAnagCliente(cl) {
+    var h = '';
+    if (cl.codice_danea) h += '      <CustomerCode>' + _xmlEsc(cl.codice_danea) + '</CustomerCode>\n';
+    h += '      <CustomerName>' + _xmlEsc(cl.nome) + '</CustomerName>\n';
+    if (cl.indirizzo) h += '      <CustomerAddress>' + _xmlEsc(cl.indirizzo) + '</CustomerAddress>\n';
+    if (cl.cap) h += '      <CustomerPostcode>' + _xmlEsc(cl.cap) + '</CustomerPostcode>\n';
+    if (cl.citta) h += '      <CustomerCity>' + _xmlEsc(cl.citta) + '</CustomerCity>\n';
+    if (cl.provincia) h += '      <CustomerProvince>' + _xmlEsc(cl.provincia) + '</CustomerProvince>\n';
+    h += '      <CustomerCountry>Italia</CustomerCountry>\n';
+    if (cl.codice_fiscale) h += '      <CustomerFiscalCode>' + _xmlEsc(cl.codice_fiscale) + '</CustomerFiscalCode>\n';
+    if (cl.piva) h += '      <CustomerVatCode>' + _xmlEsc(cl.piva) + '</CustomerVatCode>\n';
+    if (cl.telefono) h += '      <CustomerTel>' + _xmlEsc(cl.telefono) + '</CustomerTel>\n';
+    if (cl.email) h += '      <CustomerEmail>' + _xmlEsc(cl.email) + '</CustomerEmail>\n';
+    if (cl.pec) h += '      <CustomerPec>' + _xmlEsc(cl.pec) + '</CustomerPec>\n';
+    if (cl.sdi) h += '      <CustomerEInvoiceDestCode>' + _xmlEsc(cl.sdi) + '</CustomerEInvoiceDestCode>\n';
+    return h;
+  }
+
+  function _daneaCliente(o, num) {
+    var cl = o.cliente_id ? clientiMap[o.cliente_id] : null;
+    var sede = o.sede_scarico_id ? sediMap[o.sede_scarico_id] : null;
+    var pNetto = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+    var iva = Number(o.iva||22);
+    var totN = pNetto * Number(o.litri);
+    var totI = totN * (iva/100);
+    xml += '    <Document>\n      <DocumentType>C</DocumentType>\n';
+    xml += '      <Date>' + _xmlEsc(o.data) + '</Date>\n      <Number>' + num + '</Number>\n';
+    xml += cl ? _daneaAnagCliente(cl) : '      <CustomerName>' + _xmlEsc(o.cliente) + '</CustomerName>\n';
+    if (sede) {
+      xml += '      <DeliveryName>' + _xmlEsc(sede.nome||o.cliente) + '</DeliveryName>\n';
+      if (sede.indirizzo) xml += '      <DeliveryAddress>' + _xmlEsc(sede.indirizzo) + '</DeliveryAddress>\n';
+      if (sede.citta) xml += '      <DeliveryCity>' + _xmlEsc(sede.citta) + '</DeliveryCity>\n';
+      if (sede.provincia) xml += '      <DeliveryProvince>' + _xmlEsc(sede.provincia) + '</DeliveryProvince>\n';
+    }
+    xml += '      <TransportReason>Vendita</TransportReason>\n      <GoodsAppearance>Sfuso</GoodsAppearance>\n';
+    xml += '      <TotalWithoutTax>' + totN.toFixed(2) + '</TotalWithoutTax>\n      <VatAmount>' + totI.toFixed(2) + '</VatAmount>\n      <Total>' + (totN+totI).toFixed(2) + '</Total>\n';
+    xml += '      <PricesIncludeVat>false</PricesIncludeVat>\n';
+    xml += '      <InternalComment>' + _xmlEsc(o.note||'') + '</InternalComment>\n';
+    xml += '      <CustomField1>PF-' + o.id.substring(0,8) + '</CustomField1>\n';
+    if (o.smistamento) xml += '      <CustomField2>Smistamento</CustomField2>\n';
+    xml += '      <Rows>\n        <Row>\n';
+    xml += '          <Code>' + _xmlEsc(_codProdottoDanea(o.prodotto)) + '</Code>\n';
+    xml += '          <Description>' + _xmlEsc(o.prodotto) + '</Description>\n';
+    xml += '          <Qty>' + Number(o.litri) + '</Qty>\n          <Um>LT</Um>\n';
+    xml += '          <Price>' + pNetto.toFixed(4) + '</Price>\n';
+    xml += '          <VatCode Perc="' + iva + '" Class="Imponibile" Description="Aliquota ' + iva + '%">' + iva + '</VatCode>\n';
+    xml += '          <Stock>true</Stock>\n';
+    xml += '          <Notes>Costo ' + Number(o.costo_litro||0).toFixed(4) + ' + Trasp ' + Number(o.trasporto_litro||0).toFixed(4) + ' + Marg ' + Number(o.margine||0).toFixed(4) + '</Notes>\n';
+    xml += '        </Row>\n      </Rows>\n';
+    xml += '      <Payments>\n        <Payment>\n          <Advance>false</Advance>\n';
+    xml += '          <Date>' + _xmlEsc(o.data_scadenza||o.data) + '</Date>\n';
+    xml += '          <Amount>' + (totN+totI).toFixed(2) + '</Amount>\n';
+    xml += '          <Paid>' + (o.pagato?'true':'false') + '</Paid>\n';
+    xml += '        </Payment>\n      </Payments>\n    </Document>\n';
+  }
+
+  function _daneaFornitore(o, num) {
+    var forn = fornitoriMap[o.fornitore] || null;
+    var costo = Number(o.costo_litro||0);
+    var iva = Number(o.iva||22);
+    var totN = costo * Number(o.litri);
+    var totI = totN * (iva/100);
+    xml += '    <Document>\n      <DocumentType>E</DocumentType>\n';
+    xml += '      <Date>' + _xmlEsc(o.data) + '</Date>\n      <Number>' + num + '</Number>\n';
+    if (forn) {
+      if (forn.codice_danea) xml += '      <CustomerCode>' + _xmlEsc(forn.codice_danea) + '</CustomerCode>\n';
+      xml += '      <CustomerName>' + _xmlEsc(forn.nome) + '</CustomerName>\n';
+      if (forn.indirizzo) xml += '      <CustomerAddress>' + _xmlEsc(forn.indirizzo) + '</CustomerAddress>\n';
+      if (forn.piva) xml += '      <CustomerVatCode>' + _xmlEsc(forn.piva) + '</CustomerVatCode>\n';
+      if (forn.codice_fiscale) xml += '      <CustomerFiscalCode>' + _xmlEsc(forn.codice_fiscale) + '</CustomerFiscalCode>\n';
+      if (forn.email) xml += '      <CustomerEmail>' + _xmlEsc(forn.email) + '</CustomerEmail>\n';
+      if (forn.pec) xml += '      <CustomerPec>' + _xmlEsc(forn.pec) + '</CustomerPec>\n';
+    } else {
+      xml += '      <CustomerName>' + _xmlEsc(o.fornitore) + '</CustomerName>\n';
+    }
+    xml += '      <TotalWithoutTax>' + totN.toFixed(2) + '</TotalWithoutTax>\n      <VatAmount>' + totI.toFixed(2) + '</VatAmount>\n      <Total>' + (totN+totI).toFixed(2) + '</Total>\n';
+    xml += '      <PricesIncludeVat>false</PricesIncludeVat>\n';
+    xml += '      <InternalComment>' + _xmlEsc(o.note||'') + '</InternalComment>\n';
+    xml += '      <CustomField1>PF-' + o.id.substring(0,8) + '</CustomField1>\n';
+    xml += '      <Rows>\n        <Row>\n';
+    xml += '          <Code>' + _xmlEsc(_codProdottoDanea(o.prodotto)) + '</Code>\n';
+    xml += '          <Description>' + _xmlEsc(o.prodotto) + '</Description>\n';
+    xml += '          <Qty>' + Number(o.litri) + '</Qty>\n          <Um>LT</Um>\n';
+    xml += '          <Price>' + costo.toFixed(4) + '</Price>\n';
+    xml += '          <VatCode Perc="' + iva + '" Class="Imponibile" Description="Aliquota ' + iva + '%">' + iva + '</VatCode>\n';
+    xml += '          <Stock>true</Stock>\n';
+    xml += '        </Row>\n      </Rows>\n';
+    xml += '      <Payments>\n        <Payment>\n          <Advance>false</Advance>\n';
+    xml += '          <Date>' + _xmlEsc(o.data_scadenza||o.data) + '</Date>\n';
+    xml += '          <Amount>' + (totN+totI).toFixed(2) + '</Amount>\n';
+    xml += '          <Paid>' + (o.pagato?'true':'false') + '</Paid>\n';
+    xml += '        </Payment>\n      </Payments>\n    </Document>\n';
+  }
+
+  function _daneaAutofattura(o, num) {
+    var costo = Number(o.costo_litro||0);
+    var iva = Number(o.iva||22);
+    var totN = costo * Number(o.litri);
+    var totI = totN * (iva/100);
+    xml += '    <Document>\n      <DocumentType>M</DocumentType>\n';
+    xml += '      <Date>' + _xmlEsc(o.data) + '</Date>\n      <Number>' + num + '</Number>\n';
+    xml += '      <CustomerName>Phoenix Fuel Srl</CustomerName>\n';
+    xml += '      <CustomerCity>Vibo Valentia</CustomerCity>\n      <CustomerProvince>VV</CustomerProvince>\n      <CustomerCountry>Italia</CustomerCountry>\n';
+    xml += '      <TotalWithoutTax>' + totN.toFixed(2) + '</TotalWithoutTax>\n      <VatAmount>' + totI.toFixed(2) + '</VatAmount>\n      <Total>' + (totN+totI).toFixed(2) + '</Total>\n';
+    xml += '      <PricesIncludeVat>false</PricesIncludeVat>\n';
+    xml += '      <InternalComment>Autoconsumo: ' + _xmlEsc(o.note||o.prodotto) + '</InternalComment>\n';
+    xml += '      <CustomField1>PF-' + o.id.substring(0,8) + '</CustomField1>\n';
+    xml += '      <Rows>\n        <Row>\n';
+    xml += '          <Code>' + _xmlEsc(_codProdottoDanea(o.prodotto)) + '</Code>\n';
+    xml += '          <Description>Autoconsumo ' + _xmlEsc(o.prodotto) + '</Description>\n';
+    xml += '          <Qty>' + Number(o.litri) + '</Qty>\n          <Um>LT</Um>\n';
+    xml += '          <Price>' + costo.toFixed(4) + '</Price>\n';
+    xml += '          <VatCode Perc="' + iva + '" Class="Imponibile" Description="Aliquota ' + iva + '%">' + iva + '</VatCode>\n';
+    xml += '          <Stock>true</Stock>\n';
+    xml += '        </Row>\n      </Rows>\n';
+    xml += '    </Document>\n';
+  }
+
+  xml += '  </Documents>\n</EasyfattDocuments>';
+
+  // Download
+  var blob = new Blob([xml], {type:'application/xml'});
+  var url = URL.createObjectURL(blob);
+  var a2 = document.createElement('a');
+  a2.href = url;
+  a2.download = 'PhoenixFuel_' + tipoFiltro + '_' + da + '_' + a + '.DefXml';
+  document.body.appendChild(a2); a2.click(); document.body.removeChild(a2);
+  URL.revokeObjectURL(url);
+
+  var riepilogo = [];
+  if (numCl) riepilogo.push(numCl + ' ordini cliente');
+  if (numForn) riepilogo.push(numForn + ' ordini fornitore');
+  if (numAuto) riepilogo.push(numAuto + ' autofatture');
+  toast('Export completato! ' + riepilogo.join(' + '));
+  _auditLog('export_danea', 'ordini', da + ' → ' + a + ': ' + riepilogo.join(', '));
+}
+
+function _xmlEsc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+
+function _codProdottoDanea(prodotto) {
+  var map = { 'Gasolio Autotrazione':'GA', 'Benzina':'BZ', 'Gasolio Agricolo':'GAGR', 'HVO':'HVO' };
+  return map[prodotto] || prodotto.substring(0, 4).toUpperCase();
+}

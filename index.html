@@ -268,6 +268,27 @@
           <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
         </div>
+
+        <!-- EXPORT DANEA EASYFATT -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📤 Export ordini → Danea Easyfatt</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Genera file Easyfatt-XML per Danea. Ordini cliente → ordine cliente, entrate deposito → ordine fornitore, autoconsumo → autofattura. Gli ordini stazione (mov. interno) sono esclusi.</div>
+          <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Da</label><input type="date" id="danea-da" /></div>
+            <div class="form-group" style="margin:0"><label style="font-size:11px">A</label><input type="date" id="danea-a" /></div>
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Tipo</label>
+              <select id="danea-tipo" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="tutti">Tutti (clienti + fornitori + autofatture)</option>
+                <option value="cliente">Solo ordini cliente</option>
+                <option value="entrata_deposito">Solo ordini fornitore (deposito)</option>
+                <option value="autoconsumo">Solo autofatture (autoconsumo)</option>
+              </select>
+            </div>
+            <button class="btn-primary" style="background:#D85A30;padding:8px 18px" onclick="esportaDaneaXml()">📤 Esporta XML Danea</button>
+          </div>
+        </div>
       </div>
 
       <!-- PREZZI -->
