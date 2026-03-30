@@ -1136,3 +1136,377 @@ async function stampaGiacenzeGiornaliere() {
   html += '</div></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// (F) SMISTAMENTO DIRETTO v2 — Ordine fornitore → Clienti + Carico
+// ═══════════════════════════════════════════════════════════════════
+
+var _smistOrdine = null;
+var _smistRighe = 0;
+var _smistClienti = [];
+var _smistMezzi = [];
+var _smistSedi = {};
+
+async function apriModaleSmistamento(ordineId) {
+  var { data: ordine } = await sb.from('ordini').select('*,basi_carico(nome)').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+  _smistOrdine = ordine;
+  _smistRighe = 0;
+
+  // Precarica dati
+  var [clRes, mzRes, trRes] = await Promise.all([
+    sb.from('clienti').select('id,nome,tipo,cliente_rete').order('nome'),
+    sb.from('mezzi').select('id,targa,capacita_totale,autista_default').eq('attivo', true).order('targa'),
+    sb.from('trasportatori').select('id,nome').eq('attivo', true).order('nome')
+  ]);
+  _smistClienti = clRes.data || [];
+  _smistMezzi = mzRes.data || [];
+  var trasportatori = trRes.data || [];
+
+  var optsClienti = '<option value="">— Seleziona cliente —</option>';
+  _smistClienti.forEach(function(c) { optsClienti += '<option value="' + c.id + '" data-nome="' + esc(c.nome) + '">' + esc(c.nome) + '</option>'; });
+  window._smistOptsClienti = optsClienti;
+
+  var optsMezzi = '<option value="">— Mezzo —</option>';
+  _smistMezzi.forEach(function(m) { optsMezzi += '<option value="' + m.id + '" data-targa="' + esc(m.targa) + '" data-autista="' + esc(m.autista_default||'') + '">' + esc(m.targa) + ' (' + fmtL(m.capacita_totale) + 'L)</option>'; });
+  // Mezzi trasportatori
+  trasportatori.forEach(function(t) { optsMezzi += '<option value="tr_' + t.id + '" data-targa="' + esc(t.nome) + '" data-autista="">Vettore: ' + esc(t.nome) + '</option>'; });
+
+  var baseNome = ordine.basi_carico ? ordine.basi_carico.nome : '—';
+
+  var h = '<div style="font-size:18px;font-weight:500;margin-bottom:4px">Smistamento diretto</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Distribuisci i litri tra i clienti e organizza il carico. La merce va direttamente dal fornitore ai clienti.</div>';
+
+  // Header ordine
+  h += '<div style="padding:14px 18px;border:2px solid #D85A30;border-radius:12px;margin-bottom:16px;background:#D85A3010">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
+  h += '<div><div style="font-size:11px;color:#D85A30;text-transform:uppercase;letter-spacing:0.4px">Ordine fornitore</div>';
+  h += '<div style="font-size:16px;font-weight:500">' + esc(ordine.fornitore) + ' — ' + fmtL(ordine.litri) + ' L ' + esc(ordine.prodotto) + '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted)">Costo: <span style="font-family:var(--font-mono);font-weight:500">' + fmt(ordine.costo_litro) + ' €/L</span> — Base: ' + esc(baseNome) + ' — Data: ' + ordine.data + '</div></div>';
+  h += '<div style="font-family:var(--font-mono);font-size:22px;font-weight:500">' + fmtL(ordine.litri) + ' L</div>';
+  h += '</div></div>';
+
+  // Sezione trasporto
+  h += '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:0.5px solid var(--border)">Trasporto</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">';
+  h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Mezzo / targa</div>';
+  h += '<select id="smist-mezzo" onchange="_smistMezzoChange()" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + optsMezzi + '</select></div>';
+  h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Autista</div>';
+  h += '<input type="text" id="smist-autista" placeholder="Nome autista" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" /></div>';
+  h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Data carico</div>';
+  h += '<input type="date" id="smist-data-carico" value="' + oggiISO + '" style="width:100%" /></div>';
+  h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Data consegna</div>';
+  h += '<input type="date" id="smist-data-consegna" value="' + oggiISO + '" style="width:100%" /></div>';
+  h += '</div>';
+
+  // Distribuzione clienti
+  h += '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:0.5px solid var(--border)">Distribuzione clienti (ordine di consegna)</div>';
+  h += '<div id="smist-righe" style="display:grid;gap:8px"></div>';
+  h += '<button onclick="_smistAggiungiRiga()" style="margin-top:8px;padding:6px 14px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;color:var(--text)">+ Aggiungi cliente</button>';
+
+  // Riepilogo
+  h += '<div id="smist-riepilogo" style="margin-top:14px;padding:14px 18px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"></div>';
+
+  // Info
+  h += '<div style="margin-top:10px;padding:10px 14px;background:#E1F5EE;border-radius:8px;font-size:12px;color:#085041">Il sistema crea automaticamente: ordini cliente + DAS + carico con sequenza consegne + movimenti deposito (entrata + uscite). Ordine fornitore marcato come "smistato".</div>';
+
+  // Bottoni
+  h += '<div style="display:flex;gap:8px;margin-top:14px">';
+  h += '<button class="btn-primary" style="flex:1;background:#D85A30;font-size:14px;padding:12px" onclick="confermaSmistamento()">Conferma smistamento + crea carico</button>';
+  h += '<button onclick="chiudiModal()" style="flex:0 0 auto;padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+
+  apriModal(h);
+  _smistAggiungiRiga();
+  _smistAggiornaRiepilogo();
+}
+
+function _smistMezzoChange() {
+  var sel = document.getElementById('smist-mezzo');
+  if (!sel || !sel.value) return;
+  var opt = sel.options[sel.selectedIndex];
+  var autista = opt.dataset.autista || '';
+  if (autista) document.getElementById('smist-autista').value = autista;
+}
+
+function _smistAggiungiRiga() {
+  _smistRighe++;
+  var idx = _smistRighe;
+  var o = _smistOrdine;
+  var pNetto = Number(o.costo_litro) + 0.018 + 0.045;
+
+  var h = '<div class="smist-riga" data-idx="' + idx + '" style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:12px 14px;position:relative">';
+  h += '<div style="position:absolute;top:8px;right:8px"><button onclick="this.closest(\'.smist-riga\').remove();_smistAggiornaRiepilogo()" style="border:none;background:none;cursor:pointer;font-size:14px;color:#A32D2D">x</button></div>';
+
+  // Riga principale: seq + cliente + litri + trasporto + margine + prezzo + totale
+  h += '<div style="display:grid;grid-template-columns:36px 2fr 1fr 1fr 1fr 1fr 1fr;gap:8px;align-items:end">';
+
+  // Sequenza
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Seq.</div>';
+  h += '<div style="width:32px;height:32px;border-radius:50%;background:#D85A30;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">' + idx + '</div></div>';
+
+  // Cliente
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Cliente</div>';
+  h += '<select class="smist-cliente" data-idx="' + idx + '" onchange="_smistPrecompila(' + idx + ')" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + window._smistOptsClienti + '</select></div>';
+
+  // Litri
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Litri</div>';
+  h += '<input type="number" class="smist-litri" data-idx="' + idx + '" step="100" placeholder="0" oninput="_smistRicalcolaRiga(' + idx + ');_smistAggiornaRiepilogo()" style="width:100%;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);text-align:right" /></div>';
+
+  // Trasporto
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Trasporto</div>';
+  h += '<input type="number" class="smist-trasporto" data-idx="' + idx + '" step="0.001" value="0.018" oninput="_smistRicalcolaRiga(' + idx + ');_smistAggiornaRiepilogo()" style="width:100%;font-family:var(--font-mono);font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);text-align:right" /></div>';
+
+  // Margine
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Margine</div>';
+  h += '<input type="number" class="smist-margine" data-idx="' + idx + '" step="0.001" value="0.045" oninput="_smistRicalcolaRiga(' + idx + ');_smistAggiornaRiepilogo()" style="width:100%;font-family:var(--font-mono);font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);text-align:right" /></div>';
+
+  // Prezzo netto editabile
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Prezzo netto</div>';
+  h += '<input type="number" class="smist-prezzo" data-idx="' + idx + '" step="0.001" value="' + pNetto.toFixed(4) + '" oninput="_smistDaPrezzoNetto(' + idx + ')" style="width:100%;font-family:var(--font-mono);font-size:13px;font-weight:500;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:#D85A30;text-align:right" /></div>';
+
+  // Totale
+  h += '<div><div style="font-size:10px;color:var(--text-muted)">Totale</div>';
+  h += '<div class="smist-totale" data-idx="' + idx + '" style="font-family:var(--font-mono);font-size:13px;font-weight:500;padding:7px 0">—</div></div>';
+
+  h += '</div>';
+
+  // Sede scarico (caricata al cambio cliente)
+  h += '<div class="smist-sede-wrap" data-idx="' + idx + '" style="padding-left:44px;margin-top:6px;font-size:11px;color:var(--text-muted)"></div>';
+
+  h += '</div>';
+
+  document.getElementById('smist-righe').insertAdjacentHTML('beforeend', h);
+}
+
+async function _smistPrecompila(idx) {
+  var sel = document.querySelector('.smist-cliente[data-idx="' + idx + '"]');
+  if (!sel || !sel.value) return;
+  var clienteId = sel.value;
+  var clienteNome = sel.options[sel.selectedIndex].dataset.nome;
+  var prod = _smistOrdine.prodotto;
+
+  // Precompila trasporto e margine dagli ultimi ordini
+  var { data: ultimi } = await sb.from('ordini').select('trasporto_litro,margine')
+    .or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome)
+    .eq('prodotto', prod).eq('tipo_ordine','cliente').neq('stato','annullato')
+    .gt('margine', 0).order('data',{ascending:false}).limit(5);
+
+  if (ultimi && ultimi.length) {
+    var avgTr = ultimi.reduce(function(s, o) { return s + Number(o.trasporto_litro); }, 0) / ultimi.length;
+    var avgMg = ultimi.reduce(function(s, o) { return s + Number(o.margine); }, 0) / ultimi.length;
+    var trEl = document.querySelector('.smist-trasporto[data-idx="' + idx + '"]');
+    var mgEl = document.querySelector('.smist-margine[data-idx="' + idx + '"]');
+    if (trEl) trEl.value = avgTr.toFixed(4);
+    if (mgEl) mgEl.value = avgMg.toFixed(4);
+    _smistRicalcolaRiga(idx);
+  }
+
+  // Carica sedi scarico del cliente
+  var { data: sedi } = await sb.from('sedi_scarico').select('id,nome,indirizzo,citta,provincia').eq('cliente_id', clienteId);
+  var sedeWrap = document.querySelector('.smist-sede-wrap[data-idx="' + idx + '"]');
+  if (sedeWrap) {
+    if (sedi && sedi.length) {
+      var sh = 'Sede scarico: <select class="smist-sede" data-idx="' + idx + '" style="font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text)">';
+      sedi.forEach(function(s, i) {
+        sh += '<option value="' + s.id + '" data-nome="' + esc(s.nome||'') + '"' + (i===0?' selected':'') + '>' + esc((s.nome||'') + (s.indirizzo ? ' — ' + s.indirizzo : '') + (s.citta ? ', ' + s.citta : '') + (s.provincia ? ' (' + s.provincia + ')' : '')) + '</option>';
+      });
+      sh += '</select>';
+      sedeWrap.innerHTML = sh;
+    } else {
+      sedeWrap.innerHTML = 'Sede scarico: <em>nessuna sede configurata</em>';
+    }
+  }
+
+  _smistAggiornaRiepilogo();
+}
+
+function _smistRicalcolaRiga(idx) {
+  var costo = Number(_smistOrdine.costo_litro);
+  var tr = parseFloat(document.querySelector('.smist-trasporto[data-idx="' + idx + '"]')?.value) || 0;
+  var mg = parseFloat(document.querySelector('.smist-margine[data-idx="' + idx + '"]')?.value) || 0;
+  var litri = parseFloat(document.querySelector('.smist-litri[data-idx="' + idx + '"]')?.value) || 0;
+  var pNetto = costo + tr + mg;
+  var prEl = document.querySelector('.smist-prezzo[data-idx="' + idx + '"]');
+  if (prEl) prEl.value = pNetto.toFixed(4);
+  var totEl = document.querySelector('.smist-totale[data-idx="' + idx + '"]');
+  if (totEl) totEl.textContent = litri > 0 ? fmtE(pNetto * litri) : '—';
+}
+
+function _smistDaPrezzoNetto(idx) {
+  var costo = Number(_smistOrdine.costo_litro);
+  var tr = parseFloat(document.querySelector('.smist-trasporto[data-idx="' + idx + '"]')?.value) || 0;
+  var pNetto = parseFloat(document.querySelector('.smist-prezzo[data-idx="' + idx + '"]')?.value) || 0;
+  var mg = pNetto - costo - tr;
+  var mgEl = document.querySelector('.smist-margine[data-idx="' + idx + '"]');
+  if (mgEl) mgEl.value = mg.toFixed(4);
+  var litri = parseFloat(document.querySelector('.smist-litri[data-idx="' + idx + '"]')?.value) || 0;
+  var totEl = document.querySelector('.smist-totale[data-idx="' + idx + '"]');
+  if (totEl) totEl.textContent = litri > 0 ? fmtE(pNetto * litri) : '—';
+  _smistAggiornaRiepilogo();
+}
+
+function _smistAggiornaRiepilogo() {
+  if (!_smistOrdine) return;
+  var totLitri = Number(_smistOrdine.litri);
+  var assegnati = 0, totFatt = 0, totMarg = 0, nClienti = 0;
+  document.querySelectorAll('.smist-riga').forEach(function(riga) {
+    var idx = riga.dataset.idx;
+    var litri = parseFloat(document.querySelector('.smist-litri[data-idx="' + idx + '"]')?.value) || 0;
+    var pNetto = parseFloat(document.querySelector('.smist-prezzo[data-idx="' + idx + '"]')?.value) || 0;
+    var mg = parseFloat(document.querySelector('.smist-margine[data-idx="' + idx + '"]')?.value) || 0;
+    var cl = document.querySelector('.smist-cliente[data-idx="' + idx + '"]')?.value;
+    if (cl && litri > 0) nClienti++;
+    assegnati += litri;
+    totFatt += pNetto * litri;
+    totMarg += mg * litri;
+  });
+  var residuo = totLitri - assegnati;
+  var resColor = residuo > 0 ? '#BA7517' : residuo === 0 ? '#639922' : '#A32D2D';
+  var mezzoSel = document.getElementById('smist-mezzo');
+  var autista = document.getElementById('smist-autista')?.value || '—';
+  var mezzoTxt = mezzoSel && mezzoSel.selectedIndex > 0 ? mezzoSel.options[mezzoSel.selectedIndex].dataset.targa : '—';
+
+  var h = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">';
+  h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Litri fornitore</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:500">' + fmtL(totLitri) + '</div></div>';
+  h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Assegnati a clienti</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#D85A30">' + fmtL(assegnati) + '</div></div>';
+  h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Residuo in deposito</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:' + resColor + '">' + fmtL(residuo) + '</div></div>';
+  h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Margine totale</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#639922">' + fmtE(totMarg) + '</div></div>';
+  h += '</div>';
+  h += '<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:11px;color:var(--text-muted)">';
+  h += '<div>Consegne: <span style="font-weight:500;color:var(--text)">' + nClienti + ' clienti</span></div>';
+  h += '<div>Mezzo: <span style="font-weight:500;color:var(--text)">' + esc(mezzoTxt) + '</span></div>';
+  h += '<div>Autista: <span style="font-weight:500;color:var(--text)">' + esc(autista) + '</span></div>';
+  h += '</div>';
+  if (residuo < 0) h += '<div style="margin-top:8px;padding:6px 10px;border-radius:6px;background:#FCEBEB;color:#A32D2D;font-size:12px;font-weight:500">I litri assegnati superano quelli disponibili!</div>';
+
+  document.getElementById('smist-riepilogo').innerHTML = h;
+}
+
+async function confermaSmistamento() {
+  if (!_smistOrdine) return;
+  var ordine = _smistOrdine;
+  var totLitri = Number(ordine.litri);
+
+  // Validazione mezzo/autista
+  var mezzoSel = document.getElementById('smist-mezzo');
+  var autista = document.getElementById('smist-autista')?.value || '';
+  var dataCarico = document.getElementById('smist-data-carico')?.value || oggiISO;
+  var dataConsegna = document.getElementById('smist-data-consegna')?.value || oggiISO;
+  if (!mezzoSel || !mezzoSel.value) { toast('Seleziona un mezzo'); return; }
+  if (!autista) { toast('Inserisci il nome dell\'autista'); return; }
+
+  var mezzoOpt = mezzoSel.options[mezzoSel.selectedIndex];
+  var mezzoId = mezzoSel.value.startsWith('tr_') ? null : mezzoSel.value;
+  var mezzoTarga = mezzoOpt.dataset.targa || '';
+
+  // Raccogli righe
+  var righe = [];
+  var assegnati = 0;
+  var seq = 0;
+  document.querySelectorAll('.smist-riga').forEach(function(riga) {
+    var idx = riga.dataset.idx;
+    var sel = document.querySelector('.smist-cliente[data-idx="' + idx + '"]');
+    var clienteId = sel ? sel.value : '';
+    var clienteNome = sel && sel.selectedIndex > 0 ? sel.options[sel.selectedIndex].dataset.nome : '';
+    var litri = parseFloat(document.querySelector('.smist-litri[data-idx="' + idx + '"]')?.value) || 0;
+    var trasporto = parseFloat(document.querySelector('.smist-trasporto[data-idx="' + idx + '"]')?.value) || 0;
+    var margine = parseFloat(document.querySelector('.smist-margine[data-idx="' + idx + '"]')?.value) || 0;
+    var sedeSel = document.querySelector('.smist-sede[data-idx="' + idx + '"]');
+    var sedeId = sedeSel ? sedeSel.value : null;
+    var sedeNome = sedeSel && sedeSel.selectedIndex >= 0 ? (sedeSel.options[sedeSel.selectedIndex].dataset.nome || '') : '';
+    if (!clienteId || litri <= 0) return;
+    seq++;
+    assegnati += litri;
+    righe.push({ clienteId:clienteId, clienteNome:clienteNome, litri:litri, trasporto:trasporto, margine:margine, seq:seq, sedeId:sedeId, sedeNome:sedeNome });
+  });
+
+  if (!righe.length) { toast('Aggiungi almeno un cliente'); return; }
+  if (assegnati > totLitri) { toast('Litri assegnati (' + fmtL(assegnati) + ') superano disponibili (' + fmtL(totLitri) + ')!'); return; }
+  var residuo = totLitri - assegnati;
+
+  var det = righe.map(function(r) { return r.seq + '. ' + r.clienteNome + ' ' + fmtL(r.litri) + 'L'; }).join('\n');
+  if (!confirm('Confermi smistamento?\n\n' + det + (residuo > 0 ? '\nResiduo in deposito: ' + fmtL(residuo) + ' L' : '') + '\n\nMezzo: ' + mezzoTarga + ' — Autista: ' + autista + '\n\nVerranno creati: ' + righe.length + ' ordini + DAS + carico.')) return;
+
+  toast('Smistamento in corso...');
+
+  // 1. Trova cisterna
+  var cisterna = await _trovaCisternaPerProdotto(ordine.prodotto);
+  var livelloAtt = cisterna ? Number(cisterna.livello_attuale) : 0;
+
+  // 2. Entrata deposito (tutti i litri)
+  if (cisterna) {
+    await sb.from('movimenti_cisterne').insert([{ cisterna_id:cisterna.id, ordine_id:ordine.id, tipo:'entrata', litri:totLitri, note:'Smistamento — entrata ' + ordine.fornitore }]);
+  }
+
+  // 3. Crea carico
+  var caricoRecord = { data:dataConsegna, mezzo_id:mezzoId, mezzo_targa:mezzoTarga, autista:autista, stato:'programmato', note:'Smistamento da ' + ordine.fornitore + ' ' + fmtL(totLitri) + 'L' };
+  var { data: carico } = await sb.from('carichi').insert([caricoRecord]).select().single();
+
+  // 4. Per ogni riga: crea ordine + carico_ordini + uscita deposito
+  var ordiniCreati = [];
+  for (var i = 0; i < righe.length; i++) {
+    var r = righe[i];
+    var nuovoOrdine = {
+      data: ordine.data,
+      cliente: r.clienteNome,
+      cliente_id: r.clienteId,
+      prodotto: ordine.prodotto,
+      litri: r.litri,
+      costo_litro: Number(ordine.costo_litro),
+      trasporto_litro: r.trasporto,
+      margine: r.margine,
+      iva: ordine.iva || 22,
+      fornitore: 'PhoenixFuel',
+      tipo_ordine: 'cliente',
+      stato: 'programmato',
+      pagato: false,
+      note: 'Smistamento da ' + ordine.fornitore + ' del ' + ordine.data,
+      smistamento: true,
+      ordine_fornitore_id: ordine.id,
+      sede_scarico_id: r.sedeId || null,
+      sede_scarico_nome: r.sedeNome || null
+    };
+    var { data: nuovo } = await sb.from('ordini').insert([nuovoOrdine]).select().single();
+    if (nuovo) {
+      ordiniCreati.push(nuovo);
+      // Carico ordine con sequenza
+      if (carico) await sb.from('carico_ordini').insert([{ carico_id:carico.id, ordine_id:nuovo.id, sequenza:r.seq }]);
+      // Uscita deposito
+      if (cisterna) await sb.from('movimenti_cisterne').insert([{ cisterna_id:cisterna.id, ordine_id:nuovo.id, tipo:'uscita', litri:r.litri, note:'Smistamento → ' + r.clienteNome }]);
+    }
+  }
+
+  // 5. Aggiorna cisterna: solo residuo resta
+  if (cisterna) {
+    await sb.from('cisterne').update({ livello_attuale: livelloAtt + residuo }).eq('id', cisterna.id);
+  }
+
+  // 6. Genera DAS per tutte le consegne
+  if (carico && ordiniCreati.length && typeof _generaDasPerCarico === 'function') {
+    await _generaDasPerCarico(carico.id, ordiniCreati, mezzoTarga, autista, dataConsegna);
+  }
+
+  // 7. Marca ordine fornitore come smistato
+  var detNote = righe.map(function(r) { return r.clienteNome + ' ' + fmtL(r.litri) + 'L'; }).join(', ');
+  await sb.from('ordini').update({
+    caricato_deposito: true,
+    stato: 'confermato',
+    note: (ordine.note ? ordine.note + ' | ' : '') + 'SMISTATO: ' + detNote + (residuo > 0 ? ' + ' + fmtL(residuo) + 'L deposito' : '')
+  }).eq('id', ordine.id);
+
+  // 8. Audit
+  _auditLog('smistamento', 'ordini', ordine.fornitore + ' ' + fmtL(totLitri) + 'L ' + ordine.prodotto + ' → ' + righe.length + ' clienti, carico ' + (carico ? carico.id.substring(0,8) : '—'));
+
+  toast('Smistamento completato! ' + righe.length + ' ordini + carico + DAS creati.');
+  chiudiModal();
+  if (typeof caricaOrdini === 'function') caricaOrdini();
+  if (typeof caricaDeposito === 'function') caricaDeposito();
+  if (typeof caricaCarichi === 'function') caricaCarichi();
+}
+
+async function _trovaCisternaPerProdotto(prodotto) {
+  var { data: cist } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo').eq('prodotto', prodotto).order('livello_attuale',{ascending:false}).limit(1);
+  return cist && cist.length ? cist[0] : null;
+}
