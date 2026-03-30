@@ -143,7 +143,7 @@ function _futuresAlertClick() {
 function _renderFuturesManuale(wrap) {
   var h = '<div class="card" style="margin-bottom:16px">';
   h += '<div class="card-title">Inserimento manuale — ICE Gasoil + EUR/USD</div>';
-  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci i dati da <a href="https://www.ice.com/products/34361831/Low-Sulphur-Gasoil-Futures" target="_blank" style="color:#378ADD">ICE Exchange</a> e <a href="https://www.google.com/finance/quote/EUR-USD" target="_blank" style="color:#378ADD">Google Finance EUR/USD</a></div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci i dati da <a href="https://www.reuters.com/markets/quote/LGOc1/" target="_blank" style="color:#378ADD">Reuters LGO Futures</a> e <a href="https://www.google.com/finance/quote/EUR-USD" target="_blank" style="color:#378ADD">Google Finance EUR/USD</a></div>';
   h += '<div class="form-grid">';
   h += '<div class="form-group"><label>Data</label><input type="date" id="fut-m-data" value="' + oggiISO + '" /></div>';
   h += '<div class="form-group"><label>LGO=F ($/tonnellata)</label><input type="number" id="fut-m-lgo" step="0.01" placeholder="Es. 691.00" style="font-family:var(--font-mono);font-size:16px" /></div>';
