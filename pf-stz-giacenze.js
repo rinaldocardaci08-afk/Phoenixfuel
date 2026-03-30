@@ -33,7 +33,7 @@ async function caricaGiacenzeMensili() {
   var { data: cisterne } = await sb.from('cisterne').select('prodotto').eq('sede', 'stazione_oppido');
   var prodottiSet = {};
   (cisterne || []).forEach(function(c) { if (c.prodotto) prodottiSet[c.prodotto] = true; });
-  var prodotti = Object.keys(prodottiSet).sort();
+  var prodotti = Object.keys(prodottiSet).sort(function(a,b){ if(a.toLowerCase().indexOf("gasolio")>=0&&b.toLowerCase().indexOf("gasolio")<0) return -1; if(a.toLowerCase().indexOf("gasolio")<0&&b.toLowerCase().indexOf("gasolio")>=0) return 1; return a.localeCompare(b); });
   if (!prodotti.length) prodotti = ['Gasolio Autotrazione', 'Benzina'];
 
   // Coefficienti cali tecnici
@@ -437,4 +437,109 @@ async function stampaGiacenzeMensili() {
 
   h += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
   w.document.open(); w.document.write(h); w.document.close();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CHIUSURA ANNO — Registra giacenza finale e passa al nuovo anno
+// ═══════════════════════════════════════════════════════════════════
+async function chiusuraAnno() {
+  var anno = parseInt(document.getElementById('gm-anno').value);
+  if (!anno) { toast('Seleziona un anno'); return; }
+
+  // Carica prodotti stazione
+  var { data: cisterne } = await sb.from('cisterne').select('prodotto').eq('sede', 'stazione_oppido');
+  var prodottiSet = {};
+  (cisterne || []).forEach(function(c) { if (c.prodotto) prodottiSet[c.prodotto] = true; });
+  var prodotti = Object.keys(prodottiSet).sort(function(a,b){ if(a.toLowerCase().indexOf("gasolio")>=0&&b.toLowerCase().indexOf("gasolio")<0) return -1; if(a.toLowerCase().indexOf("gasolio")<0&&b.toLowerCase().indexOf("gasolio")>=0) return 1; return a.localeCompare(b); });
+  if (!prodotti.length) prodotti = ['Gasolio Autotrazione', 'Benzina'];
+
+  // Carica giacenza salvata dicembre anno corrente (se già esiste)
+  var { data: dicSalvati } = await sb.from('giacenze_mensili').select('*').eq('anno', anno).eq('mese', 12);
+  var dicMap = {};
+  (dicSalvati || []).forEach(function(s) { dicMap[s.prodotto] = s; });
+
+  // Calcola giacenza presunta di fine anno (da dati)
+  var giacPresunta = {};
+  if (_gmDati && _gmDati.anno === anno) {
+    prodotti.forEach(function(p) {
+      if (_gmDati.mesi[p] && _gmDati.mesi[p][11]) {
+        giacPresunta[p] = Math.round(_gmDati.mesi[p][11].giacPresunta);
+      }
+    });
+  }
+
+  var h = '<div style="font-size:16px;font-weight:500;margin-bottom:4px">📋 Chiusura anno ' + anno + '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;line-height:1.6">';
+  h += 'Inserisci la <strong>giacenza reale rilevata al 31/12/' + anno + '</strong> per ogni prodotto.<br/>';
+  h += 'Questo valore diventerà la <strong>giacenza iniziale del ' + (anno + 1) + '</strong>.</div>';
+
+  h += '<div style="display:grid;gap:12px">';
+  prodotti.forEach(function(p) {
+    var pi = cacheProdotti ? cacheProdotti.find(function(x) { return x.nome === p; }) : null;
+    var col = pi ? pi.colore : '#888';
+    var salvata = dicMap[p] ? Number(dicMap[p].giacenza_rilevata) : '';
+    var presunta = giacPresunta[p] || '—';
+
+    h += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);padding:14px 18px;border-left:4px solid ' + col + '">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    h += '<div style="font-size:13px;font-weight:500"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + esc(p) + '</div>';
+    h += '<div style="font-size:11px;color:var(--text-muted)">Presunta: <strong style="font-family:var(--font-mono)">' + (typeof presunta === 'number' ? _sep(presunta.toLocaleString('it-IT')) + ' L' : presunta) + '</strong></div>';
+    h += '</div>';
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+    h += '<div><label style="font-size:11px;color:var(--text-muted)">Giacenza rilevata al 31/12/' + anno + '</label>';
+    h += '<input type="number" id="chiusura-' + p.replace(/\s/g, '_') + '" value="' + (salvata !== '' && salvata !== null ? salvata : '') + '" placeholder="Litri rilevati" step="1" style="width:100%;font-family:var(--font-mono);font-size:16px;padding:10px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text)" /></div>';
+    h += '<div><label style="font-size:11px;color:var(--text-muted)">Note (opzionali)</label>';
+    h += '<input type="text" id="chiusura-note-' + p.replace(/\s/g, '_') + '" value="' + (dicMap[p] ? esc(dicMap[p].note || '') : 'Inventario fisico 31/12/' + anno) + '" placeholder="Es. inventario fisico" style="width:100%;font-size:13px;padding:10px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text)" /></div>';
+    h += '</div></div>';
+  });
+  h += '</div>';
+
+  h += '<div style="display:flex;gap:8px;margin-top:16px">';
+  h += '<button class="btn-primary" style="flex:1;background:#D85A30;font-size:14px;padding:12px" onclick="_salvaChiusuraAnno(' + anno + ')">💾 Salva chiusura ' + anno + '</button>';
+  h += '<button onclick="chiudiModal()" style="flex:0 0 auto;padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+
+  apriModal(h);
+}
+
+async function _salvaChiusuraAnno(anno) {
+  var { data: cisterne } = await sb.from('cisterne').select('prodotto').eq('sede', 'stazione_oppido');
+  var prodottiSet = {};
+  (cisterne || []).forEach(function(c) { if (c.prodotto) prodottiSet[c.prodotto] = true; });
+  var prodotti = Object.keys(prodottiSet).sort(function(a,b){ if(a.toLowerCase().indexOf("gasolio")>=0&&b.toLowerCase().indexOf("gasolio")<0) return -1; if(a.toLowerCase().indexOf("gasolio")<0&&b.toLowerCase().indexOf("gasolio")>=0) return 1; return a.localeCompare(b); });
+  if (!prodotti.length) prodotti = ['Gasolio Autotrazione', 'Benzina'];
+
+  var salvati = 0;
+  for (var i = 0; i < prodotti.length; i++) {
+    var p = prodotti[i];
+    var inputId = 'chiusura-' + p.replace(/\s/g, '_');
+    var noteId = 'chiusura-note-' + p.replace(/\s/g, '_');
+    var valEl = document.getElementById(inputId);
+    var noteEl = document.getElementById(noteId);
+    if (!valEl || valEl.value === '') continue;
+    var val = parseFloat(valEl.value);
+    if (isNaN(val) || val < 0) { toast('Valore non valido per ' + p); return; }
+    var note = noteEl ? noteEl.value : '';
+
+    // Upsert giacenza dicembre
+    var { data: existing } = await sb.from('giacenze_mensili').select('id')
+      .eq('anno', anno).eq('mese', 12).eq('prodotto', p).maybeSingle();
+    var record = {
+      anno: anno, mese: 12, prodotto: p,
+      giacenza_rilevata: val, note: note || 'Chiusura anno ' + anno
+    };
+    if (existing) {
+      await sb.from('giacenze_mensili').update(record).eq('id', existing.id);
+    } else {
+      await sb.from('giacenze_mensili').insert([record]);
+    }
+    salvati++;
+  }
+
+  if (salvati === 0) { toast('Inserisci almeno una giacenza'); return; }
+
+  _auditLog('chiusura_anno', 'giacenze_mensili', 'Chiusura ' + anno + ': ' + salvati + ' prodotti');
+  toast('Chiusura anno ' + anno + ' salvata! Giacenze iniziali ' + (anno + 1) + ' impostate.');
+  chiudiModal();
+  caricaGiacenzeMensili();
 }
