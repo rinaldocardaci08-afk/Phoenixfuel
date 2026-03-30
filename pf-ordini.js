@@ -101,6 +101,9 @@ async function caricaPrezzi() {
   else { const s=document.getElementById('pr-fornitore'); if(s&&s.options.length<=1) { s.innerHTML='<option value="">Seleziona...</option>'+cacheFornitori.map(f=>'<option value="'+f.id+'">'+f.nome+'</option>').join(''); } }
   if (!cacheClienti.length) await caricaSelectClienti('pc-cliente');
   const filtroData = document.getElementById('filtro-data-prezzi').value;
+  // Sincronizza data inserimento con data visualizzata
+  var prData = document.getElementById('pr-data');
+  if (prData && filtroData) prData.value = filtroData;
   let query = sb.from('prezzi').select('*, basi_carico(nome)').order('data',{ascending:false}).order('fornitore');
   if (filtroData) query = query.eq('data', filtroData);
   else query = query.limit(200); // Limite sicurezza se nessun filtro
