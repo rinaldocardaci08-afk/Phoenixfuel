@@ -8,6 +8,11 @@ function initReportStazione() {
       for (var y = annoCorr; y >= annoCorr - 5; y--) sel.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
     }
   });
+  // Anno per report annuale vendite dettaglio
+  var vdettAnno = document.getElementById('vdett-anno');
+  if (vdettAnno && vdettAnno.options.length === 0) {
+    for (var y = annoCorr; y >= annoCorr - 5; y--) vdettAnno.innerHTML += '<option value="' + y + '"' + (y===annoCorr?' selected':'') + '>' + y + '</option>';
+  }
   ['stz-rep-mese','stz-rep-cassa-mese','stz-rep-vend-mese'].forEach(function(id) {
     var sel = document.getElementById(id);
     if (sel) sel.value = meseCorr;
@@ -457,3 +462,234 @@ async function esportaVenditeExcel() {
 
 // Backward compatibility
 async function generaReportStazione() { stampaReportVenditeStazione(); }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// REPORT ANNUALE STAZIONE — Due tabelle (IVA incl. + Netto IVA) + Istogrammi
+// ═══════════════════════════════════════════════════════════════════
+
+function stampaReportAnnualeDettaglio() {
+  var anno = document.getElementById('vdett-anno')?.value || new Date().getFullYear();
+  _stampaReportAnnualeInterno(anno);
+}
+
+function stampaReportAnnualeStazione() {
+  var anno = document.getElementById('stz-rep-vend-anno')?.value || new Date().getFullYear();
+  _stampaReportAnnualeInterno(anno);
+}
+
+async function _stampaReportAnnualeInterno(anno) {
+  if (!anno) { toast('Seleziona l\'anno'); return; }
+  toast('Generazione report annuale...');
+
+  var mesiNomi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  var datiMesi = [];
+
+  for (var m = 1; m <= 12; m++) {
+    var mese = String(m).padStart(2, '0');
+    var r = await _caricaDatiVenditeMese(anno, mese);
+    var t = r.totali;
+    var litriTot = (t.gasolio || 0) + (t.benzina || 0);
+    var margPct = t.incasso > 0 ? ((t.margine / t.incasso) * 100) : 0;
+    datiMesi.push({
+      mese: mesiNomi[m - 1], meseBreve: mesiNomi[m - 1].substring(0, 3),
+      gasolio: t.gasolio || 0, benzina: t.benzina || 0, litri: litriTot,
+      incasso: t.incasso || 0, costo: t.costo || 0, margine: t.margine || 0,
+      margPct: margPct, giorni: r.righe ? r.righe.length : 0
+    });
+  }
+
+  var totA = { gasolio:0, benzina:0, litri:0, incasso:0, costo:0, margine:0, giorni:0 };
+  datiMesi.forEach(function(d) {
+    totA.gasolio+=d.gasolio; totA.benzina+=d.benzina; totA.litri+=d.litri;
+    totA.incasso+=d.incasso; totA.costo+=d.costo; totA.margine+=d.margine; totA.giorni+=d.giorni;
+  });
+  totA.margPct = totA.incasso > 0 ? ((totA.margine / totA.incasso) * 100) : 0;
+  var mediaGG = totA.giorni > 0 ? Math.round(totA.litri / totA.giorni) : 0;
+  var maxLitri = Math.max.apply(null, datiMesi.map(function(d){return d.litri;})) || 1;
+
+  var w = _apriReport('Report annuale stazione ' + anno); if (!w) return;
+
+  var css = '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10px;background:#fff}';
+  css += '.page{padding:10mm;margin:0 auto}';
+  css += '@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}.page2{page-break-before:always}}';
+  css += '@media screen{.page{max-width:297mm;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin:10px auto}body{background:#f5f4f0}}';
+  css += 'table{width:100%;border-collapse:collapse}';
+  css += 'th{padding:5px 4px;font-size:8px;text-transform:uppercase;border:1px solid;text-align:right}';
+  css += 'th:first-child{text-align:left}';
+  css += 'td{padding:4px 6px;border:1px solid #ddd;font-size:10px;text-align:right;font-family:Courier New,monospace}';
+  css += 'td:first-child{text-align:left;font-family:Arial;font-weight:500}';
+  css += '.tot td{border-top:3px solid;font-weight:bold}';
+  css += '.bar{height:16px;border-radius:3px;display:inline-block}';
+  css += '.kpi-row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}';
+  css += '.kpi-box{flex:1;min-width:90px;padding:10px 14px;border-radius:8px;border-left:4px solid}';
+  css += '</style>';
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Report Annuale Stazione ' + anno + '</title>' + css + '</head><body>';
+
+  // ═══ PAGINA 1: VALORI IVA INCLUSA ═══
+  html += '<div class="page">';
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:3px solid #D85A30;padding-bottom:8px;margin-bottom:14px">';
+  html += '<div><div style="font-size:20px;font-weight:bold;color:#D85A30">REPORT ANNUALE VENDITE</div>';
+  html += '<div style="font-size:13px;color:#666">Stazione Oppido Mamertina — Anno ' + anno + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  // KPI
+  html += '<div class="kpi-row">';
+  html += '<div class="kpi-box" style="background:#FAECE7;border-color:#D85A30"><div style="font-size:8px;color:#993C1D;text-transform:uppercase">Litri totali</div><div style="font-size:18px;font-weight:bold;color:#712B13;font-family:Courier New">' + fmtL(totA.litri) + '</div></div>';
+  html += '<div class="kpi-box" style="background:#FAECE7;border-color:#D85A30"><div style="font-size:8px;color:#993C1D;text-transform:uppercase">Incasso totale IVA incl.</div><div style="font-size:18px;font-weight:bold;color:#712B13;font-family:Courier New">' + fmtE(totA.incasso) + '</div></div>';
+  html += '<div class="kpi-box" style="background:#EAF3DE;border-color:#639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine totale</div><div style="font-size:18px;font-weight:bold;color:#173404;font-family:Courier New">' + fmtE(totA.margine) + '</div></div>';
+  html += '<div class="kpi-box" style="background:#EAF3DE;border-color:#639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Marginalità</div><div style="font-size:18px;font-weight:bold;color:#173404;font-family:Courier New">' + totA.margPct.toFixed(2) + '%</div></div>';
+  html += '<div class="kpi-box" style="background:#E6F1FB;border-color:#378ADD"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">Media lt/giorno</div><div style="font-size:18px;font-weight:bold;color:#042C53;font-family:Courier New">' + fmtL(mediaGG) + '</div></div>';
+  html += '</div>';
+
+  // TABELLA IVA INCLUSA
+  html += '<div style="font-size:12px;font-weight:bold;color:#D85A30;margin-bottom:6px">Valori IVA inclusa</div>';
+  html += _tabellaAnnuale(datiMesi, totA, maxLitri, false);
+
+  // TABELLA NETTO IVA
+  html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin:16px 0 6px">Imponibili al netto IVA</div>';
+  html += _tabellaAnnuale(datiMesi, totA, maxLitri, true);
+
+  html += '</div>'; // fine pagina 1
+
+  // ═══ PAGINA 2: GRAFICI ═══
+  html += '<div class="page page2">';
+  html += '<div style="font-size:16px;font-weight:bold;color:#D85A30;margin-bottom:14px">Grafici annuali — Stazione Oppido ' + anno + '</div>';
+
+  // Istogramma vendite
+  html += '<div style="font-size:12px;font-weight:bold;color:#D85A30;margin-bottom:8px">Andamento vendite mensili (litri)</div>';
+  html += '<div style="display:flex;align-items:flex-end;gap:6px;height:160px;border-bottom:2px solid #ddd;padding-bottom:4px">';
+  datiMesi.forEach(function(d) {
+    if (d.litri === 0) return;
+    var hGas = Math.round((d.gasolio / maxLitri) * 140);
+    var hBen = Math.round((d.benzina / maxLitri) * 140);
+    html += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">';
+    html += '<div style="font-size:8px;font-weight:bold;color:#333">' + fmtL(d.litri) + '</div>';
+    html += '<div style="display:flex;gap:1px;align-items:flex-end">';
+    html += '<div style="width:14px;height:' + hGas + 'px;background:#D4A017;border-radius:2px 2px 0 0"></div>';
+    html += '<div style="width:14px;height:' + hBen + 'px;background:#378ADD;border-radius:2px 2px 0 0"></div>';
+    html += '</div><div style="font-size:8px;color:#666;margin-top:2px">' + d.meseBreve + '</div></div>';
+  });
+  html += '</div>';
+  html += '<div style="display:flex;gap:14px;margin-top:6px;font-size:9px;color:#666">';
+  html += '<div><span style="display:inline-block;width:10px;height:10px;background:#D4A017;border-radius:2px;vertical-align:middle;margin-right:3px"></span>Gasolio</div>';
+  html += '<div><span style="display:inline-block;width:10px;height:10px;background:#378ADD;border-radius:2px;vertical-align:middle;margin-right:3px"></span>Benzina</div>';
+  html += '</div>';
+
+  // Istogramma fatturato IVA incl. vs Netto
+  html += '<div style="margin-top:20px;font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:8px">Fatturato mensile: IVA inclusa vs imponibile netto</div>';
+  var maxFatt = Math.max.apply(null, datiMesi.map(function(d){return d.incasso;})) || 1;
+  html += '<div style="display:flex;align-items:flex-end;gap:6px;height:140px;border-bottom:2px solid #ddd;padding-bottom:4px">';
+  datiMesi.forEach(function(d) {
+    if (d.incasso === 0) return;
+    var nettoIva = Math.round(d.incasso / 1.22);
+    var hIva = Math.round((d.incasso / maxFatt) * 120);
+    var hNet = Math.round((nettoIva / maxFatt) * 120);
+    html += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">';
+    html += '<div style="font-size:7px;font-weight:bold;color:#333">' + Math.round(d.incasso/1000) + 'k</div>';
+    html += '<div style="display:flex;gap:1px;align-items:flex-end">';
+    html += '<div style="width:14px;height:' + hIva + 'px;background:#D85A30;border-radius:2px 2px 0 0"></div>';
+    html += '<div style="width:14px;height:' + hNet + 'px;background:#6B5FCC;border-radius:2px 2px 0 0"></div>';
+    html += '</div><div style="font-size:8px;color:#666;margin-top:2px">' + d.meseBreve + '</div></div>';
+  });
+  html += '</div>';
+  html += '<div style="display:flex;gap:14px;margin-top:6px;font-size:9px;color:#666">';
+  html += '<div><span style="display:inline-block;width:10px;height:10px;background:#D85A30;border-radius:2px;vertical-align:middle;margin-right:3px"></span>IVA inclusa</div>';
+  html += '<div><span style="display:inline-block;width:10px;height:10px;background:#6B5FCC;border-radius:2px;vertical-align:middle;margin-right:3px"></span>Imponibile netto</div>';
+  html += '</div>';
+
+  // Istogramma marginalità
+  html += '<div style="margin-top:20px;font-size:12px;font-weight:bold;color:#639922;margin-bottom:8px">Marginalità mensile (%)</div>';
+  var maxMarg = Math.max.apply(null, datiMesi.map(function(d){return d.margPct;})) || 1;
+  html += '<div style="display:flex;align-items:flex-end;gap:6px;height:120px;border-bottom:2px solid #ddd;padding-bottom:4px">';
+  datiMesi.forEach(function(d) {
+    if (d.litri === 0) return;
+    var hBar = Math.round((d.margPct / maxMarg) * 100);
+    var barColor = d.margPct >= totA.margPct ? '#639922' : '#BA7517';
+    html += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">';
+    html += '<div style="font-size:8px;font-weight:bold;color:' + barColor + '">' + d.margPct.toFixed(1) + '%</div>';
+    html += '<div style="width:22px;height:' + hBar + 'px;background:' + barColor + ';border-radius:2px 2px 0 0"></div>';
+    html += '<div style="font-size:8px;color:#666;margin-top:2px">' + d.meseBreve + '</div></div>';
+  });
+  html += '</div>';
+  html += '<div style="font-size:9px;color:#666;margin-top:4px">Media annuale: <strong style="color:#639922">' + totA.margPct.toFixed(2) + '%</strong> — Verde = sopra media, arancione = sotto media</div>';
+
+  // Footer
+  html += '<div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:6px;margin-top:14px">PhoenixFuel Srl — Report annuale vendite stazione — ' + anno + '</div>';
+  html += '</div>'; // fine pagina 2
+
+  // Bottoni
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
+  html += '</div></body></html>';
+
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+function _tabellaAnnuale(datiMesi, totA, maxLitri, nettoIva) {
+  var iva = nettoIva ? 1.22 : 1;
+  var thBg = nettoIva ? '#EEEDFE' : '#FAECE7';
+  var thCol = nettoIva ? '#534AB7' : '#993C1D';
+  var thBor = nettoIva ? '#534AB7' : '#C04A20';
+  var totBg = nettoIva ? '#EEEDFE' : '#FAECE7';
+  var totBor = nettoIva ? '#6B5FCC' : '#D85A30';
+  var totCol = nettoIva ? '#3C3489' : '#712B13';
+
+  var h = '<table><thead><tr>';
+  h += '<th style="text-align:left;background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Mese</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Gg</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Gasolio (L)</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Benzina (L)</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Totale (L)</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">' + (nettoIva ? 'Incasso netto' : 'Incasso IVA incl.') + '</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">' + (nettoIva ? 'Costo netto' : 'Costo IVA incl.') + '</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Margine</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + '">Marg. %</th>';
+  h += '<th style="background:' + thBg + ';color:' + thCol + ';border-color:' + thBor + ';width:100px;text-align:left">Litri</th>';
+  h += '</tr></thead><tbody>';
+
+  datiMesi.forEach(function(d, i) {
+    if (d.litri === 0 && d.incasso === 0) return;
+    var inc = d.incasso / iva;
+    var cos = d.costo / iva;
+    var marg = inc - cos;
+    var mp = inc > 0 ? (marg / inc * 100) : 0;
+    var mc = marg >= 0 ? '#639922' : '#E24B4A';
+    var barW = Math.round((d.litri / maxLitri) * 100);
+    h += '<tr' + (i % 2 ? ' style="background:#fafaf8"' : '') + '>';
+    h += '<td style="font-weight:600">' + d.mese + '</td>';
+    h += '<td>' + d.giorni + '</td>';
+    h += '<td>' + fmtL(d.gasolio) + '</td>';
+    h += '<td>' + fmtL(d.benzina) + '</td>';
+    h += '<td style="font-weight:600">' + fmtL(d.litri) + '</td>';
+    h += '<td>' + fmtE(inc) + '</td>';
+    h += '<td>' + (cos > 0 ? fmtE(cos) : '—') + '</td>';
+    h += '<td style="color:' + mc + ';font-weight:600">' + (marg !== 0 ? fmtE(marg) : '—') + '</td>';
+    h += '<td style="color:' + mc + '">' + (mp > 0 ? mp.toFixed(2) + '%' : '—') + '</td>';
+    h += '<td style="text-align:left"><div class="bar" style="width:' + barW + '%;background:' + totBor + '"></div></td>';
+    h += '</tr>';
+  });
+
+  // Riga totale
+  var tInc = totA.incasso / iva;
+  var tCos = totA.costo / iva;
+  var tMarg = tInc - tCos;
+  var tMp = tInc > 0 ? (tMarg / tInc * 100) : 0;
+  var tmc = tMarg >= 0 ? '#639922' : '#E24B4A';
+  h += '<tr class="tot" style="background:' + totBg + '">';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">TOTALE ' + '</td>';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">' + totA.giorni + '</td>';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">' + fmtL(totA.gasolio) + '</td>';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">' + fmtL(totA.benzina) + '</td>';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">' + fmtL(totA.litri) + '</td>';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">' + fmtE(tInc) + '</td>';
+  h += '<td style="color:' + totCol + ';border-color:' + totBor + '">' + (tCos > 0 ? fmtE(tCos) : '—') + '</td>';
+  h += '<td style="color:' + tmc + ';border-color:' + totBor + '">' + fmtE(tMarg) + '</td>';
+  h += '<td style="color:' + tmc + ';border-color:' + totBor + '">' + tMp.toFixed(2) + '%</td>';
+  h += '<td style="border-color:' + totBor + '"></td>';
+  h += '</tr></tbody></table>';
+  return h;
+}

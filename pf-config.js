@@ -64,6 +64,8 @@ function initForms() {
   if (document.getElementById('pr-data')) document.getElementById('pr-data').value = oggiISO;
   if (document.getElementById('ord-data')) document.getElementById('ord-data').value = oggiISO;
   if (document.getElementById('filtro-data-prezzi')) document.getElementById('filtro-data-prezzi').value = oggiISO;
+  if (document.getElementById('danea-da')) document.getElementById('danea-da').value = oggiISO;
+  if (document.getElementById('danea-a')) document.getElementById('danea-a').value = oggiISO;
   if (document.getElementById('pc-data')) document.getElementById('pc-data').value = oggiISO;
   // Popola dropdown prodotti dinamici
   popolaDropdownProdotti('filtro-prodotto-ordini', true);

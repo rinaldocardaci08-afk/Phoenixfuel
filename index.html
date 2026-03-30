@@ -575,6 +575,8 @@
               <span>Vendite al dettaglio — Stazione Oppido</span>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportDettaglio()">📊 Report PDF</button>
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#D85A30" onclick="stampaReportAnnualeDettaglio()">📊 Report annuale</button>
+                <select id="vdett-anno" style="font-size:12px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
                 <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
                 <input type="date" id="vdett-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
                 <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
@@ -1453,6 +1455,7 @@
               <button class="btn-primary" onclick="stampaReportVenditeStazione()">🖨️ Stampa / PDF</button>
               <button class="btn-primary" style="background:#639922" onclick="esportaVenditeExcel()">📊 Esporta Excel</button>
               <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportAcquistiStazione()">🖨️ Report acquisti</button>
+              <button class="btn-primary" style="background:#D85A30" onclick="stampaReportAnnualeStazione()">📊 Report annuale</button>
             </div>
           </div>
           <div class="card">
