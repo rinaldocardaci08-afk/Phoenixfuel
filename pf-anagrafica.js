@@ -32,19 +32,34 @@ async function caricaConsegne() {
     const docsMap = {};
     (allDocs||[]).forEach(d => { if(!docsMap[d.ordine_id]) docsMap[d.ordine_id]=[]; docsMap[d.ordine_id].push(d); });
 
+    // Carica DAS generati per tutti gli ordini
+    const { data: allDas } = await sb.from('das_documenti').select('id,ordine_id,anno,numero_progressivo').in('ordine_id', ordineIds);
+    const dasMap = {};
+    (allDas||[]).forEach(d => { if(!dasMap[d.ordine_id]) dasMap[d.ordine_id]=[]; dasMap[d.ordine_id].push(d); });
+
     tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
       const docs = docsMap[r.id] || [];
 
       // Documenti badges
       let docsHtml = '';
+      // DAS generati
+      const dasOrdine = dasMap[r.id] || [];
+      if (dasOrdine.length) {
+        dasOrdine.forEach(d => {
+          var numDas = 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4,'0');
+          docsHtml += '<span class="badge amber" style="font-size:9px;cursor:pointer" onclick="stampaDas(\'' + d.id + '\')" title="Stampa ' + numDas + '">' + numDas + '</span> ';
+        });
+      }
+      // Documenti allegati
       if (docs.length) {
-        docsHtml = docs.map(d => {
+        docsHtml += docs.map(d => {
           const url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
           const badge = d.tipo === 'das' ? 'amber' : d.tipo === 'conferma' ? 'blue' : 'gray';
           return '<a href="' + url + '" target="_blank" style="text-decoration:none"><span class="badge ' + badge + '" style="font-size:9px;cursor:pointer">' + d.tipo.toUpperCase() + '</span></a>';
         }).join(' ');
-      } else {
+      }
+      if (!docsHtml) {
         docsHtml = '<span style="font-size:10px;color:var(--text-hint)">—</span>';
       }
 
@@ -57,6 +72,7 @@ async function caricaConsegne() {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
+      azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
       azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
 
       return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.sede_scarico_nome ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.sede_scarico_nome) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
