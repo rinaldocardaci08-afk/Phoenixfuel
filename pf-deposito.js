@@ -1155,23 +1155,32 @@ async function apriModaleSmistamento(ordineId) {
   _smistRighe = 0;
 
   // Precarica dati
-  var [clRes, mzRes, trRes] = await Promise.all([
+  var [clRes, mzRes, trRes, mzTrRes, autRes] = await Promise.all([
     sb.from('clienti').select('id,nome,tipo,cliente_rete').order('nome'),
     sb.from('mezzi').select('id,targa,capacita_totale,autista_default').eq('attivo', true).order('targa'),
-    sb.from('trasportatori').select('id,nome').eq('attivo', true).order('nome')
+    sb.from('trasportatori').select('id,nome').eq('attivo', true).order('nome'),
+    sb.from('mezzi_trasportatori').select('id,targa,capacita_totale,trasportatore_id').order('targa'),
+    sb.from('autisti').select('id,nome,trasportatore_id').order('nome')
   ]);
   _smistClienti = clRes.data || [];
   _smistMezzi = mzRes.data || [];
   var trasportatori = trRes.data || [];
+  var mezziTr = mzTrRes.data || [];
+  var autistiTr = autRes.data || [];
+
+  // Salva per cascata
+  window._smistTrasportatori = trasportatori;
+  window._smistMezziPropri = _smistMezzi;
+  window._smistMezziTr = mezziTr;
+  window._smistAutistiTr = autistiTr;
 
   var optsClienti = '<option value="">— Seleziona cliente —</option>';
   _smistClienti.forEach(function(c) { optsClienti += '<option value="' + c.id + '" data-nome="' + esc(c.nome) + '">' + esc(c.nome) + '</option>'; });
   window._smistOptsClienti = optsClienti;
 
-  var optsMezzi = '<option value="">— Mezzo —</option>';
-  _smistMezzi.forEach(function(m) { optsMezzi += '<option value="' + m.id + '" data-targa="' + esc(m.targa) + '" data-autista="' + esc(m.autista_default||'') + '">' + esc(m.targa) + ' (' + fmtL(m.capacita_totale) + 'L)</option>'; });
-  // Mezzi trasportatori
-  trasportatori.forEach(function(t) { optsMezzi += '<option value="tr_' + t.id + '" data-targa="' + esc(t.nome) + '" data-autista="">Vettore: ' + esc(t.nome) + '</option>'; });
+  // Opzioni vettori
+  var optsVettori = '<option value="proprio">Phoenix Fuel Srl (mezzo proprio)</option>';
+  trasportatori.forEach(function(t) { optsVettori += '<option value="' + t.id + '">' + esc(t.nome) + '</option>'; });
 
   var baseNome = ordine.basi_carico ? ordine.basi_carico.nome : '—';
 
@@ -1189,11 +1198,13 @@ async function apriModaleSmistamento(ordineId) {
 
   // Sezione trasporto
   h += '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;padding-bottom:4px;border-bottom:0.5px solid var(--border)">Trasporto</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">';
+  h += '<div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">';
+  h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Vettore</div>';
+  h += '<select id="smist-vettore" onchange="_smistVettoreChange()" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + optsVettori + '</select></div>';
   h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Mezzo / targa</div>';
-  h += '<select id="smist-mezzo" onchange="_smistMezzoChange()" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + optsMezzi + '</select></div>';
+  h += '<select id="smist-mezzo" onchange="_smistMezzoChange()" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"><option value="">—</option></select></div>';
   h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Autista</div>';
-  h += '<input type="text" id="smist-autista" placeholder="Nome autista" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" /></div>';
+  h += '<select id="smist-autista" style="width:100%;font-size:13px;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"><option value="">—</option></select></div>';
   h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Data carico</div>';
   h += '<input type="date" id="smist-data-carico" value="' + oggiISO + '" style="width:100%" /></div>';
   h += '<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Data consegna</div>';
@@ -1218,7 +1229,39 @@ async function apriModaleSmistamento(ordineId) {
   h += '</div>';
 
   apriModal(h);
+  _smistVettoreChange(); // Popola mezzi per vettore default (proprio)
   _smistAggiungiRiga();
+  _smistAggiornaRiepilogo();
+}
+
+function _smistVettoreChange() {
+  var vettore = document.getElementById('smist-vettore').value;
+  var selMezzo = document.getElementById('smist-mezzo');
+  var selAutista = document.getElementById('smist-autista');
+
+  if (vettore === 'proprio') {
+    // Mezzi propri
+    selMezzo.innerHTML = '<option value="">— Seleziona mezzo —</option>';
+    (window._smistMezziPropri||[]).forEach(function(m) {
+      selMezzo.innerHTML += '<option value="' + m.id + '" data-targa="' + esc(m.targa) + '" data-autista="' + esc(m.autista_default||'') + '">' + esc(m.targa) + ' (' + fmtL(m.capacita_totale) + 'L)</option>';
+    });
+    selAutista.innerHTML = '<option value="">— Seleziona autista —</option>';
+  } else {
+    // Mezzi del trasportatore
+    var trId = vettore;
+    selMezzo.innerHTML = '<option value="">— Seleziona mezzo —</option>';
+    (window._smistMezziTr||[]).filter(function(m) { return m.trasportatore_id === trId; }).forEach(function(m) {
+      selMezzo.innerHTML += '<option value="tr_' + m.id + '" data-targa="' + esc(m.targa) + '">' + esc(m.targa) + ' (' + fmtL(m.capacita_totale) + 'L)</option>';
+    });
+    // Autisti del trasportatore
+    selAutista.innerHTML = '<option value="">— Seleziona autista —</option>';
+    (window._smistAutistiTr||[]).filter(function(a) { return a.trasportatore_id === trId; }).forEach(function(a) {
+      selAutista.innerHTML += '<option value="' + esc(a.nome) + '">' + esc(a.nome) + '</option>';
+    });
+    // Se un solo autista, selezionalo
+    var autFiltrati = (window._smistAutistiTr||[]).filter(function(a) { return a.trasportatore_id === trId; });
+    if (autFiltrati.length === 1) selAutista.value = autFiltrati[0].nome;
+  }
   _smistAggiornaRiepilogo();
 }
 
@@ -1227,7 +1270,20 @@ function _smistMezzoChange() {
   if (!sel || !sel.value) return;
   var opt = sel.options[sel.selectedIndex];
   var autista = opt.dataset.autista || '';
-  if (autista) document.getElementById('smist-autista').value = autista;
+  // Per mezzi propri, precompila autista_default
+  if (autista) {
+    var selA = document.getElementById('smist-autista');
+    // Cerca se esiste come option
+    var found = false;
+    for (var i = 0; i < selA.options.length; i++) {
+      if (selA.options[i].value === autista) { selA.selectedIndex = i; found = true; break; }
+    }
+    if (!found) {
+      selA.innerHTML += '<option value="' + esc(autista) + '">' + esc(autista) + '</option>';
+      selA.value = autista;
+    }
+  }
+  _smistAggiornaRiepilogo();
 }
 
 function _smistAggiungiRiga() {
@@ -1365,8 +1421,11 @@ function _smistAggiornaRiepilogo() {
   var residuo = totLitri - assegnati;
   var resColor = residuo > 0 ? '#BA7517' : residuo === 0 ? '#639922' : '#A32D2D';
   var mezzoSel = document.getElementById('smist-mezzo');
-  var autista = document.getElementById('smist-autista')?.value || '—';
+  var autistaSel = document.getElementById('smist-autista');
+  var autista = autistaSel && autistaSel.value ? autistaSel.value : '—';
   var mezzoTxt = mezzoSel && mezzoSel.selectedIndex > 0 ? mezzoSel.options[mezzoSel.selectedIndex].dataset.targa : '—';
+  var vettoreSel = document.getElementById('smist-vettore');
+  var vettoreTxt = vettoreSel ? vettoreSel.options[vettoreSel.selectedIndex].text : '—';
 
   var h = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">';
   h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Litri fornitore</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:500">' + fmtL(totLitri) + '</div></div>';
@@ -1374,8 +1433,9 @@ function _smistAggiornaRiepilogo() {
   h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Residuo in deposito</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:' + resColor + '">' + fmtL(residuo) + '</div></div>';
   h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Margine totale</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#639922">' + fmtE(totMarg) + '</div></div>';
   h += '</div>';
-  h += '<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:11px;color:var(--text-muted)">';
+  h += '<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;font-size:11px;color:var(--text-muted)">';
   h += '<div>Consegne: <span style="font-weight:500;color:var(--text)">' + nClienti + ' clienti</span></div>';
+  h += '<div>Vettore: <span style="font-weight:500;color:var(--text)">' + esc(vettoreTxt) + '</span></div>';
   h += '<div>Mezzo: <span style="font-weight:500;color:var(--text)">' + esc(mezzoTxt) + '</span></div>';
   h += '<div>Autista: <span style="font-weight:500;color:var(--text)">' + esc(autista) + '</span></div>';
   h += '</div>';
@@ -1391,15 +1451,19 @@ async function confermaSmistamento() {
 
   // Validazione mezzo/autista
   var mezzoSel = document.getElementById('smist-mezzo');
-  var autista = document.getElementById('smist-autista')?.value || '';
+  var autistaSel = document.getElementById('smist-autista');
+  var autista = autistaSel ? autistaSel.value : '';
+  var vettoreSel = document.getElementById('smist-vettore');
+  var vettoreId = vettoreSel ? vettoreSel.value : 'proprio';
   var dataCarico = document.getElementById('smist-data-carico')?.value || oggiISO;
   var dataConsegna = document.getElementById('smist-data-consegna')?.value || oggiISO;
   if (!mezzoSel || !mezzoSel.value) { toast('Seleziona un mezzo'); return; }
-  if (!autista) { toast('Inserisci il nome dell\'autista'); return; }
+  if (!autista) { toast('Seleziona un autista'); return; }
 
   var mezzoOpt = mezzoSel.options[mezzoSel.selectedIndex];
   var mezzoId = mezzoSel.value.startsWith('tr_') ? null : mezzoSel.value;
   var mezzoTarga = mezzoOpt.dataset.targa || '';
+  var trasportatoreId = vettoreId !== 'proprio' ? vettoreId : null;
 
   // Raccogli righe
   var righe = [];
@@ -1441,7 +1505,7 @@ async function confermaSmistamento() {
   }
 
   // 3. Crea carico
-  var caricoRecord = { data:dataConsegna, mezzo_id:mezzoId, mezzo_targa:mezzoTarga, autista:autista, stato:'programmato', note:'Smistamento da ' + ordine.fornitore + ' ' + fmtL(totLitri) + 'L' };
+  var caricoRecord = { data:dataConsegna, mezzo_id:mezzoId, mezzo_targa:mezzoTarga, autista:autista, trasportatore_id:trasportatoreId, stato:'programmato', note:'Smistamento da ' + ordine.fornitore + ' ' + fmtL(totLitri) + 'L' };
   var { data: carico } = await sb.from('carichi').insert([caricoRecord]).select().single();
 
   // 4. Per ogni riga: crea ordine + carico_ordini + uscita deposito
