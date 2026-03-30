@@ -89,21 +89,29 @@
 
       <!-- DASHBOARD -->
       <div class="section active" id="s-dashboard">
-        <!-- KPI INGROSSO -->
-        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Vendita all'ingrosso — oggi</div>
+        <!-- KPI INGROSSO IERI -->
+        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Ingrosso — ieri</div>
         <div class="grid4">
-          <div class="kpi"><div class="kpi-label">Fatturato ingrosso</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
-          <div class="kpi"><div class="kpi-label">Litri ingrosso</div><div class="kpi-value" id="kpi-litri">—</div></div>
+          <div class="kpi"><div class="kpi-label">Fatturato ieri</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
+          <div class="kpi"><div class="kpi-label">Litri ieri</div><div class="kpi-value" id="kpi-litri">—</div></div>
           <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value" id="kpi-margine">—</div></div>
-          <div class="kpi"><div class="kpi-label">Ordini clienti</div><div class="kpi-value" id="kpi-ordini">—</div></div>
+          <div class="kpi"><div class="kpi-label">Ordini ieri</div><div class="kpi-value" id="kpi-ordini">—</div></div>
         </div>
-        <!-- KPI DETTAGLIO -->
-        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">⛽ Vendita al dettaglio — stazione Oppido</div>
-        <div class="grid4" style="margin-bottom:20px">
-          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso oggi pompe</div><div class="kpi-value" id="kpi-dett-incasso">—</div></div>
-          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Litri venduti pompe</div><div class="kpi-value" id="kpi-dett-litri">—</div></div>
-          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso mese</div><div class="kpi-value" id="kpi-dett-mese">—</div></div>
-          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Movimenti interni oggi</div><div class="kpi-value" id="kpi-mov-interni">—</div></div>
+        <!-- KPI INGROSSO MESE -->
+        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Ingrosso — mese corrente</div>
+        <div class="grid4">
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="kpi-ingr-mese-fatt">—</div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="kpi-ingr-mese-litri">—</div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Margine mese</div><div class="kpi-value" id="kpi-ingr-mese-margine">—</div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="kpi-ingr-mese-ordini">—</div></div>
+        </div>
+        <!-- KPI DETTAGLIO IERI -->
+        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">⛽ Dettaglio stazione — ieri</div>
+        <div class="grid4">
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso ieri pompe</div><div class="kpi-value" id="kpi-dett-incasso">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Litri venduti ieri</div><div class="kpi-value" id="kpi-dett-litri">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso mese stazione</div><div class="kpi-value" id="kpi-dett-mese">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Movimenti interni ieri</div><div class="kpi-value" id="kpi-mov-interni">—</div></div>
         </div>
 
         <!-- COCKPIT: confronto mese e alert operativi -->
