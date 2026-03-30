@@ -339,6 +339,7 @@
         <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
           <button class="btn-primary dep-tab active" data-tab="dep-principale" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px">🏗 Deposito</button>
           <button class="btn-primary dep-tab" data-tab="dep-ricezione-das" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📄 Ricezione DAS</button>
+          <button class="btn-primary dep-tab" data-tab="dep-giacenze-gg" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze giornaliere</button>
         </div>
 
         <!-- PANEL: DEPOSITO PRINCIPALE -->
@@ -400,6 +401,38 @@
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ordini entrata deposito: scatta una foto o carica il PDF del DAS ricevuto dal fornitore.</div>
             <div id="das-ordini-deposito-lista">
               <div class="loading">Caricamento ordini...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL: GIACENZE GIORNALIERE -->
+        <div class="dep-panel" id="dep-giacenze-gg" style="display:none">
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Lettura giornaliera asta cisterne</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci la giacenza rilevata da lettura asta per ogni prodotto. Il sistema calcola entrate/uscite del giorno e la differenza con la giacenza teorica.</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Data rilevazione</label><input type="date" id="gg-data" onchange="caricaGiacenzeGiornaliere()" /></div>
+              <div class="form-group"><label>Soglia alert (litri)</label><input type="number" id="gg-soglia" value="500" step="100" style="font-family:var(--font-mono)" onchange="GG_SOGLIA_ALERT=parseInt(this.value)||500" /></div>
+            </div>
+            <div id="gg-form-prodotti"></div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn-primary" style="background:#639922" onclick="salvaGiacenzeGiornaliere()">💾 Salva lettura</button>
+              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaGiacenzeGiornaliere()">🖨️ Stampa registro</button>
+            </div>
+          </div>
+          <div class="grid4" style="margin-bottom:12px" id="gg-kpi"></div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Registro giornaliero deposito</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                <label style="font-size:12px;color:var(--text-muted)">Mese:</label>
+                <select id="gg-mese" onchange="caricaRegistroGiornaliero()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                <select id="gg-prodotto-filtro" onchange="caricaRegistroGiornaliero()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Data</th><th>Prodotto</th><th>Giac. inizio</th><th style="color:#639922">Entrate</th><th style="color:#A32D2D">Uscite</th><th style="color:#BA7517">Cali/Ecc.</th><th>Giac. teorica</th><th style="color:#6B5FCC">Giac. rilevata</th><th>Differenza</th><th>Diff. cumulata</th><th>Note</th></tr></thead>
+              <tbody id="gg-registro"><tr><td colspan="11" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
         </div>

@@ -11,6 +11,7 @@ function switchDepositoTab(btn) {
   document.querySelectorAll('.dep-panel').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById(btn.dataset.tab).style.display = '';
   if (btn.dataset.tab === 'dep-ricezione-das') caricaDasOrdiniDeposito();
+  if (btn.dataset.tab === 'dep-giacenze-gg') caricaGiacenzeGiornaliere();
 }
 
 function cisternasvg(pct, colore) {
@@ -767,3 +768,371 @@ async function stampaPrelievi() {
   w.document.close();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// GIACENZE GIORNALIERE DEPOSITO v2 — Lettura asta + Cali/Eccedenze + Alert
+// ═══════════════════════════════════════════════════════════════════
+
+var _ggProdotti = [];
+var _ggDatiGiorno = {};
+var GG_SOGLIA_ALERT = 500; // litri — soglia differenza per alert admin
+
+async function caricaGiacenzeGiornaliere() {
+  var dataEl = document.getElementById('gg-data');
+  if (!dataEl.value) dataEl.value = oggiISO;
+  var data = dataEl.value;
+
+  // Soglia alert
+  var sogliaEl = document.getElementById('gg-soglia');
+  if (sogliaEl && sogliaEl.value) GG_SOGLIA_ALERT = parseInt(sogliaEl.value) || 500;
+
+  // Identifica prodotti deposito dalle cisterne
+  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita,livello_attuale').eq('sede','deposito_vibo');
+  var prodMap = {};
+  (cisterne||[]).forEach(function(c) {
+    if (!prodMap[c.prodotto]) prodMap[c.prodotto] = { capacita:0, attuale:0 };
+    prodMap[c.prodotto].capacita += Number(c.capacita||0);
+    prodMap[c.prodotto].attuale += Number(c.livello_attuale||0);
+  });
+  _ggProdotti = Object.keys(prodMap).sort();
+  // Se mancano prodotti noti, aggiungili
+  ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'].forEach(function(p) {
+    if (_ggProdotti.indexOf(p) < 0) _ggProdotti.push(p);
+  });
+
+  // Popola selettori mese e prodotto se vuoti
+  var selMese = document.getElementById('gg-mese');
+  if (selMese && selMese.options.length === 0) {
+    var mesiNomi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+    var meseCorr = new Date().getMonth();
+    for (var i = 0; i < 12; i++) selMese.innerHTML += '<option value="' + (i+1) + '"' + (i===meseCorr?' selected':'') + '>' + mesiNomi[i] + '</option>';
+  }
+  var selProd = document.getElementById('gg-prodotto-filtro');
+  if (selProd && selProd.options.length === 0) {
+    selProd.innerHTML = '<option value="">Tutti</option>';
+    _ggProdotti.forEach(function(p) { selProd.innerHTML += '<option value="' + p + '">' + p + '</option>'; });
+  }
+
+  // Giacenza giorno precedente dal DB
+  var giornoPrima = new Date(new Date(data).getTime() - 86400000).toISOString().split('T')[0];
+  var { data: precSalv } = await sb.from('giacenze_giornaliere').select('prodotto,giacenza_rilevata,giacenza_teorica')
+    .eq('data', giornoPrima).eq('sede','deposito_vibo');
+  var precMap = {};
+  (precSalv||[]).forEach(function(g) { precMap[g.prodotto] = g.giacenza_rilevata !== null ? Number(g.giacenza_rilevata) : Number(g.giacenza_teorica); });
+
+  // Giacenza già salvata per oggi
+  var { data: oggiSalv } = await sb.from('giacenze_giornaliere').select('*').eq('data', data).eq('sede','deposito_vibo');
+  var oggiMap = {};
+  (oggiSalv||[]).forEach(function(g) { oggiMap[g.prodotto] = g; });
+
+  // Entrate: ordini entrata_deposito del giorno
+  var { data: entrate } = await sb.from('ordini').select('prodotto,litri')
+    .eq('tipo_ordine','entrata_deposito').neq('stato','annullato').eq('data', data);
+  var entrateMap = {};
+  (entrate||[]).forEach(function(o) { entrateMap[o.prodotto] = (entrateMap[o.prodotto]||0) + Number(o.litri); });
+
+  // Uscite: ordini da deposito verso clienti + stazione + autoconsumo
+  var { data: uscCl } = await sb.from('ordini').select('prodotto,litri')
+    .eq('tipo_ordine','cliente').neq('stato','annullato').ilike('fornitore','%phoenix%').eq('data', data);
+  var { data: uscSt } = await sb.from('ordini').select('prodotto,litri')
+    .eq('tipo_ordine','stazione_servizio').neq('stato','annullato').eq('data', data);
+  var { data: uscAu } = await sb.from('ordini').select('prodotto,litri')
+    .eq('tipo_ordine','autoconsumo').neq('stato','annullato').eq('data', data);
+  var usciteMap = {};
+  [uscCl, uscSt, uscAu].forEach(function(arr) {
+    (arr||[]).forEach(function(o) { usciteMap[o.prodotto] = (usciteMap[o.prodotto]||0) + Number(o.litri); });
+  });
+
+  // Colori prodotti
+  var coloriProd = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#639922', 'Gasolio Agricolo':'#6B5FCC', 'HVO':'#1D9E75' };
+
+  // Render form per ogni prodotto
+  _ggDatiGiorno = {};
+  var h = '<div style="display:grid;gap:10px;margin-top:12px">';
+  _ggProdotti.forEach(function(prod) {
+    var pi = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===prod;}) : null;
+    var col = pi ? pi.colore : (coloriProd[prod] || '#888');
+    var inizio = precMap[prod] || prodMap[prod]?.attuale || 0;
+    var ent = entrateMap[prod] || 0;
+    var usc = usciteMap[prod] || 0;
+    var salvata = oggiMap[prod];
+    var caliEcc = salvata ? Number(salvata.cali_eccedenze || 0) : 0;
+    var teorica = Math.round(inizio + ent - usc + caliEcc);
+    var rilevata = salvata && salvata.giacenza_rilevata !== null ? Number(salvata.giacenza_rilevata) : '';
+    var diff = rilevata !== '' ? Math.round(rilevata - teorica) : null;
+    var nota = salvata ? (salvata.note||'') : '';
+
+    _ggDatiGiorno[prod] = { inizio:inizio, entrate:ent, uscite:usc, caliEcc:caliEcc, teorica:teorica };
+
+    h += '<div style="background:var(--bg);border:0.5px solid var(--border);padding:14px 18px;border-left:4px solid ' + col + ';border-radius:0">';
+    h += '<div style="font-size:13px;font-weight:500;margin-bottom:10px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + esc(prod) + '</div>';
+
+    // Riga 1: 5 colonne (inizio, entrate, uscite, cali/ecc input, teorica)
+    h += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px">';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Giac. inizio</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:500">' + fmtL(inizio) + '</div></div>';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">+ Entrate</div><div style="font-family:var(--font-mono);font-size:15px;color:#639922;font-weight:500">' + fmtL(ent) + '</div></div>';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">- Uscite</div><div style="font-family:var(--font-mono);font-size:15px;color:#A32D2D;font-weight:500">' + fmtL(usc) + '</div></div>';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">+/- Cali / eccedenze</div>';
+    h += '<input type="number" class="gg-cali" data-prodotto="' + esc(prod) + '" value="' + caliEcc + '" step="1" oninput="_ggRicalcola(\'' + esc(prod) + '\')" style="width:100%;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:' + (caliEcc >= 0 ? (caliEcc > 0 ? '#639922' : 'var(--text)') : '#A32D2D') + '" /></div>';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">= Teorica</div><div class="gg-teorica-display" data-prodotto="' + esc(prod) + '" style="font-family:var(--font-mono);font-size:15px;font-weight:600">' + fmtL(teorica) + '</div></div>';
+    h += '</div>';
+
+    // Riga 2: rilevata, differenza, note
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Giacenza rilevata (asta)</div>';
+    h += '<input type="number" class="gg-rilevata" data-prodotto="' + esc(prod) + '" value="' + rilevata + '" placeholder="' + teorica + '" step="1" oninput="_ggCalcDiff(\'' + esc(prod) + '\')" style="width:100%;font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text)" /></div>';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Differenza</div>';
+    h += '<div class="gg-diff-display" data-prodotto="' + esc(prod) + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 0;color:' + (diff !== null ? (diff >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)') + '">' + (diff !== null ? (diff >= 0 ? '+' : '') + fmtL(diff) : '—') + '</div></div>';
+    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Note</div>';
+    h += '<input type="text" class="gg-nota" data-prodotto="' + esc(prod) + '" value="' + esc(nota) + '" placeholder="Es. inventario fisico" style="width:100%;font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text)" /></div>';
+    h += '</div></div>';
+  });
+  h += '</div>';
+
+  // Alert box (nascosto, si mostra al salvataggio)
+  h += '<div id="gg-alert-box" style="display:none;margin-top:12px"></div>';
+
+  document.getElementById('gg-form-prodotti').innerHTML = h;
+
+  // KPI
+  _ggAggiornaKPI(oggiMap);
+
+  // Registro
+  caricaRegistroGiornaliero();
+}
+
+function _ggRicalcola(prod) {
+  var dati = _ggDatiGiorno[prod]; if (!dati) return;
+  var caliEl = document.querySelector('.gg-cali[data-prodotto="' + prod + '"]');
+  var cali = caliEl ? parseFloat(caliEl.value) || 0 : 0;
+  // Aggiorna colore cali
+  if (caliEl) caliEl.style.color = cali > 0 ? '#639922' : cali < 0 ? '#A32D2D' : 'var(--text)';
+  var nuovaTeor = Math.round(dati.inizio + dati.entrate - dati.uscite + cali);
+  dati.caliEcc = cali;
+  dati.teorica = nuovaTeor;
+  var teorEl = document.querySelector('.gg-teorica-display[data-prodotto="' + prod + '"]');
+  if (teorEl) teorEl.textContent = fmtL(nuovaTeor);
+  // Aggiorna placeholder rilevata
+  var rilEl = document.querySelector('.gg-rilevata[data-prodotto="' + prod + '"]');
+  if (rilEl) rilEl.placeholder = nuovaTeor;
+  // Ricalcola differenza
+  _ggCalcDiff(prod);
+}
+
+function _ggCalcDiff(prod) {
+  var dati = _ggDatiGiorno[prod]; if (!dati) return;
+  var rilEl = document.querySelector('.gg-rilevata[data-prodotto="' + prod + '"]');
+  var diffEl = document.querySelector('.gg-diff-display[data-prodotto="' + prod + '"]');
+  if (!rilEl || !diffEl) return;
+  var val = parseFloat(rilEl.value);
+  if (isNaN(val)) { diffEl.textContent = '—'; diffEl.style.color = 'var(--text-muted)'; return; }
+  var diff = Math.round(val - dati.teorica);
+  diffEl.textContent = (diff >= 0 ? '+' : '') + fmtL(diff);
+  diffEl.style.color = diff >= 0 ? '#639922' : '#A32D2D';
+}
+
+function _ggAggiornaKPI(oggiMap) {
+  var totTeor = 0, totRilev = 0, hasRilev = false;
+  _ggProdotti.forEach(function(p) {
+    totTeor += (_ggDatiGiorno[p] ? _ggDatiGiorno[p].teorica : 0);
+    var s = oggiMap ? oggiMap[p] : null;
+    if (s && s.giacenza_rilevata !== null) { totRilev += Number(s.giacenza_rilevata); hasRilev = true; }
+  });
+  var diffTot = hasRilev ? totRilev - totTeor : null;
+  var kpiEl = document.getElementById('gg-kpi');
+  if (!kpiEl) return;
+  kpiEl.innerHTML =
+    '<div class="kpi"><div class="kpi-label">Prodotti monitorati</div><div class="kpi-value">' + _ggProdotti.length + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Giacenza teorica totale</div><div class="kpi-value" style="font-family:var(--font-mono)">' + fmtL(totTeor) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Giacenza rilevata totale</div><div class="kpi-value" style="font-family:var(--font-mono);color:' + (hasRilev ? '#6B5FCC' : 'var(--text-muted)') + '">' + (hasRilev ? fmtL(totRilev) : '—') + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Differenza totale</div><div class="kpi-value" style="font-family:var(--font-mono);color:' + (diffTot !== null ? (diffTot >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)') + '">' + (diffTot !== null ? (diffTot >= 0 ? '+' : '') + fmtL(diffTot) : '—') + '</div></div>';
+}
+
+async function salvaGiacenzeGiornaliere() {
+  var data = document.getElementById('gg-data').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  var salvati = 0, alerts = [];
+
+  for (var i = 0; i < _ggProdotti.length; i++) {
+    var prod = _ggProdotti[i];
+    var rilEl = document.querySelector('.gg-rilevata[data-prodotto="' + prod + '"]');
+    var caliEl = document.querySelector('.gg-cali[data-prodotto="' + prod + '"]');
+    var notaEl = document.querySelector('.gg-nota[data-prodotto="' + prod + '"]');
+    var rilevata = rilEl && rilEl.value !== '' ? parseFloat(rilEl.value) : null;
+    var caliEcc = caliEl ? parseFloat(caliEl.value) || 0 : 0;
+    var nota = notaEl ? notaEl.value : '';
+    var dati = _ggDatiGiorno[prod] || {};
+    var teorica = Math.round((dati.inizio || 0) + (dati.entrate || 0) - (dati.uscite || 0) + caliEcc);
+    var diff = rilevata !== null ? Math.round(rilevata - teorica) : null;
+
+    var record = {
+      data: data, prodotto: prod, sede: 'deposito_vibo',
+      giacenza_inizio: dati.inizio || 0,
+      entrate: dati.entrate || 0,
+      uscite: dati.uscite || 0,
+      cali_eccedenze: caliEcc,
+      giacenza_teorica: teorica,
+      giacenza_rilevata: rilevata,
+      differenza: diff,
+      note: nota || null,
+      rilevata_da: utenteCorrente ? utenteCorrente.nome : 'admin'
+    };
+
+    var { data: existing } = await sb.from('giacenze_giornaliere').select('id')
+      .eq('data', data).eq('prodotto', prod).eq('sede','deposito_vibo').maybeSingle();
+    if (existing) await sb.from('giacenze_giornaliere').update(record).eq('id', existing.id);
+    else await sb.from('giacenze_giornaliere').insert([record]);
+    salvati++;
+
+    // Alert se differenza supera soglia
+    if (diff !== null && Math.abs(diff) >= GG_SOGLIA_ALERT) {
+      alerts.push({ prodotto: prod, diff: diff, teorica: teorica, rilevata: rilevata });
+    }
+  }
+
+  // Mostra alert
+  var alertBox = document.getElementById('gg-alert-box');
+  if (alerts.length && alertBox) {
+    var ah = '';
+    alerts.forEach(function(a) {
+      var col = a.diff < 0 ? '#A32D2D' : '#BA7517';
+      ah += '<div style="padding:10px 14px;border-left:4px solid ' + col + ';background:' + (a.diff < 0 ? '#FCEBEB' : '#FAEEDA') + ';border-radius:0 8px 8px 0;margin-bottom:6px;font-size:12px;color:' + col + '">';
+      ah += '<strong>Alert ' + esc(a.prodotto) + '</strong> — Differenza <strong>' + (a.diff >= 0 ? '+' : '') + fmtL(a.diff) + ' L</strong> supera soglia (' + fmtL(GG_SOGLIA_ALERT) + ' L). Teorica: ' + fmtL(a.teorica) + ', Rilevata: ' + fmtL(a.rilevata) + '</div>';
+    });
+    alertBox.innerHTML = ah;
+    alertBox.style.display = '';
+
+    // Invia alert in bacheca admin
+    var msg = 'Giacenze deposito ' + data + ': ';
+    alerts.forEach(function(a, idx) {
+      msg += (idx > 0 ? ' | ' : '') + a.prodotto + ' diff ' + (a.diff >= 0 ? '+' : '') + a.diff + 'L (teorica ' + Math.round(a.teorica) + ', rilevata ' + Math.round(a.rilevata) + ')';
+    });
+    inviaAvvisoSistema(msg, 'anomalia');
+  } else if (alertBox) {
+    alertBox.style.display = 'none';
+  }
+
+  toast('Giacenze giornaliere salvate! (' + salvati + ' prodotti)');
+  _auditLog('salva_giacenze_gg', 'giacenze_giornaliere', data + ' — ' + salvati + ' prodotti');
+  caricaRegistroGiornaliero();
+}
+
+async function caricaRegistroGiornaliero() {
+  var mese = document.getElementById('gg-mese')?.value || (new Date().getMonth() + 1);
+  var anno = new Date().getFullYear();
+  var prodFiltro = document.getElementById('gg-prodotto-filtro')?.value || '';
+  var da = anno + '-' + String(mese).padStart(2,'0') + '-01';
+  var ultimoGg = new Date(anno, Number(mese), 0).getDate();
+  var a = anno + '-' + String(mese).padStart(2,'0') + '-' + ultimoGg;
+
+  var q = sb.from('giacenze_giornaliere').select('*').eq('sede','deposito_vibo').gte('data', da).lte('data', a).order('data',{ascending:false});
+  if (prodFiltro) q = q.eq('prodotto', prodFiltro);
+  var { data: righe } = await q;
+
+  var tbody = document.getElementById('gg-registro');
+  if (!righe || !righe.length) { tbody.innerHTML = '<tr><td colspan="11" class="loading">Nessuna lettura nel periodo</td></tr>'; return; }
+
+  var coloriProd = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#639922', 'Gasolio Agricolo':'#6B5FCC', 'HVO':'#1D9E75' };
+
+  // Diff cumulata per prodotto (ordine cronologico per calcolo)
+  var righeAsc = righe.slice().reverse();
+  var cumMap = {};
+  righeAsc.forEach(function(r) {
+    if (!cumMap[r.prodotto]) cumMap[r.prodotto] = 0;
+    if (r.differenza !== null) cumMap[r.prodotto] += Number(r.differenza);
+    r._cum = r.differenza !== null ? cumMap[r.prodotto] : null;
+  });
+
+  // Render in ordine discendente
+  var html = '';
+  righe.forEach(function(r, idx) {
+    var pi = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===r.prodotto;}) : null;
+    var col = pi ? pi.colore : (coloriProd[r.prodotto] || '#888');
+    var diffCol = r.differenza !== null ? (Number(r.differenza) >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)';
+    var cumCol = r._cum !== null ? (r._cum >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)';
+    var caliVal = Number(r.cali_eccedenze || 0);
+    var caliCol = caliVal > 0 ? '#639922' : caliVal < 0 ? '#A32D2D' : 'var(--text-muted)';
+    var bg = idx % 2 ? 'background:var(--bg)' : '';
+    var isAlert = r.differenza !== null && Math.abs(Number(r.differenza)) >= GG_SOGLIA_ALERT;
+
+    html += '<tr style="' + bg + (isAlert ? ';border-left:3px solid #E24B4A' : '') + '">';
+    html += '<td style="font-weight:500">' + r.data + '</td>';
+    html += '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right">' + fmtL(r.giacenza_inizio||0) + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;color:#639922">' + fmtL(r.entrate||0) + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;color:#A32D2D">' + fmtL(r.uscite||0) + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;color:' + caliCol + '">' + (caliVal !== 0 ? (caliVal > 0 ? '+' : '') + fmtL(caliVal) : '0') + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;font-weight:500">' + fmtL(r.giacenza_teorica||0) + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;font-weight:600;color:#6B5FCC">' + (r.giacenza_rilevata !== null ? fmtL(r.giacenza_rilevata) : '—') + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;color:' + diffCol + ';font-weight:500">' + (r.differenza !== null ? (Number(r.differenza) >= 0 ? '+' : '') + fmtL(r.differenza) : '—') + '</td>';
+    html += '<td style="font-family:var(--font-mono);text-align:right;color:' + cumCol + ';font-weight:500">' + (r._cum !== null ? (r._cum >= 0 ? '+' : '') + fmtL(r._cum) : '—') + '</td>';
+    html += '<td style="font-size:10px;color:var(--text-muted)">' + esc(r.note||'') + '</td>';
+    html += '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+async function stampaGiacenzeGiornaliere() {
+  var w = _apriReport('Giacenze giornaliere deposito'); if (!w) return;
+  var mese = document.getElementById('gg-mese')?.value || (new Date().getMonth() + 1);
+  var anno = new Date().getFullYear();
+  var mesiNomi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  var meseNome = mesiNomi[Number(mese)-1];
+  var da = anno + '-' + String(mese).padStart(2,'0') + '-01';
+  var ultimoGg = new Date(anno, Number(mese), 0).getDate();
+  var a = anno + '-' + String(mese).padStart(2,'0') + '-' + ultimoGg;
+
+  var { data: righe } = await sb.from('giacenze_giornaliere').select('*').eq('sede','deposito_vibo').gte('data', da).lte('data', a).order('data');
+  if (!righe || !righe.length) { w.close(); toast('Nessun dato'); return; }
+
+  var css = '<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10px}' +
+    '.page{padding:10mm;margin:0 auto}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}}' +
+    '@media screen{.page{max-width:297mm;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin:10px auto}body{background:#f5f4f0}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#6B5FCC;color:#fff;padding:5px 4px;font-size:8px;text-transform:uppercase;border:1px solid #5A4FBB;text-align:center}' +
+    'td{padding:4px 6px;border:1px solid #ddd;font-size:10px}' +
+    '.m{font-family:Courier New,monospace;text-align:right}' +
+    '</style>';
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Giacenze Giornaliere — ' + meseNome + ' ' + anno + '</title>' + css + '</head><body><div class="page">';
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:3px solid #6B5FCC;padding-bottom:8px;margin-bottom:12px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#6B5FCC">REGISTRO GIACENZE GIORNALIERE</div>';
+  html += '<div style="font-size:11px;color:#666">Deposito Vibo Valentia — ' + meseNome + ' ' + anno + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:14px;font-weight:bold">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:9px;color:#666">Generato: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  html += '<table><thead><tr><th>Data</th><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Cali/Ecc.</th><th>Giac. teorica</th><th>Giac. rilevata</th><th>Differenza</th><th>Diff. cum.</th><th>Note</th></tr></thead><tbody>';
+
+  var cumMap = {};
+  righe.forEach(function(r, idx) {
+    if (!cumMap[r.prodotto]) cumMap[r.prodotto] = 0;
+    if (r.differenza !== null) cumMap[r.prodotto] += Number(r.differenza);
+    var cum = r.differenza !== null ? cumMap[r.prodotto] : null;
+    var dC = r.differenza !== null ? (Number(r.differenza) >= 0 ? '#639922' : '#A32D2D') : '#999';
+    var cC = cum !== null ? (cum >= 0 ? '#639922' : '#A32D2D') : '#999';
+    var caliV = Number(r.cali_eccedenze||0);
+    var caliC = caliV > 0 ? '#639922' : caliV < 0 ? '#A32D2D' : '#999';
+
+    html += '<tr' + (idx%2?' style="background:#f9f9f6"':'') + '>';
+    html += '<td style="font-weight:500">' + r.data.substring(5) + '</td>';
+    html += '<td>' + r.prodotto + '</td>';
+    html += '<td class="m">' + fmtL(r.giacenza_inizio||0) + '</td>';
+    html += '<td class="m" style="color:#639922">' + fmtL(r.entrate||0) + '</td>';
+    html += '<td class="m" style="color:#A32D2D">' + fmtL(r.uscite||0) + '</td>';
+    html += '<td class="m" style="color:' + caliC + '">' + (caliV !== 0 ? (caliV > 0 ? '+' : '') + fmtL(caliV) : '0') + '</td>';
+    html += '<td class="m" style="font-weight:500">' + fmtL(r.giacenza_teorica||0) + '</td>';
+    html += '<td class="m" style="font-weight:600;color:#6B5FCC">' + (r.giacenza_rilevata!==null?fmtL(r.giacenza_rilevata):'—') + '</td>';
+    html += '<td class="m" style="color:' + dC + '">' + (r.differenza!==null?(Number(r.differenza)>=0?'+':'')+fmtL(r.differenza):'—') + '</td>';
+    html += '<td class="m" style="color:' + cC + ';font-weight:500">' + (cum!==null?(cum>=0?'+':'')+fmtL(cum):'—') + '</td>';
+    html += '<td style="font-size:9px;color:#666">' + (r.note||'') + '</td></tr>';
+  });
+
+  html += '</tbody></table>';
+  html += '<div style="text-align:center;font-size:8px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:6px;margin-top:10px">PhoenixFuel Srl — Registro giacenze giornaliere deposito — ' + meseNome + ' ' + anno + '</div>';
+  html += '</div>';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button>';
+  html += '</div></body></html>';
+  w.document.open(); w.document.write(html); w.document.close();
+}
