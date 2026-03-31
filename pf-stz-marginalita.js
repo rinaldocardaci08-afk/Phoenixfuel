@@ -435,7 +435,7 @@ async function salvaCostiMarg() {
       if (inp2) m.costiMap[d+'_'+p] = parseFloat(inp2.value);
     }
   }
-  toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati!');
+  // Toast viene mostrato alla fine della funzione
 
   // ═══ Auto-crea costi per giorno successivo da CMP cisterne ═══
   try {
@@ -471,13 +471,13 @@ async function salvaCostiMarg() {
 
   renderStoricoMarg();
 
-  // Chiedi se vuole andare al giorno successivo
+  // Auto-avanza: ricarica marginalità con i nuovi dati
   if (dataCorr) {
     var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
-    if (confirm('Costi salvati! Dati preparati per il ' + domani + '.\nVuoi andare al giorno ' + domani + '?')) {
-      // Ricarica marginalità con i nuovi dati e naviga al giorno più recente
-      await caricaMarginalita();
-    }
+    toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati! Dati ' + domani + ' preparati.');
+    await caricaMarginalita();
+  } else {
+    toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati!');
   }
 }
 

@@ -294,12 +294,11 @@ async function salvaLetture() {
   caricaStoricoLetture();
   caricaStoricoPrezzi();
 
-  // Chiedi se vuole andare al giorno successivo
+  // Auto-avanza al giorno successivo
   var domaniNav = new Date(new Date(data).getTime() + 86400000).toISOString().split('T')[0];
-  if (confirm('Letture salvate! Prezzi preparati per il ' + domaniNav + '.\nVuoi andare al giorno ' + domaniNav + '?')) {
-    document.getElementById('stz-data-lettura').value = domaniNav;
-    caricaFormLetture();
-  }
+  toast(anyOffline ? '⚡ Letture salvate offline' : upserts.length + ' letture salvate! Prezzi ' + domaniNav + ' preparati.');
+  document.getElementById('stz-data-lettura').value = domaniNav;
+  caricaFormLetture();
 }
 
 async function caricaStoricoLetture() {

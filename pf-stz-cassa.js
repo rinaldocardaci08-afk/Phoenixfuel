@@ -216,12 +216,7 @@ async function salvaCassa() {
     return;
   }
 
-  // Controlla se esiste già un registro per questa data
-  var { data: cassaEsistente } = await sb.from('stazione_cassa').select('id').eq('data', data).maybeSingle();
-  if (cassaEsistente) {
-    if (!confirm('Esiste già un registro cassa per il ' + data + '.\nVuoi sovrascriverlo?')) return;
-  }
-
+  // Upsert diretto — sovrascrive se esiste (senza confirm bloccante su mobile)
   var { error } = await sb.from('stazione_cassa').upsert(record, { onConflict: 'data' });
   if (error) { toast('Errore: ' + error.message); return; }
 
@@ -697,10 +692,12 @@ async function confermaOcrLetture() {
   document.getElementById('ocr-status').style.display = 'none';
   _auditLog('ocr_letture', 'stazione_letture', salvate + ' letture da OCR scontrino ' + data);
 
-  // Ricarica letture se siamo nel tab letture
-  if (document.getElementById('stz-letture') && document.getElementById('stz-letture').style.display !== 'none') {
-    caricaTabLetture();
-  }
+  // Ricarica letture e cassa (vendite dipendono dalle letture)
+  try {
+    if (typeof caricaFormLetture === 'function') caricaFormLetture();
+    if (typeof caricaStoricoLetture === 'function') caricaStoricoLetture();
+    if (typeof calcolaCassa === 'function') calcolaCassa();
+  } catch(e) { console.warn('Refresh dopo OCR:', e); }
 }
 
 async function stampaCassa() {
