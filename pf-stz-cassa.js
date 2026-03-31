@@ -7,6 +7,7 @@ async function caricaCassa() {
   var input = document.getElementById('cassa-data');
   if (!input.value) input.value = oggiISO;
   var data = input.value;
+  _labelGiorno('cassa-data');
 
   // Carica dati salvati in parallelo
   var [cassaRes, speseRes, totVendite] = await Promise.all([

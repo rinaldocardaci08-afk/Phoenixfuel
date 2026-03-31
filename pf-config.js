@@ -67,6 +67,9 @@ function initForms() {
   if (document.getElementById('danea-da')) document.getElementById('danea-da').value = oggiISO;
   if (document.getElementById('danea-a')) document.getElementById('danea-a').value = oggiISO;
   if (document.getElementById('pc-data')) document.getElementById('pc-data').value = oggiISO;
+  // Label giorno su date operative
+  _labelGiorno('ord-data');
+  _labelGiorno('filtro-data-prezzi');
   // Popola dropdown prodotti dinamici
   popolaDropdownProdotti('filtro-prodotto-ordini', true);
   popolaDropdownProdotti('vend-prodotto', true);
@@ -328,3 +331,25 @@ async function caricaSelectClienti(selectId) {
   sel.innerHTML = '<option value="">Seleziona...</option>' + cacheClienti.map(c => '<option value="' + c.id + '">' + c.nome + '</option>').join('');
 }
 
+// ── LABEL GIORNO (OGGI/DOMANI/IERI) ────────────────────────────
+function _labelGiorno(inputId) {
+  var inp = document.getElementById(inputId);
+  if (!inp) return;
+  var spanId = inputId + '-lbl';
+  var el = document.getElementById(spanId);
+  if (!el) {
+    el = document.createElement('span');
+    el.id = spanId;
+    el.style.cssText = 'font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;margin-left:6px;display:none;vertical-align:middle';
+    inp.parentNode.insertBefore(el, inp.nextSibling);
+  }
+  var val = inp.value;
+  if (!val) { el.style.display = 'none'; return; }
+  var oggi = new Date(); oggi.setHours(0,0,0,0);
+  var sel = new Date(val); sel.setHours(0,0,0,0);
+  var diff = Math.round((sel - oggi) / 86400000);
+  if (diff === 0) { el.textContent = 'OGGI'; el.style.background = '#378ADD'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
+  else if (diff === 1) { el.textContent = 'DOMANI'; el.style.background = '#639922'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
+  else if (diff === -1) { el.textContent = 'IERI'; el.style.background = '#BA7517'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
+  else { el.style.display = 'none'; }
+}

@@ -18,6 +18,7 @@ async function caricaFoglioGiornaliero() {
   var input = document.getElementById('fg-data');
   if (!input.value) input.value = oggiISO;
   var data = input.value;
+  _labelGiorno('fg-data');
   var giornoPre = new Date(new Date(data+'T12:00:00').getTime()-86400000).toISOString().split('T')[0];
 
   // FIX: usa select('*') e order('ordine') come il tab letture funzionante

@@ -170,6 +170,17 @@ function renderMargGiorno(idx) {
 
   var dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
   document.getElementById('marg-data-label').textContent = dataFmt;
+  // Label OGGI/DOMANI/IERI
+  var elLbl = document.getElementById('marg-data-lbl');
+  if (elLbl) {
+    var oggi = new Date(); oggi.setHours(0,0,0,0);
+    var sel = new Date(data); sel.setHours(0,0,0,0);
+    var diff = Math.round((sel - oggi) / 86400000);
+    if (diff === 0) { elLbl.textContent = 'OGGI'; elLbl.style.background = '#378ADD'; elLbl.style.color = '#fff'; elLbl.style.display = 'inline-block'; }
+    else if (diff === 1) { elLbl.textContent = 'DOMANI'; elLbl.style.background = '#639922'; elLbl.style.color = '#fff'; elLbl.style.display = 'inline-block'; }
+    else if (diff === -1) { elLbl.textContent = 'IERI'; elLbl.style.background = '#BA7517'; elLbl.style.color = '#fff'; elLbl.style.display = 'inline-block'; }
+    else { elLbl.style.display = 'none'; }
+  }
 
   var el = document.getElementById('marg-pompe-content');
   var html = '';
