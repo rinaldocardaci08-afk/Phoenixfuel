@@ -245,7 +245,7 @@ async function caricaStazioneDashboard() {
       if (lettOggi && lettIeri) {
         const litri = Number(lettOggi.lettura) - Number(lettIeri.lettura);
         if (litri > 0) {
-          const prezzo = Number(prezziMap[data+'_'+pompa.prodotto] || 0);
+          const prezzo = Number(prezziMap[data+'_'+pompa.prodotto] || 0) / 1.22;
           const co = costiMap[data+'_'+pompa.prodotto] || 0;
           if (pompa.prodotto === 'Gasolio Autotrazione') totLitriG += litri;
           else totLitriB += litri;

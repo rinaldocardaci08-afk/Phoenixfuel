@@ -377,10 +377,10 @@ async function _caricaDatiVenditeMese(anno, mese) {
       if(lettOggi&&lettIeri){
         var litri=Number(lettOggi.lettura)-Number(lettIeri.lettura);
         if(litri>0){
-          var prezzo=Number(prezziMap[data+'_'+pompa.prodotto]||0);
+          var prezzo=Number(prezziMap[data+'_'+pompa.prodotto]||0)/1.22;
           var costo=costiMap[data+'_'+pompa.prodotto]||0;
           var litriPD=Number(lettOggi.litri_prezzo_diverso||0);
-          var prezzoPD=Number(lettOggi.prezzo_diverso||0);
+          var prezzoPD=Number(lettOggi.prezzo_diverso||0)/1.22;
           var hasCambio=litriPD>0&&prezzoPD>0;
           var litriStd=hasCambio?Math.max(0,litri-litriPD):litri;
           if(pompa.prodotto==='Gasolio Autotrazione') gG+=litri; else gB+=litri;
