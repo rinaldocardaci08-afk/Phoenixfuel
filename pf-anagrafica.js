@@ -606,18 +606,9 @@ async function caricaVenditeAnnuali() {
     mesi.push({ mese: MESI_NOMI[m], ingLitri, ingFatt, ingMarg, dettLitri, dettInc, dettMarg, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc, totMarg: ingMarg+dettMarg });
   }
 
-  // Tabella
-  const tbody = document.getElementById('tabella-vend-annuale');
-  let totIL=0,totIF=0,totIM=0,totDL=0,totDI=0,totDM=0,totTL=0,totTF=0,totTM=0;
-  tbody.innerHTML = mesi.map(m => {
-    totIL+=m.ingLitri; totIF+=m.ingFatt; totIM+=m.ingMarg; totDL+=m.dettLitri; totDI+=m.dettInc; totDM+=m.dettMarg; totTL+=m.totLitri; totTF+=m.totFatt; totTM+=m.totMarg;
-    const hasData = m.ingLitri > 0 || m.dettLitri > 0;
-    const dmColor = m.dettMarg >= 0 ? '#639922' : '#E24B4A';
-    const tmColor = m.totMarg >= 0 ? '#639922' : '#E24B4A';
-    return '<tr' + (!hasData?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(m.ingLitri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(m.ingFatt) + '</td><td style="font-family:var(--font-mono);color:#639922">' + fmtE(m.ingMarg) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtL(m.dettLitri) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtE(m.dettInc) + '</td><td style="font-family:var(--font-mono);color:' + dmColor + '">' + fmtE(m.dettMarg) + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtL(m.totLitri) + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtE(m.totFatt) + '</td><td style="font-family:var(--font-mono);font-weight:bold;color:' + tmColor + '">' + fmtE(m.totMarg) + '</td></tr>';
-  }).join('');
-  const tmTotColor = totTM >= 0 ? '#639922' : '#E24B4A';
-  tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE ' + anno + '</td><td style="font-family:var(--font-mono)">' + fmtL(totIL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totIF) + '</td><td style="font-family:var(--font-mono);color:#639922">' + fmtE(totIM) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtL(totDL) + '</td><td style="font-family:var(--font-mono);color:#6B5FCC">' + fmtE(totDI) + '</td><td style="font-family:var(--font-mono);color:#639922">' + fmtE(totDM) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totTL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totTF) + '</td><td style="font-family:var(--font-mono);font-weight:bold;color:' + tmTotColor + '">' + fmtE(totTM) + '</td></tr>';
+  // Salva dati per filtro vista
+  window._annualeData = { mesi: mesi, anno: anno };
+  _renderTabellaAnnuale();
 
   // Grafici
   const labelsM = mesi.map(m => m.mese.substring(0,3));
@@ -642,6 +633,53 @@ async function caricaVenditeAnnuali() {
     });
   }
 }
+
+function _renderTabellaAnnuale() {
+  var d = window._annualeData; if (!d) return;
+  var mesi = d.mesi, anno = d.anno;
+  var vista = (document.getElementById('vann-vista') || {}).value || 'totale';
+  var thead = document.getElementById('thead-vend-annuale');
+  var tbody = document.getElementById('tabella-vend-annuale');
+  var mono = 'font-family:var(--font-mono)';
+
+  if (vista === 'ingrosso') {
+    thead.innerHTML = '<tr><th>Mese</th><th>Litri</th><th>Fatturato</th><th>Margine</th><th>€/L margine</th></tr>';
+    var tL=0,tF=0,tM=0;
+    tbody.innerHTML = mesi.map(function(m) {
+      tL+=m.ingLitri; tF+=m.ingFatt; tM+=m.ingMarg;
+      var mpl = m.ingLitri > 0 ? (m.ingMarg/m.ingLitri).toFixed(4) : '—';
+      var mc = m.ingMarg >= 0 ? '#639922' : '#E24B4A';
+      return '<tr' + (!m.ingLitri?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="'+mono+'">' + fmtL(m.ingLitri) + '</td><td style="'+mono+'">' + fmtE(m.ingFatt) + '</td><td style="'+mono+';color:'+mc+'">' + fmtE(m.ingMarg) + '</td><td style="'+mono+';color:'+mc+'">' + mpl + '</td></tr>';
+    }).join('');
+    var tc = tM >= 0 ? '#639922' : '#E24B4A';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE '+anno+'</td><td style="'+mono+'">'+fmtL(tL)+'</td><td style="'+mono+'">'+fmtE(tF)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
+  } else if (vista === 'dettaglio') {
+    thead.innerHTML = '<tr><th>Mese</th><th>Litri</th><th>Incasso netto</th><th>Margine</th><th>€/L margine</th></tr>';
+    var tL=0,tI=0,tM=0;
+    tbody.innerHTML = mesi.map(function(m) {
+      tL+=m.dettLitri; tI+=m.dettInc; tM+=m.dettMarg;
+      var mpl = m.dettLitri > 0 ? (m.dettMarg/m.dettLitri).toFixed(4) : '—';
+      var mc = m.dettMarg >= 0 ? '#639922' : '#E24B4A';
+      return '<tr' + (!m.dettLitri?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="'+mono+';color:#6B5FCC">' + fmtL(m.dettLitri) + '</td><td style="'+mono+';color:#6B5FCC">' + fmtE(m.dettInc) + '</td><td style="'+mono+';color:'+mc+'">' + fmtE(m.dettMarg) + '</td><td style="'+mono+';color:'+mc+'">' + mpl + '</td></tr>';
+    }).join('');
+    var tc = tM >= 0 ? '#639922' : '#E24B4A';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE '+anno+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(tL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(tI)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
+  } else {
+    thead.innerHTML = '<tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Margine dettaglio</th><th>Totale litri</th><th>Totale fatturato</th><th>Totale margine</th></tr>';
+    var totIL=0,totIF=0,totIM=0,totDL=0,totDI=0,totDM=0,totTL=0,totTF=0,totTM=0;
+    tbody.innerHTML = mesi.map(function(m) {
+      totIL+=m.ingLitri; totIF+=m.ingFatt; totIM+=m.ingMarg; totDL+=m.dettLitri; totDI+=m.dettInc; totDM+=m.dettMarg; totTL+=m.totLitri; totTF+=m.totFatt; totTM+=m.totMarg;
+      var hasData = m.ingLitri > 0 || m.dettLitri > 0;
+      var dmColor = m.dettMarg >= 0 ? '#639922' : '#E24B4A';
+      var tmColor = m.totMarg >= 0 ? '#639922' : '#E24B4A';
+      return '<tr'+ (!hasData?' style="opacity:0.4"':'') +'><td><strong>'+m.mese+'</strong></td><td style="'+mono+'">'+fmtL(m.ingLitri)+'</td><td style="'+mono+'">'+fmtE(m.ingFatt)+'</td><td style="'+mono+';color:#639922">'+fmtE(m.ingMarg)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(m.dettLitri)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(m.dettInc)+'</td><td style="'+mono+';color:'+dmColor+'">'+fmtE(m.dettMarg)+'</td><td style="'+mono+';font-weight:500">'+fmtL(m.totLitri)+'</td><td style="'+mono+';font-weight:500">'+fmtE(m.totFatt)+'</td><td style="'+mono+';font-weight:bold;color:'+tmColor+'">'+fmtE(m.totMarg)+'</td></tr>';
+    }).join('');
+    var tmTotColor = totTM >= 0 ? '#639922' : '#E24B4A';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE '+anno+'</td><td style="'+mono+'">'+fmtL(totIL)+'</td><td style="'+mono+'">'+fmtE(totIF)+'</td><td style="'+mono+';color:#639922">'+fmtE(totIM)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(totDL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(totDI)+'</td><td style="'+mono+';color:#639922">'+fmtE(totDM)+'</td><td style="'+mono+'">'+fmtL(totTL)+'</td><td style="'+mono+'">'+fmtE(totTF)+'</td><td style="'+mono+';font-weight:bold;color:'+tmTotColor+'">'+fmtE(totTM)+'</td></tr>';
+  }
+}
+
+function filtraVistaAnnuale() { _renderTabellaAnnuale(); }
 
 // ── REPORT PDF DETTAGLIO ─────────────────────────────────────────
 async function stampaReportDettaglio() {

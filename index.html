@@ -622,13 +622,18 @@
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>Riepilogo vendite totali per mese</span>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select id="vann-vista" onchange="filtraVistaAnnuale()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500">
+                  <option value="totale">Totale (Ingrosso + Dettaglio)</option>
+                  <option value="ingrosso">Solo Ingrosso</option>
+                  <option value="dettaglio">Solo Dettaglio</option>
+                </select>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="stampaReportAnnuale()">📊 Report PDF</button>
                 <select id="vann-anno" onchange="caricaVenditeAnnuali()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
               </div>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ingrosso (ordini clienti) + Dettaglio (letture pompe stazione). Litri e fatturato imponibile per mese.</div>
             <div style="overflow-x:auto">
-            <table><thead><tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Margine dettaglio</th><th>Totale litri</th><th>Totale fatturato</th><th>Totale margine</th></tr></thead>
+            <table><thead id="thead-vend-annuale"><tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Margine dettaglio</th><th>Totale litri</th><th>Totale fatturato</th><th>Totale margine</th></tr></thead>
             <tbody id="tabella-vend-annuale"><tr><td colspan="10" class="loading">Seleziona un anno...</td></tr></tbody></table>
             </div>
             <div class="grid2" style="margin-top:16px">
