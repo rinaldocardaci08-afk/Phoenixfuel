@@ -1200,7 +1200,7 @@
             <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Quadratura versamento</div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
               <div class="kpi"><div class="kpi-label">Da versare</div><div class="kpi-value" id="cassa-kpi-daversare">—</div></div>
-              <div class="kpi"><div class="kpi-label">Versato</div><input type="number" id="cassa-versato" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:18px;font-weight:700;text-align:center;width:100%;border:none;background:transparent;color:var(--text);padding:4px 0" /></div>
+              <div class="kpi"><div class="kpi-label">Versato (€)</div><input type="number" id="cassa-versato" inputmode="decimal" step="0.01" placeholder="0.00" oninput="calcolaCassa()" style="font-family:var(--font-mono);font-size:18px;font-weight:700;text-align:center;width:100%;border:1.5px solid #378ADD;background:var(--bg-card);color:var(--text);padding:6px 4px;border-radius:8px" /></div>
               <div class="kpi" id="cassa-kpi-diff"><div class="kpi-label">Differenza</div><div class="kpi-value" id="cassa-differenza">—</div></div>
             </div>
 
