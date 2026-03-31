@@ -77,6 +77,20 @@ async function caricaHome() {
     if (p.tipo === 'avviso') tipoBadge = '⚠️ ';
     else if (p.tipo === 'report') tipoBadge = '📊 ';
     else if (p.tipo === 'foto') tipoBadge = '📷 ';
+    else if (p.tipo === 'timer') tipoBadge = '⏱️ ';
+
+    // Timer override: border color based on state
+    var isTimer = p.tipo === 'timer';
+    var timerData = null;
+    if (isTimer) {
+      try { timerData = JSON.parse(p.contenuto || '{}'); } catch(e) { timerData = {}; }
+      var timerAttivo = timerData.attivo !== false;
+      if (!prioritaStyle) {
+        var timerTarget = new Date(timerData.data_target);
+        var isFuture = timerTarget > new Date();
+        prioritaStyle = timerAttivo ? 'border-left:4px solid ' + (isFuture ? '#378ADD' : '#639922') + ';border-radius:0' : 'border-left:4px solid #B4B2A9;border-radius:0';
+      }
+    }
 
     var dragAttr = isAdmin ? ' draggable="true" ondragstart="_dragPost(event,' + idx + ')" ondragover="_dragOverPost(event)" ondrop="_dropPost(event,' + idx + ')" style="cursor:grab;margin-bottom:12px;transition:opacity 0.2s;' + prioritaStyle + '"' : ' style="margin-bottom:12px;' + prioritaStyle + '"';
 
@@ -87,6 +101,10 @@ async function caricaHome() {
       html += '<div style="display:flex;gap:4px;align-items:center">';
       html += '<span style="font-size:14px;color:var(--text-muted);cursor:grab;padding:0 4px" title="Trascina per riordinare">⠿</span>';
       html += '<button class="btn-edit" title="Fissa/Sfissa" onclick="togglePinPost(\'' + p.id + '\',' + !p.pinned + ')">📌</button>';
+      if (isTimer) {
+        var tAtt = timerData && timerData.attivo !== false;
+        html += '<button class="btn-edit" style="font-size:11px;padding:2px 8px;border:0.5px solid var(--border);border-radius:4px" onclick="toggleTimerPost(\'' + p.id + '\',' + !tAtt + ')" title="' + (tAtt ? 'Stoppa' : 'Riavvia') + '">' + (tAtt ? '⏸ stop' : '▶ start') + '</button>';
+      }
       html += '<button class="btn-edit" onclick="modificaPost(\'' + p.id + '\')">✏️</button>';
       html += '<button class="btn-danger" onclick="eliminaPost(\'' + p.id + '\')">x</button>';
       html += '</div>';
@@ -95,7 +113,35 @@ async function caricaHome() {
 
     html += '<div style="font-size:17px;font-weight:600;margin-bottom:8px">' + tipoBadge + esc(p.titolo) + '</div>';
 
-    if (p.contenuto) {
+    if (isTimer && timerData) {
+      var tTarget = new Date(timerData.data_target);
+      var tAttivo = timerData.attivo !== false;
+      var tFuture = tTarget > new Date();
+      var tStoppato = timerData.stoppato_il;
+      var tDataFmt = tTarget.toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' }) + ', ore ' + String(tTarget.getHours()).padStart(2,'0') + ':' + String(tTarget.getMinutes()).padStart(2,'0');
+
+      // Status badges
+      if (tAttivo) {
+        html += '<div style="margin-bottom:8px"><span style="font-size:11px;background:' + (tFuture ? '#378ADD' : '#639922') + ';color:#fff;padding:2px 10px;border-radius:10px;font-weight:600">' + (tFuture ? 'conto alla rovescia' : 'conta in avanti') + '</span></div>';
+        html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + (tFuture ? 'Obiettivo: ' : 'Dal ') + tDataFmt + '</div>';
+      } else {
+        html += '<div style="margin-bottom:8px"><span style="font-size:11px;background:#B4B2A9;color:#fff;padding:2px 10px;border-radius:10px;font-weight:600">stoppato</span></div>';
+        html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Stoppato il ' + (tStoppato ? new Date(tStoppato).toLocaleDateString('it-IT') : '—') + '</div>';
+      }
+
+      // Timer boxes
+      var tColor = !tAttivo ? ['#F1EFE8','#444441','#5F5E5A'] : tFuture ? ['#E6F1FB','#0C447C','#185FA5'] : ['#EAF3DE','#27500A','#3B6D11'];
+      var opacStyle = tAttivo ? '' : 'opacity:0.5;';
+      html += '<div class="timer-display" data-timer-id="' + p.id + '" data-target="' + timerData.data_target + '" data-attivo="' + (tAttivo?'1':'0') + '" data-stoppato="' + (tStoppato||'') + '" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;' + opacStyle + '">';
+      ['anni','mesi','giorni','ore','min','sec'].forEach(function(u) {
+        html += '<div style="background:' + tColor[0] + ';border-radius:8px;padding:10px 14px;text-align:center;min-width:60px">';
+        html += '<div class="timer-val" data-unit="' + u + '" style="font-size:26px;font-weight:500;color:' + tColor[1] + ';font-family:var(--font-mono)">—</div>';
+        html += '<div style="font-size:10px;color:' + tColor[2] + ';margin-top:3px;text-transform:uppercase">' + u + '</div></div>';
+      });
+      html += '</div>';
+      html += '<div class="timer-summary" data-timer-id="' + p.id + '" style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:center"></div>';
+
+    } else if (p.contenuto) {
       var cont = esc(p.contenuto).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>').replace(/\n/g, '<br>');
       html += '<div style="font-size:14px;line-height:1.6;color:var(--text);margin-bottom:10px">' + cont + '</div>';
     }
@@ -129,6 +175,7 @@ async function caricaHome() {
     html += '</div>';
   });
   container.innerHTML = html;
+  _startTimerTick();
 }
 
 // ── DRAG & DROP ──
@@ -278,7 +325,9 @@ async function salvaPost(postId) {
 async function modificaPost(id) {
   var { data: p } = await sb.from('bacheca_post').select('*').eq('id', id).single();
   if (!p) { toast('Post non trovato'); return; }
-  window._editPost = p; apriFormPost(id);
+  window._editPost = p;
+  if (p.tipo === 'timer') apriFormTimer(id);
+  else apriFormPost(id);
 }
 async function eliminaPost(id) {
   if (!confirm('Eliminare questo post dalla bacheca?')) return;
@@ -454,4 +503,138 @@ async function salvaLavagna() {
     toast('✅ Disegno pubblicato in bacheca!');
     caricaHome();
   }, 'image/png');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CONTATORI / TIMER
+// ══════════════════════════════════════════════════════════════════
+
+var _timerInterval = null;
+
+function _startTimerTick() {
+  if (_timerInterval) clearInterval(_timerInterval);
+  _tickAllTimers();
+  _timerInterval = setInterval(_tickAllTimers, 1000);
+}
+
+function _tickAllTimers() {
+  var timers = document.querySelectorAll('.timer-display');
+  timers.forEach(function(el) {
+    var target = new Date(el.dataset.target);
+    var attivo = el.dataset.attivo === '1';
+    var stoppato = el.dataset.stoppato;
+    var now = attivo ? new Date() : (stoppato ? new Date(stoppato) : new Date());
+    var diff = target - now;
+    var isFuture = diff > 0;
+    var absDiff = Math.abs(diff);
+
+    var totalSec = Math.floor(absDiff / 1000);
+    var totalMin = Math.floor(totalSec / 60);
+    var totalOre = Math.floor(totalMin / 60);
+    var totalGiorni = Math.floor(totalOre / 24);
+
+    var anni = Math.floor(totalGiorni / 365);
+    var restGG = totalGiorni - anni * 365;
+    var mesi = Math.floor(restGG / 30);
+    var giorni = restGG - mesi * 30;
+    var ore = totalOre % 24;
+    var min = totalMin % 60;
+    var sec = totalSec % 60;
+
+    var vals = el.querySelectorAll('.timer-val');
+    var map = { anni: anni, mesi: mesi, giorni: giorni, ore: ore, min: min, sec: sec };
+    vals.forEach(function(v) {
+      var unit = v.dataset.unit;
+      var val = map[unit];
+      v.textContent = (unit === 'ore' || unit === 'min' || unit === 'sec') ? String(val).padStart(2, '0') : val;
+    });
+
+    // Summary
+    var tid = el.dataset.timerId;
+    var summEl = document.querySelector('.timer-summary[data-timer-id="' + tid + '"]');
+    if (summEl) {
+      summEl.textContent = 'Totale: ' + totalGiorni + ' giorni, ' + ore + ' ore, ' + min + ' minuti, ' + sec + ' secondi';
+    }
+  });
+}
+
+function apriFormTimer(postId) {
+  var titolo = '', dataTarget = '', oraTarget = '08:00', attivo = true;
+
+  if (postId && window._editPost && window._editPost.tipo === 'timer') {
+    var p = window._editPost;
+    titolo = p.titolo || '';
+    try {
+      var td = JSON.parse(p.contenuto || '{}');
+      var dt = new Date(td.data_target);
+      dataTarget = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+      oraTarget = String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+      attivo = td.attivo !== false;
+    } catch(e) {}
+  }
+
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:16px">' + (postId ? '✏️ Modifica contatore' : '⏱️ Nuovo contatore') + '</div>';
+  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6">Imposta una data: se è nel passato il contatore conta in avanti (tempo trascorso), se è nel futuro conta alla rovescia (tempo rimanente).</div>';
+  html += '<div style="display:flex;flex-direction:column;gap:12px">';
+  html += '<div class="form-group"><label>Titolo contatore</label><input type="text" id="timer-titolo" value="' + esc(titolo) + '" placeholder="Es. Giorni senza incidenti, Scadenza certificazione..." style="font-size:15px;padding:10px 14px" /></div>';
+  html += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+  html += '<div class="form-group" style="flex:1;min-width:160px"><label>Data di riferimento</label><input type="date" id="timer-data" value="' + dataTarget + '" style="font-size:15px;padding:10px 14px" /></div>';
+  html += '<div class="form-group" style="flex:0;min-width:120px"><label>Ora</label><input type="time" id="timer-ora" value="' + oraTarget + '" style="font-size:15px;padding:10px 14px" /></div>';
+  html += '</div>';
+  html += '<div class="form-group"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="timer-attivo" ' + (attivo ? 'checked' : '') + ' /> Attivo (in esecuzione)</label></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:16px">';
+  html += '<button class="btn-primary" style="flex:1;padding:12px;font-size:15px;background:#378ADD" onclick="salvaTimer(' + (postId ? "'" + postId + "'" : 'null') + ')">💾 Pubblica contatore</button>';
+  html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Annulla</button>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function salvaTimer(postId) {
+  var titolo = document.getElementById('timer-titolo').value.trim();
+  if (!titolo) { toast('Inserisci un titolo'); return; }
+  var data = document.getElementById('timer-data').value;
+  var ora = document.getElementById('timer-ora').value || '00:00';
+  if (!data) { toast('Inserisci una data di riferimento'); return; }
+  var attivo = document.getElementById('timer-attivo').checked;
+
+  var dataTarget = data + 'T' + ora + ':00';
+  var contenuto = JSON.stringify({ data_target: dataTarget, attivo: attivo, stoppato_il: attivo ? null : new Date().toISOString() });
+
+  var record = {
+    titolo: titolo,
+    contenuto: contenuto,
+    tipo: 'timer',
+    priorita: 'normale',
+    pinned: false,
+    allegato_url: null,
+    allegato_nome: null,
+    autore_id: utenteCorrente ? utenteCorrente.id : null,
+    autore_nome: utenteCorrente ? utenteCorrente.nome : 'Admin',
+    ordine: postId ? undefined : Date.now(),
+    updated_at: new Date().toISOString()
+  };
+  if (postId) delete record.ordine;
+
+  var error;
+  if (postId) { error = (await sb.from('bacheca_post').update(record).eq('id', postId)).error; }
+  else { error = (await sb.from('bacheca_post').insert([record])).error; }
+  if (error) { toast('Errore: ' + error.message); return; }
+  chiudiModalePermessi();
+  toast(postId ? '✅ Contatore aggiornato!' : '✅ Contatore pubblicato!');
+  caricaHome();
+}
+
+async function toggleTimerPost(id, nuovoStato) {
+  var { data: post } = await sb.from('bacheca_post').select('contenuto').eq('id', id).single();
+  if (!post) return;
+  var td = {};
+  try { td = JSON.parse(post.contenuto || '{}'); } catch(e) {}
+  td.attivo = nuovoStato;
+  if (!nuovoStato) td.stoppato_il = new Date().toISOString();
+  else td.stoppato_il = null;
+  await sb.from('bacheca_post').update({ contenuto: JSON.stringify(td), updated_at: new Date().toISOString() }).eq('id', id);
+  toast(nuovoStato ? '▶ Contatore riavviato' : '⏸ Contatore stoppato');
+  caricaHome();
 }
