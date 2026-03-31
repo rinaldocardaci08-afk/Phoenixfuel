@@ -639,64 +639,128 @@ async function salvaOrdine() {
   document.getElementById('prev-fido-warn').style.display = 'none';
   fidoClienteCorrente = null;
   _cacheMarginClienti = {};
+  // Aggiorna vista giorno alla data dell'ordine appena creato
+  var ordDataSel = document.getElementById('ordini-giorno-data');
+  if (ordDataSel) ordDataSel.value = record.data;
   caricaOrdini();
 }
 
-async function caricaOrdini() {
+// ── Helper per renderizzare una riga ordine ──
+function _renderRigaOrdine(r) {
+  const pL = prezzoConIva(r), tot = pL*r.litri;
+  const basNome = r.basi_carico ? r.basi_carico.nome : '—';
+  const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
+  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
+  let btnCisterna = '';
+  if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
+  else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
+  return '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+}
+
+// ── ORDINI DEL GIORNO (vista compatta) ──
+async function caricaOrdiniGiorno() {
   mostraBacklogOrdini();
+  var inp = document.getElementById('ordini-giorno-data');
+  if (!inp.value) {
+    // Default: ieri
+    var ieri = new Date(); ieri.setDate(ieri.getDate()-1);
+    inp.value = ieri.toISOString().split('T')[0];
+  }
+  _labelGiorno('ordini-giorno-data');
+  var data = inp.value;
+
   if (!navigator.onLine) {
-    document.getElementById('tabella-ordini').innerHTML = '<tr><td colspan="14" class="loading" style="color:#D85A30">⚡ Sei offline — gli ordini verranno caricati al ritorno della connessione</td></tr>';
+    document.getElementById('tabella-ordini').innerHTML = '<tr><td colspan="14" class="loading" style="color:#D85A30">⚡ Sei offline</td></tr>';
     return;
   }
   await aggiornaSelezioniOrdine();
-  // Carica solo gli ultimi 500 ordini per velocità (i filtri restringono ulteriormente)
-  const { data } = await sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false}).limit(500);
+  const { data: ordini } = await sb.from('ordini').select('*, basi_carico(nome)').eq('data', data).order('created_at',{ascending:false});
   const tbody = document.getElementById('tabella-ordini');
-  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine</td></tr>'; return; }
-  let html = '';
-  data.forEach(r => {
-    const pL = prezzoConIva(r), tot = pL*r.litri;
-    const basNome = r.basi_carico ? r.basi_carico.nome : '—';
-    const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
-    const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
-    let btnCisterna = '';
-    if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
-    else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-    html += '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
-  });
-  tbody.innerHTML = html;
+  var countEl = document.getElementById('ordini-giorno-count');
+  if (!ordini||!ordini.length) {
+    tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine per questa data</td></tr>';
+    if (countEl) countEl.textContent = '0 ordini';
+    return;
+  }
+  tbody.innerHTML = ordini.map(_renderRigaOrdine).join('');
+  if (countEl) countEl.textContent = ordini.length + ' ordini';
 }
+
+function navigaOrdiniGiorno(dir) {
+  var inp = document.getElementById('ordini-giorno-data');
+  var d = new Date(inp.value || new Date());
+  d.setDate(d.getDate() + dir);
+  inp.value = d.toISOString().split('T')[0];
+  caricaOrdiniGiorno();
+}
+
+// Alias per compatibilità (chiamato dopo salvataggio ordine, eliminazione, ecc.)
+async function caricaOrdini() { await caricaOrdiniGiorno(); }
+
+// ── STORICO ORDINI (espandibile con filtri) ──
+function toggleStoricoOrdini() {
+  var body = document.getElementById('storico-ordini-body');
+  var toggle = document.getElementById('storico-ordini-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▲ Chiudi';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▼ Espandi';
+  }
+}
+
+async function caricaStoricoOrdini() {
+  var da = document.getElementById('filtro-da-ordini').value;
+  var a = document.getElementById('filtro-a-ordini').value;
+  var tbody = document.getElementById('tabella-storico-ordini');
+  if (!da && !a) {
+    // Default: ultimo mese
+    var oggi = new Date();
+    var meseFA = new Date(oggi); meseFA.setMonth(meseFA.getMonth()-1);
+    da = meseFA.toISOString().split('T')[0];
+    a = oggi.toISOString().split('T')[0];
+    document.getElementById('filtro-da-ordini').value = da;
+    document.getElementById('filtro-a-ordini').value = a;
+  }
+  tbody.innerHTML = '<tr><td colspan="14" class="loading">Caricamento...</td></tr>';
+  var q = sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false});
+  if (da) q = q.gte('data', da);
+  if (a) q = q.lte('data', a);
+  q = q.limit(1000);
+  const { data: ordini } = await q;
+  if (!ordini||!ordini.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine nel periodo</td></tr>'; return; }
+  window._storicoOrdiniData = ordini;
+  _renderStoricoFiltrato();
+}
+
+function _renderStoricoFiltrato() {
+  var ordini = window._storicoOrdiniData || [];
+  var qTxt = (document.getElementById('search-ordini').value||'').toLowerCase();
+  var prodotto = document.getElementById('filtro-prodotto-ordini').value;
+  var stato = document.getElementById('filtro-stato-ordini').value;
+  var tipoFiltro = document.getElementById('filtro-tipo-ordini').value;
+
+  var filtrati = ordini.filter(function(r) {
+    if (qTxt && (r.cliente||'').toLowerCase().indexOf(qTxt) < 0) return false;
+    if (prodotto && r.prodotto !== prodotto) return false;
+    if (stato && r.stato !== stato) return false;
+    if (tipoFiltro && r.tipo_ordine !== tipoFiltro) return false;
+    return true;
+  });
+
+  var tbody = document.getElementById('tabella-storico-ordini');
+  if (!filtrati.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine con questi filtri</td></tr>'; return; }
+  tbody.innerHTML = filtrati.map(_renderRigaOrdine).join('');
+}
+
+function filtraOrdiniStorico() { _renderStoricoFiltrato(); }
+
+// Mantieni compatibilità vecchia funzione
+function filtraOrdini() { filtraOrdiniStorico(); }
 
 // Dati ordini per filtro client-side
 let _ordiniCache = [];
-
-function filtraOrdini() {
-  const q = (document.getElementById('search-ordini').value||'').toLowerCase();
-  const prodotto = document.getElementById('filtro-prodotto-ordini').value;
-  const stato = document.getElementById('filtro-stato-ordini').value;
-  const tipoFiltro = document.getElementById('filtro-tipo-ordini').value;
-  const da = document.getElementById('filtro-da-ordini').value;
-  const a = document.getElementById('filtro-a-ordini').value;
-  const tipoLabels = { 'cliente':'cliente','entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
-  const righe = document.querySelectorAll('#tabella-ordini tr');
-  righe.forEach(tr => {
-    const celle = tr.querySelectorAll('td');
-    if (!celle.length) return;
-    const dataOrd = celle[0]?.textContent || '';
-    const tipoBadge = celle[1]?.textContent?.trim() || '';
-    const cliente = celle[2]?.textContent?.toLowerCase() || '';
-    const prod = celle[3]?.textContent || '';
-    const st = celle[12]?.textContent || '';
-    let vis = true;
-    if (q && !cliente.includes(q)) vis = false;
-    if (prodotto && prod !== prodotto) vis = false;
-    if (stato && st !== stato) vis = false;
-    if (tipoFiltro && tipoBadge !== (tipoLabels[tipoFiltro]||tipoFiltro)) vis = false;
-    if (da && dataOrd < da) vis = false;
-    if (a && dataOrd > a) vis = false;
-    tr.style.display = vis ? '' : 'none';
-  });
-}
 
 // ── MODIFICA ORDINE ───────────────────────────────────────────────
 async function apriModaleOrdine(id) {
