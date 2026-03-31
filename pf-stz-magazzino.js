@@ -224,7 +224,7 @@ async function caricaGiacenzeStazione() {
       gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
       cmpGruppo = totG > 0 ? valGruppo / totG : 0;
       const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
-      cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div class="dep-product-total">' + fmtL(totG) + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+      cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div style="display:flex;align-items:center;gap:10px">' + (nCis > 1 ? '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC;white-space:nowrap" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')">⚖️ Distribuisci</button>' : '') + '<div class="dep-product-total">' + fmtL(totG) + '</div></div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
     });
   } else {
     cisHtmlAll = '<div class="loading">Nessuna cisterna configurata per la stazione</div>';
@@ -408,3 +408,170 @@ async function stampaReportAcquistiStazione() {
 }
 
 // ── Report stazione ──
+
+// ══════════════════════════════════════════════════════════════════
+// DISTRIBUZIONE CISTERNE (stesso prodotto, totale invariato)
+// ══════════════════════════════════════════════════════════════════
+
+async function apriDistribuzioneCisterne(prodotto, sede) {
+  var { data: cisterne } = await sb.from('cisterne').select('*').eq('sede', sede).eq('prodotto', prodotto).order('nome');
+  if (!cisterne || cisterne.length < 2) { toast('Servono almeno 2 cisterne dello stesso prodotto'); return; }
+
+  var totale = 0;
+  cisterne.forEach(function(c) { totale += Number(c.livello_attuale || 0); });
+  totale = Math.round(totale);
+
+  var pi = cacheProdotti.find(function(p) { return p.nome === prodotto; });
+  var colore = pi ? pi.colore : '#888';
+
+  window._distCisterne = { cisterne: cisterne, totale: totale, prodotto: prodotto, sede: sede };
+
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:4px">⚖️ Distribuisci ' + esc(prodotto) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Sposta il carburante tra le cisterne. Il totale resta invariato.</div>';
+
+  // KPI totale
+  html += '<div style="background:#EAF3DE;border-radius:8px;padding:14px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">';
+  html += '<div><div style="font-size:11px;color:#3B6D11;text-transform:uppercase">Totale ' + esc(prodotto) + '</div><div style="font-size:24px;font-weight:600;font-family:var(--font-mono);color:#27500A">' + _sep(totale.toLocaleString('it-IT')) + ' L</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:11px;color:#3B6D11;text-transform:uppercase">Da assegnare</div><div id="dist-rimanente" style="font-size:24px;font-weight:600;font-family:var(--font-mono);color:#27500A">0 L</div></div>';
+  html += '</div>';
+
+  // Cisterne
+  html += '<div style="display:flex;flex-direction:column;gap:14px;margin-bottom:16px">';
+  cisterne.forEach(function(c, idx) {
+    var cap = Number(c.capacita_max) || 10000;
+    var att = Math.round(Number(c.livello_attuale || 0));
+    html += '<div style="background:var(--bg);border-radius:8px;padding:14px;border-left:4px solid ' + colore + ';border-radius:0">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    html += '<div><div style="font-size:14px;font-weight:500">' + esc(c.nome) + '</div><div style="font-size:12px;color:var(--text-muted)">Capacità: ' + _sep(cap.toLocaleString('it-IT')) + ' L</div></div>';
+    html += '<div style="font-size:12px;color:var(--text-muted)">Attuale: <strong style="font-family:var(--font-mono)">' + _sep(att.toLocaleString('it-IT')) + ' L</strong></div>';
+    html += '</div>';
+    html += '<div style="display:flex;align-items:center;gap:12px">';
+    html += '<input type="range" class="dist-slider" data-idx="' + idx + '" min="0" max="' + totale + '" value="' + att + '" step="1" oninput="_distSlider(' + idx + ')" style="flex:1" />';
+    html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" id="dist-val-' + idx + '" class="dist-val" data-idx="' + idx + '" value="' + att + '" min="0" max="' + totale + '" step="1" oninput="_distInput(' + idx + ')" style="width:100px;font-family:var(--font-mono);font-size:15px;text-align:right;padding:6px 8px" /><span style="font-size:13px;color:var(--text-muted)">L</span></div>';
+    html += '</div>';
+    html += '<div style="margin-top:6px;height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div id="dist-bar-' + idx + '" style="height:100%;width:' + Math.round(att / cap * 100) + '%;background:' + colore + ';border-radius:3px;transition:width 0.2s"></div></div>';
+    var pctFill = cap > 0 ? Math.round(att / cap * 100) : 0;
+    html += '<div id="dist-pct-' + idx + '" style="font-size:10px;color:var(--text-muted);margin-top:2px;text-align:right">' + pctFill + '% della capacità</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  // Warning overflow
+  html += '<div id="dist-warning" style="display:none;background:#FCEBEB;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#791F1F;font-weight:500"></div>';
+
+  html += '<div style="display:flex;gap:8px">';
+  html += '<button class="btn-primary" style="flex:1;padding:12px;font-size:15px;background:#639922" onclick="salvaDistribuzione()">💾 Salva distribuzione</button>';
+  html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Annulla</button>';
+  html += '</div>';
+
+  apriModal(html);
+  _distRicalcola();
+}
+
+function _distSlider(changedIdx) {
+  var d = window._distCisterne; if (!d) return;
+  var n = d.cisterne.length;
+  var totale = d.totale;
+  var val = parseInt(document.querySelector('.dist-slider[data-idx="' + changedIdx + '"]').value) || 0;
+
+  // Aggiorna il campo numerico di quello cambiato
+  document.getElementById('dist-val-' + changedIdx).value = val;
+
+  // Calcola quanto resta per gli altri
+  var usato = val;
+  var altriIdx = [];
+  for (var i = 0; i < n; i++) {
+    if (i !== changedIdx) altriIdx.push(i);
+  }
+
+  // Se solo 2 cisterne: l'altro prende il resto
+  if (n === 2) {
+    var altroIdx = altriIdx[0];
+    var resto = totale - val;
+    if (resto < 0) resto = 0;
+    document.getElementById('dist-val-' + altroIdx).value = resto;
+    document.querySelector('.dist-slider[data-idx="' + altroIdx + '"]').value = resto;
+  } else {
+    // Con 3+ cisterne: distribuisci proporzionalmente tra gli altri
+    var restoTotale = totale - val;
+    if (restoTotale < 0) restoTotale = 0;
+    var sommaAltri = 0;
+    altriIdx.forEach(function(i) { sommaAltri += parseInt(document.getElementById('dist-val-' + i).value) || 0; });
+    altriIdx.forEach(function(i) {
+      var attuale = parseInt(document.getElementById('dist-val-' + i).value) || 0;
+      var nuovo = sommaAltri > 0 ? Math.round(attuale / sommaAltri * restoTotale) : Math.round(restoTotale / altriIdx.length);
+      document.getElementById('dist-val-' + i).value = nuovo;
+      document.querySelector('.dist-slider[data-idx="' + i + '"]').value = nuovo;
+    });
+  }
+  _distRicalcola();
+}
+
+function _distInput(changedIdx) {
+  var d = window._distCisterne; if (!d) return;
+  var val = parseInt(document.getElementById('dist-val-' + changedIdx).value) || 0;
+  if (val < 0) val = 0;
+  if (val > d.totale) val = d.totale;
+  document.querySelector('.dist-slider[data-idx="' + changedIdx + '"]').value = val;
+  _distSlider(changedIdx);
+}
+
+function _distRicalcola() {
+  var d = window._distCisterne; if (!d) return;
+  var totAssegnato = 0;
+  var warnings = [];
+  for (var i = 0; i < d.cisterne.length; i++) {
+    var val = parseInt(document.getElementById('dist-val-' + i).value) || 0;
+    var cap = Number(d.cisterne[i].capacita_max) || 10000;
+    totAssegnato += val;
+    var pct = cap > 0 ? Math.round(val / cap * 100) : 0;
+    var barEl = document.getElementById('dist-bar-' + i);
+    var pctEl = document.getElementById('dist-pct-' + i);
+    if (barEl) barEl.style.width = Math.min(100, pct) + '%';
+    if (pctEl) pctEl.textContent = pct + '% della capacità';
+    if (val > cap) warnings.push(d.cisterne[i].nome + ': ' + _sep(val.toLocaleString('it-IT')) + ' L supera la capacità di ' + _sep(cap.toLocaleString('it-IT')) + ' L');
+  }
+  var rim = d.totale - totAssegnato;
+  var elRim = document.getElementById('dist-rimanente');
+  if (elRim) {
+    elRim.textContent = rim + ' L';
+    elRim.style.color = rim === 0 ? '#27500A' : '#A32D2D';
+  }
+  var warnEl = document.getElementById('dist-warning');
+  if (warnEl) {
+    if (warnings.length || rim !== 0) {
+      var msg = '';
+      if (rim !== 0) msg += '⚠️ Il totale assegnato (' + _sep(totAssegnato.toLocaleString('it-IT')) + ' L) non corrisponde al totale (' + _sep(d.totale.toLocaleString('it-IT')) + ' L). ';
+      if (warnings.length) msg += warnings.join('. ');
+      warnEl.textContent = msg;
+      warnEl.style.display = '';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
+}
+
+async function salvaDistribuzione() {
+  var d = window._distCisterne; if (!d) return;
+  // Verifica totale
+  var totAssegnato = 0;
+  var valori = [];
+  for (var i = 0; i < d.cisterne.length; i++) {
+    var val = parseInt(document.getElementById('dist-val-' + i).value) || 0;
+    totAssegnato += val;
+    valori.push(val);
+  }
+  if (totAssegnato !== d.totale) {
+    toast('Il totale assegnato (' + totAssegnato + ' L) deve essere uguale al totale (' + d.totale + ' L)');
+    return;
+  }
+  // Salva
+  for (var i = 0; i < d.cisterne.length; i++) {
+    await sb.from('cisterne').update({ livello_attuale: valori[i] }).eq('id', d.cisterne[i].id);
+  }
+  _auditLog('distribuzione_cisterne', 'cisterne', d.prodotto + ' ' + d.sede + ': ' + valori.join(' + ') + ' = ' + d.totale + ' L');
+  toast('✅ Distribuzione salvata! Totale invariato: ' + _sep(d.totale.toLocaleString('it-IT')) + ' L');
+  chiudiModalePermessi();
+  if (d.sede === 'stazione_oppido') caricaGiacenzeStazione();
+  else if (typeof caricaDeposito === 'function') caricaDeposito();
+}

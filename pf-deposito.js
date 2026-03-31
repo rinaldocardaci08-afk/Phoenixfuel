@@ -77,7 +77,8 @@ async function caricaDeposito() {
       cmpGruppo = totG > 0 ? valGruppo / totG : 0;
     }
     const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
-    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div class="dep-product-total">' + totLabel + '</div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+    const distBtn = nCis > 1 ? '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC;white-space:nowrap" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')">⚖️ Distribuisci</button>' : '';
+    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div style="display:flex;align-items:center;gap:10px">' + distBtn + '<div class="dep-product-total">' + totLabel + '</div></div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
 
     if (categoria === 'benzine') { htmlBenzine += cardHtml; totaleStoccato += totG; capacitaTotale += capGruppo; } else { htmlMagazzino += cardHtml; }
   });
