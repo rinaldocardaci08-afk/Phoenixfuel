@@ -111,7 +111,7 @@
           <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso ieri pompe</div><div class="kpi-value" id="kpi-dett-incasso">—</div></div>
           <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Litri venduti ieri</div><div class="kpi-value" id="kpi-dett-litri">—</div></div>
           <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso mese stazione</div><div class="kpi-value" id="kpi-dett-mese">—</div></div>
-          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Movimenti interni ieri</div><div class="kpi-value" id="kpi-mov-interni">—</div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Margine ieri stazione</div><div class="kpi-value" id="kpi-dett-margine" style="color:#639922">—</div></div>
         </div>
 
         <!-- COCKPIT: confronto mese e alert operativi -->
@@ -1011,7 +1011,7 @@
               <div style="flex:1;min-width:0">
                 <div id="stz-form-letture"><div class="loading">Caricamento pompe...</div></div>
                 <div id="stz-totali-letture" style="margin-top:12px"></div>
-                <button class="btn-primary" onclick="salvaLetture()" style="margin-top:12px">💾 Salva totalizzatori</button>
+                <button id="btn-salva-letture" class="btn-primary" onclick="salvaLetture()" style="margin-top:12px">💾 Salva totalizzatori</button>
               </div>
               <div id="stz-totali-live" style="position:sticky;top:80px;min-width:200px;max-width:240px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:14px;padding:20px;color:#fff;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
                 <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Totali live</div>
@@ -1045,7 +1045,7 @@
               <div class="form-group"><label>Gasolio €/L</label><input type="number" id="stz-prezzo-gasolio" step="0.001" placeholder="1.789" /></div>
               <div class="form-group"><label>Benzina €/L</label><input type="number" id="stz-prezzo-benzina" step="0.001" placeholder="1.889" /></div>
             </div>
-            <button class="btn-primary" onclick="salvaPrezziPompa()">💾 Salva prezzi</button>
+            <button id="btn-salva-prezzi" class="btn-primary" onclick="salvaPrezziPompa()">💾 Salva prezzi</button>
           </div>
           <div class="card">
             <div class="card-title">Storico prezzi pompa</div>
@@ -1156,7 +1156,7 @@
             <div id="stz-marg-layout" style="display:flex;gap:20px;align-items:flex-start">
               <div style="flex:1;min-width:0">
                 <div id="marg-pompe-content"><div class="loading">Caricamento...</div></div>
-                <button class="btn-primary" onclick="salvaCostiMarg()" style="margin-top:12px">💾 Salva costi</button>
+                <button id="btn-salva-costi" class="btn-primary" onclick="salvaCostiMarg()" style="margin-top:12px">💾 Salva costi</button>
               </div>
               <div id="marg-totali-live" style="position:sticky;top:80px;min-width:200px;max-width:240px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:14px;padding:20px;color:#fff;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
                 <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Marginalità live</div>
@@ -1229,7 +1229,7 @@
             </div>
 
             <div style="display:flex;gap:8px">
-              <button class="btn-primary" style="flex:1" onclick="salvaCassa()">💾 Salva registro</button>
+              <button id="btn-salva-cassa" class="btn-primary" style="flex:1" onclick="salvaCassa()">💾 Salva registro</button>
               <button class="btn-primary" style="background:#6B5FCC" onclick="stampaCassa()">🖨️ Stampa</button>
               <button class="btn-primary" style="background:#378ADD" onclick="document.getElementById('ocr-scontrino-input').click()">📷 Leggi scontrino</button>
               <input type="file" id="ocr-scontrino-input" accept="image/*" style="display:none" onchange="ocrScontrino(this)" />
@@ -1341,7 +1341,7 @@
 
             <!-- BOTTONI -->
             <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-              <button class="btn-primary" style="flex:1;background:#639922" onclick="salvaFoglioGiornaliero()">💾 Salva foglio</button>
+              <button id="btn-salva-foglio" class="btn-primary" style="flex:1;background:#639922" onclick="salvaFoglioGiornaliero()">💾 Salva foglio</button>
               <button class="btn-primary" style="background:#D85A30" onclick="stampaFoglioGiornaliero()">🖨️ Stampa / PDF</button>
             </div>
           </div>

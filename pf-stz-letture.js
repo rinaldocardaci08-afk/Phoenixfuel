@@ -11,6 +11,7 @@ async function caricaFormLetture() {
   if (!inp.value) inp.value = oggiISO;
   const data = inp.value;
   _labelGiorno('stz-data-lettura');
+  _resetSaved('btn-salva-letture');
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
   if (!pompe||!pompe.length) { document.getElementById('stz-form-letture').innerHTML='<div class="loading">Nessuna pompa configurata</div>'; return; }
 
@@ -77,9 +78,8 @@ async function caricaFormLetture() {
     html += '</div>';
   });
   document.getElementById('stz-form-letture').innerHTML = html;
-
-  // Calcola subito se ci sono già valori
   calcolaLettureVendite();
+  if (Object.keys(lettMap).length > 0) _markSaved('btn-salva-letture');
 }
 
 function calcolaLettureVendite() {
@@ -245,6 +245,7 @@ function stampaReportLetture() {
 async function salvaLetture() {
   const data = document.getElementById('stz-data-lettura').value;
   if (!data) { toast('Seleziona una data'); return; }
+  if (!_checkSaved('btn-salva-letture')) return;
   const inputs = document.querySelectorAll('.stz-lettura-input');
   var upserts = [], cpOps = [], _offlineBatch = [];
   for (const inp of inputs) {
@@ -271,6 +272,7 @@ async function salvaLetture() {
   if (errore) { toast('Errore: ' + errore.error.message); return; }
   await Promise.all(cpOps);
   toast(anyOffline ? '⚡ ' + upserts.length + ' letture salvate offline' : upserts.length + ' letture salvate!');
+  _markSaved('btn-salva-letture');
 
   // ═══ Auto-crea prezzi pompa per giorno successivo ═══
   try {

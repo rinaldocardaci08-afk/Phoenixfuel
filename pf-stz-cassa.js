@@ -8,6 +8,7 @@ async function caricaCassa() {
   if (!input.value) input.value = oggiISO;
   var data = input.value;
   _labelGiorno('cassa-data');
+  _resetSaved('btn-salva-cassa');
 
   // Carica dati salvati in parallelo
   var [cassaRes, speseRes, totVendite] = await Promise.all([
@@ -16,6 +17,7 @@ async function caricaCassa() {
     _calcolaTotVenditeDaLetture(data)
   ]);
   var cassa = cassaRes.data;
+  if (cassa) _markSaved('btn-salva-cassa');
   var spese = speseRes.data;
   document.getElementById('cassa-tot-vendite').textContent = fmtE(totVendite);
 
@@ -162,6 +164,7 @@ function calcolaCassa() {
 async function salvaCassa() {
   var data = document.getElementById('cassa-data').value;
   if (!data) { toast('Seleziona una data'); return; }
+  if (!_checkSaved('btn-salva-cassa')) return;
 
   var bancomat = parseFloat(document.getElementById('cassa-bancomat').value) || 0;
   var nexi = parseFloat(document.getElementById('cassa-nexi').value) || 0;
@@ -213,6 +216,7 @@ async function salvaCassa() {
       await _sbWrite('stazione_versamenti', 'insert', [{ data: data, contanti: versato, pos: totCarteOff, note: 'Da registro cassa' }]);
     }
     toast('⚡ Registro cassa salvato offline');
+    _markSaved('btn-salva-cassa');
     calcolaCassa();
     return;
   }
@@ -256,6 +260,7 @@ async function salvaCassa() {
 
   _auditLog('salva_cassa', 'stazione_cassa', data + ' vendite:' + fmtE(totVendite) + ' versato:' + fmtE(versato));
   toast('Registro cassa salvato!');
+  _markSaved('btn-salva-cassa');
   calcolaCassa();
   caricaCrediti();
 }

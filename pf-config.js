@@ -353,3 +353,28 @@ function _labelGiorno(inputId) {
   else if (diff === -1) { el.textContent = 'IERI'; el.style.background = '#BA7517'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
   else { el.style.display = 'none'; }
 }
+
+// ── BOTTONI SALVA: stato "già salvato" ─────────────────────────
+function _markSaved(btnId) {
+  var btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.dataset.saved = 'true';
+  btn._origBg = btn._origBg || btn.style.background;
+  btn._origText = btn._origText || btn.textContent;
+  btn.style.background = '#B4B2A9';
+  btn.textContent = '✅ Salvato';
+  setTimeout(function(){ btn.textContent = btn._origText; }, 2000);
+}
+
+function _checkSaved(btnId) {
+  var btn = document.getElementById(btnId);
+  if (!btn || btn.dataset.saved !== 'true') return true;
+  return confirm('Dati già registrati per questa data. Vuoi sovrascrivere?');
+}
+
+function _resetSaved(btnId) {
+  var btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.dataset.saved = '';
+  if (btn._origBg) btn.style.background = btn._origBg;
+}

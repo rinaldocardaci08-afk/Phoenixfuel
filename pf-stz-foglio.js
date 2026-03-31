@@ -48,6 +48,8 @@ async function caricaFoglioGiornaliero() {
   var prezzi = prezziRes.data || [];
   var cassa = cassaRes.data;
   var spese = speseRes.data || [];
+  _resetSaved('btn-salva-foglio');
+  if (cassa) _markSaved('btn-salva-foglio');
 
   var prezzoMap = {};
   prezzi.forEach(function(p){ prezzoMap[p.prodotto] = Number(p.prezzo_litro); });
@@ -214,6 +216,7 @@ function fgCalcola() {
 async function salvaFoglioGiornaliero() {
   var data = document.getElementById('fg-data').value;
   if (!data) { toast('Seleziona una data'); return; }
+  if (!_checkSaved('btn-salva-foglio')) return;
   var bn = {};
   [100, 50, 20, 10, 5, 2, 1].forEach(function(t) {
     bn['banconote_' + t] = parseInt(document.getElementById('fg-b' + t).value) || 0;
@@ -240,6 +243,7 @@ async function salvaFoglioGiornaliero() {
 
   _auditLog('salva_foglio_giornaliero', 'stazione_cassa', 'Foglio giornaliero ' + data);
   toast('Foglio giornaliero salvato!');
+  _markSaved('btn-salva-foglio');
 }
 
 // ── STAMPA ───────────────────────────────────────────────────────

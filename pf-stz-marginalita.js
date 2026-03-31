@@ -265,6 +265,10 @@ function renderMargGiorno(idx) {
 
   el.innerHTML = html;
   calcolaMargini();
+  _resetSaved('btn-salva-costi');
+  var hasCostiSalvati = false;
+  document.querySelectorAll('.marg-costo').forEach(function(inp) { if (parseFloat(inp.value) > 0) hasCostiSalvati = true; });
+  if (hasCostiSalvati) _markSaved('btn-salva-costi');
 }
 
 function copiaCostoMarg(input) {
@@ -419,6 +423,7 @@ function calcolaMargini() {
 }
 
 async function salvaCostiMarg() {
+  if (!_checkSaved('btn-salva-costi')) return;
   var inputs = document.querySelectorAll('.marg-costo');
   var salvati = {}, anyOffline = false;
   var ops = [];
@@ -486,9 +491,11 @@ async function salvaCostiMarg() {
   if (dataCorr) {
     var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
     toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati! Dati ' + domani + ' preparati.');
+    _markSaved('btn-salva-costi');
     await caricaMarginalita();
   } else {
     toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati!');
+    _markSaved('btn-salva-costi');
   }
 }
 

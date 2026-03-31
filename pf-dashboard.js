@@ -24,9 +24,14 @@ async function caricaDashboard() {
   document.getElementById('kpi-margine').textContent=ingrosso.length?'€ '+(margine/ingrosso.length).toFixed(4)+'/L':'—';
   document.getElementById('kpi-ordini').textContent=ingrosso.length;
 
-  // MOVIMENTI INTERNI ieri
-  const movInterni = (data||[]).filter(r => (r.tipo_ordine === 'stazione_servizio' || r.tipo_ordine === 'entrata_deposito' || r.tipo_ordine === 'autoconsumo') && r.stato !== 'annullato');
-  document.getElementById('kpi-mov-interni').textContent = movInterni.length;
+  // MARGINE IERI STAZIONE
+  try {
+    var costiIeriRes = await sb.from('stazione_costi').select('prodotto,costo_litro').eq('data', ieriISO);
+    var costiIeriMap = {}; (costiIeriRes.data||[]).forEach(c => { costiIeriMap[c.prodotto] = Number(c.costo_litro); });
+    // Usa letture ieri già caricate sotto per calcolo margine netto
+    var _margIeri = { vendutoN: 0, costoTot: 0 };
+    window._margIeriCalc = { costiMap: costiIeriMap, result: _margIeri };
+  } catch(e) { console.warn('Margine ieri:', e); }
 
   // ══ INGROSSO MESE ══
   var allMeseOrd = [], from = 0; var hasMore = true;
@@ -60,7 +65,8 @@ async function caricaDashboard() {
     const prezziMap = {}; (prezziIeriRes.data||[]).forEach(p => { prezziMap[p.prodotto] = Number(p.prezzo_litro); });
     const lettIeri2Map = {}; (lettIeri2Res.data||[]).forEach(l => { lettIeri2Map[l.pompa_id] = Number(l.lettura); });
 
-    let dettLitri=0, dettIncasso=0;
+    let dettLitri=0, dettIncasso=0, dettCosto=0;
+    var _costiIeri = window._margIeriCalc ? window._margIeriCalc.costiMap : {};
     (lettIeriRes.data||[]).forEach(l => {
       const prec = lettIeri2Map[l.pompa_id];
       if (prec === undefined) return;
@@ -68,9 +74,16 @@ async function caricaDashboard() {
       const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
       dettLitri += lv;
       dettIncasso += lv * (prezziMap[pompa.prodotto] || 0);
+      dettCosto += lv * (_costiIeri[pompa.prodotto] || 0);
     });
     document.getElementById('kpi-dett-incasso').textContent = fmtE(dettIncasso);
     document.getElementById('kpi-dett-litri').textContent = fmtL(dettLitri);
+    var margIeri = (dettIncasso / 1.22) - dettCosto;
+    var elMarg = document.getElementById('kpi-dett-margine');
+    if (elMarg) {
+      elMarg.textContent = dettCosto > 0 ? fmtE(margIeri) : '—';
+      elMarg.style.color = margIeri >= 0 ? '#639922' : '#E24B4A';
+    }
 
     // Incasso mese da letture
     const lettPerData = {};

@@ -4,6 +4,7 @@ async function caricaTabPrezzi() { await caricaStoricoPrezzi(); }
 async function salvaPrezziPompa() {
   const data = document.getElementById('stz-data-prezzo').value;
   if (!data) { toast('Seleziona una data'); return; }
+  if (!_checkSaved('btn-salva-prezzi')) return;
   const gasolio = parseFloat(document.getElementById('stz-prezzo-gasolio').value);
   const benzina = parseFloat(document.getElementById('stz-prezzo-benzina').value);
   if (isNaN(gasolio) && isNaN(benzina)) { toast('Inserisci almeno un prezzo'); return; }
@@ -21,6 +22,7 @@ async function salvaPrezziPompa() {
     salvati++;
   }
   toast(anyOffline ? '⚡ ' + salvati + ' prezzi salvati offline' : salvati + ' prezzi salvati!');
+  _markSaved('btn-salva-prezzi');
   document.getElementById('stz-prezzo-gasolio').value = '';
   document.getElementById('stz-prezzo-benzina').value = '';
   caricaStoricoPrezzi();
