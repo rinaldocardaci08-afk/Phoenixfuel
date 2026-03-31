@@ -172,6 +172,7 @@ async function segnaLettiBacheca() {
 async function aggiornaBadgeBacheca() {
   var badge = document.getElementById('bacheca-badge');
   if (!badge) return;
+  if (!navigator.onLine) return;
   try {
     var { count } = await sb.from('bacheca_avvisi').select('*', { count: 'exact', head: true }).eq('letto', false);
     if (count > 0) {
