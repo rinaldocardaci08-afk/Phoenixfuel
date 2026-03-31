@@ -1098,16 +1098,22 @@
           </div>
           <div class="card" style="margin-bottom:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-              <span>Cisterne stazione Oppido</span>
+              <span>Acquisti stazione Oppido</span>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <select id="stz-acq-anno" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <select id="stz-acq-anno" onchange="caricaReportAcquistiStazione()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                   <option value="">Tutti gli anni</option>
                 </select>
-                <input type="date" id="stz-acq-da" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="Da" />
-                <input type="date" id="stz-acq-a" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="A" />
-                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportAcquistiStazione()">🖨️ Report acquisti</button>
+                <select id="stz-acq-mese" onchange="caricaReportAcquistiStazione()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                  <option value="">Tutti i mesi</option>
+                  <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option><option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                  <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option><option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+                </select>
+                <input type="date" id="stz-acq-da" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="Da" onchange="caricaReportAcquistiStazione()" />
+                <input type="date" id="stz-acq-a" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="A" onchange="caricaReportAcquistiStazione()" />
+                <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportAcquistiStazione()">🖨️ Stampa PDF</button>
               </div>
             </div>
+            <div id="stz-acquisti-report"><div class="loading">Seleziona un filtro per caricare il report...</div></div>
             <div id="stz-cisterne-grafiche"><div class="loading">Caricamento...</div></div>
             <div id="stz-magazzino-content" style="margin-top:12px"></div>
           </div>

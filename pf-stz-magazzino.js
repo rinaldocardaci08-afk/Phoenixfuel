@@ -239,6 +239,8 @@ async function caricaGiacenzeStazione() {
     for (let y = annoCorr; y >= annoCorr - 5; y--) {
       selAnno.innerHTML += '<option value="' + y + '">' + y + '</option>';
     }
+    selAnno.value = annoCorr;
+    caricaReportAcquistiStazione();
   }
 
   const { data: pompe } = await sb.from('stazione_pompe').select('*').eq('attiva',true).order('ordine');
@@ -261,100 +263,148 @@ async function caricaGiacenzeStazione() {
   document.getElementById('stz-magazzino-content').innerHTML = linkHtml;
 }
 
-async function stampaReportAcquistiStazione() {
-  var w = _apriReport("Report acquisti stazione"); if (!w) return;
-  // Leggi filtri
-  const anno = document.getElementById('stz-acq-anno').value;
-  const da = document.getElementById('stz-acq-da').value;
-  const a = document.getElementById('stz-acq-a').value;
+async function _queryAcquistiStazione() {
+  var anno = document.getElementById('stz-acq-anno').value;
+  var mese = document.getElementById('stz-acq-mese').value;
+  var da = document.getElementById('stz-acq-da').value;
+  var a = document.getElementById('stz-acq-a').value;
 
-  let query = sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato');
-  let periodoLabel = 'Tutti i dati';
+  var query = sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato');
+  var periodoLabel = 'Tutti i dati';
   if (da && a) {
     query = query.gte('data', da).lte('data', a);
-    periodoLabel = 'Dal ' + new Date(da).toLocaleDateString('it-IT') + ' al ' + new Date(a).toLocaleDateString('it-IT');
+    periodoLabel = new Date(da+'T12:00:00').toLocaleDateString('it-IT') + ' — ' + new Date(a+'T12:00:00').toLocaleDateString('it-IT');
+  } else if (anno && mese) {
+    var ultimoGiorno = new Date(parseInt(anno), parseInt(mese), 0).getDate();
+    query = query.gte('data', anno+'-'+mese+'-01').lte('data', anno+'-'+mese+'-'+String(ultimoGiorno).padStart(2,'0'));
+    var MESI = ['','Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+    periodoLabel = MESI[parseInt(mese)] + ' ' + anno;
   } else if (anno) {
-    query = query.gte('data', anno + '-01-01').lte('data', anno + '-12-31');
+    query = query.gte('data', anno+'-01-01').lte('data', anno+'-12-31');
     periodoLabel = 'Anno ' + anno;
   }
-  const { data: ordini } = await query.order('data',{ascending:false});
-  if (!ordini || !ordini.length) { toast('Nessun acquisto trovato per il periodo selezionato'); return; }
+  var { data: ordini } = await query.order('data',{ascending:false});
+  return { ordini: ordini || [], periodoLabel: periodoLabel };
+}
 
-  let totLitri = 0, totValore = 0;
-  let righeHtml = '';
-  ordini.forEach(function(r, i) {
-    var litri = Number(r.litri);
-    var costoTot = Number(r.costo_litro) * litri;
-    totLitri += litri;
-    totValore += costoTot;
-    var dataFmt = new Date(r.data).toLocaleDateString('it-IT');
-    righeHtml += '<tr>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + dataFmt + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litri) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(Number(r.costo_litro)) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(costoTot) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.fornitore) + '</td>' +
-      '</tr>';
-  });
-
-  // Riepilogo per anno e prodotto
-  var perAnno = {};
+function _calcolaRiepilogoAcquisti(ordini) {
+  var perProdotto = {};
+  var totLitri = 0, totImponibile = 0, totIva = 0, totTotale = 0;
   ordini.forEach(function(r) {
-    var anno = r.data.substring(0,4);
-    if (!perAnno[anno]) perAnno[anno] = {};
-    if (!perAnno[anno][r.prodotto]) perAnno[anno][r.prodotto] = { litri:0, valore:0, ordini:0 };
-    perAnno[anno][r.prodotto].litri += Number(r.litri);
-    perAnno[anno][r.prodotto].valore += Number(r.costo_litro) * Number(r.litri);
-    perAnno[anno][r.prodotto].ordini++;
+    var litri = Number(r.litri);
+    var costoL = Number(r.costo_litro);
+    var aliquotaIva = Number(r.iva) || 22;
+    var imponibile = costoL * litri;
+    var iva = imponibile * aliquotaIva / 100;
+    var totale = imponibile + iva;
+    totLitri += litri; totImponibile += imponibile; totIva += iva; totTotale += totale;
+    if (!perProdotto[r.prodotto]) perProdotto[r.prodotto] = { litri:0, imponibile:0, iva:0, totale:0, ordini:0, costoSum:0 };
+    var p = perProdotto[r.prodotto];
+    p.litri += litri; p.imponibile += imponibile; p.iva += iva; p.totale += totale; p.ordini++; p.costoSum += costoL * litri;
   });
+  return { perProdotto, totLitri, totImponibile, totIva, totTotale };
+}
 
-  var riepilogoHtml = '';
-  Object.keys(perAnno).sort().reverse().forEach(function(anno) {
-    riepilogoHtml += '<tr><td colspan="4" style="padding:8px;border:1px solid #ddd;background:#f5f5f5;font-weight:bold">' + anno + '</td></tr>';
-    Object.entries(perAnno[anno]).forEach(function(entry) {
-      var prod = entry[0], v = entry[1];
-      riepilogoHtml += '<tr><td style="padding:6px 8px;border:1px solid #ddd;padding-left:20px">' + esc(prod) + '</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + v.ordini + '</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(v.litri) + '</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(v.valore) + '</td></tr>';
-    });
+async function caricaReportAcquistiStazione() {
+  var el = document.getElementById('stz-acquisti-report');
+  if (!el) return;
+  var { ordini, periodoLabel } = await _queryAcquistiStazione();
+  if (!ordini.length) { el.innerHTML = '<div class="loading">Nessun acquisto trovato per il periodo selezionato</div>'; return; }
+  var r = _calcolaRiepilogoAcquisti(ordini);
+  var mono = 'font-family:var(--font-mono)';
+  var html = '';
+
+  // KPI cards
+  html += '<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">';
+  html += '<div style="background:#EEEDFE;border-radius:8px;padding:12px 20px;flex:1;min-width:120px;text-align:center"><div style="font-size:10px;color:#26215C;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:700;'+mono+'">'+fmtL(r.totLitri)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border-radius:8px;padding:12px 20px;flex:1;min-width:120px;text-align:center"><div style="font-size:10px;color:#26215C;text-transform:uppercase">Imponibile</div><div style="font-size:20px;font-weight:700;'+mono+'">'+fmtE(r.totImponibile)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border-radius:8px;padding:12px 20px;flex:1;min-width:120px;text-align:center"><div style="font-size:10px;color:#26215C;text-transform:uppercase">IVA</div><div style="font-size:20px;font-weight:700;'+mono+'">'+fmtE(r.totIva)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border-radius:8px;padding:12px 20px;flex:1;min-width:120px;text-align:center"><div style="font-size:10px;color:#26215C;text-transform:uppercase">Totale IVA incl.</div><div style="font-size:20px;font-weight:700;'+mono+'">'+fmtE(r.totTotale)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border-radius:8px;padding:12px 20px;flex:1;min-width:120px;text-align:center"><div style="font-size:10px;color:#26215C;text-transform:uppercase">Ordini</div><div style="font-size:20px;font-weight:700;'+mono+'">'+ordini.length+'</div></div>';
+  html += '</div>';
+
+  // Riepilogo per prodotto
+  html += '<div style="font-size:12px;font-weight:600;color:#6B5FCC;margin-bottom:6px;text-transform:uppercase">Riepilogo per prodotto</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Prodotto</th><th>Ordini</th><th>Litri</th><th>Prezzo medio €/L</th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>';
+  Object.entries(r.perProdotto).forEach(function(e) {
+    var prod = e[0], v = e[1];
+    var pm = v.litri > 0 ? (v.costoSum / v.litri).toFixed(4) : '—';
+    html += '<tr><td><strong>'+esc(prod)+'</strong></td><td style="text-align:center">'+v.ordini+'</td><td style="'+mono+';text-align:right">'+fmtL(v.litri)+'</td><td style="'+mono+';text-align:right">€ '+pm+'</td><td style="'+mono+';text-align:right">'+fmtE(v.imponibile)+'</td><td style="'+mono+';text-align:right">'+fmtE(v.iva)+'</td><td style="'+mono+';text-align:right;font-weight:600">'+fmtE(v.totale)+'</td></tr>';
   });
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td style="text-align:center">'+ordini.length+'</td><td style="'+mono+';text-align:right">'+fmtL(r.totLitri)+'</td><td style="'+mono+';text-align:right">€ '+(r.totLitri>0?(r.totImponibile/r.totLitri).toFixed(4):'—')+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totImponibile)+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totIva)+'</td><td style="'+mono+';text-align:right;font-weight:700">'+fmtE(r.totTotale)+'</td></tr>';
+  html += '</tbody></table></div>';
+
+  // Dettaglio ordini
+  html += '<div style="font-size:12px;font-weight:600;color:#6B5FCC;margin-bottom:6px;margin-top:16px;text-transform:uppercase">Dettaglio ordini</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Data</th><th>Prodotto</th><th>Fornitore</th><th>Litri</th><th>€/L netto</th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>';
+  ordini.forEach(function(o, i) {
+    var litri = Number(o.litri), costoL = Number(o.costo_litro), aliq = Number(o.iva)||22;
+    var imp = costoL*litri, iva = imp*aliq/100, tot = imp+iva;
+    html += '<tr><td style="text-align:center">'+(i+1)+'</td><td>'+new Date(o.data+'T12:00:00').toLocaleDateString('it-IT')+'</td><td>'+esc(o.prodotto)+'</td><td>'+esc(o.fornitore)+'</td><td style="'+mono+';text-align:right">'+fmtL(litri)+'</td><td style="'+mono+';text-align:right">'+fmt(costoL)+'</td><td style="'+mono+';text-align:right">'+fmtE(imp)+'</td><td style="'+mono+';text-align:right">'+fmtE(iva)+'</td><td style="'+mono+';text-align:right;font-weight:600">'+fmtE(tot)+'</td></tr>';
+  });
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td colspan="4">TOTALE</td><td style="'+mono+';text-align:right">'+fmtL(r.totLitri)+'</td><td></td><td style="'+mono+';text-align:right">'+fmtE(r.totImponibile)+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totIva)+'</td><td style="'+mono+';text-align:right;font-weight:700">'+fmtE(r.totTotale)+'</td></tr>';
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+async function stampaReportAcquistiStazione() {
+  var w = _apriReport("Report acquisti stazione"); if (!w) return;
+  var { ordini, periodoLabel } = await _queryAcquistiStazione();
+  if (!ordini || !ordini.length) { toast('Nessun acquisto trovato'); return; }
+  var r = _calcolaRiepilogoAcquisti(ordini);
+
+  // Riepilogo per prodotto HTML
+  var riepilogoHtml = '';
+  Object.entries(r.perProdotto).forEach(function(e) {
+    var prod = e[0], v = e[1];
+    var pm = v.litri > 0 ? (v.costoSum / v.litri).toFixed(4) : '—';
+    riepilogoHtml += '<tr><td style="padding:6px 8px;border:1px solid #ddd"><strong>'+esc(prod)+'</strong></td><td style="padding:6px 8px;border:1px solid #ddd;text-align:center">'+v.ordini+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(v.litri)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ '+pm+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(v.imponibile)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(v.iva)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(v.totale)+'</td></tr>';
+  });
+  riepilogoHtml += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd">TOTALE</td><td style="padding:8px;border:1px solid #ddd;text-align:center">'+ordini.length+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(r.totLitri)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ '+(r.totLitri>0?(r.totImponibile/r.totLitri).toFixed(4):'—')+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totImponibile)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totIva)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(r.totTotale)+'</td></tr>';
+
+  // Dettaglio ordini HTML
+  var righeHtml = '';
+  ordini.forEach(function(o, i) {
+    var litri = Number(o.litri), costoL = Number(o.costo_litro), aliq = Number(o.iva)||22;
+    var imp = costoL*litri, iva = imp*aliq/100, tot = imp+iva;
+    righeHtml += '<tr><td style="padding:6px 8px;border:1px solid #ddd;text-align:center">'+(i+1)+'</td><td style="padding:6px 8px;border:1px solid #ddd">'+new Date(o.data+'T12:00:00').toLocaleDateString('it-IT')+'</td><td style="padding:6px 8px;border:1px solid #ddd">'+esc(o.prodotto)+'</td><td style="padding:6px 8px;border:1px solid #ddd">'+esc(o.fornitore)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(litri)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmt(costoL)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(imp)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(iva)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(tot)+'</td></tr>';
+  });
+  righeHtml += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd" colspan="4">TOTALE</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(r.totLitri)+'</td><td></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totImponibile)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totIva)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(r.totTotale)+'</td></tr>';
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acquisti Stazione Oppido</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:15mm}' +
-    '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}}' +
-    '@media(max-width:600px){body{padding:4mm!important;font-size:10px}.rpt-header{flex-direction:column!important;gap:8px}.rpt-header>div:last-child{text-align:left!important}.rpt-kpi{flex-direction:column!important;gap:6px!important}table{font-size:9px}th,td{padding:4px 3px!important}.rpt-actions{bottom:8px!important;right:8px!important}button{padding:8px 12px!important;font-size:12px!important}}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:10mm}}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:10px}table{font-size:9px}th,td{padding:4px 3px!important}}' +
     'table{width:100%;border-collapse:collapse;margin-bottom:16px}' +
     'th{background:#6B5FCC;color:#fff;padding:8px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;border:1px solid #5A4FBB;text-align:center}' +
     '.tot td{border-top:3px solid #6B5FCC!important;font-weight:bold;font-size:12px;background:#EEEDFE!important}' +
     '</style></head><body>';
 
-  html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:10px;margin-bottom:14px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6B5FCC;padding-bottom:10px;margin-bottom:14px">';
   html += '<div><div style="font-size:20px;font-weight:bold;color:#6B5FCC">ACQUISTI STAZIONE OPPIDO</div>';
-  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + periodoLabel + '</strong> — Ordini: <strong>' + ordini.length + '</strong> — Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div>';
-  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div></div></div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + periodoLabel + '</strong> — Ordini: <strong>' + ordini.length + '</strong></div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
 
-  html += '<div class="rpt-kpi" style="display:flex;gap:12px;margin-bottom:14px">';
-  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
-  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Valore totale</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totValore) + '</div></div>';
+  html += '<div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">';
+  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">'+fmtL(r.totLitri)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Imponibile</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">'+fmtE(r.totImponibile)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">IVA</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">'+fmtE(r.totIva)+'</div></div>';
+  html += '<div style="background:#EEEDFE;border:1px solid #6B5FCC;border-radius:6px;padding:12px 20px;text-align:center"><div style="font-size:9px;color:#26215C;text-transform:uppercase">Totale</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">'+fmtE(r.totTotale)+'</div></div>';
   html += '</div>';
 
-  html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;text-transform:uppercase">Riepilogo per anno</div>';
-  html += '<table><thead><tr><th>Prodotto</th><th>Ordini</th><th>Litri</th><th>Valore</th></tr></thead><tbody>' + riepilogoHtml + '</tbody></table>';
+  html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;text-transform:uppercase">Riepilogo per prodotto</div>';
+  html += '<table><thead><tr><th>Prodotto</th><th>Ordini</th><th>Litri</th><th>Prezzo medio €/L</th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>' + riepilogoHtml + '</tbody></table>';
 
   html += '<div style="font-size:12px;font-weight:bold;color:#6B5FCC;margin-bottom:6px;text-transform:uppercase">Dettaglio ordini</div>';
-  html += '<table><thead><tr><th>#</th><th>Data</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Totale</th><th>Fornitore</th></tr></thead><tbody>';
-  html += righeHtml;
-  html += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd" colspan="3">TOTALE</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:8px;border:1px solid #ddd"></td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totValore) + '</td><td style="padding:8px;border:1px solid #ddd"></td></tr>';
-  html += '</tbody></table>';
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Prodotto</th><th>Fornitore</th><th>Litri</th><th>€/L netto</th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>' + righeHtml + '</tbody></table>';
 
-  html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
   html += '</div></body></html>';
 
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 // ── Report stazione ──
