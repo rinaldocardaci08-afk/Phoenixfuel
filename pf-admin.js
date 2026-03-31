@@ -21,7 +21,7 @@ const SEZIONI_SISTEMA = [
   {id:'logistica',label:'Logistica',icon:'🚛'},
   {id:'stazione',label:'Stazione Oppido',icon:'⛽', sub:[
     {id:'stazione.dashboard',label:'Dashboard'},
-    {id:'stazione.letture',label:'Letture contatori'},
+    {id:'stazione.letture',label:'Totalizzatori contatori'},
     {id:'stazione.prezzi',label:'Prezzi pompa'},
     {id:'stazione.versamenti',label:'Versamenti'},
     {id:'stazione.magazzino',label:'Magazzino'},

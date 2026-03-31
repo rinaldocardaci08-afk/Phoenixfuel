@@ -1,7 +1,23 @@
-// PhoenixFuel — Stazione: Letture contatori
+// PhoenixFuel — Stazione: Totalizzatori contatori
+
+function _aggiornaLabelGiorno() {
+  var el = document.getElementById('stz-label-giorno');
+  if (!el) return;
+  var val = document.getElementById('stz-data-lettura').value;
+  if (!val) { el.style.display = 'none'; return; }
+  var oggi = new Date(); oggi.setHours(0,0,0,0);
+  var sel = new Date(val); sel.setHours(0,0,0,0);
+  var diff = Math.round((sel - oggi) / 86400000);
+  if (diff === 0) { el.textContent = 'OGGI'; el.style.background = '#378ADD'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
+  else if (diff === 1) { el.textContent = 'DOMANI'; el.style.background = '#639922'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
+  else if (diff === -1) { el.textContent = 'IERI'; el.style.background = '#BA7517'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
+  else { el.style.display = 'none'; }
+}
+
 async function caricaTabLetture() {
   await caricaFormLetture();
   await caricaStoricoLetture();
+  _aggiornaLabelGiorno();
 }
 
 async function caricaFormLetture() {
@@ -298,6 +314,7 @@ async function salvaLetture() {
   var domaniNav = new Date(new Date(data).getTime() + 86400000).toISOString().split('T')[0];
   toast(anyOffline ? '⚡ Letture salvate offline' : upserts.length + ' letture salvate! Prezzi ' + domaniNav + ' preparati.');
   document.getElementById('stz-data-lettura').value = domaniNav;
+  _aggiornaLabelGiorno();
   caricaFormLetture();
 }
 
