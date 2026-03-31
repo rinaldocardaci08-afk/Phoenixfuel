@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>PhoenixFuel — Gestionale Carburanti</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Playfair+Display&display=swap" rel="stylesheet">
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#D4A017" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -97,6 +99,26 @@
           <div id="home-btn-nuovo" style="display:none">
             <button class="btn-primary" style="padding:10px 20px;font-size:14px;background:#639922" onclick="apriFormPost()">📝 Nuovo post</button>
             <button class="btn-primary" style="padding:10px 20px;font-size:14px;background:#6B5FCC" onclick="apriLavagna()">🎨 Lavagna</button>
+          </div>
+        </div>
+        <!-- OROLOGIO + DATA -->
+        <div class="card" style="margin-bottom:16px;padding:20px">
+          <div style="display:flex;align-items:center;justify-content:center;gap:40px;flex-wrap:wrap">
+            <svg id="home-clock" width="150" height="150" viewBox="0 0 160 160">
+              <circle cx="80" cy="80" r="74" fill="none" stroke="#378ADD" stroke-width="3"/>
+              <circle cx="80" cy="80" r="70" fill="none" stroke="#E6F1FB" stroke-width="1"/>
+              <circle cx="80" cy="80" r="4" fill="#378ADD"/>
+              <g id="home-clock-marks"></g>
+              <line id="home-hour" x1="80" y1="80" x2="80" y2="40" stroke="#0C447C" stroke-width="4" stroke-linecap="round"/>
+              <line id="home-min" x1="80" y1="80" x2="80" y2="28" stroke="#378ADD" stroke-width="2.5" stroke-linecap="round"/>
+              <line id="home-sec" x1="80" y1="80" x2="80" y2="24" stroke="#E24B4A" stroke-width="1" stroke-linecap="round"/>
+              <circle cx="80" cy="80" r="2" fill="#E24B4A"/>
+            </svg>
+            <div style="text-align:center">
+              <div id="home-giorno" style="font-family:'Dancing Script',cursive;font-size:40px;font-weight:700;color:#378ADD;line-height:1.1"></div>
+              <div id="home-data" style="font-family:'Playfair Display',serif;font-size:20px;color:#6B5FCC;margin-top:4px;letter-spacing:1px"></div>
+              <div id="home-ora" style="font-family:var(--font-mono);font-size:15px;color:var(--text-muted);margin-top:6px"></div>
+            </div>
           </div>
         </div>
         <div id="home-feed"><div class="loading">Caricamento bacheca...</div></div>

@@ -1,6 +1,54 @@
-// PhoenixFuel — Home / Bacheca con Drag & Drop + Lavagna
+// PhoenixFuel — Home / Bacheca con Drag & Drop + Lavagna + Orologio
+
+var _homeClockInterval = null;
+
+function _initOrologioBacheca() {
+  var marksG = document.getElementById('home-clock-marks');
+  if (!marksG || marksG.childNodes.length > 0) return;
+  for (var i = 0; i < 12; i++) {
+    var ang = (i * 30 - 90) * Math.PI / 180;
+    var r1 = i % 3 === 0 ? 60 : 64, r2 = 70;
+    var line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', 80 + r1 * Math.cos(ang)); line.setAttribute('y1', 80 + r1 * Math.sin(ang));
+    line.setAttribute('x2', 80 + r2 * Math.cos(ang)); line.setAttribute('y2', 80 + r2 * Math.sin(ang));
+    line.setAttribute('stroke', i % 3 === 0 ? '#0C447C' : '#B5D4F4');
+    line.setAttribute('stroke-width', i % 3 === 0 ? '2.5' : '1');
+    line.setAttribute('stroke-linecap', 'round');
+    marksG.appendChild(line);
+    if (i % 3 === 0) {
+      var txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.setAttribute('x', 80 + 52 * Math.cos(ang)); txt.setAttribute('y', 80 + 52 * Math.sin(ang) + 4);
+      txt.setAttribute('text-anchor','middle'); txt.setAttribute('fill','#0C447C');
+      txt.setAttribute('font-size','12'); txt.setAttribute('font-weight','500');
+      txt.textContent = [12,3,6,9][i/3];
+      marksG.appendChild(txt);
+    }
+  }
+  _tickOrologio();
+  if (_homeClockInterval) clearInterval(_homeClockInterval);
+  _homeClockInterval = setInterval(_tickOrologio, 1000);
+}
+
+function _tickOrologio() {
+  var now = new Date();
+  var h = now.getHours() % 12, m = now.getMinutes(), s = now.getSeconds();
+  var hAng = (h * 30 + m * 0.5 - 90) * Math.PI / 180;
+  var mAng = (m * 6 - 90) * Math.PI / 180;
+  var sAng = (s * 6 - 90) * Math.PI / 180;
+  var hH = document.getElementById('home-hour'), mH = document.getElementById('home-min'), sH = document.getElementById('home-sec');
+  if (!hH) return;
+  hH.setAttribute('x2', 80 + 32 * Math.cos(hAng)); hH.setAttribute('y2', 80 + 32 * Math.sin(hAng));
+  mH.setAttribute('x2', 80 + 44 * Math.cos(mAng)); mH.setAttribute('y2', 80 + 44 * Math.sin(mAng));
+  sH.setAttribute('x2', 80 + 50 * Math.cos(sAng)); sH.setAttribute('y2', 80 + 50 * Math.sin(sAng));
+  var GIORNI = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  var MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  var elG = document.getElementById('home-giorno'); if (elG) elG.textContent = GIORNI[now.getDay()];
+  var elD = document.getElementById('home-data'); if (elD) elD.textContent = now.getDate() + ' ' + MESI[now.getMonth()] + ' ' + now.getFullYear();
+  var elO = document.getElementById('home-ora'); if (elO) elO.textContent = String(now.getHours()).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
 
 async function caricaHome() {
+  _initOrologioBacheca();
   var container = document.getElementById('home-feed');
   if (!container) return;
   container.innerHTML = '<div class="loading">Caricamento bacheca...</div>';
