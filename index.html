@@ -87,8 +87,22 @@
     </div>
     <div class="content">
 
+      <!-- HOME / BACHECA -->
+      <div class="section" id="s-home">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:20px;font-weight:700">🏠 Bacheca Phoenix Fuel</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px" id="home-benvenuto"></div>
+          </div>
+          <div id="home-btn-nuovo" style="display:none">
+            <button class="btn-primary" style="padding:10px 20px;font-size:14px;background:#639922" onclick="apriFormPost()">📝 Nuovo post</button>
+          </div>
+        </div>
+        <div id="home-feed"><div class="loading">Caricamento bacheca...</div></div>
+      </div>
+
       <!-- DASHBOARD -->
-      <div class="section active" id="s-dashboard">
+      <div class="section" id="s-dashboard">
         <!-- KPI INGROSSO IERI -->
         <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Ingrosso — ieri</div>
         <div class="grid4">
@@ -1951,6 +1965,7 @@
 <script src="pf-logistica.js"></script>
 <script src="pf-admin.js"></script>
 <script src="pf-dashboard.js"></script>
+<script src="pf-home.js"></script>
 <script src="pf-benchmark.js"></script>
 <script src="pf-futures.js"></script>
 <script src="pf-test.js"></script>

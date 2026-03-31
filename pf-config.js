@@ -42,11 +42,22 @@ async function inizializza() {
   else {
     await Promise.all([caricaCacheProdotti(), caricaSelectClienti('ord-cliente')]);
     initForms(); aggiornaSelezioniOrdine();
-    // Apri sezione in base alla postazione
-    var sezionePost = { 'stazione_oppido':'stazione', 'deposito_vibo':'deposito', 'logistica':'logistica' };
-    var sezioneIniziale = sezionePost[utente.postazione] || 'dashboard';
+    // Sezione iniziale: admin→dashboard, operatori→home (bacheca)
+    var sezioneIniziale;
+    if (utente.ruolo === 'admin') {
+      sezioneIniziale = 'dashboard';
+    } else {
+      sezioneIniziale = 'home';
+    }
     var navItem = document.querySelector('.nav-item[onclick*="' + sezioneIniziale + '"]') || document.querySelector('.nav-item');
     setSection(sezioneIniziale, navItem);
+    // Home: benvenuto + bottone nuovo post (solo admin)
+    var elBenvenuto = document.getElementById('home-benvenuto');
+    if (elBenvenuto) elBenvenuto.textContent = 'Benvenuto ' + utente.nome + ' — ' + new Date().toLocaleDateString('it-IT', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    if (utente.ruolo === 'admin') {
+      var elBtn = document.getElementById('home-btn-nuovo');
+      if (elBtn) elBtn.style.display = '';
+    }
     // Controlla avvisi non letti (badge pulsante)
     aggiornaBadgeBacheca();
     setInterval(aggiornaBadgeBacheca, 60000);
@@ -84,6 +95,7 @@ async function costruisciMenu(ruolo, utenteId) {
     voci.push({ id:'cliente', icon:'👤', label:'I miei prezzi' });
   } else if (ruolo === 'admin') {
     voci.push({ section:'Operativo' });
+    voci.push({ id:'home', icon:'🏠', label:'Bacheca' });
     ['dashboard','ordini','prezzi','deposito','consegne','vendite'].forEach(id => {
       const map = { dashboard:{icon:'▦',label:'Dashboard'}, ordini:{icon:'📋',label:'Ordini'}, prezzi:{icon:'💰',label:'Prezzi giornalieri'}, deposito:{icon:'🏗',label:'Deposito'}, consegne:{icon:'🚚',label:'Consegne'}, vendite:{icon:'📊',label:'Vendite'} };
       voci.push({ id, ...map[id] });
@@ -110,7 +122,8 @@ async function costruisciMenu(ruolo, utenteId) {
     const { data: permessi } = await sb.from('permessi').select('*').eq('utente_id', utenteId).eq('abilitato', true);
     const abilitati = new Set((permessi||[]).map(p => p.sezione));
     const tutteSezioni = [
-      { id:'dashboard', icon:'▦', label:'Dashboard', section:'Operativo' },
+      { id:'home', icon:'🏠', label:'Bacheca', section:'Operativo' },
+      { id:'dashboard', icon:'▦', label:'Dashboard' },
       { id:'ordini', icon:'📋', label:'Ordini' },
       { id:'prezzi', icon:'💰', label:'Prezzi giornalieri' },
       { id:'deposito', icon:'🏗', label:'Deposito' },
@@ -128,7 +141,11 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'bacheca', icon:'🔔', label:'Bacheca avvisi', section:'Comunicazioni' },
     ];
     let lastSection = null;
+    // Home è sempre visibile per tutti
+    voci.push({ section: 'Operativo' }); lastSection = 'Operativo';
+    voci.push({ id: 'home', icon: '🏠', label: 'Bacheca' });
     tutteSezioni.forEach(s => {
+      if (s.id === 'home') return; // già aggiunto
       if (abilitati.has(s.id)) {
         if (s.section && s.section !== lastSection) { voci.push({ section: s.section }); lastSection = s.section; }
         voci.push({ id: s.id, icon: s.icon, label: s.label });
@@ -148,14 +165,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi', benchmark:'Benchmark mercato', finanze:'Finanze' };
+const TITLES = { home:'Bacheca', dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi', benchmark:'Benchmark mercato', finanze:'Finanze' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca, benchmark:caricaBenchmark, finanze:caricaFinanze };
+  const loaders = { home:caricaHome, dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca, benchmark:caricaBenchmark, finanze:caricaFinanze };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
