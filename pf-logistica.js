@@ -370,6 +370,7 @@ async function caricaOrdiniPerCarico() {
   const dataEl = document.getElementById('car-data');
   if (!dataEl) return;
   const data = dataEl.value;
+  _labelGiorno('car-data');
   const wrap = document.getElementById('ordini-per-carico');
   if (!data) { wrap.innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
   try {

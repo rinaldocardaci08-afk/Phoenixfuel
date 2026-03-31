@@ -170,16 +170,25 @@ function renderMargGiorno(idx) {
 
   var dataFmt = new Date(data).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
   document.getElementById('marg-data-label').textContent = dataFmt;
-  // Label OGGI/DOMANI/IERI
+  // Label OGGI/DOMANI/IERI + giorno settimana
   var elLbl = document.getElementById('marg-data-lbl');
+  var elDay = document.getElementById('marg-data-day');
   if (elLbl) {
     var oggi = new Date(); oggi.setHours(0,0,0,0);
-    var sel = new Date(data); sel.setHours(0,0,0,0);
+    var sel = new Date(data + 'T12:00:00'); sel.setHours(0,0,0,0);
     var diff = Math.round((sel - oggi) / 86400000);
     if (diff === 0) { elLbl.textContent = 'OGGI'; elLbl.style.background = '#378ADD'; elLbl.style.color = '#fff'; elLbl.style.display = 'inline-block'; }
     else if (diff === 1) { elLbl.textContent = 'DOMANI'; elLbl.style.background = '#639922'; elLbl.style.color = '#fff'; elLbl.style.display = 'inline-block'; }
     else if (diff === -1) { elLbl.textContent = 'IERI'; elLbl.style.background = '#BA7517'; elLbl.style.color = '#fff'; elLbl.style.display = 'inline-block'; }
     else { elLbl.style.display = 'none'; }
+  }
+  if (elDay) {
+    var selD = new Date(data + 'T12:00:00');
+    var GIORNI = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+    var dayColors = { 0:['#FCEBEB','#791F1F'], 1:['#E6F1FB','#0C447C'], 2:['#E6F1FB','#0C447C'], 3:['#E6F1FB','#0C447C'], 4:['#E6F1FB','#0C447C'], 5:['#E6F1FB','#0C447C'], 6:['#EEEDFE','#3C3489'] };
+    var dc = dayColors[selD.getDay()];
+    elDay.textContent = GIORNI[selD.getDay()];
+    elDay.style.background = dc[0]; elDay.style.color = dc[1]; elDay.style.display = 'inline-block';
   }
 
   var el = document.getElementById('marg-pompe-content');

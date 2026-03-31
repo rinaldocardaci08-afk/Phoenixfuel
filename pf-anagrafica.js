@@ -1,9 +1,9 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
 // ── CONSEGNE ─────────────────────────────────────────────────────
 async function caricaConsegne() {
-  // Imposta data filtro a oggi se non impostata
-  const filtroEl = document.getElementById('filtro-data-consegne');
+  var filtroEl = document.getElementById('filtro-data-consegne');
   if (!filtroEl.value) filtroEl.value = oggiISO;
+  _labelGiorno('filtro-data-consegne');
   const dataFiltro = filtroEl.value;
 
   const { data } = await sb.from('ordini').select('*').eq('data', dataFiltro).neq('stato','annullato').order('cliente');

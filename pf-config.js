@@ -348,27 +348,45 @@ async function caricaSelectClienti(selectId) {
   sel.innerHTML = '<option value="">Seleziona...</option>' + cacheClienti.map(c => '<option value="' + c.id + '">' + c.nome + '</option>').join('');
 }
 
-// ── LABEL GIORNO (OGGI/DOMANI/IERI) ────────────────────────────
+// ── LABEL GIORNO (OGGI/DOMANI/IERI + giorno settimana) ──────────
 function _labelGiorno(inputId) {
   var inp = document.getElementById(inputId);
   if (!inp) return;
   var spanId = inputId + '-lbl';
+  var dayId = inputId + '-day';
   var el = document.getElementById(spanId);
+  var elDay = document.getElementById(dayId);
   if (!el) {
     el = document.createElement('span');
     el.id = spanId;
     el.style.cssText = 'font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;margin-left:6px;display:none;vertical-align:middle';
     inp.parentNode.insertBefore(el, inp.nextSibling);
   }
+  if (!elDay) {
+    elDay = document.createElement('span');
+    elDay.id = dayId;
+    elDay.style.cssText = 'font-size:13px;font-weight:600;padding:4px 12px;border-radius:8px;margin-left:4px;display:none;vertical-align:middle';
+    el.parentNode.insertBefore(elDay, el.nextSibling);
+  }
   var val = inp.value;
-  if (!val) { el.style.display = 'none'; return; }
+  if (!val) { el.style.display = 'none'; elDay.style.display = 'none'; return; }
   var oggi = new Date(); oggi.setHours(0,0,0,0);
-  var sel = new Date(val); sel.setHours(0,0,0,0);
+  var sel = new Date(val + 'T12:00:00'); sel.setHours(0,0,0,0);
   var diff = Math.round((sel - oggi) / 86400000);
+  var GIORNI = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  var giorno = GIORNI[sel.getDay()];
+  // Badge OGGI/IERI/DOMANI
   if (diff === 0) { el.textContent = 'OGGI'; el.style.background = '#378ADD'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
   else if (diff === 1) { el.textContent = 'DOMANI'; el.style.background = '#639922'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
   else if (diff === -1) { el.textContent = 'IERI'; el.style.background = '#BA7517'; el.style.color = '#fff'; el.style.display = 'inline-block'; }
   else { el.style.display = 'none'; }
+  // Badge giorno settimana (sempre visibile)
+  var dayColors = { 0:['#FCEBEB','#791F1F'], 1:['#E6F1FB','#0C447C'], 2:['#E6F1FB','#0C447C'], 3:['#E6F1FB','#0C447C'], 4:['#E6F1FB','#0C447C'], 5:['#E6F1FB','#0C447C'], 6:['#EEEDFE','#3C3489'] };
+  var dc = dayColors[sel.getDay()];
+  elDay.textContent = giorno;
+  elDay.style.background = dc[0];
+  elDay.style.color = dc[1];
+  elDay.style.display = 'inline-block';
 }
 
 // ── BOTTONI SALVA: stato "già salvato" ─────────────────────────

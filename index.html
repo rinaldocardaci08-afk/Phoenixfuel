@@ -525,7 +525,7 @@
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="generaElencoVenditeGiorno()">📊 Elenco vendite</button>
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Data:</label>
-              <input type="date" id="filtro-data-consegne" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500;max-width:180px" onchange="caricaConsegne()" />
+              <input type="date" id="filtro-data-consegne" style="font-size:16px;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:600;max-width:200px" onchange="caricaConsegne();_labelGiorno('filtro-data-consegne')" />
             </div>
           </div>
 
@@ -1176,6 +1176,7 @@
                 <button onclick="margGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
                 <span id="marg-data-label" style="font-family:var(--font-mono);font-size:14px;font-weight:600;min-width:110px;text-align:center">—</span>
                 <span id="marg-data-lbl" style="font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;margin-left:6px;display:none"></span>
+                <span id="marg-data-day" style="font-size:13px;font-weight:600;padding:4px 12px;border-radius:8px;margin-left:4px;display:none"></span>
                 <button onclick="margGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               </div>
             </div>
@@ -1563,7 +1564,7 @@
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Pianifica nuovo carico</div>
             <div class="form-grid">
-              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" onchange="caricaOrdiniPerCarico()" /></div>
+              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" onchange="caricaOrdiniPerCarico();_labelGiorno('car-data')" /></div>
               <div class="form-group"><label>Vettore</label><select id="car-trasportatore" onchange="aggiornaVeicoliVettore()"><option value="">Nostro mezzo</option></select></div>
               <div class="form-group"><label>Mezzo</label><select id="car-mezzo"><option value="">Seleziona mezzo...</option></select></div>
               <div class="form-group"><label>Autista</label><select id="car-autista"><option value="">Seleziona autista...</option></select></div>
