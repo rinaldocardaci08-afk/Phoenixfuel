@@ -662,9 +662,10 @@ async function caricaOrdiniGiorno() {
   mostraBacklogOrdini();
   var inp = document.getElementById('ordini-giorno-data');
   if (!inp.value) {
-    // Default: ieri
+    // Default: ieri (locale, no timezone)
     var ieri = new Date(); ieri.setDate(ieri.getDate()-1);
-    inp.value = ieri.toISOString().split('T')[0];
+    var y = ieri.getFullYear(), m = String(ieri.getMonth()+1).padStart(2,'0'), dd = String(ieri.getDate()).padStart(2,'0');
+    inp.value = y + '-' + m + '-' + dd;
   }
   _labelGiorno('ordini-giorno-data');
   var data = inp.value;
@@ -688,9 +689,10 @@ async function caricaOrdiniGiorno() {
 
 function navigaOrdiniGiorno(dir) {
   var inp = document.getElementById('ordini-giorno-data');
-  var d = new Date(inp.value || new Date());
+  var d = new Date(inp.value + 'T12:00:00');
   d.setDate(d.getDate() + dir);
-  inp.value = d.toISOString().split('T')[0];
+  var y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+  inp.value = y + '-' + m + '-' + dd;
   caricaOrdiniGiorno();
 }
 
