@@ -1,4 +1,4 @@
-// PhoenixFuel — Home / Bacheca (landing page operatori)
+// PhoenixFuel — Home / Bacheca con Drag & Drop + Lavagna
 
 async function caricaHome() {
   var container = document.getElementById('home-feed');
@@ -8,16 +8,18 @@ async function caricaHome() {
   var { data: posts, error } = await sb.from('bacheca_post').select('*')
     .eq('attivo', true)
     .order('pinned', { ascending: false })
+    .order('ordine', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(50);
 
   if (error) { container.innerHTML = '<div class="loading">Errore: ' + error.message + '</div>'; return; }
   if (!posts || !posts.length) { container.innerHTML = '<div class="loading" style="color:var(--text-muted)">Nessun post in bacheca. L\'admin può pubblicare contenuti da qui.</div>'; return; }
 
+  window._bachecaPosts = posts;
   var isAdmin = utenteCorrente && utenteCorrente.ruolo === 'admin';
   var html = '';
-  posts.forEach(function(p) {
-    var dataFmt = new Date(p.created_at).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  posts.forEach(function(p, idx) {
+    var dataFmt = new Date(p.created_at).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
     var prioritaStyle = '';
     var prioritaBadge = '';
     if (p.priorita === 'urgente') { prioritaStyle = 'border-left:4px solid #E24B4A;border-radius:0'; prioritaBadge = '<span style="font-size:10px;background:#E24B4A;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">URGENTE</span> '; }
@@ -28,11 +30,14 @@ async function caricaHome() {
     else if (p.tipo === 'report') tipoBadge = '📊 ';
     else if (p.tipo === 'foto') tipoBadge = '📷 ';
 
-    html += '<div class="card" style="margin-bottom:12px;' + prioritaStyle + '">';
+    var dragAttr = isAdmin ? ' draggable="true" ondragstart="_dragPost(event,' + idx + ')" ondragover="_dragOverPost(event)" ondrop="_dropPost(event,' + idx + ')" style="cursor:grab;margin-bottom:12px;transition:opacity 0.2s;' + prioritaStyle + '"' : ' style="margin-bottom:12px;' + prioritaStyle + '"';
+
+    html += '<div class="card" data-post-idx="' + idx + '"' + dragAttr + '>';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
     html += '<div>' + pinnedBadge + prioritaBadge + '</div>';
     if (isAdmin) {
-      html += '<div style="display:flex;gap:4px">';
+      html += '<div style="display:flex;gap:4px;align-items:center">';
+      html += '<span style="font-size:14px;color:var(--text-muted);cursor:grab;padding:0 4px" title="Trascina per riordinare">⠿</span>';
       html += '<button class="btn-edit" title="Fissa/Sfissa" onclick="togglePinPost(\'' + p.id + '\',' + !p.pinned + ')">📌</button>';
       html += '<button class="btn-edit" onclick="modificaPost(\'' + p.id + '\')">✏️</button>';
       html += '<button class="btn-danger" onclick="eliminaPost(\'' + p.id + '\')">x</button>';
@@ -50,46 +55,65 @@ async function caricaHome() {
     if (p.allegato_url) {
       var urls = p.allegato_url.split('||');
       var nomi = (p.allegato_nome || '').split('||');
-      urls.forEach(function(url, idx) {
+      urls.forEach(function(url, aidx) {
         url = url.trim(); if (!url) return;
-        var nome = (nomi[idx] || '').trim() || url.split('/').pop().split('?')[0];
+        var nome = (nomi[aidx] || '').trim() || url.split('/').pop().split('?')[0];
         var isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(nome) || /\.(jpg|jpeg|png|gif|webp)/i.test(url);
         var isVideo = /youtube\.com|youtu\.be|vimeo\.com/i.test(url);
         var isPdf = /\.pdf$/i.test(nome);
         var isExcel = /\.(xlsx?|csv)$/i.test(nome);
-
         if (isImg) {
           html += '<div style="margin-bottom:10px"><img src="' + esc(url) + '" alt="' + esc(nome) + '" style="max-width:100%;max-height:500px;border-radius:8px;border:0.5px solid var(--border);cursor:pointer" onclick="window.open(\'' + esc(url) + '\',\'_blank\')" /></div>';
         } else if (isVideo) {
-          var videoId = '';
           var m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]+)/);
-          if (m) videoId = m[1];
-          if (videoId) {
-            html += '<div style="margin-bottom:10px;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px"><iframe src="https://www.youtube.com/embed/' + videoId + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px" allowfullscreen></iframe></div>';
-          } else {
-            html += '<div style="margin-bottom:10px"><a href="' + esc(url) + '" target="_blank" style="color:#378ADD;text-decoration:underline">🎬 ' + esc(nome) + '</a></div>';
-          }
+          if (m) { html += '<div style="margin-bottom:10px;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px"><iframe src="https://www.youtube.com/embed/' + m[1] + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px" allowfullscreen></iframe></div>'; }
+          else { html += '<div style="margin-bottom:10px"><a href="' + esc(url) + '" target="_blank" style="color:#378ADD">🎬 ' + esc(nome) + '</a></div>'; }
         } else if (isPdf) {
           html += '<div style="margin-bottom:10px;padding:10px 14px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><a href="' + esc(url) + '" target="_blank" style="color:#E24B4A;text-decoration:none;font-weight:500">📄 ' + esc(nome) + '</a></div>';
         } else if (isExcel) {
           html += '<div style="margin-bottom:10px;padding:10px 14px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><a href="' + esc(url) + '" target="_blank" style="color:#639922;text-decoration:none;font-weight:500">📊 ' + esc(nome) + '</a></div>';
         } else {
-          html += '<div style="margin-bottom:10px"><a href="' + esc(url) + '" target="_blank" style="color:#378ADD;text-decoration:underline">📎 ' + esc(nome) + '</a></div>';
+          html += '<div style="margin-bottom:10px"><a href="' + esc(url) + '" target="_blank" style="color:#378ADD">📎 ' + esc(nome) + '</a></div>';
         }
       });
     }
-
     html += '<div style="font-size:11px;color:var(--text-muted)">' + esc(p.autore_nome || 'Admin') + ' — ' + dataFmt + '</div>';
     html += '</div>';
   });
-
   container.innerHTML = html;
 }
+
+// ── DRAG & DROP ──
+var _dragIdx = null;
+function _dragPost(ev, idx) { _dragIdx = idx; ev.target.closest('.card').style.opacity = '0.4'; ev.dataTransfer.effectAllowed = 'move'; }
+function _dragOverPost(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }
+async function _dropPost(ev, dropIdx) {
+  ev.preventDefault();
+  if (_dragIdx === null || _dragIdx === dropIdx) return;
+  var posts = window._bachecaPosts;
+  if (!posts) return;
+  // Sposta il post
+  var movedPost = posts[_dragIdx];
+  var targetPost = posts[dropIdx];
+  // Scambia ordine nel DB
+  var now = Date.now();
+  var ordineTarget = targetPost.ordine || now;
+  var ordineMoved = movedPost.ordine || now;
+  await Promise.all([
+    sb.from('bacheca_post').update({ ordine: ordineTarget }).eq('id', movedPost.id),
+    sb.from('bacheca_post').update({ ordine: ordineMoved }).eq('id', targetPost.id)
+  ]);
+  _dragIdx = null;
+  caricaHome();
+}
+document.addEventListener('dragend', function() {
+  document.querySelectorAll('#home-feed .card').forEach(function(c) { c.style.opacity = '1'; });
+  _dragIdx = null;
+});
 
 // ── ADMIN: Form post ──
 function apriFormPost(postId) {
   var titolo = '', contenuto = '', tipo = 'nota', priorita = 'normale', pinned = false;
-
   if (postId && window._editPost) {
     var p = window._editPost;
     titolo = p.titolo || ''; contenuto = p.contenuto || ''; tipo = p.tipo || 'nota';
@@ -120,7 +144,6 @@ function apriFormPost(postId) {
   html += '<div class="form-group" style="flex:0"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="post-pinned" ' + (pinned ? 'checked' : '') + ' /> 📌 Fissa</label></div>';
   html += '</div>';
   html += '<div class="form-group"><label>Contenuto</label><textarea id="post-contenuto" rows="6" placeholder="Scrivi il contenuto... (**grassetto**, *corsivo*)" style="font-size:14px;padding:10px 14px;line-height:1.5">' + esc(contenuto) + '</textarea></div>';
-  // Upload
   html += '<div class="form-group"><label>Allegati (foto, PDF, Excel, video YouTube)</label>';
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
   html += '<button type="button" class="btn-primary" style="font-size:13px;padding:8px 16px;background:#378ADD" onclick="document.getElementById(\'post-file-input\').click()">📁 Carica file</button>';
@@ -134,7 +157,6 @@ function apriFormPost(postId) {
   html += '<button class="btn-primary" style="flex:1;padding:12px;font-size:15px;background:#639922" onclick="salvaPost(' + (postId ? "'" + postId + "'" : 'null') + ')">💾 Pubblica</button>';
   html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Annulla</button>';
   html += '</div>';
-
   apriModal(html);
   _renderAllegatiLista();
 }
@@ -148,35 +170,27 @@ function _renderAllegatiLista() {
     var isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(a.nome);
     var icon = isImg ? '🖼️' : /\.pdf$/i.test(a.nome) ? '📄' : /\.(xlsx?|csv)$/i.test(a.nome) ? '📊' : /youtube|youtu\.be/i.test(a.url) ? '🎬' : '📎';
     return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg);border-radius:6px;margin-bottom:4px">' +
-      '<span>' + icon + '</span>' +
-      '<span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.nome) + '</span>' +
+      '<span>' + icon + '</span><span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.nome) + '</span>' +
       (isImg ? '<img src="' + esc(a.url) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px" />' : '') +
       '<button class="btn-danger" style="font-size:11px;padding:2px 8px" onclick="rimuoviAllegato(' + i + ')">x</button></div>';
   }).join('');
 }
-
-function rimuoviAllegato(idx) {
-  window._postAllegati.splice(idx, 1);
-  _renderAllegatiLista();
-}
+function rimuoviAllegato(idx) { window._postAllegati.splice(idx, 1); _renderAllegatiLista(); }
 
 function aggiungiUrlManuale() {
   var inp = document.getElementById('post-url-manual');
-  var url = (inp.value || '').trim();
-  if (!url) return;
+  var url = (inp.value || '').trim(); if (!url) return;
   var nome = url;
   try { nome = decodeURIComponent(url.split('/').pop().split('?')[0]); } catch(e) {}
   if (/youtube\.com|youtu\.be/i.test(url)) nome = 'Video YouTube';
   window._postAllegati.push({ url: url, nome: nome });
-  inp.value = '';
-  _renderAllegatiLista();
+  inp.value = ''; _renderAllegatiLista();
 }
 
 async function uploadAllegatiPost(input) {
   if (!input.files || !input.files.length) return;
   for (var i = 0; i < input.files.length; i++) {
-    var file = input.files[i];
-    var nome = file.name;
+    var file = input.files[i], nome = file.name;
     var path = 'post/' + Date.now() + '_' + nome.replace(/[^a-zA-Z0-9._-]/g, '_');
     toast('⏳ Caricamento ' + nome + '...');
     var { data, error } = await sb.storage.from('bacheca').upload(path, file, { upsert: true });
@@ -185,8 +199,7 @@ async function uploadAllegatiPost(input) {
     window._postAllegati.push({ url: urlData.publicUrl, nome: nome });
     toast('✅ ' + nome + ' caricato!');
   }
-  input.value = '';
-  _renderAllegatiLista();
+  input.value = ''; _renderAllegatiLista();
 }
 
 async function salvaPost(postId) {
@@ -194,17 +207,17 @@ async function salvaPost(postId) {
   if (!titolo) { toast('Inserisci un titolo'); return; }
   var allegati = window._postAllegati || [];
   var record = {
-    titolo: titolo,
-    contenuto: document.getElementById('post-contenuto').value,
-    tipo: document.getElementById('post-tipo').value,
-    priorita: document.getElementById('post-priorita').value,
+    titolo: titolo, contenuto: document.getElementById('post-contenuto').value,
+    tipo: document.getElementById('post-tipo').value, priorita: document.getElementById('post-priorita').value,
     pinned: document.getElementById('post-pinned').checked,
-    allegato_url: allegati.map(function(a) { return a.url; }).join('||') || null,
-    allegato_nome: allegati.map(function(a) { return a.nome; }).join('||') || null,
+    allegato_url: allegati.map(function(a){return a.url;}).join('||') || null,
+    allegato_nome: allegati.map(function(a){return a.nome;}).join('||') || null,
     autore_id: utenteCorrente ? utenteCorrente.id : null,
     autore_nome: utenteCorrente ? utenteCorrente.nome : 'Admin',
+    ordine: postId ? undefined : Date.now(),
     updated_at: new Date().toISOString()
   };
+  if (postId) delete record.ordine;
   var error;
   if (postId) { error = (await sb.from('bacheca_post').update(record).eq('id', postId)).error; }
   else { error = (await sb.from('bacheca_post').insert([record])).error; }
@@ -217,19 +230,180 @@ async function salvaPost(postId) {
 async function modificaPost(id) {
   var { data: p } = await sb.from('bacheca_post').select('*').eq('id', id).single();
   if (!p) { toast('Post non trovato'); return; }
-  window._editPost = p;
-  apriFormPost(id);
+  window._editPost = p; apriFormPost(id);
 }
-
 async function eliminaPost(id) {
   if (!confirm('Eliminare questo post dalla bacheca?')) return;
   await sb.from('bacheca_post').update({ attivo: false }).eq('id', id);
-  toast('Post eliminato');
-  caricaHome();
+  toast('Post eliminato'); caricaHome();
 }
-
 async function togglePinPost(id, pinned) {
   await sb.from('bacheca_post').update({ pinned: pinned }).eq('id', id);
-  toast(pinned ? '📌 Post fissato in cima' : 'Post sfissato');
-  caricaHome();
+  toast(pinned ? '📌 Post fissato in cima' : 'Post sfissato'); caricaHome();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ── LAVAGNA (Whiteboard con matite colorate) ─────────────────────
+// ══════════════════════════════════════════════════════════════════
+
+function apriLavagna() {
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:12px">🎨 Lavagna — disegna e pubblica</div>';
+  // Toolbar
+  html += '<div id="lavagna-toolbar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:10px;background:var(--bg);border-radius:8px">';
+  // Colori
+  var colori = [
+    {hex:'#1a1a1a',nome:'Nero'},{hex:'#E24B4A',nome:'Rosso'},{hex:'#378ADD',nome:'Blu'},
+    {hex:'#639922',nome:'Verde'},{hex:'#D4A017',nome:'Arancione'},{hex:'#6B5FCC',nome:'Viola'},
+    {hex:'#D85A30',nome:'Corallo'},{hex:'#BA7517',nome:'Marrone'},{hex:'#ffffff',nome:'Bianco (gomma)'}
+  ];
+  html += '<div style="display:flex;gap:4px;align-items:center">';
+  colori.forEach(function(c) {
+    var border = c.hex === '#ffffff' ? '2px solid #ccc' : '2px solid transparent';
+    html += '<div onclick="_lavagnaColore(\'' + c.hex + '\',this)" title="' + c.nome + '" style="width:28px;height:28px;border-radius:50%;background:' + c.hex + ';cursor:pointer;border:' + border + ';flex-shrink:0' + (c.hex === '#1a1a1a' ? ';box-shadow:0 0 0 2px #378ADD' : '') + '" class="lav-colore"></div>';
+  });
+  html += '</div>';
+  // Spessore
+  html += '<div style="display:flex;gap:4px;align-items:center;margin-left:8px">';
+  [2,4,8,14,24].forEach(function(s) {
+    html += '<div onclick="_lavagnaSpessore(' + s + ',this)" title="' + s + 'px" class="lav-spessore" style="width:' + Math.max(18,s+8) + 'px;height:' + Math.max(18,s+8) + 'px;border-radius:50%;background:var(--text);opacity:' + (s===4?'1':'0.3') + ';cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0"><div style="width:' + s + 'px;height:' + s + 'px;border-radius:50%;background:var(--text)"></div></div>';
+  });
+  html += '</div>';
+  // Bottoni
+  html += '<button class="btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto" onclick="_lavagnaPulisci()">🗑️ Pulisci</button>';
+  html += '<button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="_lavagnaUndo()">↩️ Annulla</button>';
+  html += '</div>';
+  // Canvas
+  html += '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#fff;touch-action:none">';
+  html += '<canvas id="lavagna-canvas" width="800" height="500" style="width:100%;display:block;cursor:crosshair"></canvas>';
+  html += '</div>';
+  // Titolo + salva
+  html += '<div style="display:flex;gap:8px;margin-top:12px;align-items:center">';
+  html += '<input type="text" id="lavagna-titolo" placeholder="Titolo del disegno..." style="flex:1;font-size:14px;padding:10px 14px" />';
+  html += '<button class="btn-primary" style="padding:12px 24px;font-size:15px;background:#639922" onclick="salvaLavagna()">💾 Pubblica in bacheca</button>';
+  html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button>';
+  html += '</div>';
+
+  apriModal(html);
+
+  // Init canvas
+  setTimeout(function() {
+    var canvas = document.getElementById('lavagna-canvas');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    window._lav = { ctx: ctx, canvas: canvas, drawing: false, color: '#1a1a1a', size: 4, history: [] };
+    _lavagnaSalvaStato();
+
+    // Mouse events
+    canvas.addEventListener('mousedown', _lavMouseDown);
+    canvas.addEventListener('mousemove', _lavMouseMove);
+    canvas.addEventListener('mouseup', _lavMouseUp);
+    canvas.addEventListener('mouseleave', _lavMouseUp);
+    // Touch events
+    canvas.addEventListener('touchstart', _lavTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', _lavTouchMove, { passive: false });
+    canvas.addEventListener('touchend', _lavTouchEnd);
+  }, 100);
+}
+
+function _lavPos(ev) {
+  var canvas = window._lav.canvas;
+  var rect = canvas.getBoundingClientRect();
+  return { x: (ev.clientX - rect.left) * (canvas.width / rect.width), y: (ev.clientY - rect.top) * (canvas.height / rect.height) };
+}
+function _lavMouseDown(ev) {
+  var l = window._lav; l.drawing = true;
+  var p = _lavPos(ev);
+  l.ctx.beginPath(); l.ctx.moveTo(p.x, p.y);
+  l.ctx.strokeStyle = l.color; l.ctx.lineWidth = l.size;
+}
+function _lavMouseMove(ev) {
+  var l = window._lav; if (!l.drawing) return;
+  var p = _lavPos(ev);
+  l.ctx.lineTo(p.x, p.y); l.ctx.stroke();
+}
+function _lavMouseUp() {
+  var l = window._lav; if (!l.drawing) return;
+  l.drawing = false; _lavagnaSalvaStato();
+}
+function _lavTouchStart(ev) {
+  ev.preventDefault();
+  var touch = ev.touches[0];
+  var me = new MouseEvent('mousedown', { clientX: touch.clientX, clientY: touch.clientY });
+  window._lav.canvas.dispatchEvent(me);
+}
+function _lavTouchMove(ev) {
+  ev.preventDefault();
+  var touch = ev.touches[0];
+  var me = new MouseEvent('mousemove', { clientX: touch.clientX, clientY: touch.clientY });
+  window._lav.canvas.dispatchEvent(me);
+}
+function _lavTouchEnd(ev) {
+  var me = new MouseEvent('mouseup', {});
+  window._lav.canvas.dispatchEvent(me);
+}
+
+function _lavagnaColore(hex, el) {
+  window._lav.color = hex;
+  document.querySelectorAll('.lav-colore').forEach(function(d) { d.style.boxShadow = 'none'; });
+  el.style.boxShadow = '0 0 0 2px #378ADD';
+}
+function _lavagnaSpessore(size, el) {
+  window._lav.size = size;
+  document.querySelectorAll('.lav-spessore').forEach(function(d) { d.style.opacity = '0.3'; });
+  el.style.opacity = '1';
+}
+function _lavagnaPulisci() {
+  var l = window._lav;
+  l.ctx.fillStyle = '#ffffff';
+  l.ctx.fillRect(0, 0, l.canvas.width, l.canvas.height);
+  _lavagnaSalvaStato();
+}
+function _lavagnaSalvaStato() {
+  var l = window._lav;
+  l.history.push(l.canvas.toDataURL());
+  if (l.history.length > 30) l.history.shift();
+}
+function _lavagnaUndo() {
+  var l = window._lav;
+  if (l.history.length <= 1) return;
+  l.history.pop();
+  var img = new Image();
+  img.onload = function() { l.ctx.clearRect(0, 0, l.canvas.width, l.canvas.height); l.ctx.drawImage(img, 0, 0); };
+  img.src = l.history[l.history.length - 1];
+}
+
+async function salvaLavagna() {
+  var titolo = (document.getElementById('lavagna-titolo').value || '').trim() || 'Disegno lavagna ' + new Date().toLocaleDateString('it-IT');
+  var canvas = document.getElementById('lavagna-canvas');
+  if (!canvas) return;
+
+  toast('⏳ Salvataggio disegno...');
+  // Converti canvas → blob → upload su Supabase Storage
+  canvas.toBlob(async function(blob) {
+    var nome = 'lavagna_' + Date.now() + '.png';
+    var path = 'post/' + nome;
+    var { data, error } = await sb.storage.from('bacheca').upload(path, blob, { contentType: 'image/png', upsert: true });
+    if (error) { toast('Errore upload: ' + error.message); return; }
+    var { data: urlData } = sb.storage.from('bacheca').getPublicUrl(path);
+    var publicUrl = urlData.publicUrl;
+
+    // Crea post con l'immagine
+    var record = {
+      titolo: titolo, contenuto: '', tipo: 'foto', priorita: 'normale', pinned: false,
+      allegato_url: publicUrl, allegato_nome: nome,
+      autore_id: utenteCorrente ? utenteCorrente.id : null,
+      autore_nome: utenteCorrente ? utenteCorrente.nome : 'Admin',
+      ordine: Date.now(), updated_at: new Date().toISOString()
+    };
+    var { error: errIns } = await sb.from('bacheca_post').insert([record]);
+    if (errIns) { toast('Errore: ' + errIns.message); return; }
+    chiudiModalePermessi();
+    toast('✅ Disegno pubblicato in bacheca!');
+    caricaHome();
+  }, 'image/png');
 }
