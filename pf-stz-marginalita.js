@@ -213,30 +213,30 @@ function renderMargGiorno(idx) {
     }
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:14px">' + esc(pompa.nome) + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + ' — ' + fmtL(litri) + ' L totali</span></div>';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + ' — ' + fmtL(litri) + ' L totali</span></div>';
 
     var prezzoN = prezzo ? (prezzo / 1.22) : 0;
     var costoIva = costoProposto ? (Number(costoProposto) * 1.22).toFixed(3) : '';
     var cmpBadge = isCMP ? ' <span style="font-size:8px;background:#378ADD;color:#fff;padding:1px 4px;border-radius:3px">CMP</span>' : '';
     var brdCol = isCMP ? '#378ADD' : 'var(--border)';
-    var inpStyle = 'font-family:var(--font-mono);font-size:13px;font-weight:600;padding:4px 8px;border-radius:6px;background:#fff;color:#1a1a18;width:100px;text-align:right;border:0.5px solid ';
+    var inpStyle = 'font-family:var(--font-mono);font-size:16px;font-weight:600;padding:5px 10px;border-radius:6px;background:#fff;color:#1a1a18;width:115px;text-align:right;border:0.5px solid ';
 
     // Riga litri standard
     html += '<div style="display:grid;grid-template-columns:0.8fr 1fr 1.2fr 1.2fr;gap:8px;align-items:start;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
     // Col 1: Litri
-    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriStd) + '</div></div>';
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-size:20px;font-weight:700">' + fmtL(litriStd) + '</div></div>';
     // Col 2: Vendita netto + IVA
-    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#1a1a18">' + (prezzoN ? '€ ' + prezzoN.toFixed(4) + ' <span style="font-size:9px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (prezzo ? '€ ' + prezzo.toFixed(3) + ' IVA' : '') + '</div>';
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#1a1a18">' + (prezzoN ? '€ ' + prezzoN.toFixed(4) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (prezzo ? '€ ' + prezzo.toFixed(3) + ' IVA' : '') + '</div>';
     html += '</div>';
     // Col 3: Costo netto + IVA (linked inputs)
-    html += '<div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
-    html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px"><input type="number" class="marg-costo" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriStd + '" data-prezzo="' + prezzo + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="syncCostoIva(this);copiaCostoMarg(this);calcolaMargini()" style="' + inpStyle + brdCol + '" /><span style="font-size:9px;color:var(--text-muted)">netto</span></div>';
-    html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" class="marg-costo-iva" data-linked="' + l.pompa_id + '" value="' + costoIva + '" placeholder="0.000" step="0.001" oninput="syncCostoNetto(this,\'' + l.pompa_id + '\')" style="' + inpStyle + 'var(--border);opacity:0.7" /><span style="font-size:9px;color:var(--text-muted)">IVA</span></div>';
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
+    html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px"><input type="number" class="marg-costo" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriStd + '" data-prezzo="' + prezzo + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="syncCostoIva(this);copiaCostoMarg(this);calcolaMargini()" style="' + inpStyle + brdCol + '" /><span style="font-size:10px;color:var(--text-muted)">netto</span></div>';
+    html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" class="marg-costo-iva" data-linked="' + l.pompa_id + '" value="' + costoIva + '" placeholder="0.000" step="0.001" oninput="syncCostoNetto(this,\'' + l.pompa_id + '\')" style="' + inpStyle + 'var(--border);opacity:0.7" /><span style="font-size:10px;color:var(--text-muted)">IVA</span></div>';
     html += '</div>';
     // Col 4: Margine netto + IVA
-    html += '<div id="marg-res-' + l.pompa_id + '"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
+    html += '<div id="marg-res-' + l.pompa_id + '"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div></div>';
     html += '</div>';
 
     // Riga cambio prezzo
@@ -244,19 +244,19 @@ function renderMargGiorno(idx) {
       var prezzoPDN = prezzoPD ? (prezzoPD / 1.22) : 0;
       html += '<div style="display:grid;grid-template-columns:0.8fr 1fr 1.2fr 1.2fr;gap:8px;align-items:start;padding:8px 12px;background:#f5f5f0;border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
       // Col 1: Litri cambio
-      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Litri <span style="font-size:8px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio</span></div><div style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtL(litriPD) + '</div></div>';
+      html += '<div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Litri <span style="font-size:9px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio</span></div><div style="font-family:var(--font-mono);font-size:20px;font-weight:700">' + fmtL(litriPD) + '</div></div>';
       // Col 2: Vendita netto + IVA
-      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Vendita €/L</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(4) + ' <span style="font-size:9px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (prezzoPD ? '€ ' + prezzoPD.toFixed(3) + ' IVA' : '') + '</div>';
+      html += '<div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Vendita €/L</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(4) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (prezzoPD ? '€ ' + prezzoPD.toFixed(3) + ' IVA' : '') + '</div>';
       html += '</div>';
       // Col 3: Costo netto + IVA
-      html += '<div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
-      html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px"><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="syncCostoIva(this);copiaCostoMarg(this);calcolaMargini()" style="' + inpStyle + brdCol + '" /><span style="font-size:9px;color:var(--text-muted)">netto</span></div>';
-      html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" class="marg-costo-cp-iva" data-linked-cp="' + l.pompa_id + '" value="' + costoIva + '" placeholder="0.000" step="0.001" oninput="syncCostoNettoCp(this,\'' + l.pompa_id + '\')" style="' + inpStyle + 'var(--border);opacity:0.7" /><span style="font-size:9px;color:var(--text-muted)">IVA</span></div>';
+      html += '<div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
+      html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px"><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="syncCostoIva(this);copiaCostoMarg(this);calcolaMargini()" style="' + inpStyle + brdCol + '" /><span style="font-size:10px;color:var(--text-muted)">netto</span></div>';
+      html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" class="marg-costo-cp-iva" data-linked-cp="' + l.pompa_id + '" value="' + costoIva + '" placeholder="0.000" step="0.001" oninput="syncCostoNettoCp(this,\'' + l.pompa_id + '\')" style="' + inpStyle + 'var(--border);opacity:0.7" /><span style="font-size:10px;color:var(--text-muted)">IVA</span></div>';
       html += '</div>';
       // Col 4: Margine
-      html += '<div id="marg-res-cp-' + l.pompa_id + '"><div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div><div style="font-size:9px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">—</div></div>';
+      html += '<div id="marg-res-cp-' + l.pompa_id + '"><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div></div>';
       html += '</div>';
     }
 
@@ -336,12 +336,12 @@ function calcolaMargini() {
       var mColor = margL >= 0 ? '#639922' : '#E24B4A';
       var margLIva = margL * 1.22;
       var margTotIva = margTot * 1.22;
-      elRes.innerHTML = '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div>' +
-        '<div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:9px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(4) + ' IVA' : '') + '</div>' +
-        '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div>' +
-        '<div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) + ' <span style="font-size:9px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (costo > 0 ? fmtE(margTotIva) + ' IVA' : '') + '</div>';
+      elRes.innerHTML = '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div>' +
+        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(4) + ' IVA' : '') + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div>' +
+        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? fmtE(margTotIva) + ' IVA' : '') + '</div>';
     }
 
     if (costo > 0 && litri > 0) {
@@ -367,12 +367,12 @@ function calcolaMargini() {
       var mColor = margL >= 0 ? '#639922' : '#E24B4A';
       var margLIva = margL * 1.22;
       var margTotIva = margTot * 1.22;
-      elRes.innerHTML = '<div style="font-size:9px;color:#1a1a18;text-transform:uppercase">Margine €/L</div>' +
-        '<div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:9px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(4) + ' IVA' : '') + '</div>' +
-        '<div style="font-size:9px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div>' +
-        '<div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) + ' <span style="font-size:9px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (costo > 0 ? fmtE(margTotIva) + ' IVA' : '') + '</div>';
+      elRes.innerHTML = '<div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Margine €/L</div>' +
+        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(4) + ' IVA' : '') + '</div>' +
+        '<div style="font-size:11px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div>' +
+        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? fmtE(margTotIva) + ' IVA' : '') + '</div>';
     }
 
     if (costo > 0 && litri > 0) {
