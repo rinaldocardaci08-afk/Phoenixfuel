@@ -570,6 +570,7 @@ async function caricaVenditeAnnuali() {
 
   const pompeMap = {};
   (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
+  console.log('📊 ANNUALE DEBUG — pompe:', (pompe||[]).length, 'letture:', letture.length, 'pompeMap keys:', Object.keys(pompeMap));
   const prezziMap = {};
   (prezziP||[]).forEach(p => { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
   const costiDetMap = {};
@@ -579,6 +580,8 @@ async function caricaVenditeAnnuali() {
   const lettPerData = {};
   (letture||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
   const dateOrd = Object.keys(lettPerData).sort();
+  console.log('📊 ANNUALE DEBUG — giorni con letture:', dateOrd.length, 'primi 3:', dateOrd.slice(0,3), 'ultimi 3:', dateOrd.slice(-3));
+  if (letture.length > 0) console.log('📊 ANNUALE DEBUG — prima lettura:', JSON.stringify(letture[0]));
 
   const dettaglioPerGiorno = {};
   for (var di = 0; di < dateOrd.length; di++) {
@@ -616,6 +619,7 @@ async function caricaVenditeAnnuali() {
     Object.entries(dettaglioPerGiorno).forEach(([d,v]) => { if (d.startsWith(prefix)) { dettLitri += v.litri; dettInc += v.incasso; dettMarg += v.margine; } });
 
     mesi.push({ mese: MESI_NOMI[m], ingLitri, ingFatt, ingMarg, dettLitri, dettInc, dettMarg, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc, totMarg: ingMarg+dettMarg });
+    if (dettLitri > 0 || m < 3) console.log('📊 MESE', MESI_NOMI[m], '— ingLitri:', ingLitri, 'dettLitri:', dettLitri, 'totLitri:', ingLitri+dettLitri);
   }
 
   // Salva dati per filtro vista
