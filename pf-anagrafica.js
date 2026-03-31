@@ -553,7 +553,18 @@ async function caricaVenditeAnnuali() {
 
   // Dettaglio: letture stazione
   const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
-  const { data: letture } = await sb.from('stazione_letture').select('data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso').gte('data', da).lte('data', a).order('data');
+  // Include giorno precedente a inizio anno per calcolare litri 1° gennaio
+  var daPrev = new Date(anno, 0, 0).toISOString().split('T')[0];
+  var allLetture = [];
+  var fromL = 0;
+  while (true) {
+    var { data: batchL } = await sb.from('stazione_letture').select('data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso').gte('data', daPrev).lte('data', a).order('data').range(fromL, fromL + 999);
+    if (!batchL || !batchL.length) break;
+    allLetture = allLetture.concat(batchL);
+    if (batchL.length < 1000) break;
+    fromL += 1000;
+  }
+  const letture = allLetture;
   const { data: prezziP } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a);
   const { data: costiP } = await sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a);
 
@@ -564,34 +575,35 @@ async function caricaVenditeAnnuali() {
   const costiDetMap = {};
   (costiP||[]).forEach(c => { costiDetMap[c.data + '_' + c.prodotto] = Number(c.costo_litro); });
 
-  // Calcola dettaglio per giorno
+  // Calcola dettaglio per giorno (ottimizzato)
   const lettPerData = {};
   (letture||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
   const dateOrd = Object.keys(lettPerData).sort();
 
   const dettaglioPerGiorno = {};
-  dateOrd.forEach(data => {
+  for (var di = 0; di < dateOrd.length; di++) {
+    var data = dateOrd[di];
+    var prevD = di > 0 ? dateOrd[di-1] : null;
     let litriG = 0, incassoG = 0, costoG = 0;
-    lettPerData[data].forEach(l => {
-      const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
-      const prev = dateOrd.filter(d => d < data);
-      const prevD = prev.length ? prev[prev.length-1] : null;
-      let precL = null;
-      if (prevD && lettPerData[prevD]) { const pl = lettPerData[prevD].find(x => x.pompa_id === l.pompa_id); if (pl) precL = Number(pl.lettura); }
-      if (precL === null) return;
-      const lv = Number(l.lettura) - precL; if (lv <= 0) return;
-      const pr = prezziMap[data + '_' + pompa.prodotto] || 0;
-      const co = costiDetMap[data + '_' + pompa.prodotto] || 0;
-      const litriPD = Number(l.litri_prezzo_diverso||0);
-      const prezzoPD = Number(l.prezzo_diverso||0);
-      const hasCambio = litriPD > 0 && prezzoPD > 0;
-      const litriStd = hasCambio ? Math.max(0, lv - litriPD) : lv;
-      litriG += lv;
-      incassoG += (litriStd * pr) + (hasCambio ? litriPD * prezzoPD : 0);
-      costoG += lv * co;
-    });
+    if (prevD) {
+      lettPerData[data].forEach(l => {
+        const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+        const pl = (lettPerData[prevD]||[]).find(x => x.pompa_id === l.pompa_id);
+        if (!pl) return;
+        const lv = Number(l.lettura) - Number(pl.lettura); if (lv <= 0) return;
+        const pr = (prezziMap[data + '_' + pompa.prodotto] || 0) / 1.22;
+        const co = costiDetMap[data + '_' + pompa.prodotto] || 0;
+        const litriPD = Number(l.litri_prezzo_diverso||0);
+        const prezzoPD = Number(l.prezzo_diverso||0) / 1.22;
+        const hasCambio = litriPD > 0 && prezzoPD > 0;
+        const litriStd = hasCambio ? Math.max(0, lv - litriPD) : lv;
+        litriG += lv;
+        incassoG += (litriStd * pr) + (hasCambio ? litriPD * prezzoPD : 0);
+        costoG += lv * co;
+      });
+    }
     dettaglioPerGiorno[data] = { litri: litriG, incasso: incassoG, costo: costoG, margine: incassoG - costoG };
-  });
+  }
 
   // Aggrega per mese
   const mesi = [];
