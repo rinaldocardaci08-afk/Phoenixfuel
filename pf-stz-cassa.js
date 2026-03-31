@@ -506,13 +506,15 @@ async function ocrScontrino(input) {
     html += '<div style="padding:6px 10px;background:var(--bg);border-radius:6px"><div style="font-size:10px;color:var(--text-muted)">Rimb. gg prec</div><div style="font-family:var(--font-mono);font-weight:600">' + fmtE(risultato.creditiRimbPrec) + '</div></div>';
     html += '</div>';
 
-    html += '<div style="display:flex;gap:8px;margin-top:8px">';
-    html += '<button class="btn-primary" style="flex:1;background:#639922" onclick="applicaOcrCassa()">✅ Applica alla cassa</button>';
-    html += '<button class="btn-primary" style="background:#378ADD" onclick="applicaOcrLetture()">⛽ Applica alle letture</button>';
-    html += '<button onclick="document.getElementById(\'ocr-status\').style.display=\'none\'" style="padding:8px 14px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:12px">Chiudi</button>';
+    html += '<div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">';
+    html += '<button class="btn-primary" style="width:100%;padding:14px;font-size:16px;font-weight:600;background:#639922" onclick="applicaOcrCassa()">✅ Applica alla cassa</button>';
+    html += '<button class="btn-primary" style="width:100%;padding:14px;font-size:16px;font-weight:600;background:#378ADD" onclick="applicaOcrLetture()">⛽ Applica alle letture (totalizzatori)</button>';
+    html += '<button onclick="document.getElementById(\'ocr-status\').style.display=\'none\'" style="width:100%;padding:12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Chiudi</button>';
     html += '</div>';
 
     statusEl.innerHTML = html;
+    // Scroll ai bottoni su mobile
+    setTimeout(function() { statusEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
 
     // Salva risultato per applicazione
     window._ocrRisultato = risultato;
@@ -625,16 +627,19 @@ function applicaOcrCassa() {
   var r = window._ocrRisultato;
   if (!r) { toast('Nessun dato OCR disponibile'); return; }
 
-  // Compila campi cassa
-  if (r.bancomat > 0) document.getElementById('cassa-bancomat').value = r.bancomat.toFixed(2);
-  if (r.nexi > 0) document.getElementById('cassa-nexi').value = r.nexi.toFixed(2);
-  if (r.creditiEmessi > 0) document.getElementById('cassa-crediti-emessi').value = r.creditiEmessi.toFixed(2);
-  if (r.creditiRimborsati > 0) document.getElementById('cassa-rimborsi').value = r.creditiRimborsati.toFixed(2);
-  if (r.creditiRimbPrec > 0) document.getElementById('cassa-rimborsi-prec').value = r.creditiRimbPrec.toFixed(2);
+  // Applica tutti i valori (anche 0 — l'utente può modificare dopo)
+  document.getElementById('cassa-bancomat').value = r.bancomat ? r.bancomat.toFixed(2) : '';
+  document.getElementById('cassa-nexi').value = r.nexi ? r.nexi.toFixed(2) : '';
+  document.getElementById('cassa-crediti-emessi').value = r.creditiEmessi ? r.creditiEmessi.toFixed(2) : '';
+  document.getElementById('cassa-rimborsi').value = r.creditiRimborsati ? r.creditiRimborsati.toFixed(2) : '';
+  document.getElementById('cassa-rimborsi-prec').value = r.creditiRimbPrec ? r.creditiRimbPrec.toFixed(2) : '';
 
   calcolaCassa();
   toast('✅ Dati scontrino applicati alla cassa!');
   document.getElementById('ocr-status').style.display = 'none';
+  // Scroll al form cassa per vedere i valori inseriti
+  var cassaForm = document.getElementById('cassa-bancomat');
+  if (cassaForm) cassaForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function applicaOcrLetture() {
