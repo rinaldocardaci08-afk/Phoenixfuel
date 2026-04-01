@@ -1,79 +1,85 @@
-var CACHE_NAME = 'phoenixfuel-v5';
-var APP_SHELL = [
+var CACHE_NAME = 'phoenixfuel-v31';
+var FILES_TO_CACHE = [
   '/',
   '/index.html',
-  '/login.html',
   '/style.css',
+  '/login.html',
+  '/manifest.json',
   '/pf-config.js',
   '/pf-ordini.js',
   '/pf-deposito.js',
   '/pf-anagrafica.js',
-  '/pf-stazione.js',
+  '/pf-stz-core.js',
+  '/pf-stz-letture.js',
+  '/pf-stz-marginalita.js',
+  '/pf-stz-magazzino.js',
+  '/pf-stz-cassa.js',
+  '/pf-stz-report.js',
+  '/pf-stz-foglio.js',
+  '/pf-stz-giacenze.js',
   '/pf-logistica.js',
   '/pf-admin.js',
   '/pf-dashboard.js',
+  '/pf-home.js',
   '/pf-benchmark.js',
+  '/pf-futures.js',
   '/pf-finanze.js',
+  '/pf-allegati.js',
   '/pf-system.js',
-  '/manifest.json'
-];
-var CDN_CACHE = 'phoenixfuel-cdn-v5';
-var CDN_URLS = [
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
-  'https://cdn.jsdelivr.net/npm/chart.js@4',
-  'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+  '/pf-push.js',
+  '/pf-test.js',
+  '/stz-sortable.js'
 ];
 
-self.addEventListener('install', function(e) {
-  e.waitUntil(
-    Promise.all([
-      caches.open(CACHE_NAME).then(function(cache) { return cache.addAll(APP_SHELL); }),
-      caches.open(CDN_CACHE).then(function(cache) { return cache.addAll(CDN_URLS); })
-    ]).then(function() { self.skipWaiting(); })
+self.addEventListener('install', function(event) {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(function(cache) {
+      return cache.addAll(FILES_TO_CACHE).catch(function(err) {
+        console.warn('SW: cache addAll parziale, continuo...', err);
+        return Promise.all(
+          FILES_TO_CACHE.map(function(url) {
+            return cache.add(url).catch(function() {
+              console.warn('SW: skip cache per', url);
+            });
+          })
+        );
+      });
+    })
   );
+  self.skipWaiting();
 });
 
-self.addEventListener('activate', function(e) {
-  e.waitUntil(
-    caches.keys().then(function(names) {
+self.addEventListener('activate', function(event) {
+  event.waitUntil(
+    caches.keys().then(function(keys) {
       return Promise.all(
-        names.filter(function(n) { return n !== CACHE_NAME && n !== CDN_CACHE; })
-             .map(function(n) { return caches.delete(n); })
+        keys.filter(function(k) { return k !== CACHE_NAME; })
+            .map(function(k) { return caches.delete(k); })
       );
-    }).then(function() { self.clients.claim(); })
+    })
   );
+  self.clients.claim();
 });
 
-self.addEventListener('fetch', function(e) {
-  var url = new URL(e.request.url);
-  if (url.hostname.includes('supabase')) return;
-  if (url.hostname.includes('cdn.jsdelivr.net') || url.hostname.includes('cdnjs.cloudflare.com')) {
-    e.respondWith(
-      caches.match(e.request).then(function(cached) {
-        return cached || fetch(e.request).then(function(resp) {
-          var clone = resp.clone();
-          caches.open(CDN_CACHE).then(function(c) { c.put(e.request, clone); });
-          return resp;
-        });
-      })
+self.addEventListener('fetch', function(event) {
+  var url = event.request.url;
+  if (url.indexOf('supabase.co') >= 0 || url.indexOf('googleapis.com') >= 0 || url.indexOf('cdn') >= 0) {
+    event.respondWith(
+      fetch(event.request).catch(function() { return caches.match(event.request); })
     );
     return;
   }
-  if (url.origin === self.location.origin) {
-    e.respondWith(
-      fetch(e.request).then(function(resp) {
-        if (resp.status === 200) {
-          var clone = resp.clone();
-          caches.open(CACHE_NAME).then(function(c) { c.put(e.request, clone); });
-        }
-        return resp;
-      }).catch(function() {
-        return caches.match(e.request).then(function(cached) {
-          return cached || caches.match('/index.html');
-        });
-      })
-    );
-    return;
-  }
+  event.respondWith(
+    fetch(event.request).then(function(response) {
+      if (response && response.status === 200) {
+        var clone = response.clone();
+        caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
+      }
+      return response;
+    }).catch(function() {
+      return caches.match(event.request).then(function(r) {
+        return r || new Response('Offline — ricarica quando torni online', { headers: { 'Content-Type': 'text/html' } });
+      });
+    })
+  );
 });
