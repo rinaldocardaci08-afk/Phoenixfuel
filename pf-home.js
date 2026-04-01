@@ -65,13 +65,13 @@ async function caricaHome() {
 
   window._bachecaPosts = posts;
   var isAdmin = utenteCorrente && utenteCorrente.ruolo === 'admin';
-  var html = '';
+  var html = '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px" id="bacheca-grid">';
   posts.forEach(function(p, idx) {
     var dataFmt = new Date(p.created_at).toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
     var prioritaStyle = '';
     var prioritaBadge = '';
-    if (p.priorita === 'urgente') { prioritaStyle = 'border-left:4px solid #E24B4A;border-radius:0'; prioritaBadge = '<span style="font-size:10px;background:#E24B4A;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">URGENTE</span> '; }
-    else if (p.priorita === 'importante') { prioritaStyle = 'border-left:4px solid #D4A017;border-radius:0'; prioritaBadge = '<span style="font-size:10px;background:#D4A017;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">IMPORTANTE</span> '; }
+    if (p.priorita === 'urgente') { prioritaStyle = 'border-left:4px solid #E24B4A;border-radius:0;'; prioritaBadge = '<span style="font-size:10px;background:#E24B4A;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">URGENTE</span> '; }
+    else if (p.priorita === 'importante') { prioritaStyle = 'border-left:4px solid #D4A017;border-radius:0;'; prioritaBadge = '<span style="font-size:10px;background:#D4A017;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">IMPORTANTE</span> '; }
     var pinnedBadge = p.pinned ? '<span style="font-size:10px;background:#378ADD;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">📌 FISSATO</span> ' : '';
     var tipoBadge = '';
     if (p.tipo === 'avviso') tipoBadge = '⚠️ ';
@@ -92,7 +92,9 @@ async function caricaHome() {
       }
     }
 
-    var dragAttr = isAdmin ? ' draggable="true" ondragstart="_dragPost(event,' + idx + ')" ondragover="_dragOverPost(event)" ondrop="_dropPost(event,' + idx + ')" style="cursor:grab;margin-bottom:12px;transition:opacity 0.2s;' + prioritaStyle + '"' : ' style="margin-bottom:12px;' + prioritaStyle + '"';
+    var isHalf = p.dimensione === 'half';
+    var gridCol = isHalf ? '' : 'grid-column:1/-1;';
+    var dragAttr = isAdmin ? ' draggable="true" ondragstart="_dragPost(event,' + idx + ')" ondragover="_dragOverPost(event)" ondrop="_dropPost(event,' + idx + ')" style="cursor:grab;transition:opacity 0.2s;' + gridCol + prioritaStyle + '"' : ' style="' + gridCol + prioritaStyle + '"';
 
     html += '<div class="card" data-post-idx="' + idx + '"' + dragAttr + '>';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
@@ -100,6 +102,7 @@ async function caricaHome() {
     if (isAdmin) {
       html += '<div style="display:flex;gap:4px;align-items:center">';
       html += '<span style="font-size:14px;color:var(--text-muted);cursor:grab;padding:0 4px" title="Trascina per riordinare">⠿</span>';
+      html += '<button class="btn-edit" title="' + (isHalf ? 'Espandi a tutta larghezza' : 'Riduci a metà') + '" onclick="toggleDimensionePost(\'' + p.id + '\',\'' + (isHalf ? 'full' : 'half') + '\')">' + (isHalf ? '⬜' : '◻') + '</button>';
       html += '<button class="btn-edit" title="Fissa/Sfissa" onclick="togglePinPost(\'' + p.id + '\',' + !p.pinned + ')">📌</button>';
       if (isTimer) {
         var tAtt = timerData && timerData.attivo !== false;
@@ -174,7 +177,11 @@ async function caricaHome() {
     html += '<div style="font-size:11px;color:var(--text-muted)">' + esc(p.autore_nome || 'Admin') + ' — ' + dataFmt + '</div>';
     html += '</div>';
   });
+  html += '</div>';
   container.innerHTML = html;
+  // Mobile: 1 colonna
+  var grid = document.getElementById('bacheca-grid');
+  if (grid && window.innerWidth < 640) grid.style.gridTemplateColumns = '1fr';
   _startTimerTick();
 }
 
@@ -208,11 +215,11 @@ document.addEventListener('dragend', function() {
 
 // ── ADMIN: Form post ──
 function apriFormPost(postId) {
-  var titolo = '', contenuto = '', tipo = 'nota', priorita = 'normale', pinned = false;
+  var titolo = '', contenuto = '', tipo = 'nota', priorita = 'normale', pinned = false, dimensione = 'full';
   if (postId && window._editPost) {
     var p = window._editPost;
     titolo = p.titolo || ''; contenuto = p.contenuto || ''; tipo = p.tipo || 'nota';
-    priorita = p.priorita || 'normale'; pinned = !!p.pinned;
+    priorita = p.priorita || 'normale'; pinned = !!p.pinned; dimensione = p.dimensione || 'full';
   }
   window._postAllegati = [];
   if (postId && window._editPost && window._editPost.allegato_url) {
@@ -237,6 +244,7 @@ function apriFormPost(postId) {
   });
   html += '</select></div>';
   html += '<div class="form-group" style="flex:0"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="post-pinned" ' + (pinned ? 'checked' : '') + ' /> 📌 Fissa</label></div>';
+  html += '<div class="form-group" style="flex:1;min-width:140px"><label>Dimensione</label><select id="post-dimensione" style="font-size:13px;padding:8px 10px"><option value="full"' + (dimensione==='full'?' selected':'') + '>⬜ Intero</option><option value="half"' + (dimensione==='half'?' selected':'') + '>◻ Metà</option></select></div>';
   html += '</div>';
   html += '<div class="form-group"><label>Contenuto</label><textarea id="post-contenuto" rows="6" placeholder="Scrivi il contenuto... (**grassetto**, *corsivo*)" style="font-size:14px;padding:10px 14px;line-height:1.5">' + esc(contenuto) + '</textarea></div>';
   html += '<div class="form-group"><label>Allegati (foto, PDF, Excel, video YouTube)</label>';
@@ -305,6 +313,7 @@ async function salvaPost(postId) {
     titolo: titolo, contenuto: document.getElementById('post-contenuto').value,
     tipo: document.getElementById('post-tipo').value, priorita: document.getElementById('post-priorita').value,
     pinned: document.getElementById('post-pinned').checked,
+    dimensione: document.getElementById('post-dimensione').value || 'full',
     allegato_url: allegati.map(function(a){return a.url;}).join('||') || null,
     allegato_nome: allegati.map(function(a){return a.nome;}).join('||') || null,
     autore_id: utenteCorrente ? utenteCorrente.id : null,
@@ -337,6 +346,12 @@ async function eliminaPost(id) {
 async function togglePinPost(id, pinned) {
   await sb.from('bacheca_post').update({ pinned: pinned }).eq('id', id);
   toast(pinned ? '📌 Post fissato in cima' : 'Post sfissato'); caricaHome();
+}
+
+async function toggleDimensionePost(id, nuovaDim) {
+  await sb.from('bacheca_post').update({ dimensione: nuovaDim }).eq('id', id);
+  toast(nuovaDim === 'half' ? '◻ Pannello ridotto a metà' : '⬜ Pannello espanso');
+  caricaHome();
 }
 
 // ══════════════════════════════════════════════════════════════════
