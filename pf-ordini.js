@@ -100,6 +100,11 @@ async function caricaPrezzi() {
   if (!cacheFornitori.length) await caricaSelectFornitori('pr-fornitore');
   else { const s=document.getElementById('pr-fornitore'); if(s&&s.options.length<=1) { s.innerHTML='<option value="">Seleziona...</option>'+cacheFornitori.map(f=>'<option value="'+f.id+'">'+f.nome+'</option>').join(''); } }
   if (!cacheClienti.length) await caricaSelectClienti('pc-cliente');
+  // Popola dropdown singolo cliente per offerta/listino
+  var selClSingolo = document.getElementById('lp-cliente-singolo');
+  if (selClSingolo && selClSingolo.options.length <= 1 && cacheClienti.length) {
+    selClSingolo.innerHTML = '<option value="">Seleziona...</option>' + cacheClienti.map(function(c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('');
+  }
   const filtroData = document.getElementById('filtro-data-prezzi').value;
   // Sincronizza data inserimento con data visualizzata
   var prData = document.getElementById('pr-data');
