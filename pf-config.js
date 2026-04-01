@@ -253,7 +253,7 @@ function chiudiModal() { chiudiModalePermessi(); chiudiModalOverlay(); }
 function _sep(s) { return s.replace(/\./g, "'"); }
 function fmt(n) {
   const v = Number(n);
-  return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
+  return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 6, maximumFractionDigits: 6 }));
 }
 function fmtE(n) {
   const v = Number(n);
