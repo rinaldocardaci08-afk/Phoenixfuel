@@ -494,6 +494,13 @@ async function controllaFidoCliente() {
   const { data: cliente } = await sb.from('clienti').select('*').eq('id', clienteId).single();
   if (!cliente) { infoDiv.style.display = 'none'; return; }
 
+  // Auto-fill destinazione da indirizzo cliente (se vuoto)
+  var destEl = document.getElementById('ord-destinazione');
+  if (destEl && !destEl.value) {
+    var dest = [cliente.indirizzo, cliente.citta, cliente.provincia ? '(' + cliente.provincia + ')' : ''].filter(Boolean).join(', ');
+    if (dest) destEl.value = dest;
+  }
+
   // Fido
   const fidoMax = Number(cliente.fido_massimo || 0);
   if (fidoMax <= 0) { infoDiv.style.display = 'none'; return; }
@@ -605,7 +612,7 @@ async function salvaOrdine() {
   const ggPag = parseInt(document.getElementById('ord-gg').value);
   const dataOrdine = new Date(document.getElementById('ord-data').value);
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value };
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, destinazione:document.getElementById('ord-destinazione').value.trim()||null };
 
   // ═══ OFFLINE: salva nel backlog locale ═══
   if (!navigator.onLine) {
@@ -635,6 +642,7 @@ async function salvaOrdine() {
   document.getElementById('ord-trasporto-custom').value = '';
   document.getElementById('ord-margine-custom').value = '';
   document.getElementById('ord-prezzo-netto').value = '';
+  document.getElementById('ord-destinazione').value = '';
   document.getElementById('fido-cliente-info').style.display = 'none';
   document.getElementById('prev-fido-warn').style.display = 'none';
   fidoClienteCorrente = null;
@@ -654,7 +662,8 @@ function _renderRigaOrdine(r) {
   let btnCisterna = '';
   if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-  return '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+  var destHtml = r.destinazione ? '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '';
+  return '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -787,6 +796,7 @@ async function apriModaleOrdine(id) {
   html += '</select></div>';
   html += '<div class="form-group"><label>IVA %</label><select id="mod-iva"><option value="22"' + (r.iva==22?' selected':'') + '>22%</option><option value="10"' + (r.iva==10?' selected':'') + '>10%</option><option value="4"' + (r.iva==4?' selected':'') + '>4%</option></select></div>';
   html += '<div class="form-group" style="grid-column:1/-1"><label>Note</label><input type="text" id="mod-note" value="' + esc(r.note||'') + '" /></div>';
+  html += '<div class="form-group" style="grid-column:1/-1"><label>Destinazione scarico</label><input type="text" id="mod-destinazione" value="' + esc(r.destinazione||'') + '" placeholder="Indirizzo o località di consegna" /></div>';
   html += '</div>';
 
   // Preview prezzo
@@ -854,7 +864,7 @@ async function salvaModificaOrdine(id) {
   const ggPag = parseInt(document.getElementById('mod-gg').value);
   const { data: ordine } = await sb.from('ordini').select('data').eq('id', id).single();
   const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
-  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value }).eq('id', id);
+  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:document.getElementById('mod-destinazione').value.trim()||null }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   toast('Ordine aggiornato!');
   chiudiModalePermessi();

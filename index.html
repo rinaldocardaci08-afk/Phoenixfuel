@@ -257,6 +257,7 @@
               </select>
             </div>
             <div class="form-group"><label>Note</label><input type="text" id="ord-note" /></div>
+            <div class="form-group" id="grp-destinazione"><label>Destinazione scarico</label><input type="text" id="ord-destinazione" placeholder="Indirizzo o località di consegna" /></div>
           </div>
           <div class="form-preview">
             <span>Costo/L: <strong id="prev-costo">—</strong></span>
@@ -1083,10 +1084,11 @@
         <div class="stz-panel" id="stz-prezzi" style="display:none">
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Imposta prezzi pompa</div>
+            <div id="stz-prezzi-hint" style="margin-bottom:12px"></div>
             <div class="form-grid">
               <div class="form-group"><label>Data</label><input type="date" id="stz-data-prezzo" /></div>
-              <div class="form-group"><label>Gasolio €/L</label><input type="number" id="stz-prezzo-gasolio" step="0.001" placeholder="1.789" /></div>
-              <div class="form-group"><label>Benzina €/L</label><input type="number" id="stz-prezzo-benzina" step="0.001" placeholder="1.889" /></div>
+              <div class="form-group"><label>Gasolio €/L <span id="stz-hint-gasolio" style="font-size:11px;color:var(--text-muted);font-weight:400"></span></label><input type="number" id="stz-prezzo-gasolio" step="0.001" placeholder="1.789" /></div>
+              <div class="form-group"><label>Benzina €/L <span id="stz-hint-benzina" style="font-size:11px;color:var(--text-muted);font-weight:400"></span></label><input type="number" id="stz-prezzo-benzina" step="0.001" placeholder="1.889" /></div>
             </div>
             <button id="btn-salva-prezzi" class="btn-primary" onclick="salvaPrezziPompa()">💾 Salva prezzi</button>
           </div>
