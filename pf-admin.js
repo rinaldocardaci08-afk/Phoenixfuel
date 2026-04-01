@@ -33,6 +33,7 @@ const SEZIONI_SISTEMA = [
     {id:'stazione.report',label:'Report'}
   ]},
   {id:'autoconsumo',label:'Autoconsumo',icon:'🛢'},
+  {id:'home',label:'Bacheca Home',icon:'🏠'},
   {id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},
   {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
   {id:'finanze',label:'Finanze',icon:'🏦'},
