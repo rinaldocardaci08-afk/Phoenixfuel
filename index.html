@@ -382,21 +382,21 @@
           <div id="container-tabelle-prezzi"></div>
         </div>
 
-        <div class="card">
-          <div class="card-title">Inserisci prezzo giornaliero</div>
+        <div class="card" style="background:#F1EFE8;border:0.5px solid #D3D1C7">
+          <div class="card-title"><span style="background:#D4A017;color:#fff;padding:5px 16px;border-radius:8px;font-size:15px">Inserisci prezzo giornaliero</span></div>
           <div class="form-grid">
-            <div class="form-group"><label>Data</label><input type="date" id="pr-data" /></div>
-            <div class="form-group"><label>Fornitore</label><select id="pr-fornitore" onchange="caricaBasiPerFornitore()"><option value="">Seleziona...</option></select></div>
-            <div class="form-group"><label>Base di carico</label><select id="pr-base"><option value="">Nessuna (opzionale)</option></select></div>
-            <div class="form-group"><label>Prodotto</label>
-              <select id="pr-prodotto">
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Data</label><input type="date" id="pr-data" style="border:1px solid #B4B2A9" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Fornitore</label><select id="pr-fornitore" onchange="caricaBasiPerFornitore()" style="border:1px solid #B4B2A9"><option value="">Seleziona...</option></select></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Base di carico</label><select id="pr-base" style="border:1px solid #B4B2A9"><option value="">Nessuna (opzionale)</option></select></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Prodotto</label>
+              <select id="pr-prodotto" style="border:1px solid #B4B2A9">
                 <option value="">Seleziona...</option>
               </select>
             </div>
-            <div class="form-group"><label>Costo/L (€)</label><input type="number" id="pr-costo" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
-            <div class="form-group"><label>Trasporto/L (€)</label><input type="number" id="pr-trasporto" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
-            <div class="form-group"><label>Margine/L (€)</label><input type="number" id="pr-margine" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" /></div>
-            <div class="form-group"><label>IVA %</label><select id="pr-iva" onchange="aggiornaPrev()"><option value="22">22%</option><option value="10">10%</option><option value="4">4%</option></select></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Costo/L (€)</label><input type="number" id="pr-costo" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" style="border:1px solid #B4B2A9" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Trasporto/L (€)</label><input type="number" id="pr-trasporto" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" style="border:1px solid #B4B2A9" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">Margine/L (€)</label><input type="number" id="pr-margine" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" style="border:1px solid #B4B2A9" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#2C2C2A">IVA %</label><select id="pr-iva" onchange="aggiornaPrev()" style="border:1px solid #B4B2A9"><option value="22">22%</option><option value="10">10%</option><option value="4">4%</option></select></div>
           </div>
           <div class="form-preview">Prezzo IVA esclusa: <strong id="calc-noiva">€ —</strong> &nbsp;|&nbsp; Prezzo IVA inclusa: <strong id="calc-iva">€ —</strong></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
