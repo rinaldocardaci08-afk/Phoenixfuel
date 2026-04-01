@@ -49,6 +49,7 @@ async function caricaConsegne() {
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
+      azioniHtml += '<button style="font-size:10px;padding:3px 10px;background:#D85A30;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:500" onclick="apriDirottamento(\'' + r.id + '\',null)">Dirotta</button>';
 
       return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.destinazione ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + dasSemaforo + '</td><td>' + cartSemaforo + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
