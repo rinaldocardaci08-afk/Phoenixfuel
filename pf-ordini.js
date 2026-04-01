@@ -902,6 +902,254 @@ function _stampaReportOrdini(w, ordini, titolo, periodo) {
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+// ── REPORT ORDINI DEL GIORNO RAGGRUPPATO PER PRODOTTO (verticale) ──
+async function stampaOrdiniGiornoPerProdotto() {
+  var data = document.getElementById('ordini-giorno-data').value || oggiISO;
+  if (!data) { toast('Seleziona una data'); return; }
+  var w = _apriReport("Ordini " + data); if (!w) return;
+
+  var { data: ordini } = await sb.from('ordini').select('*, basi_carico(nome)').eq('data', data).neq('stato','annullato').order('cliente');
+  if (!ordini || !ordini.length) { toast('Nessun ordine per ' + data); w.close(); return; }
+
+  var PRODOTTI_ORDINE = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
+  var perProdotto = {};
+  ordini.forEach(function(o) {
+    var p = o.prodotto || 'Altro';
+    if (!perProdotto[p]) perProdotto[p] = [];
+    perProdotto[p].push(o);
+  });
+
+  // Ordina per sequenza definita
+  var prodottiOrdinati = [];
+  PRODOTTI_ORDINE.forEach(function(p) { if (perProdotto[p]) prodottiOrdinati.push(p); });
+  Object.keys(perProdotto).forEach(function(p) { if (prodottiOrdinati.indexOf(p) < 0) prodottiOrdinati.push(p); });
+
+  var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  var GIORNI = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  var giorno = GIORNI[new Date(data + 'T12:00:00').getDay()];
+
+  var totGeneraleLitri = 0, totGeneraleFatt = 0, totGeneraleMarg = 0;
+  ordini.forEach(function(o) {
+    totGeneraleLitri += Number(o.litri);
+    totGeneraleFatt += prezzoConIva(o) * Number(o.litri);
+    totGeneraleMarg += Number(o.margine) * Number(o.litri);
+  });
+
+  var coloriProdotto = { 'Gasolio Autotrazione':'#BA7517', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC' };
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ordini ' + data + '</title>';
+  html += '<style>';
+  html += 'body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm;color:#1a1a18}';
+  html += '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}.product-section{page-break-inside:avoid}}';
+  html += 'table{width:100%;border-collapse:collapse;margin-bottom:6px}';
+  html += 'th{padding:5px 6px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #ddd;text-align:center}';
+  html += 'td{padding:5px 6px;border:1px solid #ddd;font-size:10px}';
+  html += '.m{font-family:Courier New,monospace;text-align:right}';
+  html += '.kpi{display:inline-block;border-radius:6px;padding:8px 16px;text-align:center;margin-right:8px;margin-bottom:6px}';
+  html += '</style></head><body>';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #D4A017;padding-bottom:8px;margin-bottom:12px">';
+  html += '<div><div style="font-size:20px;font-weight:bold;color:#D4A017">ORDINI DEL GIORNO</div>';
+  html += '<div style="font-size:14px;color:#333;margin-top:3px;font-weight:500">' + giorno + ' ' + new Date(data + 'T12:00:00').getDate() + ' ' + dataFmt.split(' ').slice(2).join(' ') + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:15px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:9px;color:#666">Vibo Valentia — Calabria</div>';
+  html += '<div style="font-size:9px;color:#666">Stampato: ' + new Date().toLocaleDateString('it-IT') + ' ' + new Date().toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}) + '</div></div></div>';
+
+  // KPI generali
+  html += '<div style="margin-bottom:14px">';
+  html += '<div class="kpi" style="background:#FDF3D0;border:1px solid #D4A017"><div style="font-size:8px;color:#633806;text-transform:uppercase">Ordini totali</div><div style="font-size:20px;font-weight:bold">' + ordini.length + '</div></div>';
+  html += '<div class="kpi" style="background:#FDF3D0;border:1px solid #D4A017"><div style="font-size:8px;color:#633806;text-transform:uppercase">Litri totali</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totGeneraleLitri) + '</div></div>';
+  html += '<div class="kpi" style="background:#EAF3DE;border:1px solid #639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Fatturato IVA incl.</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totGeneraleFatt) + '</div></div>';
+  html += '<div class="kpi" style="background:#EAF3DE;border:1px solid #639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine totale</div><div style="font-size:20px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totGeneraleMarg) + '</div></div>';
+  html += '</div>';
+
+  // Sezioni per prodotto
+  prodottiOrdinati.forEach(function(prodotto) {
+    var lista = perProdotto[prodotto];
+    var col = coloriProdotto[prodotto] || '#888';
+    var totLitri = 0, totFatt = 0, totMarg = 0;
+    lista.forEach(function(o) {
+      totLitri += Number(o.litri);
+      totFatt += prezzoConIva(o) * Number(o.litri);
+      totMarg += Number(o.margine) * Number(o.litri);
+    });
+
+    html += '<div class="product-section" style="margin-bottom:16px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;border-bottom:2px solid ' + col + ';padding-bottom:4px;margin-bottom:6px">';
+    html += '<div style="width:12px;height:12px;border-radius:50%;background:' + col + '"></div>';
+    html += '<div style="font-size:14px;font-weight:bold;color:' + col + ';text-transform:uppercase">' + prodotto + '</div>';
+    html += '<div style="margin-left:auto;font-size:11px;color:#666">' + lista.length + ' ordini · <strong style="font-family:Courier New,monospace">' + fmtL(totLitri) + '</strong> · Margine: <strong style="font-family:Courier New,monospace;color:#639922">' + fmtE(totMarg) + '</strong></div>';
+    html += '</div>';
+
+    html += '<table><thead><tr style="background:' + col + '15">';
+    html += '<th style="width:24px;color:' + col + '">#</th>';
+    html += '<th style="text-align:left;color:' + col + '">Cliente</th>';
+    html += '<th style="text-align:left;color:' + col + '">Destinazione</th>';
+    html += '<th style="color:' + col + '">Litri</th>';
+    html += '<th style="color:' + col + '">Costo/L</th>';
+    html += '<th style="color:' + col + '">Trasp/L</th>';
+    html += '<th style="color:' + col + '">Margine/L</th>';
+    html += '<th style="color:' + col + '">Prezzo netto</th>';
+    html += '<th style="color:' + col + '">Prezzo IVA</th>';
+    html += '<th style="color:' + col + '">Totale IVA</th>';
+    html += '<th style="color:' + col + '">Fornitore</th>';
+    html += '</tr></thead><tbody>';
+
+    lista.forEach(function(o, i) {
+      var pL = prezzoConIva(o);
+      var pNetto = Number(o.costo_litro) + Number(o.trasporto_litro||0) + Number(o.margine);
+      var tot = pL * Number(o.litri);
+      var dest = o.destinazione || '—';
+      html += '<tr' + (i % 2 ? ' style="background:#fafaf5"' : '') + '>';
+      html += '<td style="text-align:center;color:#999">' + (i+1) + '</td>';
+      html += '<td style="font-weight:500">' + esc(o.cliente||o.fornitore||'—') + '</td>';
+      html += '<td style="font-size:9px;color:#555">' + esc(dest) + '</td>';
+      html += '<td class="m" style="font-weight:600">' + fmtL(o.litri) + '</td>';
+      html += '<td class="m">' + fmt(o.costo_litro) + '</td>';
+      html += '<td class="m">' + fmt(o.trasporto_litro) + '</td>';
+      html += '<td class="m" style="color:#639922">' + fmt(o.margine) + '</td>';
+      html += '<td class="m">' + fmt(pNetto) + '</td>';
+      html += '<td class="m" style="font-weight:600">' + fmt(pL) + '</td>';
+      html += '<td class="m" style="font-weight:600">' + fmtE(tot) + '</td>';
+      html += '<td style="font-size:9px">' + esc(o.fornitore||'—') + '</td>';
+      html += '</tr>';
+    });
+
+    // Riga totale prodotto
+    html += '<tr style="border-top:2px solid ' + col + ';font-weight:bold;background:' + col + '10">';
+    html += '<td colspan="3" style="padding:6px;border:1px solid #ddd">Totale ' + prodotto + ' — ' + lista.length + ' ordini</td>';
+    html += '<td class="m" style="padding:6px;border:1px solid #ddd;font-size:12px">' + fmtL(totLitri) + '</td>';
+    html += '<td colspan="5" style="border:1px solid #ddd"></td>';
+    html += '<td class="m" style="padding:6px;border:1px solid #ddd;font-size:12px">' + fmtE(totFatt) + '</td>';
+    html += '<td style="border:1px solid #ddd"></td>';
+    html += '</tr></tbody></table></div>';
+  });
+
+  // Footer totale generale
+  html += '<div style="border-top:3px solid #D4A017;padding-top:8px;margin-top:12px;display:flex;justify-content:space-between;align-items:center">';
+  html += '<div style="font-size:13px;font-weight:bold">TOTALE GENERALE: ' + ordini.length + ' ordini — ' + fmtL(totGeneraleLitri) + '</div>';
+  html += '<div style="font-size:13px;font-weight:bold;color:#639922">Margine: ' + fmtE(totGeneraleMarg) + '</div>';
+  html += '</div>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D4A017;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+// ── STAMPA LISTINO PREZZI FORNITORI DEL GIORNO ──
+async function stampaListinoPrezziGiorno() {
+  var data = document.getElementById('filtro-data-prezzi').value || oggiISO;
+  if (!data) { toast('Seleziona una data'); return; }
+  var w = _apriReport("Listino prezzi " + data); if (!w) return;
+
+  var { data: prezzi } = await sb.from('prezzi').select('*, basi_carico(nome)').eq('data', data).order('fornitore');
+  if (!prezzi || !prezzi.length) { toast('Nessun prezzo per ' + data); w.close(); return; }
+
+  var PRODOTTI_ORDINE = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
+  var coloriProdotto = { 'Gasolio Autotrazione':'#BA7517', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC' };
+  var perProdotto = {};
+  prezzi.forEach(function(p) {
+    var prod = p.prodotto || 'Altro';
+    if (!perProdotto[prod]) perProdotto[prod] = [];
+    perProdotto[prod].push(p);
+  });
+
+  var prodottiOrdinati = [];
+  PRODOTTI_ORDINE.forEach(function(p) { if (perProdotto[p]) prodottiOrdinati.push(p); });
+  Object.keys(perProdotto).forEach(function(p) { if (prodottiOrdinati.indexOf(p) < 0) prodottiOrdinati.push(p); });
+
+  var GIORNI = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  var MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  var dt = new Date(data + 'T12:00:00');
+  var dataFmt = GIORNI[dt.getDay()] + ' ' + dt.getDate() + ' ' + MESI[dt.getMonth()] + ' ' + dt.getFullYear();
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Listino prezzi ' + data + '</title>';
+  html += '<style>';
+  html += 'body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:14mm;color:#1a1a18}';
+  html += '@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}.product-section{page-break-inside:avoid}}';
+  html += 'table{width:100%;border-collapse:collapse;margin-bottom:8px}';
+  html += 'th{padding:8px 10px;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #ddd;text-align:center}';
+  html += 'td{padding:8px 10px;border:1px solid #ddd}';
+  html += '.m{font-family:Courier New,monospace;text-align:right}';
+  html += '</style></head><body>';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #D4A017;padding-bottom:10px;margin-bottom:16px">';
+  html += '<div><div style="font-size:22px;font-weight:bold;color:#D4A017">LISTINO PREZZI GIORNALIERO</div>';
+  html += '<div style="font-size:15px;color:#333;margin-top:4px;font-weight:500">' + dataFmt + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:9px;color:#666">Vibo Valentia — Calabria</div>';
+  html += '<div style="font-size:9px;color:#666">Stampato: ' + new Date().toLocaleDateString('it-IT') + ' ' + new Date().toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}) + '</div></div></div>';
+
+  // KPI
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:8px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Prodotti</div><div style="font-size:20px;font-weight:bold">' + prodottiOrdinati.length + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:8px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Quotazioni</div><div style="font-size:20px;font-weight:bold">' + prezzi.length + '</div></div>';
+  html += '</div>';
+
+  // Sezioni per prodotto
+  prodottiOrdinati.forEach(function(prodotto) {
+    var lista = perProdotto[prodotto];
+    var col = coloriProdotto[prodotto] || '#888';
+
+    // Ordina per prezzo (miglior prezzo prima)
+    lista.sort(function(a, b) { return Number(a.costo_litro) - Number(b.costo_litro); });
+    var best = lista.length > 0 ? Number(lista[0].costo_litro) : 0;
+
+    html += '<div class="product-section" style="margin-bottom:22px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;border-bottom:2px solid ' + col + ';padding-bottom:5px;margin-bottom:8px">';
+    html += '<div style="width:14px;height:14px;border-radius:50%;background:' + col + '"></div>';
+    html += '<div style="font-size:16px;font-weight:bold;color:' + col + ';text-transform:uppercase">' + prodotto + '</div>';
+    html += '<div style="margin-left:auto;font-size:11px;color:#666">' + lista.length + ' quotazion' + (lista.length === 1 ? 'e' : 'i') + '</div>';
+    html += '</div>';
+
+    html += '<table><thead><tr style="background:' + col + '12">';
+    html += '<th style="text-align:left;color:' + col + '">Fornitore</th>';
+    html += '<th style="text-align:left;color:' + col + '">Base di carico</th>';
+    html += '<th style="color:' + col + '">Prezzo €/L</th>';
+    html += '<th style="color:' + col + '">Trasporto €/L</th>';
+    html += '<th style="color:' + col + '">Costo totale €/L</th>';
+    html += '<th style="color:' + col + '">IVA</th>';
+    html += '<th style="color:' + col + '">Prezzo IVA incl.</th>';
+    html += '</tr></thead><tbody>';
+
+    lista.forEach(function(r, i) {
+      var costoTot = Number(r.costo_litro) + Number(r.trasporto_litro || 0);
+      var ivaPerc = Number(r.iva || 22);
+      var prezzoIva = costoTot * (1 + ivaPerc / 100);
+      var isBest = Number(r.costo_litro) === best && lista.length > 1;
+      var bestTag = isBest ? ' <span style="font-size:8px;background:#639922;color:#fff;padding:1px 6px;border-radius:8px;vertical-align:middle">BEST</span>' : '';
+      var bgRow = isBest ? 'background:#EAF3DE' : (i % 2 ? 'background:#fafaf5' : '');
+
+      html += '<tr style="' + bgRow + '">';
+      html += '<td style="font-weight:600;font-size:12px">' + esc(r.fornitore) + bestTag + '</td>';
+      html += '<td>' + esc(r.basi_carico ? r.basi_carico.nome : '—') + '</td>';
+      html += '<td class="m" style="font-size:15px;font-weight:bold;color:' + col + '">' + Number(r.costo_litro).toFixed(4) + '</td>';
+      html += '<td class="m">' + Number(r.trasporto_litro || 0).toFixed(4) + '</td>';
+      html += '<td class="m" style="font-weight:600;font-size:13px">' + costoTot.toFixed(4) + '</td>';
+      html += '<td style="text-align:center">' + ivaPerc + '%</td>';
+      html += '<td class="m" style="font-weight:500;font-size:13px">' + prezzoIva.toFixed(4) + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+  });
+
+  // Footer
+  html += '<div style="border-top:2px solid #ddd;padding-top:10px;margin-top:12px;font-size:9px;color:#999;text-align:center">Listino prezzi fornitori del ' + new Date(data + 'T12:00:00').toLocaleDateString('it-IT') + ' — Phoenix Fuel SRL — Uso interno riservato</div>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D4A017;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
 // Mantieni compatibilità vecchia funzione
 function filtraOrdini() { filtraOrdiniStorico(); }
 
