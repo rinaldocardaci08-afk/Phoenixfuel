@@ -249,11 +249,11 @@
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Margine/L (€)</label><input type="number" id="ord-margine-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevDaMargine()" style="border:1px solid #85B7EB" /></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Prezzo/L netto (€)</label><input type="number" id="ord-prezzo-netto" step="0.0001" placeholder="Calc. automatico" oninput="aggiornaPrevDaPrezzo()" style="border:1px solid #85B7EB" /></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Giorni pagamento</label><select id="ord-gg" style="border:1px solid #85B7EB"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
-            <div class="form-group"><label style="font-weight:700;color:#0C447C">Stato</label>
-              <select id="ord-stato" style="border:1px solid #85B7EB">
-                <option value="in attesa">In attesa</option>
-                <option value="confermato">Confermato</option>
-                <option value="programmato">Programmato</option>
+            <div class="form-group"><label style="font-weight:700;color:#0C447C">Stato <span onclick="_mostraLegendaStati(event)" style="cursor:pointer;font-size:14px;vertical-align:middle" title="Legenda stati">ℹ️</span></label>
+              <select id="ord-stato" style="border:2px solid #D4A017;background:#FAEEDA;color:#633806;font-weight:600" onchange="_applicaStatoColore('ord-stato')">
+                <option value="in attesa" style="background:#FAEEDA;color:#633806;font-weight:600">In attesa</option>
+                <option value="confermato" style="background:#EAF3DE;color:#27500A;font-weight:600">Confermato</option>
+                <option value="programmato" style="background:#E6F1FB;color:#0C447C;font-weight:600">Programmato</option>
               </select>
             </div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Note</label><input type="text" id="ord-note" style="border:1px solid #85B7EB" /></div>

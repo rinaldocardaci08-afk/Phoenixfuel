@@ -271,6 +271,38 @@ function badgeStato(stato) {
   const labels = { 'entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
   return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(labels[stato]||stato) + '</span>';
 }
+
+var _statoColori = {
+  'in attesa':  { bg:'#FAEEDA', color:'#633806', border:'#D4A017' },
+  'confermato': { bg:'#EAF3DE', color:'#27500A', border:'#639922' },
+  'programmato':{ bg:'#E6F1FB', color:'#0C447C', border:'#378ADD' },
+  'annullato':  { bg:'#FCEBEB', color:'#791F1F', border:'#E24B4A' }
+};
+
+function _applicaStatoColore(selectId) {
+  var sel = document.getElementById(selectId); if (!sel) return;
+  var c = _statoColori[sel.value] || { bg:'var(--bg)', color:'var(--text)', border:'var(--border)' };
+  sel.style.background = c.bg; sel.style.color = c.color; sel.style.border = '2px solid ' + c.border; sel.style.fontWeight = '600';
+}
+
+function _mostraLegendaStati(ev) {
+  var existing = document.getElementById('popup-legenda-stati');
+  if (existing) { existing.remove(); return; }
+  var popup = document.createElement('div');
+  popup.id = 'popup-legenda-stati';
+  popup.style.cssText = 'position:fixed;z-index:9999;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;max-width:340px;font-size:12px;line-height:1.8;box-shadow:0 4px 20px rgba(0,0,0,0.15)';
+  var rect = ev.target.getBoundingClientRect();
+  popup.style.top = (rect.bottom + 8) + 'px';
+  popup.style.left = Math.max(10, rect.left - 100) + 'px';
+  popup.innerHTML = '<div style="font-size:14px;font-weight:600;margin-bottom:8px">Legenda stati ordine</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#FAEEDA;border:1px solid #D4A017"></span><strong style="color:#633806">In attesa</strong> — Ordine inserito, non ancora confermato. Visibile in "Ordini non processati". Può essere riprogrammato o annullato.</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#E6F1FB;border:1px solid #378ADD"></span><strong style="color:#0C447C">Programmato</strong> — Ordine pianificato per una data specifica. Pronto per essere caricato su un viaggio.</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#EAF3DE;border:1px solid #639922"></span><strong style="color:#27500A">Confermato</strong> — Consegna completata. Lo scarico dal deposito è avvenuto. Entra nel calcolo vendite e margini.</div>' +
+    '<div style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#FCEBEB;border:1px solid #E24B4A"></span><strong style="color:#791F1F">Annullato</strong> — Ordine cancellato. Non entra nei calcoli. Lo scarico deposito viene stornato.</div>' +
+    '<div style="margin-top:10px;text-align:right"><button onclick="document.getElementById(\'popup-legenda-stati\').remove()" style="font-size:11px;padding:4px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  document.body.appendChild(popup);
+  setTimeout(function() { document.addEventListener('click', function _chiudi(e) { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', _chiudi); } }); }, 100);
+}
 function badgeRuolo(ruolo) {
   const map = { 'admin':'purple','operatore':'blue','contabilita':'green','logistica':'amber','cliente':'gray' };
   return '<span class="badge ' + (map[esc(ruolo)]||'gray') + '">' + esc(ruolo) + '</span>';
