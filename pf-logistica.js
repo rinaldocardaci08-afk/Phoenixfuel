@@ -638,21 +638,31 @@ async function apriDettaglioCarico(caricoId) {
 }
 
 async function confermaOrdineSingoloCarico(ordineId, caricoId) {
-  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-  if (!ordine) { toast('Ordine non trovato'); return; }
-  if (!confirm('Confermare consegna di ' + fmtL(ordine.litri) + ' a ' + ordine.cliente + '?')) return;
-  if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
-    await confermaUscitaDeposito(ordineId, true);
+  var { data: ordine, error: errFetch } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (errFetch || !ordine) { toast('Ordine non trovato: ' + (errFetch ? errFetch.message : '')); return; }
+  if (ordine.stato === 'confermato') { toast('Ordine già confermato'); chiudiModalePermessi(); apriDettaglioCarico(caricoId); return; }
+  if (!confirm('Confermare consegna di ' + fmtL(ordine.litri) + ' di ' + ordine.prodotto + ' a ' + ordine.cliente + '?')) return;
+  
+  var errore = null;
+  // Se ha già cisterna_id assegnata → lo scarico è già stato fatto, conferma diretto
+  if (ordine.cisterna_id) {
+    var { error: errUpd } = await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+    if (errUpd) errore = errUpd.message;
+  } else if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
+    try { await confermaUscitaDeposito(ordineId, true); } catch(e) { errore = e.message; }
   } else {
-    await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+    var { error: errUpd2 } = await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+    if (errUpd2) errore = errUpd2.message;
   }
+  
+  if (errore) { toast('Errore conferma: ' + errore); return; }
   toast('✅ Ordine confermato!');
   chiudiModalePermessi();
-  apriDettaglioCarico(caricoId);
+  setTimeout(function() { apriDettaglioCarico(caricoId); }, 300);
 }
 
 async function confermaTutteConsegneCarico(caricoId) {
-  const { data: caricoOrdini } = await sb.from('carico_ordini').select('ordine_id, ordini(id,stato,fornitore)').eq('carico_id', caricoId);
+  const { data: caricoOrdini } = await sb.from('carico_ordini').select('ordine_id, ordini(id,stato,fornitore,cisterna_id)').eq('carico_id', caricoId);
   if (!caricoOrdini || !caricoOrdini.length) { toast('Nessun ordine nel carico'); return; }
   const daConfermare = caricoOrdini.filter(co => co.ordini && co.ordini.stato !== 'confermato');
   if (!daConfermare.length) { toast('Tutti gli ordini sono già confermati'); return; }
@@ -660,7 +670,9 @@ async function confermaTutteConsegneCarico(caricoId) {
 
   let confermati = 0;
   for (const co of daConfermare) {
-    if (co.ordini.fornitore && co.ordini.fornitore.toLowerCase().includes('phoenix')) {
+    if (co.ordini.cisterna_id) {
+      await sb.from('ordini').update({ stato:'confermato' }).eq('id', co.ordine_id);
+    } else if (co.ordini.fornitore && co.ordini.fornitore.toLowerCase().includes('phoenix')) {
       await confermaUscitaDeposito(co.ordine_id, true);
     } else {
       await sb.from('ordini').update({ stato:'confermato' }).eq('id', co.ordine_id);

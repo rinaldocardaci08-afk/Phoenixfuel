@@ -64,13 +64,15 @@ async function confermaOrdineConsegna(ordineId) {
   if (!ordine) { toast('Ordine non trovato'); return; }
   if (!confirm('Confermare la consegna di ' + fmtL(ordine.litri) + ' di ' + ordine.prodotto + ' a ' + ordine.cliente + '?')) return;
 
-  // Se l'ordine viene dal deposito PhoenixFuel, scarica anche dalla cisterna
-  if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
+  if (ordine.cisterna_id) {
+    // Già scaricato dal deposito, conferma diretto
+    await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+  } else if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
     await confermaUscitaDeposito(ordineId, true);
   } else {
     await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
   }
-  toast('Ordine confermato!');
+  toast('✅ Ordine confermato!');
   caricaConsegne();
 }
 
