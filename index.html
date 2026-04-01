@@ -280,6 +280,7 @@
               <input type="date" id="ordini-giorno-data" onchange="caricaOrdiniGiorno();_labelGiorno('ordini-giorno-data')" style="font-size:16px;font-weight:600;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text)" />
               <button onclick="navigaOrdiniGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               <span id="ordini-giorno-count" style="font-size:13px;color:var(--text-muted)"></span>
+              <button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#6B5FCC" onclick="stampaOrdiniGiorno()">🖨️ PDF</button>
             </div>
           </div>
           <!-- Backlog ordini offline -->
@@ -340,9 +341,18 @@
               <select id="filtro-stato-ordini" onchange="filtraOrdiniStorico()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="">Tutti gli stati</option><option value="in attesa">In attesa</option><option value="confermato">Confermato</option><option value="programmato">Programmato</option><option value="annullato">Annullato</option>
               </select>
+              <select id="filtro-anno-ordini" onchange="_setMeseAnnoStorico()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Anno</option>
+              </select>
+              <select id="filtro-mese-ordini" onchange="_setMeseAnnoStorico()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Mese</option>
+                <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option><option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option><option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+              </select>
               <input type="date" id="filtro-da-ordini" onchange="caricaStoricoOrdini()" title="Da data" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
               <input type="date" id="filtro-a-ordini" onchange="caricaStoricoOrdini()" title="A data" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
               <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="caricaStoricoOrdini()">🔍 Cerca</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaStoricoOrdini()">🖨️ PDF</button>
             </div>
             <div style="overflow-x:auto">
               <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>

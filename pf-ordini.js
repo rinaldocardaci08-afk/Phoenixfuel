@@ -731,6 +731,7 @@ function toggleStoricoOrdini() {
   if (body.style.display === 'none') {
     body.style.display = '';
     toggle.textContent = '▲ Chiudi';
+    _initAnnoStorico();
   } else {
     body.style.display = 'none';
     toggle.textContent = '▼ Espandi';
@@ -782,6 +783,124 @@ function _renderStoricoFiltrato() {
 }
 
 function filtraOrdiniStorico() { _renderStoricoFiltrato(); }
+
+// ── Filtro mese/anno storico ──
+function _setMeseAnnoStorico() {
+  var anno = document.getElementById('filtro-anno-ordini').value;
+  var mese = document.getElementById('filtro-mese-ordini').value;
+  if (anno && mese) {
+    var ultimo = new Date(parseInt(anno), parseInt(mese), 0).getDate();
+    document.getElementById('filtro-da-ordini').value = anno + '-' + mese + '-01';
+    document.getElementById('filtro-a-ordini').value = anno + '-' + mese + '-' + String(ultimo).padStart(2,'0');
+    caricaStoricoOrdini();
+  } else if (anno) {
+    document.getElementById('filtro-da-ordini').value = anno + '-01-01';
+    document.getElementById('filtro-a-ordini').value = anno + '-12-31';
+    caricaStoricoOrdini();
+  }
+}
+
+function _initAnnoStorico() {
+  var sel = document.getElementById('filtro-anno-ordini');
+  if (!sel || sel.options.length > 1) return;
+  var ac = new Date().getFullYear();
+  for (var y = ac; y >= ac - 5; y--) sel.innerHTML += '<option value="' + y + '">' + y + '</option>';
+}
+
+// ── STAMPA ORDINI DEL GIORNO ──
+async function stampaOrdiniGiorno() {
+  var w = _apriReport("Ordini del giorno"); if (!w) return;
+  var data = document.getElementById('ordini-giorno-data').value;
+  if (!data) { toast('Seleziona una data'); return; }
+  var { data: ordini } = await sb.from('ordini').select('*, basi_carico(nome)').eq('data', data).order('created_at',{ascending:false});
+  if (!ordini || !ordini.length) { toast('Nessun ordine per questa data'); return; }
+  var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  _stampaReportOrdini(w, ordini, 'Ordini del giorno', dataFmt);
+}
+
+// ── STAMPA STORICO ORDINI ──
+function stampaStoricoOrdini() {
+  var w = _apriReport("Storico ordini"); if (!w) return;
+  var ordini = window._storicoOrdiniData || [];
+  if (!ordini.length) { toast('Nessun ordine da stampare — esegui prima una ricerca'); return; }
+  // Applica filtri attivi
+  var qTxt = (document.getElementById('search-ordini').value||'').toLowerCase();
+  var prodotto = document.getElementById('filtro-prodotto-ordini').value;
+  var stato = document.getElementById('filtro-stato-ordini').value;
+  var tipoFiltro = document.getElementById('filtro-tipo-ordini').value;
+  var filtrati = ordini.filter(function(r) {
+    if (qTxt && (r.cliente||'').toLowerCase().indexOf(qTxt) < 0) return false;
+    if (prodotto && r.prodotto !== prodotto) return false;
+    if (stato && r.stato !== stato) return false;
+    if (tipoFiltro && r.tipo_ordine !== tipoFiltro) return false;
+    return true;
+  });
+  if (!filtrati.length) { toast('Nessun ordine con i filtri attivi'); return; }
+  var da = document.getElementById('filtro-da-ordini').value;
+  var a = document.getElementById('filtro-a-ordini').value;
+  var periodoFmt = 'Dal ' + new Date(da+'T12:00:00').toLocaleDateString('it-IT') + ' al ' + new Date(a+'T12:00:00').toLocaleDateString('it-IT');
+  _stampaReportOrdini(w, filtrati, 'Storico ordini', periodoFmt);
+}
+
+// ── Report PDF ordini (comune) ──
+function _stampaReportOrdini(w, ordini, titolo, periodo) {
+  var totLitri = 0, totFatt = 0, totMarg = 0;
+  var righe = '';
+  ordini.forEach(function(r, i) {
+    var pL = prezzoConIva(r); var tot = pL * Number(r.litri);
+    var margTot = Number(r.margine) * Number(r.litri);
+    var basNome = r.basi_carico ? r.basi_carico.nome : '—';
+    totLitri += Number(r.litri); totFatt += Number(r.costo_litro) * Number(r.litri) + Number(r.trasporto_litro||0) * Number(r.litri) + margTot; totMarg += margTot;
+    var dest = r.destinazione ? '<br/><span style="font-size:9px;color:#666">📍 ' + esc(r.destinazione) + '</span>' : '';
+    righe += '<tr><td style="padding:5px 6px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd">' + r.data + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.cliente||r.fornitore||'—') + dest + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(r.litri) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(r.costo_litro) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(r.trasporto_litro) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(r.margine) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmt(pL) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(tot) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.fornitore||'—') + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:center">' + (r.stato||'—') + '</td></tr>';
+  });
+  righe += '<tr style="border-top:3px solid #D4A017;font-weight:bold;background:#FDF3D0"><td style="padding:6px;border:1px solid #ddd" colspan="4">TOTALE — ' + ordini.length + ' ordini</td>' +
+    '<td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td>' +
+    '<td style="padding:6px;border:1px solid #ddd" colspan="3"></td>' +
+    '<td style="padding:6px;border:1px solid #ddd" colspan="2"></td>' +
+    '<td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMarg) + ' margine</td><td></td></tr>';
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + titolo + '</title>' +
+    '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:10mm}' +
+    '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:9px}table{font-size:8px}th,td{padding:3px 2px!important}}' +
+    'table{width:100%;border-collapse:collapse}' +
+    'th{background:#D4A017;color:#fff;padding:6px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #BA7517;text-align:center}' +
+    '</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:10px;margin-bottom:10px">';
+  html += '<div><div style="font-size:18px;font-weight:bold;color:#D4A017">' + titolo.toUpperCase() + '</div>';
+  html += '<div style="font-size:11px;color:#666;margin-top:3px">' + periodo + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:14px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:9px;color:#666">Generato: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  html += '<div style="display:flex;gap:12px;margin-bottom:10px">';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Ordini</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + ordini.length + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Litri totali</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine totale</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMarg) + '</div></div>';
+  html += '</div>';
+
+  html += '<table><thead><tr><th>#</th><th>Data</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Trasp/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale IVA</th><th>Fornitore</th><th>Stato</th></tr></thead><tbody>';
+  html += righe + '</tbody></table>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D4A017;color:#fff">🖨️ Stampa / PDF</button>';
+  html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
+  html += '</div></body></html>';
+
+  w.document.open(); w.document.write(html); w.document.close();
+}
 
 // Mantieni compatibilità vecchia funzione
 function filtraOrdini() { filtraOrdiniStorico(); }
