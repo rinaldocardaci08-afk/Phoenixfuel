@@ -26,56 +26,31 @@ async function caricaConsegne() {
     const elI=document.getElementById('tot-fatt-iva-cons'); if(elI) elI.textContent=fmtE(tIva);
     const elM=document.getElementById('tot-margine-cons'); if(elM) elM.textContent=fmtE(tMargine);
 
-    // Carica documenti per tutti gli ordini
-    const ordineIds = data.map(r=>r.id);
-    const { data: allDocs } = await sb.from('documenti_ordine').select('*').in('ordine_id', ordineIds);
-    const docsMap = {};
-    (allDocs||[]).forEach(d => { if(!docsMap[d.ordine_id]) docsMap[d.ordine_id]=[]; docsMap[d.ordine_id].push(d); });
-
-    // Carica DAS generati per tutti gli ordini
-    const { data: allDas } = await sb.from('das_documenti').select('id,ordine_id,anno,numero_progressivo').in('ordine_id', ordineIds);
-    const dasMap = {};
-    (allDas||[]).forEach(d => { if(!dasMap[d.ordine_id]) dasMap[d.ordine_id]=[]; dasMap[d.ordine_id].push(d); });
-
+    // Render consegne con semafori DAS/Cartellino
     tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
-      const docs = docsMap[r.id] || [];
 
-      // Documenti badges
-      let docsHtml = '';
-      // DAS generati
-      const dasOrdine = dasMap[r.id] || [];
-      if (dasOrdine.length) {
-        dasOrdine.forEach(d => {
-          var numDas = 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4,'0');
-          docsHtml += '<span class="badge amber" style="font-size:9px;cursor:pointer" onclick="stampaDas(\'' + d.id + '\')" title="Stampa ' + numDas + '">' + numDas + '</span> ';
-        });
-      }
-      // Documenti allegati
-      if (docs.length) {
-        docsHtml += docs.map(d => {
-          const url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
-          const badge = d.tipo === 'das' ? 'amber' : d.tipo === 'conferma' ? 'blue' : 'gray';
-          return '<a href="' + url + '" target="_blank" style="text-decoration:none"><span class="badge ' + badge + '" style="font-size:9px;cursor:pointer">' + d.tipo.toUpperCase() + '</span></a>';
-        }).join(' ');
-      }
-      if (!docsHtml) {
-        docsHtml = '<span style="font-size:10px;color:var(--text-hint)">—</span>';
-      }
+      // Semafori DAS firmato e Cartellino
+      var hasDas = !!r.das_firmato_url;
+      var hasCart = !!r.cartellino_url;
+      var dasSemaforo = hasDas
+        ? '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#639922"></div><span style="font-size:9px;color:#27500A;font-weight:500">Allegato</span></div><a href="' + esc(r.das_firmato_url) + '" target="_blank" style="font-size:9px;color:#639922;text-decoration:none">Apri</a></div>'
+        : '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#E24B4A"></div><span style="font-size:9px;color:#791F1F;font-weight:500">Mancante</span></div><button style="font-size:9px;padding:2px 8px;background:#FCEBEB;color:#791F1F;border:0.5px solid #F09595;border-radius:5px;cursor:pointer" onclick="allegaDocConsegna(\'' + r.id + '\',\'das_firmato\')">Allega</button></div>';
+      var cartSemaforo = hasCart
+        ? '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#639922"></div><span style="font-size:9px;color:#27500A;font-weight:500">Allegato</span></div><a href="' + esc(r.cartellino_url) + '" target="_blank" style="font-size:9px;color:#639922;text-decoration:none">Apri</a></div>'
+        : '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#E24B4A"></div><span style="font-size:9px;color:#791F1F;font-weight:500">Mancante</span></div><button style="font-size:9px;padding:2px 8px;background:#FCEBEB;color:#791F1F;border:0.5px solid #F09595;border-radius:5px;cursor:pointer" onclick="allegaDocConsegna(\'' + r.id + '\',\'cartellino\')">Allega</button></div>';
 
       // Azioni in base al tipo ordine
       let azioniHtml = '';
       if (r.tipo_ordine === 'entrata_deposito' && !r.caricato_deposito && r.stato !== 'annullato') {
-        // Entrata deposito → pulsante "Carica cisterne"
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">📦 Carica</button> ';
       } else if (r.stato !== 'confermato') {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
-      azioniHtml += '<button class="btn-edit" title="Gestisci documenti" onclick="apriModaleOrdine(\'' + r.id + '\')">📎</button>';
 
-      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.sede_scarico_nome ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.sede_scarico_nome) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + docsHtml + '</td><td>' + azioniHtml + '</td></tr>';
+      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.destinazione ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + dasSemaforo + '</td><td>' + cartSemaforo + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
   }
 
@@ -137,6 +112,181 @@ async function annullaOrdine(ordineId) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('Ordine annullato');
   caricaConsegne();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ALLEGA DAS FIRMATO / CARTELLINO
+// ══════════════════════════════════════════════════════════════════
+
+function allegaDocConsegna(ordineId, tipoDoc) {
+  var label = tipoDoc === 'das_firmato' ? 'DAS firmato' : 'Cartellino';
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:12px">📎 Allega ' + label + '</div>';
+  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Scatta una foto o carica un file PDF del ' + label + ' firmato dal cliente.</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+  html += '<button class="btn-primary" style="font-size:14px;padding:10px 20px;background:#378ADD" onclick="document.getElementById(\'doc-cons-file\').click()">📁 Scegli file</button>';
+  html += '<input type="file" id="doc-cons-file" accept="image/*,.pdf" style="display:none" onchange="_uploadDocConsegna(\'' + ordineId + '\',\'' + tipoDoc + '\',this)" />';
+  html += '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted)">oppure incolla un URL:</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:6px">';
+  html += '<input type="text" id="doc-cons-url" placeholder="https://..." style="flex:1;font-size:13px;padding:8px 12px" />';
+  html += '<button class="btn-primary" style="padding:8px 16px" onclick="_salvaUrlDocConsegna(\'' + ordineId + '\',\'' + tipoDoc + '\')">Salva</button>';
+  html += '</div>';
+  apriModal(html);
+}
+
+async function _uploadDocConsegna(ordineId, tipoDoc, input) {
+  var file = input.files[0]; if (!file) return;
+  toast('Caricamento in corso...');
+  var path = 'consegne/' + ordineId + '/' + tipoDoc + '_' + Date.now() + '_' + file.name;
+  var { error } = await sb.storage.from('Das').upload(path, file);
+  if (error) { toast('Errore upload: ' + error.message); return; }
+  var url = SUPABASE_URL + '/storage/v1/object/public/Das/' + path;
+  var update = {};
+  update[tipoDoc + '_url'] = url;
+  update[tipoDoc + '_nome'] = file.name;
+  await sb.from('ordini').update(update).eq('id', ordineId);
+  toast('✅ ' + (tipoDoc === 'das_firmato' ? 'DAS firmato' : 'Cartellino') + ' allegato!');
+  chiudiModalePermessi();
+  caricaConsegne();
+}
+
+async function _salvaUrlDocConsegna(ordineId, tipoDoc) {
+  var url = document.getElementById('doc-cons-url').value.trim();
+  if (!url) { toast('Inserisci un URL'); return; }
+  var update = {};
+  update[tipoDoc + '_url'] = url;
+  update[tipoDoc + '_nome'] = tipoDoc === 'das_firmato' ? 'DAS firmato' : 'Cartellino';
+  await sb.from('ordini').update(update).eq('id', ordineId);
+  toast('✅ URL salvato!');
+  chiudiModalePermessi();
+  caricaConsegne();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STORICO CONSEGNE
+// ══════════════════════════════════════════════════════════════════
+
+function toggleStoricoConsegne() {
+  var body = document.getElementById('storico-consegne-body');
+  var toggle = document.getElementById('storico-consegne-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▲ Chiudi';
+    _initAnnoConsegne();
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▼ Espandi';
+  }
+}
+
+function _initAnnoConsegne() {
+  var sel = document.getElementById('filtro-anno-consegne');
+  if (!sel || sel.options.length > 1) return;
+  var ac = new Date().getFullYear();
+  for (var y = ac; y >= ac - 5; y--) sel.innerHTML += '<option value="' + y + '">' + y + '</option>';
+}
+
+function _setMeseAnnoConsegne() {
+  var anno = document.getElementById('filtro-anno-consegne').value;
+  var mese = document.getElementById('filtro-mese-consegne').value;
+  if (anno && mese) {
+    var ultimo = new Date(parseInt(anno), parseInt(mese), 0).getDate();
+    document.getElementById('filtro-da-consegne').value = anno + '-' + mese + '-01';
+    document.getElementById('filtro-a-consegne').value = anno + '-' + mese + '-' + String(ultimo).padStart(2,'0');
+    caricaStoricoConsegne();
+  } else if (anno) {
+    document.getElementById('filtro-da-consegne').value = anno + '-01-01';
+    document.getElementById('filtro-a-consegne').value = anno + '-12-31';
+    caricaStoricoConsegne();
+  }
+}
+
+async function caricaStoricoConsegne() {
+  var da = document.getElementById('filtro-da-consegne').value;
+  var a = document.getElementById('filtro-a-consegne').value;
+  var tbody = document.getElementById('tabella-storico-consegne');
+  if (!da && !a) {
+    var oggi = new Date(); var meseFA = new Date(oggi); meseFA.setMonth(meseFA.getMonth()-1);
+    da = meseFA.toISOString().split('T')[0]; a = oggi.toISOString().split('T')[0];
+    document.getElementById('filtro-da-consegne').value = da;
+    document.getElementById('filtro-a-consegne').value = a;
+  }
+  tbody.innerHTML = '<tr><td colspan="8" class="loading">Caricamento...</td></tr>';
+  var q = sb.from('ordini').select('*').in('tipo_ordine',['cliente','stazione_servizio']).neq('stato','annullato').order('data',{ascending:false}).order('cliente');
+  if (da) q = q.gte('data', da);
+  if (a) q = q.lte('data', a);
+  q = q.limit(1000);
+  var { data: ordini } = await q;
+  if (!ordini||!ordini.length) { tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessuna consegna nel periodo</td></tr>'; return; }
+  window._storicoConsegneData = ordini;
+  filtraStoricoConsegne();
+}
+
+function filtraStoricoConsegne() {
+  var ordini = window._storicoConsegneData || [];
+  var qTxt = (document.getElementById('search-consegne').value||'').toLowerCase();
+  var filtroDoc = document.getElementById('filtro-docs-consegne').value;
+  var filtrati = ordini.filter(function(r) {
+    if (qTxt && (r.cliente||'').toLowerCase().indexOf(qTxt) < 0) return false;
+    if (filtroDoc === 'manca_das' && r.das_firmato_url) return false;
+    if (filtroDoc === 'manca_cart' && r.cartellino_url) return false;
+    if (filtroDoc === 'completo' && (!r.das_firmato_url || !r.cartellino_url)) return false;
+    return true;
+  });
+  var tbody = document.getElementById('tabella-storico-consegne');
+  if (!filtrati.length) { tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessuna consegna con questi filtri</td></tr>'; return; }
+  tbody.innerHTML = filtrati.map(function(r) {
+    var tot = prezzoConIva(r) * Number(r.litri);
+    var dasIco = r.das_firmato_url ? '<div style="width:10px;height:10px;border-radius:50%;background:#639922;display:inline-block"></div> <span style="font-size:9px;color:#27500A">OK</span>' : '<div style="width:10px;height:10px;border-radius:50%;background:#E24B4A;display:inline-block"></div> <span style="font-size:9px;color:#791F1F">No</span>';
+    var cartIco = r.cartellino_url ? '<div style="width:10px;height:10px;border-radius:50%;background:#639922;display:inline-block"></div> <span style="font-size:9px;color:#27500A">OK</span>' : '<div style="width:10px;height:10px;border-radius:50%;background:#E24B4A;display:inline-block"></div> <span style="font-size:9px;color:#791F1F">No</span>';
+    return '<tr><td>' + r.data + '</td><td><strong>' + esc(r.cliente) + '</strong>' + (r.destinazione ? '<div style="font-size:9px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td style="text-align:center">' + dasIco + '</td><td style="text-align:center">' + cartIco + '</td></tr>';
+  }).join('');
+}
+
+function stampaStoricoConsegne() {
+  var w = _apriReport("Storico consegne"); if (!w) return;
+  var ordini = window._storicoConsegneData || [];
+  var qTxt = (document.getElementById('search-consegne').value||'').toLowerCase();
+  var filtroDoc = document.getElementById('filtro-docs-consegne').value;
+  var filtrati = ordini.filter(function(r) {
+    if (qTxt && (r.cliente||'').toLowerCase().indexOf(qTxt) < 0) return false;
+    if (filtroDoc === 'manca_das' && r.das_firmato_url) return false;
+    if (filtroDoc === 'manca_cart' && r.cartellino_url) return false;
+    if (filtroDoc === 'completo' && (!r.das_firmato_url || !r.cartellino_url)) return false;
+    return true;
+  });
+  if (!filtrati.length) { toast('Nessuna consegna da stampare'); return; }
+
+  var da = document.getElementById('filtro-da-consegne').value;
+  var a = document.getElementById('filtro-a-consegne').value;
+  var periodoFmt = 'Dal ' + new Date(da+'T12:00:00').toLocaleDateString('it-IT') + ' al ' + new Date(a+'T12:00:00').toLocaleDateString('it-IT');
+
+  var totL=0, totF=0, totM=0, totDas=0, totCart=0;
+  filtrati.forEach(function(r) { totL+=Number(r.litri); totF+=prezzoConIva(r)*Number(r.litri); totM+=Number(r.margine)*Number(r.litri); if(r.das_firmato_url) totDas++; if(r.cartellino_url) totCart++; });
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Storico consegne</title>';
+  html += '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:10mm;color:#1a1a18}@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}table{width:100%;border-collapse:collapse}th{background:#D85A30;color:#fff;padding:5px 6px;font-size:8px;text-transform:uppercase;border:1px solid #993C1D}td{padding:5px 6px;border:1px solid #ddd;font-size:10px}.m{font-family:Courier New,monospace;text-align:right}.sem{display:inline-block;width:10px;height:10px;border-radius:50%}</style></head><body>';
+
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:3px solid #D85A30;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:18px;font-weight:bold;color:#D85A30">STORICO CONSEGNE</div><div style="font-size:11px;color:#666;margin-top:2px">' + periodoFmt + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div><div style="font-size:9px;color:#666">Generato: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">';
+  html += '<div style="background:#FAECE7;border:1px solid #D85A30;border-radius:6px;padding:6px 14px;text-align:center"><div style="font-size:8px;color:#712B13;text-transform:uppercase">Consegne</div><div style="font-size:16px;font-weight:bold">' + filtrati.length + '</div></div>';
+  html += '<div style="background:#FAECE7;border:1px solid #D85A30;border-radius:6px;padding:6px 14px;text-align:center"><div style="font-size:8px;color:#712B13;text-transform:uppercase">Litri</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totL) + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:6px 14px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">DAS firmati</div><div style="font-size:16px;font-weight:bold;color:' + (totDas===filtrati.length?'#639922':'#E24B4A') + '">' + totDas + '/' + filtrati.length + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:6px 14px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Cartellini</div><div style="font-size:16px;font-weight:bold;color:' + (totCart===filtrati.length?'#639922':'#E24B4A') + '">' + totCart + '/' + filtrati.length + '</div></div>';
+  html += '</div>';
+
+  html += '<table><thead><tr><th>#</th><th>Data</th><th style="text-align:left">Cliente</th><th style="text-align:left">Destinazione</th><th>Prodotto</th><th>Litri</th><th>Totale IVA</th><th>Stato</th><th>DAS firmato</th><th>Cartellino</th></tr></thead><tbody>';
+  filtrati.forEach(function(r, i) {
+    var tot = prezzoConIva(r) * Number(r.litri);
+    var dasC = r.das_firmato_url ? '#639922' : '#E24B4A';
+    var cartC = r.cartellino_url ? '#639922' : '#E24B4A';
+    html += '<tr' + (i%2 ? ' style="background:#fafaf5"' : '') + '><td style="text-align:center;color:#999">' + (i+1) + '</td><td>' + r.data + '</td><td style="font-weight:500">' + esc(r.cliente) + '</td><td style="font-size:9px;color:#555">' + esc(r.destinazione||'—') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td style="text-align:center">' + (r.stato||'—') + '</td><td style="text-align:center"><span class="sem" style="background:' + dasC + '"></span> ' + (r.das_firmato_url?'SI':'NO') + '</td><td style="text-align:center"><span class="sem" style="background:' + cartC + '"></span> ' + (r.cartellino_url?'SI':'NO') + '</td></tr>';
+  });
+  html += '</tbody></table>';
+
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">🖨️ Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button></div></body></html>';
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 // ── ELENCO VENDITE GIORNALIERO (stampabile) ─────────────────────

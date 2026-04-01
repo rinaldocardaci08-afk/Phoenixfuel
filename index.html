@@ -567,8 +567,43 @@
           </div>
 
           <div style="overflow-x:auto">
-          <table><thead><tr><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th><th>Documenti</th><th>Azioni</th></tr></thead>
-          <tbody id="tabella-consegne"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+          <table><thead><tr><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th><th>DAS firmato</th><th>Cartellino</th><th>Azioni</th></tr></thead>
+          <tbody id="tabella-consegne"><tr><td colspan="8" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
+        </div>
+
+        <!-- STORICO CONSEGNE -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;cursor:pointer" onclick="toggleStoricoConsegne()">
+            <span>📋 Storico consegne</span>
+            <span id="storico-consegne-toggle" style="font-size:12px;color:var(--text-muted)">▼ Espandi</span>
+          </div>
+          <div id="storico-consegne-body" style="display:none">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+              <input type="text" id="search-consegne" placeholder="Cerca cliente..." oninput="filtraStoricoConsegne()" style="font-size:13px;padding:7px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);min-width:120px;max-width:200px;flex:1" />
+              <select id="filtro-anno-consegne" onchange="_setMeseAnnoConsegne()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Anno</option>
+              </select>
+              <select id="filtro-mese-consegne" onchange="_setMeseAnnoConsegne()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Mese</option>
+                <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option><option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
+                <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option><option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+              </select>
+              <input type="date" id="filtro-da-consegne" title="Da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <input type="date" id="filtro-a-consegne" title="A" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <select id="filtro-docs-consegne" onchange="filtraStoricoConsegne()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti i documenti</option>
+                <option value="manca_das">Manca DAS firmato</option>
+                <option value="manca_cart">Manca Cartellino</option>
+                <option value="completo">Documenti completi</option>
+              </select>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="caricaStoricoConsegne()">🔍 Cerca</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaStoricoConsegne()">🖨️ PDF</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th><th>DAS firmato</th><th>Cartellino</th></tr></thead>
+              <tbody id="tabella-storico-consegne"><tr><td colspan="8" class="loading">Imposta i filtri e premi Cerca</td></tr></tbody></table>
+            </div>
           </div>
         </div>
 
