@@ -141,9 +141,11 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'bacheca', icon:'🔔', label:'Bacheca avvisi', section:'Comunicazioni' },
     ];
     let lastSection = null;
-    // Home è sempre visibile per tutti
-    voci.push({ section: 'Operativo' }); lastSection = 'Operativo';
-    voci.push({ id: 'home', icon: '🏠', label: 'Bacheca' });
+    // Home: visibile se ha il permesso (o se nessun permesso è configurato)
+    if (abilitati.has('home')) {
+      voci.push({ section: 'Operativo' }); lastSection = 'Operativo';
+      voci.push({ id: 'home', icon: '🏠', label: 'Bacheca' });
+    }
     tutteSezioni.forEach(s => {
       if (s.id === 'home') return; // già aggiunto
       if (abilitati.has(s.id)) {
