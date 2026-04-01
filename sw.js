@@ -27,8 +27,7 @@ var FILES_TO_CACHE = [
   '/pf-allegati.js',
   '/pf-system.js',
   '/pf-push.js',
-  '/pf-test.js',
-  '/stz-sortable.js'
+  '/pf-test.js'
 ];
 
 self.addEventListener('install', function(event) {

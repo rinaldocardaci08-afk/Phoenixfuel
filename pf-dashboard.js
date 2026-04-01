@@ -9,13 +9,28 @@ const COLORI_DASH = {
 };
 
 async function caricaDashboard() {
-  // Date
   var ieri = new Date(oggi); ieri.setDate(ieri.getDate()-1);
   var ieriISO = ieri.toISOString().split('T')[0];
   var meseInizio = oggiISO.substring(0,8) + '01';
+  var ieri2 = new Date(ieri); ieri2.setDate(ieri2.getDate()-1);
+  var ieri2ISO = ieri2.toISOString().split('T')[0];
+
+  // ══ CARICAMENTO PARALLELO INIZIALE ══
+  var [ordIeriRes, costiIeriRes, ordMeseRes, recRes, lettIeriRes, lettIeri2Res, prezziIeriRes, lettMeseRes, pompeRes, prezziMeseRes] = await Promise.all([
+    sb.from('ordini').select('*').eq('data', ieriISO),
+    sb.from('stazione_costi').select('prodotto,costo_litro').eq('data', ieriISO),
+    sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data', meseInizio).lte('data', oggiISO).limit(1000),
+    sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5),
+    sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieriISO),
+    sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieri2ISO),
+    sb.from('stazione_prezzi').select('prodotto,prezzo_litro').eq('data', ieriISO),
+    sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', meseInizio).lte('data', ieriISO).order('data').limit(5000),
+    sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true),
+    sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', meseInizio).lte('data', ieriISO)
+  ]);
 
   // ══ INGROSSO IERI ══
-  const{data}=await sb.from('ordini').select('*').eq('data',ieriISO);
+  var data = ordIeriRes.data;
   const ingrosso = (data||[]).filter(r => r.tipo_ordine === 'cliente' && r.stato !== 'annullato');
   let fatturato=0,litri=0,margine=0;
   ingrosso.forEach(r=>{fatturato+=prezzoNoIva(r)*r.litri;litri+=Number(r.litri);margine+=Number(r.margine);});
@@ -25,20 +40,18 @@ async function caricaDashboard() {
   document.getElementById('kpi-ordini').textContent=ingrosso.length;
 
   // MARGINE IERI STAZIONE
-  try {
-    var costiIeriRes = await sb.from('stazione_costi').select('prodotto,costo_litro').eq('data', ieriISO);
-    var costiIeriMap = {}; (costiIeriRes.data||[]).forEach(c => { costiIeriMap[c.prodotto] = Number(c.costo_litro); });
-    // Usa letture ieri già caricate sotto per calcolo margine netto
-    var _margIeri = { vendutoN: 0, costoTot: 0 };
-    window._margIeriCalc = { costiMap: costiIeriMap, result: _margIeri };
-  } catch(e) { console.warn('Margine ieri:', e); }
+  var costiIeriMap = {}; (costiIeriRes.data||[]).forEach(c => { costiIeriMap[c.prodotto] = Number(c.costo_litro); });
 
   // ══ INGROSSO MESE ══
-  var allMeseOrd = [], from = 0; var hasMore = true;
-  while (hasMore) {
-    var { data: batch } = await sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato')
-      .eq('tipo_ordine','cliente').neq('stato','annullato').gte('data', meseInizio).lte('data', oggiISO).range(from, from + 999);
-    if (batch && batch.length) { allMeseOrd = allMeseOrd.concat(batch); from += 1000; } else { hasMore = false; }
+  var allMeseOrd = ordMeseRes.data || [];
+  // Se >1000 ordini, pagina
+  if (allMeseOrd.length >= 1000) {
+    var from = 1000; var hasMore = true;
+    while (hasMore) {
+      var { data: batch } = await sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato')
+        .eq('tipo_ordine','cliente').neq('stato','annullato').gte('data', meseInizio).lte('data', oggiISO).range(from, from + 999);
+      if (batch && batch.length) { allMeseOrd = allMeseOrd.concat(batch); from += 1000; } else { hasMore = false; }
+    }
   }
   var mFatt=0, mLitri=0, mMarg=0;
   allMeseOrd.forEach(function(r) { mFatt += prezzoNoIva(r) * Number(r.litri); mLitri += Number(r.litri); mMarg += Number(r.margine) * Number(r.litri); });
@@ -48,25 +61,13 @@ async function caricaDashboard() {
   var el4 = document.getElementById('kpi-ingr-mese-ordini'); if(el4) el4.textContent = allMeseOrd.length;
 
   // ══ DETTAGLIO IERI + MESE ══
-  // ══ DETTAGLIO IERI + MESE ══
   try {
-    var ieri2 = new Date(ieri); ieri2.setDate(ieri2.getDate()-1);
-    var ieri2ISO = ieri2.toISOString().split('T')[0];
-    const [lettIeriRes, lettIeri2Res, prezziIeriRes, lettMeseRes, pompeRes, prezziMeseRes] = await Promise.all([
-      sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieriISO),
-      sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieri2ISO),
-      sb.from('stazione_prezzi').select('prodotto,prezzo_litro').eq('data', ieriISO),
-      sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', meseInizio).lte('data', ieriISO).order('data'),
-      sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true),
-      sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', meseInizio).lte('data', ieriISO)
-    ]);
     const pompe = pompeRes.data;
     const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
     const prezziMap = {}; (prezziIeriRes.data||[]).forEach(p => { prezziMap[p.prodotto] = Number(p.prezzo_litro); });
     const lettIeri2Map = {}; (lettIeri2Res.data||[]).forEach(l => { lettIeri2Map[l.pompa_id] = Number(l.lettura); });
 
     let dettLitri=0, dettIncasso=0, dettCosto=0;
-    var _costiIeri = window._margIeriCalc ? window._margIeriCalc.costiMap : {};
     (lettIeriRes.data||[]).forEach(l => {
       const prec = lettIeri2Map[l.pompa_id];
       if (prec === undefined) return;
@@ -74,7 +75,7 @@ async function caricaDashboard() {
       const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
       dettLitri += lv;
       dettIncasso += lv * (prezziMap[pompa.prodotto] || 0);
-      dettCosto += lv * (_costiIeri[pompa.prodotto] || 0);
+      dettCosto += lv * (costiIeriMap[pompa.prodotto] || 0);
     });
     document.getElementById('kpi-dett-incasso').textContent = fmtE(dettIncasso);
     document.getElementById('kpi-dett-litri').textContent = fmtL(dettLitri);
@@ -108,9 +109,11 @@ async function caricaDashboard() {
     console.error('Errore KPI dettaglio:', e);
   }
 
-  const{data:rec}=await sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5);
+  // Ultimi ordini
+  var rec = recRes.data;
   const tbody=document.getElementById('dashboard-ordini');
   tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
+
   // Giacenza deposito + grafici + cockpit in parallelo
   await Promise.all([caricaGiacenzaDashboard(), caricaGraficiDashboard(), caricaCockpit(), caricaAlertOperativi()]);
   if (typeof caricaAlertFutures === 'function') caricaAlertFutures();
