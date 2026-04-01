@@ -1051,8 +1051,32 @@ async function stampaListinoPrezziGiorno() {
   if (!data) { toast('Seleziona una data'); return; }
   var w = _apriReport("Listino prezzi " + data); if (!w) return;
 
-  var { data: prezzi } = await sb.from('prezzi').select('*, basi_carico(nome)').eq('data', data).order('fornitore');
-  if (!prezzi || !prezzi.length) { toast('Nessun prezzo per ' + data); w.close(); return; }
+  var [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
+    sb.from('prezzi').select('*, basi_carico(nome)').eq('data', data).order('fornitore'),
+    sb.from('cisterne').select('*').eq('sede','deposito_vibo'),
+    sb.from('basi_carico').select('*').ilike('nome','%phoenix%').maybeSingle()
+  ]);
+
+  var prezzi = prezziRes.data || [];
+
+  // Aggiungi PhoenixFuel deposito
+  var cisterne = cisterneRes.data || [];
+  var baseDeposito = baseDepRes.data;
+  if (cisterne.length && baseDeposito) {
+    var prodottiDep = {};
+    cisterne.forEach(function(c) { if (c.prodotto) { if (!prodottiDep[c.prodotto]) prodottiDep[c.prodotto] = { litri:0, valTot:0 }; prodottiDep[c.prodotto].litri += Number(c.livello_attuale||0); prodottiDep[c.prodotto].valTot += Number(c.livello_attuale||0) * Number(c.costo_medio||0); } });
+    Object.keys(prodottiDep).forEach(function(prod) {
+      var d = prodottiDep[prod];
+      if (d.litri > 0) {
+        var cmp = d.valTot / d.litri;
+        var prodInfo = cacheProdotti.find(function(p) { return p.nome === prod; });
+        var ovr = (typeof _depositoOverrides !== 'undefined' ? _depositoOverrides[prod] : null) || {};
+        prezzi.push({ fornitore:'PhoenixFuel (Deposito)', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
+      }
+    });
+  }
+
+  if (!prezzi.length) { toast('Nessun prezzo per ' + data); w.close(); return; }
 
   var PRODOTTI_ORDINE = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
   var coloriProdotto = { 'Gasolio Autotrazione':'#BA7517', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC' };
@@ -1131,7 +1155,8 @@ async function stampaListinoPrezziGiorno() {
       var bgRow = isBest ? 'background:#EAF3DE' : (i % 2 ? 'background:#fafaf5' : '');
 
       html += '<tr style="' + bgRow + '">';
-      html += '<td style="font-weight:600;font-size:12px">' + esc(r.fornitore) + bestTag + '</td>';
+      var giacTag = r._isDeposito && r._giacenza ? ' <span style="font-size:8px;background:#EAF3DE;color:#27500A;padding:1px 6px;border-radius:8px;vertical-align:middle">' + r._giacenza.toLocaleString('it-IT') + ' L</span>' : '';
+      html += '<td style="font-weight:600;font-size:12px">' + esc(r.fornitore) + bestTag + giacTag + '</td>';
       html += '<td>' + esc(r.basi_carico ? r.basi_carico.nome : '—') + '</td>';
       html += '<td class="m" style="font-size:15px;font-weight:bold;color:' + col + '">' + Number(r.costo_litro).toFixed(4) + '</td>';
       html += '<td class="m">' + Number(r.trasporto_litro || 0).toFixed(4) + '</td>';
