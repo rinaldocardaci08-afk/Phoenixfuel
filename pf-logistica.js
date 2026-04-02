@@ -556,9 +556,33 @@ function apriFoglioViaggio(caricoId) {
   window.open('foglio_viaggio.html?carico_id=' + caricoId, '_blank');
 }
 
-function apriConfermaOrdine(ordineId) {
-  window.open('conferma_ordine.html?ordine_id=' + ordineId, '_blank');
+async function apriConfermaOrdine(ordineId) {
+  var {data:ord}=await sb.from('ordini').select('*').eq('id',ordineId).single();
+  if(!ord){toast('Ordine non trovato');return;}
+  var {data:tutti}=await sb.from('ordini').select('*').eq('cliente',ord.cliente).eq('data',ord.data).neq('stato','annullato').order('prodotto');
+  if(!tutti||!tutti.length) tutti=[ord];
+  var w=_apriReport('Conferma ordine');if(!w)return;
+  var GIORNI=['Domenica','Lunedi','Martedi','Mercoledi','Giovedi','Venerdi','Sabato'];
+  var dt=new Date(ord.data+'T12:00:00');
+  var dataFmt=dt.getDate()+'/'+(dt.getMonth()+1)+'/'+dt.getFullYear();
+  var totGen=0;
+  tutti.forEach(function(o){totGen+=prezzoConIva(o)*Number(o.litri);});
+  var h='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Conferma ordine</title><style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:14mm;color:#1a1a18}@media print{.no-print{display:none!important}@page{size:portrait;margin:10mm}}table{width:100%;border-collapse:collapse}th{background:#D85A30;color:#fff;padding:6px 10px;font-size:9px;text-transform:uppercase;border:1px solid #993C1D}td{padding:6px 10px;border:1px solid #ddd}.m{font-family:Courier New,monospace;text-align:right}</style></head><body>';
+  h+='<div style="display:flex;justify-content:space-between;border-bottom:3px solid #D85A30;padding-bottom:10px;margin-bottom:16px"><div><div style="font-size:20px;font-weight:bold;color:#D85A30">CONFERMA ORDINE</div><div style="font-size:12px;color:#666;margin-top:4px">Data: '+dataFmt+' - '+GIORNI[dt.getDay()]+'</div></div><div style="text-align:right"><div style="font-size:14px;font-weight:bold">PHOENIX FUEL SRL</div><div style="font-size:9px;color:#666">Vibo Valentia</div></div></div>';
+  h+='<div style="background:#f5f5f0;border-radius:8px;padding:12px 16px;margin-bottom:16px"><div style="font-size:14px;font-weight:bold">'+esc(ord.cliente)+'</div>'+(ord.destinazione?'<div style="font-size:11px;color:#666;margin-top:2px">Destinazione: '+esc(ord.destinazione)+'</div>':'')+'</div>';
+  h+='<table><thead><tr><th style="text-align:left">Prodotto</th><th>Litri</th><th>Prezzo netto</th><th>IVA</th><th>Prezzo IVA incl.</th><th>Totale</th></tr></thead><tbody>';
+  tutti.forEach(function(o,i){
+    var pN=prezzoNoIva(o);var pI=prezzoConIva(o);var tot=pI*Number(o.litri);
+    h+='<tr'+(i%2?' style="background:#fafaf5"':'')+'><td style="font-weight:600">'+esc(o.prodotto)+'</td><td class="m">'+fmtL(o.litri)+'</td><td class="m">'+fmt(pN)+'</td><td style="text-align:center">'+(o.iva||22)+'%</td><td class="m" style="font-weight:600">'+fmt(pI)+'</td><td class="m" style="font-weight:bold">'+fmtE(tot)+'</td></tr>';
+  });
+  h+='<tr style="background:#FAECE7;font-weight:bold"><td>TOTALE ('+tutti.length+' prodott'+(tutti.length>1?'i':'o')+')</td><td></td><td></td><td></td><td></td><td class="m" style="font-size:14px">'+fmtE(totGen)+'</td></tr>';
+  h+='</tbody></table>';
+  h+='<div style="margin-top:20px;display:flex;justify-content:space-between"><div style="border-top:1px solid #333;padding-top:5px;width:40%;text-align:center;font-size:10px">Firma Phoenix Fuel SRL</div><div style="border-top:1px solid #333;padding-top:5px;width:40%;text-align:center;font-size:10px">Firma Cliente</div></div>';
+  h+='<div style="margin-top:14px;font-size:9px;color:#999;text-align:center">Phoenix Fuel SRL - Documento generato il '+new Date().toLocaleDateString('it-IT')+'</div>';
+  h+='<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
+  w.document.open();w.document.write(h);w.document.close();
 }
+
 
 async function apriListinoPDF() {
   if (!_listinoData || !_listinoData.length) await generaListinoPrezzi();
