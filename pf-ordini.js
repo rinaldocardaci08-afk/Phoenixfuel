@@ -296,7 +296,9 @@ let _cacheCisterne=null, _cacheBaseDeposito=null, _cacheBaseDepositoLoaded=false
 function toggleTipoOrdine() {
   const tipo = document.getElementById('ord-tipo').value;
   const isCliente = tipo === 'cliente';
-  document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';\n  document.getElementById('grp-destinazione').style.display = isCliente ? '' : 'none';\n  var grpDM = document.getElementById('grp-dest-manuale'); if(grpDM) grpDM.style.display = 'none';
+  document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
+  document.getElementById('grp-destinazione').style.display = isCliente ? '' : 'none';
+  var grpDM = document.getElementById('grp-dest-manuale'); if(grpDM) grpDM.style.display = 'none';
   if (!isCliente) {
     const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
     document.getElementById('ord-note').placeholder = lbl[tipo] || '';
