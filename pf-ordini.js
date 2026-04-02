@@ -1782,9 +1782,4 @@ function _xmlEsc(str) {
 function _codProdottoDanea(prodotto) {
   var map = { 'Gasolio Autotrazione':'GA', 'Benzina':'BZ', 'Gasolio Agricolo':'GAGR', 'HVO':'HVO' };
   return map[prodotto] || prodotto.substring(0, 4).toUpperCase();
-<<<<<<< Updated upstream
-}function _renderLabelPrezzi(){var inp=document.getElementById('filtro-data-prezzi');var div=document.getElementById('prezzi-label-giorno');if(!inp||!div)return;if(!inp.value){div.innerHTML='';return;}var G=['Domenica','Lunedi','Martedi','Mercoledi','Giovedi','Venerdi','Sabato'];var oggi=new Date();oggi.setHours(0,0,0,0);var sel=new Date(inp.value+'T12:00:00');sel.setHours(0,0,0,0);var diff=Math.round((sel-oggi)/86400000);var giorno=G[sel.getDay()];var h='';if(diff===0)h+='<span style="background:#378ADD;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">OGGI</span>';else if(diff===-1)h+='<span style="background:#BA7517;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">IERI</span>';else if(diff===1)h+='<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">DOMANI</span>';var dc={0:['#FCEBEB','#791F1F'],1:['#E6F1FB','#0C447C'],2:['#E6F1FB','#0C447C'],3:['#E6F1FB','#0C447C'],4:['#E6F1FB','#0C447C'],5:['#E6F1FB','#0C447C'],6:['#EEEDFE','#3C3489']}[sel.getDay()];h+='<span style="background:'+dc[0]+';color:'+dc[1]+';padding:4px 12px;border-radius:8px;font-size:13px;font-weight:600">'+giorno+'</span>';div.innerHTML=h;}
-=======
 }
- 
->>>>>>> Stashed changes
