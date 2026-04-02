@@ -21,6 +21,7 @@ function _tickOrologio() {
 
 async function caricaHome() {
   _initOrologioBacheca();
+  caricaUtentiOnline();
   var container = document.getElementById('home-feed');
   if (!container) return;
   container.innerHTML = '<div class="loading">Caricamento bacheca...</div>';

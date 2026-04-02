@@ -61,6 +61,9 @@ async function inizializza() {
     // Controlla avvisi non letti (badge pulsante)
     aggiornaBadgeBacheca();
     setInterval(aggiornaBadgeBacheca, 60000);
+    // Heartbeat presenza online
+    _heartbeat();
+    setInterval(_heartbeat, 60000);
     // Scarica dati in cache per uso offline
     _aggiornaDataCacheOffline();
   }
@@ -471,4 +474,37 @@ function _resetSaved(btnId) {
   if (!btn) return;
   btn.dataset.saved = '';
   if (btn._origBg) btn.style.background = btn._origBg;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PRESENZA ONLINE
+// ══════════════════════════════════════════════════════════════════
+
+async function _heartbeat() {
+  if (!utente || !utente.id) return;
+  await sb.from('utenti').update({ last_seen: new Date().toISOString() }).eq('id', utente.id);
+  if (document.getElementById('utenti-online')) caricaUtentiOnline();
+}
+
+async function caricaUtentiOnline() {
+  var wrap = document.getElementById('utenti-online');
+  if (!wrap) return;
+  var treMinFa = new Date(Date.now() - 3 * 60000).toISOString();
+  var { data: online } = await sb.from('utenti').select('nome,ruolo,last_seen').gte('last_seen', treMinFa).order('nome');
+  var { data: tutti } = await sb.from('utenti').select('nome,ruolo,last_seen').order('nome');
+  if (!tutti || !tutti.length) { wrap.innerHTML = ''; return; }
+  var onlineIds = (online || []).map(function(u) { return u.nome; });
+  var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+  tutti.forEach(function(u) {
+    var isOn = onlineIds.indexOf(u.nome) >= 0;
+    var colore = isOn ? '#639922' : '#B4B2A9';
+    var ruoloMap = { 'admin':'👑', 'operatore':'👷', 'contabilita':'📊', 'logistica':'🚛' };
+    var ico = ruoloMap[u.ruolo] || '👤';
+    html += '<div style="display:flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;background:' + (isOn ? '#EAF3DE' : '#F1EFE8') + ';border:1px solid ' + (isOn ? '#639922' : '#D3D1C7') + ';font-size:12px">';
+    html += '<div style="width:8px;height:8px;border-radius:50%;background:' + colore + '"></div>';
+    html += '<span>' + ico + ' ' + u.nome + '</span>';
+    html += '</div>';
+  });
+  html += '</div>';
+  wrap.innerHTML = html;
 }
