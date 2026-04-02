@@ -28,7 +28,7 @@ async function caricaFinanze() {
       .eq('tipo_ordine','cliente').neq('stato','annullato').eq('pagato',false)
       .gte('data_scadenza',daISO).lte('data_scadenza',aISO),
     sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore')
-      .neq('stato','annullato').eq('pagato_fornitore',false).gte('data',daISO),
+      .neq('stato','annullato').eq('pagato_fornitore',false).not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').gte('data',daISO),
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
       .gte('data',inizioMeseISO).lte('data',fineMeseISO).order('data'),
     sb.from('fornitori').select('nome,giorni_pagamento,colore')
@@ -68,10 +68,11 @@ async function caricaFinanze() {
     });
   });
 
-  // 2. Uscite fornitori
+  // 2. Uscite fornitori (solo acquisti reali, esclusi movimenti interni deposito)
   ordFornitori.forEach(function(o) {
     if (!o.data || !o.fornitore) return;
-    if (o.fornitore.toLowerCase().indexOf('phoenix') >= 0) return;
+    var fn = o.fornitore.toLowerCase();
+    if (fn.indexOf('phoenix') >= 0 || fn.indexOf('deposito') >= 0) return;
     var ggPag = o.giorni_pagamento || (fornitoriMap[o.fornitore] ? fornitoriMap[o.fornitore].giorni_pagamento : 30) || 30;
     var scad = new Date(o.data + 'T12:00:00');
     scad.setDate(scad.getDate() + ggPag);
