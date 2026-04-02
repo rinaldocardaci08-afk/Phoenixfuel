@@ -21,7 +21,14 @@ function _tickOrologio() {
 
 async function caricaHome() {
   _initOrologioBacheca();
-  caricaUtentiOnline();
+  // Utenti online solo per admin
+  var panelOnline = document.getElementById('utenti-online-wrap');
+  if (utenteCorrente && utenteCorrente.ruolo === 'admin') {
+    if (panelOnline) panelOnline.style.display = '';
+    caricaUtentiOnline();
+  } else {
+    if (panelOnline) panelOnline.style.display = 'none';
+  }
   var container = document.getElementById('home-feed');
   if (!container) return;
   container.innerHTML = '<div class="loading">Caricamento bacheca...</div>';
