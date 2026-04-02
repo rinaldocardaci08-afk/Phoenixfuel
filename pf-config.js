@@ -282,7 +282,7 @@ var _statoColori = {
 function _applicaStatoColore(selectId) {
   var sel = document.getElementById(selectId); if (!sel) return;
   var c = _statoColori[sel.value] || { bg:'var(--bg)', color:'var(--text)', border:'var(--border)' };
-  sel.style.background = c.bg; sel.style.color = c.color; sel.style.border = '2px solid ' + c.border; sel.style.fontWeight = '600';
+  sel.style.cssText = 'appearance:none;-webkit-appearance:none;background:' + c.bg + ';color:' + c.color + ';border:2px solid ' + c.border + ';font-weight:700;font-size:14px;padding:8px 30px 8px 12px;border-radius:8px;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'' + encodeURIComponent(c.color) + '\' fill=\'none\' stroke-width=\'2\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;cursor:pointer';
 }
 
 function _mostraLegendaStati(ev) {
