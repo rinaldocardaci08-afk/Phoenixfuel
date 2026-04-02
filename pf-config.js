@@ -281,8 +281,33 @@ var _statoColori = {
 
 function _applicaStatoColore(selectId) {
   var sel = document.getElementById(selectId); if (!sel) return;
-  var c = _statoColori[sel.value] || { bg:'var(--bg)', color:'var(--text)', border:'var(--border)' };
-  sel.style.cssText = 'appearance:none;-webkit-appearance:none;background:' + c.bg + ';color:' + c.color + ';border:2px solid ' + c.border + ';font-weight:700;font-size:14px;padding:8px 30px 8px 12px;border-radius:8px;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'' + encodeURIComponent(c.color) + '\' fill=\'none\' stroke-width=\'2\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;cursor:pointer';
+  var badgeId = selectId + '-badge';
+  var badge = document.getElementById(badgeId);
+  if (!badge) return;
+  var c = _statoColori[sel.value] || { bg:'#eee', color:'#333', border:'#ccc' };
+  badge.textContent = sel.value.charAt(0).toUpperCase() + sel.value.slice(1);
+  badge.style.background = c.bg;
+  badge.style.color = c.color;
+  badge.style.borderColor = c.border;
+}
+
+function _aggiornaLabelPrezzi() {
+  var inp = document.getElementById('filtro-data-prezzi');
+  var div = document.getElementById('prezzi-label-giorno');
+  if (!inp || !div || !inp.value) { if(div) div.innerHTML = ''; return; }
+  var oggi = new Date(); oggi.setHours(0,0,0,0);
+  var sel = new Date(inp.value + 'T12:00:00'); sel.setHours(0,0,0,0);
+  var diff = Math.round((sel - oggi) / 86400000);
+  var GIORNI_L = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  var giorno = GIORNI_L[sel.getDay()];
+  var html = '';
+  if (diff === 0) html += '<span style="background:#378ADD;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">OGGI</span>';
+  else if (diff === -1) html += '<span style="background:#BA7517;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">IERI</span>';
+  else if (diff === 1) html += '<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">DOMANI</span>';
+  var dayColors = { 0:['#FCEBEB','#791F1F'], 1:['#E6F1FB','#0C447C'], 2:['#E6F1FB','#0C447C'], 3:['#E6F1FB','#0C447C'], 4:['#E6F1FB','#0C447C'], 5:['#E6F1FB','#0C447C'], 6:['#EEEDFE','#3C3489'] };
+  var dc = dayColors[sel.getDay()];
+  html += '<span style="background:' + dc[0] + ';color:' + dc[1] + ';padding:4px 12px;border-radius:8px;font-size:13px;font-weight:600">' + giorno + '</span>';
+  div.innerHTML = html;
 }
 
 function _mostraLegendaStati(ev) {
