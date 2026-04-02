@@ -217,7 +217,7 @@ async function caricaPrezzi() {
 
       var forColor = _forColori[r.fornitore] || '';
       var forStyle = forColor ? 'font-weight:700;padding:4px 8px;border-radius:4px;background:' + forColor : 'font-weight:700';
-      html += '<tr><td>' + r.data + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+      html += '<tr><td>' + r.data + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + (isBest?'':' <span style="font-size:10px;color:#A32D2D;font-weight:600">+'+(prezzoNoIva(r)-prezzoNoIva(best[r.data+'_'+r.prodotto])).toFixed(4)+'</span>') + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
     });
     tbody.innerHTML = html;
   });
