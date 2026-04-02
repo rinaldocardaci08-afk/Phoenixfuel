@@ -265,6 +265,7 @@ function fmtE(n) {
   const dec = v % 1 === 0 ? 0 : 2;
   return '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }));
 }
+function fmtD(d){if(!d)return '-';var p=d.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
 function fmtL(n) {
   const v = Number(n);
   return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })) + ' L';
