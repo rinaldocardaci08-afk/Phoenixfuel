@@ -481,8 +481,8 @@ function _resetSaved(btnId) {
 // ══════════════════════════════════════════════════════════════════
 
 async function _heartbeat() {
-  if (!utente || !utente.id) return;
-  await sb.from('utenti').update({ last_seen: new Date().toISOString() }).eq('id', utente.id);
+  if (!utenteCorrente || !utenteCorrente.id) return;
+  await sb.from('utenti').update({ last_seen: new Date().toISOString() }).eq('id', utenteCorrente.id);
   if (document.getElementById('utenti-online')) caricaUtentiOnline();
 }
 
