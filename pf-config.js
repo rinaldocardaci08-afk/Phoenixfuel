@@ -476,6 +476,17 @@ function _resetSaved(btnId) {
   if (btn._origBg) btn.style.background = btn._origBg;
 }
 
+function _autoIvaProdotto() {
+  var sel = document.getElementById('pr-prodotto');
+  var ivaSelect = document.getElementById('pr-iva');
+  if (!sel || !ivaSelect || !sel.value) return;
+  var prod = cacheProdotti.find(function(p) { return p.nome === sel.value; });
+  if (prod && prod.iva_default) {
+    ivaSelect.value = String(prod.iva_default);
+    aggiornaPrev();
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════
 // PRESENZA ONLINE
 // ══════════════════════════════════════════════════════════════════
