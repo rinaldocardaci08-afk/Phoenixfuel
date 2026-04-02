@@ -1,2 +1,2 @@
 var fs=require('fs'); 
-var files=['pf-ordini.js','pf-anagrafica.js','pf-logistica.js','pf-deposito.js','pf-dashboard.js']; 
+var files=['pf-anagrafica.js','pf-logistica.js','pf-dashboard.js','pf-deposito.js']; 
