@@ -548,7 +548,7 @@ async function caricaCarichi() {
     const totLitri = c.carico_ordini ? c.carico_ordini.reduce((s,o)=>s+Number(o.ordini?.litri||0),0) : 0;
     const nConsegne = c.carico_ordini ? c.carico_ordini.length : 0;
     const prodotti = c.carico_ordini ? [...new Set(c.carico_ordini.map(o=>o.ordini?.prodotto).filter(Boolean))].join(', ') : '—';
-    return '<tr><td>' + c.data + '</td><td>' + (c.mezzo_targa||'—') + '</td><td>' + (c.autista||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + prodotti + '</td><td>' + nConsegne + ' consegne</td><td>' + badgeStato(c.stato) + ' <button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')">🖨️</button><button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')">👁</button><button class="btn-danger" onclick="eliminaRecord(\'carichi\',\'' + c.id + '\',caricaCarichi)">x</button></td></tr>';
+    return '<tr><td>' + fmtD(c.data) + '</td><td>' + (c.mezzo_targa||'—') + '</td><td>' + (c.autista||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + prodotti + '</td><td>' + nConsegne + ' consegne</td><td>' + badgeStato(c.stato) + ' <button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')">🖨️</button><button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')">👁</button><button class="btn-danger" onclick="eliminaRecord(\'carichi\',\'' + c.id + '\',caricaCarichi)">x</button></td></tr>';
   }).join('');
 }
 
@@ -615,7 +615,7 @@ async function apriDettaglioCarico(caricoId) {
     (dasList||[]).forEach(function(d) { if(!dasMap[d.ordine_id]) dasMap[d.ordine_id]=[]; dasMap[d.ordine_id].push(d); });
   }
 
-  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Dettaglio carico — ' + carico.data + '</div>';
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Dettaglio carico — ' + fmtD(carico.data) + '</div>';
   html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Mezzo: ' + (carico.mezzo_targa||'—') + ' · Autista: ' + (carico.autista||'—') + ' · ' + ordini.length + ' consegne' + (nonConfermati.length ? ' · <span style="color:#BA7517">' + nonConfermati.length + ' da confermare</span>' : ' · <span style="color:#639922">tutte confermate</span>') + '</div>';
 
   html += '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">';
@@ -1092,7 +1092,7 @@ async function mostraDasOrdine(ordineId) {
   dasList.forEach(function(d) {
     var num = 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4,'0');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border-radius:8px;margin-bottom:6px">';
-    html += '<div><strong>' + num + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:8px">' + d.data + ' · ' + esc(d.prodotto) + ' · ' + fmtL(d.litri_ambiente) + '</span></div>';
+    html += '<div><strong>' + num + '</strong><span style="font-size:11px;color:var(--text-muted);margin-left:8px">' + fmtD(d.data) + ' · ' + esc(d.prodotto) + ' · ' + fmtL(d.litri_ambiente) + '</span></div>';
     html += '<button class="btn-primary" style="font-size:11px;padding:5px 14px" onclick="stampaDas(\'' + d.id + '\')">🖨️ Stampa</button>';
     html += '</div>';
   });
