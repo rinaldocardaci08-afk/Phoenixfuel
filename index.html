@@ -102,23 +102,29 @@
             <button class="btn-primary" style="padding:10px 20px;font-size:14px;background:#6B5FCC" onclick="apriLavagna()">🎨 Lavagna</button>
           </div>
         </div>
-        <!-- OROLOGIO + DATA -->
+        <!-- OROLOGIO DIGITALE + DATA -->
         <div class="card" style="margin-bottom:16px;padding:20px">
-          <div style="display:flex;align-items:center;justify-content:center;gap:40px;flex-wrap:wrap">
-            <svg id="home-clock" width="150" height="150" viewBox="0 0 160 160">
-              <circle cx="80" cy="80" r="74" fill="none" stroke="#378ADD" stroke-width="3"/>
-              <circle cx="80" cy="80" r="70" fill="none" stroke="#E6F1FB" stroke-width="1"/>
-              <circle cx="80" cy="80" r="4" fill="#378ADD"/>
-              <g id="home-clock-marks"></g>
-              <line id="home-hour" x1="80" y1="80" x2="80" y2="40" stroke="#0C447C" stroke-width="4" stroke-linecap="round"/>
-              <line id="home-min" x1="80" y1="80" x2="80" y2="28" stroke="#378ADD" stroke-width="2.5" stroke-linecap="round"/>
-              <line id="home-sec" x1="80" y1="80" x2="80" y2="24" stroke="#E24B4A" stroke-width="1" stroke-linecap="round"/>
-              <circle cx="80" cy="80" r="2" fill="#E24B4A"/>
-            </svg>
+          <div style="display:flex;align-items:center;justify-content:center;gap:30px;flex-wrap:wrap">
+            <div style="background:linear-gradient(135deg,#D4A017,#BA7517);border-radius:20px;padding:20px 28px;min-width:220px;text-align:center;position:relative;overflow:hidden">
+              <div style="position:absolute;top:0;left:0;right:0;bottom:0;opacity:0.08">
+                <svg viewBox="0 0 200 140" style="width:100%;height:100%">
+                  <line x1="20" y1="5" x2="20" y2="15" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="40" y1="5" x2="40" y2="12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                  <line x1="60" y1="5" x2="60" y2="12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                  <line x1="80" y1="5" x2="80" y2="15" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="100" y1="5" x2="100" y2="12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                  <line x1="120" y1="5" x2="120" y2="12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                  <line x1="140" y1="5" x2="140" y2="15" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="160" y1="5" x2="160" y2="12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                  <line x1="180" y1="5" x2="180" y2="12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div id="home-ora-dig" style="font-family:'Courier New',monospace;font-size:56px;font-weight:900;color:#fff;letter-spacing:4px;line-height:1;text-shadow:0 2px 8px rgba(0,0,0,0.2)">08:00</div>
+              <div id="home-sec-dig" style="font-family:'Courier New',monospace;font-size:22px;font-weight:700;color:rgba(255,255,255,0.7);margin-top:2px;letter-spacing:2px">:00</div>
+            </div>
             <div style="text-align:center">
-              <div id="home-giorno" style="font-family:'Dancing Script',cursive;font-size:40px;font-weight:700;color:#378ADD;line-height:1.1"></div>
+              <div id="home-giorno" style="font-family:'Dancing Script',cursive;font-size:40px;font-weight:700;color:#D4A017;line-height:1.1"></div>
               <div id="home-data" style="font-family:'Playfair Display',serif;font-size:20px;color:#6B5FCC;margin-top:4px;letter-spacing:1px"></div>
-              <div id="home-ora" style="font-family:var(--font-mono);font-size:15px;color:var(--text-muted);margin-top:6px"></div>
             </div>
           </div>
         </div>
