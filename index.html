@@ -264,6 +264,7 @@
                 <option value="in attesa">In attesa</option>
                 <option value="confermato">Confermato</option>
                 <option value="programmato">Programmato</option>
+                <option value="consegnato">Consegnato</option>
               </select>
               <div id="popup-leg-stati-new" style="display:none;margin-top:6px;background:#FFFCF0;border:1px solid #D4A017;border-radius:10px;padding:10px 14px;font-size:11px;line-height:1.8">
                 <div><b style="color:#633806">In attesa</b> — Inserito, non confermato</div>
@@ -355,7 +356,7 @@
                 <option value="">Tutti i prodotti</option>
               </select>
               <select id="filtro-stato-ordini" onchange="filtraOrdiniStorico()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                <option value="">Tutti gli stati</option><option value="in attesa">In attesa</option><option value="confermato">Confermato</option><option value="programmato">Programmato</option><option value="annullato">Annullato</option>
+                <option value="">Tutti gli stati</option><option value="in attesa">In attesa</option><option value="confermato">Confermato</option><option value="programmato">Programmato</option><option value="consegnato">Consegnato</option><option value="annullato">Annullato</option>
               </select>
               <select id="filtro-anno-ordini" onchange="_setMeseAnnoStorico()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="">Anno</option>
@@ -1432,7 +1433,7 @@
             <div id="stz-marg-layout" style="display:flex;gap:20px;align-items:flex-start">
               <div style="flex:1;min-width:0">
                 <div id="marg-pompe-content"><div class="loading">Caricamento...</div></div>
-                <button id="btn-salva-costi" class="btn-primary" onclick="salvaCostiMarg()" style="margin-top:12px">💾 Salva costi</button>
+                <button id="btn-salva-costi" class="btn-primary" onclick="_salvaAllCosti()" style="margin-top:12px">💾 Salva costi</button>
               </div>
               <div id="marg-totali-live" style="position:sticky;top:80px;min-width:200px;max-width:240px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:14px;padding:20px;color:#fff;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
                 <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Marginalità live</div>

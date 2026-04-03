@@ -449,6 +449,9 @@ function renderMargPerProdotto(idx) {
       costoProposto = m.cmpCorrente[prod]; isCMP = true;
     }
     var costoIva = costoProposto ? (Number(costoProposto)*1.22).toFixed(3) : '';
+    // Costo separato per riga cambio prezzo (da costiMapCP)
+    var costoPropostoCP = (m.costiMapCP && m.costiMapCP[data+'_'+prod]) || costoProposto;
+    var costoIvaCP = costoPropostoCP ? (Number(costoPropostoCP)*1.22).toFixed(3) : '';
     var brdCol = isCMP ? '#378ADD' : 'var(--border)';
     var cmpBadge = isCMP ? ' <span style="font-size:8px;background:#378ADD;color:#fff;padding:1px 4px;border-radius:3px">CMP</span>' : '';
 
@@ -501,11 +504,17 @@ function renderMargPerProdotto(idx) {
       html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">'+(prezzoPDmedio?'€ '+prezzoPDmedio.toFixed(3)+' IVA':'')+'</div></div>';
       html += '<div><div style="font-size:11px;text-transform:uppercase;margin-bottom:4px">Costo €/L'+cmpBadge+'</div>';
       html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">';
-      html += '<input type="number" class="marg-pr-costo-cp" data-prodotto="'+prod+'" data-litri="'+g.litriPD+'" data-prezzo="'+prezzoPDmedio+'" ';
-      html += 'value="'+(costoProposto||'')+'" placeholder="0.000" step="0.001" ';
+      html += '<input type="number" class="marg-pr-costo-cp" data-prodotto="'+prod+'" data-data="'+data+'" data-litri="'+g.litriPD+'" data-prezzo="'+prezzoPDmedio+'" ';
+      html += 'value="'+(costoPropostoCP||'')+'" placeholder="0.000" step="0.001" ';
       html += 'oninput="calcolaMarginiProdotto()" ';
       html += 'style="'+inpStyle+brdCol+'" />';
-      html += '<span style="font-size:10px;color:var(--text-muted)">netto</span></div></div>';
+      html += '<span style="font-size:10px;color:var(--text-muted)">netto</span></div>';
+      html += '<div style="display:flex;align-items:center;gap:4px">';
+      html += '<input type="number" class="marg-pr-costo-cp-iva" data-prodotto="'+prod+'" ';
+      html += 'value="'+costoIvaCP+'" placeholder="0.000" step="0.001" ';
+      html += 'oninput="_syncPrCostoNettoCP(this)" ';
+      html += 'style="'+inpStyle+'var(--border);opacity:0.7" />';
+      html += '<span style="font-size:10px;color:var(--text-muted)">IVA</span></div></div>';
       html += '<div id="marg-pr-res-cp-'+prod.replace(/\s+/g,'_')+'">';
       html += '<div style="font-size:11px;text-transform:uppercase;margin-bottom:4px">Margine €/L</div>';
       html += '<div class="marg-pr-eul" style="font-family:var(--font-mono);font-size:20px;font-weight:700">—</div>';
@@ -519,6 +528,7 @@ function renderMargPerProdotto(idx) {
 
   el.innerHTML = html;
   calcolaMarginiProdotto();
+  _addEuroLitroPanel();
 }
 
 function syncCostoNettoProdotto(inpIva, prod) {
@@ -578,6 +588,7 @@ function calcolaMarginiProdotto() {
   // Aggiorna pannello live
   // Aggiorna pannello live ricalcolando tutto
   calcolaMargini();
+  _addEuroLitroPanel();
 }
 
 function calcolaMargini() {
@@ -777,3 +788,140 @@ async function salvaCostiMarg() {
 }
 
 // ── Prezzi pompa ──
+
+// ═══════════════════════════════════════════════════════════════
+// NUOVE FUNZIONI — aggiunte senza modificare quelle esistenti
+// ═══════════════════════════════════════════════════════════════
+
+// Sync IVA → netto per riga cambio prezzo in vista per prodotto
+function _syncPrCostoNettoCP(inpIva) {
+  var val = parseFloat(inpIva.value);
+  var prod = inpIva.dataset.prodotto;
+  var elNetto = document.querySelector('.marg-pr-costo-cp[data-prodotto="'+prod+'"]');
+  if (elNetto && !isNaN(val)) { elNetto.value = (val/1.22).toFixed(3); }
+  calcolaMarginiProdotto();
+}
+
+// Salvataggio unificato: legge sia per-pompa che per-prodotto
+async function _salvaAllCosti() {
+  if (window._margVista === 'prodotto') {
+    await _salvaAllCostiProdotto();
+  } else {
+    await salvaCostiMarg();
+  }
+}
+
+async function _salvaAllCostiProdotto() {
+  var ops = [], count = 0;
+  var dataCorr = null;
+
+  // 1. Costi standard (marg-pr-costo)
+  var salvati = {};
+  document.querySelectorAll('.marg-pr-costo').forEach(function(inp) {
+    var costo = parseFloat(inp.value);
+    if (isNaN(costo) || costo <= 0) return;
+    var d = inp.dataset.data; var p = inp.dataset.prodotto;
+    if (!dataCorr && d) dataCorr = d;
+    var key = d + '_' + p;
+    if (salvati[key]) return;
+    ops.push(sb.from('stazione_costi').upsert({ data:d, prodotto:p, costo_litro:costo }, { onConflict:'data,prodotto' }));
+    salvati[key] = costo;
+    count++;
+  });
+
+  // 2. Costi cambio prezzo (marg-pr-costo-cp)
+  var salvatiCP = {};
+  document.querySelectorAll('.marg-pr-costo-cp').forEach(function(inp) {
+    var costo = parseFloat(inp.value);
+    if (isNaN(costo) || costo <= 0) return;
+    var d = inp.dataset.data; var p = inp.dataset.prodotto;
+    if (!dataCorr && d) dataCorr = d;
+    var key = d + '_' + p;
+    if (salvatiCP[key]) return;
+    ops.push(sb.from('stazione_costi').upsert({ data:d, prodotto:p, costo_litro_cp:costo }, { onConflict:'data,prodotto' }));
+    salvatiCP[key] = costo;
+    count++;
+  });
+
+  if (!ops.length) { toast('Inserisci almeno un costo'); return; }
+  var results = await Promise.all(ops);
+  var errore = results.find(function(r) { return r && r.error; });
+  if (errore) { toast('Errore: ' + (errore.error ? errore.error.message : errore)); return; }
+
+  // Aggiorna cache _margData
+  var m = window._margData;
+  if (m) {
+    for (var k in salvati) { m.costiMap[k] = salvati[k]; }
+    if (!m.costiMapCP) m.costiMapCP = {};
+    for (var k in salvatiCP) { m.costiMapCP[k] = salvatiCP[k]; }
+  }
+
+  toast(count + ' cost' + (count === 1 ? 'o salvato' : 'i salvati') + '!');
+  _markSaved('btn-salva-costi');
+
+  // Auto-prepara costi giorno successivo da CMP
+  try {
+    if (dataCorr) {
+      var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
+      var { data: cisterne } = await sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido');
+      if (cisterne && cisterne.length) {
+        var cmpPP = {};
+        cisterne.forEach(function(c) {
+          if (!cmpPP[c.prodotto]) cmpPP[c.prodotto] = { litri:0, valore:0 };
+          cmpPP[c.prodotto].litri += Number(c.livello_attuale||0);
+          cmpPP[c.prodotto].valore += Number(c.livello_attuale||0) * Number(c.costo_medio||0);
+        });
+        var costiD = [];
+        Object.entries(cmpPP).forEach(function([p, v]) {
+          var cmp = v.litri > 0 ? Math.round(v.valore / v.litri * 1000000) / 1000000 : 0;
+          if (cmp > 0) costiD.push(sb.from('stazione_costi').upsert({ data:domani, prodotto:p, costo_litro:cmp }, { onConflict:'data,prodotto' }));
+        });
+        if (costiD.length) await Promise.all(costiD);
+      }
+    }
+  } catch(e) { console.warn('auto costi domani:', e); }
+
+  await caricaMarginalita();
+}
+
+// Aggiunge riga €/L al pannello live nero (chiamato dopo calcolaMargini)
+function _addEuroLitroPanel() {
+  var el = document.getElementById('marg-totali-live');
+  if (!el) return;
+  // Leggi i valori già calcolati raccogliendo tutti gli input visibili
+  var totLitri = 0, totMarg = 0;
+  ['.marg-costo', '.marg-costo-cp', '.marg-pr-costo', '.marg-pr-costo-cp'].forEach(function(sel) {
+    document.querySelectorAll(sel).forEach(function(inp) {
+      var costo = parseFloat(inp.value) || 0;
+      var litri = parseFloat(inp.dataset.litri) || 0;
+      var prezzoIva = parseFloat(inp.dataset.prezzo) || 0;
+      if (costo > 0 && litri > 0 && prezzoIva > 0) {
+        var prezzoN = prezzoIva / 1.22;
+        totLitri += litri;
+        totMarg  += (prezzoN - costo) * litri;
+      }
+    });
+  });
+  if (totLitri <= 0) return;
+  var margEL = totMarg / totLitri;
+  var color = margEL >= 0 ? '#7CFC00' : '#FF6B6B';
+  // Rimuovi eventuale riga €/L precedente e aggiungi
+  var existing = el.querySelector('#marg-eul-row');
+  if (existing) existing.remove();
+  var div = document.createElement('div');
+  div.id = 'marg-eul-row';
+  div.style.cssText = 'border-top:1px solid rgba(255,255,255,0.15);margin-top:10px;padding-top:10px;display:flex;justify-content:space-between;align-items:center';
+  div.innerHTML = '<span style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px">€/L margine</span>' +
+    '<span style="font-family:var(--font-mono);font-size:20px;font-weight:800;color:'+color+'">€ '+margEL.toFixed(4)+'</span>';
+  el.appendChild(div);
+}
+
+// Override calcolaMargini per aggiungere €/L al pannello live
+// (wrapping non modifica la funzione originale)
+(function() {
+  var _orig = calcolaMargini;
+  calcolaMargini = function() {
+    _orig.apply(this, arguments);
+    _addEuroLitroPanel();
+  };
+})();
