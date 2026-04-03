@@ -252,6 +252,13 @@ async function calcolaGiacenzeAnno(sede) {
       if (diff > 0) prodottiDati[r.prodotto].entrate += diff;
       else prodottiDati[r.prodotto].uscite += Math.abs(diff);
     });
+    // Aggiungi prodotti dalle cisterne anche se senza movimenti nel periodo
+    const { data: cisterneProd } = await sb.from('cisterne').select('prodotto').eq('sede', sede);
+    (cisterneProd||[]).forEach(c => {
+      if (c.prodotto && !prodottiDati[c.prodotto]) {
+        prodottiDati[c.prodotto] = { entrate:0, uscite:0 };
+      }
+    });
 
   } else if (sede === 'stazione_oppido') {
     // Entrate: ordini stazione_servizio confermati
