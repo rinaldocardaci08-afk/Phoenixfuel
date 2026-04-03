@@ -37,6 +37,7 @@ async function caricaMarginalita() {
   const pompeMap = {}; (pompe||[]).forEach(p=>pompeMap[p.id]=p);
   const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
   const costiMap = {}; (costi||[]).forEach(c=>{ costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro); });
+  const costiMapCP = {}; (costi||[]).forEach(c=>{ if(c.costo_litro_cp) costiMapCP[c.data+'_'+c.prodotto]=Number(c.costo_litro_cp); });
   const lettureByData = {};
   letture.forEach(l => { if(!lettureByData[l.data]) lettureByData[l.data]=[]; lettureByData[l.data].push(l); });
   const lettureByPompa = {};
@@ -57,7 +58,7 @@ async function caricaMarginalita() {
     cmpCorrente[p] = v.litri > 0 ? Math.round((v.valore / v.litri) * 1000000) / 1000000 : 0;
   });
 
-  window._margData = { dateUniche, pompeMap, prezziMap, costiMap, lettureByData, lettureByPompa, pompe, indice: 0, cmpCorrente, cmpStorico: cmpStorico||[] };
+  window._margData = { dateUniche, pompeMap, prezziMap, costiMap, costiMapCP, lettureByData, lettureByPompa, pompe, indice: 0, cmpCorrente, cmpStorico: cmpStorico||[] };
   _renderMargConRouting(0);
   renderStoricoMarg();
   renderStoricoCMP();
@@ -263,6 +264,10 @@ function renderMargGiorno(idx) {
     html += '<div id="marg-res-' + l.pompa_id + '"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div></div>';
     html += '</div>';
 
+    // Costo separato per cambio prezzo (può essere diverso dal costo std)
+    var costoSavedCP = (m.costiMapCP && m.costiMapCP[data+'_'+pompa.prodotto]) || '';
+    var costoPropostoCP = costoSavedCP || costoProposto;
+    var costoIvaCP = costoPropostoCP ? (Number(costoPropostoCP) * 1.22).toFixed(3) : '';
     // Riga cambio prezzo
     if (hasCambio) {
       var prezzoPDN = prezzoPD ? (prezzoPD / 1.22) : 0;
@@ -276,8 +281,8 @@ function renderMargGiorno(idx) {
       html += '</div>';
       // Col 3: Costo netto + IVA
       html += '<div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
-      html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px"><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoProposto || '') + '" placeholder="0.000" step="0.001" oninput="syncCostoIva(this);copiaCostoMarg(this);calcolaMargini()" style="' + inpStyle + brdCol + '" /><span style="font-size:10px;color:var(--text-muted)">netto</span></div>';
-      html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" class="marg-costo-cp-iva" data-linked-cp="' + l.pompa_id + '" value="' + costoIva + '" placeholder="0.000" step="0.001" oninput="syncCostoNettoCp(this,\'' + l.pompa_id + '\')" style="' + inpStyle + 'var(--border);opacity:0.7" /><span style="font-size:10px;color:var(--text-muted)">IVA</span></div>';
+      html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px"><input type="number" class="marg-costo-cp" data-pompa="' + l.pompa_id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" data-litri="' + litriPD + '" data-prezzo="' + prezzoPD + '" value="' + (costoPropostoCP || '') + '" placeholder="0.000" step="0.001" oninput="syncCostoIva(this);copiaCostoMarg(this);calcolaMargini()" style="' + inpStyle + brdCol + '" /><span style="font-size:10px;color:var(--text-muted)">netto</span></div>';
+      html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" class="marg-costo-cp-iva" data-linked-cp="' + l.pompa_id + '" value="' + costoIvaCP + '" placeholder="0.000" step="0.001" oninput="syncCostoNettoCp(this,\'' + l.pompa_id + '\')" style="' + inpStyle + 'var(--border);opacity:0.7" /><span style="font-size:10px;color:var(--text-muted)">IVA</span></div>';
       html += '</div>';
       // Col 4: Margine
       html += '<div id="marg-res-cp-' + l.pompa_id + '"><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Margine €/L</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700">—</div></div>';
@@ -691,6 +696,18 @@ async function salvaCostiMarg() {
     ops.push(_sbWrite('stazione_costi', 'upsert', { data:inp.dataset.data, prodotto:inp.dataset.prodotto, costo_litro:costo }, 'data,prodotto'));
     salvati[key] = true;
   }
+  // Salva anche i costi cambio prezzo in costo_litro_cp
+  var salvatiCP = {};
+  var inputsCP = document.querySelectorAll('.marg-costo-cp');
+  for (var ic = 0; ic < inputsCP.length; ic++) {
+    var inpCP = inputsCP[ic];
+    var costoCP = parseFloat(inpCP.value);
+    if (isNaN(costoCP) || costoCP <= 0) continue;
+    var keyCP = inpCP.dataset.data + '_' + inpCP.dataset.prodotto;
+    if (salvatiCP[keyCP]) continue;
+    ops.push(sb.from('stazione_costi').upsert({ data:inpCP.dataset.data, prodotto:inpCP.dataset.prodotto, costo_litro_cp:costoCP }, { onConflict:'data,prodotto' }));
+    salvatiCP[keyCP] = costoCP;
+  }
   if (!ops.length) { toast('Inserisci almeno un costo'); return; }
   var results = await Promise.all(ops);
   anyOffline = results.some(function(r) { return r._offline; });
@@ -704,6 +721,11 @@ async function salvaCostiMarg() {
       var parts = k.split('_'); var d = parts[0]; var p = parts.slice(1).join('_');
       var inp2 = document.querySelector('.marg-costo[data-data="'+d+'"][data-prodotto="'+p+'"]');
       if (inp2) m.costiMap[d+'_'+p] = parseFloat(inp2.value);
+    }
+    // Aggiorna cache costiMapCP
+    if (!m.costiMapCP) m.costiMapCP = {};
+    for (var kcp in salvatiCP) {
+      m.costiMapCP[kcp] = salvatiCP[kcp];
     }
   }
   // Toast viene mostrato alla fine della funzione
