@@ -154,9 +154,14 @@ async function inizializzaNuovaFattura(){
   // Default date: mese corrente
   const oggi = _oggi();
   const primoMese = oggi.substring(0,7) + '-01';
-  document.getElementById('nf-dal').value  = primoMese;
-  document.getElementById('nf-al').value   = oggi;
-  document.getElementById('nf-data').value = oggi;
+  const elDal = document.getElementById('nf-dal');
+  const elAl  = document.getElementById('nf-al');
+  const elDta = document.getElementById('nf-data');
+  if(elDal && !elDal.value) elDal.value = primoMese;
+  if(elAl  && !elAl.value)  elAl.value  = oggi;
+  if(elDta && !elDta.value) elDta.value = oggi;
+  // Carica subito lista ordini fatturabili
+  await caricaOrdiniFatturabili();
 }
 
 async function cercaOrdiniPerFattura(){
@@ -400,6 +405,12 @@ async function apriDettaglioFattura(id){
   const { data: righe } = await sb.from('fattura_righe').select('*').eq('fattura_id', id).order('numero_riga');
   if(!f) return;
 
+  // Carica DAS collegati alla fattura
+  const { data: dasAllegati } = await sb.from('documenti_ordine')
+    .select('id,nome_file,percorso_storage,ordine_id')
+    .eq('fattura_id', id)
+    .eq('tipo','das');
+
   const html = `
     <div style="font-size:13px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
@@ -440,6 +451,19 @@ async function apriDettaglioFattura(id){
       </div>
 
       ${f.note?`<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">Note: ${_esc(f.note)}</div>`:''}
+    ${dasAllegati&&dasAllegati.length?`
+    <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📎 DAS firmati allegati</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${dasAllegati.map(d=>{
+          const url=`${SUPABASE_URL}/storage/v1/object/public/Das/${d.percorso_storage}`;
+          return `<a href="${url}" target="_blank"
+            style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#E6F1FB;color:#0C447C;border-radius:8px;font-size:12px;text-decoration:none;border:0.5px solid #85B7EB">
+            📄 ${_esc(d.nome_file||'DAS')}
+          </a>`;
+        }).join('')}
+      </div>
+    </div>`:''}
     </div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn-primary" style="flex:1;background:#6B5FCC" onclick="generaXMLFatturaPA('${f.id}');chiudiModale()">📥 Scarica XML FatturaPA</button>
@@ -848,4 +872,249 @@ async function initFatture(){
   }
   await inizializzaNuovaFattura();
   await caricaFatture();
+}
+
+// ═════════════════════════════════════════════════════════════
+// NUOVA FATTURA v2 — Lista ordini consegnati con DAS
+// Funzioni AGGIUNTIVE — non toccano nulla di esistente
+// ═════════════════════════════════════════════════════════════
+
+// Stato selezione ordini multi-cliente
+window._nfOrdiniDisponibili = [];
+window._nfSelezionati       = new Set();
+
+async function caricaOrdiniFatturabili(){
+  const clienteId = document.getElementById('nf-cliente')?.value || '';
+  const dal       = document.getElementById('nf-dal')?.value || '';
+  const al        = document.getElementById('nf-al')?.value || '';
+  const area      = document.getElementById('nf-ordini-area');
+  if(!area) return;
+  area.innerHTML = '<div class="loading">Carico ordini consegnati con DAS…</div>';
+  window._nfSelezionati.clear();
+
+  // Ordini consegnati nel periodo
+  let q = sb.from('ordini')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,stato,giorni_pagamento')
+    .eq('stato','consegnato')
+    .eq('tipo_ordine','cliente')
+    .order('data',{ascending:false})
+    .order('cliente');
+  if(clienteId) q = q.eq('cliente_id', clienteId);
+  if(dal) q = q.gte('data', dal);
+  if(al)  q = q.lte('data', al);
+  const { data: ordini, error } = await q;
+  if(error){ area.innerHTML='<div style="color:red">Errore: '+error.message+'</div>'; return; }
+  if(!ordini||!ordini.length){ area.innerHTML='<div class="loading">Nessun ordine consegnato nel periodo</div>'; return; }
+
+  // Trova quali ordini hanno DAS allegato
+  const ordineIds = ordini.map(o=>o.id);
+  const { data: docs } = await sb.from('documenti_ordine')
+    .select('ordine_id,percorso_storage,nome_file')
+    .in('ordine_id', ordineIds)
+    .eq('tipo','das');
+  const dasMap = {};
+  (docs||[]).forEach(d=>{ if(!dasMap[d.ordine_id]) dasMap[d.ordine_id]=[]; dasMap[d.ordine_id].push(d); });
+
+  // Ordini già fatturati
+  const { data: righeEsistenti } = await sb.from('fattura_righe').select('ordine_id').not('ordine_id','is',null);
+  const giàFatturatiSet = new Set((righeEsistenti||[]).map(r=>r.ordine_id));
+
+  // Filtra: solo quelli con DAS e non ancora fatturati
+  const ordiniFatturabili = ordini.filter(o => dasMap[o.id] && dasMap[o.id].length && !giàFatturatiSet.has(o.id));
+  window._nfOrdiniDisponibili = ordiniFatturabili.map(o=>({ ...o, _das: dasMap[o.id]||[] }));
+
+  if(!ordiniFatturabili.length){
+    area.innerHTML='<div class="loading">Nessun ordine con DAS allegato e non ancora fatturato</div>';
+    return;
+  }
+
+  const fmtD2 = d=>{ if(!d) return '—'; const p=d.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; };
+  const fmtL2 = v=>Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0})+' L';
+  const fmtE2 = v=>'€ '+Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  let html = '<div class="card" style="margin-bottom:14px">';
+  html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">';
+  html += '<strong style="font-size:13px">'+ordiniFatturabili.length+' ordini fatturabili</strong>';
+  html += '<button class="btn-primary" style="font-size:11px;padding:5px 12px" onclick="_nfSelAll(true)">✓ Seleziona tutti</button>';
+  html += '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="_nfSelAll(false)">☐ Deseleziona</button>';
+  html += '</div>';
+  html += '<div style="overflow-x:auto"><table>';
+  html += '<thead><tr><th style="width:30px"></th><th>Data</th><th>Cliente</th><th>Prodotto</th><th style="text-align:right">Litri</th><th style="text-align:right">Imponibile</th><th style="text-align:center">DAS</th></tr></thead><tbody>';
+
+  ordiniFatturabili.forEach(o=>{
+    const pNoIva = Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0);
+    const impon  = pNoIva * Number(o.litri||0);
+    const dasLinks = o._das.map(d=>{
+      const url = `${SUPABASE_URL}/storage/v1/object/public/Das/${d.percorso_storage}`;
+      return `<a href="${url}" target="_blank" style="font-size:10px;color:#0C447C">📄 DAS</a>`;
+    }).join(' ');
+    html += `<tr>
+      <td><input type="checkbox" class="nf2-chk" value="${o.id}" onchange="_nfAggiornaSelezione()"></td>
+      <td style="font-size:12px">${fmtD2(o.data)}</td>
+      <td style="font-size:12px;font-weight:500">${_esc(o.cliente||'')}</td>
+      <td style="font-size:12px">${_esc(o.prodotto||'')}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:12px">${fmtL2(o.litri)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:12px">${fmtE2(impon)}</td>
+      <td style="text-align:center">${dasLinks}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div></div>';
+  area.innerHTML = html;
+  _nfAggiornaSelezione();
+}
+
+function _nfSelAll(stato){
+  document.querySelectorAll('.nf2-chk').forEach(c=>{ c.checked=stato; });
+  _nfAggiornaSelezione();
+}
+
+function _nfAggiornaSelezione(){
+  window._nfSelezionati.clear();
+  document.querySelectorAll('.nf2-chk:checked').forEach(c=>window._nfSelezionati.add(c.value));
+
+  const ant = document.getElementById('nf-anteprima-multi');
+  if(!ant) return;
+
+  const selezionati = window._nfOrdiniDisponibili.filter(o=>window._nfSelezionati.has(o.id));
+  if(!selezionati.length){ ant.innerHTML=''; return; }
+
+  // Raggruppa per cliente
+  const perCliente = {};
+  selezionati.forEach(o=>{
+    const k = o.cliente_id || o.cliente;
+    if(!perCliente[k]) perCliente[k]={ nome:o.cliente, id:o.cliente_id, ordini:[] };
+    perCliente[k].ordini.push(o);
+  });
+
+  const nClienti = Object.keys(perCliente).length;
+  const fmtE2 = v=>'€ '+Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  let html = '<div class="card">';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:10px">📊 Riepilogo fatture da generare</div>';
+
+  if(nClienti > 1){
+    html += `<div style="background:#FFF3CD;border:0.5px solid #F0D080;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px">
+      ⚠️ Hai selezionato ordini di <strong>${nClienti} clienti diversi</strong>. Verranno generate <strong>${nClienti} fatture separate</strong>.
+    </div>`;
+  }
+
+  Object.values(perCliente).forEach(cl=>{
+    const tot = cl.ordini.reduce((s,o)=>{
+      const p=Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0);
+      return s+p*Number(o.litri||0);
+    }, 0);
+    const totIva = cl.ordini.reduce((s,o)=>{
+      const p=Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0);
+      const imp=p*Number(o.litri||0);
+      return s+imp*(parseInt(o.iva||22)/100);
+    }, 0);
+    html += `<div style="background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:8px;border:0.5px solid var(--border)">
+      <div style="font-weight:600;margin-bottom:4px">${_esc(cl.nome)} — ${cl.ordini.length} ordini</div>
+      <div style="display:flex;gap:20px;font-size:12px;font-family:var(--font-mono)">
+        <span>Imponibile: <strong>${fmtE2(tot)}</strong></span>
+        <span>IVA: <strong>${fmtE2(totIva)}</strong></span>
+        <span style="color:var(--primary)">Totale: <strong>${fmtE2(tot+totIva)}</strong></span>
+      </div>
+    </div>`;
+  });
+
+  html += `<button class="btn-primary" style="width:100%;margin-top:8px;padding:12px;font-size:14px;background:#2E7D32"
+    onclick="generaFattureMulti()">
+    🧾 Genera ${nClienti} fattura${nClienti>1?'e':''} (${selezionati.length} ordini)
+  </button>`;
+  html += '</div>';
+  ant.innerHTML = html;
+}
+
+async function generaFattureMulti(){
+  const dataFattura = document.getElementById('nf-data')?.value || _oggi();
+  const selezionati = window._nfOrdiniDisponibili.filter(o=>window._nfSelezionati.has(o.id));
+  if(!selezionati.length){ toast('Seleziona almeno un ordine'); return; }
+
+  // Raggruppa per cliente
+  const perCliente = {};
+  selezionati.forEach(o=>{
+    const k = o.cliente_id || o.cliente;
+    if(!perCliente[k]) perCliente[k]={ nome:o.cliente, id:o.cliente_id, ordini:[] };
+    perCliente[k].ordini.push(o);
+  });
+
+  const nClienti = Object.keys(perCliente).length;
+  if(nClienti > 1){
+    if(!confirm(`Vuoi generare ${nClienti} fatture separate (una per ogni cliente)?`)) return;
+  }
+
+  const btn = document.querySelector('[onclick="generaFattureMulti()"]');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Generazione…'; }
+
+  try {
+    let fattureCreate = 0;
+    for(const cl of Object.values(perCliente)){
+      // Dati cliente
+      const { data: cliente } = cl.id
+        ? await sb.from('clienti').select('*').eq('id', cl.id).single()
+        : { data: { nome: cl.nome, giorni_pagamento: 30 } };
+
+      const anno   = parseInt(dataFattura.split('-')[0]);
+      const numero = await _prossimoNumeroFattura(anno);
+      const ggPag  = cliente?.giorni_pagamento || 30;
+      const dataScad = _addDays(dataFattura, ggPag);
+
+      let totImponibile=0, totIva=0;
+      const righe = cl.ordini.map((o,idx)=>{
+        const pNoIva = Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0);
+        const impon  = pNoIva * Number(o.litri||0);
+        const aliq   = parseInt(o.iva||22);
+        const ivaImp = impon*(aliq/100);
+        totImponibile += impon; totIva += ivaImp;
+        return {
+          numero_riga:idx+1, ordine_id:o.id,
+          descrizione:`${o.prodotto} del ${_fmtD(o.data)}`,
+          prodotto:o.prodotto, unita_misura:'LT',
+          quantita:Number(o.litri||0), prezzo_unitario:pNoIva,
+          aliquota_iva:aliq, imponibile:impon, iva_importo:ivaImp,
+          data_ordine:o.data
+        };
+      });
+
+      // Crea fattura
+      const { data: fattura, error: errF } = await sb.from('fatture').insert([{
+        numero, anno, data:dataFattura,
+        cliente_id:cl.id||null, cliente_nome:cl.nome,
+        imponibile:totImponibile, iva:totIva, totale:totImponibile+totIva,
+        stato:'bozza', tipo_documento:'TD01',
+        giorni_pagamento:ggPag, data_scadenza:dataScad,
+      }]).select().single();
+      if(errF){ toast('Errore fattura '+cl.nome+': '+errF.message); continue; }
+
+      // Crea righe
+      await sb.from('fattura_righe').insert(righe.map(r=>({...r, fattura_id:fattura.id})));
+
+      // Collega DAS degli ordini alla fattura
+      const dasOrdineIds = cl.ordini.map(o=>o.id);
+      await sb.from('documenti_ordine')
+        .update({ fattura_id: fattura.id })
+        .in('ordine_id', dasOrdineIds)
+        .eq('tipo','das');
+
+      fattureCreate++;
+    }
+
+    toast(`✓ ${fattureCreate} fattura${fattureCreate>1?'e':''} generate!`);
+    window._nfSelezionati.clear();
+    document.getElementById('nf-ordini-area').innerHTML='';
+    document.getElementById('nf-anteprima-multi').innerHTML='';
+
+    // Vai all'elenco
+    const btnElenco = document.querySelector('.fatt-tab[data-tab="fatt-panel-elenco"]');
+    if(btnElenco) switchFattureTab(btnElenco);
+    await caricaFatture();
+
+  } catch(e){
+    toast('Errore: '+e.message);
+    console.error(e);
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='🧾 Genera fatture'; }
+  }
 }

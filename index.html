@@ -907,39 +907,34 @@
         <!-- PANEL: NUOVA FATTURA -->
         <div id="fatt-panel-nuova" class="fatt-panel" style="display:none">
           <div class="card" style="margin-bottom:14px">
-            <div class="card-title">🧾 Genera nuova fattura da ordini</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+            <div class="card-title">🧾 Seleziona ordini da fatturare</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">
               <div class="form-group">
-                <label>Cliente *</label>
-                <select id="nf-cliente" style="width:100%">
-                  <option value="">— Seleziona —</option>
+                <label>Cliente (opzionale)</label>
+                <select id="nf-cliente" onchange="caricaOrdiniFatturabili()" style="width:100%">
+                  <option value="">— Tutti i clienti —</option>
                 </select>
               </div>
               <div class="form-group">
-                <label>Ordini dal</label>
-                <input type="date" id="nf-dal">
+                <label>Dal</label>
+                <input type="date" id="nf-dal" onchange="caricaOrdiniFatturabili()">
               </div>
               <div class="form-group">
-                <label>Ordini al</label>
-                <input type="date" id="nf-al">
+                <label>Al</label>
+                <input type="date" id="nf-al" onchange="caricaOrdiniFatturabili()">
               </div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
               <div class="form-group">
                 <label>Data fattura *</label>
                 <input type="date" id="nf-data">
               </div>
-              <div class="form-group">
-                <label>Note</label>
-                <input type="text" id="nf-note" placeholder="Note opzionali">
-              </div>
             </div>
-            <button class="btn-primary" onclick="cercaOrdiniPerFattura()" style="background:#D85A30">
-              🔍 Cerca ordini da fatturare
-            </button>
           </div>
 
+          <!-- Lista ordini con checkbox -->
           <div id="nf-ordini-area"></div>
+
+          <!-- Anteprima e pulsante genera -->
+          <div id="nf-anteprima-multi"></div>
         </div>
 
         <!-- PANEL: IMPOSTAZIONI FATTURE -->

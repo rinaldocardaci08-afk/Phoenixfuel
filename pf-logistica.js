@@ -894,7 +894,7 @@ async function eseguiDirottamento() {
     data: d.ordine.data, tipo_ordine: d.ordine.tipo_ordine,
     cliente: nuovoCliente.nome, cliente_id: nuovoClienteId,
     prodotto: d.ordine.prodotto, litri: litriDirottati,
-    fornitore: d.ordine.fornitore, costo_litro: d.ordine.costo_litro,
+    fornitore: 'PhoenixFuel', costo_litro: d.ordine.costo_litro, // Dirottamento: merce transita da deposito Phoenix
     trasporto_litro: d.ordine.trasporto_litro, margine: margineNuovo,
     iva: d.ordine.iva, base_carico_id: d.ordine.base_carico_id,
     giorni_pagamento: ggPag, data_scadenza: dataScad.toISOString().split('T')[0],
