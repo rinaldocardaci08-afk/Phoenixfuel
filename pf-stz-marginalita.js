@@ -162,7 +162,12 @@ function margGiorno(dir) {
   var nuovoIdx = m.indice - dir;
   if (nuovoIdx < 0 || nuovoIdx >= m.dateUniche.length) return;
   m.indice = nuovoIdx;
-  renderMargGiorno(nuovoIdx);
+  // Routing: per pompa (originale intatta) oppure per prodotto (nuova)
+  if (window._margVista === 'prodotto') {
+    renderMargPerProdotto(nuovoIdx);
+  } else {
+    renderMargGiorno(nuovoIdx);
+  }
 }
 
 function renderMargGiorno(idx) {
@@ -197,23 +202,7 @@ function renderMargGiorno(idx) {
   var el = document.getElementById('marg-pompe-content');
   var html = '';
 
-  // Nessuna lettura per questa data → messaggio guida
-  if (!lettureGiorno.length) {
-    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">' +
-      '<div style="font-size:32px;margin-bottom:8px">📋</div>' +
-      '<div style="font-size:14px;font-weight:600;margin-bottom:4px">Nessuna lettura per questa data</div>' +
-      '<div style="font-size:12px">Vai in <strong>Totalizzatori</strong>, inserisci le letture pompa di oggi e torna qui.</div>' +
-      '</div>';
-    return;
-  }
-
-  // Ordina per ordine pompa (come Totalizzatori: Pompa 1, 2, 3, 4)
-  var lettureOrdinate = lettureGiorno.slice().sort(function(a, b) {
-    var pa = m.pompeMap[a.pompa_id]; var pb = m.pompeMap[b.pompa_id];
-    return ((pa && pa.ordine) || 99) - ((pb && pb.ordine) || 99);
-  });
-
-  lettureOrdinate.forEach(function(l) {
+  lettureGiorno.forEach(function(l) {
     var pompa = m.pompeMap[l.pompa_id];
     if (!pompa) return;
     var _pi = cacheProdotti.find(function(pp){return pp.nome===pompa.prodotto;}); var colore = _pi ? _pi.colore : '#888';
@@ -291,7 +280,6 @@ function renderMargGiorno(idx) {
     html += '</div>';
   });
 
-  if (window._margVista === "prodotto") { renderMargPerProdotto(idx); return; }
   el.innerHTML = html;
   calcolaMargini();
   _resetSaved('btn-salva-costi');
