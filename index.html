@@ -1426,6 +1426,14 @@
                 <button onclick="margGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               </div>
             </div>
+            <!-- Toggle vista -->
+            <div style="display:flex;gap:6px;margin-bottom:14px">
+              <button id="marg-btn-pompe" class="btn-primary" onclick="switchMargVista('pompe')"
+                style="font-size:12px;padding:7px 16px">⛽ Per pompa</button>
+              <button id="marg-btn-prodotto" class="btn-primary" onclick="switchMargVista('prodotto')"
+                style="font-size:12px;padding:7px 16px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Per prodotto</button>
+            </div>
+
             <div id="stz-marg-layout" style="display:flex;gap:20px;align-items:flex-start">
               <div style="flex:1;min-width:0">
                 <div id="marg-pompe-content"><div class="loading">Caricamento...</div></div>
