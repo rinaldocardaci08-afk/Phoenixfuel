@@ -30,7 +30,10 @@ async function caricaMarginalita() {
     return;
   }
 
-  const dateUniche = [...new Set(letture.map(l=>l.data))].sort().reverse();
+  var _oggiISO = new Date().toISOString().split('T')[0];
+  var _dateSet = new Set(letture.map(l=>l.data));
+  _dateSet.add(_oggiISO); // includi sempre oggi anche senza letture
+  const dateUniche = [..._dateSet].sort().reverse();
   const pompeMap = {}; (pompe||[]).forEach(p=>pompeMap[p.id]=p);
   const prezziMap = {}; (prezzi||[]).forEach(p=>{ prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro; });
   const costiMap = {}; (costi||[]).forEach(c=>{ costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro); });
@@ -193,6 +196,16 @@ function renderMargGiorno(idx) {
 
   var el = document.getElementById('marg-pompe-content');
   var html = '';
+
+  // Nessuna lettura per questa data → messaggio guida
+  if (!lettureGiorno.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">' +
+      '<div style="font-size:32px;margin-bottom:8px">📋</div>' +
+      '<div style="font-size:14px;font-weight:600;margin-bottom:4px">Nessuna lettura per questa data</div>' +
+      '<div style="font-size:12px">Vai in <strong>Totalizzatori</strong>, inserisci le letture pompa di oggi e torna qui.</div>' +
+      '</div>';
+    return;
+  }
 
   // Ordina per ordine pompa (come Totalizzatori: Pompa 1, 2, 3, 4)
   var lettureOrdinate = lettureGiorno.slice().sort(function(a, b) {
