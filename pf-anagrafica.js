@@ -148,6 +148,8 @@ async function _uploadDocConsegna(ordineId, tipoDoc, input) {
   update[tipoDoc + '_url'] = url;
   update[tipoDoc + '_nome'] = file.name;
   await sb.from('ordini').update(update).eq('id', ordineId);
+  // Se è il DAS firmato → aggiorna stato ordine a consegnato
+  if (tipoDoc === 'das_firmato') { await _aggiornaStatoConsegnato(ordineId); }
   toast('✅ ' + (tipoDoc === 'das_firmato' ? 'DAS firmato' : 'Cartellino') + ' allegato!');
   chiudiModalePermessi();
   caricaConsegne();
@@ -160,6 +162,8 @@ async function _salvaUrlDocConsegna(ordineId, tipoDoc) {
   update[tipoDoc + '_url'] = url;
   update[tipoDoc + '_nome'] = tipoDoc === 'das_firmato' ? 'DAS firmato' : 'Cartellino';
   await sb.from('ordini').update(update).eq('id', ordineId);
+  // Se è il DAS firmato → aggiorna stato ordine a consegnato
+  if (tipoDoc === 'das_firmato') { await _aggiornaStatoConsegnato(ordineId); }
   toast('✅ URL salvato!');
   chiudiModalePermessi();
   caricaConsegne();

@@ -894,7 +894,7 @@ async function caricaOrdiniFatturabili(){
 
   // Ordini consegnati nel periodo
   let q = sb.from('ordini')
-    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,stato,giorni_pagamento')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,stato,giorni_pagamento,das_firmato_url,das_firmato_nome')
     .eq('stato','consegnato')
     .eq('tipo_ordine','cliente')
     .order('data',{ascending:false})
@@ -906,22 +906,14 @@ async function caricaOrdiniFatturabili(){
   if(error){ area.innerHTML='<div style="color:red">Errore: '+error.message+'</div>'; return; }
   if(!ordini||!ordini.length){ area.innerHTML='<div class="loading">Nessun ordine consegnato nel periodo</div>'; return; }
 
-  // Trova quali ordini hanno DAS allegato
-  const ordineIds = ordini.map(o=>o.id);
-  const { data: docs } = await sb.from('documenti_ordine')
-    .select('ordine_id,percorso_storage,nome_file')
-    .in('ordine_id', ordineIds)
-    .eq('tipo','das');
-  const dasMap = {};
-  (docs||[]).forEach(d=>{ if(!dasMap[d.ordine_id]) dasMap[d.ordine_id]=[]; dasMap[d.ordine_id].push(d); });
-
   // Ordini già fatturati
+  const ordineIds = ordini.map(o=>o.id);
   const { data: righeEsistenti } = await sb.from('fattura_righe').select('ordine_id').not('ordine_id','is',null);
   const giàFatturatiSet = new Set((righeEsistenti||[]).map(r=>r.ordine_id));
 
-  // Filtra: solo quelli con DAS e non ancora fatturati
-  const ordiniFatturabili = ordini.filter(o => dasMap[o.id] && dasMap[o.id].length && !giàFatturatiSet.has(o.id));
-  window._nfOrdiniDisponibili = ordiniFatturabili.map(o=>({ ...o, _das: dasMap[o.id]||[] }));
+  // Filtra: solo quelli con DAS firmato (das_firmato_url) e non ancora fatturati
+  const ordiniFatturabili = ordini.filter(o => o.das_firmato_url && !giàFatturatiSet.has(o.id));
+  window._nfOrdiniDisponibili = ordiniFatturabili.map(o=>({ ...o, _das_url: o.das_firmato_url, _das_nome: o.das_firmato_nome }));
 
   if(!ordiniFatturabili.length){
     area.innerHTML='<div class="loading">Nessun ordine con DAS allegato e non ancora fatturato</div>';
@@ -944,10 +936,9 @@ async function caricaOrdiniFatturabili(){
   ordiniFatturabili.forEach(o=>{
     const pNoIva = Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0);
     const impon  = pNoIva * Number(o.litri||0);
-    const dasLinks = o._das.map(d=>{
-      const url = `${SUPABASE_URL}/storage/v1/object/public/Das/${d.percorso_storage}`;
-      return `<a href="${url}" target="_blank" style="font-size:10px;color:#0C447C">📄 DAS</a>`;
-    }).join(' ');
+    const dasLinks = o._das_url
+      ? `<a href="${o._das_url}" target="_blank" style="font-size:10px;color:#0C447C">📄 DAS</a>`
+      : '—';
     html += `<tr>
       <td><input type="checkbox" class="nf2-chk" value="${o.id}" onchange="_nfAggiornaSelezione()"></td>
       <td style="font-size:12px">${fmtD2(o.data)}</td>

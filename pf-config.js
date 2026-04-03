@@ -273,7 +273,7 @@ function fmtL(n) {
   return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })) + ' L';
 }
 function badgeStato(stato) {
-  const map = { 'confermato':'green','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
+  const map = { 'confermato':'green','consegnato':'teal','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
   const labels = { 'entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
   return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(labels[stato]||stato) + '</span>';
 }
@@ -522,4 +522,23 @@ async function caricaUtentiOnline() {
   });
   html += '</div>';
   wrap.innerHTML = html;
+}
+
+// ── _aggiornaStatoConsegnato ──────────────────────────────────────
+// Chiamata dopo upload DAS firmato: porta l'ordine a stato 'consegnato'
+// Solo se lo stato attuale lo permette (non annullato, non già consegnato)
+async function _aggiornaStatoConsegnato(ordineId) {
+  if (!ordineId) return;
+  try {
+    const { data: ord } = await sb.from('ordini').select('stato,tipo_ordine,das_firmato_url').eq('id', ordineId).single();
+    if (!ord) return;
+    // Solo ordini cliente con DAS firmato allegato, non già consegnati o annullati
+    if (ord.stato === 'consegnato' || ord.stato === 'annullato') return;
+    if (ord.tipo_ordine && ord.tipo_ordine !== 'cliente') return;
+    if (!ord.das_firmato_url) return; // DAS firmato obbligatorio
+    await sb.from('ordini').update({ stato: 'consegnato' }).eq('id', ordineId);
+    console.log('Ordine ' + ordineId + ' → consegnato');
+  } catch(e) {
+    console.warn('_aggiornaStatoConsegnato:', e);
+  }
 }
