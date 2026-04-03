@@ -518,25 +518,36 @@ async function caricaDati() {
     }
 
     // Arricchisci ordini con indirizzo corretto
+    // PRIORITÀ: 1) sede_scarico_nome già sull'ordine  2) sediMap per indirizzo completo  3) cliente principale
     ordini.forEach(o => {
-      if (o.sede_scarico_id && sediMap[o.sede_scarico_id]) {
-        // Usa indirizzo della sede di scarico
-        const sede = sediMap[o.sede_scarico_id];
-        o._indirizzo = sede.indirizzo || '';
-        o._citta = sede.citta || '';
-        o._provincia = sede.provincia || '';
-        o._cap = sede.cap || '';
-        o._sede_nome = sede.nome || '';
+      const cl = clientiMap[o.cliente_id] || clientiMap[o.cliente] || {};
+      o._telefono = cl.telefono || o.telefono || '';
+
+      if (o.sede_scarico_nome) {
+        // La sede è già salvata in testo sull'ordine — usala come label sicura
+        o._sede_nome = o.sede_scarico_nome;
+        // Prova a recuperare indirizzo completo dalla mappa se disponibile
+        if (o.sede_scarico_id && sediMap[o.sede_scarico_id]) {
+          const sede = sediMap[o.sede_scarico_id];
+          o._indirizzo = sede.indirizzo || '';
+          o._citta = sede.citta || '';
+          o._provincia = sede.provincia || '';
+          o._cap = sede.cap || '';
+        } else {
+          // Indirizzo non disponibile nella mappa, mostra almeno il nome sede
+          o._indirizzo = o.sede_scarico_nome;
+          o._citta = '';
+          o._provincia = '';
+          o._cap = '';
+        }
       } else {
-        // Usa indirizzo principale del cliente
-        const cl = clientiMap[o.cliente_id] || clientiMap[o.cliente] || {};
+        // Nessuna sede specifica: usa indirizzo principale del cliente
         o._indirizzo = cl.indirizzo || o.indirizzo || '';
         o._citta = cl.citta || o.citta || '';
         o._provincia = cl.provincia || o.provincia || '';
         o._cap = cl.cap || o.cap || '';
         o._sede_nome = '';
       }
-      o._telefono = (clientiMap[o.cliente_id] || clientiMap[o.cliente] || {}).telefono || o.telefono || '';
     });
 
     renderConsegne(ordini);
