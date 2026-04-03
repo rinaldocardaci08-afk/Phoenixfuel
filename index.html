@@ -832,6 +832,159 @@
         </div>
       </div>
 
+
+      <!-- FATTURE -->
+      <div class="section" id="s-fatture">
+        <!-- Tab header -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="btn-primary fatt-tab active" data-tab="fatt-panel-elenco"
+            onclick="switchFattureTab(this)" style="font-size:12px;padding:8px 14px">
+            📋 Elenco fatture
+          </button>
+          <button class="btn-primary fatt-tab" data-tab="fatt-panel-nuova"
+            onclick="switchFattureTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            ➕ Nuova fattura
+          </button>
+          <button class="btn-primary fatt-tab" data-tab="fatt-panel-impostazioni"
+            onclick="switchFattureTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            ⚙️ Impostazioni
+          </button>
+        </div>
+
+        <!-- PANEL: ELENCO FATTURE -->
+        <div id="fatt-panel-elenco" class="fatt-panel">
+          <!-- KPI totali -->
+          <div class="grid4" style="margin-bottom:14px">
+            <div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value" id="fatt-tot-imponibile">—</div></div>
+            <div class="kpi"><div class="kpi-label">IVA</div><div class="kpi-value" id="fatt-tot-iva">—</div></div>
+            <div class="kpi"><div class="kpi-label">Totale fatturato</div><div class="kpi-value" id="fatt-tot-totale">—</div></div>
+            <div class="kpi" style="background:#FFF3CD"><div class="kpi-label">Da incassare</div><div class="kpi-value" id="fatt-tot-da-incassare">—</div></div>
+          </div>
+
+          <!-- Filtri -->
+          <div class="card" style="margin-bottom:14px">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="fatt-filtro-anno" onchange="caricaFatture()"
+                style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+              </select>
+              <select id="fatt-filtro-stato" onchange="caricaFatture()"
+                style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti gli stati</option>
+                <option value="bozza">Bozza</option>
+                <option value="emessa">Emessa</option>
+                <option value="pagata">Pagata</option>
+                <option value="annullata">Annullata</option>
+              </select>
+              <select id="fatt-filtro-cliente" onchange="caricaFatture()"
+                style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                <option value="">Tutti i clienti</option>
+              </select>
+              <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="caricaFatture()">🔍 Filtra</button>
+            </div>
+          </div>
+
+          <!-- Tabella fatture -->
+          <div style="overflow-x:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>N° Fattura</th><th>Data</th><th>Cliente</th>
+                  <th style="text-align:right">Imponibile</th>
+                  <th style="text-align:right">IVA</th>
+                  <th style="text-align:right">Totale</th>
+                  <th>Stato</th><th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody id="fatt-elenco-tbody">
+                <tr><td colspan="8" class="loading">Caricamento…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- PANEL: NUOVA FATTURA -->
+        <div id="fatt-panel-nuova" class="fatt-panel" style="display:none">
+          <div class="card" style="margin-bottom:14px">
+            <div class="card-title">🧾 Genera nuova fattura da ordini</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+              <div class="form-group">
+                <label>Cliente *</label>
+                <select id="nf-cliente" style="width:100%">
+                  <option value="">— Seleziona —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Ordini dal</label>
+                <input type="date" id="nf-dal">
+              </div>
+              <div class="form-group">
+                <label>Ordini al</label>
+                <input type="date" id="nf-al">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+              <div class="form-group">
+                <label>Data fattura *</label>
+                <input type="date" id="nf-data">
+              </div>
+              <div class="form-group">
+                <label>Note</label>
+                <input type="text" id="nf-note" placeholder="Note opzionali">
+              </div>
+            </div>
+            <button class="btn-primary" onclick="cercaOrdiniPerFattura()" style="background:#D85A30">
+              🔍 Cerca ordini da fatturare
+            </button>
+          </div>
+
+          <div id="nf-ordini-area"></div>
+        </div>
+
+        <!-- PANEL: IMPOSTAZIONI FATTURE -->
+        <div id="fatt-panel-impostazioni" class="fatt-panel" style="display:none">
+          <div class="card" style="max-width:500px">
+            <div class="card-title">⚙️ Impostazioni numerazione</div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">
+              Imposta il prossimo numero di fattura per continuare la sequenza da Danea
+              o da un altro gestionale. Il sistema userà questo numero se è maggiore
+              dell'ultimo numero già presente.
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+              <div class="form-group">
+                <label>Anno</label>
+                <select id="cfg-fatt-anno" style="width:100%">
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Prossimo numero fattura</label>
+                <input type="number" id="cfg-fatt-numero" min="1" step="1"
+                  placeholder="es. 188" style="width:100%">
+              </div>
+            </div>
+
+            <div id="cfg-fatt-stato" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;min-height:18px"></div>
+
+            <div style="display:flex;gap:8px">
+              <button class="btn-primary" onclick="salvaConfigFatture()" style="background:#2E7D32">
+                💾 Salva impostazione
+              </button>
+              <button class="btn-primary" onclick="caricaConfigFatture()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+                🔄 Ricarica
+              </button>
+            </div>
+
+            <div style="margin-top:24px;padding-top:16px;border-top:0.5px solid var(--border)">
+              <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Situazione attuale per anno</div>
+              <div id="cfg-fatt-riepilogo" style="font-size:12px;color:var(--text-muted)">—</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
       <!-- BENCHMARK MERCATO -->
       <div class="section" id="s-benchmark">
 
@@ -2067,6 +2220,7 @@
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-allegati.js?v=1775149951158"></script>
+<script src="pf-fatture.js?v=1775149951158"></script>
 <script src="pf-system.js?v=1775149951158"></script>
 <script>
 if ('serviceWorker' in navigator) {
