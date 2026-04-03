@@ -192,9 +192,15 @@ function renderMargGiorno(idx) {
   }
 
   var el = document.getElementById('marg-pompe-content');
-  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;align-items:start">';
+  var html = '';
 
-  lettureGiorno.forEach(function(l) {
+  // Ordina per ordine pompa (come Totalizzatori: Pompa 1, 2, 3, 4)
+  var lettureOrdinate = lettureGiorno.slice().sort(function(a, b) {
+    var pa = m.pompeMap[a.pompa_id]; var pb = m.pompeMap[b.pompa_id];
+    return ((pa && pa.ordine) || 99) - ((pb && pb.ordine) || 99);
+  });
+
+  lettureOrdinate.forEach(function(l) {
     var pompa = m.pompeMap[l.pompa_id];
     if (!pompa) return;
     var _pi = cacheProdotti.find(function(pp){return pp.nome===pompa.prodotto;}); var colore = _pi ? _pi.colore : '#888';
@@ -221,7 +227,7 @@ function renderMargGiorno(idx) {
       isCMP = true;
     }
 
-    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px">';
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
     html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + ' — ' + fmtL(litri) + ' L totali</span></div>';
 
     var prezzoN = prezzo ? (prezzo / 1.22) : 0;
@@ -272,7 +278,6 @@ function renderMargGiorno(idx) {
     html += '</div>';
   });
 
-  html += '</div>';
   el.innerHTML = html;
   calcolaMargini();
   _resetSaved('btn-salva-costi');
