@@ -165,26 +165,9 @@ function margGiorno(dir) {
   _renderMargConRouting(nuovoIdx);
 }
 
-// Routing automatico: >= 03/04/2025 → per prodotto, prima → per pompa
+// Routing basato sul toggle manuale (⛽ Per pompa / 📊 Per prodotto)
 function _renderMargConRouting(idx) {
-  var m = window._margData;
-  var data = m.dateUniche[idx];
-  var isProdotto = data >= '2025-04-03';
-  // Aggiorna stile pulsanti toggle
-  var btnP = document.getElementById('marg-btn-pompe');
-  var btnR = document.getElementById('marg-btn-prodotto');
-  var btnSalva = document.getElementById('btn-salva-costi');
-  if (btnP && btnR) {
-    if (isProdotto) {
-      btnR.style.background='var(--primary)'; btnR.style.color='#fff'; btnR.style.border='none';
-      btnP.style.background='var(--bg)'; btnP.style.color='var(--text)'; btnP.style.border='0.5px solid var(--border)';
-    } else {
-      btnP.style.background='var(--primary)'; btnP.style.color='#fff'; btnP.style.border='none';
-      btnR.style.background='var(--bg)'; btnR.style.color='var(--text)'; btnR.style.border='0.5px solid var(--border)';
-    }
-  }
-  if (btnSalva) btnSalva.style.display = isProdotto ? 'none' : '';
-  if (isProdotto) {
+  if (window._margVista === 'prodotto') {
     renderMargPerProdotto(idx);
   } else {
     renderMargGiorno(idx);
