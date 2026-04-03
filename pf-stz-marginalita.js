@@ -472,7 +472,7 @@ function renderMargPerProdotto(idx) {
     html += '<div style="display:flex;align-items:center;gap:4px">';
     html += '<input type="number" class="marg-pr-costo-iva" data-prodotto="'+prod+'" ';
     html += 'value="'+costoIva+'" placeholder="0.000" step="0.001" ';
-    html += 'oninput="syncCostoNettoProdotto(this,''+prod+'')" ';
+    html += 'oninput="syncCostoNettoProdotto(this,\'' + prod + '\')" ';
     html += 'style="'+inpStyle+'var(--border);opacity:0.7" />';
     html += '<span style="font-size:10px;color:var(--text-muted)">IVA</span></div></div>';
     // Margine risultato
@@ -568,7 +568,8 @@ function calcolaMarginiProdotto() {
     if (costo > 0) { totMargine += margTot||0; totVenduto += prezzoN*litri; totCosto += costo*litri; }
   });
   // Aggiorna pannello live
-  _aggiornaMargLive(totVenduto, totCosto, totMargine);
+  // Aggiorna pannello live ricalcolando tutto
+  calcolaMargini();
 }
 
 function calcolaMargini() {
