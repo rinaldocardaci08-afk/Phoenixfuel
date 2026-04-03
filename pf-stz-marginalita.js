@@ -58,7 +58,7 @@ async function caricaMarginalita() {
   });
 
   window._margData = { dateUniche, pompeMap, prezziMap, costiMap, lettureByData, lettureByPompa, pompe, indice: 0, cmpCorrente, cmpStorico: cmpStorico||[] };
-  renderMargGiorno(0);
+  _renderMargConRouting(0);
   renderStoricoMarg();
   renderStoricoCMP();
 }
@@ -162,11 +162,32 @@ function margGiorno(dir) {
   var nuovoIdx = m.indice - dir;
   if (nuovoIdx < 0 || nuovoIdx >= m.dateUniche.length) return;
   m.indice = nuovoIdx;
-  // Routing: per pompa (originale intatta) oppure per prodotto (nuova)
-  if (window._margVista === 'prodotto') {
-    renderMargPerProdotto(nuovoIdx);
+  _renderMargConRouting(nuovoIdx);
+}
+
+// Routing automatico: >= 03/04/2025 → per prodotto, prima → per pompa
+function _renderMargConRouting(idx) {
+  var m = window._margData;
+  var data = m.dateUniche[idx];
+  var isProdotto = data >= '2025-04-03';
+  // Aggiorna stile pulsanti toggle
+  var btnP = document.getElementById('marg-btn-pompe');
+  var btnR = document.getElementById('marg-btn-prodotto');
+  var btnSalva = document.getElementById('btn-salva-costi');
+  if (btnP && btnR) {
+    if (isProdotto) {
+      btnR.style.background='var(--primary)'; btnR.style.color='#fff'; btnR.style.border='none';
+      btnP.style.background='var(--bg)'; btnP.style.color='var(--text)'; btnP.style.border='0.5px solid var(--border)';
+    } else {
+      btnP.style.background='var(--primary)'; btnP.style.color='#fff'; btnP.style.border='none';
+      btnR.style.background='var(--bg)'; btnR.style.color='var(--text)'; btnR.style.border='0.5px solid var(--border)';
+    }
+  }
+  if (btnSalva) btnSalva.style.display = isProdotto ? 'none' : '';
+  if (isProdotto) {
+    renderMargPerProdotto(idx);
   } else {
-    renderMargGiorno(nuovoIdx);
+    renderMargGiorno(idx);
   }
 }
 
@@ -201,6 +222,9 @@ function renderMargGiorno(idx) {
 
   var el = document.getElementById('marg-pompe-content');
   var html = '';
+
+  // Ordina per campo 'ordine' pompa — Pompa1, Pompa2, Pompa3, Pompa4
+  lettureGiorno = lettureGiorno.slice().sort(function(a,b){ return ((m.pompeMap[a.pompa_id]||{}).ordine||99)-((m.pompeMap[b.pompa_id]||{}).ordine||99); });
 
   lettureGiorno.forEach(function(l) {
     var pompa = m.pompeMap[l.pompa_id];
@@ -344,29 +368,24 @@ function syncCostoNettoCp(inpIva, pompaId) {
 window._margVista = 'pompe'; // 'pompe' | 'prodotto'
 
 function switchMargVista(vista) {
-  window._margVista = vista;
+  // Override manuale del routing automatico
+  var m = window._margData;
   var btnP = document.getElementById('marg-btn-pompe');
   var btnR = document.getElementById('marg-btn-prodotto');
   var btnSalva = document.getElementById('btn-salva-costi');
   if (btnP && btnR) {
     if (vista === 'pompe') {
-      btnP.style.background = 'var(--primary)'; btnP.style.color = '#fff'; btnP.style.border = 'none';
-      btnR.style.background = 'var(--bg)'; btnR.style.color = 'var(--text)'; btnR.style.border = '0.5px solid var(--border)';
+      btnP.style.background='var(--primary)'; btnP.style.color='#fff'; btnP.style.border='none';
+      btnR.style.background='var(--bg)'; btnR.style.color='var(--text)'; btnR.style.border='0.5px solid var(--border)';
     } else {
-      btnR.style.background = 'var(--primary)'; btnR.style.color = '#fff'; btnR.style.border = 'none';
-      btnP.style.background = 'var(--bg)'; btnP.style.color = 'var(--text)'; btnP.style.border = '0.5px solid var(--border)';
+      btnR.style.background='var(--primary)'; btnR.style.color='#fff'; btnR.style.border='none';
+      btnP.style.background='var(--bg)'; btnP.style.color='var(--text)'; btnP.style.border='0.5px solid var(--border)';
     }
   }
-  // Il pulsante salva costi ha senso solo in vista per pompa
   if (btnSalva) btnSalva.style.display = vista === 'pompe' ? '' : 'none';
-
-  if (window._margData) {
-    var m = window._margData;
-    if (vista === 'pompe') {
-      renderMargGiorno(m.indice);
-    } else {
-      renderMargPerProdotto(m.indice);
-    }
+  if (m) {
+    if (vista === 'pompe') renderMargGiorno(m.indice);
+    else renderMargPerProdotto(m.indice);
   }
 }
 
@@ -677,7 +696,6 @@ function calcolaMargini() {
 }
 
 async function salvaCostiMarg() {
-  if (!_checkSaved('btn-salva-costi')) return;
   var inputs = document.querySelectorAll('.marg-costo');
   var salvati = {}, anyOffline = false;
   var ops = [];
