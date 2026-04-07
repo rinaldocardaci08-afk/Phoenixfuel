@@ -77,7 +77,9 @@ async function caricaDeposito() {
       gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
       cmpGruppo = totG > 0 ? valGruppo / totG : 0;
     }
-    const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
+    var isAdmin = utenteCorrente && utenteCorrente.ruolo === 'admin';
+    var cmpEditBtn = isAdmin && cmpGruppo > 0 ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
+    const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + '</div>' : '';
     const distBtn = nCis > 1 ? '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC;white-space:nowrap" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')">⚖️ Distribuisci</button>' : '';
     const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div style="display:flex;align-items:center;gap:10px">' + distBtn + '<div class="dep-product-total">' + totLabel + '</div></div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
 
@@ -1576,4 +1578,48 @@ async function confermaSmistamento() {
 async function _trovaCisternaPerProdotto(prodotto) {
   var { data: cist } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo').eq('prodotto', prodotto).order('livello_attuale',{ascending:false}).limit(1);
   return cist && cist.length ? cist[0] : null;
+}
+
+
+// ── Modifica manuale CMP deposito (solo admin) ────────────────────
+function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale) {
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:8px">✏️ Modifica CMP — ' + esc(prodNome) + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">';
+  html += 'CMP attuale: <strong style="font-family:var(--font-mono)">€ ' + Number(cmpAttuale).toFixed(6) + '</strong> · ';
+  html += 'Giacenza totale: <strong style="font-family:var(--font-mono)">' + fmtL(litriTotali) + '</strong></div>';
+  html += '<div style="font-size:12px;color:#A32D2D;background:#FCEBEB;padding:10px 12px;border-radius:8px;margin-bottom:14px">';
+  html += '⚠️ Questa operazione modifica il costo medio ponderato su tutte le cisterne del gruppo. ';
+  html += 'Usare solo per correggere valori errati.</div>';
+  html += '<div class="form-group"><label>Nuovo CMP (€/L)</label>';
+  html += '<input type="number" id="cmp-nuovo-val" value="' + Number(cmpAttuale).toFixed(6) + '" step="0.000001" ';
+  html += 'style="font-family:var(--font-mono);font-size:18px;font-weight:600;padding:10px 14px;width:100%" /></div>';
+  html += '<div style="display:flex;gap:8px;margin-top:16px">';
+  html += '<button class="btn-primary" style="flex:1;background:#D85A30;padding:12px" ';
+  html += 'onclick="_confermaCMPDeposito(\'' + cisterneIds + '\',\'' + esc(prodNome) + '\')" >💾 Salva nuovo CMP</button>';
+  html += '</div>';
+  apriModale('Modifica CMP ' + prodNome, html);
+}
+
+async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
+  var nuovoCMP = parseFloat(document.getElementById('cmp-nuovo-val').value);
+  if (isNaN(nuovoCMP) || nuovoCMP <= 0) { toast('Inserisci un valore valido'); return; }
+
+  var ids = cisterneIdsStr.split(',').filter(Boolean);
+  if (!ids.length) { toast('Nessuna cisterna trovata'); return; }
+
+  if (!confirm('Confermi la modifica del CMP di ' + prodNome + ' a € ' + nuovoCMP.toFixed(6) + ' su tutte le ' + ids.length + ' cisterne?')) return;
+
+  var ops = ids.map(function(id) {
+    return sb.from('cisterne').update({ costo_medio: nuovoCMP, updated_at: new Date().toISOString() }).eq('id', id);
+  });
+  var results = await Promise.all(ops);
+  var err = results.find(function(r){ return r.error; });
+  if (err) { toast('Errore: ' + err.error.message); return; }
+
+  // Registra nel log
+  _auditLog('modifica_cmp_manuale', 'cisterne', 'CMP ' + prodNome + ' modificato a ' + nuovoCMP);
+
+  toast('✓ CMP ' + prodNome + ' aggiornato a € ' + nuovoCMP.toFixed(6));
+  chiudiModale();
+  caricaDeposito();
 }
