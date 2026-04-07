@@ -132,8 +132,9 @@ async function caricaGiacenzeMensiliDeposito() {
       var caliV     = Number(salv.cali_viaggio || 0);
       var coeff     = _depGmCoeff[prod] || 0.00020;
       var caliSug   = Math.round(entrate * coeff * 100) / 100;
-      var caliTec   = (salv.cali_tecnici !== undefined && salv.cali_tecnici !== null)
-                      ? Number(salv.cali_tecnici) : caliSug;
+      // caliTecnici: usa il valore manuale se inserito, altrimenti 0 (non auto-calcola)
+      var caliManuale = (salv.cali_tecnici !== undefined && salv.cali_tecnici !== null);
+      var caliTec   = caliManuale ? Number(salv.cali_tecnici) : 0;
       var giacRilev = (salv.giacenza_rilevata !== undefined && salv.giacenza_rilevata !== null)
                       ? Number(salv.giacenza_rilevata) : null;
       var giacPresunta = Math.round((giacCorr + entrate + eccedenze - caliV - caliTec - uscite) * 100) / 100;
@@ -141,7 +142,7 @@ async function caricaGiacenzeMensiliDeposito() {
       if (diffMese !== null) diffCum = Math.round((diffCum + diffMese) * 100) / 100;
       risultato[prod].push({
         mese:m, giacInizio:Math.round(giacCorr), entrate:entrate, uscite:uscite,
-        eccedenze:eccedenze, caliViaggio:caliV, caliSuggeriti:caliSug, caliTecnici:caliTec,
+        eccedenze:eccedenze, caliViaggio:caliV, caliSuggeriti:caliSug, caliTecnici:caliTec, caliManuale:caliManuale,
         giacPresunta:giacPresunta, giacRilevata:giacRilev,
         diffMese:diffMese, diffCumulata:(giacRilev!==null ? diffCum : null)
       });
@@ -191,7 +192,7 @@ function renderGiacenzeMensiliDeposito() {
       { key:'uscite',     label:'- Uscite (vendite+staz)', bg:'#FCEBEB', color:'#791F1F', auto:true, neg:true },
       { key:'eccedenze',  label:'+ Eccedenze viaggio',     bg:'#FAEEDA', color:'#633806', input:'eccedenze_viaggio' },
       { key:'caliViaggio',label:'- Cali viaggio',          bg:'#FAEEDA', color:'#633806', input:'cali_viaggio', neg:true },
-      { key:'caliTecnici',label:'- Cali tecnici',          bg:'#EEEDFE', color:'#3C3489', input:'cali_tecnici', neg:true },
+      { key:'caliTecnici',label:'- Cali tecnici',          bg:'#EEEDFE', color:'#3C3489', input:'cali_tecnici', neg:true, suggerito:'caliSuggeriti', manuale:'caliManuale' },
       { key:'giacPresunta',label:'= Giacenza teorica',     bg:'#EAF3DE', color:'#27500A', auto:true, bold:true },
     ];
 
@@ -208,7 +209,21 @@ function renderGiacenzeMensiliDeposito() {
           html += 'data-prod="'+esc(prod)+'" data-mese="'+(i+1)+'" data-campo="'+riga.input+'" ';
           html += 'value="'+(savedVal||'')+'" placeholder="0" step="0.01" ';
           html += 'oninput="aggiornaRigheDeposito(this)" ';
-          html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:4px;background:#fff;color:#1a1a18;text-align:right">';
+          // Stile input: bordo verde se valore manuale inserito, normale altrimenti
+          var isManualeOra = (savedVal !== '' && savedVal !== null && savedVal !== undefined);
+          var borderStile = isManualeOra ? '1.5px solid #27500A' : '0.5px solid var(--border)';
+          html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:'+borderStile+';border-radius:4px;background:#fff;color:#1a1a18;text-align:right">';
+          // Hint sotto input: suggerisce il calo DM55/2000 se non inserito
+          if (riga.suggerito) {
+            var sug = d[riga.suggerito];
+            if (!isManualeOra && sug > 0) {
+              html += '<div style="font-size:9px;color:#9b8fcf;margin-top:2px">DM55: '+sug.toFixed(0)+' L</div>';
+            } else if (isManualeOra) {
+              html += '<div style="font-size:9px;color:#27500A;margin-top:2px">✓ manuale</div>';
+            } else {
+              html += '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">non calcolato</div>';
+            }
+          }
           html += '</td>';
         } else {
           var display = val !== null && val !== undefined ? _sep(Math.round(val).toLocaleString('it-IT'))+' L' : '—';
