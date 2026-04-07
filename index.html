@@ -459,6 +459,7 @@
           <button class="btn-primary dep-tab active" data-tab="dep-principale" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px">🏗 Deposito</button>
           <button class="btn-primary dep-tab" data-tab="dep-ricezione-das" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📄 Ricezione DAS</button>
           <button class="btn-primary dep-tab" data-tab="dep-giacenze-gg" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze giornaliere</button>
+          <button class="btn-primary dep-tab" data-tab="dep-giacenze-mensili" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Giacenze mensili</button>
         </div>
 
         <!-- PANEL: DEPOSITO PRINCIPALE -->
@@ -555,6 +556,31 @@
             </div>
           </div>
         </div>
+
+        <!-- DEPOSITO: GIACENZE MENSILI -->
+        <div class="dep-panel" id="dep-giacenze-mensili" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📅 Giacenze mensili deposito</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select id="dep-gm-anno" onchange="caricaGiacenzeMensiliDeposito()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)"></select>
+                <button class="btn-primary dep-gm-trim active" data-trim="1" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px">Q1</button>
+                <button class="btn-primary dep-gm-trim" data-trim="2" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q2</button>
+                <button class="btn-primary dep-gm-trim" data-trim="3" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q3</button>
+                <button class="btn-primary dep-gm-trim" data-trim="4" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q4</button>
+                <button class="btn-primary dep-gm-trim" data-trim="0" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Anno</button>
+              </div>
+            </div>
+            <div id="dep-gm-contenuto" style="margin-top:12px">
+              <div class="loading">Seleziona anno</div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn-primary" style="background:#639922" onclick="salvaGiacenzeMensiliDeposito()">💾 Salva dati manuali</button>
+              <button class="btn-primary" style="background:#6B5FCC" onclick="esportaGiacenzeMensiliDeposito()">📊 Esporta Excel</button>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- CONSEGNE -->
@@ -2225,6 +2251,7 @@
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-allegati.js?v=1775149951158"></script>
 <script src="pf-fatture.js?v=1775149951158"></script>
+<script src="pf-dep-giacenze.js?v=1775149951158"></script>
 <script src="pf-system.js?v=1775149951158"></script>
 <script>
 if ('serviceWorker' in navigator) {

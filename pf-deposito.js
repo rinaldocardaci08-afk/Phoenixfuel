@@ -12,6 +12,7 @@ function switchDepositoTab(btn) {
   document.getElementById(btn.dataset.tab).style.display = '';
   if (btn.dataset.tab === 'dep-ricezione-das') caricaDasOrdiniDeposito();
   if (btn.dataset.tab === 'dep-giacenze-gg') caricaGiacenzeGiornaliere();
+  if (btn.dataset.tab === 'dep-giacenze-mensili') caricaGiacenzeMensiliDeposito();
 }
 
 function cisternasvg(pct, colore) {
