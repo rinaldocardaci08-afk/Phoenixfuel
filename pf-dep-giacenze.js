@@ -132,9 +132,9 @@ async function caricaGiacenzeMensiliDeposito() {
       var caliV     = Number(salv.cali_viaggio || 0);
       var coeff     = _depGmCoeff[prod] || 0.00020;
       var caliSug   = Math.round(entrate * coeff * 100) / 100;
-      // caliTecnici: usa il valore manuale se inserito, altrimenti 0 (non auto-calcola)
+      // caliTecnici: usa il valore manuale se inserito, altrimenti suggerito DM55/2000
       var caliManuale = (salv.cali_tecnici !== undefined && salv.cali_tecnici !== null);
-      var caliTec   = caliManuale ? Number(salv.cali_tecnici) : 0;
+      var caliTec   = caliManuale ? Number(salv.cali_tecnici) : caliSug;
       var giacRilev = (salv.giacenza_rilevata !== undefined && salv.giacenza_rilevata !== null)
                       ? Number(salv.giacenza_rilevata) : null;
       var giacPresunta = Math.round((giacCorr + entrate + eccedenze - caliV - caliTec - uscite) * 100) / 100;
@@ -210,18 +210,17 @@ function renderGiacenzeMensiliDeposito() {
           html += 'value="'+(savedVal||'')+'" placeholder="0" step="0.01" ';
           html += 'oninput="aggiornaRigheDeposito(this)" ';
           // Stile input: bordo verde se valore manuale inserito, normale altrimenti
-          var isManualeOra = (savedVal !== '' && savedVal !== null && savedVal !== undefined);
+          // Distingui tra valore manuale e suggerito DM55
+          var isManualeOra = riga.manuale ? d[riga.manuale] : false;
           var borderStile = isManualeOra ? '1.5px solid #27500A' : '0.5px solid var(--border)';
-          html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:'+borderStile+';border-radius:4px;background:#fff;color:#1a1a18;text-align:right">';
-          // Hint sotto input: suggerisce il calo DM55/2000 se non inserito
+          var bgStile = isManualeOra ? '#fff' : '#f8f7ff';
+          html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:'+borderStile+';border-radius:4px;background:'+bgStile+';color:#1a1a18;text-align:right">';
+          // Hint sotto input
           if (riga.suggerito) {
-            var sug = d[riga.suggerito];
-            if (!isManualeOra && sug > 0) {
-              html += '<div style="font-size:9px;color:#9b8fcf;margin-top:2px">DM55: '+sug.toFixed(0)+' L</div>';
-            } else if (isManualeOra) {
+            if (isManualeOra) {
               html += '<div style="font-size:9px;color:#27500A;margin-top:2px">✓ manuale</div>';
             } else {
-              html += '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">non calcolato</div>';
+              html += '<div style="font-size:9px;color:#9b8fcf;margin-top:2px">📐 DM55/2000</div>';
             }
           }
           html += '</td>';
