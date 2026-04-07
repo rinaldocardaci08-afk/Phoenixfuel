@@ -1,4 +1,3 @@
-function _renderLabelPrezzi(){var stale1=document.getElementById("filtro-data-prezzi-lbl");if(stale1)stale1.remove();var stale2=document.getElementById("filtro-data-prezzi-day");if(stale2)stale2.remove();var inp=document.getElementById('filtro-data-prezzi');var div=document.getElementById('prezzi-label-giorno');if(!inp||!div)return;if(!inp.value){div.innerHTML='';return;}var G=['Domenica','Lunedi','Martedi','Mercoledi','Giovedi','Venerdi','Sabato'];var oggi=new Date();oggi.setHours(0,0,0,0);var sel=new Date(inp.value+'T12:00:00');sel.setHours(0,0,0,0);var diff=Math.round((sel-oggi)/86400000);var giorno=G[sel.getDay()];var h='';if(diff===0)h+='<span style="background:#378ADD;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">OGGI</span>';else if(diff===-1)h+='<span style="background:#BA7517;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">IERI</span>';else if(diff===1)h+='<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">DOMANI</span>';var dc={0:['#FCEBEB','#791F1F'],1:['#E6F1FB','#0C447C'],2:['#E6F1FB','#0C447C'],3:['#E6F1FB','#0C447C'],4:['#E6F1FB','#0C447C'],5:['#E6F1FB','#0C447C'],6:['#EEEDFE','#3C3489']}[sel.getDay()];h+='<span style="background:'+dc[0]+';color:'+dc[1]+';padding:4px 12px;border-radius:8px;font-size:13px;font-weight:600">'+giorno+'</span>';div.innerHTML=h;}
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
 // ── AREA CLIENTE ──────────────────────────────────────────────────
 async function caricaAreaCliente() {
@@ -20,7 +19,7 @@ async function caricaAreaCliente() {
   if (!ordini||!ordini.length) {
     tbStorico.innerHTML = '<tr><td colspan="6" class="loading">Nessun acquisto</td></tr>';
   } else {
-    tbStorico.innerHTML = ordini.map(r => '<tr><td>' + fmtD(r.data) + '</td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmtE(prezzoConIva(r)*r.litri) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+    tbStorico.innerHTML = ordini.map(r => '<tr><td>' + r.data + '</td><td>' + r.prodotto + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(r)) + '</td><td style="font-family:var(--font-mono)">' + fmtE(prezzoConIva(r)*r.litri) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
     const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
     const mese = ordini.filter(r=>r.data>=inizio);
     document.getElementById('cl-mese-litri').textContent = fmtL(mese.reduce((s,r)=>s+Number(r.litri),0));
@@ -93,7 +92,6 @@ function scorriGiornoPrezzi(dir) {
   var current = input.value ? new Date(input.value) : new Date();
   current.setDate(current.getDate() + dir);
   input.value = current.toISOString().split('T')[0];
-  _renderLabelPrezzi();
   caricaPrezzi();
 }
 
@@ -108,7 +106,6 @@ async function caricaPrezzi() {
     selClSingolo.innerHTML = '<option value="">Seleziona...</option>' + cacheClienti.map(function(c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('');
   }
   const filtroData = document.getElementById('filtro-data-prezzi').value;
-  _renderLabelPrezzi();
   // Sincronizza data inserimento con data visualizzata
   var prData = document.getElementById('pr-data');
   if (prData && filtroData) prData.value = filtroData;
@@ -129,7 +126,7 @@ async function caricaPrezzi() {
   // Mappa colori fornitori
   var _forColori = {};
   (forColRes.data||[]).forEach(function(f) { _forColori[f.nome] = f.colore || '#FAEEDA'; });
-  _forColori['PhoenixFuel'] = '#FCEBEB';
+  _forColori['Deposito Vibo'] = '#FCEBEB';
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
@@ -140,7 +137,7 @@ async function caricaPrezzi() {
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
         const prodInfo = cacheProdotti.find(p=>p.nome===prodotto);
         const ovr = _depositoOverrides[prodotto] || {};
-        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
+        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'Deposito Vibo', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
       }
     });
   }
@@ -217,7 +214,7 @@ async function caricaPrezzi() {
 
       var forColor = _forColori[r.fornitore] || '';
       var forStyle = forColor ? 'font-weight:700;padding:4px 8px;border-radius:4px;background:' + forColor : 'font-weight:700';
-      html += '<tr><td>' + fmtD(r.data) + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + (isBest?'':' <span style="font-size:10px;color:#A32D2D;font-weight:600">+'+(prezzoNoIva(r)-prezzoNoIva(best[r.data+'_'+r.prodotto])).toFixed(4)+'</span>') + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+      html += '<tr><td>' + r.data + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
     });
     tbody.innerHTML = html;
   });
@@ -297,8 +294,6 @@ function toggleTipoOrdine() {
   const tipo = document.getElementById('ord-tipo').value;
   const isCliente = tipo === 'cliente';
   document.getElementById('grp-cliente').style.display = isCliente ? '' : 'none';
-  document.getElementById('grp-destinazione').style.display = isCliente ? '' : 'none';
-  var grpDM = document.getElementById('grp-dest-manuale'); if(grpDM) grpDM.style.display = 'none';
   if (!isCliente) {
     const lbl = { 'entrata_deposito':'Deposito Vibo', 'stazione_servizio':'Stazione Oppido', 'autoconsumo':'Autoconsumo' };
     document.getElementById('ord-note').placeholder = lbl[tipo] || '';
@@ -332,7 +327,7 @@ async function aggiornaSelezioniOrdine() {
         const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
         const prodI = cacheProdotti.find(pp=>pp.nome===prodotto);
-        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'PhoenixFuel', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
+        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'Deposito Vibo', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
       }
     });
   }
@@ -341,7 +336,7 @@ async function aggiornaSelezioniOrdine() {
   // Per entrata deposito: escludi PhoenixFuel (non puoi caricare dal tuo stesso deposito)
   var tipoOrd = document.getElementById('ord-tipo').value;
   if (tipoOrd === 'entrata_deposito') {
-    fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('phoenix') === -1; });
+    fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('deposito vibo') === -1; });
   }
   const selFor = document.getElementById('ord-fornitore');
   selFor.innerHTML = '<option value="">Seleziona fornitore...</option>' + fornitori.map(f=>'<option value="'+f.nome+'">'+f.nome+'</option>').join('');
@@ -636,7 +631,7 @@ async function salvaOrdine() {
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
   var destVal = document.getElementById('ord-destinazione').value;
   var destinazione = destVal === '__manuale__' ? (document.getElementById('ord-dest-manuale').value.trim()||null) : (destVal || null);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, destinazione: tipo==='entrata_deposito' ? 'Deposito Vibo Valentia' : tipo==='stazione_servizio' ? 'Stazione Servizio Oppido Mamertina' : tipo==='autoconsumo' ? 'Autoconsumo camion' : destinazione };
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, destinazione:destinazione };
 
   // ═══ OFFLINE: salva nel backlog locale ═══
   if (!navigator.onLine) {
@@ -684,12 +679,12 @@ function _renderRigaOrdine(r) {
   const pL = prezzoConIva(r), tot = pL*r.litri;
   const basNome = r.basi_carico ? r.basi_carico.nome : '—';
   const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
-  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
+  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('deposito vibo') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
   let btnCisterna = '';
   if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
   var destHtml = r.destinazione ? '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '';
-  return '<tr><td>' + fmtD(r.data) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+  return '<tr><td>' + r.data + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -863,7 +858,7 @@ function _stampaReportOrdini(w, ordini, titolo, periodo) {
     totLitri += Number(r.litri); totFatt += Number(r.costo_litro) * Number(r.litri) + Number(r.trasporto_litro||0) * Number(r.litri) + margTot; totMarg += margTot;
     var dest = r.destinazione ? '<br/><span style="font-size:9px;color:#666">📍 ' + esc(r.destinazione) + '</span>' : '';
     righe += '<tr><td style="padding:5px 6px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd">' + fmtD(r.data) + '</td>' +
+      '<td style="padding:5px 6px;border:1px solid #ddd">' + r.data + '</td>' +
       '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.cliente||r.fornitore||'—') + dest + '</td>' +
       '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
       '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(r.litri) + '</td>' +
@@ -1076,7 +1071,7 @@ async function stampaListinoPrezziGiorno() {
         var cmp = d.valTot / d.litri;
         var prodInfo = cacheProdotti.find(function(p) { return p.nome === prod; });
         var ovr = (typeof _depositoOverrides !== 'undefined' ? _depositoOverrides[prod] : null) || {};
-        prezzi.push({ fornitore:'PhoenixFuel (Deposito)', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
+        prezzi.push({ fornitore:'Deposito Vibo', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
       }
     });
   }
