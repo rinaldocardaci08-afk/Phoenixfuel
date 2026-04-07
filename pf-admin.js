@@ -230,7 +230,7 @@ async function calcolaGiacenzeAnno(sede) {
     // Entrate: ordini entrata_deposito confermati
     const { data: entrate } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','entrata_deposito').neq('stato','annullato').gte('data', da).lte('data', a);
     // Uscite: ordini da deposito (PhoenixFuel) verso clienti + stazione + autoconsumo
-    const { data: usciteClienti } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','cliente').neq('stato','annullato').ilike('fornitore','%phoenix%').gte('data', da).lte('data', a);
+    const { data: usciteClienti } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','cliente').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a);
     const { data: usciteStazione } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a);
     const { data: usciteAutoconsumo } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','autoconsumo').neq('stato','annullato').gte('data', da).lte('data', a);
 

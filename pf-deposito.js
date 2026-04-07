@@ -837,7 +837,8 @@ async function caricaGiacenzeGiornaliere() {
 
   // Uscite: ordini da deposito verso clienti + stazione + autoconsumo
   var { data: uscCl } = await sb.from('ordini').select('prodotto,litri')
-    .eq('tipo_ordine','cliente').neq('stato','annullato').ilike('fornitore','%phoenix%').eq('data', data);
+    .eq('tipo_ordine','cliente').neq('stato','annullato')
+    .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').eq('data', data);
   var { data: uscSt } = await sb.from('ordini').select('prodotto,litri')
     .eq('tipo_ordine','stazione_servizio').neq('stato','annullato')
     .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').eq('data', data);
