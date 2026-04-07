@@ -49,7 +49,7 @@ async function caricaGiacenzeMensiliDeposito() {
   // Coefficienti cali tecnici deposito
   _depGmCoeff = {};
   prodotti.forEach(function(p) {
-    _depGmCoeff[p] = p.toLowerCase().indexOf('benzina') >= 0 ? 0.00050 : 0.00020;
+    _depGmCoeff[p] = p.toLowerCase().indexOf('benzina') >= 0 ? 0.00050 : 0.00025;
   });
 
   var daISO = anno + '-01-01';

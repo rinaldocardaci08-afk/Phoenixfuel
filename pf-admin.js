@@ -209,7 +209,7 @@ async function calcolaGiacenzeAnno(sede) {
   const anno = parseInt(document.getElementById(cfg.selAnno).value);
   if (!anno) { toast('Seleziona un anno'); return; }
   const tbody = document.getElementById(cfg.tbody);
-  tbody.innerHTML = '<tr><td colspan="8" class="loading">Calcolo in corso...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" class="loading">Calcolo in corso...</td></tr>';
 
   const da = anno + '-01-01', a = anno + '-12-31';
   const annoPrev = anno - 1;
@@ -312,7 +312,7 @@ async function calcolaGiacenzeAnno(sede) {
 
   // Se nessun prodotto trovato
   if (!Object.keys(prodottiDati).length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessun movimento trovato per ' + anno + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun movimento trovato per ' + anno + '</td></tr>';
     return;
   }
 
@@ -345,9 +345,39 @@ async function calcolaGiacenzeAnno(sede) {
     if (isConv) {
       html += '<td style="font-family:var(--font-mono);font-weight:600;color:#639922">' + fmtL(realeVal) + '</td>';
     } else {
-      html += '<td><input type="number" class="giac-reale-input" data-prodotto="' + esc(prodotto) + '" data-sede="' + sede + '" data-stimata="' + stimata + '" value="' + realeVal + '" placeholder="' + Math.round(stimata) + '" style="font-family:var(--font-mono);font-size:13px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:120px;max-width:100%;text-align:right" oninput="aggiornaGiacDiff(this,' + stimata + ')" /></td>';
+      html += '<td><input type="number" class="giac-reale-input" data-prodotto="' + esc(prodotto) + '" data-sede="' + sede + '" data-stimata="' + stimata + '" data-giac-inizio="' + inizio + '" data-entrate="' + d.entrate + '" value="' + realeVal + '" placeholder="' + Math.round(stimata) + '" style="font-family:var(--font-mono);font-size:13px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:120px;max-width:100%;text-align:right" oninput="aggiornaGiacDiff(this,' + stimata + ')" /></td>';
+    }
+    // Calo consentito (D.M. 55/2000) — solo per sede deposito e prodotti gasolio/benzina
+    var caloHtml = '';
+    if (sede === 'deposito_vibo') {
+      var totaleCaricoVerifica = inizio + d.entrate;
+      var coeffCalo = prodotto.toLowerCase().indexOf('gasolio autotrazione') >= 0 ? 0.003 :
+                      prodotto.toLowerCase().indexOf('gasolio agricolo') >= 0 ? 0.01 :
+                      prodotto.toLowerCase().indexOf('benzina') >= 0 ? 0.02 : 0;
+      if (coeffCalo > 0 && totaleCaricoVerifica > 0) {
+        var caloMax = Math.round(totaleCaricoVerifica * coeffCalo);
+        var caloEff = realeVal !== '' ? Math.max(0, Math.round(stimata - Number(realeVal))) : null;
+        var entroToll = caloEff !== null ? caloEff <= caloMax : null;
+        var residuo = caloEff !== null ? caloMax - caloEff : null;
+        var pct = caloEff !== null ? Math.min(100, Math.round((caloEff / caloMax) * 100)) : 0;
+        var barCol = entroToll === null ? '#ccc' : entroToll ? '#639922' : '#E24B4A';
+        var normLabel = prodotto.toLowerCase().indexOf('gasolio autotrazione') >= 0 ? '3‰ gasolio' :
+                        prodotto.toLowerCase().indexOf('gasolio agricolo') >= 0 ? '1% agricolo' : '2% benzina';
+        caloHtml = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">' + normLabel + ' · max <strong style="font-family:var(--font-mono)">' + _sep(caloMax.toLocaleString('it-IT')) + ' L</strong></div>';
+        if (caloEff !== null) {
+          var semBg = entroToll ? '#EAF3DE' : '#FCEBEB';
+          var semCol = entroToll ? '#27500A' : '#791F1F';
+          var semTxt = entroToll ? 'Calo consentito' : 'Calo NON consentito';
+          caloHtml += '<div style="background:' + semBg + ';color:' + semCol + ';font-size:9px;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-block;margin-bottom:4px">' + semTxt + '</div>';
+          caloHtml += '<div style="font-size:10px;color:var(--text-muted)">' + (entroToll ? 'Residuo: ' : 'Sforamento: ') + '<span style="font-family:var(--font-mono);color:' + semCol + ';font-weight:600">' + _sep(Math.abs(residuo).toLocaleString('it-IT')) + ' L</span></div>';
+          caloHtml += '<div style="margin-top:4px;height:6px;background:rgba(0,0,0,0.08);border-radius:3px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:' + barCol + ';border-radius:3px"></div></div>';
+        } else {
+          caloHtml += '<div style="font-size:10px;color:var(--text-muted)">Inserisci giacenza reale</div>';
+        }
+      }
     }
     html += '<td style="font-family:var(--font-mono);color:' + diffColor + '">' + diffLabel + '</td>';
+    html += '<td style="min-width:160px">' + caloHtml + '</td>';
     html += '<td>' + (isConv ? '<span class="badge green">✅ Convalidata</span><div style="font-size:9px;color:var(--text-hint);margin-top:2px">' + (esistente.convalidata_da||'') + ' · ' + (esistente.convalidata_il ? new Date(esistente.convalidata_il).toLocaleDateString('it-IT') : '') + '</div>' : '<span class="badge amber">Da convalidare</span>') + '</td>';
     html += '</tr>';
   });
@@ -379,13 +409,43 @@ async function calcolaGiacenzeAnno(sede) {
 }
 
 function aggiornaGiacDiff(input, stimata) {
-  const val = parseFloat(input.value);
-  const tr = input.closest('tr');
-  const diffTd = tr.querySelectorAll('td')[6]; // colonna differenza
+  var val = parseFloat(input.value);
+  var tr = input.closest('tr');
+  var tds = tr.querySelectorAll('td');
+  var diffTd = tds[6]; // colonna differenza
+  var caloTd = tds[7]; // colonna calo consentito
   if (isNaN(val)) { diffTd.innerHTML = '—'; return; }
-  const diff = val - stimata;
-  const col = diff > 0 ? '#639922' : diff < 0 ? '#A32D2D' : 'var(--text-muted)';
+  var diff = val - stimata;
+  var col = diff > 0 ? '#639922' : diff < 0 ? '#A32D2D' : 'var(--text-muted)';
   diffTd.innerHTML = '<span style="font-family:var(--font-mono);color:' + col + '">' + (diff > 0 ? '+' : '') + _sep(Math.round(diff).toLocaleString('it-IT')) + ' L</span>';
+  // Aggiorna semaforo calo consentito se presente
+  if (caloTd && input.dataset.sede === 'deposito_vibo') {
+    var prodotto = input.dataset.prodotto || '';
+    var inizio = parseFloat(input.dataset.giacInizio || 0);
+    var entrate = parseFloat(input.dataset.entrate || 0);
+    var totaleCaricoVerifica = inizio + entrate;
+    var coeffCalo = prodotto.toLowerCase().indexOf('gasolio autotrazione') >= 0 ? 0.003 :
+                    prodotto.toLowerCase().indexOf('gasolio agricolo') >= 0 ? 0.01 :
+                    prodotto.toLowerCase().indexOf('benzina') >= 0 ? 0.02 : 0;
+    if (coeffCalo > 0 && totaleCaricoVerifica > 0) {
+      var caloMax = Math.round(totaleCaricoVerifica * coeffCalo);
+      var caloEff = Math.max(0, Math.round(stimata - val));
+      var entroToll = caloEff <= caloMax;
+      var residuo = caloMax - caloEff;
+      var pct = Math.min(100, Math.round((caloEff / caloMax) * 100));
+      var barCol = entroToll ? '#639922' : '#E24B4A';
+      var semBg = entroToll ? '#EAF3DE' : '#FCEBEB';
+      var semCol = entroToll ? '#27500A' : '#791F1F';
+      var semTxt = entroToll ? 'Calo consentito' : 'Calo NON consentito';
+      var normLabel = prodotto.toLowerCase().indexOf('gasolio autotrazione') >= 0 ? '3‰ gasolio' :
+                      prodotto.toLowerCase().indexOf('gasolio agricolo') >= 0 ? '1% agricolo' : '2% benzina';
+      caloTd.innerHTML =
+        '<div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">' + normLabel + ' · max <strong style="font-family:var(--font-mono)">' + _sep(caloMax.toLocaleString('it-IT')) + ' L</strong></div>' +
+        '<div style="background:' + semBg + ';color:' + semCol + ';font-size:9px;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-block;margin-bottom:4px">' + semTxt + '</div>' +
+        '<div style="font-size:10px;color:var(--text-muted)">' + (entroToll ? 'Residuo: ' : 'Sforamento: ') + '<span style="font-family:var(--font-mono);color:' + semCol + ';font-weight:600">' + _sep(Math.abs(residuo).toLocaleString('it-IT')) + ' L</span></div>' +
+        '<div style="margin-top:4px;height:6px;background:rgba(0,0,0,0.08);border-radius:3px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:' + barCol + ';border-radius:3px"></div></div>';
+    }
+  }
 }
 
 async function convalidaGiacenze(sede) {
