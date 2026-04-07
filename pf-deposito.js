@@ -791,11 +791,11 @@ async function caricaGiacenzeGiornaliere() {
   if (sogliaEl && sogliaEl.value) GG_SOGLIA_ALERT = parseInt(sogliaEl.value) || 500;
 
   // Identifica prodotti deposito dalle cisterne
-  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita,livello_attuale').eq('sede','deposito_vibo');
+  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita_max,livello_attuale').eq('sede','deposito_vibo');
   var prodMap = {};
   (cisterne||[]).forEach(function(c) {
     if (!prodMap[c.prodotto]) prodMap[c.prodotto] = { capacita:0, attuale:0 };
-    prodMap[c.prodotto].capacita += Number(c.capacita||0);
+    prodMap[c.prodotto].capacita += Number(c.capacita_max||0);
     prodMap[c.prodotto].attuale += Number(c.livello_attuale||0);
   });
   _ggProdotti = Object.keys(prodMap).sort();
