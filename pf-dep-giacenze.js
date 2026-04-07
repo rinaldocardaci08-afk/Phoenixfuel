@@ -97,6 +97,7 @@ async function caricaGiacenzeMensiliDeposito() {
       .ilike('fornitore','%phoenix%').gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,prodotto,litri')
       .eq('tipo_ordine','stazione_servizio').neq('stato','annullato')
+      .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,prodotto,litri')
       .eq('tipo_ordine','autoconsumo').neq('stato','annullato')
