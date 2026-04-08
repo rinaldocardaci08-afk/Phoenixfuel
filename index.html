@@ -527,6 +527,14 @@
 
         <!-- PANEL: GIACENZE GIORNALIERE -->
         <div class="dep-panel" id="dep-giacenze-gg" style="display:none">
+          <!-- Toggle vista: Singolo giorno (esistente) / Settimanale (nuovo) -->
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+            <button id="dgw-btn-giorno" class="btn-primary" onclick="dgwToggleVista('giorno')" style="font-size:12px;padding:7px 14px">📅 Singolo giorno</button>
+            <button id="dgw-btn-week" class="btn-primary" onclick="dgwToggleVista('week')" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Vista settimanale calcolata</button>
+          </div>
+
+          <!-- BLOCCO ESISTENTE — Singolo giorno -->
+          <div id="dgw-blocco-giorno">
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Lettura giornaliera asta cisterne</div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci la giacenza rilevata da lettura asta per ogni prodotto. Il sistema calcola entrate/uscite del giorno e la differenza con la giacenza teorica.</div>
@@ -555,6 +563,24 @@
               <tbody id="gg-registro"><tr><td colspan="11" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
+          </div>
+          <!-- /BLOCCO ESISTENTE -->
+
+          <!-- NUOVO BLOCCO — Vista settimanale calcolata -->
+          <div id="dgw-blocco-week" style="display:none">
+            <div class="card">
+              <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <span>📊 Vista settimanale calcolata — Deposito Vibo</span>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <select id="dgw-prodotto" onchange="dgwCambiaProdotto()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                  <select id="dgw-anno" onchange="dgwCambiaAnno()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin:6px 0 4px">Calcolato cumulativo dal 01/01 dell'anno selezionato. Il calcolato e il rilevato camminano in parallelo: rilevata si salva automaticamente all'uscita dal campo. Le rettifiche inventario appaiono come 🔧 sui giorni interessati.</div>
+              <div id="dgw-contenuto" style="margin-top:10px"><div class="loading">Carica una settimana</div></div>
+            </div>
+          </div>
+          <!-- /NUOVO BLOCCO -->
         </div>
 
         <!-- DEPOSITO: GIACENZE MENSILI -->
@@ -2229,8 +2255,8 @@
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
 <script src="pf-config.js?v=1775149951158"></script>
-<script src="pf-ordini.js?v=1775572232606"></script>
-<script src="pf-deposito.js?v=1775574629579"></script>
+<script src="pf-ordini.js?v=1775149951158"></script>
+<script src="pf-deposito.js?v=1775149951158"></script>
 <script src="pf-anagrafica.js?v=1775149951158"></script>
 <script src="pf-stz-core.js?v=1775149951158"></script>
 <script src="pf-stz-letture.js?v=1775149951158"></script>
@@ -2252,6 +2278,7 @@
 <script src="pf-allegati.js?v=1775149951158"></script>
 <script src="pf-fatture.js?v=1775149951158"></script>
 <script src="pf-dep-giacenze.js?v=1775149951158"></script>
+<script src="pf-dep-giac-week.js?v=1775149951159"></script>
 <script src="pf-system.js?v=1775149951158"></script>
 <script>
 if ('serviceWorker' in navigator) {
