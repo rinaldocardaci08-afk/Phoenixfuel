@@ -1215,9 +1215,18 @@ function filtraOrdini() { filtraOrdiniStorico(); }
 let _ordiniCache = [];
 
 // ── MODIFICA ORDINE ───────────────────────────────────────────────
+// Valori originali dell'ordine in modifica, usati per rilevare cambi di costo
+var _modOrigCosto = null, _modOrigTrasporto = null, _modOrigMargine = null, _modOrigPrezzoNetto = null;
+
 async function apriModaleOrdine(id) {
   const { data: r } = await sb.from('ordini').select('*').eq('id', id).single();
   if (!r) return;
+
+  // Memorizza valori originali per il check di coerenza in salvataggio
+  _modOrigCosto = Number(r.costo_litro);
+  _modOrigTrasporto = Number(r.trasporto_litro);
+  _modOrigMargine = Number(r.margine);
+  _modOrigPrezzoNetto = _modOrigCosto + _modOrigTrasporto + _modOrigMargine;
 
   // Carica documenti esistenti
   const { data: docs } = await sb.from('documenti_ordine').select('*').eq('ordine_id', id).order('created_at',{ascending:false});
@@ -1322,13 +1331,28 @@ async function apriModaleOrdine(id) {
   }
 }
 
-async function salvaModificaOrdine(id) {
+async function salvaModificaOrdine(id, bypassCheck) {
   const litri = parseFloat(document.getElementById('mod-litri').value);
   const costo = parseFloat(document.getElementById('mod-costo').value);
   const trasporto = parseFloat(document.getElementById('mod-trasporto').value);
   const margine = parseFloat(document.getElementById('mod-margine').value);
   const iva = parseInt(document.getElementById('mod-iva').value);
   const ggPag = parseInt(document.getElementById('mod-gg').value);
+
+  // ── Check coerenza prezzo netto cliente ─────────────────────────
+  // Se l'utente ha modificato costo o trasporto MA non il margine, il prezzo
+  // netto cliente cambia silenziosamente. Mostriamo popup per scelta esplicita.
+  // Bypass: chiamato dalle opzioni del popup stesso o quando margine è stato toccato.
+  if (!bypassCheck && _modOrigCosto !== null) {
+    var costoCambiato = Math.abs(costo - _modOrigCosto) > 0.00001;
+    var trasportoCambiato = Math.abs(trasporto - _modOrigTrasporto) > 0.00001;
+    var margineCambiato = Math.abs(margine - _modOrigMargine) > 0.00001;
+    if ((costoCambiato || trasportoCambiato) && !margineCambiato) {
+      _mostraPopupConfermaPrezzo(id, costo, trasporto, margine);
+      return;
+    }
+  }
+
   const { data: ordine } = await sb.from('ordini').select('data').eq('id', id).single();
   const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
   var modDestVal = document.getElementById('mod-destinazione').value;
@@ -1345,9 +1369,124 @@ async function salvaModificaOrdine(id) {
   }
   const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
+  // Reset valori originali
+  _modOrigCosto = _modOrigTrasporto = _modOrigMargine = _modOrigPrezzoNetto = null;
   toast('Ordine aggiornato!');
   chiudiModalePermessi();
   caricaOrdini();
+}
+
+// Popup di conferma quando cambia il costo ma non il margine.
+// Tre scelte: mantieni prezzo netto (ricalcola margine), accetta nuovo prezzo, annulla.
+function _mostraPopupConfermaPrezzo(id, nuovoCosto, nuovoTrasporto, margineCorrente) {
+  // Snapshot completo del form per non perdere le altre modifiche (stato, litri, note, dest, ecc.)
+  window._modSnapshotForm = {
+    stato: document.getElementById('mod-stato').value,
+    litri: document.getElementById('mod-litri').value,
+    iva: document.getElementById('mod-iva').value,
+    gg: document.getElementById('mod-gg').value,
+    note: document.getElementById('mod-note').value,
+    destinazione: document.getElementById('mod-destinazione').value,
+    destManuale: document.getElementById('mod-dest-manuale').value
+  };
+
+  var prezzoOrig = _modOrigPrezzoNetto;
+  var prezzoNuovo = nuovoCosto + nuovoTrasporto + margineCorrente;
+  var margineRicalc = prezzoOrig - nuovoCosto - nuovoTrasporto;
+  var deltaPrezzo = prezzoNuovo - prezzoOrig;
+
+  var bgWarn = '#FAEEDA', txtWarn = '#854F0B';
+  var bgOk = '#EAF3DE', txtOk = '#27500A';
+  var trasportoCambiato = Math.abs(nuovoTrasporto - _modOrigTrasporto) > 0.00001;
+
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:6px">⚠️ Hai modificato il costo di acquisto</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Il prezzo netto cliente era già stato comunicato. Cosa vuoi fare?</div>';
+
+  // Tabella confronto valori (3 colonne: voce, prima, dopo)
+  html += '<div style="background:var(--bg-kpi);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">';
+  html += '<div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 18px;align-items:baseline">';
+  html += '<div style="color:var(--text-muted)">Costo €/L</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted);text-decoration:line-through">' + _modOrigCosto.toFixed(4) + '</div>';
+  html += '<div style="font-family:var(--font-mono);font-weight:600;color:' + txtWarn + '">' + nuovoCosto.toFixed(4) + '</div>';
+  html += '<div style="color:var(--text-muted)">Trasporto €/L</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)' + (trasportoCambiato ? ';text-decoration:line-through' : '') + '">' + _modOrigTrasporto.toFixed(4) + '</div>';
+  html += '<div style="font-family:var(--font-mono);' + (trasportoCambiato ? 'font-weight:600;color:' + txtWarn : 'color:var(--text-muted)') + '">' + nuovoTrasporto.toFixed(4) + '</div>';
+  html += '<div style="color:var(--text-muted)">Margine €/L</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)">' + margineCorrente.toFixed(4) + '</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)">' + margineCorrente.toFixed(4) + '</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-weight:600">Prezzo netto €/L</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-family:var(--font-mono);font-weight:600">' + prezzoOrig.toFixed(4) + '</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-family:var(--font-mono);font-weight:600;color:' + txtWarn + '">' + prezzoNuovo.toFixed(4) + ' (' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(4) + ')</div>';
+  html += '</div></div>';
+
+  // Opzione 1: mantieni prezzo cliente, ricalcola margine
+  html += '<button onclick="_optMantieniPrezzo(\'' + id + '\',' + nuovoCosto + ',' + nuovoTrasporto + ',' + margineRicalc + ')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #639922;background:' + bgOk + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
+  html += '<div style="font-weight:600;font-size:13px;color:' + txtOk + '">✓ Mantieni prezzo netto cliente € ' + prezzoOrig.toFixed(4) + '/L</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il margine viene ricalcolato: ' + margineCorrente.toFixed(4) + ' → ' + margineRicalc.toFixed(4) + ' €/L</div>';
+  html += '</button>';
+
+  // Opzione 2: accetta nuovo prezzo
+  html += '<button onclick="_optAccettaNuovoPrezzo(\'' + id + '\',' + nuovoCosto + ',' + nuovoTrasporto + ',' + margineCorrente + ')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #BA7517;background:' + bgWarn + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
+  html += '<div style="font-weight:600;font-size:13px;color:' + txtWarn + '">⚠ Accetta nuovo prezzo netto € ' + prezzoNuovo.toFixed(4) + '/L</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il prezzo cliente cambia di ' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(4) + ' €/L. Margine invariato a ' + margineCorrente.toFixed(4) + '</div>';
+  html += '</button>';
+
+  // Opzione 3: annulla → riapre la modale ricaricando l'ordine, scarta tutto
+  html += '<button onclick="chiudiModalePermessi();apriModaleOrdine(\'' + id + '\')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid var(--border);background:var(--bg);border-radius:8px;cursor:pointer">';
+  html += '<div style="font-weight:600;font-size:13px">Annulla</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Torna al form senza salvare le modifiche</div>';
+  html += '</button>';
+
+  apriModal(html);
+}
+
+// Helper: ripristina lo snapshot del form e applica i nuovi valori di costo/trasporto/margine
+async function _ripristinaFormESalva(id, costoFinale, trasportoFinale, margineFinale) {
+  chiudiModalePermessi();
+  await apriModaleOrdine(id);
+  // Aspetta il render della modale, poi ripristina i campi
+  await new Promise(function(resolve){ setTimeout(resolve, 120); });
+  var snap = window._modSnapshotForm || {};
+  if (snap.stato !== undefined) document.getElementById('mod-stato').value = snap.stato;
+  if (snap.litri !== undefined) document.getElementById('mod-litri').value = snap.litri;
+  if (snap.iva !== undefined) document.getElementById('mod-iva').value = snap.iva;
+  if (snap.gg !== undefined) document.getElementById('mod-gg').value = snap.gg;
+  if (snap.note !== undefined) document.getElementById('mod-note').value = snap.note;
+  if (snap.destinazione !== undefined) {
+    var dSel = document.getElementById('mod-destinazione');
+    if (dSel) {
+      // Verifica che l'option esista, altrimenti fallback su manuale
+      var found = false;
+      for (var i = 0; i < dSel.options.length; i++) {
+        if (dSel.options[i].value === snap.destinazione) { dSel.value = snap.destinazione; found = true; break; }
+      }
+      if (!found && snap.destinazione) dSel.value = '__manuale__';
+    }
+  }
+  if (snap.destManuale !== undefined) document.getElementById('mod-dest-manuale').value = snap.destManuale;
+  // Applica i valori prezzo finali
+  document.getElementById('mod-costo').value = costoFinale.toFixed(4);
+  document.getElementById('mod-trasporto').value = trasportoFinale.toFixed(4);
+  document.getElementById('mod-margine').value = margineFinale.toFixed(4);
+  aggiornaPreviewModifica();
+  // Salva con bypass del check
+  await salvaModificaOrdine(id, true);
+  window._modSnapshotForm = null;
+}
+
+// Opzione 1: mantieni prezzo netto, ricalcola margine. Avviso se margine negativo.
+async function _optMantieniPrezzo(id, nuovoCosto, nuovoTrasporto, margineRicalc) {
+  if (margineRicalc < 0) {
+    if (!confirm('⚠ Attenzione: il margine risultante sarà negativo (' + margineRicalc.toFixed(4) + ' €/L), stai vendendo sotto costo.\n\nConfermi comunque?')) {
+      return;
+    }
+  }
+  await _ripristinaFormESalva(id, nuovoCosto, nuovoTrasporto, margineRicalc);
+}
+
+// Opzione 2: accetta nuovo prezzo (margine invariato, prezzo netto cambia)
+async function _optAccettaNuovoPrezzo(id, nuovoCosto, nuovoTrasporto, margineCorrente) {
+  await _ripristinaFormESalva(id, nuovoCosto, nuovoTrasporto, margineCorrente);
 }
 
 // Aggiorna preview nella modale modifica
