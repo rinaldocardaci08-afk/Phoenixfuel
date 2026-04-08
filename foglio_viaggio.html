@@ -517,8 +517,29 @@ async function caricaDati() {
       (sediData||[]).forEach(s => { sediMap[s.id] = s; });
     }
 
+    // Carica anche tutte le sedi dei clienti coinvolti, per poter fare
+    // match per nome quando l'ordine ha solo il campo "destinazione" testuale.
+    // Indicizzate per "cliente_id|nome" e anche solo "nome" come fallback.
+    let sediPerNomeMap = {};
+    const clienteIds = [...new Set(Object.values(clientiMap).map(c => c && c.id).filter(Boolean))];
+    if (clienteIds.length) {
+      const { data: sediCli } = await sb.from('sedi_scarico').select('id,cliente_id,nome,indirizzo,citta,provincia,cap').in('cliente_id', clienteIds);
+      (sediCli||[]).forEach(s => {
+        if (!s.nome) return;
+        const k = (s.cliente_id||'') + '|' + s.nome.trim().toLowerCase();
+        sediPerNomeMap[k] = s;
+        // Fallback: anche solo per nome (ultima vince, ma meglio di niente)
+        if (!sediPerNomeMap['|' + s.nome.trim().toLowerCase()]) {
+          sediPerNomeMap['|' + s.nome.trim().toLowerCase()] = s;
+        }
+      });
+    }
+
     // Arricchisci ordini con indirizzo corretto
-    // PRIORITÀ: 1) sede_scarico_nome già sull'ordine  2) sediMap per indirizzo completo  3) cliente principale
+    // PRIORITÀ: 1) sede_scarico_id/nome già sull'ordine (smistamento)
+    //          2) destinazione testuale con match sulle sedi del cliente
+    //          3) destinazione testuale libera
+    //          4) indirizzo principale cliente
     ordini.forEach(o => {
       const cl = clientiMap[o.cliente_id] || clientiMap[o.cliente] || {};
       o._telefono = cl.telefono || o.telefono || '';
@@ -540,8 +561,29 @@ async function caricaDati() {
           o._provincia = '';
           o._cap = '';
         }
+      } else if (o.destinazione) {
+        // L'ordine ha il campo destinazione testuale (form standard).
+        // Tenta un match con le sedi di scarico del cliente per nome.
+        const destTrim = o.destinazione.trim().toLowerCase();
+        const cliId = (cl && cl.id) || o.cliente_id || '';
+        const sedeMatch = sediPerNomeMap[cliId + '|' + destTrim]
+                       || sediPerNomeMap['|' + destTrim];
+        if (sedeMatch) {
+          o._sede_nome = sedeMatch.nome;
+          o._indirizzo = sedeMatch.indirizzo || o.destinazione;
+          o._citta = sedeMatch.citta || '';
+          o._provincia = sedeMatch.provincia || '';
+          o._cap = sedeMatch.cap || '';
+        } else {
+          // Destinazione testuale libera, nessuna sede corrispondente
+          o._sede_nome = o.destinazione;
+          o._indirizzo = o.destinazione;
+          o._citta = '';
+          o._provincia = '';
+          o._cap = '';
+        }
       } else {
-        // Nessuna sede specifica: usa indirizzo principale del cliente
+        // Nessuna sede specifica e nessuna destinazione: usa indirizzo principale del cliente
         o._indirizzo = cl.indirizzo || o.indirizzo || '';
         o._citta = cl.citta || o.citta || '';
         o._provincia = cl.provincia || o.provincia || '';
