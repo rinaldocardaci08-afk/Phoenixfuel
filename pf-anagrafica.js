@@ -24,7 +24,7 @@ async function caricaConsegne() {
     const elL=document.getElementById('tot-litri-cons'); if(elL) elL.textContent=fmtL(tLitri);
     const elN=document.getElementById('tot-fatt-netto-cons'); if(elN) elN.textContent=fmtE(tNetto);
     const elI=document.getElementById('tot-fatt-iva-cons'); if(elI) elI.textContent=fmtE(tIva);
-    const elM=document.getElementById('tot-margine-cons'); if(elM) elM.textContent=fmtE(tMargine);
+    const elM=document.getElementById('tot-margine-cons'); if(elM) elM.innerHTML=fmtMe(tMargine);
 
     // Render consegne con semafori DAS/Cartellino
     tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito').map(r => {
@@ -364,7 +364,7 @@ async function generaElencoVenditeGiorno() {
   html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Litri totali</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
   html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Fatt. netto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totNetto) + '</div></div>';
   html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#7A5D00;text-transform:uppercase">Fatt. IVA incl.</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace">' + fmtE(totIva) + '</div></div>';
-  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtMe(totMargine) + '</div></div>';
   html += '<div style="background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;padding:10px;text-align:center"><div style="font-size:8px;color:#791F1F;text-transform:uppercase">Costo acquisto</div><div style="font-size:16px;font-weight:bold;font-family:Courier New,monospace;color:#A32D2D">' + fmtE(totCosto) + '</div></div>';
   html += '</div>';
 
@@ -374,9 +374,9 @@ async function generaElencoVenditeGiorno() {
   var clArr = Object.entries(perCliente).sort(function(a,b) { return b[1].iva - a[1].iva; });
   clArr.forEach(function(entry) {
     var c = entry[0], v = entry[1];
-    html += '<tr><td style="padding:5px 6px;border:1px solid #ddd;font-weight:bold">' + esc(c) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:center;font-family:Courier New,monospace">' + v.ordini + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(v.litri) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(v.netto) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(v.iva) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(v.margine) + '</td></tr>';
+    html += '<tr><td style="padding:5px 6px;border:1px solid #ddd;font-weight:bold">' + esc(c) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:center;font-family:Courier New,monospace">' + v.ordini + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(v.litri) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(v.netto) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(v.iva) + '</td><td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtMe(v.margine) + '</td></tr>';
   });
-  html += '<tr class="tot-row"><td style="padding:6px;border:1px solid #ddd;font-weight:bold">TOTALE</td><td style="padding:6px;border:1px solid #ddd;text-align:center;font-family:Courier New,monospace">' + ordini.length + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(totIva) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td></tr>';
+  html += '<tr class="tot-row"><td style="padding:6px;border:1px solid #ddd;font-weight:bold">TOTALE</td><td style="padding:6px;border:1px solid #ddd;text-align:center;font-family:Courier New,monospace">' + ordini.length + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmtE(totIva) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtMe(totMargine) + '</td></tr>';
   html += '</tbody></table>';
   html += '<div style="text-align:center;font-size:9px;color:#aaa;border-top:1px solid #e8e8e8;padding-top:6px;margin-top:10px">PhoenixFuel Srl — Elenco vendite ' + dataFmt + '</div>';
   html += '</div>'; // chiude pagina 1
@@ -384,7 +384,7 @@ async function generaElencoVenditeGiorno() {
   // ═══ PAGINE DETTAGLIO ORDINI (paginato ~35 righe) ═══
   var RPP = 35;
   var theadHtml = '<thead><tr><th>#</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Prezzo/L netto</th><th>Tot. netto</th><th>IVA</th><th>Tot. IVA incl.</th><th>Margine</th></tr></thead>';
-  var rigaTot = '<tr class="tot-row"><td style="padding:6px;border:1px solid #ddd" colspan="3">TOTALE (' + ordini.length + ' ordini)</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:6px;border:1px solid #ddd"></td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td><td style="padding:6px;border:1px solid #ddd"></td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMargine) + '</td></tr>';
+  var rigaTot = '<tr class="tot-row"><td style="padding:6px;border:1px solid #ddd" colspan="3">TOTALE (' + ordini.length + ' ordini)</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td><td style="padding:6px;border:1px solid #ddd"></td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td><td style="padding:6px;border:1px solid #ddd"></td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td><td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtMe(totMargine) + '</td></tr>';
 
   var totPag = Math.ceil(righeArr.length / RPP);
   for (var p = 0; p < totPag; p++) {
@@ -494,18 +494,18 @@ async function caricaVenditeIngrosso() {
 
   document.getElementById('vend-fatturato').textContent = fmtE(fatturato);
   document.getElementById('vend-litri').textContent = fmtL(litri);
-  document.getElementById('vend-margine').textContent = fmtE(margine);
+  document.getElementById('vend-margine').innerHTML = fmtMe(margine);
   document.getElementById('vend-ordini').textContent = data.length;
 
   // Tabella per fornitore
   const tbody = document.getElementById('tabella-vendite');
   const righeF = Object.entries(pf).sort((a,b) => b[1].fatturato - a[1].fatturato);
-  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td></tr>').join('') : '<tr><td colspan="4" class="loading">Nessun dato</td></tr>';
+  tbody.innerHTML = righeF.length ? righeF.map(([f,v]) => '<tr><td><strong>' + esc(f) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtMe(v.margine) + '</td></tr>').join('') : '<tr><td colspan="4" class="loading">Nessun dato</td></tr>';
 
   // Tabella per cliente
   const tbCl = document.getElementById('tabella-vendite-clienti');
   const righeCl = Object.entries(pc).sort((a,b) => b[1].fatturato - a[1].fatturato);
-  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
+  tbCl.innerHTML = righeCl.length ? righeCl.map(([c,v]) => '<tr><td><strong>' + esc(c) + '</strong></td><td style="font-family:var(--font-mono)">' + fmtL(v.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(v.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtMe(v.margine) + '</td><td>' + v.ordini + '</td></tr>').join('') : '<tr><td colspan="5" class="loading">Nessun dato</td></tr>';
 
   // Grafici vendite
   const coloriGrafico = ['#D4A017','#378ADD','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A'];
@@ -628,7 +628,7 @@ async function caricaVenditeDettaglio() {
   document.getElementById('vdett-incasso').textContent = fmtE(totIncasso);
   document.getElementById('vdett-litri').textContent = fmtL(totLitri);
   document.getElementById('vdett-costo').textContent = fmtE(costoApprovv);
-  document.getElementById('vdett-margine').textContent = fmtE(margineDettaglio);
+  document.getElementById('vdett-margine').innerHTML = fmtMe(margineDettaglio);
 
   // Tabella giornaliera
   const tbody = document.getElementById('tabella-vend-dettaglio');
@@ -644,7 +644,7 @@ async function caricaVenditeDettaglio() {
       return '<tr><td>' + d + '</td><td style="font-family:var(--font-mono)">' + fmtL(g.litriG) + '</td><td style="font-family:var(--font-mono)">' + fmtL(g.litriB) + '</td><td style="font-family:var(--font-mono);font-weight:500">' + fmtL(totG) + '</td><td style="font-family:var(--font-mono)">' + fmtE(g.incasso) + '</td><td style="font-family:var(--font-mono);color:' + (hasCosto?'var(--text)':'var(--text-muted)') + '">' + (hasCosto ? fmtE(g.costo) : '—') + '</td><td style="font-family:var(--font-mono);color:' + (hasCosto ? margColor : 'var(--text-muted)') + '">' + (hasCosto ? fmtE(margG) : '—') + '</td></tr>';
     }).join('');
     // Riga totale
-    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:500"><td>TOTALE</td><td style="font-family:var(--font-mono)">' + fmtL(totGasolio) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totBenzina) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totIncasso) + '</td><td style="font-family:var(--font-mono)">' + fmtE(costoApprovv) + '</td><td style="font-family:var(--font-mono);color:' + (margineDettaglio >= 0 ? '#639922' : '#A32D2D') + '">' + fmtE(margineDettaglio) + '</td></tr>';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:500"><td>TOTALE</td><td style="font-family:var(--font-mono)">' + fmtL(totGasolio) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totBenzina) + '</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totIncasso) + '</td><td style="font-family:var(--font-mono)">' + fmtE(costoApprovv) + '</td><td style="font-family:var(--font-mono);color:' + (margineDettaglio >= 0 ? '#639922' : '#A32D2D') + '">' + fmtMe(margineDettaglio) + '</td></tr>';
   }
 
   // Grafici
@@ -1168,7 +1168,7 @@ async function caricaMargineCliente() {
   var margMedio = totale.litri > 0 ? totale.margine / totale.litri : 0;
   var pctMarg = totale.fatturato > 0 ? (totale.margine / totale.fatturato) * 100 : 0;
   kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + lista.length + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" style="color:#639922">' + fmtE(totale.margine) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" style="color:#639922">' + fmtMe(totale.margine) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value">€ ' + margMedio.toFixed(4) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">% margine su fatt.</div><div class="kpi-value">' + pctMarg.toFixed(1) + '%</div></div>';
 
@@ -1189,14 +1189,14 @@ async function caricaMargineCliente() {
       '<td style="font-family:var(--font-mono)">' + fmtL(c.litri) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtE(c.fatturato) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtE(c.costo) + '</td>' +
-      '<td style="font-family:var(--font-mono);font-weight:600;color:' + mColor + '">' + fmtE(c.margine) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:600;color:' + mColor + '">' + fmtMe(c.margine) + '</td>' +
       '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + ml.toFixed(4) + '</td>' +
       '<td style="font-family:var(--font-mono);color:' + mColor + '">' + pct.toFixed(1) + '%</td></tr>';
   }).join('');
 
   // Riga totale
   var tmColor = totale.margine >= 0 ? '#639922' : '#E24B4A';
-  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtE(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(4) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtMe(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(4) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
   tbody.innerHTML = html;
 
   // Grafici
@@ -1273,10 +1273,10 @@ async function stampaMargineCliente() {
   html += '<table><thead><tr><th style="text-align:left">Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Costo</th><th>Margine</th><th>€/L</th><th>%</th></tr></thead><tbody>';
   lista.forEach(function(c,i) {
     var ml = c.litri>0?c.margine/c.litri:0; var pct = c.fatturato>0?(c.margine/c.fatturato)*100:0;
-    html += '<tr' + (i%2?' class="alt"':'') + '><td>' + esc(c.cliente) + '</td><td style="text-align:center">' + c.ordini + '</td><td>' + fmtL(c.litri) + '</td><td>' + fmtE(c.fatturato) + '</td><td>' + fmtE(c.costo) + '</td><td style="font-weight:bold;color:' + (c.margine>=0?'#639922':'#E24B4A') + '">' + fmtE(c.margine) + '</td><td>€ ' + ml.toFixed(4) + '</td><td>' + pct.toFixed(1) + '%</td></tr>';
+    html += '<tr' + (i%2?' class="alt"':'') + '><td>' + esc(c.cliente) + '</td><td style="text-align:center">' + c.ordini + '</td><td>' + fmtL(c.litri) + '</td><td>' + fmtE(c.fatturato) + '</td><td>' + fmtE(c.costo) + '</td><td style="font-weight:bold;color:' + (c.margine>=0?'#639922':'#E24B4A') + '">' + fmtMe(c.margine) + '</td><td>€ ' + ml.toFixed(4) + '</td><td>' + pct.toFixed(1) + '%</td></tr>';
   });
   var tMl = tot.litri>0?tot.margine/tot.litri:0; var tPct = tot.fatturato>0?(tot.margine/tot.fatturato)*100:0;
-  html += '<tr class="tot"><td>TOTALE</td><td style="text-align:center">' + tot.ordini + '</td><td>' + fmtL(tot.litri) + '</td><td>' + fmtE(tot.fatturato) + '</td><td>' + fmtE(tot.costo) + '</td><td style="color:#639922">' + fmtE(tot.margine) + '</td><td>€ ' + tMl.toFixed(4) + '</td><td>' + tPct.toFixed(1) + '%</td></tr>';
+  html += '<tr class="tot"><td>TOTALE</td><td style="text-align:center">' + tot.ordini + '</td><td>' + fmtL(tot.litri) + '</td><td>' + fmtE(tot.fatturato) + '</td><td>' + fmtE(tot.costo) + '</td><td style="color:#639922">' + fmtMe(tot.margine) + '</td><td>€ ' + tMl.toFixed(4) + '</td><td>' + tPct.toFixed(1) + '%</td></tr>';
   html += '</tbody></table>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
@@ -1483,7 +1483,7 @@ async function apriSchedaCliente(clienteId, clienteNome) {
   } else {
     ordini.forEach(o => {
       const tot = prezzoConIva(o) * Number(o.litri);
-      const scadData = o.data_scadenza || '—';
+      const scadData = o.data_scadenza ? fmtD(o.data_scadenza) : '—';
       const isPagato = o.pagato === true;
       const isScaduto = !isPagato && o.data_scadenza && new Date(o.data_scadenza) < oggi;
       const rowStyle = isPagato ? 'opacity:0.5' : isScaduto ? 'background:#FCEBEB' : '';
@@ -1498,9 +1498,9 @@ async function apriSchedaCliente(clienteId, clienteNome) {
       html += '<td><input type="checkbox" ' + (isPagato ? 'checked' : '') + ' onchange="togglePagamento(\'' + o.id + '\',this.checked,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" /></td>';
       html += '<td>';
       if (isPagato && o.data_pagamento) {
-        html += '<span style="font-size:11px;color:#639922">' + o.data_pagamento + '</span>';
+        html += '<span style="font-size:11px;color:#639922">' + fmtD(o.data_pagamento) + '</span>';
       } else if (!isPagato && o.data_pagamento && o.data_pagamento > oggiISO) {
-        html += '<span style="font-size:11px;color:#378ADD">' + o.data_pagamento + '</span> <span style="font-size:9px;color:#378ADD;font-weight:500">PROGRAMMATO</span>';
+        html += '<span style="font-size:11px;color:#378ADD">' + fmtD(o.data_pagamento) + '</span> <span style="font-size:9px;color:#378ADD;font-weight:500">PROGRAMMATO</span>';
         html += '<br/><input type="date" style="font-size:10px;padding:1px 3px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg);margin-top:2px" value="' + o.data_pagamento + '" onchange="impostaDataPagamento(\'' + o.id + '\',this.value,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" />';
       } else {
         html += '<input type="date" style="font-size:11px;padding:2px 4px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg)" value="' + (o.data_pagamento||'') + '" onchange="impostaDataPagamento(\'' + o.id + '\',this.value,\'' + clienteId + '\',\'' + clienteNome.replace(/'/g,"\\'") + '\')" />';
@@ -1939,11 +1939,11 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
       html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
       html += '<td style="font-family:var(--font-mono)">€ ' + costoUnitario.toFixed(4) + '</td>';
       html += '<td style="font-family:var(--font-mono);font-weight:500">' + fmtE(tot) + '</td>';
-      html += '<td style="font-size:11px">' + scadISO + (isScaduto ? ' <span style="color:#A32D2D;font-size:9px;font-weight:500">SCADUTA</span>' : '') + '</td>';
+      html += '<td style="font-size:11px">' + fmtD(scadISO) + (isScaduto ? ' <span style="color:#A32D2D;font-size:9px;font-weight:500">SCADUTA</span>' : '') + '</td>';
       html += '<td><input type="checkbox" ' + (isPagato ? 'checked' : '') + ' onchange="togglePagamentoFornitore(\'' + o.id + '\',this.checked,\'' + fornitoreId + '\',\'' + fornitoreNome.replace(/'/g,"\\'") + '\')" /></td>';
       html += '<td>';
       if (isPagato && o.data_pagamento_fornitore) {
-        html += '<span style="font-size:11px;color:#639922">' + o.data_pagamento_fornitore + '</span>';
+        html += '<span style="font-size:11px;color:#639922">' + fmtD(o.data_pagamento_fornitore) + '</span>';
       } else {
         html += '<input type="date" style="font-size:11px;padding:2px 4px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg)" value="' + (o.data_pagamento_fornitore||'') + '" onchange="impostaDataPagFornitore(\'' + o.id + '\',this.value,\'' + fornitoreId + '\',\'' + fornitoreNome.replace(/'/g,"\\'") + '\')" />';
       }

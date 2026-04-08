@@ -156,6 +156,8 @@ function fmt(n){const v=Number(n);return'€ '+_sep(v.toLocaleString('it-IT',{mi
 function fmtE(n){const v=Number(n);const d=v%1===0?0:2;return'€ '+_sep(v.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:2}));}
 function fmtL(n){return _sep(Number(n).toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:0}));}
 function fmtD(d){if(!d)return '-';var p=String(d).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
+function fmtM(n){const v=Number(n)||0;const txt='€ '+_sep(v.toLocaleString('it-IT',{minimumFractionDigits:4,maximumFractionDigits:4}));const col=v>0.00005?'#27500A':(v<-0.00005?'#A32D2D':'#666');return '<strong style="color:'+col+'">'+txt+'</strong>';}
+function fmtMe(n){const v=Number(n)||0;const d=v%1===0?0:2;const txt='€ '+_sep(v.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:2}));const col=v>0.005?'#27500A':(v<-0.005?'#A32D2D':'#666');return '<strong style="color:'+col+'">'+txt+'</strong>';}
 function esc(s){return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function prezzoNoIva(r){return Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine);}
 function prezzoConIva(r){return prezzoNoIva(r)*(1+Number(r.iva)/100);}
@@ -239,7 +241,7 @@ async function generaReport(){
 
   document.getElementById('r-fatturato').textContent=fmtE(fatturato);
   document.getElementById('r-litri').textContent=fmtL(litri)+' L';
-  document.getElementById('r-margine').textContent=fmtE(margine);
+  document.getElementById('r-margine').innerHTML=fmtMe(margine);
   document.getElementById('r-margine-litro').textContent=litri>0?fmt(margine/litri):'—';
   document.getElementById('r-ordini').textContent=ordini.length;
 
@@ -247,15 +249,15 @@ async function generaReport(){
   const clArr=Object.entries(perCliente).sort((a,b)=>b[1].fatturato-a[1].fatturato);
   document.getElementById('r-tab-clienti').innerHTML=clArr.map(([c,v])=>{
     const ml=v.litri>0?v.margine/v.litri:0;
-    return '<tr><td><strong>'+esc(c)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtE(v.margine)+'</td><td class="mono" style="color:#639922">'+fmt(ml)+'</td></tr>';
-  }).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtE(margine)+'</td><td class="mono" style="color:#639922">'+fmt(litri>0?margine/litri:0)+'</td></tr>';
+    return '<tr><td><strong>'+esc(c)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtMe(v.margine)+'</td><td class="mono" style="color:#639922">'+fmt(ml)+'</td></tr>';
+  }).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtMe(margine)+'</td><td class="mono" style="color:#639922">'+fmt(litri>0?margine/litri:0)+'</td></tr>';
 
   // Tabella FORNITORI
   const foArr=Object.entries(perFornitore).sort((a,b)=>b[1].fatturato-a[1].fatturato);
   document.getElementById('r-tab-fornitori').innerHTML=foArr.map(([f,v])=>{
     const ml=v.litri>0?v.margine/v.litri:0;
-    return '<tr><td><strong>'+esc(f)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtE(v.margine)+'</td><td class="mono" style="color:#639922">'+fmt(ml)+'</td></tr>';
-  }).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtE(margine)+'</td><td class="mono" style="color:#639922">'+fmt(litri>0?margine/litri:0)+'</td></tr>';
+    return '<tr><td><strong>'+esc(f)+'</strong></td><td class="mono">'+v.ordini+'</td><td class="mono">'+fmtL(v.litri)+'</td><td class="mono">'+fmtE(v.fatturato)+'</td><td class="mono">'+fmtMe(v.margine)+'</td><td class="mono" style="color:#639922">'+fmt(ml)+'</td></tr>';
+  }).join('')+'<tr class="totale"><td><strong>TOTALE</strong></td><td class="mono">'+ordini.length+'</td><td class="mono">'+fmtL(litri)+'</td><td class="mono">'+fmtE(fatturato)+'</td><td class="mono">'+fmtMe(margine)+'</td><td class="mono" style="color:#639922">'+fmt(litri>0?margine/litri:0)+'</td></tr>';
 
   // ═══ DETTAGLIO ORDINI — multi-pagina (~35 righe/pagina) ═══
   const RPP=35;

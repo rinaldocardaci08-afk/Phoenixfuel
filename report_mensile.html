@@ -108,6 +108,9 @@ function fmtN(n) {
 }
 function fmtE(n) { return '€ ' + fmtN(n); }
 function fmtL(n) { return _sep(Number(n).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })); }
+function fmtD(d){if(!d)return '-';var p=String(d).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
+function fmtM(n){const v=Number(n)||0;const txt='€ '+_sep(v.toLocaleString('it-IT',{minimumFractionDigits:4,maximumFractionDigits:4}));const col=v>0.00005?'#27500A':(v<-0.00005?'#A32D2D':'#666');return '<strong style="color:'+col+'">'+txt+'</strong>';}
+function fmtMe(n){const v=Number(n)||0;const d=v%1===0?0:2;const txt='€ '+_sep(v.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:2}));const col=v>0.005?'#27500A':(v<-0.005?'#A32D2D':'#666');return '<strong style="color:'+col+'">'+txt+'</strong>';}
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -204,13 +207,13 @@ async function generaReport() {
   html += '<div class="t-cell"><div class="t-head">Totale IVA inclusa</div><div class="t-val">' + fmtE(totFattIva) + '</div></div>';
   html += '<div class="t-cell"><div class="t-head">Costo acquisto</div><div class="t-val" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</div></div>';
   html += '<div class="t-cell"><div class="t-head">Costo trasporto</div><div class="t-val">' + fmtE(totCostoTrasp) + '</div></div>';
-  html += '<div class="t-cell"><div class="t-head">Margine netto</div><div class="t-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Margine netto</div><div class="t-val" style="color:#639922">' + fmtMe(margineTotale) + '</div></div>';
   html += '</div>';
 
   // Margini extra
   html += '<div class="margine-extra">';
-  html += '<div class="margine-box"><div class="m-label">Margine lordo (Fatt. - Acquisto)</div><div class="m-val" style="color:#6B5FCC">' + fmtE(margineLordo) + '</div></div>';
-  html += '<div class="margine-box" style="background:#EAF3DE;border-color:#97C459"><div class="m-label">Margine netto (Fatt. - Acquisto - Trasporto)</div><div class="m-val" style="color:#639922">' + fmtE(margineTotale) + '</div></div>';
+  html += '<div class="margine-box"><div class="m-label">Margine lordo (Fatt. - Acquisto)</div><div class="m-val" style="color:#6B5FCC">' + fmtMe(margineLordo) + '</div></div>';
+  html += '<div class="margine-box" style="background:#EAF3DE;border-color:#97C459"><div class="m-label">Margine netto (Fatt. - Acquisto - Trasporto)</div><div class="m-val" style="color:#639922">' + fmtMe(margineTotale) + '</div></div>';
   html += '</div>';
 
   // Tabella mesi
@@ -241,8 +244,8 @@ async function generaReport() {
   html += '<td class="mono">' + fmtE(totFattIva) + '</td>';
   html += '<td class="mono" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</td>';
   html += '<td class="mono">' + fmtE(totCostoTrasp) + '</td>';
-  html += '<td class="mono" style="color:#6B5FCC">' + fmtE(margineLordo) + '</td>';
-  html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtE(margineTotale) + '</td>';
+  html += '<td class="mono" style="color:#6B5FCC">' + fmtMe(margineLordo) + '</td>';
+  html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtMe(margineTotale) + '</td>';
   html += '</tr></tbody></table>';
 
   // Grafici

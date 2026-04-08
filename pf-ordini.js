@@ -207,9 +207,9 @@ async function caricaPrezzi() {
       // Margine - editabile per tutti
       let tdMargine;
       if (r._isDeposito) {
-        tdMargine = '<td class="editable" onclick="editaDepositoValore(this,\'margine\',\'' + r.prodotto + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
+        tdMargine = '<td class="editable" onclick="editaDepositoValore(this,\'margine\',\'' + r.prodotto + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td>';
       } else {
-        tdMargine = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td>';
+        tdMargine = '<td class="editable" onclick="editaCella(this,\'prezzi\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td>';
       }
 
       var forColor = _forColori[r.fornitore] || '';
@@ -478,7 +478,7 @@ function aggiornaPrevOrdine() {
   const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
   const conIva = noIva * (1 + Number(prezzoCorrente.iva) / 100);
   document.getElementById('prev-trasporto').textContent = fmt(trasporto);
-  document.getElementById('prev-margine').textContent = fmt(margine);
+  document.getElementById('prev-margine').innerHTML = fmtM(margine);
   document.getElementById('prev-prezzo-netto').textContent = fmt(noIva);
   document.getElementById('prev-prezzo').textContent = fmt(conIva);
   document.getElementById('prev-totale').textContent = fmtE(conIva * litri);
@@ -697,7 +697,7 @@ function _renderRigaOrdine(r) {
   if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
   var destHtml = r.destinazione ? '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '';
-  return '<tr><td>' + fmtD(r.data) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmt(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza||'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+  return '<tr><td>' + fmtD(r.data) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza?fmtD(r.data_scadenza):'—') + '</td><td>' + badgeStato(r.stato) + '</td><td>' + btnCisterna + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -1041,7 +1041,7 @@ async function stampaOrdiniGiornoPerProdotto() {
       html += '<td class="m" style="font-weight:600">' + fmtL(o.litri) + '</td>';
       html += '<td class="m">' + fmt(o.costo_litro) + '</td>';
       html += '<td class="m">' + fmt(o.trasporto_litro) + '</td>';
-      html += '<td class="m" style="color:#639922">' + fmt(o.margine) + '</td>';
+      html += '<td class="m" style="color:#639922">' + fmtM(o.margine) + '</td>';
       html += '<td class="m">' + fmt(pNetto) + '</td>';
       html += '<td class="m" style="font-weight:600">' + fmt(pL) + '</td>';
       html += '<td class="m" style="font-weight:600">' + fmtE(tot) + '</td>';

@@ -107,7 +107,7 @@ function renderStoricoMarg() {
       '<td style="font-family:var(--font-mono)">' + fmtL(litriBenz) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtE(venduto) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + (hasCosti ? fmtE(costoTot) : '<span style="color:var(--text-muted)">—</span>') + '</td>' +
-      '<td style="font-family:var(--font-mono);font-weight:bold;color:' + (hasCosti?margColor:'var(--text-muted)') + '">' + (hasCosti ? fmtE(margine) : '—') + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:bold;color:' + (hasCosti?margColor:'var(--text-muted)') + '">' + (hasCosti ? fmtMe(margine) : '—') + '</td>' +
       '<td style="font-family:var(--font-mono);color:' + (hasCosti?margColor:'var(--text-muted)') + '">' + (hasCosti ? '€ ' + margL.toFixed(4) : '—') + '</td></tr>';
   });
   tbody.innerHTML = html || '<tr><td colspan="7" class="loading">Nessun dato</td></tr>';

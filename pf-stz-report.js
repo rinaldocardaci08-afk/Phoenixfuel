@@ -426,10 +426,10 @@ async function stampaReportVenditeStazione() {
   html+='<table><thead><tr><th style="text-align:left;width:50px">Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Costo €</th><th>Margine €</th></tr></thead><tbody>';
   righe.forEach(function(r,i){
     var mc=r.margine>=0?'#639922':'#E24B4A';
-    html+='<tr'+(i%2?' class="alt"':'')+'><td>'+r.data.substring(8)+'/'+r.data.substring(5,7)+'</td><td>'+fmtL(r.gasolio)+'</td><td>'+fmtL(r.benzina)+'</td><td style="font-weight:bold">'+fmtL(r.totale)+'</td><td>'+fmtE(r.incasso)+'</td><td>'+(r.costo>0?fmtE(r.costo):'—')+'</td><td style="font-weight:bold;color:'+mc+'">'+(r.costo>0?fmtE(r.margine):'—')+'</td></tr>';
+    html+='<tr'+(i%2?' class="alt"':'')+'><td>'+r.data.substring(8)+'/'+r.data.substring(5,7)+'</td><td>'+fmtL(r.gasolio)+'</td><td>'+fmtL(r.benzina)+'</td><td style="font-weight:bold">'+fmtL(r.totale)+'</td><td>'+fmtE(r.incasso)+'</td><td>'+(r.costo>0?fmtE(r.costo):'—')+'</td><td style="font-weight:bold;color:'+mc+'">'+(r.costo>0?fmtMe(r.margine):'—')+'</td></tr>';
   });
   var tmc=t.margine>=0?'#639922':'#E24B4A';
-  html+='<tr class="tot"><td>TOTALE</td><td>'+fmtL(t.gasolio)+'</td><td>'+fmtL(t.benzina)+'</td><td>'+fmtL(t.gasolio+t.benzina)+'</td><td>'+fmtE(t.incasso)+'</td><td>'+(t.costo>0?fmtE(t.costo):'—')+'</td><td style="color:'+tmc+'">'+(t.costo>0?fmtE(t.margine):'—')+'</td></tr>';
+  html+='<tr class="tot"><td>TOTALE</td><td>'+fmtL(t.gasolio)+'</td><td>'+fmtL(t.benzina)+'</td><td>'+fmtL(t.gasolio+t.benzina)+'</td><td>'+fmtE(t.incasso)+'</td><td>'+(t.costo>0?fmtE(t.costo):'—')+'</td><td style="color:'+tmc+'">'+(t.costo>0?fmtMe(t.margine):'—')+'</td></tr>';
   html+='</tbody></table>';
 
   if(!righe.length) html+='<div style="text-align:center;padding:20px;color:#888">Nessun dato vendite</div>';
@@ -539,7 +539,7 @@ async function _stampaReportAnnualeInterno(anno) {
   html += '<div class="kpi-row">';
   html += '<div class="kpi-box" style="background:#FAECE7;border-color:#D85A30"><div style="font-size:8px;color:#993C1D;text-transform:uppercase">Litri totali</div><div style="font-size:18px;font-weight:bold;color:#712B13;font-family:Courier New">' + fmtL(totA.litri) + '</div></div>';
   html += '<div class="kpi-box" style="background:#FAECE7;border-color:#D85A30"><div style="font-size:8px;color:#993C1D;text-transform:uppercase">Incasso totale IVA incl.</div><div style="font-size:18px;font-weight:bold;color:#712B13;font-family:Courier New">' + fmtE(totA.incasso) + '</div></div>';
-  html += '<div class="kpi-box" style="background:#EAF3DE;border-color:#639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine totale</div><div style="font-size:18px;font-weight:bold;color:#173404;font-family:Courier New">' + fmtE(totA.margine) + '</div></div>';
+  html += '<div class="kpi-box" style="background:#EAF3DE;border-color:#639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine totale</div><div style="font-size:18px;font-weight:bold;color:#173404;font-family:Courier New">' + fmtMe(totA.margine) + '</div></div>';
   html += '<div class="kpi-box" style="background:#EAF3DE;border-color:#639922"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Marginalità</div><div style="font-size:18px;font-weight:bold;color:#173404;font-family:Courier New">' + totA.margPct.toFixed(2) + '%</div></div>';
   html += '<div class="kpi-box" style="background:#E6F1FB;border-color:#378ADD"><div style="font-size:8px;color:#0C447C;text-transform:uppercase">Media lt/giorno</div><div style="font-size:18px;font-weight:bold;color:#042C53;font-family:Courier New">' + fmtL(mediaGG) + '</div></div>';
   html += '</div>';
