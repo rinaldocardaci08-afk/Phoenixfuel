@@ -631,7 +631,20 @@ async function salvaOrdine() {
   const dataScad = new Date(dataOrdine); dataScad.setDate(dataScad.getDate()+ggPag);
   var destVal = document.getElementById('ord-destinazione').value;
   var destinazione = destVal === '__manuale__' ? (document.getElementById('ord-dest-manuale').value.trim()||null) : (destVal || null);
-  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, destinazione:destinazione };
+  // Coerenza sede_scarico_id/nome con destinazione selezionata dal dropdown.
+  // Se l'utente ha scelto una sede dal dropdown, recupero l'ID dall'option;
+  // se ha scelto "manuale" o "nessuna", azzero entrambi i campi per evitare
+  // disallineamenti con valori vecchi.
+  var sedeScaricoId = null, sedeScaricoNome = null;
+  if (destVal && destVal !== '__manuale__') {
+    var destSelEl = document.getElementById('ord-destinazione');
+    var optSel = destSelEl ? destSelEl.options[destSelEl.selectedIndex] : null;
+    if (optSel && optSel.dataset && optSel.dataset.sedeId) {
+      sedeScaricoId = optSel.dataset.sedeId;
+      sedeScaricoNome = destinazione;
+    }
+  }
+  const record = { data:document.getElementById('ord-data').value, tipo_ordine:tipo, cliente:clienteNome, cliente_id:tipo==='cliente'?clienteId:null, prodotto:prezzoCorrente.prodotto, litri, fornitore:prezzoCorrente.fornitore, costo_litro:prezzoCorrente.costo_litro, trasporto_litro:trasporto, margine:margine, iva:prezzoCorrente.iva, base_carico_id:prezzoCorrente.base_carico_id||null, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], stato:document.getElementById('ord-stato').value, note:document.getElementById('ord-note').value, destinazione:destinazione, sede_scarico_id:sedeScaricoId, sede_scarico_nome:sedeScaricoNome };
 
   // ═══ OFFLINE: salva nel backlog locale ═══
   if (!navigator.onLine) {
@@ -1294,7 +1307,7 @@ async function apriModaleOrdine(id) {
         var label = s.nome + (s.indirizzo ? ' — ' + s.indirizzo : '') + (s.citta ? ', ' + s.citta : '');
         var sel = r.destinazione && r.destinazione === label ? ' selected' : '';
         if (sel) found = true;
-        modDestSel.innerHTML += '<option value="' + esc(label) + '"' + sel + '>' + esc(label) + '</option>';
+        modDestSel.innerHTML += '<option value="' + esc(label) + '" data-sede-id="' + s.id + '"' + sel + '>' + esc(label) + '</option>';
       });
     }
     modDestSel.innerHTML += '<option value="__manuale__"' + (r.destinazione && !found ? ' selected' : '') + '>✏️ Altro (manuale)</option>';
@@ -1320,7 +1333,17 @@ async function salvaModificaOrdine(id) {
   const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
   var modDestVal = document.getElementById('mod-destinazione').value;
   var modDest = modDestVal === '__manuale__' ? (document.getElementById('mod-dest-manuale').value.trim()||null) : (modDestVal || null);
-  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest }).eq('id', id);
+  // Coerenza sede_scarico_id/nome con destinazione selezionata dal dropdown.
+  var modSedeId = null, modSedeNome = null;
+  if (modDestVal && modDestVal !== '__manuale__') {
+    var modDestSelEl = document.getElementById('mod-destinazione');
+    var modOptSel = modDestSelEl ? modDestSelEl.options[modDestSelEl.selectedIndex] : null;
+    if (modOptSel && modOptSel.dataset && modOptSel.dataset.sedeId) {
+      modSedeId = modOptSel.dataset.sedeId;
+      modSedeNome = modDest;
+    }
+  }
+  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   toast('Ordine aggiornato!');
   chiudiModalePermessi();

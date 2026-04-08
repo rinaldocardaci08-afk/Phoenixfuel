@@ -536,34 +536,17 @@ async function caricaDati() {
     }
 
     // Arricchisci ordini con indirizzo corretto
-    // PRIORITÀ: 1) sede_scarico_id/nome già sull'ordine (smistamento)
-    //          2) destinazione testuale con match sulle sedi del cliente
-    //          3) destinazione testuale libera
+    // PRIORITÀ: 1) destinazione testuale sull'ordine (verità utente, modificabile)
+    //          2) destinazione con match sulle sedi del cliente per dettagli
+    //          3) sede_scarico_id/nome (smistamento/legacy, usato solo se destinazione vuota)
     //          4) indirizzo principale cliente
     ordini.forEach(o => {
       const cl = clientiMap[o.cliente_id] || clientiMap[o.cliente] || {};
       o._telefono = cl.telefono || o.telefono || '';
 
-      if (o.sede_scarico_nome) {
-        // La sede è già salvata in testo sull'ordine — usala come label sicura
-        o._sede_nome = o.sede_scarico_nome;
-        // Prova a recuperare indirizzo completo dalla mappa se disponibile
-        if (o.sede_scarico_id && sediMap[o.sede_scarico_id]) {
-          const sede = sediMap[o.sede_scarico_id];
-          o._indirizzo = sede.indirizzo || '';
-          o._citta = sede.citta || '';
-          o._provincia = sede.provincia || '';
-          o._cap = sede.cap || '';
-        } else {
-          // Indirizzo non disponibile nella mappa, mostra almeno il nome sede
-          o._indirizzo = o.sede_scarico_nome;
-          o._citta = '';
-          o._provincia = '';
-          o._cap = '';
-        }
-      } else if (o.destinazione) {
-        // L'ordine ha il campo destinazione testuale (form standard).
-        // Tenta un match con le sedi di scarico del cliente per nome.
+      if (o.destinazione) {
+        // Verità utente: la destinazione testuale ha priorità.
+        // Tenta un match con le sedi del cliente per arricchire con indirizzo completo.
         const destTrim = o.destinazione.trim().toLowerCase();
         const cliId = (cl && cl.id) || o.cliente_id || '';
         const sedeMatch = sediPerNomeMap[cliId + '|' + destTrim]
@@ -575,15 +558,31 @@ async function caricaDati() {
           o._provincia = sedeMatch.provincia || '';
           o._cap = sedeMatch.cap || '';
         } else {
-          // Destinazione testuale libera, nessuna sede corrispondente
+          // Testo libero senza match: mostro il testo esatto inserito dall'utente
           o._sede_nome = o.destinazione;
           o._indirizzo = o.destinazione;
           o._citta = '';
           o._provincia = '';
           o._cap = '';
         }
+      } else if (o.sede_scarico_nome) {
+        // Nessuna destinazione testuale ma presente sede_scarico (ordini da smistamento deposito
+        // o flussi legacy): uso quella come fonte secondaria.
+        o._sede_nome = o.sede_scarico_nome;
+        if (o.sede_scarico_id && sediMap[o.sede_scarico_id]) {
+          const sede = sediMap[o.sede_scarico_id];
+          o._indirizzo = sede.indirizzo || '';
+          o._citta = sede.citta || '';
+          o._provincia = sede.provincia || '';
+          o._cap = sede.cap || '';
+        } else {
+          o._indirizzo = o.sede_scarico_nome;
+          o._citta = '';
+          o._provincia = '';
+          o._cap = '';
+        }
       } else {
-        // Nessuna sede specifica e nessuna destinazione: usa indirizzo principale del cliente
+        // Nessuna destinazione né sede: fallback indirizzo principale del cliente
         o._indirizzo = cl.indirizzo || o.indirizzo || '';
         o._citta = cl.citta || o.citta || '';
         o._provincia = cl.provincia || o.provincia || '';
