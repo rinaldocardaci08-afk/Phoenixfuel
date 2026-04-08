@@ -698,7 +698,9 @@ async function apriDettaglioCarico(caricoId) {
     } else {
       html += '<span style="font-size:10px;color:var(--text-hint)">Nessun DAS</span>';
     }
-    html += '<button style="font-size:11px;padding:5px 14px;background:#D85A30;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:500;margin-left:auto" onclick="apriDirottamento(\'' + r.id + '\',\'' + caricoId + '\')">Dirottamento</button>';
+    if (r.stato !== 'consegnato' && r.stato !== 'annullato') {
+      html += '<button style="font-size:11px;padding:5px 14px;background:#D85A30;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:500;margin-left:auto" onclick="apriDirottamento(\'' + r.id + '\',\'' + caricoId + '\')">Dirottamento</button>';
+    }
     html += '</div></div>';
   });
   html += '</div>';
@@ -763,204 +765,6 @@ async function confermaTutteConsegneCarico(caricoId) {
 // DIROTTAMENTO ORDINE
 // ══════════════════════════════════════════════════════════════════
 
-async function apriDirottamento(ordineId, caricoId) {
-  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-  if (!ordine) { toast('Ordine non trovato'); return; }
-
-  // Carica DAS dell'ordine
-  var { data: dasList } = await sb.from('das_documenti').select('*').eq('ordine_id', ordineId).order('created_at',{ascending:false}).limit(1);
-  var dasInfo = dasList && dasList.length ? dasList[0] : null;
-  var dasLabel = dasInfo ? 'DAS-' + dasInfo.anno + '/' + String(dasInfo.numero_progressivo).padStart(4,'0') : 'Nessun DAS';
-
-  // Carica clienti
-  if (!cacheClienti.length) await caricaSelectClienti('ord-cliente');
-  var opzClienti = cacheClienti.map(function(c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('');
-
-  var litriMax = Number(ordine.litri);
-  window._dirottamentoData = { ordine: ordine, das: dasInfo, caricoId: caricoId };
-
-  var html = '<div style="font-size:16px;font-weight:600;color:#D85A30;margin-bottom:4px">Dirottamento ordine</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">' + esc(ordine.cliente) + ' · ' + esc(ordine.prodotto) + ' · <strong>' + fmtL(litriMax) + '</strong> · ' + dasLabel + '</div>';
-
-  // Slider litri
-  html += '<div style="background:#FAECE7;border-radius:8px;padding:14px 18px;margin-bottom:16px">';
-  html += '<div style="font-size:12px;font-weight:500;color:#712B13;margin-bottom:8px">Litri da dirottare</div>';
-  html += '<div style="display:flex;align-items:center;gap:12px">';
-  html += '<input type="range" id="dir-slider" min="100" max="' + litriMax + '" value="' + litriMax + '" step="100" oninput="_aggiornaSliderDirottamento(' + litriMax + ')" style="flex:1" />';
-  html += '<div style="display:flex;align-items:center;gap:4px"><input type="number" id="dir-litri" value="' + litriMax + '" min="100" max="' + litriMax + '" step="100" oninput="_aggiornaInputDirottamento(' + litriMax + ')" style="width:100px;font-family:var(--font-mono);font-size:16px;text-align:right;padding:6px 8px" /><span style="font-size:13px;color:#993C1D">L</span></div>';
-  html += '</div>';
-  html += '<div style="display:flex;justify-content:space-between;margin-top:8px">';
-  html += '<div style="background:#E6F1FB;border-radius:6px;padding:6px 12px"><span style="font-size:10px;color:#0C447C">Restano a ' + esc(ordine.cliente).substring(0,20) + ':</span> <strong id="dir-resta" style="font-family:var(--font-mono);color:#0C447C">0 L</strong></div>';
-  html += '<div style="background:#FAECE7;border-radius:6px;padding:6px 12px"><span style="font-size:10px;color:#712B13">Dirottati:</span> <strong id="dir-dirot" style="font-family:var(--font-mono);color:#D85A30">' + fmtL(litriMax) + '</strong></div>';
-  html += '</div></div>';
-
-  // Dati nuovo cliente
-  html += '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">';
-  html += '<div><label style="font-size:12px;font-weight:500;color:var(--text);display:block;margin-bottom:4px">Nuovo cliente</label><select id="dir-cliente" onchange="_caricaSediDirottamento()" style="width:100%;font-size:13px;padding:8px 12px;border:1px solid var(--border);border-radius:8px">' + '<option value="">Seleziona...</option>' + opzClienti + '</select></div>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
-  html += '<div><label style="font-size:12px;font-weight:500;color:var(--text);display:block;margin-bottom:4px">Prezzo netto €/L</label><input type="number" id="dir-prezzo" step="0.0001" value="' + (Number(ordine.costo_litro)+Number(ordine.trasporto_litro)+Number(ordine.margine)).toFixed(4) + '" style="width:100%;font-family:var(--font-mono);font-size:14px;padding:8px 12px;border:1px solid var(--border);border-radius:8px" /></div>';
-  html += '<div><label style="font-size:12px;font-weight:500;color:var(--text);display:block;margin-bottom:4px">Sede di scarico</label><select id="dir-sede" style="width:100%;font-size:13px;padding:8px 12px;border:1px solid var(--border);border-radius:8px"><option value="">— Seleziona cliente —</option></select></div>';
-  html += '</div></div>';
-
-  // Riepilogo
-  html += '<div id="dir-riepilogo" style="background:#FAEEDA;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:#633806;line-height:1.6"></div>';
-
-  html += '<div style="display:flex;gap:8px">';
-  html += '<button class="btn-primary" style="flex:1;padding:12px;font-size:14px;background:#D85A30" onclick="eseguiDirottamento()">Conferma dirottamento</button>';
-  html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Annulla</button>';
-  html += '</div>';
-
-  apriModal(html);
-  _aggiornaSliderDirottamento(litriMax);
-}
-
-function _aggiornaSliderDirottamento(max) {
-  var val = parseInt(document.getElementById('dir-slider').value) || 0;
-  document.getElementById('dir-litri').value = val;
-  _aggiornaRiepilogoDirottamento(max, val);
-}
-
-function _aggiornaInputDirottamento(max) {
-  var val = parseInt(document.getElementById('dir-litri').value) || 0;
-  if (val > max) val = max;
-  if (val < 0) val = 0;
-  document.getElementById('dir-slider').value = val;
-  _aggiornaRiepilogoDirottamento(max, val);
-}
-
-function _aggiornaRiepilogoDirottamento(max, dirottati) {
-  var resta = max - dirottati;
-  document.getElementById('dir-resta').textContent = resta > 0 ? fmtL(resta) : '0 L (ordine eliminato)';
-  document.getElementById('dir-dirot').textContent = fmtL(dirottati);
-  var d = window._dirottamentoData; if (!d) return;
-  var dasLabel = d.das ? 'DAS-' + d.das.anno + '/' + String(d.das.numero_progressivo).padStart(4,'0') : 'DAS';
-  var riepilogo = '<div style="font-weight:500;margin-bottom:4px">Cosa succede:</div>';
-  if (resta > 0) {
-    riepilogo += '<div>Ordine ' + esc(d.ordine.cliente) + ' ridotto da ' + fmtL(max) + ' a ' + fmtL(resta) + '</div>';
-    riepilogo += '<div>Nuovo ordine per ' + fmtL(dirottati) + ' aggiunto al carico</div>';
-    riepilogo += '<div>' + dasLabel + ' aggiornato con <strong>NON SCORTA MERCE</strong></div>';
-    riepilogo += '<div>Nuovo ' + dasLabel + ' <strong>Vers.2</strong> per il nuovo cliente</div>';
-  } else {
-    riepilogo += '<div>Ordine ' + esc(d.ordine.cliente) + ' <strong>eliminato</strong> (tutti i ' + fmtL(max) + ' dirottati)</div>';
-    riepilogo += '<div>Nuovo ordine creato per il nuovo cliente</div>';
-    riepilogo += '<div>' + dasLabel + ' aggiornato con <strong>Vers.2</strong> per il nuovo cliente</div>';
-  }
-  document.getElementById('dir-riepilogo').innerHTML = riepilogo;
-}
-
-async function _caricaSediDirottamento() {
-  var clienteId = document.getElementById('dir-cliente').value;
-  var sel = document.getElementById('dir-sede');
-  sel.innerHTML = '<option value="">— Nessuna —</option>';
-  if (!clienteId) return;
-  var { data: sedi } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('is_default',{ascending:false}).order('nome');
-  if (sedi && sedi.length) {
-    sedi.forEach(function(s) {
-      var label = s.nome + (s.indirizzo ? ' — ' + s.indirizzo : '') + (s.citta ? ', ' + s.citta : '');
-      sel.innerHTML += '<option value="' + esc(label) + '"' + (s.is_default ? ' selected' : '') + '>' + esc(label) + '</option>';
-    });
-  }
-  sel.innerHTML += '<option value="__manuale__">Altro (manuale)</option>';
-}
-
-async function eseguiDirottamento() {
-  var d = window._dirottamentoData; if (!d) return;
-  var litriDirottati = parseInt(document.getElementById('dir-litri').value) || 0;
-  var nuovoClienteId = document.getElementById('dir-cliente').value;
-  var prezzoNetto = parseFloat(document.getElementById('dir-prezzo').value) || 0;
-  var sede = document.getElementById('dir-sede').value;
-
-  if (!nuovoClienteId) { toast('Seleziona il nuovo cliente'); return; }
-  if (litriDirottati <= 0) { toast('Inserisci i litri da dirottare'); return; }
-  if (sede === '__manuale__') sede = prompt('Inserisci la destinazione manuale:') || '';
-
-  var { data: nuovoCliente } = await sb.from('clienti').select('id,nome,giorni_pagamento').eq('id', nuovoClienteId).single();
-  if (!nuovoCliente) { toast('Cliente non trovato'); return; }
-
-  if (!confirm('Confermi il dirottamento di ' + litriDirottati + ' L da ' + d.ordine.cliente + ' a ' + nuovoCliente.nome + '?')) return;
-
-  toast('Dirottamento in corso...');
-  var litriMax = Number(d.ordine.litri);
-  var litriRestanti = litriMax - litriDirottati;
-  var isTotale = litriRestanti <= 0;
-
-  // Calcola margine dal prezzo netto
-  var margineNuovo = prezzoNetto - Number(d.ordine.costo_litro) - Number(d.ordine.trasporto_litro);
-  var ggPag = nuovoCliente.giorni_pagamento || 30;
-  var dataScad = new Date(d.ordine.data); dataScad.setDate(dataScad.getDate() + ggPag);
-
-  // 1. Crea nuovo ordine
-  var nuovoOrdine = {
-    data: d.ordine.data, tipo_ordine: d.ordine.tipo_ordine,
-    cliente: nuovoCliente.nome, cliente_id: nuovoClienteId,
-    prodotto: d.ordine.prodotto, litri: litriDirottati,
-    fornitore: 'PhoenixFuel', costo_litro: d.ordine.costo_litro, // Dirottamento: merce transita da deposito Phoenix
-    trasporto_litro: d.ordine.trasporto_litro, margine: margineNuovo,
-    iva: d.ordine.iva, base_carico_id: d.ordine.base_carico_id,
-    giorni_pagamento: ggPag, data_scadenza: dataScad.toISOString().split('T')[0],
-    stato: d.ordine.stato, destinazione: sede || null,
-    note: 'DIROTTATO da ' + d.ordine.cliente + ' (' + fmtL(litriDirottati) + ')'
-  };
-  var { data: inserito, error: errIns } = await sb.from('ordini').insert([nuovoOrdine]).select().single();
-  if (errIns) { toast('Errore creazione ordine: ' + errIns.message); return; }
-
-  // 2. Aggiungi al carico se presente
-  if (d.caricoId && inserito) {
-    var { data: maxSeq } = await sb.from('carico_ordini').select('sequenza').eq('carico_id', d.caricoId).order('sequenza',{ascending:false}).limit(1);
-    var nextSeq = maxSeq && maxSeq.length ? maxSeq[0].sequenza + 1 : 99;
-    await sb.from('carico_ordini').insert([{ carico_id: d.caricoId, ordine_id: inserito.id, sequenza: nextSeq }]);
-  }
-
-  // 3. Gestisci DAS
-  if (d.das) {
-    if (isTotale) {
-      // Dirottamento totale: aggiorna DAS esistente con Vers.2 e nuovo cliente
-      await sb.from('das_documenti').update({
-        ordine_id: inserito.id,
-        destinatario_nome: nuovoCliente.nome,
-        note_dirottamento: 'Vers.2',
-        versione: 2
-      }).eq('id', d.das.id);
-    } else {
-      // Parziale: DAS originale → NON SCORTA MERCE
-      await sb.from('das_documenti').update({
-        note_dirottamento: 'NON SCORTA MERCE'
-      }).eq('id', d.das.id);
-
-      // Nuovo DAS Vers.2 per il nuovo ordine
-      var { data: clData } = await sb.from('clienti').select('piva,indirizzo,citta,provincia').eq('id', nuovoClienteId).single();
-      var nuovoDas = Object.assign({}, d.das);
-      delete nuovoDas.id; delete nuovoDas.created_at;
-      nuovoDas.ordine_id = inserito.id;
-      nuovoDas.destinatario_nome = nuovoCliente.nome;
-      nuovoDas.destinatario_piva = clData ? clData.piva : '';
-      nuovoDas.destinatario_indirizzo = sede || (clData ? [clData.indirizzo,clData.citta].filter(Boolean).join(', ') : '');
-      nuovoDas.litri = litriDirottati;
-      nuovoDas.note_dirottamento = 'Vers.2';
-      nuovoDas.versione = 2;
-      await sb.from('das_documenti').insert([nuovoDas]);
-    }
-  }
-
-  // 4. Ordine originale
-  if (isTotale) {
-    // Elimina ordine originale
-    await sb.from('carico_ordini').delete().eq('ordine_id', d.ordine.id);
-    await sb.from('ordini').delete().eq('id', d.ordine.id);
-  } else {
-    // Riduci litri ordine originale
-    await sb.from('ordini').update({
-      litri: litriRestanti,
-      note: (d.ordine.note ? d.ordine.note + ' | ' : '') + 'Dirottati ' + litriDirottati + 'L a ' + nuovoCliente.nome
-    }).eq('id', d.ordine.id);
-  }
-
-  _auditLog('dirottamento', 'ordini', (isTotale ? 'TOTALE' : 'PARZIALE') + ': ' + litriDirottati + 'L da ' + d.ordine.cliente + ' a ' + nuovoCliente.nome);
-  toast('✅ Dirottamento completato! ' + (isTotale ? 'Ordine originale eliminato.' : 'Ordine ridotto a ' + fmtL(litriRestanti) + '.'));
-  chiudiModalePermessi();
-  if (d.caricoId) apriDettaglioCarico(d.caricoId);
-  else if (typeof caricaConsegne === 'function') caricaConsegne();
-}
 
 // ── DAS DOCUMENTI ────────────────────────────────────────────────
 
@@ -1156,6 +960,15 @@ async function mostraDasOrdine(ordineId) {
 async function apriDirottamento(ordineId, caricoId) {
   var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) { toast('Ordine non trovato'); return; }
+  // Blocco: ordini consegnati non si possono dirottare
+  if (ordine.stato === 'consegnato') {
+    toast('Ordine già consegnato: non dirottabile');
+    return;
+  }
+  if (ordine.stato === 'annullato') {
+    toast('Ordine annullato: non dirottabile');
+    return;
+  }
 
   // Carica DAS dell'ordine
   var { data: dasOrig } = await sb.from('das_documenti').select('*').eq('ordine_id', ordineId).order('created_at',{ascending:false}).limit(1);
@@ -1259,6 +1072,13 @@ async function _aggDirottSedi() {
 
 async function eseguiDirottamento() {
   var d = window._dirottamento; if (!d) return;
+  // Doppio check difensivo: ricarico lo stato attuale dal DB
+  var { data: ordineFresh } = await sb.from('ordini').select('stato').eq('id', d.ordine.id).single();
+  if (ordineFresh && (ordineFresh.stato === 'consegnato' || ordineFresh.stato === 'annullato')) {
+    toast('Ordine ' + ordineFresh.stato + ': non dirottabile');
+    chiudiModalePermessi();
+    return;
+  }
   var litriDiv = parseInt(document.getElementById('div-litri').value) || 0;
   var nuovoClienteId = document.getElementById('div-cliente').value;
   if (!nuovoClienteId) { toast('Seleziona il nuovo cliente'); return; }

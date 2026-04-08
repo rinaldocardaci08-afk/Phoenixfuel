@@ -352,8 +352,9 @@ async function uploadDasOrdine(ordineId, inputId, tipoOrdine) {
   if (errDb) { toast('Errore salvataggio: ' + errDb.message); return; }
 
   _auditLog('upload_das_fornitore', 'documenti_ordine', 'DAS allegato a ordine ' + ordineId + ' — ' + nomeFile);
-  // DAS firmato allegato → marca ordine come consegnato
-  await _aggiornaStatoConsegnato(ordineId);
+  // NOTA: questo è il DAS del FORNITORE (documento di accompagnamento in entrata/stazione),
+  // non il DAS firmato dal cliente. Per il flusso "DAS firmato → ordine consegnato",
+  // vedi _uploadDocConsegna in pf-anagrafica.js sezione Consegne.
   toast('DAS allegato all\'ordine!');
   fileInput.value = '';
 

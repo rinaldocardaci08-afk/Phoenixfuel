@@ -204,6 +204,11 @@ async function confermaCaricoDeposito(ordineId) {
   const cisterne = window._cisterneCarico || [];
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
+  // Warning ordini con data futura
+  var oggiISO_c = new Date().toISOString().split('T')[0];
+  if (ordine.data && ordine.data > oggiISO_c) {
+    if (!confirm('⚠ Questo ordine è programmato per il ' + fmtD(ordine.data) + ' (futuro).\n\nSe confermi ora, la cisterna verrà caricata oggi ' + fmtD(oggiISO_c) + ' e la giacenza potrebbe non riflettere la realtà fisica fino alla data dell\'ordine.\n\nContinuare comunque?')) return;
+  }
   let totAssegnato = 0;
   cisterne.forEach(c => { const inp = document.getElementById('cis-qty-'+c.id); if(inp) totAssegnato += parseFloat(inp.value)||0; });
   const diff = Math.abs(Number(ordine.litri) - totAssegnato);
@@ -224,6 +229,11 @@ async function confermaCaricoDeposito(ordineId) {
 async function confermaUscitaDeposito(ordineId, auto) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
+  // Warning ordini con data futura
+  var oggiISO_u = new Date().toISOString().split('T')[0];
+  if (ordine.data && ordine.data > oggiISO_u) {
+    if (!confirm('⚠ Questo ordine è programmato per il ' + fmtD(ordine.data) + ' (futuro).\n\nSe confermi ora, la cisterna verrà scaricata oggi ' + fmtD(oggiISO_u) + ' e la giacenza potrebbe non riflettere la realtà fisica fino alla data dell\'ordine.\n\nContinuare comunque?')) return;
+  }
   const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).eq('sede','deposito_vibo').order('livello_attuale',{ascending:false});
@@ -1728,5 +1738,79 @@ function _movAppliaRicerca() {
 
   if (countEl) {
     countEl.textContent = filtrati.length + ' risultati' + (q ? ' (filtrati)' : '');
+  }
+}
+
+// ── ANNULLA OPERAZIONE DEPOSITO (scarico o carico) ─────────────────
+// Compensativo: non modifica il CMP, inserisce un movimento inverso.
+// Azzera cisterna_id/caricato_deposito sull'ordine e lo riporta a 'in attesa'.
+async function annullaOperazioneDeposito(ordineId, tipoOperazione) {
+  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+
+  var msgOp, movCompensativo, nuovoStato;
+  if (tipoOperazione === 'uscita') {
+    if (!ordine.cisterna_id) { toast('Ordine non risulta scaricato da alcuna cisterna'); return; }
+    msgOp = 'Vuoi annullare lo scarico di ' + fmtL(ordine.litri) + ' ' + esc(ordine.prodotto) + ' per ' + esc(ordine.cliente || ordine.fornitore) + '?\n\nI litri verranno ripristinati sulla cisterna (movimento compensativo, CMP invariato).\nL\'ordine tornerà allo stato "in attesa".\n\nContinuare?';
+    movCompensativo = 'entrata'; // reinserisco i litri
+    nuovoStato = 'in attesa';
+  } else if (tipoOperazione === 'entrata') {
+    if (!ordine.caricato_deposito) { toast('Ordine non risulta caricato'); return; }
+    msgOp = 'Vuoi annullare il carico di ' + fmtL(ordine.litri) + ' ' + esc(ordine.prodotto) + ' da ' + esc(ordine.fornitore) + '?\n\nI litri verranno rimossi dalle cisterne caricate (movimento compensativo, CMP invariato).\nL\'ordine tornerà allo stato "in attesa".\n\nContinuare?';
+    movCompensativo = 'uscita';
+    nuovoStato = 'in attesa';
+  } else {
+    toast('Tipo operazione non riconosciuto'); return;
+  }
+
+  if (!confirm(msgOp)) return;
+
+  try {
+    if (tipoOperazione === 'uscita') {
+      // Reinserisco i litri sulla cisterna scaricata
+      var { data: cis } = await sb.from('cisterne').select('*').eq('id', ordine.cisterna_id).single();
+      if (!cis) { toast('Cisterna originale non trovata'); return; }
+      var nuovoLiv = Number(cis.livello_attuale) + Number(ordine.litri);
+      // Attenzione: potrebbe superare capacita_max se nel frattempo è stata caricata. Avviso ma procedo.
+      if (cis.capacita_max && nuovoLiv > Number(cis.capacita_max)) {
+        if (!confirm('⚠ Il ripristino porterebbe la cisterna sopra la capacità massima (' + fmtL(nuovoLiv) + ' > ' + fmtL(cis.capacita_max) + '). Procedere comunque?')) return;
+      }
+      await sb.from('cisterne').update({ livello_attuale: nuovoLiv, updated_at: new Date().toISOString() }).eq('id', cis.id);
+      await sb.from('movimenti_cisterne').insert([{
+        cisterna_id: cis.id, ordine_id: ordineId, tipo: 'entrata',
+        litri: Number(ordine.litri),
+        data: new Date().toISOString().split('T')[0],
+        note: 'Compensativo: annullamento scarico ordine'
+      }]);
+      await sb.from('ordini').update({ stato: nuovoStato, cisterna_id: null }).eq('id', ordineId);
+    } else {
+      // Annullamento carico: trovo tutti i movimenti 'entrata' di questo ordine e inverto ciascuno
+      var { data: movimenti } = await sb.from('movimenti_cisterne').select('*').eq('ordine_id', ordineId).eq('tipo', 'entrata');
+      if (!movimenti || !movimenti.length) { toast('Nessun movimento di carico trovato per questo ordine'); return; }
+      for (var i = 0; i < movimenti.length; i++) {
+        var m = movimenti[i];
+        // Salto quelli che sono già compensativi o potrebbero creare loop
+        if (m.note && m.note.indexOf('Compensativo') >= 0) continue;
+        var { data: cisEntr } = await sb.from('cisterne').select('*').eq('id', m.cisterna_id).single();
+        if (!cisEntr) continue;
+        var nLiv = Math.max(0, Number(cisEntr.livello_attuale) - Number(m.litri));
+        await sb.from('cisterne').update({ livello_attuale: nLiv, updated_at: new Date().toISOString() }).eq('id', m.cisterna_id);
+        await sb.from('movimenti_cisterne').insert([{
+          cisterna_id: m.cisterna_id, ordine_id: ordineId, tipo: 'uscita',
+          litri: Number(m.litri),
+          data: new Date().toISOString().split('T')[0],
+          note: 'Compensativo: annullamento carico ordine'
+        }]);
+      }
+      await sb.from('ordini').update({ stato: nuovoStato, caricato_deposito: false }).eq('id', ordineId);
+    }
+
+    _auditLog('annulla_' + tipoOperazione + '_deposito', 'ordini', 'Annullato ' + tipoOperazione + ' ordine ' + ordineId + ' (' + fmtL(ordine.litri) + ' ' + ordine.prodotto + ')');
+    toast('✓ Operazione annullata. Ordine tornato in attesa.');
+    caricaDeposito();
+    caricaOrdini();
+  } catch (e) {
+    console.error('annullaOperazioneDeposito:', e);
+    toast('Errore durante l\'annullamento: ' + (e.message || e));
   }
 }
