@@ -1805,7 +1805,9 @@ async function esportaDaneaXml() {
   xml += '  <Company>\n    <n>Phoenix Fuel Srl</n>\n    <City>Vibo Valentia</City>\n    <Province>VV</Province>\n    <Country>Italia</Country>\n  </Company>\n';
   xml += '  <Documents>\n';
 
-  var numCl = 0, numForn = 0, numAuto = 0;
+  var numCl = parseInt(document.getElementById('danea-start-cliente')?.value) || 0;
+  var numForn = parseInt(document.getElementById('danea-start-fornitore')?.value) || 0;
+  var numAuto = parseInt(document.getElementById('danea-start-autofattura')?.value) || 0;
 
   allOrdini.forEach(function(o) {
     if (o.tipo_ordine === 'cliente') { numCl++; _daneaCliente(o, numCl); }
