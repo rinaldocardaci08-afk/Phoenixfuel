@@ -272,6 +272,43 @@ function fmtL(n) {
   const v = Number(n);
   return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })) + ' L';
 }
+// ── Helper margine colorato (verde se > 0, rosso se < 0, grigio se = 0) ──
+// fmtM(v)  → margine €/L, 4 decimali, grassetto, colorato. Restituisce HTML.
+// fmtMe(v) → margine in euro (totali), 2 decimali, grassetto, colorato. Restituisce HTML.
+// Usare SOLO per valori che rappresentano margine/marginalità/guadagno. Per costi o
+// prezzi generici continuare a usare fmt() e fmtE().
+function fmtM(n) {
+  const v = Number(n) || 0;
+  const txt = '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
+  const col = v > 0.00005 ? '#27500A' : (v < -0.00005 ? '#A32D2D' : 'var(--text-muted)');
+  return '<strong style="color:' + col + '">' + txt + '</strong>';
+}
+function fmtMe(n) {
+  const v = Number(n) || 0;
+  const dec = v % 1 === 0 ? 0 : 2;
+  const txt = '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }));
+  const col = v > 0.005 ? '#27500A' : (v < -0.005 ? '#A32D2D' : 'var(--text-muted)');
+  return '<strong style="color:' + col + '">' + txt + '</strong>';
+}
+// ── Formatter data robusto che accetta sia stringa ISO che Date object ──
+// Usa fmtD() sotto il cofano. Restituisce 'DD/MM/YYYY' o '-' se null.
+function fmtDt(d) {
+  if (!d) return '-';
+  if (typeof d === 'string') return fmtD(d);
+  if (d instanceof Date && !isNaN(d)) {
+    var iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    return fmtD(iso);
+  }
+  // Fallback: prova a costruire una Date dal valore
+  try {
+    var dd = new Date(d);
+    if (!isNaN(dd)) {
+      var iso2 = dd.getFullYear() + '-' + String(dd.getMonth()+1).padStart(2,'0') + '-' + String(dd.getDate()).padStart(2,'0');
+      return fmtD(iso2);
+    }
+  } catch(e) {}
+  return '-';
+}
 function badgeStato(stato) {
   const map = { 'confermato':'green','consegnato':'teal','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
   const labels = { 'entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
