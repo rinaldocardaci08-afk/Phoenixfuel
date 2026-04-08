@@ -471,7 +471,30 @@
             <div class="kpi"><div class="kpi-label">Cisterne in allerta</div><div class="kpi-value" id="dep-allerta">—</div></div>
           </div>
           <div id="container-deposito-prodotti"></div>
-          <div class="card"><div class="card-title">Movimenti recenti</div><table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table></div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Movimenti recenti</span>
+              <span id="mov-count" style="font-size:11px;color:var(--text-muted);font-weight:400"></span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;padding:10px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)">
+              <select id="mov-mese" onchange="caricaMovimentiDeposito('mese')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
+                <option value="">— Mese —</option>
+                <option value="1">Gennaio</option><option value="2">Febbraio</option><option value="3">Marzo</option>
+                <option value="4">Aprile</option><option value="5">Maggio</option><option value="6">Giugno</option>
+                <option value="7">Luglio</option><option value="8">Agosto</option><option value="9">Settembre</option>
+                <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
+              </select>
+              <select id="mov-anno" onchange="caricaMovimentiDeposito('mese')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)"></select>
+              <span style="font-size:11px;color:var(--text-muted)">oppure</span>
+              <input type="date" id="mov-data" onchange="caricaMovimentiDeposito('data')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
+              <span style="font-size:11px;color:var(--text-muted)">oppure</span>
+              <button class="btn-edit" onclick="caricaMovimentiDeposito('ultimi')" style="font-size:12px;padding:6px 12px">Ultimi 10</button>
+              <div style="flex:1;min-width:160px">
+                <input type="text" id="mov-search" oninput="_movAppliaRicerca()" placeholder="🔍 cerca prodotto, fornitore, cliente..." style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
+              </div>
+            </div>
+            <table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+          </div>
 
           <!-- RETTIFICHE DEPOSITO -->
           <div class="card" style="margin-top:16px">

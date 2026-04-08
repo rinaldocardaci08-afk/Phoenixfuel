@@ -101,11 +101,7 @@ async function caricaDeposito() {
   document.getElementById('dep-totale').textContent = fmtL(totaleStoccato);
   document.getElementById('dep-pct').textContent = capacitaTotale > 0 ? Math.round((totaleStoccato / capacitaTotale) * 100) + '%' : '—';
   document.getElementById('dep-allerta').textContent = allerte;
-  const { data: mov } = await sb.from('ordini').select('*').or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%').order('created_at',{ascending:false}).limit(10);
-  const tbody = document.getElementById('dep-movimenti');
-  if (!mov||!mov.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>'; return; }
-  const movBadge = { 'entrata_deposito':'<span class="badge teal">Entrata</span>', 'stazione_servizio':'<span class="badge purple">Stazione</span>', 'autoconsumo':'<span class="badge gray">Autoconsumo</span>' };
-  tbody.innerHTML = mov.map(r => '<tr><td>' + fmtD(r.data) + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+  await caricaMovimentiDeposito('ultimi');
   caricaRettifiche('deposito');
   _popolaSelAnnoGiac('giac-dep-anno');
 }
@@ -1624,4 +1620,113 @@ async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
   toast('✓ CMP ' + prodNome + ' aggiornato a € ' + nuovoCMP.toFixed(6));
   chiudiModale();
   caricaDeposito();
+}
+
+// ── MOVIMENTI DEPOSITO: caricamento con filtri data/mese/anno ──────
+var _movCache = [];
+var _movBadgeMap = {
+  'entrata_deposito': '<span class="badge teal">Entrata</span>',
+  'stazione_servizio': '<span class="badge purple">Stazione</span>',
+  'autoconsumo': '<span class="badge gray">Autoconsumo</span>'
+};
+
+async function caricaMovimentiDeposito(modo) {
+  var tbody = document.getElementById('dep-movimenti');
+  var countEl = document.getElementById('mov-count');
+  if (!tbody) return;
+
+  // Popola dropdown anno se vuoto
+  var selAnno = document.getElementById('mov-anno');
+  if (selAnno && selAnno.options.length === 0) {
+    var annoCorr = new Date().getFullYear();
+    for (var y = annoCorr; y >= annoCorr - 3; y--) {
+      selAnno.innerHTML += '<option value="' + y + '"' + (y === annoCorr ? ' selected' : '') + '>' + y + '</option>';
+    }
+  }
+  // Pre-compila mese corrente la prima volta
+  var selMese = document.getElementById('mov-mese');
+  if (selMese && !selMese.value && modo !== 'mese') {
+    selMese.value = new Date().getMonth() + 1;
+  }
+
+  tbody.innerHTML = '<tr><td colspan="6" class="loading">Caricamento...</td></tr>';
+
+  var query = sb.from('ordini').select('*')
+    .or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%');
+
+  if (modo === 'data') {
+    var dataVal = document.getElementById('mov-data').value;
+    if (!dataVal) { modo = 'ultimi'; }
+    else {
+      query = query.eq('data', dataVal).order('created_at', { ascending: false });
+      // Reset altri filtri
+      if (selMese) selMese.value = '';
+    }
+  }
+
+  if (modo === 'mese') {
+    var mese = parseInt(document.getElementById('mov-mese').value);
+    var anno = parseInt(document.getElementById('mov-anno').value);
+    if (!mese || !anno) { modo = 'ultimi'; }
+    else {
+      var mStr = String(mese).padStart(2, '0');
+      var ultGg = new Date(anno, mese, 0).getDate();
+      var daISO = anno + '-' + mStr + '-01';
+      var aISO = anno + '-' + mStr + '-' + String(ultGg).padStart(2, '0');
+      query = query.gte('data', daISO).lte('data', aISO).order('data', { ascending: false }).order('created_at', { ascending: false });
+      // Reset data singola
+      var dEl = document.getElementById('mov-data');
+      if (dEl) dEl.value = '';
+    }
+  }
+
+  if (modo === 'ultimi') {
+    query = query.order('created_at', { ascending: false }).limit(10);
+    // Reset filtri
+    var dEl2 = document.getElementById('mov-data');
+    if (dEl2) dEl2.value = '';
+    if (selMese) selMese.value = '';
+  }
+
+  var res = await query;
+  if (res.error) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Errore: ' + esc(res.error.message) + '</td></tr>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+
+  _movCache = res.data || [];
+  _movAppliaRicerca();
+}
+
+function _movAppliaRicerca() {
+  var tbody = document.getElementById('dep-movimenti');
+  var countEl = document.getElementById('mov-count');
+  if (!tbody) return;
+
+  var searchEl = document.getElementById('mov-search');
+  var q = searchEl ? (searchEl.value || '').trim().toLowerCase() : '';
+  var filtrati = _movCache;
+  if (q) {
+    filtrati = _movCache.filter(function(r) {
+      var haystack = ((r.prodotto || '') + ' ' + (r.fornitore || '') + ' ' + (r.cliente || '')).toLowerCase();
+      return haystack.indexOf(q) >= 0;
+    });
+  }
+
+  if (!filtrati.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>';
+    if (countEl) countEl.textContent = q ? '0 risultati' : '';
+    return;
+  }
+
+  tbody.innerHTML = filtrati.map(function(r) {
+    var badge = _movBadgeMap[r.tipo_ordine] || '<span class="badge amber">Uscita</span>';
+    var controparte = r.tipo_ordine === 'entrata_deposito' ? (r.fornitore || '—') : (r.cliente || r.fornitore || '—');
+    return '<tr><td>' + fmtD(r.data) + '</td><td>' + badge + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(controparte) + '</td><td>' + badgeStato(r.stato) + '</td></tr>';
+  }).join('');
+
+  if (countEl) {
+    countEl.textContent = filtrati.length + ' risultati' + (q ? ' (filtrati)' : '');
+  }
 }
