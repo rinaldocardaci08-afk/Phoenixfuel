@@ -105,7 +105,7 @@ async function caricaDeposito() {
   const tbody = document.getElementById('dep-movimenti');
   if (!mov||!mov.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>'; return; }
   const movBadge = { 'entrata_deposito':'<span class="badge teal">Entrata</span>', 'stazione_servizio':'<span class="badge purple">Stazione</span>', 'autoconsumo':'<span class="badge gray">Autoconsumo</span>' };
-  tbody.innerHTML = mov.map(r => '<tr><td>' + r.data + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
+  tbody.innerHTML = mov.map(r => '<tr><td>' + fmtD(r.data) + '</td><td>' + (movBadge[r.tipo_ordine]||'<span class="badge amber">Uscita</span>') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + badgeStato(r.stato) + '</td></tr>').join('');
   caricaRettifiche('deposito');
   _popolaSelAnnoGiac('giac-dep-anno');
 }
@@ -317,7 +317,7 @@ async function caricaRettifiche(tipo) {
     } else {
       azioni = '<span style="font-size:10px;color:var(--text-hint)">' + (r.confermata_da || '') + '</span>';
     }
-    return '<tr><td>' + r.data + '</td><td>' + esc(cisNome) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.giacenza_sistema||0) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmtL(r.giacenza_rilevata) + '</td><td style="font-family:var(--font-mono);color:' + diffColor + ';font-weight:600">' + diffLabel + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td>' + statoBadge + '</td><td>' + azioni + '</td></tr>';
+    return '<tr><td>' + fmtD(r.data) + '</td><td>' + esc(cisNome) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.giacenza_sistema||0) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmtL(r.giacenza_rilevata) + '</td><td style="font-family:var(--font-mono);color:' + diffColor + ';font-weight:600">' + diffLabel + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td>' + statoBadge + '</td><td>' + azioni + '</td></tr>';
   }).join('');
 }
 
@@ -450,7 +450,7 @@ async function stampaRettifiche(tipo) {
     var confInfo = r.confermata ? (r.confermata_da || '') + (r.confermata_il ? ' — ' + new Date(r.confermata_il).toLocaleDateString('it-IT') : '') : '';
     righeHtml += '<tr>' +
       '<td style="padding:6px 8px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
-      '<td style="padding:6px 8px;border:1px solid #ddd">' + r.data + '</td>' +
+      '<td style="padding:6px 8px;border:1px solid #ddd">' + fmtD(r.data) + '</td>' +
       '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.cisterne ? r.cisterne.nome : '—') + '</td>' +
       '<td style="padding:6px 8px;border:1px solid #ddd">' + esc(r.prodotto || '—') + '</td>' +
       '<td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(r.giacenza_sistema||0) + '</td>' +
@@ -611,7 +611,7 @@ async function caricaStoricoOrdiniAutoconsumo() {
     var ricevuto = r.caricato_deposito;
     var badge = ricevuto ? '<span class="badge green">Ricevuto</span>' : '<span class="badge amber">Da ricevere</span>';
     return '<tr' + (idx%2 ? ' style="background:var(--bg)"' : '') + '>' +
-      '<td>' + r.data + '</td>' +
+      '<td>' + fmtD(r.data) + '</td>' +
       '<td>' + esc(r.prodotto) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
       '<td>' + esc(r.fornitore) + '</td>' +
@@ -1062,7 +1062,7 @@ async function caricaRegistroGiornaliero() {
     var isAlert = r.differenza !== null && Math.abs(Number(r.differenza)) >= GG_SOGLIA_ALERT;
 
     html += '<tr style="' + bg + (isAlert ? ';border-left:3px solid #E24B4A' : '') + '">';
-    html += '<td style="font-weight:500">' + r.data + '</td>';
+    html += '<td style="font-weight:500">' + fmtD(r.data) + '</td>';
     html += '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>';
     html += '<td style="font-family:var(--font-mono);text-align:right">' + fmtL(r.giacenza_inizio||0) + '</td>';
     html += '<td style="font-family:var(--font-mono);text-align:right;color:#639922">' + fmtL(r.entrate||0) + '</td>';

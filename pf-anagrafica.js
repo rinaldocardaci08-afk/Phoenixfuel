@@ -246,7 +246,7 @@ function filtraStoricoConsegne() {
     var tot = prezzoConIva(r) * Number(r.litri);
     var dasIco = r.das_firmato_url ? '<div style="width:10px;height:10px;border-radius:50%;background:#639922;display:inline-block"></div> <span style="font-size:9px;color:#27500A">OK</span>' : '<div style="width:10px;height:10px;border-radius:50%;background:#E24B4A;display:inline-block"></div> <span style="font-size:9px;color:#791F1F">No</span>';
     var cartIco = r.cartellino_url ? '<div style="width:10px;height:10px;border-radius:50%;background:#639922;display:inline-block"></div> <span style="font-size:9px;color:#27500A">OK</span>' : '<div style="width:10px;height:10px;border-radius:50%;background:#E24B4A;display:inline-block"></div> <span style="font-size:9px;color:#791F1F">No</span>';
-    return '<tr><td>' + r.data + '</td><td><strong>' + esc(r.cliente) + '</strong>' + (r.destinazione ? '<div style="font-size:9px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td style="text-align:center">' + dasIco + '</td><td style="text-align:center">' + cartIco + '</td></tr>';
+    return '<tr><td>' + fmtD(r.data) + '</td><td><strong>' + esc(r.cliente) + '</strong>' + (r.destinazione ? '<div style="font-size:9px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td style="text-align:center">' + dasIco + '</td><td style="text-align:center">' + cartIco + '</td></tr>';
   }).join('');
 }
 
@@ -288,7 +288,7 @@ function stampaStoricoConsegne() {
     var tot = prezzoConIva(r) * Number(r.litri);
     var dasC = r.das_firmato_url ? '#639922' : '#E24B4A';
     var cartC = r.cartellino_url ? '#639922' : '#E24B4A';
-    html += '<tr' + (i%2 ? ' style="background:#fafaf5"' : '') + '><td style="text-align:center;color:#999">' + (i+1) + '</td><td>' + r.data + '</td><td style="font-weight:500">' + esc(r.cliente) + '</td><td style="font-size:9px;color:#555">' + esc(r.destinazione||'—') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td style="text-align:center">' + (r.stato||'—') + '</td><td style="text-align:center"><span class="sem" style="background:' + dasC + '"></span> ' + (r.das_firmato_url?'SI':'NO') + '</td><td style="text-align:center"><span class="sem" style="background:' + cartC + '"></span> ' + (r.cartellino_url?'SI':'NO') + '</td></tr>';
+    html += '<tr' + (i%2 ? ' style="background:#fafaf5"' : '') + '><td style="text-align:center;color:#999">' + (i+1) + '</td><td>' + fmtD(r.data) + '</td><td style="font-weight:500">' + esc(r.cliente) + '</td><td style="font-size:9px;color:#555">' + esc(r.destinazione||'—') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td style="text-align:center">' + (r.stato||'—') + '</td><td style="text-align:center"><span class="sem" style="background:' + dasC + '"></span> ' + (r.das_firmato_url?'SI':'NO') + '</td><td style="text-align:center"><span class="sem" style="background:' + cartC + '"></span> ' + (r.cartellino_url?'SI':'NO') + '</td></tr>';
   });
   html += '</tbody></table>';
 
@@ -1489,7 +1489,7 @@ async function apriSchedaCliente(clienteId, clienteNome) {
       const rowStyle = isPagato ? 'opacity:0.5' : isScaduto ? 'background:#FCEBEB' : '';
 
       html += '<tr style="' + rowStyle + '">';
-      html += '<td>' + o.data + '</td>';
+      html += '<td>' + fmtD(o.data) + '</td>';
       html += '<td>' + o.prodotto + '</td>';
       html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
       html += '<td style="font-family:var(--font-mono)">' + fmt(prezzoConIva(o)) + '</td>';
@@ -1933,7 +1933,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
       var rowStyle = isPagato ? 'opacity:0.5' : '';
 
       html += '<tr style="' + rowStyle + '">';
-      html += '<td>' + o.data + '</td>';
+      html += '<td>' + fmtD(o.data) + '</td>';
       html += '<td>' + tipoLabel + '</td>';
       html += '<td style="font-size:11px">' + esc(o.prodotto) + '</td>';
       html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';

@@ -520,7 +520,7 @@ async function mostraBacklogOrdini() {
     var r = b.record;
     var dt = new Date(b.timestamp).toLocaleString('it-IT', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
     return '<tr style="background:#FDF3D0">' +
-      '<td>' + r.data + '</td>' +
+      '<td>' + fmtD(r.data) + '</td>' +
       '<td>' + badgeStato(r.tipo_ordine || 'cliente') + '</td>' +
       '<td>' + esc(r.cliente || '—') + '</td>' +
       '<td>' + esc(r.prodotto || '—') + '</td>' +

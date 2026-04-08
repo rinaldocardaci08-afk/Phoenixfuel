@@ -240,6 +240,7 @@ function fmtL(n) {
   const v = Number(n);
   return _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }));
 }
+function fmtD(d){if(!d)return '-';var p=String(d).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
 function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 const DEST_LABELS = { 'cliente':'Vendita cliente', 'entrata_deposito':'Entrata deposito', 'stazione_servizio':'Stazione servizio', 'autoconsumo':'Autoconsumo' };
@@ -397,7 +398,7 @@ async function generaReport() {
     const costoTot = Number(r.costo_litro) * Number(r.litri);
     const traspTot = Number(r.trasporto_litro) * Number(r.litri);
     tLitri += Number(r.litri); tCosto += costoTot; tTrasp += traspTot;
-    return '<tr><td>' + r.data + '</td><td>' + esc(r.fornitore) + '</td><td>' + destBadge(r.tipo_ordine) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(r.costo_litro) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td></tr>';
+    return '<tr><td>' + fmtD(r.data) + '</td><td>' + esc(r.fornitore) + '</td><td>' + destBadge(r.tipo_ordine) + '</td><td>' + esc(r.prodotto) + '</td><td class="mono">' + fmtL(r.litri) + '</td><td class="mono">' + fmt(r.costo_litro) + '</td><td class="mono">' + fmtE(costoTot) + '</td><td class="mono">' + fmtE(traspTot) + '</td></tr>';
   }).join('') + '<tr class="totale"><td colspan="4"><strong>TOTALI</strong></td><td class="mono">' + fmtL(tLitri) + '</td><td class="mono">' + fmt(tLitri>0?tCosto/tLitri:0) + '</td><td class="mono">' + fmtE(tCosto) + '</td><td class="mono">' + fmtE(tTrasp) + '</td></tr>';
 
   // Tabella fornitori

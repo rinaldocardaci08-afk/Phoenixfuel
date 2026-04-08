@@ -442,7 +442,7 @@ async function stampaRegistroDifferenze() {
     totDa += daV; totVers += vers;
     if (Math.abs(diff) >= 0.01) ggDiff++;
     var cls = Math.abs(diff) < 0.01 ? 'ok' : 'err';
-    html += '<tr' + (i % 2 ? ' class="alt"' : '') + '><td>' + c.data + '</td><td>' + fmtE(daV) + '</td><td>' + fmtE(vers) + '</td><td class="' + cls + '" style="font-weight:bold">' + (diff >= 0 ? '+' : '') + fmtE(diff) + '</td><td class="' + (Math.abs(cumulata) < 0.01 ? 'ok' : 'err') + '">' + (cumulata >= 0 ? '+' : '') + fmtE(cumulata) + '</td></tr>';
+    html += '<tr' + (i % 2 ? ' class="alt"' : '') + '><td>' + fmtD(c.data) + '</td><td>' + fmtE(daV) + '</td><td>' + fmtE(vers) + '</td><td class="' + cls + '" style="font-weight:bold">' + (diff >= 0 ? '+' : '') + fmtE(diff) + '</td><td class="' + (Math.abs(cumulata) < 0.01 ? 'ok' : 'err') + '">' + (cumulata >= 0 ? '+' : '') + fmtE(cumulata) + '</td></tr>';
   });
 
   var totDiff = Math.round((totVers - totDa) * 100) / 100;

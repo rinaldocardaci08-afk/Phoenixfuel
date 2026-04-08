@@ -112,7 +112,7 @@ async function caricaDashboard() {
   // Ultimi ordini
   var rec = recRes.data;
   const tbody=document.getElementById('dashboard-ordini');
-  tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+r.data+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
+  tbody.innerHTML=rec&&rec.length?rec.map(r=>'<tr><td>'+fmtD(r.data)+'</td><td>'+esc(r.cliente)+'</td><td>'+esc(r.prodotto)+'</td><td style="font-family:var(--font-mono)">'+fmtL(r.litri)+'</td><td style="font-family:var(--font-mono)">'+fmtE(prezzoConIva(r)*r.litri)+'</td><td>'+badgeStato(r.stato)+'</td></tr>').join(''):'<tr><td colspan="6" class="loading">Nessun ordine</td></tr>';
 
   // Giacenza deposito + grafici + cockpit in parallelo
   await Promise.all([caricaGiacenzaDashboard(), caricaGraficiDashboard(), caricaCockpit(), caricaAlertOperativi()]);
@@ -369,7 +369,7 @@ async function caricaNotificheDashboard() {
   ordiniVecchi.forEach(r => {
     const tot = prezzoConIva(r) * Number(r.litri);
     const giorniPassati = Math.floor((oggi - new Date(r.data)) / (1000*60*60*24));
-    html += '<tr><td>' + r.data + '</td><td><strong>' + esc(r.cliente) + '</strong></td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td>';
+    html += '<tr><td>' + fmtD(r.data) + '</td><td><strong>' + esc(r.cliente) + '</strong></td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td>';
     html += '<td><span class="badge red">' + giorniPassati + ' gg</span></td>';
     html += '<td><button class="btn-edit" title="Riprogramma" onclick="riprogrammaOrdine(\'' + r.id + '\')">📅</button>';
     html += '<button class="btn-danger" title="Annulla" onclick="annullaOrdine(\'' + r.id + '\')">x</button></td></tr>';

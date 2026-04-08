@@ -352,6 +352,8 @@ async function uploadDasOrdine(ordineId, inputId, tipoOrdine) {
   if (errDb) { toast('Errore salvataggio: ' + errDb.message); return; }
 
   _auditLog('upload_das_fornitore', 'documenti_ordine', 'DAS allegato a ordine ' + ordineId + ' — ' + nomeFile);
+  // DAS firmato allegato → marca ordine come consegnato
+  await _aggiornaStatoConsegnato(ordineId);
   toast('DAS allegato all\'ordine!');
   fileInput.value = '';
 
@@ -405,14 +407,14 @@ async function caricaStoricoDasStazione() {
   ordini.forEach(function(o) {
     var dasLista = docMap[o.id] || [];
     if (!dasLista.length) {
-      html += '<tr><td>' + o.data + '</td><td>' + esc(o.fornitore) + '</td><td>' + esc(o.prodotto) + '</td>';
+      html += '<tr><td>' + fmtD(o.data) + '</td><td>' + esc(o.fornitore) + '</td><td>' + esc(o.prodotto) + '</td>';
       html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
       html += '<td style="color:var(--text-hint);font-size:11px">—</td><td></td></tr>';
     } else {
       dasLista.forEach(function(d) {
         var url = SUPABASE_URL + '/storage/v1/object/public/Das/' + d.percorso_storage;
         var isImg = _isImmagine(_getMimeFromName(d.nome_file));
-        html += '<tr><td>' + o.data + '</td><td style="font-weight:600">' + esc(o.fornitore) + '</td><td>' + esc(o.prodotto) + '</td>';
+        html += '<tr><td>' + fmtD(o.data) + '</td><td style="font-weight:600">' + esc(o.fornitore) + '</td><td>' + esc(o.prodotto) + '</td>';
         html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
         html += '<td>';
         if (isImg) {
