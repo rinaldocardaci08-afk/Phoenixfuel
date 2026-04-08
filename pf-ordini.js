@@ -696,10 +696,12 @@ function _renderRigaOrdine(r) {
   let btnCisterna = '';
   if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
-  // Bottone annulla scarico/carico: visibile se l'operazione di cisterna è già stata fatta e lo stato non è consegnato/annullato
+  // Bottone annulla scarico/carico: visibile se operazione cisterna già fatta, stato non consegnato/annullato,
+  // e SOPRATTUTTO se NON c'è nessun DAS allegato (con DAS l'ordine è confermato e non si tocca più).
   var btnAnnullaOp = '';
   var oggiISO_bg = new Date().toISOString().split('T')[0];
-  if (r.stato !== 'consegnato' && r.stato !== 'annullato') {
+  var hasDas = window._ordiniConDas && window._ordiniConDas.has(r.id);
+  if (r.stato !== 'consegnato' && r.stato !== 'annullato' && !hasDas) {
     // Uscita già scaricata (cisterna_id valorizzato, tipo_ordine cliente/stazione/autoconsumo)
     if (r.cisterna_id && (r.tipo_ordine === 'cliente' || r.tipo_ordine === 'stazione_servizio' || r.tipo_ordine === 'autoconsumo')) {
       btnAnnullaOp = '<button class="btn-edit" title="Annulla scarico dalla cisterna" onclick="annullaOperazioneDeposito(\'' + r.id + '\',\'uscita\')" style="color:#D85A30">↩️</button>';
@@ -741,8 +743,25 @@ async function caricaOrdiniGiorno() {
     if (countEl) countEl.textContent = '0 ordini';
     return;
   }
+  // Carica Set degli ordini che hanno DAS (qualsiasi tipo): blocca bottone annulla scarico/carico
+  await _popolaOrdiniConDas(ordini.map(function(o){return o.id;}));
   tbody.innerHTML = ordini.map(_renderRigaOrdine).join('');
   if (countEl) countEl.textContent = ordini.length + ' ordini';
+}
+
+// Popola il Set globale _ordiniConDas con gli ID degli ordini che hanno almeno un DAS.
+// Controlla sia das_documenti (DAS generati dal sistema) sia documenti_ordine con tipo='das' (DAS caricati come allegato).
+async function _popolaOrdiniConDas(ordineIds) {
+  window._ordiniConDas = new Set();
+  if (!ordineIds || !ordineIds.length) return;
+  try {
+    var { data: das1 } = await sb.from('das_documenti').select('ordine_id').in('ordine_id', ordineIds);
+    (das1||[]).forEach(function(d){ if (d.ordine_id) window._ordiniConDas.add(d.ordine_id); });
+    var { data: das2 } = await sb.from('documenti_ordine').select('ordine_id').in('ordine_id', ordineIds).eq('tipo', 'das');
+    (das2||[]).forEach(function(d){ if (d.ordine_id) window._ordiniConDas.add(d.ordine_id); });
+  } catch(e) {
+    console.warn('_popolaOrdiniConDas:', e);
+  }
 }
 
 function navigaOrdiniGiorno(dir) {
@@ -812,7 +831,10 @@ function _renderStoricoFiltrato() {
 
   var tbody = document.getElementById('tabella-storico-ordini');
   if (!filtrati.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine con questi filtri</td></tr>'; return; }
-  tbody.innerHTML = filtrati.map(_renderRigaOrdine).join('');
+  // Popola cache DAS per bloccare bottone annulla scarico/carico sui già processati
+  _popolaOrdiniConDas(filtrati.map(function(o){return o.id;})).then(function() {
+    tbody.innerHTML = filtrati.map(_renderRigaOrdine).join('');
+  });
 }
 
 function filtraOrdiniStorico() { _renderStoricoFiltrato(); }
