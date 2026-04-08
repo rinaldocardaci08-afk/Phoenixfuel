@@ -126,7 +126,7 @@ async function caricaPrezzi() {
   // Mappa colori fornitori
   var _forColori = {};
   (forColRes.data||[]).forEach(function(f) { _forColori[f.nome] = f.colore || '#FAEEDA'; });
-  _forColori['Deposito Vibo'] = '#FCEBEB';
+  _forColori['PhoenixFuel'] = '#FCEBEB';
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
@@ -137,7 +137,7 @@ async function caricaPrezzi() {
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
         const prodInfo = cacheProdotti.find(p=>p.nome===prodotto);
         const ovr = _depositoOverrides[prodotto] || {};
-        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'Deposito Vibo', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
+        righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
       }
     });
   }
@@ -327,7 +327,7 @@ async function aggiornaSelezioniOrdine() {
         const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
         const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
         const prodI = cacheProdotti.find(pp=>pp.nome===prodotto);
-        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'Deposito Vibo', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
+        prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'PhoenixFuel', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
       }
     });
   }
@@ -336,7 +336,7 @@ async function aggiornaSelezioniOrdine() {
   // Per entrata deposito: escludi PhoenixFuel (non puoi caricare dal tuo stesso deposito)
   var tipoOrd = document.getElementById('ord-tipo').value;
   if (tipoOrd === 'entrata_deposito') {
-    fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('deposito vibo') === -1; });
+    fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('phoenix') === -1; });
   }
   const selFor = document.getElementById('ord-fornitore');
   selFor.innerHTML = '<option value="">Seleziona fornitore...</option>' + fornitori.map(f=>'<option value="'+f.nome+'">'+f.nome+'</option>').join('');
@@ -679,7 +679,7 @@ function _renderRigaOrdine(r) {
   const pL = prezzoConIva(r), tot = pL*r.litri;
   const basNome = r.basi_carico ? r.basi_carico.nome : '—';
   const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
-  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('deposito vibo') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
+  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
   let btnCisterna = '';
   if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
@@ -757,7 +757,7 @@ async function caricaStoricoOrdini() {
     document.getElementById('filtro-a-ordini').value = a;
   }
   tbody.innerHTML = '<tr><td colspan="14" class="loading">Caricamento...</td></tr>';
-  var q = sb.from('ordini').select('*, basi_carico(nome)').order('data',{ascending:false}).order('created_at',{ascending:false});
+  var q = sb.from('ordini').select('*, basi_carico(nome), carico_ordini(carichi(trasportatori(nome)))').order('data',{ascending:false}).order('created_at',{ascending:false});
   if (da) q = q.gte('data', da);
   if (a) q = q.lte('data', a);
   q = q.limit(1000);
@@ -817,7 +817,7 @@ async function stampaOrdiniGiorno() {
   var w = _apriReport("Ordini del giorno"); if (!w) return;
   var data = document.getElementById('ordini-giorno-data').value;
   if (!data) { toast('Seleziona una data'); return; }
-  var { data: ordini } = await sb.from('ordini').select('*, basi_carico(nome)').eq('data', data).order('created_at',{ascending:false});
+  var { data: ordini } = await sb.from('ordini').select('*, basi_carico(nome), carico_ordini(carichi(trasportatori(nome)))').eq('data', data).order('created_at',{ascending:false});
   if (!ordini || !ordini.length) { toast('Nessun ordine per questa data'); return; }
   var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
   _stampaReportOrdini(w, ordini, 'Ordini del giorno', dataFmt);
@@ -848,55 +848,70 @@ function stampaStoricoOrdini() {
 }
 
 // ── Report PDF ordini (comune) ──
+function _vettoreDaOrdine(r) {
+  if (!r || !r.carico_ordini || !r.carico_ordini.length) return 'Non assegnato';
+  var co = r.carico_ordini[0];
+  if (!co || !co.carichi) return 'Non assegnato';
+  var t = co.carichi.trasportatori;
+  if (!t || !t.nome) return 'Mezzo proprio';
+  return t.nome;
+}
+
 function _stampaReportOrdini(w, ordini, titolo, periodo) {
-  var totLitri = 0, totFatt = 0, totMarg = 0;
+  var totLitri = 0, totNetto = 0, totIva = 0;
   var righe = '';
-  ordini.forEach(function(r, i) {
-    var pL = prezzoConIva(r); var tot = pL * Number(r.litri);
-    var margTot = Number(r.margine) * Number(r.litri);
-    var basNome = r.basi_carico ? r.basi_carico.nome : '—';
-    totLitri += Number(r.litri); totFatt += Number(r.costo_litro) * Number(r.litri) + Number(r.trasporto_litro||0) * Number(r.litri) + margTot; totMarg += margTot;
-    var dest = r.destinazione ? '<br/><span style="font-size:9px;color:#666">📍 ' + esc(r.destinazione) + '</span>' : '';
-    righe += '<tr><td style="padding:5px 6px;border:1px solid #ddd;text-align:center">' + (i+1) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd">' + r.data + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.cliente||r.fornitore||'—') + dest + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(r.litri) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(r.costo_litro) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(r.trasporto_litro) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmt(r.margine) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">' + fmt(pL) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(tot) + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd">' + esc(r.fornitore||'—') + '</td>' +
-      '<td style="padding:5px 6px;border:1px solid #ddd;text-align:center">' + (r.stato||'—') + '</td></tr>';
+  ordini.forEach(function(r) {
+    var pNettoL = prezzoNoIva(r);
+    var pIvaL = prezzoConIva(r);
+    var litri = Number(r.litri);
+    var rigaNetto = pNettoL * litri;
+    var rigaIva = pIvaL * litri;
+    totLitri += litri; totNetto += rigaNetto; totIva += rigaIva;
+    var vettore = _vettoreDaOrdine(r);
+    var dataFmt = r.data ? new Date(r.data + 'T12:00:00').toLocaleDateString('it-IT') : '—';
+    var dest = r.destinazione ? '<div style="font-size:13px;color:#555;margin-top:2px">📍 ' + esc(r.destinazione) + '</div>' : '';
+    righe += '<tr>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd;text-align:center">' + dataFmt + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd"><div style="font-weight:700;font-size:14px">' + esc(r.cliente||r.fornitore||'—') + '</div>' + dest + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd">' + esc(r.prodotto) + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(litri) + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:700">' + fmt(pNettoL) + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(rigaNetto) + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(rigaIva) + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd">' + esc(vettore) + '</td>' +
+      '<td style="padding:7px 6px;border:1px solid #ddd">' + esc(r.fornitore||'—') + '</td>' +
+      '</tr>';
   });
-  righe += '<tr style="border-top:3px solid #D4A017;font-weight:bold;background:#FDF3D0"><td style="padding:6px;border:1px solid #ddd" colspan="4">TOTALE — ' + ordini.length + ' ordini</td>' +
-    '<td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td>' +
-    '<td style="padding:6px;border:1px solid #ddd" colspan="3"></td>' +
-    '<td style="padding:6px;border:1px solid #ddd" colspan="2"></td>' +
-    '<td style="padding:6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;color:#639922">' + fmtE(totMarg) + ' margine</td><td></td></tr>';
+  righe += '<tr style="border-top:3px solid #D4A017;font-weight:700;background:#FDF3D0">' +
+    '<td style="padding:9px 6px;border:1px solid #ddd" colspan="3">TOTALE — ' + ordini.length + ' ordini</td>' +
+    '<td style="padding:9px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtL(totLitri) + '</td>' +
+    '<td style="padding:9px 6px;border:1px solid #ddd"></td>' +
+    '<td style="padding:9px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totNetto) + '</td>' +
+    '<td style="padding:9px 6px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">' + fmtE(totIva) + '</td>' +
+    '<td style="padding:9px 6px;border:1px solid #ddd" colspan="2"></td>' +
+    '</tr>';
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + titolo + '</title>' +
-    '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:10mm}' +
+    '<style>body{font-family:Arial,sans-serif;font-size:13px;margin:0;padding:10mm;color:#222}' +
     '@media print{.no-print{display:none!important}@page{size:landscape;margin:8mm}}' +
-    '@media(max-width:600px){body{padding:4mm!important;font-size:9px}table{font-size:8px}th,td{padding:3px 2px!important}}' +
-    'table{width:100%;border-collapse:collapse}' +
-    'th{background:#D4A017;color:#fff;padding:6px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #BA7517;text-align:center}' +
+    '@media(max-width:600px){body{padding:4mm!important;font-size:12px}table{font-size:11px}th,td{padding:5px 3px!important}}' +
+    'table{width:100%;border-collapse:collapse;font-size:13px}' +
+    'th{background:#D4A017;color:#fff;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.3px;border:1px solid #BA7517;text-align:center}' +
     '</style></head><body>';
 
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:10px;margin-bottom:10px">';
-  html += '<div><div style="font-size:18px;font-weight:bold;color:#D4A017">' + titolo.toUpperCase() + '</div>';
-  html += '<div style="font-size:11px;color:#666;margin-top:3px">' + periodo + '</div></div>';
-  html += '<div style="text-align:right"><div style="font-size:14px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
-  html += '<div style="font-size:9px;color:#666">Generato: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #D4A017;padding-bottom:12px;margin-bottom:12px">';
+  html += '<div><div style="font-size:22px;font-weight:700;color:#D4A017;letter-spacing:0.5px">' + titolo.toUpperCase() + '</div>';
+  html += '<div style="font-size:14px;color:#666;margin-top:3px">' + periodo + '</div></div>';
+  html += '<div style="text-align:right"><div style="font-size:17px;font-weight:700;letter-spacing:1px">PHOENIX FUEL SRL</div>';
+  html += '<div style="font-size:11px;color:#666">Generato: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
 
-  html += '<div style="display:flex;gap:12px;margin-bottom:10px">';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Ordini</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + ordini.length + '</div></div>';
-  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Litri totali</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
-  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px 18px;text-align:center"><div style="font-size:8px;color:#27500A;text-transform:uppercase">Margine totale</div><div style="font-size:18px;font-weight:bold;font-family:Courier New,monospace;color:#639922">' + fmtE(totMarg) + '</div></div>';
+  html += '<div style="display:flex;gap:12px;margin-bottom:14px">';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 20px;text-align:center"><div style="font-size:10px;color:#633806;text-transform:uppercase">Ordini</div><div style="font-size:22px;font-weight:700;font-family:Courier New,monospace">' + ordini.length + '</div></div>';
+  html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:10px 20px;text-align:center"><div style="font-size:10px;color:#633806;text-transform:uppercase">Litri totali</div><div style="font-size:22px;font-weight:700;font-family:Courier New,monospace">' + fmtL(totLitri) + '</div></div>';
+  html += '<div style="background:#EAF3DE;border:1px solid #639922;border-radius:6px;padding:10px 20px;text-align:center"><div style="font-size:10px;color:#27500A;text-transform:uppercase">Totale netto</div><div style="font-size:22px;font-weight:700;font-family:Courier New,monospace;color:#27500A">' + fmtE(totNetto) + '</div></div>';
   html += '</div>';
 
-  html += '<table><thead><tr><th>#</th><th>Data</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Costo/L</th><th>Trasp/L</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale IVA</th><th>Fornitore</th><th>Stato</th></tr></thead><tbody>';
+  html += '<table><thead><tr><th>Data cons.</th><th style="text-align:left">Cliente / destinazione</th><th>Prodotto</th><th>Litri</th><th>Prezzo €/L netto</th><th>Totale netto</th><th>Totale con IVA</th><th>Vettore</th><th>Fornitore</th></tr></thead><tbody>';
   html += righe + '</tbody></table>';
 
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
@@ -1071,7 +1086,7 @@ async function stampaListinoPrezziGiorno() {
         var cmp = d.valTot / d.litri;
         var prodInfo = cacheProdotti.find(function(p) { return p.nome === prod; });
         var ovr = (typeof _depositoOverrides !== 'undefined' ? _depositoOverrides[prod] : null) || {};
-        prezzi.push({ fornitore:'Deposito Vibo', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
+        prezzi.push({ fornitore:'PhoenixFuel (Deposito)', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
       }
     });
   }
