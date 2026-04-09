@@ -497,8 +497,13 @@
               <input type="date" id="mov-data" onchange="caricaMovimentiDeposito('data')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
               <span style="font-size:11px;color:var(--text-muted)">oppure</span>
               <button class="btn-edit" onclick="caricaMovimentiDeposito('ultimi')" style="font-size:12px;padding:6px 12px">Ultimi 10</button>
+              <select id="mov-tipo-eu" onchange="_movAppliaRicerca()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
+                <option value="tutti">Tutti</option>
+                <option value="entrate">Solo entrate</option>
+                <option value="uscite">Solo uscite</option>
+              </select>
               <div style="flex:1;min-width:160px">
-                <input type="text" id="mov-search" oninput="_movAppliaRicerca()" placeholder="🔍 cerca prodotto, fornitore, cliente..." style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
+                <input type="text" id="mov-search" oninput="_movAppliaRicerca()" placeholder="🔍 cerca prodotto, fornitore, cliente, base..." style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
               </div>
             </div>
             <table><thead><tr><th>Data</th><th>Tipo</th><th>Prodotto</th><th>Litri</th><th>Controparte</th><th>Stato</th></tr></thead><tbody id="dep-movimenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>

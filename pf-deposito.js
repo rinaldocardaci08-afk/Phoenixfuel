@@ -1688,7 +1688,7 @@ async function caricaMovimentiDeposito(modo) {
 
   tbody.innerHTML = '<tr><td colspan="6" class="loading">Caricamento...</td></tr>';
 
-  var query = sb.from('ordini').select('*')
+  var query = sb.from('ordini').select('*,basi_carico(nome)')
     .or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%');
 
   if (modo === 'data') {
@@ -1743,28 +1743,58 @@ function _movAppliaRicerca() {
 
   var searchEl = document.getElementById('mov-search');
   var q = searchEl ? (searchEl.value || '').trim().toLowerCase() : '';
+  // Nuovo filtro tipo movimento (tutti/entrate/uscite)
+  var tipoFiltroEl = document.getElementById('mov-tipo-eu');
+  var tipoFiltro = tipoFiltroEl ? tipoFiltroEl.value : 'tutti';
+
   var filtrati = _movCache;
+
+  // Filtro entrate/uscite
+  if (tipoFiltro === 'entrate') {
+    filtrati = filtrati.filter(function(r) { return r.tipo_ordine === 'entrata_deposito'; });
+  } else if (tipoFiltro === 'uscite') {
+    filtrati = filtrati.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
+  }
+
+  // Filtro ricerca libera
   if (q) {
-    filtrati = _movCache.filter(function(r) {
-      var haystack = ((r.prodotto || '') + ' ' + (r.fornitore || '') + ' ' + (r.cliente || '')).toLowerCase();
+    filtrati = filtrati.filter(function(r) {
+      var baseNome = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+      var haystack = ((r.prodotto || '') + ' ' + (r.fornitore || '') + ' ' + (r.cliente || '') + ' ' + baseNome).toLowerCase();
       return haystack.indexOf(q) >= 0;
     });
   }
 
   if (!filtrati.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>';
-    if (countEl) countEl.textContent = q ? '0 risultati' : '';
+    if (countEl) countEl.textContent = (q || tipoFiltro !== 'tutti') ? '0 risultati' : '';
     return;
   }
 
   tbody.innerHTML = filtrati.map(function(r) {
     var badge = _movBadgeMap[r.tipo_ordine] || '<span class="badge amber">Uscita</span>';
-    var controparte = r.tipo_ordine === 'entrata_deposito' ? (r.fornitore || '—') : (r.cliente || r.fornitore || '—');
-    return '<tr><td>' + fmtD(r.data) + '</td><td>' + badge + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(controparte) + '</td><td>' + badgeStato(r.stato) + '</td></tr>';
+    // Controparte differenziata:
+    // - Entrata: fornitore + base di carico (es. "Eni Gela · Gioia Tauro")
+    // - Uscita cliente: nome cliente
+    // - Stazione servizio / autoconsumo: usano il cliente o fallback al fornitore
+    var controparte;
+    if (r.tipo_ordine === 'entrata_deposito') {
+      var baseNome = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+      controparte = esc(r.fornitore || '—');
+      if (baseNome) {
+        controparte += '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(baseNome) + '</div>';
+      }
+    } else {
+      controparte = esc(r.cliente || r.fornitore || '—');
+    }
+    return '<tr><td>' + fmtD(r.data) + '</td><td>' + badge + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + controparte + '</td><td>' + badgeStato(r.stato) + '</td></tr>';
   }).join('');
 
   if (countEl) {
-    countEl.textContent = filtrati.length + ' risultati' + (q ? ' (filtrati)' : '');
+    var suffix = '';
+    if (q) suffix = ' (ricerca)';
+    else if (tipoFiltro !== 'tutti') suffix = ' (' + tipoFiltro + ')';
+    countEl.textContent = filtrati.length + ' risultati' + suffix;
   }
 }
 
