@@ -295,10 +295,6 @@ function _dgwRender() {
   var pi = (typeof cacheProdotti !== 'undefined' && cacheProdotti)
            ? cacheProdotti.find(function(p){return p.nome === _dgwProdotto;}) : null;
   var col = pi && pi.colore ? pi.colore : '#D85A30';
-  // Tint di sfondo basato sul colore prodotto: converto hex → rgba con alpha 0.10
-  // Così ogni prodotto ha la sua tinta distintiva e il pannello risalta sul bianco.
-  var bgTint = _dgwHexToRgba(col, 0.10);
-  var bgTintOggi = _dgwHexToRgba(col, 0.18);
 
   // Mappa serie per data ISO per lookup veloce
   var serieMap = {};
@@ -334,21 +330,34 @@ function _dgwRender() {
     var nota = ggSalv ? (ggSalv.note || '') : '';
     var rettOggi = _dgwRettifiche[iso] || null;
 
-    // Bordo più marcato con il colore del prodotto, 2px per "oggi", 1.5px per gli altri
-    var bordo = oggiFlag ? '2px solid '+col : '1.5px solid '+col;
-    if (rettOggi) bordo = '2px dashed #BA7517';
-    // Sfondo tinto
-    var bgUsato = oggiFlag ? bgTintOggi : bgTint;
-    if (futuro) bgUsato = 'var(--bg-card)';
-    var opacita = futuro ? 'opacity:0.55' : '';
+    // Palette grigio scuro uniforme; oggi in rilievo (più chiaro + bordo blu spesso + shadow)
+    var bgPannello = '#3A3A3A';          // grigio scuro standard
+    var bordoPannello = '1px solid #555';
+    var extraStyle = '';
+    if (oggiFlag) {
+      bgPannello = '#4A4A4A';             // leggermente più chiaro per staccarsi
+      bordoPannello = '3px solid #378ADD'; // bordo blu marcato
+      extraStyle = 'box-shadow:0 2px 8px rgba(0,0,0,0.35);transform:translateY(-2px)';
+    } else if (rettOggi) {
+      bordoPannello = '2px dashed #BA7517';
+    }
+    if (futuro) {
+      bgPannello = '#2A2A2A';
+      extraStyle += ';opacity:0.55';
+    }
 
-    html += '<div style="background:'+bgUsato+';border:'+bordo+';border-radius:8px;padding:10px;'+opacita+'">';
+    // Testo primario e muted in versione chiara per contrasto su fondo scuro
+    var txtP = '#F1EFE8';    // text primary su scuro
+    var txtM = '#A0A0A0';    // text muted su scuro
+    var bordoCella = 'rgba(255,255,255,0.12)';
 
-    // Header giorno + badge rettifica + bottone info
+    html += '<div style="background:'+bgPannello+';border:'+bordoPannello+';border-radius:8px;padding:10px;color:'+txtP+';'+extraStyle+'">';
+
+    // Header giorno + badge rettifica + bottone info (più grande, stile icona in blu)
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:4px">';
-    html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">'+nome+'</div>';
-    html += '<div style="font-size:13px;font-weight:600">'+ggIso+'</div></div>';
-    html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">';
+    html += '<div><div style="font-size:10px;color:'+txtM+';text-transform:uppercase;letter-spacing:0.5px">'+nome+'</div>';
+    html += '<div style="font-size:14px;font-weight:600;color:'+txtP+'">'+ggIso+'</div></div>';
+    html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">';
     if (rettOggi && rettOggi.length) {
       var tip = rettOggi.map(function(r){
         return r.cisterna+': '+Math.round(r.sistema)+' → '+Math.round(r.rilevata)+' L (Δ'+(r.delta>=0?'+':'')+Math.round(r.delta)+(r.note?'; '+r.note:'')+')';
@@ -356,27 +365,33 @@ function _dgwRender() {
       html += '<div title="'+esc(tip)+'" style="font-size:14px;cursor:help">🔧</div>';
     }
     if (!futuro) {
-      html += '<button class="btn-edit" style="font-size:11px;padding:1px 6px;line-height:1" title="Dettaglio movimenti del giorno" onclick="dgwMostraDettaglioGiorno(\''+iso+'\')">ⓘ</button>';
+      // Bottone info grande, cerchio blu pieno con "i" bianca serif
+      html += '<button onclick="dgwMostraDettaglioGiorno(\''+iso+'\')" title="Dettaglio movimenti del giorno" style="width:26px;height:26px;border-radius:50%;background:#378ADD;color:#fff;border:none;cursor:pointer;font-family:Georgia,serif;font-size:16px;font-weight:700;font-style:italic;line-height:1;padding:0;display:flex;align-items:center;justify-content:center" onmouseover="this.style.background=\'#185FA5\'" onmouseout="this.style.background=\'#378ADD\'">i</button>';
     }
     html += '</div>';
     html += '</div>';
 
     if (!s) {
-      html += '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:20px 0">—</div>';
+      html += '<div style="font-size:11px;color:'+txtM+';text-align:center;padding:20px 0">—</div>';
       html += '</div>';
       continue;
     }
 
+    // Colori adattati al fondo scuro: verdi/rossi più chiari, border più visibile
+    var colEntrate = '#97C459';  // verde chiaro
+    var colUscite = '#F09595';   // rosso chiaro (pink/red 200)
+    var colCalcolata = '#F5C4B3'; // coral chiaro per risaltare su scuro
+
     // Movimenti del giorno
-    html += '<div style="font-size:10px;color:var(--text-muted)">Iniziale</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:12px">'+fmtL(s.iniziale)+'</div>';
-    html += '<div style="font-size:10px;color:#27500A;margin-top:3px">+ Entrate</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.entrate>0?'#27500A':'var(--text-muted)')+'">'+fmtL(s.entrate)+'</div>';
-    html += '<div style="font-size:10px;color:#791F1F">− Uscite</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.uscite>0?'#791F1F':'var(--text-muted)')+'">'+fmtL(s.uscite)+'</div>';
-    html += '<div style="border-top:0.5px solid var(--border);margin:6px 0"></div>';
-    html += '<div style="font-size:10px;color:var(--text-muted)">Calcolata</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:'+col+'">'+fmtL(s.calcolata)+'</div>';
+    html += '<div style="font-size:10px;color:'+txtM+'">Iniziale</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+txtP+'">'+fmtL(s.iniziale)+'</div>';
+    html += '<div style="font-size:10px;color:'+colEntrate+';margin-top:3px">+ Entrate</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.entrate>0?colEntrate:txtM)+'">'+fmtL(s.entrate)+'</div>';
+    html += '<div style="font-size:10px;color:'+colUscite+'">− Uscite</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.uscite>0?colUscite:txtM)+'">'+fmtL(s.uscite)+'</div>';
+    html += '<div style="border-top:1px solid '+bordoCella+';margin:6px 0"></div>';
+    html += '<div style="font-size:10px;color:'+txtM+'">Calcolata</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:'+colCalcolata+'">'+fmtL(s.calcolata)+'</div>';
 
     // Input rilevata
     var sugg;
@@ -388,25 +403,25 @@ function _dgwRender() {
       sugg = Math.round(s.calcolata);
     }
     var inputVal = rilevataValSalv !== null ? rilevataValSalv : '';
-    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:6px">Rilevata</div>';
+    html += '<div style="font-size:10px;color:'+txtM+';margin-top:6px">Rilevata</div>';
     if (futuro) {
-      html += '<input type="text" disabled placeholder="—" style="width:100%;font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text-muted)">';
+      html += '<input type="text" disabled placeholder="—" style="width:100%;font-size:12px;padding:4px 6px;border:1px solid '+bordoCella+';border-radius:4px;background:rgba(255,255,255,0.05);color:'+txtM+'">';
     } else {
-      html += '<input type="number" step="1" data-data="'+iso+'" data-sugg="'+sugg+'" value="'+inputVal+'" placeholder="'+sugg+'" onblur="dgwSalvaRilevata(this)" style="width:100%;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);text-align:right">';
+      html += '<input type="number" step="1" data-data="'+iso+'" data-sugg="'+sugg+'" value="'+inputVal+'" placeholder="'+sugg+'" onblur="dgwSalvaRilevata(this)" style="width:100%;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:1px solid '+bordoCella+';border-radius:4px;background:rgba(255,255,255,0.08);color:'+txtP+';text-align:right">';
     }
 
-    // Delta rilevata vs calcolata
+    // Delta rilevata vs calcolata — colori adattati al fondo scuro
     if (rilevataValSalv !== null) {
       var delta = Math.round(rilevataValSalv - s.calcolata);
-      var dCol = delta === 0 ? '#27500A' : (Math.abs(delta) < 200 ? '#BA7517' : '#A32D2D');
+      var dCol = delta === 0 ? '#97C459' : (Math.abs(delta) < 200 ? '#FAC775' : '#F09595');
       html += '<div style="font-size:10px;margin-top:2px;color:'+dCol+'">Δ '+(delta>=0?'+':'')+fmtL(delta)+'</div>';
     } else {
-      html += '<div style="font-size:10px;margin-top:2px;color:var(--text-muted)">—</div>';
+      html += '<div style="font-size:10px;margin-top:2px;color:'+txtM+'">—</div>';
     }
 
     // Nota (compatta, leggibile, non editabile qui)
     if (nota) {
-      html += '<div style="font-size:9px;color:var(--text-muted);margin-top:4px;font-style:italic" title="'+esc(nota)+'">'+esc(nota.substring(0,18))+(nota.length>18?'…':'')+'</div>';
+      html += '<div style="font-size:9px;color:'+txtM+';margin-top:4px;font-style:italic" title="'+esc(nota)+'">'+esc(nota.substring(0,18))+(nota.length>18?'…':'')+'</div>';
     }
 
     html += '</div>';
