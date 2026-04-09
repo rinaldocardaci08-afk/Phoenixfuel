@@ -101,7 +101,10 @@ async function caricaDeposito() {
   document.getElementById('dep-totale').textContent = fmtL(totaleStoccato);
   document.getElementById('dep-pct').textContent = capacitaTotale > 0 ? Math.round((totaleStoccato / capacitaTotale) * 100) + '%' : '—';
   document.getElementById('dep-allerta').textContent = allerte;
-  await caricaMovimentiDeposito('ultimi');
+  // Default: movimenti di oggi (non più ultimi 10)
+  var inpMovData = document.getElementById('mov-data');
+  if (inpMovData && !inpMovData.value) inpMovData.value = new Date().toISOString().split('T')[0];
+  await caricaMovimentiDeposito('data');
   caricaRettifiche('deposito');
   _popolaSelAnnoGiac('giac-dep-anno');
 }
@@ -1737,26 +1740,18 @@ async function caricaMovimentiDeposito(modo) {
 }
 
 function _movAppliaRicerca() {
-  var tbody = document.getElementById('dep-movimenti');
+  var container = document.getElementById('dep-movimenti');
   var countEl = document.getElementById('mov-count');
-  if (!tbody) return;
+  if (!container) return;
 
   var searchEl = document.getElementById('mov-search');
   var q = searchEl ? (searchEl.value || '').trim().toLowerCase() : '';
-  // Nuovo filtro tipo movimento (tutti/entrate/uscite)
   var tipoFiltroEl = document.getElementById('mov-tipo-eu');
   var tipoFiltro = tipoFiltroEl ? tipoFiltroEl.value : 'tutti';
 
   var filtrati = _movCache;
 
-  // Filtro entrate/uscite
-  if (tipoFiltro === 'entrate') {
-    filtrati = filtrati.filter(function(r) { return r.tipo_ordine === 'entrata_deposito'; });
-  } else if (tipoFiltro === 'uscite') {
-    filtrati = filtrati.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
-  }
-
-  // Filtro ricerca libera
+  // Filtro ricerca libera (prodotto, fornitore, cliente, base)
   if (q) {
     filtrati = filtrati.filter(function(r) {
       var baseNome = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
@@ -1765,37 +1760,123 @@ function _movAppliaRicerca() {
     });
   }
 
-  if (!filtrati.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="loading">Nessun movimento</td></tr>';
-    if (countEl) countEl.textContent = (q || tipoFiltro !== 'tutti') ? '0 risultati' : '';
-    return;
-  }
+  // Split in entrate / uscite
+  var entrate = filtrati.filter(function(r) { return r.tipo_ordine === 'entrata_deposito'; });
+  var uscite = filtrati.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
 
-  tbody.innerHTML = filtrati.map(function(r) {
-    var badge = _movBadgeMap[r.tipo_ordine] || '<span class="badge amber">Uscita</span>';
-    // Controparte differenziata:
-    // - Entrata: fornitore + base di carico (es. "Eni Gela · Gioia Tauro")
-    // - Uscita cliente: nome cliente
-    // - Stazione servizio / autoconsumo: usano il cliente o fallback al fornitore
-    var controparte;
-    if (r.tipo_ordine === 'entrata_deposito') {
-      var baseNome = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
-      controparte = esc(r.fornitore || '—');
-      if (baseNome) {
-        controparte += '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(baseNome) + '</div>';
-      }
-    } else {
-      controparte = esc(r.cliente || r.fornitore || '—');
-    }
-    return '<tr><td>' + fmtD(r.data) + '</td><td>' + badge + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + controparte + '</td><td>' + badgeStato(r.stato) + '</td></tr>';
-  }).join('');
+  // Applica filtro visibilità sezioni
+  var mostraEntrate = (tipoFiltro !== 'uscite');
+  var mostraUscite = (tipoFiltro !== 'entrate');
+
+  container.innerHTML = _movRenderBlocchi(entrate, uscite, mostraEntrate, mostraUscite, 'full');
 
   if (countEl) {
+    var totaleMostrato = (mostraEntrate ? entrate.length : 0) + (mostraUscite ? uscite.length : 0);
     var suffix = '';
     if (q) suffix = ' (ricerca)';
     else if (tipoFiltro !== 'tutti') suffix = ' (' + tipoFiltro + ')';
-    countEl.textContent = filtrati.length + ' risultati' + suffix;
+    countEl.textContent = totaleMostrato + ' movimenti' + suffix;
   }
+}
+
+// Renderer condiviso per i due blocchi Entrate/Uscite.
+// Usato sia nella card "Movimenti recenti" del deposito che nel pannello dettaglio
+// della vista giacenze settimanali. Parametro modo: 'full' (tabella completa) o
+// 'compact' (mini-tabella per pannello giornaliero).
+function _movRenderBlocchi(entrate, uscite, mostraEntrate, mostraUscite, modo) {
+  var compact = modo === 'compact';
+  var fontSize = compact ? '11px' : '12px';
+  var padCell = compact ? '4px 6px' : '8px 6px';
+  var padHdr = compact ? '4px 6px' : '6px 6px';
+
+  // Calcola totali litri
+  var totLEntrate = 0, totLUscite = 0;
+  entrate.forEach(function(r) { totLEntrate += Number(r.litri || 0); });
+  uscite.forEach(function(r) { totLUscite += Number(r.litri || 0); });
+
+  var html = '';
+
+  // ── Blocco ENTRATE ──
+  if (mostraEntrate) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#E1F5EE;border-left:3px solid #1D9E75;border-radius:0 6px 6px 0;margin-bottom:6px">';
+    html += '<span style="font-size:13px;font-weight:600;color:#085041">↓ ENTRATE</span>';
+    if (entrate.length > 0) {
+      html += '<span style="font-size:11px;color:#0F6E56">' + entrate.length + ' movimenti · ' + fmtL(totLEntrate) + '</span>';
+    } else {
+      html += '<span style="font-size:11px;color:#0F6E56;font-style:italic">Nessun movimento</span>';
+    }
+    html += '</div>';
+
+    if (entrate.length > 0) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:' + fontSize + ';margin-bottom:' + (mostraUscite ? '14px' : '0') + '">';
+      html += '<thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;text-align:left">';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Data</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Prodotto</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500;text-align:right">Litri</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Fornitore · Base carico</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Stato</th>';
+      html += '</tr></thead><tbody>';
+      entrate.forEach(function(r) {
+        var baseNome = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+        var contr = esc(r.fornitore || '—');
+        if (baseNome) contr += ' <span style="font-size:10px;color:var(--text-muted)">· ' + esc(baseNome) + '</span>';
+        html += '<tr style="border-top:0.5px solid var(--border)">';
+        html += '<td style="padding:' + padCell + '">' + fmtD(r.data) + '</td>';
+        html += '<td style="padding:' + padCell + '">' + esc(r.prodotto) + '</td>';
+        html += '<td style="padding:' + padCell + ';text-align:right;font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>';
+        html += '<td style="padding:' + padCell + '">' + contr + '</td>';
+        html += '<td style="padding:' + padCell + '">' + badgeStato(r.stato) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+  }
+
+  // ── Blocco USCITE ──
+  if (mostraUscite) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#FAEEDA;border-left:3px solid #BA7517;border-radius:0 6px 6px 0;margin-bottom:6px' + (mostraEntrate && entrate.length === 0 ? ';margin-top:10px' : '') + '">';
+    html += '<span style="font-size:13px;font-weight:600;color:#633806">↑ USCITE</span>';
+    if (uscite.length > 0) {
+      html += '<span style="font-size:11px;color:#854F0B">' + uscite.length + ' movimenti · ' + fmtL(totLUscite) + '</span>';
+    } else {
+      html += '<span style="font-size:11px;color:#854F0B;font-style:italic">Nessun movimento</span>';
+    }
+    html += '</div>';
+
+    if (uscite.length > 0) {
+      html += '<table style="width:100%;border-collapse:collapse;font-size:' + fontSize + '">';
+      html += '<thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;text-align:left">';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Data</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Tipo</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Prodotto</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500;text-align:right">Litri</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Cliente</th>';
+      html += '<th style="padding:' + padHdr + ';font-weight:500">Stato</th>';
+      html += '</tr></thead><tbody>';
+      uscite.forEach(function(r) {
+        var badge = _movBadgeMap[r.tipo_ordine] || '<span class="badge amber">Uscita</span>';
+        var contr = esc(r.cliente || r.fornitore || '—');
+        html += '<tr style="border-top:0.5px solid var(--border)">';
+        html += '<td style="padding:' + padCell + '">' + fmtD(r.data) + '</td>';
+        html += '<td style="padding:' + padCell + '">' + badge + '</td>';
+        html += '<td style="padding:' + padCell + '">' + esc(r.prodotto) + '</td>';
+        html += '<td style="padding:' + padCell + ';text-align:right;font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>';
+        html += '<td style="padding:' + padCell + '">' + contr + '</td>';
+        html += '<td style="padding:' + padCell + '">' + badgeStato(r.stato) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+  }
+
+  // Se tutto è filtrato via (nessun blocco visibile e nessun dato)
+  if (!mostraEntrate && !mostraUscite) {
+    html = '<div class="loading" style="padding:20px;text-align:center">Nessun filtro selezionato</div>';
+  } else if (entrate.length === 0 && uscite.length === 0 && mostraEntrate && mostraUscite) {
+    html = '<div class="loading" style="padding:20px;text-align:center">Nessun movimento per i filtri selezionati</div>';
+  }
+
+  return html;
 }
 
 // ── ANNULLA OPERAZIONE DEPOSITO (scarico o carico) ─────────────────

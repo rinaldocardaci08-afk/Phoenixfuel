@@ -295,6 +295,10 @@ function _dgwRender() {
   var pi = (typeof cacheProdotti !== 'undefined' && cacheProdotti)
            ? cacheProdotti.find(function(p){return p.nome === _dgwProdotto;}) : null;
   var col = pi && pi.colore ? pi.colore : '#D85A30';
+  // Tint di sfondo basato sul colore prodotto: converto hex → rgba con alpha 0.10
+  // Così ogni prodotto ha la sua tinta distintiva e il pannello risalta sul bianco.
+  var bgTint = _dgwHexToRgba(col, 0.10);
+  var bgTintOggi = _dgwHexToRgba(col, 0.18);
 
   // Mappa serie per data ISO per lookup veloce
   var serieMap = {};
@@ -330,21 +334,31 @@ function _dgwRender() {
     var nota = ggSalv ? (ggSalv.note || '') : '';
     var rettOggi = _dgwRettifiche[iso] || null;
 
-    var bordo = oggiFlag ? '2px solid '+col : (rettOggi ? '0.5px solid var(--warning,#BA7517)' : '0.5px solid var(--border)');
+    // Bordo più marcato con il colore del prodotto, 2px per "oggi", 1.5px per gli altri
+    var bordo = oggiFlag ? '2px solid '+col : '1.5px solid '+col;
+    if (rettOggi) bordo = '2px dashed #BA7517';
+    // Sfondo tinto
+    var bgUsato = oggiFlag ? bgTintOggi : bgTint;
+    if (futuro) bgUsato = 'var(--bg-card)';
     var opacita = futuro ? 'opacity:0.55' : '';
 
-    html += '<div style="background:var(--bg-card);border:'+bordo+';border-radius:8px;padding:10px;'+opacita+'">';
+    html += '<div style="background:'+bgUsato+';border:'+bordo+';border-radius:8px;padding:10px;'+opacita+'">';
 
-    // Header giorno + badge rettifica
-    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">';
+    // Header giorno + badge rettifica + bottone info
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:4px">';
     html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">'+nome+'</div>';
     html += '<div style="font-size:13px;font-weight:600">'+ggIso+'</div></div>';
+    html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">';
     if (rettOggi && rettOggi.length) {
       var tip = rettOggi.map(function(r){
         return r.cisterna+': '+Math.round(r.sistema)+' → '+Math.round(r.rilevata)+' L (Δ'+(r.delta>=0?'+':'')+Math.round(r.delta)+(r.note?'; '+r.note:'')+')';
       }).join('\n');
       html += '<div title="'+esc(tip)+'" style="font-size:14px;cursor:help">🔧</div>';
     }
+    if (!futuro) {
+      html += '<button class="btn-edit" style="font-size:11px;padding:1px 6px;line-height:1" title="Dettaglio movimenti del giorno" onclick="dgwMostraDettaglioGiorno(\''+iso+'\')">ⓘ</button>';
+    }
+    html += '</div>';
     html += '</div>';
 
     if (!s) {
@@ -400,14 +414,84 @@ function _dgwRender() {
   }
   html += '</div>';
 
+  // Container per il pannello dettaglio giornata (popolato on-demand da dgwMostraDettaglioGiorno)
+  html += '<div id="dgw-dettaglio-box" style="margin-top:14px"></div>';
+
   // Legenda
   html += '<div style="display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">';
   html += '<div><strong style="color:'+col+'">Calcolata</strong> = matematica pura entrate − uscite (mai modificata)</div>';
   html += '<div>🔧 = rettifica inventario quel giorno (info al hover)</div>';
+  html += '<div>ⓘ = clicca per vedere il dettaglio movimenti del giorno</div>';
   html += '<div>Rilevata: salva auto al click fuori dall\'input</div>';
   html += '</div>';
 
   cont.innerHTML = html;
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Helper hex → rgba con alpha (per tint background pannelli)
+// ───────────────────────────────────────────────────────────────────
+function _dgwHexToRgba(hex, alpha) {
+  if (!hex || typeof hex !== 'string') return 'rgba(216,90,48,' + alpha + ')';
+  var h = hex.replace('#', '');
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  var r = parseInt(h.substring(0,2), 16);
+  var g = parseInt(h.substring(2,4), 16);
+  var b = parseInt(h.substring(4,6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return 'rgba(216,90,48,' + alpha + ')';
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Dettaglio movimenti del giorno (on demand, click su ⓘ)
+// Usa _movRenderBlocchi di pf-deposito.js per avere lo stesso layout E/U.
+// ───────────────────────────────────────────────────────────────────
+var _dgwDettaglioCorrente = null; // iso del giorno attualmente mostrato, per toggle
+
+async function dgwMostraDettaglioGiorno(iso) {
+  var box = document.getElementById('dgw-dettaglio-box');
+  if (!box) return;
+
+  // Toggle: secondo click sullo stesso giorno = chiude
+  if (_dgwDettaglioCorrente === iso) {
+    box.innerHTML = '';
+    _dgwDettaglioCorrente = null;
+    return;
+  }
+  _dgwDettaglioCorrente = iso;
+
+  box.innerHTML = '<div class="loading" style="padding:16px;text-align:center">Caricamento movimenti del ' + fmtD(iso) + '...</div>';
+
+  // Query: stessi criteri di caricaMovimentiDeposito ma filtrata sulla data del giorno
+  var res = await sb.from('ordini').select('*,basi_carico(nome)')
+    .or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%')
+    .eq('data', iso)
+    .order('created_at', { ascending: false });
+
+  if (res.error) {
+    box.innerHTML = '<div class="loading" style="padding:16px;text-align:center;color:#A32D2D">Errore: ' + esc(res.error.message) + '</div>';
+    return;
+  }
+
+  var movimenti = res.data || [];
+  var entrate = movimenti.filter(function(r) { return r.tipo_ordine === 'entrata_deposito'; });
+  var uscite = movimenti.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
+
+  var header = '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px 8px 0 0;border-bottom:none">';
+  header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + fmtD(iso) + '</div>';
+  header += '<button class="btn-edit" style="font-size:11px;padding:3px 10px" onclick="dgwMostraDettaglioGiorno(\'' + iso + '\')" title="Chiudi">✕</button>';
+  header += '</div>';
+
+  var body;
+  if (typeof _movRenderBlocchi === 'function') {
+    body = '<div style="padding:12px 14px;border:0.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;background:var(--bg-card)">';
+    body += _movRenderBlocchi(entrate, uscite, true, true, 'compact');
+    body += '</div>';
+  } else {
+    body = '<div style="padding:16px;color:#A32D2D">Errore: funzione di rendering non trovata. Ricarica la pagina.</div>';
+  }
+
+  box.innerHTML = header + body;
 }
 
 // ───────────────────────────────────────────────────────────────────
