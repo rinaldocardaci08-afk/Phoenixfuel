@@ -127,19 +127,37 @@ async function caricaPrezzi() {
   var _forColori = {};
   (forColRes.data||[]).forEach(function(f) { _forColori[f.nome] = f.colore || '#FAEEDA'; });
   _forColori['PhoenixFuel'] = '#FCEBEB';
+  // Svuota la cache del CMP storico ad ogni ricarica listino
+  // per garantire lettura fresca dal DB quando cambia la data del filtro
+  if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
+
   let righeDeposito = [];
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
-    prodotti.forEach(prodotto => {
+    const dataRif = filtroData || oggiISO;
+    // Loop async perché _cmpStoricoAllaData è una query asincrona
+    for (const prodotto of prodotti) {
       const cis = cisterne.filter(c=>c.prodotto===prodotto);
       const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
       if (totLitri > 0) {
-        const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
+        // Usa CMP storico alla data selezionata invece del CMP corrente.
+        // Se lo storico non ha dati per quel prodotto+data, la funzione
+        // ritorna il CMP corrente come fallback (nessun peggioramento).
+        let costoMedio;
+        if (typeof _cmpStoricoAllaData === 'function') {
+          costoMedio = await _cmpStoricoAllaData(prodotto, 'deposito_vibo', dataRif);
+          if (!costoMedio || costoMedio === 0) {
+            // Fallback al calcolo classico se lo storico è vuoto
+            costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
+          }
+        } else {
+          costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0) / totLitri;
+        }
         const prodInfo = cacheProdotti.find(p=>p.nome===prodotto);
         const ovr = _depositoOverrides[prodotto] || {};
         righeDeposito.push({ id:'phoenix_'+prodotto, data:filtroData||oggiISO, fornitore:'PhoenixFuel', basi_carico:{nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:totLitri, _isDeposito:true });
       }
-    });
+    }
   }
 
   const tuttiPrezzi = [...righeDeposito, ...(data||[])];
@@ -321,15 +339,25 @@ async function aggiornaSelezioniOrdine() {
   // Aggiunge PhoenixFuel sempre disponibile con costo medio deposito
   if (cisterne && baseDeposito) {
     const prodotti = [...new Set(cisterne.map(c=>c.prodotto).filter(Boolean))];
-    prodotti.forEach(prodotto => {
+    // Loop async perché _cmpStoricoAllaData è una query asincrona
+    for (const prodotto of prodotti) {
       const cis = cisterne.filter(c=>c.prodotto===prodotto&&Number(c.livello_attuale)>0);
       if (cis.length) {
         const totLitri = cis.reduce((s,c)=>s+Number(c.livello_attuale),0);
-        const costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
+        // CMP storico alla data dell'ordine (con fallback al CMP corrente)
+        let costoMedio;
+        if (typeof _cmpStoricoAllaData === 'function') {
+          costoMedio = await _cmpStoricoAllaData(prodotto, 'deposito_vibo', data);
+          if (!costoMedio || costoMedio === 0) {
+            costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
+          }
+        } else {
+          costoMedio = cis.reduce((s,c)=>s+(Number(c.costo_medio||0)*Number(c.livello_attuale)),0)/(totLitri||1);
+        }
         const prodI = cacheProdotti.find(pp=>pp.nome===prodotto);
         prezziDelGiorno.push({ id:'deposito_'+prodotto, data, fornitore:'PhoenixFuel', fornitore_id:null, base_carico_id:baseDeposito.id, basi_carico:{id:baseDeposito.id,nome:baseDeposito.nome}, prodotto, costo_litro:costoMedio||0, trasporto_litro:0, margine:0, iva:prodI?prodI.iva_default:22, _isDeposito:true });
       }
-    });
+    }
   }
 
   var fornitori = [...new Map(prezziDelGiorno.map(p=>[p.fornitore,{nome:p.fornitore}])).values()];
@@ -1134,15 +1162,25 @@ async function stampaListinoPrezziGiorno() {
   if (cisterne.length && baseDeposito) {
     var prodottiDep = {};
     cisterne.forEach(function(c) { if (c.prodotto) { if (!prodottiDep[c.prodotto]) prodottiDep[c.prodotto] = { litri:0, valTot:0 }; prodottiDep[c.prodotto].litri += Number(c.livello_attuale||0); prodottiDep[c.prodotto].valTot += Number(c.livello_attuale||0) * Number(c.costo_medio||0); } });
-    Object.keys(prodottiDep).forEach(function(prod) {
+    // Loop async per leggere CMP storico alla data del listino
+    var prodKeys = Object.keys(prodottiDep);
+    for (var pi = 0; pi < prodKeys.length; pi++) {
+      var prod = prodKeys[pi];
       var d = prodottiDep[prod];
       if (d.litri > 0) {
-        var cmp = d.valTot / d.litri;
+        // CMP storico alla data del listino (con fallback al calcolato)
+        var cmp;
+        if (typeof _cmpStoricoAllaData === 'function') {
+          cmp = await _cmpStoricoAllaData(prod, 'deposito_vibo', data);
+          if (!cmp || cmp === 0) cmp = d.valTot / d.litri;
+        } else {
+          cmp = d.valTot / d.litri;
+        }
         var prodInfo = cacheProdotti.find(function(p) { return p.nome === prod; });
         var ovr = (typeof _depositoOverrides !== 'undefined' ? _depositoOverrides[prod] : null) || {};
         prezzi.push({ fornitore:'PhoenixFuel (Deposito)', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
       }
-    });
+    }
   }
 
   if (!prezzi.length) { toast('Nessun prezzo per ' + data); w.close(); return; }

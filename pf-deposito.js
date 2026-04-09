@@ -1645,7 +1645,13 @@ async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
   var ids = cisterneIdsStr.split(',').filter(Boolean);
   if (!ids.length) { toast('Nessuna cisterna trovata'); return; }
 
-  if (!confirm('Confermi la modifica del CMP di ' + prodNome + ' a € ' + nuovoCMP.toFixed(6) + ' su tutte le ' + ids.length + ' cisterne?')) return;
+  if (!confirm('Confermi la modifica del CMP di ' + prodNome + ' a € ' + nuovoCMP.toFixed(6) + ' su tutte le ' + ids.length + ' cisterne?\n\nNOTA: questa modifica vale dalla data di oggi in poi. I giorni precedenti mantengono il loro CMP storico.')) return;
+
+  // Leggo prima il CMP attuale e la sede per poterlo registrare nello storico
+  var { data: cisternePre } = await sb.from('cisterne').select('id,prodotto,sede,costo_medio,livello_attuale').in('id', ids);
+  var cmpPrecedente = cisternePre && cisternePre[0] ? Number(cisternePre[0].costo_medio || 0) : 0;
+  var sede = cisternePre && cisternePre[0] ? cisternePre[0].sede : 'deposito_vibo';
+  var litriTotali = (cisternePre || []).reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
 
   var ops = ids.map(function(id) {
     return sb.from('cisterne').update({ costo_medio: nuovoCMP, updated_at: new Date().toISOString() }).eq('id', id);
@@ -1654,12 +1660,100 @@ async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
   var err = results.find(function(r){ return r.error; });
   if (err) { toast('Errore: ' + err.error.message); return; }
 
-  // Registra nel log
-  _auditLog('modifica_cmp_manuale', 'cisterne', 'CMP ' + prodNome + ' modificato a ' + nuovoCMP);
+  // Registra la modifica nello storico CMP con la data di oggi.
+  // Questo fix chiude il bug per cui le modifiche manuali non lasciavano traccia
+  // e il listino prezzi non poteva risalire al CMP storico di un giorno specifico.
+  var oggiISO = new Date().toISOString().split('T')[0];
+  try {
+    await sb.from('stazione_cmp_storico').insert([{
+      data: oggiISO,
+      prodotto: prodNome,
+      sede: sede,
+      cmp_precedente: cmpPrecedente,
+      cmp_nuovo: nuovoCMP,
+      litri_precedenti: litriTotali,
+      litri_caricati: 0,
+      costo_carico: nuovoCMP,
+      ordine_id: null
+    }]);
+  } catch(e) {
+    console.warn('Impossibile registrare modifica CMP nello storico:', e);
+  }
+
+  _auditLog('modifica_cmp_manuale', 'cisterne', 'CMP ' + prodNome + ' modificato da ' + cmpPrecedente.toFixed(6) + ' a ' + nuovoCMP.toFixed(6) + ' (storico aggiornato)');
 
   toast('✓ CMP ' + prodNome + ' aggiornato a € ' + nuovoCMP.toFixed(6));
   chiudiModale();
   caricaDeposito();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPER GLOBALE: restituisce il CMP storico in vigore a una data X
+// ═══════════════════════════════════════════════════════════════════
+// Legge la tabella stazione_cmp_storico e trova il record con data <= dataISO
+// più recente per quel prodotto + sede. Ritorna il cmp_nuovo di quel record.
+//
+// Logica di fallback:
+//   1. Se trova un record storico valido → ritorna cmp_nuovo del record
+//   2. Se non trova nulla (prodotto mai storicizzato o data antecedente a
+//      qualsiasi record) → ritorna il CMP corrente della cisterna (fallback
+//      al comportamento vecchio, nessun peggioramento)
+//   3. Se anche la cisterna non esiste → ritorna 0
+//
+// Cache in memoria per evitare query ripetute nello stesso render del listino:
+// la chiave è "prodotto|sede|data" e la cache viene ripulita manualmente
+// da caricaPrezzi() quando cambia la data del filtro.
+// ═══════════════════════════════════════════════════════════════════
+var _cmpStoricoCache = {};
+
+function _cmpStoricoSvuotaCache() {
+  _cmpStoricoCache = {};
+}
+
+async function _cmpStoricoAllaData(prodotto, sede, dataISO) {
+  if (!prodotto || !dataISO) return 0;
+  sede = sede || 'deposito_vibo';
+
+  var key = prodotto + '|' + sede + '|' + dataISO;
+  if (_cmpStoricoCache[key] !== undefined) return _cmpStoricoCache[key];
+
+  // Cerca il record storico più recente con data <= dataISO
+  var { data: records, error } = await sb.from('stazione_cmp_storico')
+    .select('cmp_nuovo, data')
+    .eq('prodotto', prodotto)
+    .eq('sede', sede)
+    .lte('data', dataISO)
+    .order('data', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!error && records && records.length > 0) {
+    var cmp = Number(records[0].cmp_nuovo || 0);
+    _cmpStoricoCache[key] = cmp;
+    return cmp;
+  }
+
+  // Fallback: leggi il CMP corrente dalla tabella cisterne
+  // (media ponderata sulle cisterne di quel prodotto e sede)
+  var { data: cisterne } = await sb.from('cisterne')
+    .select('livello_attuale, costo_medio')
+    .eq('prodotto', prodotto)
+    .eq('sede', sede);
+
+  if (cisterne && cisterne.length > 0) {
+    var totL = cisterne.reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
+    if (totL > 0) {
+      var valTot = cisterne.reduce(function(s, c) {
+        return s + Number(c.livello_attuale || 0) * Number(c.costo_medio || 0);
+      }, 0);
+      var cmpFallback = valTot / totL;
+      _cmpStoricoCache[key] = cmpFallback;
+      return cmpFallback;
+    }
+  }
+
+  _cmpStoricoCache[key] = 0;
+  return 0;
 }
 
 // ── MOVIMENTI DEPOSITO: caricamento con filtri data/mese/anno ──────
