@@ -332,5 +332,3 @@ async function stampaFoglioGiornaliero() {
   h += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">🖨️ Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button></div></body></html>';
   w.document.open(); w.document.write(h); w.document.close();
 }
-
-function generaFoglioGiornaliero() { stampaFoglioGiornaliero(); }

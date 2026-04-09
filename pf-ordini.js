@@ -1287,9 +1287,6 @@ async function stampaListinoPrezziGiorno() {
   w.document.open(); w.document.write(html); w.document.close();
 }
 
-// Mantieni compatibilità vecchia funzione
-function filtraOrdini() { filtraOrdiniStorico(); }
-
 // Dati ordini per filtro client-side
 let _ordiniCache = [];
 

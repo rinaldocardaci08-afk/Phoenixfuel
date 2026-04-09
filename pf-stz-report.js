@@ -460,10 +460,6 @@ async function esportaVenditeExcel() {
 }
 
 
-// Backward compatibility
-async function generaReportStazione() { stampaReportVenditeStazione(); }
-
-
 // ═══════════════════════════════════════════════════════════════════
 // REPORT ANNUALE STAZIONE — Due tabelle (IVA incl. + Netto IVA) + Istogrammi
 // ═══════════════════════════════════════════════════════════════════
