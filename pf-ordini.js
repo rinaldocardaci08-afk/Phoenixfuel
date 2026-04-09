@@ -106,6 +106,9 @@ async function caricaPrezzi() {
     selClSingolo.innerHTML = '<option value="">Seleziona...</option>' + cacheClienti.map(function(c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('');
   }
   const filtroData = document.getElementById('filtro-data-prezzi').value;
+  // Aggiorna il label OGGI/IERI/DOMANI + giorno settimana ad ogni ricarica
+  // (all'apertura tab, cambio data datepicker, click frecce navigazione)
+  if (typeof _renderLabelPrezzi === 'function') _renderLabelPrezzi();
   // Sincronizza data inserimento con data visualizzata
   var prData = document.getElementById('pr-data');
   if (prData && filtroData) prData.value = filtroData;
