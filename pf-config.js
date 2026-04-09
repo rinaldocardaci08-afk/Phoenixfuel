@@ -81,9 +81,10 @@ function initForms() {
   if (document.getElementById('danea-da')) document.getElementById('danea-da').value = oggiISO;
   if (document.getElementById('danea-a')) document.getElementById('danea-a').value = oggiISO;
   if (document.getElementById('pc-data')) document.getElementById('pc-data').value = oggiISO;
-  // Label giorno su date operative
+  // Label giorno su date operative (NON sul filtro listino prezzi:
+  // quello usa _renderLabelPrezzi + div dedicato #prezzi-label-giorno che si
+  // aggiorna ad ogni caricaPrezzi() tramite frecce, datepicker, apertura tab)
   _labelGiorno('ord-data');
-  _labelGiorno('filtro-data-prezzi');
   // Popola dropdown prodotti dinamici
   popolaDropdownProdotti('filtro-prodotto-ordini', true);
   popolaDropdownProdotti('vend-prodotto', true);
@@ -305,13 +306,15 @@ function _renderLabelPrezzi() {
   var diff = Math.round((sel - oggi) / 86400000);
   var GIORNI_L = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
   var giorno = GIORNI_L[sel.getDay()];
+  // Stili badge più grandi e leggibili (font 18px, padding 8/18)
+  var baseBadge = 'display:inline-block;padding:8px 18px;border-radius:10px;font-size:18px;line-height:1.2;vertical-align:middle';
   var html = '';
-  if (diff === 0) html += '<span style="background:#378ADD;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">OGGI</span>';
-  else if (diff === -1) html += '<span style="background:#BA7517;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">IERI</span>';
-  else if (diff === 1) html += '<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:8px;font-size:13px;font-weight:700;margin-right:6px">DOMANI</span>';
+  if (diff === 0) html += '<span style="' + baseBadge + ';background:#378ADD;color:#fff;font-weight:700;margin-right:10px">OGGI</span>';
+  else if (diff === -1) html += '<span style="' + baseBadge + ';background:#BA7517;color:#fff;font-weight:700;margin-right:10px">IERI</span>';
+  else if (diff === 1) html += '<span style="' + baseBadge + ';background:#639922;color:#fff;font-weight:700;margin-right:10px">DOMANI</span>';
   var dayColors = { 0:['#FCEBEB','#791F1F'], 1:['#E6F1FB','#0C447C'], 2:['#E6F1FB','#0C447C'], 3:['#E6F1FB','#0C447C'], 4:['#E6F1FB','#0C447C'], 5:['#E6F1FB','#0C447C'], 6:['#EEEDFE','#3C3489'] };
   var dc = dayColors[sel.getDay()];
-  html += '<span style="background:' + dc[0] + ';color:' + dc[1] + ';padding:4px 12px;border-radius:8px;font-size:13px;font-weight:600">' + giorno + '</span>';
+  html += '<span style="' + baseBadge + ';background:' + dc[0] + ';color:' + dc[1] + ';font-weight:600">' + giorno + '</span>';
   div.innerHTML = html;
 }
 
