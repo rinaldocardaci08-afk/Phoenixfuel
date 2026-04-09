@@ -290,51 +290,13 @@ function fmtMe(n) {
   const col = v > 0.005 ? '#27500A' : (v < -0.005 ? '#A32D2D' : 'var(--text-muted)');
   return '<strong style="color:' + col + '">' + txt + '</strong>';
 }
-// ── Formatter data robusto che accetta sia stringa ISO che Date object ──
-// Usa fmtD() sotto il cofano. Restituisce 'DD/MM/YYYY' o '-' se null.
-function fmtDt(d) {
-  if (!d) return '-';
-  if (typeof d === 'string') return fmtD(d);
-  if (d instanceof Date && !isNaN(d)) {
-    var iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    return fmtD(iso);
-  }
-  // Fallback: prova a costruire una Date dal valore
-  try {
-    var dd = new Date(d);
-    if (!isNaN(dd)) {
-      var iso2 = dd.getFullYear() + '-' + String(dd.getMonth()+1).padStart(2,'0') + '-' + String(dd.getDate()).padStart(2,'0');
-      return fmtD(iso2);
-    }
-  } catch(e) {}
-  return '-';
-}
 function badgeStato(stato) {
   const map = { 'confermato':'green','consegnato':'teal','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
   const labels = { 'entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
   return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(labels[stato]||stato) + '</span>';
 }
 
-var _statoColori = {
-  'in attesa':  { bg:'#FAEEDA', color:'#633806', border:'#D4A017' },
-  'confermato': { bg:'#EAF3DE', color:'#27500A', border:'#639922' },
-  'programmato':{ bg:'#E6F1FB', color:'#0C447C', border:'#378ADD' },
-  'annullato':  { bg:'#FCEBEB', color:'#791F1F', border:'#E24B4A' }
-};
-
-function _applicaStatoColore(selectId) {
-  var sel = document.getElementById(selectId); if (!sel) return;
-  var badgeId = selectId + '-badge';
-  var badge = document.getElementById(badgeId);
-  if (!badge) return;
-  var c = _statoColori[sel.value] || { bg:'#eee', color:'#333', border:'#ccc' };
-  badge.textContent = sel.value.charAt(0).toUpperCase() + sel.value.slice(1);
-  badge.style.background = c.bg;
-  badge.style.color = c.color;
-  badge.style.borderColor = c.border;
-}
-
-function _aggiornaLabelPrezzi() {
+function _renderLabelPrezzi() {
   var inp = document.getElementById('filtro-data-prezzi');
   var div = document.getElementById('prezzi-label-giorno');
   if (!inp || !div || !inp.value) { if(div) div.innerHTML = ''; return; }
@@ -353,24 +315,6 @@ function _aggiornaLabelPrezzi() {
   div.innerHTML = html;
 }
 
-function _mostraLegendaStati(ev) {
-  var existing = document.getElementById('popup-legenda-stati');
-  if (existing) { existing.remove(); return; }
-  var popup = document.createElement('div');
-  popup.id = 'popup-legenda-stati';
-  popup.style.cssText = 'position:fixed;z-index:9999;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 20px;max-width:340px;font-size:12px;line-height:1.8;box-shadow:0 4px 20px rgba(0,0,0,0.15)';
-  var rect = ev.target.getBoundingClientRect();
-  popup.style.top = (rect.bottom + 8) + 'px';
-  popup.style.left = Math.max(10, rect.left - 100) + 'px';
-  popup.innerHTML = '<div style="font-size:14px;font-weight:600;margin-bottom:8px">Legenda stati ordine</div>' +
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#FAEEDA;border:1px solid #D4A017"></span><strong style="color:#633806">In attesa</strong> — Ordine inserito, non ancora confermato. Visibile in "Ordini non processati". Può essere riprogrammato o annullato.</div>' +
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#E6F1FB;border:1px solid #378ADD"></span><strong style="color:#0C447C">Programmato</strong> — Ordine pianificato per una data specifica. Pronto per essere caricato su un viaggio.</div>' +
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#EAF3DE;border:1px solid #639922"></span><strong style="color:#27500A">Confermato</strong> — Consegna completata. Lo scarico dal deposito è avvenuto. Entra nel calcolo vendite e margini.</div>' +
-    '<div style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#FCEBEB;border:1px solid #E24B4A"></span><strong style="color:#791F1F">Annullato</strong> — Ordine cancellato. Non entra nei calcoli. Lo scarico deposito viene stornato.</div>' +
-    '<div style="margin-top:10px;text-align:right"><button onclick="document.getElementById(\'popup-legenda-stati\').remove()" style="font-size:11px;padding:4px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div>';
-  document.body.appendChild(popup);
-  setTimeout(function() { document.addEventListener('click', function _chiudi(e) { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', _chiudi); } }); }, 100);
-}
 function badgeRuolo(ruolo) {
   const map = { 'admin':'purple','operatore':'blue','contabilita':'green','logistica':'amber','cliente':'gray' };
   return '<span class="badge ' + (map[esc(ruolo)]||'gray') + '">' + esc(ruolo) + '</span>';
@@ -399,11 +343,6 @@ function validaNumero(val, min, max, nome) {
   if (min !== undefined && n < min) { toast(nome + ': il valore minimo è ' + min); return null; }
   if (max !== undefined && n > max) { toast(nome + ': il valore massimo è ' + max); return null; }
   return n;
-}
-function validaTesto(val, nome, obbligatorio) {
-  const s = (val||'').trim();
-  if (obbligatorio && !s) { toast(nome + ': campo obbligatorio'); return null; }
-  return s;
 }
 
 

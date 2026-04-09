@@ -444,20 +444,6 @@ function _dgwRender() {
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Helper hex → rgba con alpha (per tint background pannelli)
-// ───────────────────────────────────────────────────────────────────
-function _dgwHexToRgba(hex, alpha) {
-  if (!hex || typeof hex !== 'string') return 'rgba(216,90,48,' + alpha + ')';
-  var h = hex.replace('#', '');
-  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-  var r = parseInt(h.substring(0,2), 16);
-  var g = parseInt(h.substring(2,4), 16);
-  var b = parseInt(h.substring(4,6), 16);
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return 'rgba(216,90,48,' + alpha + ')';
-  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
-}
-
-// ───────────────────────────────────────────────────────────────────
 // Dettaglio movimenti del giorno (on demand, click su ⓘ)
 // Usa _movRenderBlocchi di pf-deposito.js per avere lo stesso layout E/U.
 // ───────────────────────────────────────────────────────────────────
