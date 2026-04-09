@@ -204,6 +204,15 @@ async function confermaCaricoDeposito(ordineId) {
   const cisterne = window._cisterneCarico || [];
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
+  // ── LOCK DIFENSIVO: impedisce doppi carichi ──
+  if (ordine.caricato_deposito) {
+    toast('⚠ Ordine già caricato sul deposito. Usa ↩️ per annullare prima di riprovare.');
+    return;
+  }
+  if (ordine.stato === 'annullato') {
+    toast('Ordine annullato: non caricabile');
+    return;
+  }
   // Warning ordini con data futura
   var oggiISO_c = new Date().toISOString().split('T')[0];
   if (ordine.data && ordine.data > oggiISO_c) {
@@ -229,6 +238,24 @@ async function confermaCaricoDeposito(ordineId) {
 async function confermaUscitaDeposito(ordineId, auto) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
+  // ── LOCK DIFENSIVO: impedisce doppi scarichi ──
+  // Se l'ordine ha già cisterna_id valorizzato significa che è già stato scaricato.
+  // Senza questo check, click multipli o chiamate programmatiche doppie causano
+  // decrementi ripetuti della stessa cisterna.
+  if (ordine.cisterna_id) {
+    if (!auto) {
+      toast('⚠ Ordine già scaricato da una cisterna. Usa ↩️ per annullare prima di riprovare.');
+    }
+    return;
+  }
+  if (ordine.stato === 'consegnato') {
+    if (!auto) toast('Ordine già consegnato: non è possibile scaricare di nuovo');
+    return;
+  }
+  if (ordine.stato === 'annullato') {
+    if (!auto) toast('Ordine annullato: non scaricabile');
+    return;
+  }
   // Warning ordini con data futura
   var oggiISO_u = new Date().toISOString().split('T')[0];
   if (ordine.data && ordine.data > oggiISO_u) {

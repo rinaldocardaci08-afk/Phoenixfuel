@@ -692,7 +692,11 @@ function _renderRigaOrdine(r) {
   const pL = prezzoConIva(r), tot = pL*r.litri;
   const basNome = r.basi_carico ? r.basi_carico.nome : '—';
   const isApprov = r.tipo_ordine==='entrata_deposito' && !r.caricato_deposito && r.stato!=='annullato';
-  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato';
+  // isUscita: ordine in uscita che deve ancora essere scaricato dalla cisterna.
+  // NOTA IMPORTANTE: il check su cisterna_id è ESSENZIALE per impedire doppi scarichi.
+  // Senza di esso, il bottone "Scarica" ricomparirebbe se lo stato resta diverso da confermato
+  // (es. ordini in stato 'in attesa' o 'programmato' che sono stati comunque scaricati).
+  const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato' && r.stato!=='consegnato' && !r.cisterna_id;
   let btnCisterna = '';
   if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
