@@ -894,8 +894,9 @@ async function caricaOrdiniFatturabili(){
   ordiniFatturabili.forEach(o=>{
     const pNoIva = Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0);
     const impon  = pNoIva * Number(o.litri||0);
-    const dasLinks = o._das_url
-      ? `<a href="${o._das_url}" target="_blank" style="font-size:10px;color:#0C447C">📄 DAS</a>`
+    const dasUrl = o.das_firmato_url || o._das_url; // retrocompat entrambi i nomi
+    const dasLinks = dasUrl
+      ? `<a href="${_esc(dasUrl)}" target="_blank" style="font-size:10px;color:#0C447C;text-decoration:none;padding:3px 8px;background:#E6F1FB;border-radius:4px;border:0.5px solid #85B7EB">📄 Apri</a>`
       : '—';
     html += `<tr>
       <td><input type="checkbox" class="nf2-chk" value="${o.id}" onchange="_nfAggiornaSelezione()"></td>
