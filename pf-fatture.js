@@ -304,7 +304,39 @@ async function generaFattura(){
     const { error: errRighe } = await sb.from('fattura_righe').insert(righeConId);
     if(errRighe){ toast('Errore righe: '+errRighe.message); return; }
 
-    toast(`✓ Fattura ${numero}/${anno} generata! Imponibile: ${_fmtE(totImponibile)}`);
+    // ── Collega i DAS firmati degli ordini selezionati a questa fattura ──
+    // Per ogni ordine con das_firmato_url, crea un record in documenti_ordine
+    // con tipo='das_firmato' e fattura_id valorizzato. Così nel dettaglio
+    // fattura (apriDettaglioFattura) e nella stampa PDF i DAS sono agganciati.
+    const dasRecords = selezionati
+      .filter(o => o.das_firmato_url)
+      .map(o => {
+        // Estrai il percorso_storage dall'URL pubblico Supabase
+        // URL tipo: https://xxx.supabase.co/storage/v1/object/public/Das/<percorso>
+        var percorso = null;
+        try {
+          var m = String(o.das_firmato_url).match(/\/Das\/(.+)$/);
+          if (m && m[1]) percorso = decodeURIComponent(m[1]);
+        } catch(e) {}
+        return {
+          ordine_id        : o.id,
+          tipo             : 'das_firmato',
+          nome_file        : o.das_firmato_nome || ('DAS_' + o.cliente + '_' + o.data),
+          percorso_storage : percorso,
+          fattura_id       : fattura.id
+        };
+      })
+      .filter(r => r.percorso_storage); // solo se ho estratto un percorso valido
+
+    if (dasRecords.length) {
+      const { error: errDas } = await sb.from('documenti_ordine').insert(dasRecords);
+      if (errDas) {
+        console.warn('Errore collegamento DAS alla fattura:', errDas);
+        toast('⚠ Fattura creata ma errore collegamento DAS: ' + errDas.message);
+      }
+    }
+
+    toast(`✓ Fattura ${numero}/${anno} generata! Imponibile: ${_fmtE(totImponibile)}${dasRecords.length ? ' · ' + dasRecords.length + ' DAS collegati' : ''}`);
     _fattureOrdiniSelezionati.clear();
     document.getElementById('nf-ordini-area').innerHTML='';
     document.getElementById('nf-anteprima')?.remove();
@@ -331,11 +363,11 @@ async function apriDettaglioFattura(id){
   const { data: righe } = await sb.from('fattura_righe').select('*').eq('fattura_id', id).order('numero_riga');
   if(!f) return;
 
-  // Carica DAS collegati alla fattura
+  // Carica DAS collegati alla fattura (sia DAS firmati dal cliente che DAS del fornitore)
   const { data: dasAllegati } = await sb.from('documenti_ordine')
-    .select('id,nome_file,percorso_storage,ordine_id')
+    .select('id,nome_file,percorso_storage,ordine_id,tipo')
     .eq('fattura_id', id)
-    .eq('tipo','das');
+    .in('tipo', ['das','das_firmato']);
 
   const html = `
     <div style="font-size:13px">
