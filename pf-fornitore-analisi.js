@@ -207,20 +207,23 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   });
 
   // Fido segmentato per fascia di scadenza
+  // OPZIONE A: scadute considerate come pagate (stessa logica di caricaFornitori in pf-anagrafica.js)
+  // SOLO LETTURA: nessun UPDATE al DB. La scheda 📋 fa l'auto-pagamento, qui replichiamo solo la regola di calcolo.
   var fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
-  var segmenti = { scaduto: 0, f0_15: 0, f16_30: 0, f31_45: 0, f46p: 0 };
+  var segmenti = { f0_15: 0, f16_30: 0, f31_45: 0, f46p: 0 };
   var fidoUsato = 0;
-  var nonPagatiOrdini = [];
+  var nonPagatiOrdini = []; // solo non pagati e non scaduti
   ordini.forEach(function(o) {
     if (o.pagato_fornitore) return;
-    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
-    fidoUsato += imp;
     var ggOrdine = Number(o.giorni_pagamento || ggPagDefault);
     var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
     var ggResidui = Math.floor((scad - oggi) / 86400000);
+    // Scaduta = considerata pagata (Opzione A): salta dal calcolo fido
+    if (ggResidui < 0) return;
+    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    fidoUsato += imp;
     nonPagatiOrdini.push({ ordine: o, scadenza: scad, ggResidui: ggResidui, importo: imp });
-    if (ggResidui < 0) segmenti.scaduto += imp;
-    else if (ggResidui <= 15) segmenti.f0_15 += imp;
+    if (ggResidui <= 15) segmenti.f0_15 += imp;
     else if (ggResidui <= 30) segmenti.f16_30 += imp;
     else if (ggResidui <= 45) segmenti.f31_45 += imp;
     else segmenti.f46p += imp;
@@ -306,7 +309,6 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
       h += '<div style="font-size:11px;color:#666;margin-bottom:6px;font-weight:600">Suddivisione esposizione per fascia di scadenza:</div>';
       h += '<div style="height:18px;width:100%;background:#f5f4ef;border-radius:6px;overflow:hidden;display:flex">';
       var segCols = [
-        { key: 'scaduto', label: 'Scaduto', color: '#A32D2D' },
         { key: 'f0_15', label: '0-15gg', color: '#D85A30' },
         { key: 'f16_30', label: '16-30gg', color: '#BA7517' },
         { key: 'f31_45', label: '31-45gg', color: '#D4A017' },
@@ -403,8 +405,7 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
     h += '<table><thead><tr><th>Data ord.</th><th>Prodotto</th><th class="m">Litri</th><th class="m">Importo</th><th>Scadenza</th><th class="m">Giorni</th><th>Stato</th></tr></thead><tbody>';
     nonPagatiOrdini.slice(0,15).forEach(function(p) {
       var sem, col, label;
-      if (p.ggResidui < 0) { sem = '🔴'; col = '#A32D2D'; label = 'SCADUTA'; }
-      else if (p.ggResidui <= 7) { sem = '🟠'; col = '#D85A30'; label = 'critica'; }
+      if (p.ggResidui <= 7) { sem = '🟠'; col = '#D85A30'; label = 'critica'; }
       else if (p.ggResidui <= 15) { sem = '🟡'; col = '#BA7517'; label = 'imminente'; }
       else { sem = '🟢'; col = '#639922'; label = 'ok'; }
       h += '<tr>';
@@ -413,7 +414,7 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
       h += '<td class="m">' + fmtL(p.ordine.litri) + '</td>';
       h += '<td class="m"><strong>' + fmtE(p.importo) + '</strong></td>';
       h += '<td>' + fmtD(p.scadenza.toISOString().split('T')[0]) + '</td>';
-      h += '<td class="m" style="color:' + col + ';font-weight:700">' + (p.ggResidui < 0 ? p.ggResidui : '+' + p.ggResidui) + '</td>';
+      h += '<td class="m" style="color:' + col + ';font-weight:700">+' + p.ggResidui + '</td>';
       h += '<td style="color:' + col + ';font-weight:600">' + sem + ' ' + label + '</td>';
       h += '</tr>';
     });
@@ -423,9 +424,7 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
     }
     // Totali
     h += '<div style="display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid #eee;font-size:11px">';
-    h += '<div><strong>' + nonPagatiOrdini.length + '</strong> fatture aperte</div>';
-    var totSc = segmenti.scaduto;
-    if (totSc > 0) h += '<div style="color:#A32D2D"><strong>' + fmtE(totSc) + '</strong> già scaduto</div>';
+    h += '<div><strong>' + nonPagatiOrdini.length + '</strong> fatture aperte (non scadute)</div>';
     h += '<div>Totale aperto: <strong>' + fmtE(fidoUsato) + '</strong></div>';
     h += '</div>';
   }
@@ -451,7 +450,16 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
 function _afRenderConfronto(nomi, fornitori, ordini, basiMap) {
   // Aggrega per fornitore
   var perForn = {};
-  nomi.forEach(function(n) { perForn[n] = { litri: 0, importo: 0, ordini: 0, perMese: {}, perProdotto: {}, basiSet: new Set(), prezziPerBaseProd: {} }; });
+  nomi.forEach(function(n) { 
+    perForn[n] = { 
+      litri: 0, importo: 0, ordini: 0, 
+      perMese: {}, 
+      perProdotto: {},
+      perMeseProdotto: {}, // {mese: {prodotto: litri}}
+      basiSet: new Set(),
+      perBase: {} // {baseNome: {litri, importo, ordini}}
+    }; 
+  });
   
   ordini.forEach(function(o) {
     var f = perForn[o.fornitore]; if (!f) return;
@@ -466,25 +474,17 @@ function _afRenderConfronto(nomi, fornitori, ordini, basiMap) {
     f.perMese[mese].importo += imp;
     if (!f.perProdotto[o.prodotto]) f.perProdotto[o.prodotto] = 0;
     f.perProdotto[o.prodotto] += l;
+    if (!f.perMeseProdotto[mese]) f.perMeseProdotto[mese] = {};
+    f.perMeseProdotto[mese][o.prodotto] = (f.perMeseProdotto[mese][o.prodotto] || 0) + l;
     if (o.base_carico_id) {
       var baseNome = basiMap[o.base_carico_id] ? basiMap[o.base_carico_id].nome : 'Base sconosciuta';
       f.basiSet.add(baseNome);
-      var key = o.prodotto + '||' + baseNome;
-      if (!f.prezziPerBaseProd[key]) f.prezziPerBaseProd[key] = { litri: 0, valore: 0 };
-      f.prezziPerBaseProd[key].litri += l;
-      f.prezziPerBaseProd[key].valore += l * (Number(o.costo_litro||0) + Number(o.trasporto_litro||0));
+      if (!f.perBase[baseNome]) f.perBase[baseNome] = { litri: 0, importo: 0, ordini: 0 };
+      f.perBase[baseNome].litri += l;
+      f.perBase[baseNome].importo += imp;
+      f.perBase[baseNome].ordini++;
     }
   });
-
-  // Calcola basi comuni (intersezione di tutti i set)
-  var basiTutte = nomi.map(function(n) { return Array.from(perForn[n].basiSet); });
-  var basiComuni = basiTutte.reduce(function(acc, arr) {
-    if (!acc) return arr;
-    return acc.filter(function(b) { return arr.indexOf(b) >= 0; });
-  }, null) || [];
-  var basiTutteSet = new Set();
-  basiTutte.forEach(function(arr) { arr.forEach(function(b) { basiTutteSet.add(b); }); });
-  var basiNonComuni = Array.from(basiTutteSet).filter(function(b) { return basiComuni.indexOf(b) < 0; });
 
   // Tutti i prodotti coinvolti
   var prodottiSet = new Set();
@@ -495,6 +495,11 @@ function _afRenderConfronto(nomi, fornitori, ordini, basiMap) {
   var mesiSet = new Set();
   ordini.forEach(function(o) { mesiSet.add(_afMese(o.data)); });
   var mesi = Array.from(mesiSet).sort();
+
+  // Tutte le basi coinvolte
+  var basiTutteSet = new Set();
+  nomi.forEach(function(n) { perForn[n].basiSet.forEach(function(b) { basiTutteSet.add(b); }); });
+  var basiTutte = Array.from(basiTutteSet).sort();
 
   var h = '';
 
@@ -514,80 +519,35 @@ function _afRenderConfronto(nomi, fornitori, ordini, basiMap) {
   });
   h += '</div></div>';
 
-  // Grafico a linee mensile
-  h += '<div class="card section"><div class="card-title">📈 Andamento acquisti mensili (litri)</div>';
-  h += '<div style="height:300px;position:relative"><canvas id="af-chart-linee"></canvas></div></div>';
-
-  // Prezzi medi basi comuni
-  h += '<div class="card section"><div class="card-title">💰 Confronto prezzi medi su basi comuni</div>';
-  if (basiComuni.length === 0) {
-    h += '<div style="padding:20px;text-align:center;color:#888;background:#fef8ed;border-radius:8px;border:1px dashed #D4A017">';
-    h += '⚠️ I fornitori selezionati non condividono nessuna base di carico comune.<br>';
-    h += '<div style="font-size:11px;margin-top:6px">Il confronto sui prezzi medi richiede basi comuni per essere significativo (il trasporto varia tra basi diverse e falserebbe il confronto).</div>';
-    h += '</div>';
-  } else {
-    h += '<div style="font-size:11px;color:#666;margin-bottom:10px">Basi comuni a tutti i fornitori selezionati: <strong>' + basiComuni.map(function(b){ return _esc(b); }).join(', ') + '</strong></div>';
-    basiComuni.forEach(function(base) {
-      h += '<div style="margin-bottom:14px">';
-      h += '<div style="font-size:12px;font-weight:600;color:#D4A017;margin-bottom:6px">📍 ' + _esc(base) + '</div>';
-      h += '<table><thead><tr><th>Prodotto</th>';
-      nomi.forEach(function(n) { h += '<th class="m">' + _esc(n) + '</th>'; });
-      h += '<th class="m">Miglior prezzo</th></tr></thead><tbody>';
-      prodotti.forEach(function(prod) {
-        var prezzi = [];
-        nomi.forEach(function(n) {
-          var k = prod + '||' + base;
-          var d = perForn[n].prezziPerBaseProd[k];
-          prezzi.push(d && d.litri > 0 ? d.valore / d.litri : null);
-        });
-        // Skip se nessuno dei fornitori ha dati
-        if (prezzi.every(function(p) { return p === null; })) return;
-        var prezziValidi = prezzi.filter(function(p) { return p !== null; });
-        var minP = Math.min.apply(null, prezziValidi);
-        var minIdx = prezzi.indexOf(minP);
-        h += '<tr><td><strong>' + _esc(prod) + '</strong></td>';
-        prezzi.forEach(function(p, i) {
-          if (p === null) {
-            h += '<td class="m" style="color:#ccc">—</td>';
-          } else {
-            var bg = i === minIdx && prezziValidi.length > 1 ? 'background:#EAF3DE;color:#27500A;font-weight:700' : '';
-            h += '<td class="m" style="' + bg + '">€ ' + p.toFixed(4) + '</td>';
-          }
-        });
-        if (prezziValidi.length > 1) {
-          var delta = Math.max.apply(null, prezziValidi) - minP;
-          h += '<td class="m"><strong style="color:#639922">' + _esc(nomi[minIdx]) + '</strong><br><span style="font-size:9px;color:#888">−€ ' + delta.toFixed(4) + '</span></td>';
-        } else {
-          h += '<td class="m" style="color:#888;font-size:10px">solo ' + _esc(nomi[minIdx]) + '</td>';
-        }
-        h += '</tr>';
-      });
-      h += '</tbody></table></div>';
-    });
-  }
+  // ── GRAFICO 1: Andamento mensile per fornitore (totali) ─────────
+  h += '<div class="card section"><div class="card-title">📈 Andamento acquisti mensili (litri totali per fornitore)</div>';
+  h += '<div style="height:300px;position:relative"><canvas id="af-chart-linee"></canvas></div>';
+  h += '<div style="font-size:10px;color:#888;margin-top:6px">Una linea per ogni fornitore selezionato. Mostra il volume totale mensile.</div>';
   h += '</div>';
 
-  // Basi non comuni (info)
-  if (basiNonComuni.length > 0) {
-    h += '<div class="card section"><div class="card-title">ℹ️ Basi non condivise (non confrontabili)</div>';
-    h += '<div style="font-size:11px;color:#666;margin-bottom:8px">Le seguenti basi sono servite da un solo fornitore e non rientrano nel confronto prezzi:</div>';
-    h += '<table><thead><tr><th>Base</th><th>Fornitore</th><th class="m">Litri</th></tr></thead><tbody>';
-    basiNonComuni.forEach(function(base) {
-      nomi.forEach(function(n) {
-        if (!perForn[n].basiSet.has(base)) return;
-        var tot = 0;
-        Object.keys(perForn[n].prezziPerBaseProd).forEach(function(k) {
-          var parts = k.split('||');
-          if (parts[1] === base) tot += perForn[n].prezziPerBaseProd[k].litri;
-        });
-        h += '<tr><td><strong>' + _esc(base) + '</strong></td><td>' + _esc(n) + '</td><td class="m">' + fmtL(tot) + '</td></tr>';
-      });
-    });
-    h += '</tbody></table></div>';
-  }
+  // ── GRAFICO 2: Per prodotto e fornitore (linee separate) ────────
+  // Una linea per ogni combinazione prodotto×fornitore
+  h += '<div class="card section"><div class="card-title">📊 Acquisti mensili per prodotto e fornitore</div>';
+  h += '<div style="height:340px;position:relative"><canvas id="af-chart-prodforn"></canvas></div>';
+  h += '<div style="font-size:10px;color:#888;margin-top:6px">Una linea per ogni combinazione fornitore×prodotto. Stile: continua = ' + _esc(nomi[0]) + (nomi.length>1?', tratteggiata = ' + _esc(nomi[1]):'') + (nomi.length>2?', punteggiata = ' + _esc(nomi[2]):'') + '. Colore: prodotto.</div>';
+  h += '</div>';
 
-  // Distribuzione per prodotto (tabella affiancata)
-  h += '<div class="card section"><div class="card-title">📊 Distribuzione per prodotto</div>';
+  // ── BASI DI CARICO PER FORNITORE (no prezzi) ────────────────────
+  h += '<div class="card section"><div class="card-title">📍 Basi di carico utilizzate</div>';
+  h += '<table><thead><tr><th>Base</th>';
+  nomi.forEach(function(n) { h += '<th class="m">' + _esc(n) + ' (L)</th>'; });
+  h += '<th class="m">Totale</th></tr></thead><tbody>';
+  basiTutte.forEach(function(base) {
+    var rigaTot = 0;
+    var celle = nomi.map(function(n) { var l = (perForn[n].perBase[base]||{}).litri || 0; rigaTot += l; return l; });
+    h += '<tr><td><strong>' + _esc(base) + '</strong></td>';
+    celle.forEach(function(l) { h += '<td class="m">' + (l > 0 ? fmtL(l) : '—') + '</td>'; });
+    h += '<td class="m"><strong>' + fmtL(rigaTot) + '</strong></td></tr>';
+  });
+  h += '</tbody></table></div>';
+
+  // ── DISTRIBUZIONE PER PRODOTTO (tabella affiancata) ─────────────
+  h += '<div class="card section"><div class="card-title">🎯 Distribuzione totale per prodotto</div>';
   h += '<table><thead><tr><th>Prodotto</th>';
   nomi.forEach(function(n) { h += '<th class="m">' + _esc(n) + ' (L)</th>'; });
   h += '<th class="m">Totale</th></tr></thead><tbody>';
@@ -611,13 +571,19 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
     isConfronto: nomi.length > 1
   };
 
+  // Estrai mesi e prodotti (comuni a entrambe le modalità)
+  var mesiSet = new Set();
+  var prodottiSet = new Set();
+  ordini.forEach(function(o) { mesiSet.add(_afMese(o.data)); prodottiSet.add(o.prodotto); });
+  var mesi = Array.from(mesiSet).sort();
+  var prodotti = Array.from(prodottiSet).sort();
+
+  datiChart.mesi = mesi;
+  datiChart.mesiLabel = mesi.map(function(m) { return _afFormattaMese(m); });
+  datiChart.prodotti = prodotti;
+
   if (nomi.length === 1) {
-    // Singolo: stacked bar mese×prodotto + donut prodotti
-    var mesiSet = new Set();
-    var prodottiSet = new Set();
-    ordini.forEach(function(o) { mesiSet.add(_afMese(o.data)); prodottiSet.add(o.prodotto); });
-    var mesi = Array.from(mesiSet).sort();
-    var prodotti = Array.from(prodottiSet).sort();
+    // Singolo: line chart multi-prodotto + donut prodotti
     var dataMeseProd = {}; // {mese: {prodotto: litri}}
     var dataProd = {};
     ordini.forEach(function(o) {
@@ -626,56 +592,85 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
       dataMeseProd[m][o.prodotto] = (dataMeseProd[m][o.prodotto] || 0) + Number(o.litri||0);
       dataProd[o.prodotto] = (dataProd[o.prodotto] || 0) + Number(o.litri||0);
     });
-    datiChart.mesi = mesi;
-    datiChart.prodotti = prodotti;
-    datiChart.mesiLabel = mesi.map(function(m) { return _afFormattaMese(m); });
     datiChart.dataMeseProd = dataMeseProd;
     datiChart.dataProd = dataProd;
   } else {
-    // Confronto: line chart litri per mese per fornitore
-    var mesiSet = new Set();
-    ordini.forEach(function(o) { mesiSet.add(_afMese(o.data)); });
-    var mesi = Array.from(mesiSet).sort();
-    var perForn = {};
-    nomi.forEach(function(n) { perForn[n] = {}; mesi.forEach(function(m) { perForn[n][m] = 0; }); });
+    // Confronto: 2 grafici
+    // 1) Litri totali per fornitore per mese (1 linea per fornitore)
+    var perFornMese = {};
+    nomi.forEach(function(n) { perFornMese[n] = {}; mesi.forEach(function(m) { perFornMese[n][m] = 0; }); });
+    // 2) Litri per (fornitore × prodotto) per mese (linee separate)
+    var perFornProdMese = {}; // {fornitore: {prodotto: {mese: litri}}}
+    nomi.forEach(function(n) {
+      perFornProdMese[n] = {};
+      prodotti.forEach(function(p) {
+        perFornProdMese[n][p] = {};
+        mesi.forEach(function(m) { perFornProdMese[n][p][m] = 0; });
+      });
+    });
     ordini.forEach(function(o) {
       var m = _afMese(o.data);
-      if (perForn[o.fornitore]) perForn[o.fornitore][m] += Number(o.litri||0);
+      if (perFornMese[o.fornitore]) perFornMese[o.fornitore][m] += Number(o.litri||0);
+      if (perFornProdMese[o.fornitore] && perFornProdMese[o.fornitore][o.prodotto]) {
+        perFornProdMese[o.fornitore][o.prodotto][m] += Number(o.litri||0);
+      }
     });
-    datiChart.mesi = mesi;
-    datiChart.mesiLabel = mesi.map(function(m) { return _afFormattaMese(m); });
-    datiChart.perForn = perForn;
+    datiChart.perFornMese = perFornMese;
+    datiChart.perFornProdMese = perFornProdMese;
     datiChart.colori = nomi.map(function(n, i) { return _afColoreFornitore(n, i, fornitori); });
   }
 
+  // Colori per prodotto (coerenti con il resto del progetto)
   var coloriProdotti = { 'Gasolio Autotrazione':'#BA7517', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC', 'AdBlue':'#0088CC' };
 
   return 'var D = ' + JSON.stringify(datiChart) + ';' +
     'var CP = ' + JSON.stringify(coloriProdotti) + ';' +
+    // Stili dash per distinguere fornitori nel grafico prodotto×fornitore
+    'var DASH = [[], [8,4], [2,3], [10,4,2,4], [6,2,2,2]];' +
     'window.addEventListener("load", function() {' +
     '  if (typeof Chart === "undefined") return;' +
     '  if (D.isConfronto) {' +
+    '    // GRAFICO 1 — totali per fornitore (1 linea per fornitore)' +
     '    var ctx = document.getElementById("af-chart-linee");' +
     '    if (ctx) {' +
     '      var datasets = D.nomi.map(function(n, i) {' +
-    '        return { label: n, data: D.mesi.map(function(m){ return D.perForn[n][m] || 0; }), borderColor: D.colori[i], backgroundColor: D.colori[i]+"33", borderWidth: 2.5, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, fill: false };' +
+    '        return { label: n, data: D.mesi.map(function(m){ return D.perFornMese[n][m] || 0; }), borderColor: D.colori[i], backgroundColor: D.colori[i]+"22", borderWidth: 3, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, fill: false };' +
     '      });' +
     '      new Chart(ctx, { type: "line", data: { labels: D.mesiLabel, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 11 } } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
     '    }' +
+    '    // GRAFICO 2 — linee separate per (fornitore × prodotto)' +
+    '    var ctx2 = document.getElementById("af-chart-prodforn");' +
+    '    if (ctx2) {' +
+    '      var datasets2 = [];' +
+    '      D.nomi.forEach(function(n, fi) {' +
+    '        D.prodotti.forEach(function(p) {' +
+    '          var data = D.mesi.map(function(m) { return (D.perFornProdMese[n] && D.perFornProdMese[n][p] && D.perFornProdMese[n][p][m]) || 0; });' +
+    '          var hasData = data.some(function(v) { return v > 0; });' +
+    '          if (!hasData) return;' +
+    '          datasets2.push({ label: n + " · " + p, data: data, borderColor: CP[p] || "#888", backgroundColor: (CP[p] || "#888") + "22", borderWidth: 2.5, borderDash: DASH[fi % DASH.length], tension: 0.3, pointRadius: 3, pointHoverRadius: 5, fill: false });' +
+    '        });' +
+    '      });' +
+    '      new Chart(ctx2, { type: "line", data: { labels: D.mesiLabel, datasets: datasets2 }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 10 }, boxWidth: 24 } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
+    '    }' +
     '  } else {' +
+    '    // SINGOLO — line chart multi-prodotto (NON stacked)' +
     '    var ctx1 = document.getElementById("af-chart-mese-prod");' +
     '    if (ctx1) {' +
     '      var datasets = D.prodotti.map(function(p) {' +
-    '        return { label: p, data: D.mesi.map(function(m) { return (D.dataMeseProd[m] && D.dataMeseProd[m][p]) || 0; }), backgroundColor: CP[p] || "#888", borderWidth: 0 };' +
-    '      });' +
-    '      new Chart(ctx1, { type: "bar", data: { labels: D.mesiLabel, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 11 } } } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
+    '        var data = D.mesi.map(function(m) { return (D.dataMeseProd[m] && D.dataMeseProd[m][p]) || 0; });' +
+    '        var hasData = data.some(function(v) { return v > 0; });' +
+    '        if (!hasData) return null;' +
+    '        return { label: p, data: data, borderColor: CP[p] || "#888", backgroundColor: (CP[p] || "#888") + "22", borderWidth: 3, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, fill: false };' +
+    '      }).filter(function(d){return d!==null;});' +
+    '      new Chart(ctx1, { type: "line", data: { labels: D.mesiLabel, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 11 } } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
     '    }' +
-    '    var ctx2 = document.getElementById("af-chart-prodotti");' +
-    '    if (ctx2) {' +
+    '    // Donut prodotti (rimane invariato)' +
+    '    var ctx3 = document.getElementById("af-chart-prodotti");' +
+    '    if (ctx3) {' +
     '      var labels = Object.keys(D.dataProd);' +
     '      var data = labels.map(function(p) { return D.dataProd[p]; });' +
     '      var colors = labels.map(function(p) { return CP[p] || "#888"; });' +
-    '      new Chart(ctx2, { type: "doughnut", data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { font: { size: 10 }, padding: 8 } } } } });' +
+    '      new Chart(ctx3, { type: "doughnut", data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { font: { size: 10 }, padding: 8 } } } } });' +
     '    }' +
     '  }' +
     '});';
