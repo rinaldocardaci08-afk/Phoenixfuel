@@ -1882,6 +1882,73 @@ function stampaListinoFasce() {
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Modale standalone per generare rapidamente il listino fasce PDF
+// dal bottone "📊 Genera listino PDF" senza dover compilare la card
+// "Generatore listino prezzi clienti" sotto.
+// ═══════════════════════════════════════════════════════════════════
+function apriListinoFascePDF() {
+  var prodottiDisp = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
+  var h = '<div style="font-size:17px;font-weight:600;margin-bottom:6px">📊 Genera listino fasce pagamento</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Inserisci costo base + trasporto + margini per le 4 fasce. Il PDF si apre in una nuova finestra.</div>';
+  h += '<div class="form-grid">';
+  h += '<div class="form-group"><label>Prodotto</label><select id="lfp-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">';
+  prodottiDisp.forEach(function(p) { h += '<option value="' + p + '">' + p + '</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>Costo base €/L</label><input type="number" id="lfp-costo" step="0.0001" placeholder="1.6570" style="font-family:var(--font-mono);font-size:16px" autofocus /></div>';
+  h += '<div class="form-group"><label>IVA %</label><select id="lfp-iva"><option value="22">22%</option><option value="10">10%</option></select></div>';
+  h += '<div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lfp-trasp-consumo" step="0.0001" value="0.0190" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lfp-trasp-rete" step="0.0001" value="0.0140" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"></div>';
+  h += '<div class="form-group"><label>Marg. Dilazionato</label><input type="number" id="lfp-marg-dil" step="0.001" value="0.060" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"><label>Marg. 30gg</label><input type="number" id="lfp-marg-30" step="0.001" value="0.040" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"><label>Marg. Contanti</label><input type="number" id="lfp-marg-cont" step="0.001" value="0.020" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"><label>Marg. Colonnine</label><input type="number" id="lfp-marg-col" step="0.001" value="0.015" style="font-family:var(--font-mono)" /></div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:8px;margin-top:16px">';
+  h += '<button class="btn-primary" style="flex:1;background:#639922" onclick="_lfpGeneraPDF()">📄 Genera PDF</button>';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:10px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+  apriModal(h);
+}
+
+function _lfpGeneraPDF() {
+  var prodotto = document.getElementById('lfp-prodotto').value;
+  var costo = parseFloat(document.getElementById('lfp-costo').value);
+  if (!costo || costo <= 0) { toast('Inserisci il costo base €/L'); return; }
+  var iva = parseInt(document.getElementById('lfp-iva').value) || 22;
+  var trConsumo = parseFloat(document.getElementById('lfp-trasp-consumo').value) || 0.019;
+  var trRete = parseFloat(document.getElementById('lfp-trasp-rete').value) || 0.014;
+  var mDil = parseFloat(document.getElementById('lfp-marg-dil').value) || 0;
+  var m30 = parseFloat(document.getElementById('lfp-marg-30').value) || 0;
+  var mCont = parseFloat(document.getElementById('lfp-marg-cont').value) || 0;
+  var mCol = parseFloat(document.getElementById('lfp-marg-col').value) || 0;
+
+  function riga(trasporto) {
+    var base = costo + trasporto;
+    var fattIva = 1 + iva / 100;
+    return {
+      base: base, trasporto: trasporto,
+      fasce: [
+        { nome: 'Dilazionato', marg: mDil, netto: base + mDil, iva: (base + mDil) * fattIva },
+        { nome: '30gg',        marg: m30,  netto: base + m30,  iva: (base + m30)  * fattIva },
+        { nome: 'Contanti',    marg: mCont, netto: base + mCont, iva: (base + mCont) * fattIva },
+        { nome: 'Colonnine',   marg: mCol,  netto: base + mCol,  iva: (base + mCol)  * fattIva }
+      ]
+    };
+  }
+
+  // Imposta _fasceData per riusare stampaListinoFasce (che legge da _fasceData)
+  _fasceData = {
+    prodotto: prodotto, costo: costo, iva: iva,
+    consumo: riga(trConsumo),
+    rete: riga(trRete)
+  };
+
+  chiudiModalePermessi();
+  stampaListinoFasce();
+}
+
 async function generaOffertaCliente() {
   var w = _apriReport("Conferma Ordine"); if (!w) return;
   var clienteId = document.getElementById('lp-cliente-singolo').value;

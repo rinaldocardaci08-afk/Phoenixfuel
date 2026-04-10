@@ -394,7 +394,7 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>Listino prezzi</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoPDF()">📊 Genera listino PDF</button>
+              <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
               <button onclick="scorriGiornoPrezzi(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
               <input type="date" id="filtro-data-prezzi" style="font-size:16px;padding:9px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;min-width:170px;text-align:center" onchange="_renderLabelPrezzi();caricaPrezzi()" />
