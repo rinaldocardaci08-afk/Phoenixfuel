@@ -627,8 +627,9 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
     'var CP = ' + JSON.stringify(coloriProdotti) + ';' +
     // Stili dash per distinguere fornitori nel grafico prodotto×fornitore
     'var DASH = [[], [8,4], [2,3], [10,4,2,4], [6,2,2,2]];' +
-    'window.addEventListener("load", function() {' +
-    '  if (typeof Chart === "undefined") return;' +
+    // Polling: aspetta che Chart.js sia caricato (lo script è iniettato via document.write
+    // quindi window.load potrebbe già essere stato emesso e addEventListener non scatterebbe)
+    'function _afRender() {' +
     '  if (D.isConfronto) {' +
     '    // GRAFICO 1 — totali per fornitore (1 linea per fornitore)' +
     '    var ctx = document.getElementById("af-chart-linee");' +
@@ -664,7 +665,7 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
     '      }).filter(function(d){return d!==null;});' +
     '      new Chart(ctx1, { type: "line", data: { labels: D.mesiLabel, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 11 } } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
     '    }' +
-    '    // Donut prodotti (rimane invariato)' +
+    '    // Donut prodotti' +
     '    var ctx3 = document.getElementById("af-chart-prodotti");' +
     '    if (ctx3) {' +
     '      var labels = Object.keys(D.dataProd);' +
@@ -673,7 +674,15 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
     '      new Chart(ctx3, { type: "doughnut", data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { font: { size: 10 }, padding: 8 } } } } });' +
     '    }' +
     '  }' +
-    '});';
+    '}' +
+    // Polling: prova ogni 100ms finché Chart è disponibile, max 50 tentativi (5 secondi)
+    'var _afTries = 0;' +
+    'function _afWait() {' +
+    '  if (typeof Chart !== "undefined") { try { _afRender(); } catch(e) { console.error("Errore rendering grafici:", e); } return; }' +
+    '  if (++_afTries > 50) { console.warn("Chart.js non caricato dopo 5 secondi"); return; }' +
+    '  setTimeout(_afWait, 100);' +
+    '}' +
+    '_afWait();';
 }
 
 // Nota: _esc è già definito in pf-fatture.js, lo riuso globalmente.
