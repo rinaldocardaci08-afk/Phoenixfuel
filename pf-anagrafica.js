@@ -44,8 +44,10 @@ async function caricaConsegne() {
       let azioniHtml = '';
       if (r.tipo_ordine === 'entrata_deposito' && !r.caricato_deposito && r.stato !== 'annullato') {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">📦 Carica</button> ';
-      } else if (r.stato !== 'confermato') {
-        azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
+      } else if (r.stato === 'in attesa' || r.stato === 'programmato') {
+        azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" title="Conferma ordine (scarica cisterna)" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
+      } else if (r.stato === 'consegnato') {
+        azioniHtml += '<button class="btn-edit" style="color:#D85A30" title="Annulla consegna (rimuove DAS firmato)" onclick="annullaConsegnaOrdine(\'' + r.id + '\')">↩️</button> ';
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
@@ -66,15 +68,67 @@ async function confermaOrdineConsegna(ordineId) {
   if (!ordine) { toast('Ordine non trovato'); return; }
   if (!confirm('Confermare la consegna di ' + fmtL(ordine.litri) + ' di ' + ordine.prodotto + ' a ' + ordine.cliente + '?')) return;
 
+  // Se l'ordine ha già il DAS firmato allegato → va direttamente a 'consegnato' (fatturabile)
+  // Altrimenti → 'confermato' (scaricato dalla cisterna ma in attesa del DAS per la fatturazione)
+  var nuovoStato = ordine.das_firmato_url ? 'consegnato' : 'confermato';
+
   if (ordine.cisterna_id) {
-    // Già scaricato dal deposito, conferma diretto
-    await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+    // Già scaricato dal deposito, solo cambio stato
+    await sb.from('ordini').update({ stato: nuovoStato }).eq('id', ordineId);
   } else if (ordine.fornitore && ordine.fornitore.toLowerCase().includes('phoenix')) {
+    // Deve ancora scaricare la cisterna → confermaUscitaDeposito fa tutto
     await confermaUscitaDeposito(ordineId, true);
+    // Se dopo lo scarico c'è già il DAS firmato, alziamo lo stato a consegnato
+    if (nuovoStato === 'consegnato') {
+      await sb.from('ordini').update({ stato: 'consegnato' }).eq('id', ordineId);
+    }
   } else {
-    await sb.from('ordini').update({ stato:'confermato' }).eq('id', ordineId);
+    // Ordine con fornitore esterno (triangolazione), solo cambio stato
+    await sb.from('ordini').update({ stato: nuovoStato }).eq('id', ordineId);
   }
-  toast('✅ Ordine confermato!');
+  toast(nuovoStato === 'consegnato' ? '✅ Ordine consegnato (DAS presente)' : '✅ Ordine confermato');
+  caricaConsegne();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Annulla consegna: rimuove DAS e Cartellino dallo Storage e dal DB,
+// riporta l'ordine a stato 'confermato' (non più fatturabile fino a
+// quando non viene ricaricato un nuovo DAS firmato).
+// ══════════════════════════════════════════════════════════════════
+async function annullaConsegnaOrdine(ordineId) {
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+  if (ordine.stato !== 'consegnato') { toast('L\'ordine non è in stato consegnato'); return; }
+
+  if (!confirm('Annullare la consegna?\n\nVerranno rimossi:\n• DAS firmato\n• Cartellino (se presente)\n\nL\'ordine tornerà in stato \'confermato\' e non sarà più fatturabile finché non carichi un nuovo DAS firmato.\n\nContinuare?')) return;
+
+  // Rimuovi file DAS firmato dallo Storage (se presente)
+  if (ordine.das_firmato_url) {
+    try {
+      var m = ordine.das_firmato_url.match(/\/Das\/(.+)$/);
+      if (m && m[1]) await sb.storage.from('Das').remove([decodeURIComponent(m[1])]);
+    } catch(e) { console.warn('Errore rimozione file DAS:', e); }
+  }
+  // Rimuovi file Cartellino dallo Storage (se presente)
+  if (ordine.cartellino_url) {
+    try {
+      var m2 = ordine.cartellino_url.match(/\/Das\/(.+)$/);
+      if (m2 && m2[1]) await sb.storage.from('Das').remove([decodeURIComponent(m2[1])]);
+    } catch(e) { console.warn('Errore rimozione file Cartellino:', e); }
+  }
+
+  // Azzera colonne DB e riporta a stato 'confermato'
+  var { error } = await sb.from('ordini').update({
+    stato: 'confermato',
+    das_firmato_url: null,
+    das_firmato_nome: null,
+    cartellino_url: null,
+    cartellino_nome: null
+  }).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  if (typeof _auditLog === 'function') _auditLog('annulla_consegna', 'ordini', 'Annullata consegna ordine ' + ordineId + ' — ' + ordine.cliente);
+  toast('↩️ Consegna annullata. Ricarica il DAS firmato per completare nuovamente.');
   caricaConsegne();
 }
 
