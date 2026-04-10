@@ -1760,6 +1760,113 @@ async function stampaListinoPrezzi() {
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// SIMULATORE FASCE PAGAMENTO — Consumo + Rete × 4 margini
+// Calcola prezzi finali (netto + IVA) per 4 fasce di pagamento
+// (Dilazionato / 30gg / Contanti / Colonnine) su 2 profili trasporto
+// (Consumo vs Rete). Non tocca `generaListinoPrezzi` né `_listinoData`.
+// ═══════════════════════════════════════════════════════════════════
+var _fasceData = null;
+
+function _calcolaFasce() {
+  var prodotto = document.getElementById('lp-prodotto').value;
+  var costo = parseFloat(document.getElementById('lp-costo').value);
+  if (!costo || costo <= 0) { toast('Inserisci il costo base €/L nella card sopra'); return null; }
+  var trConsumo = parseFloat(document.getElementById('lp-trasp-consumo').value) || 0.019;
+  var trRete = parseFloat(document.getElementById('lp-trasp-rete').value) || 0.014;
+  var iva = parseInt(document.getElementById('lp-iva').value) || 22;
+  var mDil = parseFloat(document.getElementById('lf-marg-dil').value) || 0;
+  var m30 = parseFloat(document.getElementById('lf-marg-30').value) || 0;
+  var mCont = parseFloat(document.getElementById('lf-marg-cont').value) || 0;
+  var mCol = parseFloat(document.getElementById('lf-marg-col').value) || 0;
+
+  function riga(trasporto) {
+    var base = costo + trasporto;
+    var fattIva = 1 + iva / 100;
+    return {
+      base: base,
+      trasporto: trasporto,
+      fasce: [
+        { nome: 'Dilazionato', marg: mDil, netto: base + mDil, iva: (base + mDil) * fattIva },
+        { nome: '30gg',        marg: m30,  netto: base + m30,  iva: (base + m30)  * fattIva },
+        { nome: 'Contanti',    marg: mCont, netto: base + mCont, iva: (base + mCont) * fattIva },
+        { nome: 'Colonnine',   marg: mCol,  netto: base + mCol,  iva: (base + mCol)  * fattIva }
+      ]
+    };
+  }
+
+  return {
+    prodotto: prodotto,
+    costo: costo,
+    iva: iva,
+    consumo: riga(trConsumo),
+    rete: riga(trRete)
+  };
+}
+
+function generaListinoFasce() {
+  var d = _calcolaFasce();
+  if (!d) return;
+  _fasceData = d;
+
+  function tabellaHtml(titolo, blocco, colorBg) {
+    var h = '<div style="flex:1;min-width:340px">';
+    h += '<div style="background:'+colorBg+';color:#fff;padding:8px 14px;border-radius:8px 8px 0 0;font-weight:600;font-size:14px">' + esc(titolo) + '</div>';
+    h += '<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:12px">';
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Costo base + trasporto: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + blocco.base.toFixed(4) + '</strong> (trasporto € ' + blocco.trasporto.toFixed(4) + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    h += '<thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left;border-bottom:0.5px solid var(--border)">Fascia</th><th style="padding:6px 8px;text-align:right;border-bottom:0.5px solid var(--border)">Marg €/L</th><th style="padding:6px 8px;text-align:right;border-bottom:0.5px solid var(--border)">Prezzo no IVA</th><th style="padding:6px 8px;text-align:right;border-bottom:0.5px solid var(--border)">Prezzo IVA incl.</th></tr></thead>';
+    h += '<tbody>';
+    blocco.fasce.forEach(function(f, i) {
+      var bg = i % 2 === 0 ? 'transparent' : 'var(--bg)';
+      h += '<tr style="background:'+bg+'"><td style="padding:7px 8px;font-weight:500">' + esc(f.nome) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">€ ' + f.marg.toFixed(4) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:600">€ ' + f.netto.toFixed(4) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:'+colorBg+'">€ ' + f.iva.toFixed(4) + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+    return h;
+  }
+
+  var wrap = document.getElementById('lf-risultato');
+  var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">' + esc(d.prodotto) + ' — Costo base: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + d.costo.toFixed(4) + '</strong> — IVA ' + d.iva + '%</div>';
+  html += '<div style="display:flex;gap:16px;flex-wrap:wrap">';
+  html += tabellaHtml('Clienti Consumo', d.consumo, '#378ADD');
+  html += tabellaHtml('Clienti Rete', d.rete, '#BA7517');
+  html += '</div>';
+  wrap.innerHTML = html;
+  toast('✓ Fasce calcolate');
+}
+
+function stampaListinoFasce() {
+  if (!_fasceData) { toast('Prima calcola le fasce'); return; }
+  var w = _apriReport("Listino fasce pagamento"); if (!w) return;
+  var d = _fasceData;
+  var dataOggi = new Date().toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+
+  function tabPdf(titolo, blocco, colorBg) {
+    var h = '<div style="width:48%"><div style="background:'+colorBg+';color:#fff;padding:8px 12px;font-weight:bold;font-size:13px;border-radius:6px 6px 0 0">' + titolo + '</div>';
+    h += '<div style="border:1px solid #ccc;border-top:none;padding:10px;border-radius:0 0 6px 6px">';
+    h += '<div style="font-size:10px;color:#666;margin-bottom:6px">Costo base + trasporto: <strong>€ ' + blocco.base.toFixed(4) + '</strong> (trasporto € ' + blocco.trasporto.toFixed(4) + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+    h += '<thead><tr style="background:#f5f5f5"><th style="padding:6px;text-align:left;border-bottom:1px solid #ccc">Fascia</th><th style="padding:6px;text-align:right;border-bottom:1px solid #ccc">Margine</th><th style="padding:6px;text-align:right;border-bottom:1px solid #ccc">Netto</th><th style="padding:6px;text-align:right;border-bottom:1px solid #ccc">IVA incl.</th></tr></thead>';
+    h += '<tbody>';
+    blocco.fasce.forEach(function(f, i) {
+      h += '<tr' + (i%2 ? ' style="background:#fafafa"' : '') + '><td style="padding:7px 6px;font-weight:500">' + f.nome + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace">€ ' + f.marg.toFixed(4) + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace">€ ' + f.netto.toFixed(4) + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace;font-weight:bold;color:'+colorBg+'">€ ' + f.iva.toFixed(4) + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+    return h;
+  }
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Listino fasce — ' + d.prodotto + '</title>';
+  html += '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:14mm;color:#1a1a18}@media print{.no-print{display:none!important}@page{size:landscape;margin:10mm}}</style></head><body>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #D4A017;padding-bottom:10px;margin-bottom:16px"><div><div style="font-size:22px;font-weight:bold;color:#D4A017">LISTINO FASCE PAGAMENTO</div><div style="font-size:14px;color:#333;margin-top:4px">' + d.prodotto + ' — ' + dataOggi + '</div></div><div style="text-align:right"><div style="font-size:16px;font-weight:bold">PHOENIX FUEL SRL</div><div style="font-size:10px;color:#666">Costo base: € ' + d.costo.toFixed(4) + ' — IVA ' + d.iva + '%</div></div></div>';
+  html += '<div style="display:flex;gap:16px;margin-bottom:16px">';
+  html += tabPdf('CLIENTI CONSUMO', d.consumo, '#378ADD');
+  html += tabPdf('CLIENTI RETE', d.rete, '#BA7517');
+  html += '</div>';
+  html += '<div style="font-size:9px;color:#888;margin-top:20px;border-top:1px solid #eee;padding-top:8px">Listino indicativo — prezzi soggetti a variazione senza preavviso. Riferimento interno Phoenix Fuel Srl.</div>';
+  html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
 async function generaOffertaCliente() {
   var w = _apriReport("Conferma Ordine"); if (!w) return;
   var clienteId = document.getElementById('lp-cliente-singolo').value;
