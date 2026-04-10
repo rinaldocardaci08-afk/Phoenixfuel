@@ -532,16 +532,35 @@ async function stampaRettifiche(tipo) {
 
 // ── AUTOCONSUMO ──────────────────────────────────────────────────
 async function caricaAutoconsumo() {
-  // Cisterna autoconsumo
-  const { data: cis } = await sb.from('cisterne').select('*').eq('sede','autoconsumo').single();
-  if (cis) {
-    const pct = Number(cis.capacita_max) > 0 ? Math.round((Number(cis.livello_attuale) / Number(cis.capacita_max)) * 100) : 0;
-    document.getElementById('ac-giacenza').textContent = fmtL(cis.livello_attuale);
-    const el = document.getElementById('ac-cisterna-grafica');
-    if (el) {
-      el.innerHTML = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:#BA7517"></div><div><div class="dep-product-title">' + esc(cis.nome) + '</div><div class="dep-product-sub">Gasolio Autotrazione · cap. ' + fmtL(cis.capacita_max) + '</div></div><div class="dep-product-total">' + fmtL(cis.livello_attuale) + '</div></div><div class="dep-cisterne-grid"><div class="dep-cisterna">' + cisternasvg(pct, '#BA7517') + '<div class="dep-cisterna-litri">' + _sep(Number(cis.livello_attuale).toLocaleString('it-IT')) + ' L</div><div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(Number(cis.capacita_max).toLocaleString('it-IT')) + ' L</div></div></div></div>';
+  // Carica TUTTE le cisterne autoconsumo (può esserci una per prodotto)
+  const { data: cisterneAC } = await sb.from('cisterne').select('*').eq('sede','autoconsumo').order('prodotto');
+  window._cisterneAutoconsumo = {};
+  (cisterneAC||[]).forEach(function(c) { window._cisterneAutoconsumo[c.prodotto] = c; });
+
+  // Retrocompatibilità: window._cisternaAutoconsumo = prima cisterna Gasolio Autotrazione (o la prima in assoluto)
+  var cisPrimary = window._cisterneAutoconsumo['Gasolio Autotrazione'] || (cisterneAC && cisterneAC[0]) || null;
+  window._cisternaAutoconsumo = cisPrimary;
+
+  // KPI giacenza totale (somma di tutte le cisterne autoconsumo)
+  var totGiacAC = (cisterneAC||[]).reduce(function(s,c){ return s + Number(c.livello_attuale||0); }, 0);
+  var elGiac = document.getElementById('ac-giacenza');
+  if (elGiac) elGiac.textContent = fmtL(totGiacAC);
+
+  // Grafica cisterne: renderizza tutte le cisterne autoconsumo (una card per ciascuna)
+  const el = document.getElementById('ac-cisterna-grafica');
+  if (el) {
+    if (cisterneAC && cisterneAC.length) {
+      var coloriAC = { 'Gasolio Autotrazione':'#BA7517', 'AdBlue':'#0088CC', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC' };
+      var htmlAC = '';
+      cisterneAC.forEach(function(c) {
+        var pct = Number(c.capacita_max) > 0 ? Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100) : 0;
+        var col = coloriAC[c.prodotto] || '#BA7517';
+        htmlAC += '<div class="card" style="margin-bottom:10px"><div class="dep-product-header"><div class="dep-product-dot" style="background:'+col+'"></div><div><div class="dep-product-title">' + esc(c.nome) + '</div><div class="dep-product-sub">' + esc(c.prodotto) + ' · cap. ' + fmtL(c.capacita_max) + '</div></div><div class="dep-product-total">' + fmtL(c.livello_attuale) + '</div></div><div class="dep-cisterne-grid"><div class="dep-cisterna">' + cisternasvg(pct, col) + '<div class="dep-cisterna-litri">' + _sep(Number(c.livello_attuale).toLocaleString('it-IT')) + ' L</div><div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(Number(c.capacita_max).toLocaleString('it-IT')) + ' L</div></div></div></div>';
+      });
+      el.innerHTML = htmlAC;
+    } else {
+      el.innerHTML = '<div class="card"><div class="card-title">Nessuna cisterna autoconsumo configurata</div></div>';
     }
-    window._cisternaAutoconsumo = cis;
   }
 
   // Prelievi mese
@@ -549,6 +568,14 @@ async function caricaAutoconsumo() {
   const { data: prelMese } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', inizioMese).lte('data', oggiISO);
   const totMese = (prelMese||[]).reduce((s,p) => s + Number(p.litri), 0);
   document.getElementById('ac-prelievi-mese').textContent = fmtL(totMese);
+
+  // Popola dropdown prodotto nel form prelievi (se presente)
+  var selProd = document.getElementById('ac-prodotto');
+  if (selProd && cisterneAC) {
+    var curP = selProd.value;
+    selProd.innerHTML = cisterneAC.map(function(c){ return '<option value="'+esc(c.prodotto)+'">'+esc(c.prodotto)+'</option>'; }).join('');
+    if (curP && cisterneAC.find(function(c){return c.prodotto===curP;})) selProd.value = curP;
+  }
 
   // Ordini autoconsumo confermati da ricevere
   await caricaOrdiniAutoconsumo();
@@ -605,16 +632,28 @@ async function caricaOrdiniAutoconsumo() {
 }
 
 async function riceviAutoconsumo(ordineId, litri) {
-  const cis = window._cisternaAutoconsumo;
-  if (!cis) { toast('Cisterna autoconsumo non trovata'); return; }
-  if (!confirm('Confermi la ricezione di ' + fmtL(litri) + ' L nella cisterna autoconsumo?')) return;
+  // Leggi l'ordine per conoscere il prodotto
+  const { data: ord } = await sb.from('ordini').select('prodotto,litri').eq('id', ordineId).single();
+  if (!ord) { toast('Ordine non trovato'); return; }
 
+  // Trova la cisterna autoconsumo del prodotto giusto
+  const mappa = window._cisterneAutoconsumo || {};
+  const cis = mappa[ord.prodotto];
+  if (!cis) { toast('Cisterna autoconsumo per ' + ord.prodotto + ' non trovata. Crearla prima dal pannello cisterne.'); return; }
+  if (!confirm('Confermi la ricezione di ' + fmtL(litri) + ' L di ' + ord.prodotto + ' nella cisterna "' + cis.nome + '"?')) return;
+
+  // Controllo capacità massima
   const nuovoLivello = Number(cis.livello_attuale) + Number(litri);
+  if (nuovoLivello > Number(cis.capacita_max)) {
+    toast('Capacità cisterna insufficiente! Max: ' + fmtL(cis.capacita_max) + ', attuale: ' + fmtL(cis.livello_attuale));
+    return;
+  }
+
   const { error: errCis } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
   if (errCis) { toast('Errore cisterna: ' + errCis.message); return; }
 
   await sb.from('ordini').update({ caricato_deposito: true }).eq('id', ordineId);
-  toast('✅ ' + fmtL(litri) + ' L ricevuti nella cisterna autoconsumo!');
+  toast('✅ ' + fmtL(litri) + ' L di ' + ord.prodotto + ' ricevuti in "' + cis.nome + '"');
   caricaAutoconsumo();
 }
 
@@ -666,21 +705,27 @@ async function salvaPrelievoAutoconsumo() {
   const mezzoTarga = document.getElementById('ac-mezzo').options[document.getElementById('ac-mezzo').selectedIndex]?.dataset?.targa || '';
   const litri = parseFloat(document.getElementById('ac-litri').value);
   const note = document.getElementById('ac-note').value;
+  // Prodotto selezionato (dropdown ac-prodotto); fallback 'Gasolio Autotrazione' per retrocompatibilità
+  var selProd = document.getElementById('ac-prodotto');
+  var prodotto = (selProd && selProd.value) ? selProd.value : 'Gasolio Autotrazione';
+
   if (!data || !mezzoId || !litri || litri <= 0) { toast('Compila data, camion e litri'); return; }
 
-  const cis = window._cisternaAutoconsumo;
-  if (!cis) { toast('Cisterna autoconsumo non trovata'); return; }
-  if (Number(cis.livello_attuale) < litri) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale)); return; }
+  // Trova la cisterna autoconsumo del prodotto selezionato
+  const mappa = window._cisterneAutoconsumo || {};
+  const cis = mappa[prodotto];
+  if (!cis) { toast('Cisterna autoconsumo ' + prodotto + ' non trovata'); return; }
+  if (Number(cis.livello_attuale) < litri) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale) + ' L di ' + prodotto); return; }
 
-  // Registra prelievo
-  const r1 = await _sbWrite('prelievi_autoconsumo', 'insert', [{ data, mezzo_id: mezzoId, mezzo_targa: mezzoTarga, litri, note }]);
+  // Registra prelievo (con prodotto)
+  const r1 = await _sbWrite('prelievi_autoconsumo', 'insert', [{ data, mezzo_id: mezzoId, mezzo_targa: mezzoTarga, litri, note, prodotto }]);
   if (r1.error) { toast('Errore: ' + r1.error.message); return; }
 
   // Scala dalla cisterna
   const nuovoLivello = Number(cis.livello_attuale) - litri;
   await _sbWrite('cisterne', 'update', { livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }, { id: cis.id });
 
-  toast(r1._offline ? '⚡ Prelievo ' + fmtL(litri) + ' L salvato offline' : '⛽ Prelievo di ' + fmtL(litri) + ' L registrato per ' + mezzoTarga);
+  toast(r1._offline ? '⚡ Prelievo ' + fmtL(litri) + ' L salvato offline' : '⛽ Prelievo di ' + fmtL(litri) + ' L ' + prodotto + ' registrato per ' + mezzoTarga);
   document.getElementById('ac-litri').value = '';
   document.getElementById('ac-note').value = '';
   caricaAutoconsumo();
@@ -730,8 +775,10 @@ async function eliminaPrelievo(id) {
   if (!prel) return;
   const { error } = await sb.from('prelievi_autoconsumo').delete().eq('id', id);
   if (error) { toast('Errore: ' + error.message); return; }
-  // Restituisci litri alla cisterna
-  const cis = window._cisternaAutoconsumo;
+  // Restituisci litri alla cisterna del prodotto corretto (fallback Gasolio Autotrazione per prelievi storici senza campo prodotto)
+  const mappa = window._cisterneAutoconsumo || {};
+  const prodPrel = prel.prodotto || 'Gasolio Autotrazione';
+  const cis = mappa[prodPrel] || window._cisternaAutoconsumo;
   if (cis) {
     const nuovoLivello = Number(cis.livello_attuale) + Number(prel.litri);
     await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
