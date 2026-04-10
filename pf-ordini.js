@@ -235,7 +235,16 @@ async function caricaPrezzi() {
 
       var forColor = _forColori[r.fornitore] || '';
       var forStyle = forColor ? 'font-weight:700;padding:4px 8px;border-radius:4px;background:' + forColor : 'font-weight:700';
-      html += '<tr><td>' + fmtD(r.data) + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
+      // Delta vs best del giorno (include trasporto perché prezzoNoIva lo somma)
+      var deltaHtml = '';
+      var bestRow = best[r.data+'_'+r.prodotto];
+      if (bestRow && !isBest) {
+        var delta = prezzoNoIva(r) - prezzoNoIva(bestRow);
+        if (delta > 0.00005) {
+          deltaHtml = ' <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:#FDECEA;color:#C0392B;font-family:var(--font-mono);font-weight:600" title="Differenza rispetto al prezzo più basso del giorno (trasporto incluso)">Δ +' + delta.toFixed(4) + '</span>';
+        }
+      }
+      html += '<tr><td>' + fmtD(r.data) + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + deltaHtml + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
     });
     tbody.innerHTML = html;
   });
