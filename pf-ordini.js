@@ -1190,7 +1190,7 @@ async function stampaListinoPrezziGiorno() {
         }
         var prodInfo = cacheProdotti.find(function(p) { return p.nome === prod; });
         var ovr = (typeof _depositoOverrides !== 'undefined' ? _depositoOverrides[prod] : null) || {};
-        prezzi.push({ fornitore:'PhoenixFuel (Deposito)', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
+        prezzi.push({ fornitore:'PhoenixFuel (Deposito)', basi_carico:{nome:baseDeposito.nome}, prodotto:prod, costo_litro:cmp, trasporto_litro:ovr.trasporto||0, margine:ovr.margine||0, iva:prodInfo?prodInfo.iva_default:22, _giacenza:Math.round(d.litri), _isDeposito:true });
       }
     }
   }
@@ -1244,9 +1244,9 @@ async function stampaListinoPrezziGiorno() {
     var lista = perProdotto[prodotto];
     var col = coloriProdotto[prodotto] || '#888';
 
-    // Ordina per prezzo (miglior prezzo prima)
-    lista.sort(function(a, b) { return Number(a.costo_litro) - Number(b.costo_litro); });
-    var best = lista.length > 0 ? Number(lista[0].costo_litro) : 0;
+    // Ordina per prezzo completo (costo + trasporto + margine) per considerare franco partenza vs franco destino
+    lista.sort(function(a, b) { return prezzoNoIva(a) - prezzoNoIva(b); });
+    var best = lista.length > 0 ? prezzoNoIva(lista[0]) : 0;
 
     html += '<div class="product-section" style="margin-bottom:22px">';
     html += '<div style="display:flex;align-items:center;gap:8px;border-bottom:2px solid ' + col + ';padding-bottom:5px;margin-bottom:8px">';
@@ -1269,13 +1269,19 @@ async function stampaListinoPrezziGiorno() {
       var costoTot = Number(r.costo_litro) + Number(r.trasporto_litro || 0);
       var ivaPerc = Number(r.iva || 22);
       var prezzoIva = costoTot * (1 + ivaPerc / 100);
-      var isBest = Number(r.costo_litro) === best && lista.length > 1;
+      var pNetto = prezzoNoIva(r);
+      var isBest = pNetto === best && lista.length > 1;
       var bestTag = isBest ? ' <span style="font-size:8px;background:#639922;color:#fff;padding:1px 6px;border-radius:8px;vertical-align:middle">BEST</span>' : '';
+      var deltaTag = '';
+      if (!isBest && lista.length > 1) {
+        var delta = pNetto - best;
+        if (delta > 0.00005) deltaTag = ' <span style="font-size:8px;background:#FDECEA;color:#C0392B;padding:1px 6px;border-radius:8px;vertical-align:middle;font-family:Courier New,monospace">Δ +' + delta.toFixed(4) + '</span>';
+      }
       var bgRow = isBest ? 'background:#EAF3DE' : (i % 2 ? 'background:#fafaf5' : '');
 
       html += '<tr style="' + bgRow + '">';
       var giacTag = r._isDeposito && r._giacenza ? ' <span style="font-size:8px;background:#EAF3DE;color:#27500A;padding:1px 6px;border-radius:8px;vertical-align:middle">' + r._giacenza.toLocaleString('it-IT') + ' L</span>' : '';
-      html += '<td style="font-weight:600;font-size:12px">' + esc(r.fornitore) + bestTag + giacTag + '</td>';
+      html += '<td style="font-weight:600;font-size:12px">' + esc(r.fornitore) + bestTag + deltaTag + giacTag + '</td>';
       html += '<td>' + esc(r.basi_carico ? r.basi_carico.nome : '—') + '</td>';
       html += '<td class="m" style="font-size:15px;font-weight:bold;color:' + col + '">' + Number(r.costo_litro).toFixed(4) + '</td>';
       html += '<td class="m">' + Number(r.trasporto_litro || 0).toFixed(4) + '</td>';
