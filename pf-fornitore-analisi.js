@@ -177,6 +177,9 @@ async function generaAnalisiFornitore(nomiFornitori, dal, al) {
 
 // ─── RENDER SINGOLO FORNITORE ──────────────────────────────────────
 function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
+  var oggi = new Date(); oggi.setHours(0,0,0,0);
+  var ggPagDefault = Number(fornitore.giorni_pagamento || 30);
+
   var tot = { litri: 0, importo: 0, ordini: ordini.length };
   ordini.forEach(function(o) {
     tot.litri += Number(o.litri||0);
@@ -203,58 +206,140 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
     perBase[bKey].ordini++;
   });
 
-  // Prezzi medi per prodotto × base
-  var prezziMed = {};
-  ordini.forEach(function(o) {
-    var b = o.base_carico_id && basiMap[o.base_carico_id] ? basiMap[o.base_carico_id].nome : 'Senza base';
-    var key = o.prodotto + '||' + b;
-    if (!prezziMed[key]) prezziMed[key] = { prodotto: o.prodotto, base: b, litri: 0, valore: 0 };
-    var l = Number(o.litri||0);
-    var c = Number(o.costo_litro||0) + Number(o.trasporto_litro||0);
-    prezziMed[key].litri += l;
-    prezziMed[key].valore += l * c;
-  });
-
-  // Fido
+  // Fido segmentato per fascia di scadenza
   var fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
+  var segmenti = { scaduto: 0, f0_15: 0, f16_30: 0, f31_45: 0, f46p: 0 };
   var fidoUsato = 0;
-  ordini.forEach(function(o) { if (!o.pagato_fornitore) fidoUsato += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0); });
+  var nonPagatiOrdini = [];
+  ordini.forEach(function(o) {
+    if (o.pagato_fornitore) return;
+    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    fidoUsato += imp;
+    var ggOrdine = Number(o.giorni_pagamento || ggPagDefault);
+    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
+    var ggResidui = Math.floor((scad - oggi) / 86400000);
+    nonPagatiOrdini.push({ ordine: o, scadenza: scad, ggResidui: ggResidui, importo: imp });
+    if (ggResidui < 0) segmenti.scaduto += imp;
+    else if (ggResidui <= 15) segmenti.f0_15 += imp;
+    else if (ggResidui <= 30) segmenti.f16_30 += imp;
+    else if (ggResidui <= 45) segmenti.f31_45 += imp;
+    else segmenti.f46p += imp;
+  });
   var fidoResiduo = fidoMax > 0 ? fidoMax - fidoUsato : 0;
   var pctFido = fidoMax > 0 ? Math.round((fidoUsato / fidoMax) * 100) : 0;
 
+  // Puntualità pagamenti (solo ordini pagati con data_pagamento_fornitore)
+  var pagamenti = [];
+  ordini.forEach(function(o) {
+    if (!o.pagato_fornitore || !o.data_pagamento_fornitore) return;
+    var ggOrdine = Number(o.giorni_pagamento || ggPagDefault);
+    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
+    var dataPag = new Date(o.data_pagamento_fornitore);
+    var delta = Math.floor((dataPag - scad) / 86400000); // negativo=anticipo, positivo=ritardo
+    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    pagamenti.push({ ordine: o, scadenza: scad, dataPag: dataPag, delta: delta, importo: imp, ggContratto: ggOrdine });
+  });
+  var statsPag = null;
+  if (pagamenti.length > 0) {
+    var sommaDelta = 0, anticipi = 0, ritardi = 0, puntuali = 0, maxRitardo = 0;
+    pagamenti.forEach(function(p) {
+      sommaDelta += p.delta;
+      if (p.delta < 0) anticipi++;
+      else if (p.delta > 0) { ritardi++; if (p.delta > maxRitardo) maxRitardo = p.delta; }
+      else puntuali++;
+    });
+    statsPag = {
+      n: pagamenti.length,
+      mediaDelta: sommaDelta / pagamenti.length,
+      anticipi: anticipi,
+      ritardi: ritardi,
+      puntuali: puntuali,
+      maxRitardo: maxRitardo,
+      pctPuntuali: Math.round(((anticipi + puntuali) / pagamenti.length) * 100)
+    };
+  }
+
+  // Quota su totale acquisti (% di questo fornitore sul totale acquisti del periodo)
+  // Calcoliamo lato server? No, qui non ho i dati totali. La metto come "ticket medio" e basta.
+  var ticketMedio = tot.ordini > 0 ? tot.importo / tot.ordini : 0;
+  var litriMedi = tot.ordini > 0 ? tot.litri / tot.ordini : 0;
+
+  // Calcola mesi attivi per derivare "media mensile"
+  var mesiSet = new Set();
+  ordini.forEach(function(o) { mesiSet.add(_afMese(o.data)); });
+  var nMesi = mesiSet.size || 1;
+  var mediaMensileLitri = tot.litri / nMesi;
+  var mediaMensileImporto = tot.importo / nMesi;
+
   var h = '';
 
-  // KPI header
+  // ── KPI HEADER ────────────────────────────────────────────────
   h += '<div class="card section"><div class="card-title">📊 Indicatori chiave</div>';
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
   h += '<div class="kpi"><div class="kpi-label">Ordini</div><div class="kpi-value">' + tot.ordini + '</div></div>';
   h += '<div class="kpi"><div class="kpi-label">Litri totali</div><div class="kpi-value">' + fmtL(tot.litri) + '</div></div>';
   h += '<div class="kpi"><div class="kpi-label">Importo totale</div><div class="kpi-value">' + fmtE(tot.importo) + '</div></div>';
-  h += '<div class="kpi"><div class="kpi-label">Ticket medio</div><div class="kpi-value">' + fmtE(tot.ordini > 0 ? tot.importo / tot.ordini : 0) + '</div></div>';
-  h += '</div>';
+  h += '<div class="kpi"><div class="kpi-label">Ticket medio</div><div class="kpi-value">' + fmtE(ticketMedio) + '</div></div>';
+  h += '</div></div>';
 
-  // Barra fido
+  // ── BARRA FIDO SEGMENTATA ─────────────────────────────────────
   if (fidoMax > 0) {
     var fidoColor = pctFido >= 90 ? '#A32D2D' : pctFido >= 60 ? '#BA7517' : '#639922';
-    h += '<div style="margin-top:14px;padding-top:14px;border-top:0.5px solid #eee">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    h += '<div style="font-size:11px;font-weight:600;color:#666;text-transform:uppercase">Fido fornitore</div>';
-    h += '<div style="font-size:11px;font-family:Courier New,monospace"><span style="color:#666">Max</span> <strong>' + fmtE(fidoMax) + '</strong> · <span style="color:' + fidoColor + '">Usato <strong>' + fmtE(fidoUsato) + '</strong></span> · <span style="color:#639922">Disp <strong>' + fmtE(fidoResiduo) + '</strong></span></div>';
+    h += '<div class="card section"><div class="card-title">💳 Fido fornitore</div>';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px">';
+    h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Fido massimo</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold">' + fmtE(fidoMax) + '</div></div>';
+    h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Esposizione</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold;color:' + fidoColor + '">' + fmtE(fidoUsato) + ' <span style="font-size:11px">(' + pctFido + '%)</span></div></div>';
+    h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Disponibile</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold;color:#639922">' + fmtE(fidoResiduo) + '</div></div>';
+    h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Termini</div><div style="font-family:Courier New,monospace;font-size:14px;font-weight:600">' + ggPagDefault + ' giorni</div></div>';
     h += '</div>';
-    h += '<div style="height:12px;width:100%;background:#eee;border-radius:6px;overflow:hidden"><div style="height:100%;width:' + Math.min(100,pctFido) + '%;background:' + fidoColor + '"></div></div>';
-    h += '<div style="font-size:10px;color:#888;margin-top:3px;text-align:right">' + pctFido + '% utilizzato</div>';
+
+    // Barra principale: usato vs disponibile
+    h += '<div style="height:22px;width:100%;background:#eee;border-radius:6px;overflow:hidden;margin-bottom:14px;display:flex">';
+    h += '<div style="height:100%;width:' + Math.min(100,pctFido) + '%;background:' + fidoColor + ';display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:600">' + (pctFido >= 15 ? fmtE(fidoUsato) + ' impegnato' : '') + '</div>';
+    if (pctFido < 100) {
+      h += '<div style="height:100%;flex:1;display:flex;align-items:center;justify-content:center;color:#27500A;font-size:10px;font-weight:600">' + ((100-pctFido) >= 15 ? fmtE(fidoResiduo) + ' disponibile' : '') + '</div>';
+    }
+    h += '</div>';
+
+    // Barra segmentata per scadenza (solo se c'è esposizione)
+    if (fidoUsato > 0) {
+      h += '<div style="font-size:11px;color:#666;margin-bottom:6px;font-weight:600">Suddivisione esposizione per fascia di scadenza:</div>';
+      h += '<div style="height:18px;width:100%;background:#f5f4ef;border-radius:6px;overflow:hidden;display:flex">';
+      var segCols = [
+        { key: 'scaduto', label: 'Scaduto', color: '#A32D2D' },
+        { key: 'f0_15', label: '0-15gg', color: '#D85A30' },
+        { key: 'f16_30', label: '16-30gg', color: '#BA7517' },
+        { key: 'f31_45', label: '31-45gg', color: '#D4A017' },
+        { key: 'f46p', label: 'oltre 45gg', color: '#639922' }
+      ];
+      segCols.forEach(function(s) {
+        var v = segmenti[s.key];
+        if (v > 0) {
+          var pct = (v / fidoUsato) * 100;
+          h += '<div title="' + s.label + ': ' + fmtE(v) + '" style="height:100%;width:' + pct + '%;background:' + s.color + ';display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:600">' + (pct >= 8 ? Math.round(pct) + '%' : '') + '</div>';
+        }
+      });
+      h += '</div>';
+      h += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:10px">';
+      segCols.forEach(function(s) {
+        var v = segmenti[s.key];
+        if (v > 0) {
+          h += '<div style="display:flex;align-items:center;gap:4px"><div style="width:10px;height:10px;background:' + s.color + ';border-radius:2px"></div><span>' + s.label + ': <strong>' + fmtE(v) + '</strong></span></div>';
+        }
+      });
+      h += '</div>';
+    }
     h += '</div>';
   }
-  h += '</div>';
 
-  // Grafico acquisti per prodotto (stacked bar mensile)
+  // ── GRAFICO ACQUISTI MENSILI PER PRODOTTO ────────────────────
   h += '<div class="card section"><div class="card-title">📈 Acquisti per mese e prodotto</div>';
-  h += '<div style="height:260px;position:relative"><canvas id="af-chart-mese-prod"></canvas></div></div>';
+  h += '<div style="height:280px;position:relative"><canvas id="af-chart-mese-prod"></canvas></div></div>';
 
-  // Distribuzione prodotti (donut)
+  // ── DISTRIBUZIONE PRODOTTI ────────────────────────────────────
   h += '<div class="card section"><div class="card-title">🎯 Distribuzione per prodotto</div>';
   h += '<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">';
-  h += '<div style="width:200px;height:200px;flex-shrink:0"><canvas id="af-chart-prodotti"></canvas></div>';
+  h += '<div style="width:220px;height:220px;flex-shrink:0"><canvas id="af-chart-prodotti"></canvas></div>';
   h += '<div style="flex:1;min-width:260px"><table>';
   h += '<thead><tr><th>Prodotto</th><th class="m">Litri</th><th class="m">Importo</th><th class="m">%</th></tr></thead><tbody>';
   Object.keys(perProdotto).sort(function(a,b){ return perProdotto[b].litri - perProdotto[a].litri; }).forEach(function(p) {
@@ -264,7 +349,7 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   });
   h += '</tbody></table></div></div></div>';
 
-  // Acquisti per base di carico
+  // ── ACQUISTI PER BASE DI CARICO ───────────────────────────────
   h += '<div class="card section"><div class="card-title">📍 Acquisti per base di carico</div>';
   h += '<table><thead><tr><th>Base</th><th class="m">Ordini</th><th class="m">Litri</th><th class="m">Importo</th><th class="m">Litri/ordine</th></tr></thead><tbody>';
   Object.keys(perBase).sort(function(a,b){ return perBase[b].litri - perBase[a].litri; }).forEach(function(b) {
@@ -273,19 +358,91 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   });
   h += '</tbody></table></div>';
 
-  // Prezzi medi per prodotto × base
-  h += '<div class="card section"><div class="card-title">💰 Prezzi medi per prodotto × base (costo + trasporto)</div>';
-  h += '<table><thead><tr><th>Prodotto</th><th>Base</th><th class="m">Litri</th><th class="m">Prezzo medio €/L</th></tr></thead><tbody>';
-  var sortedKeys = Object.keys(prezziMed).sort(function(a,b) {
-    if (prezziMed[a].prodotto !== prezziMed[b].prodotto) return prezziMed[a].prodotto.localeCompare(prezziMed[b].prodotto);
-    return prezziMed[a].base.localeCompare(prezziMed[b].base);
-  });
-  sortedKeys.forEach(function(k) {
-    var d = prezziMed[k];
-    var media = d.litri > 0 ? d.valore / d.litri : 0;
-    h += '<tr><td>' + _esc(d.prodotto) + '</td><td>' + _esc(d.base) + '</td><td class="m">' + fmtL(d.litri) + '</td><td class="m"><strong>€ ' + media.toFixed(4) + '</strong></td></tr>';
-  });
-  h += '</tbody></table></div>';
+  // ── PUNTUALITÀ PAGAMENTI ──────────────────────────────────────
+  h += '<div class="card section"><div class="card-title">⏱ Puntualità pagamenti</div>';
+  if (statsPag) {
+    var deltaCol = statsPag.mediaDelta < -1 ? '#639922' : statsPag.mediaDelta > 1 ? '#A32D2D' : '#BA7517';
+    var deltaSegno = statsPag.mediaDelta > 0 ? '+' : '';
+    var deltaTesto = statsPag.mediaDelta < -1 ? 'in anticipo' : statsPag.mediaDelta > 1 ? 'in ritardo' : 'puntuale';
+    var deltaIcon = statsPag.mediaDelta < -1 ? '🟢' : statsPag.mediaDelta > 1 ? '🔴' : '🟡';
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">';
+    h += '<div class="kpi" style="border-left-color:' + deltaCol + '"><div class="kpi-label">Media delta</div><div class="kpi-value" style="color:' + deltaCol + '">' + deltaIcon + ' ' + deltaSegno + statsPag.mediaDelta.toFixed(1) + ' gg</div><div style="font-size:9px;color:#888;margin-top:2px">' + deltaTesto + ' vs scadenza</div></div>';
+    h += '<div class="kpi"><div class="kpi-label">Pagate puntuali</div><div class="kpi-value">' + statsPag.pctPuntuali + '%</div><div style="font-size:9px;color:#888;margin-top:2px">' + (statsPag.anticipi + statsPag.puntuali) + ' su ' + statsPag.n + '</div></div>';
+    h += '<div class="kpi"><div class="kpi-label">In ritardo</div><div class="kpi-value">' + statsPag.ritardi + '</div><div style="font-size:9px;color:#888;margin-top:2px">max ' + statsPag.maxRitardo + ' gg</div></div>';
+    h += '<div class="kpi"><div class="kpi-label">Campione</div><div class="kpi-value">' + statsPag.n + '</div><div style="font-size:9px;color:#888;margin-top:2px">fatture pagate</div></div>';
+    h += '</div>';
+
+    // Tabella ultime 10 fatture pagate
+    h += '<div style="font-size:11px;font-weight:600;color:#666;margin-bottom:6px">Ultime fatture pagate (10 più recenti):</div>';
+    h += '<table><thead><tr><th>Data ord.</th><th>Prodotto</th><th class="m">Litri</th><th class="m">Importo</th><th>Scad.</th><th>Pagata il</th><th class="m">Delta gg</th></tr></thead><tbody>';
+    pagamenti.sort(function(a,b){ return b.dataPag - a.dataPag; }).slice(0,10).forEach(function(p) {
+      var col = p.delta < 0 ? '#639922' : p.delta > 0 ? '#A32D2D' : '#666';
+      var segno = p.delta > 0 ? '+' : '';
+      h += '<tr>';
+      h += '<td>' + fmtD(p.ordine.data) + '</td>';
+      h += '<td style="font-size:10px">' + _esc(p.ordine.prodotto) + '</td>';
+      h += '<td class="m">' + fmtL(p.ordine.litri) + '</td>';
+      h += '<td class="m">' + fmtE(p.importo) + '</td>';
+      h += '<td>' + fmtD(p.scadenza.toISOString().split('T')[0]) + '</td>';
+      h += '<td>' + fmtD(p.dataPag.toISOString().split('T')[0]) + '</td>';
+      h += '<td class="m" style="color:' + col + ';font-weight:700">' + segno + p.delta + ' gg</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="padding:16px;text-align:center;color:#888;background:#f5f4ef;border-radius:8px;font-size:11px">Nessuna fattura pagata con data effettiva nel periodo selezionato.<br>Per vedere la puntualità abilita il flag "pagato" e inserisci la data di pagamento sugli ordini.</div>';
+  }
+  h += '</div>';
+
+  // ── PROSSIME SCADENZE ─────────────────────────────────────────
+  h += '<div class="card section"><div class="card-title">🗓 Prossime scadenze</div>';
+  if (nonPagatiOrdini.length === 0) {
+    h += '<div style="padding:16px;text-align:center;color:#639922;background:#EAF3DE;border-radius:8px;font-size:12px;font-weight:600">✅ Nessuna fattura aperta. Tutto pagato.</div>';
+  } else {
+    nonPagatiOrdini.sort(function(a,b){ return a.scadenza - b.scadenza; });
+    h += '<table><thead><tr><th>Data ord.</th><th>Prodotto</th><th class="m">Litri</th><th class="m">Importo</th><th>Scadenza</th><th class="m">Giorni</th><th>Stato</th></tr></thead><tbody>';
+    nonPagatiOrdini.slice(0,15).forEach(function(p) {
+      var sem, col, label;
+      if (p.ggResidui < 0) { sem = '🔴'; col = '#A32D2D'; label = 'SCADUTA'; }
+      else if (p.ggResidui <= 7) { sem = '🟠'; col = '#D85A30'; label = 'critica'; }
+      else if (p.ggResidui <= 15) { sem = '🟡'; col = '#BA7517'; label = 'imminente'; }
+      else { sem = '🟢'; col = '#639922'; label = 'ok'; }
+      h += '<tr>';
+      h += '<td>' + fmtD(p.ordine.data) + '</td>';
+      h += '<td style="font-size:10px">' + _esc(p.ordine.prodotto) + '</td>';
+      h += '<td class="m">' + fmtL(p.ordine.litri) + '</td>';
+      h += '<td class="m"><strong>' + fmtE(p.importo) + '</strong></td>';
+      h += '<td>' + fmtD(p.scadenza.toISOString().split('T')[0]) + '</td>';
+      h += '<td class="m" style="color:' + col + ';font-weight:700">' + (p.ggResidui < 0 ? p.ggResidui : '+' + p.ggResidui) + '</td>';
+      h += '<td style="color:' + col + ';font-weight:600">' + sem + ' ' + label + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    if (nonPagatiOrdini.length > 15) {
+      h += '<div style="font-size:10px;color:#888;margin-top:6px;text-align:right">... e altre ' + (nonPagatiOrdini.length - 15) + ' scadenze più lontane</div>';
+    }
+    // Totali
+    h += '<div style="display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid #eee;font-size:11px">';
+    h += '<div><strong>' + nonPagatiOrdini.length + '</strong> fatture aperte</div>';
+    var totSc = segmenti.scaduto;
+    if (totSc > 0) h += '<div style="color:#A32D2D"><strong>' + fmtE(totSc) + '</strong> già scaduto</div>';
+    h += '<div>Totale aperto: <strong>' + fmtE(fidoUsato) + '</strong></div>';
+    h += '</div>';
+  }
+  h += '</div>';
+
+  // ── BOX INDICATORI CHIAVE FINALI ──────────────────────────────
+  h += '<div class="card section"><div class="card-title">📌 Riepilogo periodo</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;font-size:12px">';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Ordini totali</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + tot.ordini + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Litri totali</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + fmtL(tot.litri) + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Spesa totale</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + fmtE(tot.importo) + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Ticket medio</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + fmtE(ticketMedio) + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Litri/ordine medi</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + fmtL(litriMedi) + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Mesi attivi</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + nMesi + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Litri/mese medi</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + fmtL(mediaMensileLitri) + '</div></div>';
+  h += '<div><div style="font-size:9px;color:#888;text-transform:uppercase">Spesa/mese media</div><div style="font-family:Courier New,monospace;font-weight:600;font-size:14px">' + fmtE(mediaMensileImporto) + '</div></div>';
+  h += '</div></div>';
 
   return h;
 }
