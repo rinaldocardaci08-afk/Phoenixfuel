@@ -166,18 +166,22 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
   var aISO = _dgwISO(finoA);
 
   // 2. Movimenti dell'anno per quel prodotto, in parallelo
+  // NOTA: includiamo sia 'confermato' che 'consegnato' come stati validi.
+  // Il flusso DAS firmato porta gli ordini da 'confermato' a 'consegnato',
+  // entrambi rappresentano uscite/entrate effettivamente avvenute.
+  var STATI_VALIDI = ['confermato','consegnato'];
   var [entRes, uscCliRes, uscStaRes, uscAuRes] = await Promise.all([
     sb.from('ordini').select('data,litri')
-      .eq('tipo_ordine','entrata_deposito').eq('stato','confermato').eq('prodotto', prodotto)
+      .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,litri,fornitore')
-      .eq('tipo_ordine','cliente').eq('stato','confermato').eq('prodotto', prodotto)
+      .eq('tipo_ordine','cliente').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,litri,fornitore')
-      .eq('tipo_ordine','stazione_servizio').eq('stato','confermato').eq('prodotto', prodotto)
+      .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,litri')
-      .eq('tipo_ordine','autoconsumo').eq('stato','confermato').eq('prodotto', prodotto)
+      .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
       .gte('data', daISO).lte('data', aISO)
   ]);
 
