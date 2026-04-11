@@ -483,8 +483,7 @@
         <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
           <button class="btn-primary dep-tab active" data-tab="dep-principale" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px">🏗 Deposito</button>
           <button class="btn-primary dep-tab" data-tab="dep-ricezione-das" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📄 Ricezione DAS</button>
-          <button class="btn-primary dep-tab" data-tab="dep-giacenze-gg" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze giornaliere</button>
-          <button class="btn-primary dep-tab" data-tab="dep-giacenze-mensili" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Giacenze mensili</button>
+          <button class="btn-primary dep-tab" data-tab="dep-giacenze" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze</button>
         </div>
 
         <!-- PANEL: DEPOSITO PRINCIPALE -->
@@ -579,11 +578,12 @@
         </div>
 
         <!-- PANEL: GIACENZE GIORNALIERE -->
-        <div class="dep-panel" id="dep-giacenze-gg" style="display:none">
-          <!-- Toggle vista: Singolo giorno (esistente) / Settimanale (nuovo) -->
+        <div class="dep-panel" id="dep-giacenze" style="display:none">
+          <!-- Toggle vista a 3: Singolo giorno / Settimanale / Mensile -->
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
             <button id="dgw-btn-giorno" class="btn-primary" onclick="dgwToggleVista('giorno')" style="font-size:12px;padding:7px 14px">📅 Singolo giorno</button>
             <button id="dgw-btn-week" class="btn-primary" onclick="dgwToggleVista('week')" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Vista settimanale calcolata</button>
+            <button id="dgw-btn-mese" class="btn-primary" onclick="dgwToggleVista('mese')" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Mensile</button>
           </div>
 
           <!-- BLOCCO ESISTENTE — Singolo giorno -->
@@ -634,30 +634,31 @@
             </div>
           </div>
           <!-- /NUOVO BLOCCO -->
-        </div>
 
-        <!-- DEPOSITO: GIACENZE MENSILI -->
-        <div class="dep-panel" id="dep-giacenze-mensili" style="display:none">
-          <div class="card">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-              <span>📅 Giacenze mensili deposito</span>
-              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                <select id="dep-gm-anno" onchange="caricaGiacenzeMensiliDeposito()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)"></select>
-                <button class="btn-primary dep-gm-trim active" data-trim="1" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px">Q1</button>
-                <button class="btn-primary dep-gm-trim" data-trim="2" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q2</button>
-                <button class="btn-primary dep-gm-trim" data-trim="3" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q3</button>
-                <button class="btn-primary dep-gm-trim" data-trim="4" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q4</button>
-                <button class="btn-primary dep-gm-trim" data-trim="0" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Anno</button>
+          <!-- BLOCCO MENSILE — spostato qui dal vecchio panel separato dep-giacenze-mensili -->
+          <div id="dgw-blocco-mese" style="display:none">
+            <div class="card">
+              <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <span>📅 Giacenze mensili deposito</span>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <select id="dep-gm-anno" onchange="caricaGiacenzeMensiliDeposito()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)"></select>
+                  <button class="btn-primary dep-gm-trim active" data-trim="1" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px">Q1</button>
+                  <button class="btn-primary dep-gm-trim" data-trim="2" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q2</button>
+                  <button class="btn-primary dep-gm-trim" data-trim="3" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q3</button>
+                  <button class="btn-primary dep-gm-trim" data-trim="4" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Q4</button>
+                  <button class="btn-primary dep-gm-trim" data-trim="0" onclick="switchTrimestreDeposito(this)" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">Anno</button>
+                </div>
+              </div>
+              <div id="dep-gm-contenuto" style="margin-top:12px">
+                <div class="loading">Seleziona anno</div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+                <button class="btn-primary" style="background:#639922" onclick="salvaGiacenzeMensiliDeposito()">💾 Salva dati manuali</button>
+                <button class="btn-primary" style="background:#6B5FCC" onclick="esportaGiacenzeMensiliDeposito()">📊 Esporta Excel</button>
               </div>
             </div>
-            <div id="dep-gm-contenuto" style="margin-top:12px">
-              <div class="loading">Seleziona anno</div>
-            </div>
-            <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-              <button class="btn-primary" style="background:#639922" onclick="salvaGiacenzeMensiliDeposito()">💾 Salva dati manuali</button>
-              <button class="btn-primary" style="background:#6B5FCC" onclick="esportaGiacenzeMensiliDeposito()">📊 Esporta Excel</button>
-            </div>
           </div>
+          <!-- /BLOCCO MENSILE -->
         </div>
 
       </div>
@@ -2316,7 +2317,7 @@
 </div>
 <script src="pf-config.js?v=1775149951158"></script>
 <script src="pf-ordini.js?v=1775149951158"></script>
-<script src="pf-deposito.js?v=20260411d"></script>
+<script src="pf-deposito.js?v=20260411e"></script>
 <script src="pf-anagrafica.js?v=20260411c"></script>
 <script src="pf-data.js?v=20260411c"></script>
 <script src="pf-fornitore-analisi.js?v=20260411c"></script>
@@ -2340,7 +2341,7 @@
 <script src="pf-allegati.js?v=1775149951158"></script>
 <script src="pf-fatture.js?v=1775149951158"></script>
 <script src="pf-dep-giacenze.js?v=1775149951158"></script>
-<script src="pf-dep-giac-week.js?v=20260411d"></script>
+<script src="pf-dep-giac-week.js?v=20260411e"></script>
 <script src="pf-system.js?v=1775149951158"></script>
 <script>
 if ('serviceWorker' in navigator) {

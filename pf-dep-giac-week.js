@@ -22,24 +22,53 @@ var _DGW_PROD_ORDINE = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO
 // ───────────────────────────────────────────────────────────────────
 // Switch tra vista "Singolo giorno" (esistente) e "Settimanale" (nuova)
 // ───────────────────────────────────────────────────────────────────
+var _dgwMeseInit = false;
+
 function dgwToggleVista(target) {
   var btnGg = document.getElementById('dgw-btn-giorno');
   var btnWk = document.getElementById('dgw-btn-week');
+  var btnMs = document.getElementById('dgw-btn-mese');
   var blocoGg = document.getElementById('dgw-blocco-giorno');
   var blocoWk = document.getElementById('dgw-blocco-week');
+  var blocoMs = document.getElementById('dgw-blocco-mese');
   if (!btnGg || !btnWk || !blocoGg || !blocoWk) return;
 
+  // Reset stile di tutti i bottoni
+  function _resetBtn(b) {
+    if (!b) return;
+    b.style.background = 'var(--bg)';
+    b.style.color = 'var(--text)';
+    b.style.border = '0.5px solid var(--border)';
+  }
+  function _activeBtn(b) {
+    if (!b) return;
+    b.style.background = 'var(--primary)';
+    b.style.color = '#fff';
+    b.style.border = '';
+  }
+  _resetBtn(btnGg); _resetBtn(btnWk); _resetBtn(btnMs);
+
   if (target === 'week') {
-    btnWk.style.background = 'var(--primary)'; btnWk.style.color = '#fff';
-    btnGg.style.background = 'var(--bg)'; btnGg.style.color = 'var(--text)';
+    _activeBtn(btnWk);
     blocoGg.style.display = 'none';
     blocoWk.style.display = '';
+    if (blocoMs) blocoMs.style.display = 'none';
     if (_dgwSerie === null) _dgwInit();
+  } else if (target === 'mese') {
+    _activeBtn(btnMs);
+    blocoGg.style.display = 'none';
+    blocoWk.style.display = 'none';
+    if (blocoMs) blocoMs.style.display = '';
+    // Lazy load: chiama caricaGiacenzeMensiliDeposito solo al primo accesso
+    if (!_dgwMeseInit && typeof caricaGiacenzeMensiliDeposito === 'function') {
+      caricaGiacenzeMensiliDeposito();
+      _dgwMeseInit = true;
+    }
   } else {
-    btnGg.style.background = 'var(--primary)'; btnGg.style.color = '#fff';
-    btnWk.style.background = 'var(--bg)'; btnWk.style.color = 'var(--text)';
+    _activeBtn(btnGg);
     blocoGg.style.display = '';
     blocoWk.style.display = 'none';
+    if (blocoMs) blocoMs.style.display = 'none';
   }
 }
 

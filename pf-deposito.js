@@ -11,8 +11,15 @@ function switchDepositoTab(btn) {
   document.querySelectorAll('.dep-panel').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById(btn.dataset.tab).style.display = '';
   if (btn.dataset.tab === 'dep-ricezione-das') caricaDasOrdiniDeposito();
-  if (btn.dataset.tab === 'dep-giacenze-gg') caricaGiacenzeGiornaliere();
-  if (btn.dataset.tab === 'dep-giacenze-mensili') caricaGiacenzeMensiliDeposito();
+  if (btn.dataset.tab === 'dep-giacenze') {
+    // Tab unificato Giacenze: di default mostra la vista Singolo giorno
+    // dgwToggleVista gestisce poi il passaggio tra giorno/week/mese
+    if (typeof dgwToggleVista === 'function') {
+      dgwToggleVista('giorno');
+    } else {
+      caricaGiacenzeGiornaliere();
+    }
+  }
 }
 
 function cisternasvg(pct, colore) {
