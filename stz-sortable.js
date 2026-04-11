@@ -165,6 +165,20 @@
     });
   }
 
+  // Esposto globalmente per essere richiamato dopo cambio tab o render async.
+  // Idempotente: skip automatico su card con id/pulsanti già assegnati.
+  window.stzSortableRefresh = init;
+
+  // Hook cambio tab: dopo ogni click su uno .stz-tab ri-applica i pulsanti
+  // (alcuni panel popolano card dinamicamente dopo switch tab).
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest && e.target.closest('.stz-tab');
+    if (!t) return;
+    setTimeout(init, 50);
+    setTimeout(init, 300);
+    setTimeout(init, 800);
+  });
+
   // Avvia quando il DOM è pronto
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

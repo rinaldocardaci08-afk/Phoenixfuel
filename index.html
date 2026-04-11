@@ -1450,17 +1450,11 @@
         <!-- MAGAZZINO -->
         <div class="stz-panel" id="stz-magazzino" style="display:none">
           <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Configurazione pompe</div>
-            <div class="form-grid">
-              <div class="form-group"><label>Nome pompa</label><input type="text" id="stz-pompa-nome" placeholder="Es. Gasolio 3" /></div>
-              <div class="form-group"><label>Prodotto</label><select id="stz-pompa-prodotto"></select></div>
-            </div>
-            <button class="btn-primary" onclick="salvaPompa()">➕ Aggiungi pompa</button>
-            <div style="overflow-x:auto;margin-top:12px">
-            <table><thead><tr><th>Ordine</th><th>Nome</th><th>Prodotto</th><th>Stato</th><th></th></tr></thead>
-            <tbody id="stz-tabella-pompe"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
-            </div>
+            <div class="card-title">Cisterne stazione Oppido</div>
+            <div id="stz-cisterne-grafiche"><div class="loading">Caricamento...</div></div>
+            <div id="stz-magazzino-content" style="margin-top:12px"></div>
           </div>
+
           <div class="card" style="margin-bottom:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📦 Acquisti stazione Oppido</span>
@@ -1481,14 +1475,8 @@
             <div id="stz-acquisti-report"><div class="loading">Seleziona un filtro per caricare il report...</div></div>
           </div>
 
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Cisterne stazione Oppido</div>
-            <div id="stz-cisterne-grafiche"><div class="loading">Caricamento...</div></div>
-            <div id="stz-magazzino-content" style="margin-top:12px"></div>
-          </div>
-
           <!-- RETTIFICHE STAZIONE -->
-          <div class="card" style="margin-top:16px">
+          <div class="card" style="margin-bottom:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📋 Rettifiche inventario stazione</span>
               <div style="display:flex;gap:6px">
@@ -1503,7 +1491,7 @@
           </div>
 
           <!-- GIACENZE FINE ANNO STAZIONE -->
-          <div class="card" style="margin-top:16px">
+          <div class="card" style="margin-bottom:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📊 Chiusura giacenze fine anno</span>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -1517,6 +1505,19 @@
             <div style="overflow-x:auto">
             <table><thead><tr><th>Prodotto</th><th>Giac. inizio</th><th>Entrate</th><th>Uscite</th><th>Giac. stimata</th><th>Giac. reale</th><th>Differenza</th><th>Stato</th></tr></thead>
             <tbody id="giac-stz-tabella"><tr><td colspan="8" class="loading">Seleziona anno e premi Calcola</td></tr></tbody></table>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Configurazione pompe</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Nome pompa</label><input type="text" id="stz-pompa-nome" placeholder="Es. Gasolio 3" /></div>
+              <div class="form-group"><label>Prodotto</label><select id="stz-pompa-prodotto"></select></div>
+            </div>
+            <button class="btn-primary" onclick="salvaPompa()">➕ Aggiungi pompa</button>
+            <div style="overflow-x:auto;margin-top:12px">
+            <table><thead><tr><th>Ordine</th><th>Nome</th><th>Prodotto</th><th>Stato</th><th></th></tr></thead>
+            <tbody id="stz-tabella-pompe"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
         </div>
@@ -2329,6 +2330,7 @@
 <script src="pf-stz-report.js?v=1775149951158"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=1775149951158"></script>
+<script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=1775149951158"></script>
 <script src="pf-dashboard.js?v=1775149951158"></script>
