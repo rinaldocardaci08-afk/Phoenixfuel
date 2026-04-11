@@ -1,6 +1,54 @@
 // PhoenixFuel — Stazione: Giacenze mensili
 
 // ═══════════════════════════════════════════════════════════════════
+// TOGGLE VISTA GIACENZE STAZIONE (Giorno / Settimana / Mese)
+// Step B.2: solo segmented control, Giorno e Settimana sono placeholder.
+// Step B.3 implementerà Giorno e Settimana con vista tabellare multi-prodotto.
+// Indipendente dalla dgwToggleVista del deposito per evitare collisioni.
+// ═══════════════════════════════════════════════════════════════════
+function stzgToggleVista(target) {
+  var btnGg = document.getElementById('stzg-btn-giorno');
+  var btnWk = document.getElementById('stzg-btn-week');
+  var btnMs = document.getElementById('stzg-btn-mese');
+  var blocoGg = document.getElementById('stzg-blocco-giorno');
+  var blocoWk = document.getElementById('stzg-blocco-week');
+  var blocoMs = document.getElementById('stzg-blocco-mese');
+  if (!btnMs || !blocoMs) return;
+
+  function _resetBtn(b) {
+    if (!b) return;
+    b.style.background = 'var(--bg)';
+    b.style.color = 'var(--text)';
+    b.style.border = '0.5px solid var(--border)';
+  }
+  function _activeBtn(b) {
+    if (!b) return;
+    b.style.background = 'var(--primary)';
+    b.style.color = '#fff';
+    b.style.border = '';
+  }
+  _resetBtn(btnGg); _resetBtn(btnWk); _resetBtn(btnMs);
+
+  if (target === 'giorno') {
+    _activeBtn(btnGg);
+    if (blocoGg) blocoGg.style.display = '';
+    if (blocoWk) blocoWk.style.display = 'none';
+    blocoMs.style.display = 'none';
+  } else if (target === 'week') {
+    _activeBtn(btnWk);
+    if (blocoGg) blocoGg.style.display = 'none';
+    if (blocoWk) blocoWk.style.display = '';
+    blocoMs.style.display = 'none';
+  } else {
+    // default: 'mese'
+    _activeBtn(btnMs);
+    if (blocoGg) blocoGg.style.display = 'none';
+    if (blocoWk) blocoWk.style.display = 'none';
+    blocoMs.style.display = '';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // GIACENZE MENSILI STAZIONE (trimestri)
 // ═══════════════════════════════════════════════════════════════════
 
@@ -21,6 +69,8 @@ function switchTrimestre(btn) {
 }
 
 async function caricaGiacenzeMensili() {
+  // Step B.2: assicura che il segmented control mostri "Mese" come vista attiva quando si apre il tab Giacenza
+  if (typeof stzgToggleVista === 'function') { try { stzgToggleVista('mese'); } catch(e) {} }
   // Init anno
   var selAnno = document.getElementById('gm-anno');
   if (selAnno && selAnno.options.length === 0) {

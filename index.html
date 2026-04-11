@@ -1317,7 +1317,7 @@
           <button class="btn-primary stz-tab" data-tab="stz-cassa" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏧 Cassa</button>
           <button class="btn-primary stz-tab" data-tab="stz-versamenti" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏦 Versamenti</button>
           <button class="btn-primary stz-tab" data-tab="stz-prezzi" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Prezzi pompa</button>
-          <button class="btn-primary stz-tab" data-tab="stz-giacenze" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze mensili</button>
+          <button class="btn-primary stz-tab" data-tab="stz-giacenze" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenza</button>
           <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
           <button class="btn-primary stz-tab" data-tab="stz-allegati" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📎 Allegati</button>
         </div>
@@ -1739,6 +1739,41 @@
 
         <!-- GIACENZE MENSILI -->
         <div class="stz-panel" id="stz-giacenze" style="display:none">
+          <!-- Toggle vista a 3: Singolo giorno / Settimanale / Mensile -->
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+            <button id="stzg-btn-giorno" class="btn-primary" onclick="stzgToggleVista('giorno')" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Singolo giorno</button>
+            <button id="stzg-btn-week" class="btn-primary" onclick="stzgToggleVista('week')" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Vista settimanale calcolata</button>
+            <button id="stzg-btn-mese" class="btn-primary" onclick="stzgToggleVista('mese')" style="font-size:12px;padding:7px 14px">📅 Mensile</button>
+          </div>
+
+          <!-- BLOCCO GIORNO — placeholder, disponibile nel prossimo aggiornamento -->
+          <div id="stzg-blocco-giorno" style="display:none">
+            <div class="card">
+              <div class="card-title">📅 Giacenza singolo giorno — stazione Oppido</div>
+              <div style="padding:32px 16px;text-align:center;color:var(--text-muted);font-size:13px">
+                <div style="font-size:22px;margin-bottom:10px">🚧</div>
+                <div style="font-weight:500;color:var(--text);margin-bottom:6px">In costruzione</div>
+                <div>La vista giornaliera della stazione sarà disponibile nel prossimo aggiornamento.</div>
+                <div style="margin-top:10px;font-size:11px">Nel frattempo puoi usare la vista <strong>Mensile</strong>.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- BLOCCO SETTIMANA — placeholder, disponibile nel prossimo aggiornamento -->
+          <div id="stzg-blocco-week" style="display:none">
+            <div class="card">
+              <div class="card-title">📊 Vista settimanale calcolata — stazione Oppido</div>
+              <div style="padding:32px 16px;text-align:center;color:var(--text-muted);font-size:13px">
+                <div style="font-size:22px;margin-bottom:10px">🚧</div>
+                <div style="font-weight:500;color:var(--text);margin-bottom:6px">In costruzione</div>
+                <div>La vista settimanale della stazione sarà disponibile nel prossimo aggiornamento.</div>
+                <div style="margin-top:10px;font-size:11px">Nel frattempo puoi usare la vista <strong>Mensile</strong>.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- BLOCCO MESE — contenuto esistente, invariato -->
+          <div id="stzg-blocco-mese">
           <div class="card">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📊 Giacenze mensili stazione</span>
@@ -1768,6 +1803,8 @@
             <!-- Contenuto dinamico -->
             <div id="gm-contenuto"><div class="loading">Caricamento...</div></div>
           </div>
+          </div>
+          <!-- /BLOCCO MESE -->
         </div>
 
         <!-- ALLEGATI (REGISTRO SCONTRINI + DAS) -->
@@ -2329,7 +2366,7 @@
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
 <script src="pf-stz-report.js?v=1775149951158"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
-<script src="pf-stz-giacenze.js?v=1775149951158"></script>
+<script src="pf-stz-giacenze.js?v=20260411h"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=1775149951158"></script>
