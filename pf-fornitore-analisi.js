@@ -45,11 +45,9 @@ async function apriAnalisiFornitore() {
   if (!fornitori || !fornitori.length) { toast('Nessun fornitore attivo'); return; }
 
   // Carica ordini per calcolare KPI rapidi (dall'inizio anno)
-  var { data: ordini } = await sb.from('ordini')
-    .select('fornitore,litri,costo_litro,trasporto_litro')
-    .eq('tipo_ordine','entrata_deposito')
-    .neq('stato','annullato')
-    .gte('data', inizioAnno);
+  // MIGRATO a pfData.getAcquisti — query padre + filtro acquisti (tutti i tipi_ordine,
+  // include autoconsumo, esclude solo i giri interni "PhoenixFuel")
+  var ordini = await pfData.getAcquisti({ da: inizioAnno });
 
   // Aggrega per fornitore
   var stats = {};
@@ -111,14 +109,16 @@ async function generaAnalisiFornitore(nomiFornitori, dal, al) {
   var w = _apriReport('Analisi fornitori'); if (!w) return;
 
   // Carica dati comuni
-  var [fornRes, ordRes, basiRes] = await Promise.all([
+  // MIGRATO: gli ordini ora arrivano da pfData.getAcquisti (single source of truth).
+  // include autoconsumo e tutti i tipi_ordine, esclude solo i giri interni Phoenix.
+  var [fornRes, ordiniAcquisti, basiRes] = await Promise.all([
     sb.from('fornitori').select('*').in('nome', nomiFornitori),
-    sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,base_carico_id,stato,giorni_pagamento,pagato_fornitore,data_pagamento_fornitore,tipo_ordine').in('fornitore', nomiFornitori).eq('tipo_ordine','entrata_deposito').neq('stato','annullato').gte('data', dal).lte('data', al).order('data'),
+    pfData.getAcquisti({ da: dal, a: al, fornitore: nomiFornitori }),
     sb.from('basi_carico').select('id,nome,citta')
   ]);
 
   var fornitori = fornRes.data || [];
-  var ordini = ordRes.data || [];
+  var ordini = ordiniAcquisti || [];
   var basi = basiRes.data || [];
   var basiMap = {};
   basi.forEach(function(b) { basiMap[b.id] = b; });
