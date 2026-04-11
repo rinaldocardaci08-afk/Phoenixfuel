@@ -881,11 +881,11 @@ async function caricaGiacenzeGiornaliere() {
   if (sogliaEl && sogliaEl.value) GG_SOGLIA_ALERT = parseInt(sogliaEl.value) || 500;
 
   // Identifica prodotti deposito dalle cisterne
-  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita,livello_attuale').eq('sede','deposito_vibo');
+  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita_max,livello_attuale').eq('sede','deposito_vibo');
   var prodMap = {};
   (cisterne||[]).forEach(function(c) {
     if (!prodMap[c.prodotto]) prodMap[c.prodotto] = { capacita:0, attuale:0 };
-    prodMap[c.prodotto].capacita += Number(c.capacita||0);
+    prodMap[c.prodotto].capacita += Number(c.capacita_max||0);
     prodMap[c.prodotto].attuale += Number(c.livello_attuale||0);
   });
   _ggProdotti = Object.keys(prodMap).sort();
@@ -969,6 +969,7 @@ async function caricaGiacenzeGiornaliere() {
   h += '<button onclick="_ggCambiaGiorno(-1)" title="Giorno precedente" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">‹</button>';
   h += '<button onclick="_ggVaiOggi()" title="Vai a oggi" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;color:var(--text)">Oggi</button>';
   h += '<button onclick="_ggCambiaGiorno(1)" title="Giorno successivo" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">›</button>';
+  h += '<button onclick="_ggMostraDettaglio(\'' + data + '\')" title="Dettaglio movimenti del giorno" style="margin-left:6px;width:30px;height:30px;border-radius:50%;background:#378ADD;color:#fff;border:none;cursor:pointer;font-family:Georgia,serif;font-size:16px;font-weight:700;font-style:italic;line-height:1;padding:0;display:flex;align-items:center;justify-content:center" onmouseover="this.style.background=\'#185FA5\'" onmouseout="this.style.background=\'#378ADD\'">i</button>';
   h += '</div>';
   h += '</div>';
 
@@ -1040,6 +1041,9 @@ async function caricaGiacenzeGiornaliere() {
   // Alert box (nascosto, si mostra al salvataggio)
   h += '<div id="gg-alert-box" style="display:none;margin-top:12px"></div>';
 
+  // Container per il dettaglio movimenti del giorno (popolato da dgwMostraDettaglioGiornoGG al click sul bottone info)
+  h += '<div id="gg-dettaglio-box" style="margin-top:14px"></div>';
+
   document.getElementById('gg-form-prodotti').innerHTML = h;
 
   // KPI
@@ -1064,6 +1068,53 @@ function _ggVaiOggi() {
   if (!dataEl) return;
   dataEl.value = oggiISO;
   caricaGiacenzeGiornaliere();
+}
+
+// Toggle del dettaglio movimenti del giorno nella vista giornaliera tabellare.
+// Riusa _movRenderBlocchi (stesso renderer della vista settimanale).
+var _ggDettaglioCorrente = null;
+async function _ggMostraDettaglio(iso) {
+  var box = document.getElementById('gg-dettaglio-box');
+  if (!box) return;
+  // Toggle: secondo click sullo stesso giorno = chiude
+  if (_ggDettaglioCorrente === iso) {
+    box.innerHTML = '';
+    _ggDettaglioCorrente = null;
+    return;
+  }
+  _ggDettaglioCorrente = iso;
+  box.innerHTML = '<div class="loading" style="padding:16px;text-align:center">Caricamento movimenti del ' + (typeof fmtD==='function'?fmtD(iso):iso) + '...</div>';
+
+  var res = await sb.from('ordini').select('*,basi_carico(nome)')
+    .or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%')
+    .eq('data', iso)
+    .order('created_at', { ascending: false });
+
+  if (res.error) {
+    box.innerHTML = '<div class="loading" style="padding:16px;text-align:center;color:#A32D2D">Errore: ' + esc(res.error.message) + '</div>';
+    return;
+  }
+
+  var movimenti = res.data || [];
+  var entrate = movimenti.filter(function(r) { return r.tipo_ordine === 'entrata_deposito'; });
+  var uscite  = movimenti.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
+
+  var dataLbl = (typeof fmtD==='function') ? fmtD(iso) : iso;
+  var header = '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px 8px 0 0;border-bottom:none">';
+  header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + dataLbl + '</div>';
+  header += '<button class="btn-edit" style="font-size:11px;padding:3px 10px" onclick="_ggMostraDettaglio(\'' + iso + '\')" title="Chiudi">✕</button>';
+  header += '</div>';
+
+  var body;
+  if (typeof _movRenderBlocchi === 'function') {
+    body = '<div style="padding:12px 14px;border:0.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;background:var(--bg-card)">';
+    body += _movRenderBlocchi(entrate, uscite, true, true, 'compact');
+    body += '</div>';
+  } else {
+    body = '<div style="padding:16px;color:#A32D2D">Errore: funzione di rendering non trovata. Ricarica la pagina.</div>';
+  }
+
+  box.innerHTML = header + body;
 }
 
 function _ggRicalcola(prod) {
