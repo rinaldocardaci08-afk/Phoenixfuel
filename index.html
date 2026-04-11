@@ -837,7 +837,12 @@
                   <option value="dettaglio">Solo Dettaglio</option>
                 </select>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="stampaReportAnnuale()">📊 Report PDF</button>
-                <select id="vann-anno" onchange="caricaVenditeAnnuali()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+                <select id="vann-anno" onchange="cambiaAnnoVenditeAnnuali()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
+                <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px">Dal</span>
+                <input type="date" id="vann-da" onchange="caricaVenditeAnnuali()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"/>
+                <span style="font-size:11px;color:var(--text-muted);font-weight:500">al</span>
+                <input type="date" id="vann-a" onchange="caricaVenditeAnnuali()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"/>
+                <button class="btn-primary" style="font-size:11px;padding:6px 10px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="resetVenditeAnnualiPeriodo()" title="Ripristina inizio anno → oggi">↺</button>
               </div>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ingrosso (ordini clienti) + Dettaglio (letture pompe stazione). Litri e fatturato imponibile per mese.</div>
@@ -2312,7 +2317,7 @@
 <script src="pf-config.js?v=1775149951158"></script>
 <script src="pf-ordini.js?v=1775149951158"></script>
 <script src="pf-deposito.js?v=1775149951158"></script>
-<script src="pf-anagrafica.js?v=1775149951158"></script>
+<script src="pf-anagrafica.js?v=20260411b"></script>
 <script src="pf-fornitore-analisi.js?v=1775149951158"></script>
 <script src="pf-stz-core.js?v=1775149951158"></script>
 <script src="pf-stz-letture.js?v=1775149951158"></script>

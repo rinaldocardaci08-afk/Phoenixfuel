@@ -750,8 +750,23 @@ async function caricaVenditeAnnuali() {
   const anno = parseInt(selAnno.value);
   if (!anno) return;
 
-  const da = anno + '-01-01';
-  const a = anno + '-12-31';
+  // === Filtro periodo da/a ===
+  // Default: 01/01/anno → oggi (se anno corrente) oppure 31/12/anno (se anni passati/futuri)
+  const inpDa = document.getElementById('vann-da');
+  const inpA  = document.getElementById('vann-a');
+  const oggiISO = oggi.toISOString().split('T')[0];
+  const annoCorrente = oggi.getFullYear();
+  const defaultDa = anno + '-01-01';
+  const defaultA  = (anno === annoCorrente) ? oggiISO : (anno + '-12-31');
+  // Se input vuoti o l'anno selezionato non corrisponde alle date negli input → ripristina default
+  const annoInDa = (inpDa && inpDa.value) ? parseInt(inpDa.value.substring(0,4)) : null;
+  const annoInA  = (inpA  && inpA.value)  ? parseInt(inpA.value.substring(0,4))  : null;
+  if (!inpDa.value || !inpA.value || annoInDa !== anno || annoInA !== anno) {
+    inpDa.value = defaultDa;
+    inpA.value  = defaultA;
+  }
+  const da = inpDa.value;
+  const a  = inpA.value;
 
   // Ingrosso: ordini tipo_ordine='cliente'
   let allIng = [];
@@ -832,7 +847,7 @@ async function caricaVenditeAnnuali() {
   }
 
   // Salva dati per filtro vista
-  window._annualeData = { mesi: mesi, anno: anno };
+  window._annualeData = { mesi: mesi, anno: anno, da: da, a: a };
   _renderTabellaAnnuale();
 
   // Grafici
@@ -844,7 +859,7 @@ async function caricaVenditeAnnuali() {
       type:'bar', data:{ labels:labelsM, datasets:[
         { label:'Ingrosso', data:mesi.map(m=>Math.round(m.ingFatt)), backgroundColor:'#D4A017', borderRadius:4 },
         { label:'Dettaglio', data:mesi.map(m=>Math.round(m.dettInc)), backgroundColor:'#6B5FCC', borderRadius:4 }
-      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>fmtE(v)}},x:{stacked:true}} }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}},x:{}} }
     });
   }
   const ctxL = document.getElementById('chart-ann-litri');
@@ -854,7 +869,7 @@ async function caricaVenditeAnnuali() {
       type:'bar', data:{ labels:labelsM, datasets:[
         { label:'Ingrosso', data:mesi.map(m=>Math.round(m.ingLitri)), backgroundColor:'#D4A017', borderRadius:4 },
         { label:'Dettaglio', data:mesi.map(m=>Math.round(m.dettLitri)), backgroundColor:'#6B5FCC', borderRadius:4 }
-      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,stacked:true,ticks:{callback:v=>fmtL(v)}},x:{stacked:true}} }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v)}},x:{}} }
     });
   }
 }
@@ -862,6 +877,15 @@ async function caricaVenditeAnnuali() {
 function _renderTabellaAnnuale() {
   var d = window._annualeData; if (!d) return;
   var mesi = d.mesi, anno = d.anno;
+  // Label totale: se range = anno intero → "TOTALE anno", altrimenti "TOTALE gg/mm/aaaa — gg/mm/aaaa"
+  var rangePieno = (d.da === anno + '-01-01' && d.a === anno + '-12-31');
+  var labelTot;
+  if (rangePieno) {
+    labelTot = 'TOTALE ' + anno;
+  } else {
+    var _fd = function(iso){ var p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; };
+    labelTot = 'TOTALE ' + _fd(d.da) + ' — ' + _fd(d.a);
+  }
   var vista = (document.getElementById('vann-vista') || {}).value || 'totale';
   var thead = document.getElementById('thead-vend-annuale');
   var tbody = document.getElementById('tabella-vend-annuale');
@@ -877,7 +901,7 @@ function _renderTabellaAnnuale() {
       return '<tr' + (!m.ingLitri?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="'+mono+'">' + fmtL(m.ingLitri) + '</td><td style="'+mono+'">' + fmtE(m.ingFatt) + '</td><td style="'+mono+';color:'+mc+'">' + fmtE(m.ingMarg) + '</td><td style="'+mono+';color:'+mc+'">' + mpl + '</td></tr>';
     }).join('');
     var tc = tM >= 0 ? '#639922' : '#E24B4A';
-    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE '+anno+'</td><td style="'+mono+'">'+fmtL(tL)+'</td><td style="'+mono+'">'+fmtE(tF)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+'">'+fmtL(tL)+'</td><td style="'+mono+'">'+fmtE(tF)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
   } else if (vista === 'dettaglio') {
     thead.innerHTML = '<tr><th>Mese</th><th>Litri</th><th>Incasso netto</th><th>Margine</th><th>€/L margine</th></tr>';
     var tL=0,tI=0,tM=0;
@@ -888,7 +912,7 @@ function _renderTabellaAnnuale() {
       return '<tr' + (!m.dettLitri?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="'+mono+';color:#6B5FCC">' + fmtL(m.dettLitri) + '</td><td style="'+mono+';color:#6B5FCC">' + fmtE(m.dettInc) + '</td><td style="'+mono+';color:'+mc+'">' + fmtE(m.dettMarg) + '</td><td style="'+mono+';color:'+mc+'">' + mpl + '</td></tr>';
     }).join('');
     var tc = tM >= 0 ? '#639922' : '#E24B4A';
-    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE '+anno+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(tL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(tI)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(tL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(tI)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
   } else {
     thead.innerHTML = '<tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Margine dettaglio</th><th>Totale litri</th><th>Totale fatturato</th><th>Totale margine</th></tr>';
     var totIL=0,totIF=0,totIM=0,totDL=0,totDI=0,totDM=0,totTL=0,totTF=0,totTM=0;
@@ -900,11 +924,33 @@ function _renderTabellaAnnuale() {
       return '<tr'+ (!hasData?' style="opacity:0.4"':'') +'><td><strong>'+m.mese+'</strong></td><td style="'+mono+'">'+fmtL(m.ingLitri)+'</td><td style="'+mono+'">'+fmtE(m.ingFatt)+'</td><td style="'+mono+';color:#639922">'+fmtE(m.ingMarg)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(m.dettLitri)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(m.dettInc)+'</td><td style="'+mono+';color:'+dmColor+'">'+fmtE(m.dettMarg)+'</td><td style="'+mono+';font-weight:500">'+fmtL(m.totLitri)+'</td><td style="'+mono+';font-weight:500">'+fmtE(m.totFatt)+'</td><td style="'+mono+';font-weight:bold;color:'+tmColor+'">'+fmtE(m.totMarg)+'</td></tr>';
     }).join('');
     var tmTotColor = totTM >= 0 ? '#639922' : '#E24B4A';
-    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE '+anno+'</td><td style="'+mono+'">'+fmtL(totIL)+'</td><td style="'+mono+'">'+fmtE(totIF)+'</td><td style="'+mono+';color:#639922">'+fmtE(totIM)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(totDL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(totDI)+'</td><td style="'+mono+';color:#639922">'+fmtE(totDM)+'</td><td style="'+mono+'">'+fmtL(totTL)+'</td><td style="'+mono+'">'+fmtE(totTF)+'</td><td style="'+mono+';font-weight:bold;color:'+tmTotColor+'">'+fmtE(totTM)+'</td></tr>';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+'">'+fmtL(totIL)+'</td><td style="'+mono+'">'+fmtE(totIF)+'</td><td style="'+mono+';color:#639922">'+fmtE(totIM)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(totDL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(totDI)+'</td><td style="'+mono+';color:#639922">'+fmtE(totDM)+'</td><td style="'+mono+'">'+fmtL(totTL)+'</td><td style="'+mono+'">'+fmtE(totTF)+'</td><td style="'+mono+';font-weight:bold;color:'+tmTotColor+'">'+fmtE(totTM)+'</td></tr>';
   }
 }
 
 function filtraVistaAnnuale() { _renderTabellaAnnuale(); }
+
+// Cambio anno: azzera i campi data così caricaVenditeAnnuali ripristina i default per il nuovo anno
+function cambiaAnnoVenditeAnnuali() {
+  var inpDa = document.getElementById('vann-da');
+  var inpA  = document.getElementById('vann-a');
+  if (inpDa) inpDa.value = '';
+  if (inpA)  inpA.value  = '';
+  caricaVenditeAnnuali();
+}
+
+// Ripristina periodo: 01/01/anno → oggi (anno corrente) o 31/12/anno (anni passati)
+function resetVenditeAnnualiPeriodo() {
+  var selAnno = document.getElementById('vann-anno');
+  if (!selAnno || !selAnno.value) return;
+  var anno = parseInt(selAnno.value);
+  var inpDa = document.getElementById('vann-da');
+  var inpA  = document.getElementById('vann-a');
+  var oggiISO = oggi.toISOString().split('T')[0];
+  inpDa.value = anno + '-01-01';
+  inpA.value  = (anno === oggi.getFullYear()) ? oggiISO : (anno + '-12-31');
+  caricaVenditeAnnuali();
+}
 
 // ── REPORT PDF DETTAGLIO ─────────────────────────────────────────
 async function stampaReportDettaglio() {
