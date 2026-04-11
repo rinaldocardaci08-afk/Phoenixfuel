@@ -932,18 +932,67 @@ async function caricaGiacenzeGiornaliere() {
     (arr||[]).forEach(function(o) { usciteMap[o.prodotto] = (usciteMap[o.prodotto]||0) + Number(o.litri); });
   });
 
-  // Colori prodotti
-  var coloriProd = { 'Gasolio Autotrazione':'#D4A017', 'Benzina':'#639922', 'Gasolio Agricolo':'#6B5FCC', 'HVO':'#1D9E75' };
-
-  // Render form per ogni prodotto
+  // Render tabella compatta multi-prodotto
   _ggDatiGiorno = {};
-  var h = '<div style="display:grid;gap:10px;margin-top:12px">';
-  _ggProdotti.forEach(function(prod) {
+
+  // Header con frecce di navigazione + label Oggi/Ieri/Domani
+  var dataObj = new Date(data + 'T00:00:00');
+  var oggiObj = new Date(oggiISO + 'T00:00:00');
+  var diffGg = Math.round((dataObj - oggiObj) / 86400000);
+  var labelRel = '';
+  if (diffGg === 0) labelRel = 'Oggi';
+  else if (diffGg === -1) labelRel = 'Ieri';
+  else if (diffGg === 1) labelRel = 'Domani';
+  else if (diffGg === -2) labelRel = 'L\'altro ieri';
+  else if (diffGg === 2) labelRel = 'Dopodomani';
+  else if (diffGg < 0) labelRel = Math.abs(diffGg) + ' giorni fa';
+  else labelRel = 'Tra ' + diffGg + ' giorni';
+  var giorniSett = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+  var labelGiorno = giorniSett[dataObj.getDay()] + ' ' + dataObj.toLocaleDateString('it-IT');
+
+  var h = '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-top:12px">';
+
+  // Barra navigazione giorno
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:0.5px solid var(--border);background:var(--bg-card)">';
+  h += '<div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">' + labelRel + '</div>';
+  h += '<div style="font-size:15px;font-weight:500;margin-top:2px">' + labelGiorno + '</div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:6px">';
+  h += '<button onclick="_ggCambiaGiorno(-1)" title="Giorno precedente" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">‹</button>';
+  h += '<button onclick="_ggVaiOggi()" title="Vai a oggi" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;color:var(--text)">Oggi</button>';
+  h += '<button onclick="_ggCambiaGiorno(1)" title="Giorno successivo" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">›</button>';
+  h += '</div>';
+  h += '</div>';
+
+  // Tabella prodotti
+  h += '<div style="overflow-x:auto">';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+  h += '<thead><tr style="background:var(--bg-card)">';
+  h += '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Prodotto</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Apertura</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:#185FA5;text-transform:uppercase;letter-spacing:0.4px">+ Entrate</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:#A32D2D;text-transform:uppercase;letter-spacing:0.4px">− Uscite</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Δ giorno</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">+/− Cali</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Teorica</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Rilevata</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Differenza</th>';
+  h += '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Note</th>';
+  h += '</tr></thead><tbody>';
+
+  // Ordine fisso prodotti: Gasolio Autotrazione → Benzina → Gasolio Agricolo → HVO
+  var ordineProdotti = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
+  var prodottiOrdinati = ordineProdotti.filter(function(p) { return _ggProdotti.indexOf(p) >= 0; });
+  _ggProdotti.forEach(function(p) { if (prodottiOrdinati.indexOf(p) < 0) prodottiOrdinati.push(p); });
+
+  prodottiOrdinati.forEach(function(prod) {
     var pi = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===prod;}) : null;
     var col = pi ? pi.colore : (coloriProd[prod] || '#888');
     var inizio = precMap[prod] || prodMap[prod]?.attuale || 0;
     var ent = entrateMap[prod] || 0;
     var usc = usciteMap[prod] || 0;
+    var deltaGiornoVal = ent - usc;
     var salvata = oggiMap[prod];
     var caliEcc = salvata ? Number(salvata.cali_eccedenze || 0) : 0;
     var teorica = Math.round(inizio + ent - usc + caliEcc);
@@ -953,29 +1002,32 @@ async function caricaGiacenzeGiornaliere() {
 
     _ggDatiGiorno[prod] = { inizio:inizio, entrate:ent, uscite:usc, caliEcc:caliEcc, teorica:teorica };
 
-    h += '<div style="background:var(--bg);border:0.5px solid var(--border);padding:14px 18px;border-left:4px solid ' + col + ';border-radius:0">';
-    h += '<div style="font-size:13px;font-weight:500;margin-bottom:10px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + esc(prod) + '</div>';
+    var colDelta, txtDelta;
+    if (deltaGiornoVal > 0) { colDelta = '#639922'; txtDelta = '+' + fmtL(deltaGiornoVal); }
+    else if (deltaGiornoVal < 0) { colDelta = '#A32D2D'; txtDelta = fmtL(deltaGiornoVal); }
+    else { colDelta = 'var(--text-muted)'; txtDelta = '—'; }
 
-    // Riga 1: 5 colonne (inizio, entrate, uscite, cali/ecc input, teorica)
-    h += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px">';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Giac. inizio</div><div style="font-family:var(--font-mono);font-size:15px;font-weight:500">' + fmtL(inizio) + '</div></div>';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">+ Entrate</div><div style="font-family:var(--font-mono);font-size:15px;color:#639922;font-weight:500">' + fmtL(ent) + '</div></div>';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">- Uscite</div><div style="font-family:var(--font-mono);font-size:15px;color:#A32D2D;font-weight:500">' + fmtL(usc) + '</div></div>';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">+/- Cali / eccedenze</div>';
-    h += '<input type="number" class="gg-cali" data-prodotto="' + esc(prod) + '" value="' + caliEcc + '" step="1" oninput="_ggRicalcola(\'' + esc(prod) + '\')" style="width:100%;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:' + (caliEcc >= 0 ? (caliEcc > 0 ? '#639922' : 'var(--text)') : '#A32D2D') + '" /></div>';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">= Teorica</div><div class="gg-teorica-display" data-prodotto="' + esc(prod) + '" style="font-family:var(--font-mono);font-size:15px;font-weight:600">' + fmtL(teorica) + '</div></div>';
-    h += '</div>';
-
-    // Riga 2: rilevata, differenza, note
-    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Giacenza rilevata (asta)</div>';
-    h += '<input type="number" class="gg-rilevata" data-prodotto="' + esc(prod) + '" value="' + rilevata + '" placeholder="' + teorica + '" step="1" oninput="_ggCalcDiff(\'' + esc(prod) + '\')" style="width:100%;font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text)" /></div>';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Differenza</div>';
-    h += '<div class="gg-diff-display" data-prodotto="' + esc(prod) + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:8px 0;color:' + (diff !== null ? (diff >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)') + '">' + (diff !== null ? (diff >= 0 ? '+' : '') + fmtL(diff) : '—') + '</div></div>';
-    h += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Note</div>';
-    h += '<input type="text" class="gg-nota" data-prodotto="' + esc(prod) + '" value="' + esc(nota) + '" placeholder="Es. inventario fisico" style="width:100%;font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg-card);color:var(--text)" /></div>';
-    h += '</div></div>';
+    h += '<tr style="border-top:0.5px solid var(--border)">';
+    h += '<td style="padding:12px 14px;font-weight:500;border-left:3px solid ' + col + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + esc(prod) + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtL(inizio) + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;color:' + (ent>0?'#185FA5':'var(--text-muted)') + '">' + (ent>0?'+':'') + fmtL(ent) + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;color:' + (usc>0?'#A32D2D':'var(--text-muted)') + '">' + (usc>0?'−':'') + fmtL(usc) + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + colDelta + '">' + txtDelta + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right">';
+    h += '<input type="number" class="gg-cali" data-prodotto="' + esc(prod) + '" value="' + caliEcc + '" step="1" oninput="_ggRicalcola(\'' + esc(prod) + '\')" style="width:80px;font-family:var(--font-mono);font-size:12px;padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:' + (caliEcc>=0?(caliEcc>0?'#639922':'var(--text)'):'#A32D2D') + ';text-align:right" />';
+    h += '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600"><span class="gg-teorica-display" data-prodotto="' + esc(prod) + '">' + fmtL(teorica) + '</span></td>';
+    h += '<td style="padding:12px 10px;text-align:right">';
+    h += '<input type="number" class="gg-rilevata" data-prodotto="' + esc(prod) + '" value="' + rilevata + '" placeholder="' + teorica + '" step="1" oninput="_ggCalcDiff(\'' + esc(prod) + '\')" style="width:90px;font-family:var(--font-mono);font-size:14px;font-weight:600;padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);text-align:right" />';
+    h += '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:600"><span class="gg-diff-display" data-prodotto="' + esc(prod) + '" style="color:' + (diff!==null?(diff>=0?'#639922':'#A32D2D'):'var(--text-muted)') + '">' + (diff!==null?(diff>=0?'+':'')+fmtL(diff):'—') + '</span></td>';
+    h += '<td style="padding:12px 14px">';
+    h += '<input type="text" class="gg-nota" data-prodotto="' + esc(prod) + '" value="' + esc(nota) + '" placeholder="—" style="width:100%;min-width:140px;font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />';
+    h += '</td>';
+    h += '</tr>';
   });
+
+  h += '</tbody></table></div>';
   h += '</div>';
 
   // Alert box (nascosto, si mostra al salvataggio)
@@ -988,6 +1040,23 @@ async function caricaGiacenzeGiornaliere() {
 
   // Registro
   caricaRegistroGiornaliero();
+}
+
+function _ggCambiaGiorno(deltaGiorni) {
+  var dataEl = document.getElementById('gg-data');
+  if (!dataEl) return;
+  var corr = dataEl.value || oggiISO;
+  var nuovaData = new Date(corr + 'T00:00:00');
+  nuovaData.setDate(nuovaData.getDate() + deltaGiorni);
+  dataEl.value = nuovaData.toISOString().split('T')[0];
+  caricaGiacenzeGiornaliere();
+}
+
+function _ggVaiOggi() {
+  var dataEl = document.getElementById('gg-data');
+  if (!dataEl) return;
+  dataEl.value = oggiISO;
+  caricaGiacenzeGiornaliere();
 }
 
 function _ggRicalcola(prod) {

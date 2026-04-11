@@ -393,6 +393,13 @@ function _dgwRender() {
     html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.entrate>0?colEntrate:txtM)+'">'+fmtL(s.entrate)+'</div>';
     html += '<div style="font-size:10px;color:'+colUscite+'">− Uscite</div>';
     html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.uscite>0?colUscite:txtM)+'">'+fmtL(s.uscite)+'</div>';
+    var deltaGiorno = Math.round((Number(s.entrate)||0) - (Number(s.uscite)||0));
+    var colDeltaG, txtDeltaG;
+    if (deltaGiorno > 0) { colDeltaG = colEntrate; txtDeltaG = '+'+fmtL(deltaGiorno); }
+    else if (deltaGiorno < 0) { colDeltaG = colUscite; txtDeltaG = fmtL(deltaGiorno); }
+    else { colDeltaG = txtM; txtDeltaG = '—'; }
+    html += '<div style="font-size:10px;color:'+txtM+';margin-top:3px">Δ giorno</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:'+colDeltaG+'">'+txtDeltaG+'</div>';
     html += '<div style="border-top:1px solid '+bordoCella+';margin:6px 0"></div>';
     html += '<div style="font-size:10px;color:'+txtM+'">Calcolata</div>';
     html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:'+colCalcolata+'">'+fmtL(s.calcolata)+'</div>';
