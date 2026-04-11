@@ -123,13 +123,12 @@ async function generaAnalisiFornitore(nomiFornitori, dal, al) {
   var basiMap = {};
   basi.forEach(function(b) { basiMap[b.id] = b; });
 
-  // Scrivi l'HTML iniziale della nuova finestra
+  // Scrivi l'HTML iniziale della nuova finestra (SOLO struttura, NO script inline)
   var titolo = nomiFornitori.length === 1 
     ? 'Analisi fornitore — ' + nomiFornitori[0]
     : 'Confronto fornitori — ' + nomiFornitori.join(' vs ');
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + _esc(titolo) + '</title>';
-  html += '<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></' + 'script>';
   html += '<style>';
   html += 'body{font-family:Arial,sans-serif;font-size:12px;margin:0;padding:16mm;color:#1a1a18;background:#fafaf5}';
   html += '@media print{@page{size:portrait;margin:10mm}.no-print{display:none!important}.section{page-break-inside:avoid}}';
@@ -169,10 +168,33 @@ async function generaAnalisiFornitore(nomiFornitori, dal, al) {
   // Footer + bottoni
   html += '<div style="margin-top:20px;font-size:9px;color:#999;text-align:center;border-top:1px solid #eee;padding-top:8px">Phoenix Fuel SRL · Analisi interna fornitori · Dati estratti da gestionale PhoenixFuel</div>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D4A017;color:#fff">🖨️ Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div>';
-  html += '<script>' + _afScriptRender(nomiFornitori, fornitori, ordini, basiMap) + '</' + 'script>';
   html += '</body></html>';
 
-  w.document.open(); w.document.write(html); w.document.close();
+  // Step 1: scrivi solo l'HTML statico (senza script Chart.js né rendering)
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+
+  // Step 2: prepara i dati e la funzione di rendering nella finestra figlio
+  // SENZA passare per JSON.stringify dentro un <script> HTML (evita corruption)
+  w._afData = _afPreparaDati(nomiFornitori, fornitori, ordini, basiMap);
+  w._afRenderCharts = _afRenderChartsFn();
+
+  // Step 3: carica Chart.js dinamicamente nella finestra figlio
+  // (niente document.write, niente parser HTML, usa le DOM API)
+  var script = w.document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4';
+  script.onload = function() {
+    try {
+      w._afRenderCharts(w);
+    } catch(e) {
+      console.error('Errore rendering grafici:', e);
+    }
+  };
+  script.onerror = function() {
+    console.error('Impossibile caricare Chart.js dal CDN');
+  };
+  w.document.head.appendChild(script);
 }
 
 // ─── RENDER SINGOLO FORNITORE ──────────────────────────────────────
@@ -563,28 +585,26 @@ function _afRenderConfronto(nomi, fornitori, ordini, basiMap) {
   return h;
 }
 
-// ─── SCRIPT DI RENDER CHART (eseguito nella nuova finestra) ────────
-function _afScriptRender(nomi, fornitori, ordini, basiMap) {
-  // Serializza i dati necessari al rendering dei chart
-  var datiChart = {
+// ─── PREPARA DATI PER I GRAFICI (oggetto JS puro, no serializzazione) ──
+function _afPreparaDati(nomi, fornitori, ordini, basiMap) {
+  var dati = {
     nomi: nomi,
     isConfronto: nomi.length > 1
   };
 
-  // Estrai mesi e prodotti (comuni a entrambe le modalità)
+  // Estrai mesi e prodotti
   var mesiSet = new Set();
   var prodottiSet = new Set();
   ordini.forEach(function(o) { mesiSet.add(_afMese(o.data)); prodottiSet.add(o.prodotto); });
   var mesi = Array.from(mesiSet).sort();
   var prodotti = Array.from(prodottiSet).sort();
 
-  datiChart.mesi = mesi;
-  datiChart.mesiLabel = mesi.map(function(m) { return _afFormattaMese(m); });
-  datiChart.prodotti = prodotti;
+  dati.mesi = mesi;
+  dati.mesiLabel = mesi.map(function(m) { return _afFormattaMese(m); });
+  dati.prodotti = prodotti;
 
   if (nomi.length === 1) {
-    // Singolo: line chart multi-prodotto + donut prodotti
-    var dataMeseProd = {}; // {mese: {prodotto: litri}}
+    var dataMeseProd = {};
     var dataProd = {};
     ordini.forEach(function(o) {
       var m = _afMese(o.data);
@@ -592,15 +612,12 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
       dataMeseProd[m][o.prodotto] = (dataMeseProd[m][o.prodotto] || 0) + Number(o.litri||0);
       dataProd[o.prodotto] = (dataProd[o.prodotto] || 0) + Number(o.litri||0);
     });
-    datiChart.dataMeseProd = dataMeseProd;
-    datiChart.dataProd = dataProd;
+    dati.dataMeseProd = dataMeseProd;
+    dati.dataProd = dataProd;
   } else {
-    // Confronto: 2 grafici
-    // 1) Litri totali per fornitore per mese (1 linea per fornitore)
     var perFornMese = {};
     nomi.forEach(function(n) { perFornMese[n] = {}; mesi.forEach(function(m) { perFornMese[n][m] = 0; }); });
-    // 2) Litri per (fornitore × prodotto) per mese (linee separate)
-    var perFornProdMese = {}; // {fornitore: {prodotto: {mese: litri}}}
+    var perFornProdMese = {};
     nomi.forEach(function(n) {
       perFornProdMese[n] = {};
       prodotti.forEach(function(p) {
@@ -615,74 +632,139 @@ function _afScriptRender(nomi, fornitori, ordini, basiMap) {
         perFornProdMese[o.fornitore][o.prodotto][m] += Number(o.litri||0);
       }
     });
-    datiChart.perFornMese = perFornMese;
-    datiChart.perFornProdMese = perFornProdMese;
-    datiChart.colori = nomi.map(function(n, i) { return _afColoreFornitore(n, i, fornitori); });
+    dati.perFornMese = perFornMese;
+    dati.perFornProdMese = perFornProdMese;
+    dati.colori = nomi.map(function(n, i) { return _afColoreFornitore(n, i, fornitori); });
   }
 
-  // Colori per prodotto (coerenti con il resto del progetto)
-  var coloriProdotti = { 'Gasolio Autotrazione':'#BA7517', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC', 'AdBlue':'#0088CC' };
+  // Colori prodotti
+  dati.coloriProdotti = { 'Gasolio Autotrazione':'#BA7517', 'Benzina':'#378ADD', 'Gasolio Agricolo':'#639922', 'HVO':'#6B5FCC', 'AdBlue':'#0088CC' };
 
-  return 'var D = ' + JSON.stringify(datiChart) + ';' +
-    'var CP = ' + JSON.stringify(coloriProdotti) + ';' +
-    // Stili dash per distinguere fornitori nel grafico prodotto×fornitore
-    'var DASH = [[], [8,4], [2,3], [10,4,2,4], [6,2,2,2]];' +
-    // Polling: aspetta che Chart.js sia caricato (lo script è iniettato via document.write
-    // quindi window.load potrebbe già essere stato emesso e addEventListener non scatterebbe)
-    'function _afRender() {' +
-    '  if (D.isConfronto) {' +
-    '    // GRAFICO 1 — totali per fornitore (1 linea per fornitore)' +
-    '    var ctx = document.getElementById("af-chart-linee");' +
-    '    if (ctx) {' +
-    '      var datasets = D.nomi.map(function(n, i) {' +
-    '        return { label: n, data: D.mesi.map(function(m){ return D.perFornMese[n][m] || 0; }), borderColor: D.colori[i], backgroundColor: D.colori[i]+"22", borderWidth: 3, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, fill: false };' +
-    '      });' +
-    '      new Chart(ctx, { type: "line", data: { labels: D.mesiLabel, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 11 } } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
-    '    }' +
-    '    // GRAFICO 2 — linee separate per (fornitore × prodotto)' +
-    '    var ctx2 = document.getElementById("af-chart-prodforn");' +
-    '    if (ctx2) {' +
-    '      var datasets2 = [];' +
-    '      D.nomi.forEach(function(n, fi) {' +
-    '        D.prodotti.forEach(function(p) {' +
-    '          var data = D.mesi.map(function(m) { return (D.perFornProdMese[n] && D.perFornProdMese[n][p] && D.perFornProdMese[n][p][m]) || 0; });' +
-    '          var hasData = data.some(function(v) { return v > 0; });' +
-    '          if (!hasData) return;' +
-    '          datasets2.push({ label: n + " · " + p, data: data, borderColor: CP[p] || "#888", backgroundColor: (CP[p] || "#888") + "22", borderWidth: 2.5, borderDash: DASH[fi % DASH.length], tension: 0.3, pointRadius: 3, pointHoverRadius: 5, fill: false });' +
-    '        });' +
-    '      });' +
-    '      new Chart(ctx2, { type: "line", data: { labels: D.mesiLabel, datasets: datasets2 }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 10 }, boxWidth: 24 } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
-    '    }' +
-    '  } else {' +
-    '    // SINGOLO — line chart multi-prodotto (NON stacked)' +
-    '    var ctx1 = document.getElementById("af-chart-mese-prod");' +
-    '    if (ctx1) {' +
-    '      var datasets = D.prodotti.map(function(p) {' +
-    '        var data = D.mesi.map(function(m) { return (D.dataMeseProd[m] && D.dataMeseProd[m][p]) || 0; });' +
-    '        var hasData = data.some(function(v) { return v > 0; });' +
-    '        if (!hasData) return null;' +
-    '        return { label: p, data: data, borderColor: CP[p] || "#888", backgroundColor: (CP[p] || "#888") + "22", borderWidth: 3, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, fill: false };' +
-    '      }).filter(function(d){return d!==null;});' +
-    '      new Chart(ctx1, { type: "line", data: { labels: D.mesiLabel, datasets: datasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top", labels: { font: { size: 11 } } }, tooltip: { callbacks: { label: function(c) { return c.dataset.label + ": " + Number(c.parsed.y).toLocaleString("it-IT") + " L"; } } } }, scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return Number(v).toLocaleString("it-IT") + " L"; } } } } } });' +
-    '    }' +
-    '    // Donut prodotti' +
-    '    var ctx3 = document.getElementById("af-chart-prodotti");' +
-    '    if (ctx3) {' +
-    '      var labels = Object.keys(D.dataProd);' +
-    '      var data = labels.map(function(p) { return D.dataProd[p]; });' +
-    '      var colors = labels.map(function(p) { return CP[p] || "#888"; });' +
-    '      new Chart(ctx3, { type: "doughnut", data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: "#fff" }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { font: { size: 10 }, padding: 8 } } } } });' +
-    '    }' +
-    '  }' +
-    '}' +
-    // Polling: prova ogni 100ms finché Chart è disponibile, max 50 tentativi (5 secondi)
-    'var _afTries = 0;' +
-    'function _afWait() {' +
-    '  if (typeof Chart !== "undefined") { try { _afRender(); } catch(e) { console.error("Errore rendering grafici:", e); } return; }' +
-    '  if (++_afTries > 50) { console.warn("Chart.js non caricato dopo 5 secondi"); return; }' +
-    '  setTimeout(_afWait, 100);' +
-    '}' +
-    '_afWait();';
+  return dati;
+}
+
+// ─── FUNZIONE DI RENDERING (riceve la finestra figlio, legge w._afData) ──
+function _afRenderChartsFn() {
+  return function(w) {
+    var D = w._afData;
+    var CP = D.coloriProdotti;
+    var Chart = w.Chart;
+    var DASH = [[], [8,4], [2,3], [10,4,2,4], [6,2,2,2]];
+
+    function commonOpts() {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top', labels: { font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: function(c) { return c.dataset.label + ': ' + Number(c.parsed.y).toLocaleString('it-IT') + ' L'; }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { callback: function(v) { return Number(v).toLocaleString('it-IT') + ' L'; } }
+          }
+        }
+      };
+    }
+
+    if (D.isConfronto) {
+      // GRAFICO 1 — totali per fornitore
+      var ctx = w.document.getElementById('af-chart-linee');
+      if (ctx) {
+        var datasets1 = D.nomi.map(function(n, i) {
+          return {
+            label: n,
+            data: D.mesi.map(function(m){ return D.perFornMese[n][m] || 0; }),
+            borderColor: D.colori[i],
+            backgroundColor: D.colori[i] + '22',
+            borderWidth: 3,
+            tension: 0.3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: false
+          };
+        });
+        new Chart(ctx, { type: 'line', data: { labels: D.mesiLabel, datasets: datasets1 }, options: commonOpts() });
+      }
+
+      // GRAFICO 2 — linee per (fornitore × prodotto)
+      var ctx2 = w.document.getElementById('af-chart-prodforn');
+      if (ctx2) {
+        var datasets2 = [];
+        D.nomi.forEach(function(n, fi) {
+          D.prodotti.forEach(function(p) {
+            var data = D.mesi.map(function(m) {
+              return (D.perFornProdMese[n] && D.perFornProdMese[n][p] && D.perFornProdMese[n][p][m]) || 0;
+            });
+            var hasData = data.some(function(v) { return v > 0; });
+            if (!hasData) return;
+            datasets2.push({
+              label: n + ' · ' + p,
+              data: data,
+              borderColor: CP[p] || '#888',
+              backgroundColor: (CP[p] || '#888') + '22',
+              borderWidth: 2.5,
+              borderDash: DASH[fi % DASH.length],
+              tension: 0.3,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              fill: false
+            });
+          });
+        });
+        var opts2 = commonOpts();
+        opts2.plugins.legend.labels.boxWidth = 24;
+        opts2.plugins.legend.labels.font = { size: 10 };
+        new Chart(ctx2, { type: 'line', data: { labels: D.mesiLabel, datasets: datasets2 }, options: opts2 });
+      }
+    } else {
+      // SINGOLO — line chart multi-prodotto
+      var ctx1 = w.document.getElementById('af-chart-mese-prod');
+      if (ctx1) {
+        var datasets = D.prodotti.map(function(p) {
+          var data = D.mesi.map(function(m) {
+            return (D.dataMeseProd[m] && D.dataMeseProd[m][p]) || 0;
+          });
+          var hasData = data.some(function(v) { return v > 0; });
+          if (!hasData) return null;
+          return {
+            label: p,
+            data: data,
+            borderColor: CP[p] || '#888',
+            backgroundColor: (CP[p] || '#888') + '22',
+            borderWidth: 3,
+            tension: 0.3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: false
+          };
+        }).filter(function(d) { return d !== null; });
+        new Chart(ctx1, { type: 'line', data: { labels: D.mesiLabel, datasets: datasets }, options: commonOpts() });
+      }
+
+      // Donut prodotti
+      var ctx3 = w.document.getElementById('af-chart-prodotti');
+      if (ctx3) {
+        var labels = Object.keys(D.dataProd);
+        var data = labels.map(function(p) { return D.dataProd[p]; });
+        var colors = labels.map(function(p) { return CP[p] || '#888'; });
+        new Chart(ctx3, {
+          type: 'doughnut',
+          data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 8 } } }
+          }
+        });
+      }
+    }
+  };
 }
 
 // Nota: _esc è già definito in pf-fatture.js, lo riuso globalmente.
