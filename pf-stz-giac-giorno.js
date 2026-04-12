@@ -176,31 +176,54 @@ function _stzGiornoRender() {
 
   var coloriProd = { 'Gasolio Autotrazione': '#D4A017', 'Benzina': '#639922', 'Gasolio Agricolo': '#6B5FCC', 'HVO': '#1D9E75' };
 
-  var h = '<div class="card">';
-  h += '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
-  h += '<span>📅 Giacenza giornaliera — stazione Oppido</span>';
-  h += '<div style="display:flex;gap:6px;align-items:center">';
-  h += '<label style="font-size:11px;color:var(--text-muted)">Data:</label>';
-  h += '<input type="date" id="stzg-data" value="' + d.data + '" onchange="caricaStzGiacenzaGiorno()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"/>';
-  h += '</div>';
-  h += '</div>';
-  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Vista read-only (step B.3.a.1). Salvataggio, frecce e banner nel prossimo step. Controlla la console del browser (F12) per verificare i numeri contro le sentinelle.</div>';
+  var dataObj = new Date(d.data + 'T00:00:00');
+  var oggiObj = new Date(oggiISO + 'T00:00:00');
+  var diffGg = Math.round((dataObj - oggiObj) / 86400000);
+  var labelRel = '';
+  if (diffGg === 0) labelRel = 'Oggi';
+  else if (diffGg === -1) labelRel = 'Ieri';
+  else if (diffGg === 1) labelRel = 'Domani';
+  else if (diffGg === -2) labelRel = 'L\'altro ieri';
+  else if (diffGg === 2) labelRel = 'Dopodomani';
+  else if (diffGg < 0) labelRel = Math.abs(diffGg) + ' giorni fa';
+  else labelRel = 'Tra ' + diffGg + ' giorni';
+  var giorniSett = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+  var labelGiorno = giorniSett[dataObj.getDay()] + ' ' + dataObj.toLocaleDateString('it-IT');
+
+  var inputDisabled = !d.letturePresenti;
+  var disabledAttr = inputDisabled ? ' disabled' : '';
+  var opacStyle = inputDisabled ? ';opacity:0.5' : '';
+
+  var h = '<div class="card" style="padding:0;overflow:hidden">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:0.5px solid var(--border);background:var(--bg-card);flex-wrap:wrap;gap:8px">';
+  h += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">' + labelRel + ' — stazione Oppido</div>';
+  h += '<div style="font-size:15px;font-weight:500;margin-top:2px">' + labelGiorno + '</div></div>';
+  h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+  h += '<input type="date" id="stzg-data" value="' + d.data + '" onchange="caricaStzGiacenzaGiorno()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-right:8px"/>';
+  h += '<button onclick="_stzgCambiaGiorno(-1)" title="Precedente" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">‹</button>';
+  h += '<button onclick="_stzgVaiOggi()" title="Oggi" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:11px;cursor:pointer;color:var(--text)">Oggi</button>';
+  h += '<button onclick="_stzgCambiaGiorno(1)" title="Successivo" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">›</button>';
+  h += '<button onclick="_stzgMostraDettaglio(\'' + d.data + '\')" title="Dettaglio movimenti" style="margin-left:6px;width:30px;height:30px;border-radius:50%;background:#378ADD;color:#fff;border:none;cursor:pointer;font-family:Georgia,serif;font-size:16px;font-weight:700;font-style:italic;line-height:1;padding:0;display:flex;align-items:center;justify-content:center">i</button>';
+  h += '</div></div>';
 
   if (!d.letturePresenti) {
-    h += '<div style="padding:10px 14px;background:rgba(186,117,23,0.1);border:0.5px solid #BA7517;border-radius:8px;margin-bottom:12px;font-size:12px;color:#BA7517">⚠️ Nessuna lettura pompe inserita per questo giorno. Le uscite mostrate sono 0 L.</div>';
+    h += '<div style="padding:12px 18px;background:rgba(186,117,23,0.1);border-bottom:0.5px solid #BA7517;display:flex;align-items:center;gap:10px">';
+    h += '<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#BA7517;color:#fff;font-weight:700;font-size:14px;flex-shrink:0">!</span>';
+    h += '<div style="font-size:12px;color:#BA7517">Lettura pompe non inserita per questo giorno. Le uscite mostrate sono <strong>0 L</strong>. <a href="javascript:void(0)" onclick="_stzgVaiATotalizzatori()" style="color:#BA7517;text-decoration:underline;font-weight:500">Vai a Totalizzatori</a></div>';
+    h += '</div>';
   }
 
-  h += '<div style="overflow-x:auto">';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-card)">';
-  h += '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Prodotto</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Apertura</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:#185FA5;text-transform:uppercase">+ Entrate</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:#A32D2D;text-transform:uppercase">− Uscite pompe</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Δ giorno</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Cali</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Teorica</th>';
-  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Rilevata</th>';
-  h += '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Differenza</th>';
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-card)">';
+  h += '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:500;color:var(--text-muted);text-transform:uppercase">Prodotto</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Apertura</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:#185FA5;text-transform:uppercase">+ Entrate</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:#A32D2D;text-transform:uppercase">− Uscite pompe</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Δ giorno</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Cali</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Teorica</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Rilevata</th>';
+  h += '<th style="text-align:right;padding:10px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Differenza</th>';
+  h += '<th style="text-align:left;padding:10px 14px;font-size:10px;color:var(--text-muted);text-transform:uppercase">Note</th>';
   h += '</tr></thead><tbody>';
 
   d.righe.forEach(function(r) {
@@ -209,22 +232,163 @@ function _stzGiornoRender() {
     if (r.delta > 0) { colDelta = '#639922'; txtDelta = '+' + fmtL(r.delta); }
     else if (r.delta < 0) { colDelta = '#A32D2D'; txtDelta = fmtL(r.delta); }
     else { colDelta = 'var(--text-muted)'; txtDelta = '—'; }
+    var pe = esc(r.prodotto);
 
     h += '<tr style="border-top:0.5px solid var(--border)">';
-    h += '<td style="padding:12px 14px;font-weight:500;border-left:3px solid ' + col + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + esc(r.prodotto) + '</td>';
+    h += '<td style="padding:12px 14px;font-weight:500;border-left:3px solid ' + col + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + col + ';margin-right:6px"></span>' + pe + '</td>';
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtL(r.apertura) + '</td>';
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;color:' + (r.entrate > 0 ? '#185FA5' : 'var(--text-muted)') + '">' + (r.entrate > 0 ? '+' : '') + fmtL(r.entrate) + '</td>';
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;color:' + (r.uscite > 0 ? '#A32D2D' : 'var(--text-muted)') + '">' + (r.uscite > 0 ? '−' : '') + fmtL(r.uscite) + '</td>';
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + colDelta + '">' + txtDelta + '</td>';
-    h += '<td style="padding:12px 10px;text-align:right"><input type="number" disabled value="' + r.caliEcc + '" style="width:70px;font-family:var(--font-mono);font-size:11px;padding:4px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text-muted);text-align:right;opacity:0.6"/></td>';
-    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmtL(r.teorica) + '</td>';
-    h += '<td style="padding:12px 10px;text-align:right"><input type="number" disabled value="' + r.rilevata + '" placeholder="' + r.teorica + '" style="width:80px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text-muted);text-align:right;opacity:0.6"/></td>';
-    h += '<td style="padding:12px 14px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + (r.differenza !== null ? (r.differenza >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)') + '">' + (r.differenza !== null ? (r.differenza >= 0 ? '+' : '') + fmtL(r.differenza) : '—') + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right"><input type="number" class="stzg-cali" data-prodotto="' + pe + '" value="' + r.caliEcc + '" step="1" oninput="_stzgRicalcola(\'' + pe + '\')" onchange="stzSalvaGiacenzaGiornoRiga(\'' + pe + '\')"' + disabledAttr + ' style="width:70px;font-family:var(--font-mono);font-size:11px;padding:4px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);text-align:right' + opacStyle + '"/></td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:600"><span class="stzg-teorica" data-prodotto="' + pe + '">' + fmtL(r.teorica) + '</span></td>';
+    h += '<td style="padding:12px 10px;text-align:right"><input type="number" class="stzg-rilevata" data-prodotto="' + pe + '" value="' + r.rilevata + '" placeholder="' + r.teorica + '" step="1" oninput="_stzgCalcDiff(\'' + pe + '\')" onchange="stzSalvaGiacenzaGiornoRiga(\'' + pe + '\')"' + disabledAttr + ' style="width:80px;font-family:var(--font-mono);font-size:12px;font-weight:600;padding:4px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);text-align:right' + opacStyle + '"/></td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:600"><span class="stzg-diff" data-prodotto="' + pe + '" style="color:' + (r.differenza !== null ? (r.differenza >= 0 ? '#639922' : '#A32D2D') : 'var(--text-muted)') + '">' + (r.differenza !== null ? (r.differenza >= 0 ? '+' : '') + fmtL(r.differenza) : '—') + '</span></td>';
+    h += '<td style="padding:12px 14px"><input type="text" class="stzg-nota" data-prodotto="' + pe + '" value="' + esc(r.nota) + '" onchange="stzSalvaGiacenzaGiornoRiga(\'' + pe + '\')"' + disabledAttr + ' placeholder="—" style="width:100%;min-width:140px;font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text)' + opacStyle + '"/></td>';
     h += '</tr>';
   });
 
-  h += '</tbody></table></div>';
-  h += '</div>';
-
+  h += '</tbody></table></div></div>';
+  h += '<div id="stzg-dettaglio-box" style="margin-top:14px"></div>';
   container.innerHTML = h;
+}
+
+function _stzgCambiaGiorno(deltaGiorni) {
+  var dataEl = document.getElementById('stzg-data');
+  var corr = (dataEl && dataEl.value) ? dataEl.value : oggiISO;
+  var nuovaData = new Date(corr + 'T00:00:00');
+  nuovaData.setDate(nuovaData.getDate() + deltaGiorni);
+  if (dataEl) dataEl.value = nuovaData.toISOString().split('T')[0];
+  caricaStzGiacenzaGiorno();
+}
+
+function _stzgVaiOggi() {
+  var dataEl = document.getElementById('stzg-data');
+  if (dataEl) dataEl.value = oggiISO;
+  caricaStzGiacenzaGiorno();
+}
+
+function _stzgVaiATotalizzatori() {
+  var btn = document.querySelector('.stz-tab[data-tab="stz-letture"]');
+  if (btn) btn.click();
+}
+
+function _stzgRicalcola(prod) {
+  if (!_stzGiornoDati) return;
+  var riga = _stzGiornoDati.righe.find(function(r) { return r.prodotto === prod; });
+  if (!riga) return;
+  var caliEl = document.querySelector('.stzg-cali[data-prodotto="' + prod + '"]');
+  if (!caliEl) return;
+  var nuoviCali = Number(caliEl.value || 0);
+  riga.caliEcc = nuoviCali;
+  riga.teorica = Math.round(riga.apertura + riga.entrate - riga.uscite + nuoviCali);
+  var teorEl = document.querySelector('.stzg-teorica[data-prodotto="' + prod + '"]');
+  if (teorEl) teorEl.textContent = fmtL(riga.teorica);
+  _stzgCalcDiff(prod);
+}
+
+function _stzgCalcDiff(prod) {
+  if (!_stzGiornoDati) return;
+  var riga = _stzGiornoDati.righe.find(function(r) { return r.prodotto === prod; });
+  if (!riga) return;
+  var rilEl = document.querySelector('.stzg-rilevata[data-prodotto="' + prod + '"]');
+  var diffEl = document.querySelector('.stzg-diff[data-prodotto="' + prod + '"]');
+  if (!rilEl || !diffEl) return;
+  var rilVal = rilEl.value.trim();
+  if (rilVal === '') {
+    riga.rilevata = '';
+    riga.differenza = null;
+    diffEl.textContent = '—';
+    diffEl.style.color = 'var(--text-muted)';
+    return;
+  }
+  var rilNum = Number(rilVal);
+  riga.rilevata = rilNum;
+  riga.differenza = Math.round(rilNum - riga.teorica);
+  diffEl.textContent = (riga.differenza >= 0 ? '+' : '') + fmtL(riga.differenza);
+  diffEl.style.color = riga.differenza >= 0 ? '#639922' : '#A32D2D';
+}
+
+async function stzSalvaGiacenzaGiornoRiga(prod) {
+  if (!_stzGiornoDati) return;
+  var riga = _stzGiornoDati.righe.find(function(r) { return r.prodotto === prod; });
+  if (!riga) return;
+  var caliEl = document.querySelector('.stzg-cali[data-prodotto="' + prod + '"]');
+  var rilEl = document.querySelector('.stzg-rilevata[data-prodotto="' + prod + '"]');
+  var notaEl = document.querySelector('.stzg-nota[data-prodotto="' + prod + '"]');
+  var caliVal = caliEl ? Number(caliEl.value || 0) : 0;
+  var rilStr = rilEl ? rilEl.value.trim() : '';
+  var rilVal = rilStr === '' ? null : Number(rilStr);
+  var notaVal = notaEl ? (notaEl.value || '') : '';
+  var teoricaCalc = Math.round(riga.apertura + riga.entrate - riga.uscite + caliVal);
+
+  var payload = {
+    data: _stzGiornoDati.data,
+    sede: 'stazione_oppido',
+    prodotto: prod,
+    giacenza_iniziale: Math.round(riga.apertura),
+    entrate: Math.round(riga.entrate),
+    uscite: Math.round(riga.uscite),
+    cali_eccedenze: caliVal,
+    giacenza_teorica: teoricaCalc,
+    giacenza_rilevata: rilVal,
+    differenza: rilVal === null ? null : Math.round(rilVal - teoricaCalc),
+    note: notaVal
+  };
+
+  try {
+    var res = await sb.from('giacenze_giornaliere').upsert(payload, { onConflict: 'data,sede,prodotto' });
+    if (res.error) throw res.error;
+    if (typeof toast === 'function') toast('✓ Salvato ' + prod);
+  } catch (err) {
+    console.error('[stzSalva] errore:', err);
+    if (typeof toast === 'function') toast('✗ Errore: ' + (err.message || err));
+  }
+}
+
+var _stzgDettaglioCorrente = null;
+async function _stzgMostraDettaglio(iso) {
+  var box = document.getElementById('stzg-dettaglio-box');
+  if (!box) return;
+  if (_stzgDettaglioCorrente === iso) {
+    box.innerHTML = '';
+    _stzgDettaglioCorrente = null;
+    return;
+  }
+  _stzgDettaglioCorrente = iso;
+  var dataLbl = (typeof fmtD === 'function') ? fmtD(iso) : iso;
+  box.innerHTML = '<div class="loading" style="padding:16px;text-align:center">Caricamento movimenti del ' + dataLbl + '...</div>';
+
+  try {
+    var entrateOrd = [];
+    if (typeof pfData !== 'undefined' && pfData.getOrdini) {
+      var tutti = await pfData.getOrdini({ da: iso, a: iso });
+      entrateOrd = tutti.filter(function(o) { return o.tipo_ordine === 'stazione_servizio'; });
+    } else {
+      var res = await sb.from('ordini').select('*,basi_carico(nome)').eq('tipo_ordine', 'stazione_servizio').eq('data', iso).in('stato', ['confermato', 'consegnato']);
+      entrateOrd = res.data || [];
+    }
+
+    var usciteTot = 0;
+    if (_stzGiornoDati && _stzGiornoDati.righe) {
+      _stzGiornoDati.righe.forEach(function(r) { usciteTot += r.uscite; });
+    }
+
+    var header = '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px 8px 0 0;border-bottom:none">';
+    header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + dataLbl + '</div>';
+    header += '<button class="btn-edit" style="font-size:11px;padding:3px 10px" onclick="_stzgMostraDettaglio(\'' + iso + '\')" title="Chiudi">✕</button>';
+    header += '</div>';
+
+    var body = '<div style="padding:12px 14px;border:0.5px solid var(--border);border-top:none;border-radius:0 0 8px 8px;background:var(--bg-card)">';
+    if (typeof _movRenderBlocchi === 'function') {
+      body += _movRenderBlocchi(entrateOrd, [], true, false, 'compact');
+    } else {
+      body += '<div style="font-size:12px;color:var(--text-muted)">Entrate del giorno: ' + entrateOrd.length + ' ordini</div>';
+    }
+    body += '<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-muted)">Uscite totali (da letture pompe): <strong style="font-family:var(--font-mono);color:var(--text)">' + fmtL(usciteTot) + ' L</strong> · Dettaglio per pompa nel tab <strong>Totalizzatori</strong>.</div>';
+    body += '</div>';
+    box.innerHTML = header + body;
+  } catch (err) {
+    box.innerHTML = '<div style="padding:16px;color:#A32D2D;font-size:12px">Errore: ' + (err.message || err) + '</div>';
+  }
 }
