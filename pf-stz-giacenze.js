@@ -34,6 +34,10 @@ function stzgToggleVista(target) {
     if (blocoGg) blocoGg.style.display = '';
     if (blocoWk) blocoWk.style.display = 'none';
     blocoMs.style.display = 'none';
+    // Step B.3.a.1: carica vista giornaliera stazione
+    if (typeof caricaStzGiacenzaGiorno === 'function') {
+      try { caricaStzGiacenzaGiorno(); } catch(e) { console.warn('caricaStzGiacenzaGiorno error:', e); }
+    }
   } else if (target === 'week') {
     _activeBtn(btnWk);
     if (blocoGg) blocoGg.style.display = 'none';

@@ -1746,17 +1746,9 @@
             <button id="stzg-btn-mese" class="btn-primary" onclick="stzgToggleVista('mese')" style="font-size:12px;padding:7px 14px">📅 Mensile</button>
           </div>
 
-          <!-- BLOCCO GIORNO — placeholder, disponibile nel prossimo aggiornamento -->
+          <!-- BLOCCO GIORNO — popolato da pf-stz-giac-giorno.js -->
           <div id="stzg-blocco-giorno" style="display:none">
-            <div class="card">
-              <div class="card-title">📅 Giacenza singolo giorno — stazione Oppido</div>
-              <div style="padding:32px 16px;text-align:center;color:var(--text-muted);font-size:13px">
-                <div style="font-size:22px;margin-bottom:10px">🚧</div>
-                <div style="font-weight:500;color:var(--text);margin-bottom:6px">In costruzione</div>
-                <div>La vista giornaliera della stazione sarà disponibile nel prossimo aggiornamento.</div>
-                <div style="margin-top:10px;font-size:11px">Nel frattempo puoi usare la vista <strong>Mensile</strong>.</div>
-              </div>
-            </div>
+            <div id="stzg-blocco-giorno-contenuto"><div class="loading">Caricamento...</div></div>
           </div>
 
           <!-- BLOCCO SETTIMANA — placeholder, disponibile nel prossimo aggiornamento -->
@@ -2366,7 +2358,8 @@
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
 <script src="pf-stz-report.js?v=1775149951158"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
-<script src="pf-stz-giacenze.js?v=20260411h"></script>
+<script src="pf-stz-giacenze.js?v=20260412a"></script>
+<script src="pf-stz-giac-giorno.js?v=20260412a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=1775149951158"></script>
