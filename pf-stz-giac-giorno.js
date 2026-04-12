@@ -19,7 +19,14 @@ async function caricaStzGiacenzaGiorno() {
   // Se non c'è, usiamo oggiISO come default. Alle chiamate successive leggiamo dall'input.
   var dataEl = document.getElementById('stzg-data');
   var data = (dataEl && dataEl.value) ? dataEl.value : oggiISO;
-  var giornoPrima = new Date(new Date(data + 'T00:00:00').getTime() - 86400000).toISOString().split('T')[0];
+  // Fix timezone-safe: calcolo giornoPrima manipolando Date in UTC esplicito.
+  // Il vecchio metodo new Date(data+'T00:00:00').getTime()-86400000 falliva in fuso orario
+  // diverso da UTC: 2026-01-01T00:00 ora locale = 2025-12-31T23:00 UTC, poi -1 giorno = 30/12 UTC.
+  // Soluzione: parse componenti e usa Date.UTC per restare in UTC tutto il tempo.
+  var _parts = data.split('-');
+  var _d = new Date(Date.UTC(parseInt(_parts[0]), parseInt(_parts[1]) - 1, parseInt(_parts[2])));
+  _d.setUTCDate(_d.getUTCDate() - 1);
+  var giornoPrima = _d.toISOString().split('T')[0];
 
   try {
 
@@ -256,8 +263,9 @@ function _stzGiornoRender() {
 function _stzgCambiaGiorno(deltaGiorni) {
   var dataEl = document.getElementById('stzg-data');
   var corr = (dataEl && dataEl.value) ? dataEl.value : oggiISO;
-  var nuovaData = new Date(corr + 'T00:00:00');
-  nuovaData.setDate(nuovaData.getDate() + deltaGiorni);
+  var parts = corr.split('-');
+  var nuovaData = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+  nuovaData.setUTCDate(nuovaData.getUTCDate() + deltaGiorni);
   if (dataEl) dataEl.value = nuovaData.toISOString().split('T')[0];
   caricaStzGiacenzaGiorno();
 }
