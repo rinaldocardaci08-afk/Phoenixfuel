@@ -15,11 +15,13 @@
 var _stzGiornoDati = null;
 
 async function caricaStzGiacenzaGiorno() {
+  // Al primo caricamento l'input stzg-data non esiste ancora (viene creato dal render).
+  // Se non c'è, usiamo oggiISO come default. Alle chiamate successive leggiamo dall'input.
   var dataEl = document.getElementById('stzg-data');
-  if (!dataEl) return;
-  if (!dataEl.value) dataEl.value = oggiISO;
-  var data = dataEl.value;
+  var data = (dataEl && dataEl.value) ? dataEl.value : oggiISO;
   var giornoPrima = new Date(new Date(data + 'T00:00:00').getTime() - 86400000).toISOString().split('T')[0];
+
+  try {
 
   // ── QUERIES PARALLELE ──
   var [
@@ -151,6 +153,19 @@ async function caricaStzGiacenzaGiorno() {
 
   // ── RENDER ──
   _stzGiornoRender();
+
+  } catch (err) {
+    console.error('[pf-stz-giac-giorno] ERRORE:', err);
+    var cont = document.getElementById('stzg-blocco-giorno-contenuto');
+    if (cont) {
+      cont.innerHTML = '<div class="card"><div class="card-title">📅 Giacenza giornaliera — stazione Oppido</div>' +
+        '<div style="padding:16px;color:#A32D2D;font-size:12px">' +
+        '<strong>Errore caricamento:</strong> ' + (err && err.message ? esc(err.message) : String(err)) +
+        '<div style="margin-top:8px;color:var(--text-muted);font-size:11px">Apri la console del browser (F12) per il dettaglio completo.</div>' +
+        '<div style="margin-top:12px">Data: <input type="date" id="stzg-data" value="' + data + '" onchange="caricaStzGiacenzaGiorno()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"/></div>' +
+        '</div></div>';
+    }
+  }
 }
 
 function _stzGiornoRender() {
