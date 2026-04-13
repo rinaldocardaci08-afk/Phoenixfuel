@@ -579,6 +579,16 @@
 
         <!-- PANEL: GIACENZE GIORNALIERE -->
         <div class="dep-panel" id="dep-giacenze" style="display:none">
+          <!-- SENTINELLE AUTOMATICHE -->
+          <div class="card" style="margin-bottom:16px;border-left:3px solid #378ADD">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>🛡️ Sentinelle — controlli automatici integrità dati</span>
+              <button class="btn-primary" onclick="pfSentinelleEsegui()" style="font-size:12px;padding:7px 14px;background:#378ADD">▶ Esegui tutte</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Verifica rapida che le query del sistema producano ancora i valori attesi. Da lanciare prima/dopo ogni commit grosso per scoprire regressioni.</div>
+            <div id="pf-sent-risultati"><div style="font-size:11px;color:var(--text-muted);padding:8px">Clicca "Esegui tutte" per lanciare i controlli.</div></div>
+          </div>
+
           <!-- Toggle vista a 3: Singolo giorno / Settimanale / Mensile -->
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
             <button id="dgw-btn-giorno" class="btn-primary" onclick="dgwToggleVista('giorno')" style="font-size:12px;padding:7px 14px">📅 Singolo giorno</button>
@@ -2362,7 +2372,7 @@
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260412a"></script>
 <script src="pf-stz-giac-giorno.js?v=20260413b"></script>
-<script src="pf-stz-giac-week.js?v=20260413c"></script>
+<script src="pf-sentinelle.js?v=20260413a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=1775149951158"></script>
