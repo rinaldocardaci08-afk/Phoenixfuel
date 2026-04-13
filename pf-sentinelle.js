@@ -26,18 +26,15 @@ var PF_SENTINELLE = [
   },
   {
     id: 'eni_ordini_litri_q1_2026',
-    nome: 'Eni 01/01-07/04/2026 (ordini + litri)',
+    nome: 'Eni 01/01-07/04/2026 (ordini + litri) via pfData',
     atteso: '191 ord / 1822981 L',
     query: async function() {
-      var res = await sb.from('ordini')
-        .select('litri')
-        .eq('tipo_ordine', 'entrata_deposito')
-        .ilike('fornitore', '%eni%')
-        .in('stato', ['confermato', 'consegnato'])
-        .gte('data', '2026-01-01').lte('data', '2026-04-07');
-      if (res.error) throw res.error;
-      var count = (res.data || []).length;
-      var tot = (res.data || []).reduce(function(s, o) { return s + Number(o.litri || 0); }, 0);
+      if (typeof pfData === 'undefined' || !pfData.getAcquisti) {
+        throw new Error('pfData non caricato');
+      }
+      var ordini = await pfData.getAcquisti({ da: '2026-01-01', a: '2026-04-07', fornitore: 'Eni' });
+      var count = ordini.length;
+      var tot = ordini.reduce(function(s, o) { return s + Number(o.litri || 0); }, 0);
       return count + ' ord / ' + Math.round(tot) + ' L';
     },
     confronta: function(ottenuto) {
@@ -172,7 +169,80 @@ var PF_SENTINELLE = [
     confronta: function(ottenuto) {
       return ottenuto.indexOf('704') >= 0 && ottenuto.indexOf('374') >= 0;
     }
-  }
+  },
+  {
+    id: 'disallineamento_gasauto_deposito',
+    nome: '⚠️ Disallineamento giacenza Gas Auto deposito (4 fonti)',
+    atteso: 'Tutte uguali (tolleranza 100 L)',
+    query: async function() {
+      // Fonte 1: cisterne.livello_attuale
+      var cisRes = await sb.from('cisterne').select('livello_attuale')
+        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione');
+      var fonte1 = (cisRes.data || []).reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
+
+      // Fonte 2: giacenze_giornaliere ultimo record
+      var ggRes = await sb.from('giacenze_giornaliere')
+        .select('giacenza_teorica,giacenza_rilevata,data')
+        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
+        .order('data', { ascending: false }).limit(1).maybeSingle();
+      var fonte2 = null;
+      if (ggRes.data) {
+        fonte2 = ggRes.data.giacenza_rilevata !== null ? Number(ggRes.data.giacenza_rilevata) : Number(ggRes.data.giacenza_teorica || 0);
+      }
+
+      // Fonte 3: giacenze_mensili ultimo mese
+      var gmRes = await sb.from('giacenze_mensili')
+        .select('giacenza_teorica,mese,anno')
+        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
+        .order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1).maybeSingle();
+      var fonte3 = gmRes.data ? Number(gmRes.data.giacenza_teorica || 0) : null;
+
+      // Fonte 4: calcolata cumulativa dal 01/01 via pfData (stessa logica vista settimanale)
+      var fonte4 = null;
+      try {
+        if (typeof pfData !== 'undefined' && pfData.getOrdini) {
+          // Giacenza iniziale 01/01
+          var giacIniRes = await sb.from('giacenze_annuali')
+            .select('giacenza_reale').eq('anno', 2025).eq('sede', 'deposito_vibo')
+            .eq('prodotto', 'Gasolio Autotrazione').eq('convalidata', true).maybeSingle();
+          var iniziale = giacIniRes.data ? Number(giacIniRes.data.giacenza_reale || 0) : 20714;
+
+          var oggi = new Date().toISOString().split('T')[0];
+          var tutti = await pfData.getOrdini({ da: '2026-01-01', a: oggi });
+          var ent = 0, usc = 0;
+          tutti.forEach(function(o) {
+            if (o.prodotto !== 'Gasolio Autotrazione') return;
+            if (o.tipo_ordine === 'entrata_deposito') ent += Number(o.litri || 0);
+            else if (o.tipo_ordine === 'cliente') {
+              var f = (o.fornitore || '').toLowerCase();
+              if (f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0) usc += Number(o.litri || 0);
+            } else if (o.tipo_ordine === 'stazione_servizio') {
+              var f2 = (o.fornitore || '').toLowerCase();
+              if (f2.indexOf('phoenix') >= 0 || f2.indexOf('deposito') >= 0) usc += Number(o.litri || 0);
+            } else if (o.tipo_ordine === 'autoconsumo') usc += Number(o.litri || 0);
+          });
+          fonte4 = iniziale + ent - usc;
+        }
+      } catch (e) {}
+
+      var f1 = Math.round(fonte1);
+      var f2 = fonte2 !== null ? Math.round(fonte2) : null;
+      var f3 = fonte3 !== null ? Math.round(fonte3) : null;
+      var f4 = fonte4 !== null ? Math.round(fonte4) : null;
+
+      return 'cisterne:' + f1 + ' / ggiorn:' + (f2 !== null ? f2 : '—') + ' / gmens:' + (f3 !== null ? f3 : '—') + ' / calc:' + (f4 !== null ? f4 : '—');
+    },
+    confronta: function(ottenuto) {
+      // Estrae i 4 numeri e verifica tolleranza 100 L
+      var nums = (ottenuto.match(/\d+/g) || []).map(Number);
+      if (nums.length < 2) return false;
+      var validi = nums.filter(function(n) { return !isNaN(n); });
+      if (validi.length < 2) return false;
+      var min = Math.min.apply(null, validi);
+      var max = Math.max.apply(null, validi);
+      return (max - min) <= 100;
+    }
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
