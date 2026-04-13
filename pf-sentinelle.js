@@ -127,47 +127,69 @@ var PF_SENTINELLE = [
     }
   },
   {
-    id: 'gasauto_rilevata_deposito_07_04',
-    nome: 'Gas Auto deposito rilevata 07/04/2026 (fisica, costante)',
-    atteso: '29134 L',
+    id: 'alert_scostamento_rilevato',
+    nome: '🚨 Alert scostamenti rilevata-teorica > 10.000 L',
+    atteso: 'Nessuno scostamento sopra soglia',
     query: async function() {
       var res = await sb.from('giacenze_giornaliere')
-        .select('giacenza_rilevata')
-        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione').eq('data', '2026-04-07').maybeSingle();
+        .select('data,sede,prodotto,giacenza_teorica,giacenza_rilevata')
+        .not('giacenza_rilevata', 'is', null)
+        .gte('data', '2026-01-01')
+        .order('data', { ascending: false });
       if (res.error) throw res.error;
-      return res.data && res.data.giacenza_rilevata !== null ? Math.round(res.data.giacenza_rilevata) + ' L' : 'NULL';
+      var anomalie = [];
+      (res.data || []).forEach(function(r) {
+        var diff = Math.abs(Number(r.giacenza_rilevata || 0) - Number(r.giacenza_teorica || 0));
+        if (diff > 10000) {
+          anomalie.push(r.data + ' ' + r.sede.replace('_',' ') + ' ' + r.prodotto + ': Δ ' + Math.round(diff) + ' L');
+        }
+      });
+      if (anomalie.length === 0) return 'OK — nessuno scostamento > 10.000 L';
+      return anomalie.length + ' anomalie: ' + anomalie.slice(0, 3).join(' | ') + (anomalie.length > 3 ? ' (+' + (anomalie.length - 3) + ')' : '');
     },
     confronta: function(ottenuto) {
-      return ottenuto.indexOf('29134') >= 0;
+      return ottenuto.indexOf('OK') === 0;
     }
   },
   {
-    id: 'stazione_01_01_uscite',
-    nome: 'Stazione Oppido 01/01/2026 — uscite pompe',
-    atteso: 'Gas 704 L / Benz 374 L',
+    id: 'alert_letture_pompe_mancanti',
+    nome: '🚨 Alert letture pompe stazione mancanti (tolleranza 3 gg)',
+    atteso: 'Tutte le pompe aggiornate fino a 3 gg fa',
     query: async function() {
-      var { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true);
-      var res = await sb.from('stazione_letture').select('pompa_id,data,lettura')
-        .gte('data', '2025-12-31').lte('data', '2026-01-01');
-      if (res.error) throw res.error;
-      var byPompa = {};
-      (res.data || []).forEach(function(l) {
-        if (!byPompa[l.pompa_id]) byPompa[l.pompa_id] = {};
-        byPompa[l.pompa_id][l.data] = Number(l.lettura);
+      // Data limite: oggi - 3 giorni (tolleranza weekend)
+      var oggi = new Date();
+      var limite = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() - 3);
+      var limiteISO = limite.toISOString().split('T')[0];
+
+      var { data: pompe } = await sb.from('stazione_pompe').select('id,nome').eq('attiva', true);
+      if (!pompe || !pompe.length) return 'OK — nessuna pompa attiva';
+
+      var { data: letture } = await sb.from('stazione_letture')
+        .select('pompa_id,data')
+        .gte('data', limiteISO)
+        .order('data', { ascending: false });
+
+      // Ultima data lettura per pompa
+      var ultimaByPompa = {};
+      (letture || []).forEach(function(l) {
+        if (!ultimaByPompa[l.pompa_id] || l.data > ultimaByPompa[l.pompa_id]) {
+          ultimaByPompa[l.pompa_id] = l.data;
+        }
       });
-      var gas = 0, benz = 0;
-      (pompe || []).forEach(function(p) {
-        var m = byPompa[p.id];
-        if (!m || m['2025-12-31'] === undefined || m['2026-01-01'] === undefined) return;
-        var d = m['2026-01-01'] - m['2025-12-31'];
-        if (d <= 0) return;
-        if (p.prodotto === 'Gasolio Autotrazione') gas += d;
-        else if (p.prodotto === 'Benzina') benz += d;
+
+      var mancanti = [];
+      pompe.forEach(function(p) {
+        if (!ultimaByPompa[p.id] || ultimaByPompa[p.id] < limiteISO) {
+          var ult = ultimaByPompa[p.id] || 'mai';
+          mancanti.push(p.nome + ' (ultima: ' + ult + ')');
+        }
       });
-      return 'Gas ' + Math.round(gas) + ' L / Benz ' + Math.round(benz) + ' L';
+
+      if (mancanti.length === 0) return 'OK — tutte ' + pompe.length + ' pompe aggiornate';
+      return mancanti.length + '/' + pompe.length + ' pompe: ' + mancanti.join(' | ');
     },
     confronta: function(ottenuto) {
-      return ottenuto.indexOf('704') >= 0 && ottenuto.indexOf('374') >= 0;
+      return ottenuto.indexOf('OK') === 0;
     }
   },
   {
