@@ -85,20 +85,24 @@ async function caricaGiacenzeMensiliDeposito() {
   });
 
   // Carica entrate e uscite in parallelo
+  // FIX 13/04 sera: usiamo STATI_VALIDI=['confermato','consegnato'] coerente con
+  // pf-data.js, dashboard, giornaliera, settimanale. Prima usava .neq('annullato')
+  // che includeva anche 'in_attesa' e 'programmato' gonfiando i totali.
+  var STATI_VALIDI = ['confermato','consegnato'];
   var [entrateRes, uscCliRes, uscStaRes, uscAutoRes] = await Promise.all([
     sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','entrata_deposito').neq('stato','annullato')
+      .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI)
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','cliente').neq('stato','annullato')
+      .eq('tipo_ordine','cliente').in('stato', STATI_VALIDI)
       .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','stazione_servizio').neq('stato','annullato')
+      .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI)
       .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','autoconsumo').neq('stato','annullato')
+      .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI)
       .gte('data', daISO).lte('data', aISO)
   ]);
 
