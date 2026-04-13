@@ -43,41 +43,29 @@ async function caricaDeposito() {
   // proporzione al loro livello_attuale DB (così almeno il peso relativo
   // tra cisterne dello stesso prodotto è preservato).
   // ═══════════════════════════════════════════════════════════════════
-  console.log('[caricaDeposito] 🔄 Avvio allineamento pfData. Cisterne pre-patch:',
-    cisterne.map(function(c){return c.nome+'='+c.livello_attuale;}).join(', '));
   try {
-    if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
-      console.warn('[caricaDeposito] ❌ pfData.getGiacenzaAllaData non disponibile, skip allineamento');
-    } else {
+    if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
       var oggi = new Date().toISOString().split('T')[0];
       var prodottiUnici = [...new Set(cisterne.map(function(c) { return c.prodotto; }))];
-      console.log('[caricaDeposito] prodotti da allineare:', prodottiUnici);
       for (var pi = 0; pi < prodottiUnici.length; pi++) {
         var prod = prodottiUnici[pi];
         var giac = await pfData.getGiacenzaAllaData('deposito_vibo', prod, oggi);
         var calcTot = giac.calcolata;
-        console.log('[caricaDeposito] ' + prod + ': DB sum vs pfData calc =', {
-          iniziale: giac.iniziale, entrate: giac.entrate, uscite: giac.uscite, calcolata: calcTot
-        });
         var cisDelProd = cisterne.filter(function(c) { return c.prodotto === prod; });
         var sommaDb = cisDelProd.reduce(function(s,c) { return s + Number(c.livello_attuale || 0); }, 0);
         if (sommaDb > 0) {
-          // Distribuzione proporzionale
           cisDelProd.forEach(function(c) {
             var quota = Number(c.livello_attuale || 0) / sommaDb;
             c.livello_attuale = Math.round(calcTot * quota);
           });
         } else if (cisDelProd.length > 0) {
-          // Se sommaDb = 0, dividi equamente
           var quotaEqua = Math.round(calcTot / cisDelProd.length);
           cisDelProd.forEach(function(c) { c.livello_attuale = quotaEqua; });
         }
       }
-      console.log('[caricaDeposito] ✓ Allineamento completato. Cisterne post-patch:',
-        cisterne.map(function(c){return c.nome+'='+c.livello_attuale;}).join(', '));
     }
   } catch (e) {
-    console.warn('[caricaDeposito] ❌ allineamento calcolato fallito, uso DB:', e);
+    console.warn('[caricaDeposito] allineamento calcolato fallito, uso DB:', e);
   }
 
   // Raggruppa cisterne per tipo
@@ -953,7 +941,11 @@ async function caricaGiacenzeGiornaliere() {
   }
 
   // Giacenza giorno precedente dal DB
-  var giornoPrima = new Date(new Date(data).getTime() - 86400000).toISOString().split('T')[0];
+  // Fix timezone-safe: usa Date.UTC per evitare off-by-one in fuso Europe/Rome
+  var _ggParts = data.split('-');
+  var _ggDPrec = new Date(Date.UTC(parseInt(_ggParts[0]), parseInt(_ggParts[1]) - 1, parseInt(_ggParts[2])));
+  _ggDPrec.setUTCDate(_ggDPrec.getUTCDate() - 1);
+  var giornoPrima = _ggDPrec.toISOString().split('T')[0];
   var { data: precSalv } = await sb.from('giacenze_giornaliere').select('prodotto,giacenza_rilevata,giacenza_teorica')
     .eq('data', giornoPrima).eq('sede','deposito_vibo');
   var precMap = {};
@@ -1133,8 +1125,10 @@ function _ggCambiaGiorno(deltaGiorni) {
   var dataEl = document.getElementById('gg-data');
   if (!dataEl) return;
   var corr = dataEl.value || oggiISO;
-  var nuovaData = new Date(corr + 'T00:00:00');
-  nuovaData.setDate(nuovaData.getDate() + deltaGiorni);
+  // Fix timezone-safe (Europe/Rome): usa Date.UTC per evitare off-by-one
+  var parts = corr.split('-');
+  var nuovaData = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+  nuovaData.setUTCDate(nuovaData.getUTCDate() + deltaGiorni);
   dataEl.value = nuovaData.toISOString().split('T')[0];
   caricaGiacenzeGiornaliere();
 }
@@ -1161,8 +1155,11 @@ async function _ggMostraDettaglio(iso) {
   _ggDettaglioCorrente = iso;
   box.innerHTML = '<div class="loading" style="padding:16px;text-align:center">Caricamento movimenti del ' + (typeof fmtD==='function'?fmtD(iso):iso) + '...</div>';
 
+  // Query: include solo i veri movimenti del deposito.
+  // FIX 13/04 sera: stazione_servizio era preso TUTTO (anche consegne dirette
+  // Ludoil/Eni→stazione che NON escono dal deposito). Ora aggiungiamo filtro
+  // fornitore Phoenix anche per stazione_servizio, coerente con pfData.
   var res = await sb.from('ordini').select('*,basi_carico(nome)')
-    .or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%')
     .eq('data', iso)
     .order('created_at', { ascending: false });
 
@@ -1171,7 +1168,20 @@ async function _ggMostraDettaglio(iso) {
     return;
   }
 
-  var movimenti = res.data || [];
+  // Filtro in JS per coerenza con pfData
+  function _isPhoenix(o) {
+    var f = (o.fornitore || '').toLowerCase();
+    return f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0;
+  }
+  var movimentiTutti = res.data || [];
+  var movimenti = movimentiTutti.filter(function(o) {
+    if (o.stato === 'annullato') return false;
+    if (o.tipo_ordine === 'entrata_deposito') return true;
+    if (o.tipo_ordine === 'autoconsumo') return true;
+    if (o.tipo_ordine === 'cliente' && _isPhoenix(o)) return true;
+    if (o.tipo_ordine === 'stazione_servizio' && _isPhoenix(o)) return true;
+    return false;
+  });
   var entrate = movimenti.filter(function(r) { return r.tipo_ordine === 'entrata_deposito'; });
   var uscite  = movimenti.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
 
