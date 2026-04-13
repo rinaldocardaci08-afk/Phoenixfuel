@@ -28,6 +28,17 @@ async function caricaStzGiacenzaGiorno() {
   _d.setUTCDate(_d.getUTCDate() - 1);
   var giornoPrima = _d.toISOString().split('T')[0];
 
+  // Step B.3.a.3: assicura che la catena di giacenze_giornaliere sia costruita
+  // dal 31/12/2025 fino al giorno precedente al target, così l'apertura viene
+  // letta da record salvato e non dal fallback cisterne.livello_attuale.
+  try {
+    if (data >= '2026-01-01' && data <= oggiISO) {
+      await _stzgAssicuraCatena(giornoPrima);
+    }
+  } catch (err) {
+    console.warn('[_stzgAssicuraCatena] errore ricostruzione catena:', err);
+  }
+
   try {
 
   // ── QUERIES PARALLELE ──
@@ -399,4 +410,128 @@ async function _stzgMostraDettaglio(iso) {
   } catch (err) {
     box.innerHTML = '<div style="padding:16px;color:#A32D2D;font-size:12px">Errore: ' + (err.message || err) + '</div>';
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RICOSTRUZIONE CATENA giacenze_giornaliere stazione_oppido
+// Dal 31/12/2025 (apertura manuale) fino a dataTarget inclusa.
+// Idempotente: non tocca record esistenti, inserisce solo i mancanti
+// con giacenza_rilevata=null (snapshot di sistema).
+// ═══════════════════════════════════════════════════════════════════
+async function _stzgAssicuraCatena(dataTarget) {
+  var DATA_INIZIO = '2025-12-31'; // apertura nota (inserita manuale)
+  if (dataTarget < DATA_INIZIO) return;
+
+  // Carica in blocco TUTTO ciò che serve nel range [DATA_INIZIO, dataTarget]
+  var [pompeRes, giacRes, lettRes, ordRes] = await Promise.all([
+    sb.from('stazione_pompe').select('id,nome,prodotto,attiva').eq('attiva', true),
+    sb.from('giacenze_giornaliere').select('*').eq('sede', 'stazione_oppido').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data'),
+    sb.from('stazione_letture').select('pompa_id,lettura,data').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data'),
+    sb.from('ordini').select('data,prodotto,litri,tipo_ordine,stato').eq('tipo_ordine', 'stazione_servizio').gte('data', DATA_INIZIO).lte('data', dataTarget).in('stato', ['confermato','consegnato'])
+  ]);
+
+  var pompe = pompeRes.data || [];
+  var giacEsistenti = giacRes.data || [];
+  var letture = lettRes.data || [];
+  var ordini = ordRes.data || [];
+
+  // Indicizza
+  var pompaProd = {};
+  pompe.forEach(function(p) { pompaProd[p.id] = p.prodotto; });
+
+  // Mappa letture: {data: {pompa_id: lettura}}
+  var lettureByData = {};
+  letture.forEach(function(l) {
+    if (!lettureByData[l.data]) lettureByData[l.data] = {};
+    lettureByData[l.data][l.pompa_id] = Number(l.lettura);
+  });
+
+  // Mappa entrate: {data: {prodotto: litri_totali}}
+  var entrateByData = {};
+  ordini.forEach(function(o) {
+    if (!entrateByData[o.data]) entrateByData[o.data] = {};
+    if (!entrateByData[o.data][o.prodotto]) entrateByData[o.data][o.prodotto] = 0;
+    entrateByData[o.data][o.prodotto] += Number(o.litri || 0);
+  });
+
+  // Mappa record esistenti: {"data__prodotto": row}
+  var giacMap = {};
+  giacEsistenti.forEach(function(g) { giacMap[g.data + '__' + g.prodotto] = g; });
+
+  // Prodotti distinti presenti
+  var prodottiSet = {};
+  pompe.forEach(function(p) { prodottiSet[p.prodotto] = true; });
+  var prodotti = Object.keys(prodottiSet);
+
+  // Cammina giorno per giorno da DATA_INIZIO+1 fino a dataTarget
+  var giornoCorr = DATA_INIZIO;
+  var daInserire = [];
+
+  while (giornoCorr < dataTarget) {
+    // Calcola giorno successivo (UTC-safe)
+    var parts = giornoCorr.split('-');
+    var dx = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+    dx.setUTCDate(dx.getUTCDate() + 1);
+    var giornoSucc = dx.toISOString().split('T')[0];
+
+    prodotti.forEach(function(prod) {
+      // Skip se il record per giornoSucc/prod esiste già
+      if (giacMap[giornoSucc + '__' + prod]) return;
+
+      // Apertura = rilevata di giornoCorr, fallback teorica di giornoCorr
+      var recPrec = giacMap[giornoCorr + '__' + prod];
+      if (!recPrec) return; // senza giorno prec non posso calcolare, salto
+      var apertura = (recPrec.giacenza_rilevata !== null && recPrec.giacenza_rilevata !== undefined)
+        ? Number(recPrec.giacenza_rilevata)
+        : Number(recPrec.giacenza_teorica || 0);
+
+      // Uscite = somma diff letture delle pompe di questo prodotto
+      var lettOggi = lettureByData[giornoSucc] || {};
+      var lettPrec = lettureByData[giornoCorr] || {};
+      var uscite = 0;
+      pompe.forEach(function(p) {
+        if (p.prodotto !== prod) return;
+        if (lettOggi[p.id] !== undefined && lettPrec[p.id] !== undefined) {
+          var diff = lettOggi[p.id] - lettPrec[p.id];
+          if (diff > 0) uscite += diff;
+        }
+      });
+
+      // Entrate
+      var entrate = (entrateByData[giornoSucc] && entrateByData[giornoSucc][prod]) || 0;
+
+      var teorica = Math.round(apertura + entrate - uscite);
+      var record = {
+        data: giornoSucc,
+        sede: 'stazione_oppido',
+        prodotto: prod,
+        giacenza_iniziale: Math.round(apertura),
+        entrate: Math.round(entrate),
+        uscite: Math.round(uscite),
+        cali_eccedenze: 0,
+        giacenza_teorica: teorica,
+        giacenza_rilevata: null,
+        differenza: null,
+        note: ''
+      };
+      daInserire.push(record);
+      // Aggiungi al map per i giorni successivi del loop
+      giacMap[giornoSucc + '__' + prod] = record;
+    });
+
+    giornoCorr = giornoSucc;
+  }
+
+  if (daInserire.length === 0) {
+    console.log('[_stzgAssicuraCatena] catena già completa fino a ' + dataTarget);
+    return;
+  }
+
+  console.log('[_stzgAssicuraCatena] inserimento ' + daInserire.length + ' record da ' + daInserire[0].data + ' a ' + daInserire[daInserire.length - 1].data);
+  var res = await sb.from('giacenze_giornaliere').upsert(daInserire, { onConflict: 'data,sede,prodotto' });
+  if (res.error) {
+    console.error('[_stzgAssicuraCatena] errore upsert:', res.error);
+    throw res.error;
+  }
+  console.log('[_stzgAssicuraCatena] ✓ ' + daInserire.length + ' record salvati');
 }
