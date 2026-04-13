@@ -213,11 +213,16 @@ var PF_SENTINELLE = [
       }
 
       // Fonte 3: giacenze_mensili ultimo mese
-      var gmRes = await sb.from('giacenze_mensili')
-        .select('giacenza_teorica,mese,anno')
-        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
-        .order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1).maybeSingle();
-      var fonte3 = gmRes.data ? Number(gmRes.data.giacenza_teorica || 0) : null;
+      var fonte3 = null;
+      try {
+        var gmRes = await sb.from('giacenze_mensili')
+          .select('giacenza_teorica,mese,anno')
+          .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
+          .order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1);
+        if (gmRes.data && gmRes.data.length > 0) {
+          fonte3 = Number(gmRes.data[0].giacenza_teorica || 0);
+        }
+      } catch (e) { /* tabella vuota o errore, fonte3 resta null */ }
 
       // Fonte 4: calcolata cumulativa dal 01/01 via pfData (stessa logica vista settimanale)
       var fonte4 = null;

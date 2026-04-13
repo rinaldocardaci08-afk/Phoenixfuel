@@ -43,14 +43,22 @@ async function caricaDeposito() {
   // proporzione al loro livello_attuale DB (così almeno il peso relativo
   // tra cisterne dello stesso prodotto è preservato).
   // ═══════════════════════════════════════════════════════════════════
+  console.log('[caricaDeposito] 🔄 Avvio allineamento pfData. Cisterne pre-patch:',
+    cisterne.map(function(c){return c.nome+'='+c.livello_attuale;}).join(', '));
   try {
-    if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+    if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
+      console.warn('[caricaDeposito] ❌ pfData.getGiacenzaAllaData non disponibile, skip allineamento');
+    } else {
       var oggi = new Date().toISOString().split('T')[0];
       var prodottiUnici = [...new Set(cisterne.map(function(c) { return c.prodotto; }))];
+      console.log('[caricaDeposito] prodotti da allineare:', prodottiUnici);
       for (var pi = 0; pi < prodottiUnici.length; pi++) {
         var prod = prodottiUnici[pi];
         var giac = await pfData.getGiacenzaAllaData('deposito_vibo', prod, oggi);
         var calcTot = giac.calcolata;
+        console.log('[caricaDeposito] ' + prod + ': DB sum vs pfData calc =', {
+          iniziale: giac.iniziale, entrate: giac.entrate, uscite: giac.uscite, calcolata: calcTot
+        });
         var cisDelProd = cisterne.filter(function(c) { return c.prodotto === prod; });
         var sommaDb = cisDelProd.reduce(function(s,c) { return s + Number(c.livello_attuale || 0); }, 0);
         if (sommaDb > 0) {
@@ -65,9 +73,11 @@ async function caricaDeposito() {
           cisDelProd.forEach(function(c) { c.livello_attuale = quotaEqua; });
         }
       }
+      console.log('[caricaDeposito] ✓ Allineamento completato. Cisterne post-patch:',
+        cisterne.map(function(c){return c.nome+'='+c.livello_attuale;}).join(', '));
     }
   } catch (e) {
-    console.warn('[caricaDeposito] allineamento calcolato fallito, uso DB:', e);
+    console.warn('[caricaDeposito] ❌ allineamento calcolato fallito, uso DB:', e);
   }
 
   // Raggruppa cisterne per tipo
