@@ -43,6 +43,10 @@ function stzgToggleVista(target) {
     if (blocoGg) blocoGg.style.display = 'none';
     if (blocoWk) blocoWk.style.display = '';
     blocoMs.style.display = 'none';
+    // Step B.3.b: carica vista settimanale stazione
+    if (typeof _sgwInit === 'function') {
+      try { _sgwInit(); } catch(e) { console.warn('_sgwInit error:', e); }
+    }
   } else {
     // default: 'mese'
     _activeBtn(btnMs);

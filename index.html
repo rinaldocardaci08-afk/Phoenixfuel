@@ -1751,16 +1751,18 @@
             <div id="stzg-blocco-giorno-contenuto"><div class="loading">Caricamento...</div></div>
           </div>
 
-          <!-- BLOCCO SETTIMANA — placeholder, disponibile nel prossimo aggiornamento -->
+          <!-- BLOCCO SETTIMANA — vista calcolata stazione B.3.b -->
           <div id="stzg-blocco-week" style="display:none">
             <div class="card">
-              <div class="card-title">📊 Vista settimanale calcolata — stazione Oppido</div>
-              <div style="padding:32px 16px;text-align:center;color:var(--text-muted);font-size:13px">
-                <div style="font-size:22px;margin-bottom:10px">🚧</div>
-                <div style="font-weight:500;color:var(--text);margin-bottom:6px">In costruzione</div>
-                <div>La vista settimanale della stazione sarà disponibile nel prossimo aggiornamento.</div>
-                <div style="margin-top:10px;font-size:11px">Nel frattempo puoi usare la vista <strong>Mensile</strong>.</div>
+              <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <span>📊 Vista settimanale calcolata — stazione Oppido</span>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <select id="sgw-prodotto" onchange="sgwCambiaProdotto()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                  <select id="sgw-anno" onchange="sgwCambiaAnno()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                </div>
               </div>
+              <div style="font-size:11px;color:var(--text-muted);margin:6px 0 4px">Calcolato cumulativo dal 01/01 dell'anno selezionato. Apertura dalla giacenza rilevata del 31/12 anno prec. Uscite dalle letture pompe, entrate dagli ordini stazione_servizio.</div>
+              <div id="sgw-contenuto" style="margin-top:10px"><div class="loading">Caricamento...</div></div>
             </div>
           </div>
 
@@ -2360,6 +2362,7 @@
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260412a"></script>
 <script src="pf-stz-giac-giorno.js?v=20260413b"></script>
+<script src="pf-stz-giac-week.js?v=20260413c"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=1775149951158"></script>
