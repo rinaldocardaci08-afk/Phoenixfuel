@@ -184,6 +184,30 @@ window.pfData = {
     var anno = parseInt(data.substring(0, 4));
     var inizioAnno = anno + '-01-01';
 
+    // ─────────────────────────────────────────────────────────────
+    // CASO SPECIALE: se la data è esattamente 31/12 di un anno e
+    // esiste una giacenza_annuali convalidata per quell'anno,
+    // ritornala direttamente come saldo di chiusura.
+    // Questo evita che chiamando "31/12/2025" il sistema calcoli
+    // movimenti del 2025 (anno pre-PhoenixFuel) e dia 0.
+    // ─────────────────────────────────────────────────────────────
+    if (data === anno + '-12-31') {
+      var chiusuraRes = await sb.from('giacenze_annuali')
+        .select('giacenza_reale')
+        .eq('anno', anno).eq('sede', sede).eq('prodotto', prodotto)
+        .eq('convalidata', true).maybeSingle();
+      if (chiusuraRes.data && chiusuraRes.data.giacenza_reale !== null) {
+        var chiusura = Number(chiusuraRes.data.giacenza_reale);
+        return {
+          iniziale: chiusura,
+          entrate: 0,
+          uscite: 0,
+          calcolata: chiusura,
+          fonteIniziale: 'giacenze_annuali ' + anno + ' (chiusura convalidata)'
+        };
+      }
+    }
+
     // 1. Giacenza iniziale (01/01 dell'anno)
     var iniziale = 0;
     var fonteIniziale = '—';
