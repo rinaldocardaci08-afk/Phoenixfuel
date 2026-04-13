@@ -220,95 +220,50 @@ var PF_SENTINELLE = [
     }
   },
   {
-    id: 'disallineamento_gasauto_deposito',
-    nome: '⚠️ Disallineamento giacenza Gas Auto deposito (4 fonti)',
-    atteso: 'Tutte uguali (tolleranza 100 L)',
+    id: 'quadratura_cisterne_vs_calcolato',
+    nome: '⚖️ Quadratura cisterne DB vs calcolato pfData (tutti i prodotti deposito)',
+    atteso: 'Tutti i prodotti allineati (Δ < 100 L)',
     query: async function() {
-      // Fonte 1: cisterne.livello_attuale
-      var cisRes = await sb.from('cisterne').select('livello_attuale')
-        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione');
-      var fonte1 = (cisRes.data || []).reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
+      if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
+        throw new Error('pfData.getGiacenzaAllaData non disponibile');
+      }
+      // 1. Tutte le cisterne deposito: somma livello_attuale per prodotto
+      var cisRes = await sb.from('cisterne').select('prodotto,livello_attuale').eq('sede','deposito_vibo');
+      if (cisRes.error) throw cisRes.error;
+      var cisterneByProd = {};
+      (cisRes.data || []).forEach(function(c) {
+        if (!c.prodotto) return;
+        cisterneByProd[c.prodotto] = (cisterneByProd[c.prodotto] || 0) + Number(c.livello_attuale || 0);
+      });
+      var prodotti = Object.keys(cisterneByProd);
+      if (!prodotti.length) return 'OK — nessuna cisterna deposito';
 
-     // Fonte 2: giacenze_giornaliere ultimo record
-      var fonte2 = null;
-      try {
-        var ggRes = await sb.from('giacenze_giornaliere')
-          .select('data,giacenza_rilevata,giacenza_teorica')
-          .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
-          .order('data', { ascending: false }).limit(1);
-        if (ggRes.data && ggRes.data.length > 0) {
-          var gg0 = ggRes.data[0];
-          fonte2 = gg0.giacenza_rilevata !== null ? Number(gg0.giacenza_rilevata) : Number(gg0.giacenza_teorica || 0);
-        }
-      } catch (e) { /* fonte2 resta null */ }
+      // 2. Per ogni prodotto: calc via pfData
+      var oggi = new Date().toISOString().split('T')[0];
+      var risultati = [];
+      for (var i = 0; i < prodotti.length; i++) {
+        var prod = prodotti[i];
+        var calcRes = await pfData.getGiacenzaAllaData('deposito_vibo', prod, oggi);
+        var cisterneVal = Math.round(cisterneByProd[prod]);
+        var calcVal = Math.round(calcRes.calcolata);
+        var delta = cisterneVal - calcVal;
+        risultati.push({ prod: prod, cisterne: cisterneVal, calc: calcVal, delta: delta });
+      }
 
-     // Fonte 3: giacenze_mensili ultimo mese (teorica calcolata in JS, non esiste in DB)
-      var fonte3 = null;
-      try {
-        var gmRes = await sb.from('giacenze_mensili')
-          .select('giacenza_inizio,eccedenze_viaggio,cali_viaggio,cali_tecnici,giacenza_rilevata,mese,anno')
-          .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
-          .order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1);
-        if (gmRes.data && gmRes.data.length > 0) {
-          var gm0 = gmRes.data[0];
-          // Se rilevata è valorizzata, usa quella (è ciò che il proprietario ha misurato)
-          if (gm0.giacenza_rilevata !== null && gm0.giacenza_rilevata !== undefined) {
-            fonte3 = Number(gm0.giacenza_rilevata);
-          } else {
-            // Altrimenti calcola teorica = inizio + eccedenze - cali_viaggio - cali_tecnici
-            // (entrate/uscite non sono in giacenze_mensili, sono calcolate dal codice della vista)
-            fonte3 = Number(gm0.giacenza_inizio || 0)
-                   + Number(gm0.eccedenze_viaggio || 0)
-                   - Number(gm0.cali_viaggio || 0)
-                   - Number(gm0.cali_tecnici || 0);
-          }
-        }
-      } catch (e) { /* fonte3 resta null */ }
-
-      // Fonte 4: calcolata cumulativa dal 01/01 via pfData (stessa logica vista settimanale)
-      var fonte4 = null;
-      try {
-        if (typeof pfData !== 'undefined' && pfData.getOrdini) {
-          // Giacenza iniziale 01/01
-          var giacIniRes = await sb.from('giacenze_annuali')
-            .select('giacenza_reale').eq('anno', 2025).eq('sede', 'deposito_vibo')
-            .eq('prodotto', 'Gasolio Autotrazione').eq('convalidata', true).maybeSingle();
-          var iniziale = giacIniRes.data ? Number(giacIniRes.data.giacenza_reale || 0) : 20714;
-
-          var oggi = new Date().toISOString().split('T')[0];
-          var tutti = await pfData.getOrdini({ da: '2026-01-01', a: oggi });
-          var ent = 0, usc = 0;
-          tutti.forEach(function(o) {
-            if (o.prodotto !== 'Gasolio Autotrazione') return;
-            if (o.tipo_ordine === 'entrata_deposito') ent += Number(o.litri || 0);
-            else if (o.tipo_ordine === 'cliente') {
-              var f = (o.fornitore || '').toLowerCase();
-              if (f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0) usc += Number(o.litri || 0);
-            } else if (o.tipo_ordine === 'stazione_servizio') {
-              var f2 = (o.fornitore || '').toLowerCase();
-              if (f2.indexOf('phoenix') >= 0 || f2.indexOf('deposito') >= 0) usc += Number(o.litri || 0);
-            } else if (o.tipo_ordine === 'autoconsumo') usc += Number(o.litri || 0);
-          });
-          fonte4 = iniziale + ent - usc;
-        }
-      } catch (e) {}
-
-      var f1 = Math.round(fonte1);
-      var f2 = fonte2 !== null ? Math.round(fonte2) : null;
-      var f3 = fonte3 !== null ? Math.round(fonte3) : null;
-      var f4 = fonte4 !== null ? Math.round(fonte4) : null;
-
-      return 'cisterne:' + f1 + ' / ggiorn:' + (f2 !== null ? f2 : '—') + ' / gmens:' + (f3 !== null ? f3 : '—') + ' / calc:' + (f4 !== null ? f4 : '—');
+      // 3. Filtra i disallineati (|delta| > 100)
+      var disallineati = risultati.filter(function(r) { return Math.abs(r.delta) > 100; });
+      if (disallineati.length === 0) {
+        return 'OK — tutti ' + prodotti.length + ' prodotti allineati (Δ < 100 L)';
+      }
+      // Output: lista dei disallineati con cisterne/calc/delta
+      var dettaglio = disallineati.map(function(r) {
+        var sgn = r.delta > 0 ? '+' : '';
+        return r.prod + ': cisterne ' + r.cisterne.toLocaleString('it-IT') + ' vs calc ' + r.calc.toLocaleString('it-IT') + ' (Δ ' + sgn + r.delta.toLocaleString('it-IT') + ')';
+      });
+      return disallineati.length + '/' + prodotti.length + ' disallineati: ' + dettaglio.join(' | ');
     },
     confronta: function(ottenuto) {
-      // Estrae i 4 numeri e verifica tolleranza 100 L
-      var nums = (ottenuto.match(/\d+/g) || []).map(Number);
-      if (nums.length < 2) return false;
-      var validi = nums.filter(function(n) { return !isNaN(n); });
-      if (validi.length < 2) return false;
-      var min = Math.min.apply(null, validi);
-      var max = Math.max.apply(null, validi);
-      return (max - min) <= 100;
+      return ottenuto.indexOf('OK') === 0;
     }
   },
 ];
