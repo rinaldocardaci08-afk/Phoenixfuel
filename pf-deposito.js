@@ -34,6 +34,42 @@ async function caricaDeposito() {
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo').order('tipo').order('nome');
   if (!cisterne) return;
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ALLINEAMENTO IN MEMORIA al calcolo canonico pfData.getGiacenzaAllaData
+  // Comandamento: giacenza = iniziale + entrate − uscite.
+  // cisterne.livello_attuale sul DB può essere disallineata (bug noto),
+  // quindi qui lo sovrascriviamo in memoria con il calcolato per prodotto.
+  // Distribuiamo il totale per prodotto sulle cisterne del prodotto in
+  // proporzione al loro livello_attuale DB (così almeno il peso relativo
+  // tra cisterne dello stesso prodotto è preservato).
+  // ═══════════════════════════════════════════════════════════════════
+  try {
+    if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+      var oggi = new Date().toISOString().split('T')[0];
+      var prodottiUnici = [...new Set(cisterne.map(function(c) { return c.prodotto; }))];
+      for (var pi = 0; pi < prodottiUnici.length; pi++) {
+        var prod = prodottiUnici[pi];
+        var giac = await pfData.getGiacenzaAllaData('deposito_vibo', prod, oggi);
+        var calcTot = giac.calcolata;
+        var cisDelProd = cisterne.filter(function(c) { return c.prodotto === prod; });
+        var sommaDb = cisDelProd.reduce(function(s,c) { return s + Number(c.livello_attuale || 0); }, 0);
+        if (sommaDb > 0) {
+          // Distribuzione proporzionale
+          cisDelProd.forEach(function(c) {
+            var quota = Number(c.livello_attuale || 0) / sommaDb;
+            c.livello_attuale = Math.round(calcTot * quota);
+          });
+        } else if (cisDelProd.length > 0) {
+          // Se sommaDb = 0, dividi equamente
+          var quotaEqua = Math.round(calcTot / cisDelProd.length);
+          cisDelProd.forEach(function(c) { c.livello_attuale = quotaEqua; });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[caricaDeposito] allineamento calcolato fallito, uso DB:', e);
+  }
+
   // Raggruppa cisterne per tipo
   const tipi = [...new Set(cisterne.map(c => c.tipo))];
   // Ordina tipi secondo ordine_visualizzazione dei prodotti
@@ -880,13 +916,12 @@ async function caricaGiacenzeGiornaliere() {
   var sogliaEl = document.getElementById('gg-soglia');
   if (sogliaEl && sogliaEl.value) GG_SOGLIA_ALERT = parseInt(sogliaEl.value) || 500;
 
-  // Identifica prodotti deposito dalle cisterne
-  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita_max,livello_attuale').eq('sede','deposito_vibo');
+  // Identifica prodotti deposito dalle cisterne (solo per elenco prodotti, NON per livello)
+  var { data: cisterne } = await sb.from('cisterne').select('prodotto,capacita_max').eq('sede','deposito_vibo');
   var prodMap = {};
   (cisterne||[]).forEach(function(c) {
     if (!prodMap[c.prodotto]) prodMap[c.prodotto] = { capacita:0, attuale:0 };
     prodMap[c.prodotto].capacita += Number(c.capacita_max||0);
-    prodMap[c.prodotto].attuale += Number(c.livello_attuale||0);
   });
   _ggProdotti = Object.keys(prodMap).sort();
   // Se mancano prodotti noti, aggiungili
@@ -994,10 +1029,41 @@ async function caricaGiacenzeGiornaliere() {
   var prodottiOrdinati = ordineProdotti.filter(function(p) { return _ggProdotti.indexOf(p) >= 0; });
   _ggProdotti.forEach(function(p) { if (prodottiOrdinati.indexOf(p) < 0) prodottiOrdinati.push(p); });
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Pre-carica apertura per ogni prodotto via pfData.getGiacenzaAllaData(giornoPrima)
+  // Unica sorgente di verità (comandamento #1). Se giornoPrima < 01/01
+  // dell'anno o pfData fallisce, fallback su precMap (rilevata/teorica salvate).
+  // ═══════════════════════════════════════════════════════════════════
+  var aperturaCalcolata = {};
+  if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+    try {
+      var promises = prodottiOrdinati.map(function(prod) {
+        return pfData.getGiacenzaAllaData('deposito_vibo', prod, giornoPrima)
+          .then(function(g) { return { prod: prod, calc: g.calcolata }; })
+          .catch(function(e) { console.warn('[caricaGiacenzeGiornaliere] pfData fallita per', prod, e); return { prod: prod, calc: null }; });
+      });
+      var risultati = await Promise.all(promises);
+      risultati.forEach(function(r) { if (r.calc !== null) aperturaCalcolata[r.prod] = r.calc; });
+    } catch (e) {
+      console.warn('[caricaGiacenzeGiornaliere] allineamento calcolato fallito:', e);
+    }
+  }
+
   prodottiOrdinati.forEach(function(prod) {
     var pi = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===prod;}) : null;
     var col = pi ? pi.colore : (coloriProd[prod] || '#888');
-    var inizio = precMap[prod] || prodMap[prod]?.attuale || 0;
+    // Priorità apertura:
+    // 1. rilevata salvata gg prec (precMap) — il proprietario l'ha misurata
+    // 2. calcolata pfData del gg prec — fiume dei litri
+    // 3. 0 (prodotto nuovo o senza dati)
+    var inizio;
+    if (precMap[prod] !== undefined && precMap[prod] !== null) {
+      inizio = precMap[prod];
+    } else if (aperturaCalcolata[prod] !== undefined) {
+      inizio = aperturaCalcolata[prod];
+    } else {
+      inizio = 0;
+    }
     var ent = entrateMap[prod] || 0;
     var usc = usciteMap[prod] || 0;
     var deltaGiornoVal = ent - usc;

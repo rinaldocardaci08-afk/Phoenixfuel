@@ -164,6 +164,106 @@ window.pfData = {
       importoVendita: vendita,
       costoMedioL: litri > 0 ? costo / litri : 0
     };
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // GIACENZA ALLA DATA — unica sorgente di verità per i litri in cisterna
+  //
+  // COMANDAMENTI (stabiliti dal proprietario):
+  //   1. giacenza = iniziale_01_01 + entrate − uscite
+  //   2. solo le rettifiche modificano il flusso
+  //
+  // Parametri:
+  //   sede     : 'deposito_vibo' | 'stazione_oppido'
+  //   prodotto : nome prodotto
+  //   data     : ISO (YYYY-MM-DD) — giacenza a fine giornata
+  //
+  // Ritorna: { iniziale, entrate, uscite, calcolata, fonteIniziale }
+  // ─────────────────────────────────────────────────────────────────
+  async getGiacenzaAllaData(sede, prodotto, data) {
+    var anno = parseInt(data.substring(0, 4));
+    var inizioAnno = anno + '-01-01';
+
+    // 1. Giacenza iniziale (01/01 dell'anno)
+    var iniziale = 0;
+    var fonteIniziale = '—';
+    var gaRes = await sb.from('giacenze_annuali')
+      .select('giacenza_reale')
+      .eq('anno', anno - 1).eq('sede', sede).eq('prodotto', prodotto)
+      .eq('convalidata', true).maybeSingle();
+    if (gaRes.data && gaRes.data.giacenza_reale !== null) {
+      iniziale = Number(gaRes.data.giacenza_reale);
+      fonteIniziale = 'giacenze_annuali ' + (anno - 1);
+    } else {
+      // Fallback: primo record giacenze_giornaliere con rilevata valorizzata nell'anno-1
+      var ggIni = await sb.from('giacenze_giornaliere')
+        .select('giacenza_rilevata,data')
+        .eq('sede', sede).eq('prodotto', prodotto)
+        .not('giacenza_rilevata', 'is', null)
+        .lte('data', inizioAnno)
+        .order('data', { ascending: false }).limit(1).maybeSingle();
+      if (ggIni.data) {
+        iniziale = Number(ggIni.data.giacenza_rilevata);
+        fonteIniziale = 'giacenze_giornaliere rilevata ' + ggIni.data.data;
+      }
+    }
+
+    // 2. Movimenti [01/01, data]
+    var STATI = ['confermato','consegnato'];
+    var entrate = 0, uscite = 0;
+
+    if (sede === 'deposito_vibo') {
+      var [entRes, uscCliRes, uscStaRes, uscAuRes] = await Promise.all([
+        sb.from('ordini').select('litri')
+          .eq('tipo_ordine','entrata_deposito').in('stato', STATI).eq('prodotto', prodotto)
+          .gte('data', inizioAnno).lte('data', data),
+        sb.from('ordini').select('litri,fornitore')
+          .eq('tipo_ordine','cliente').in('stato', STATI).eq('prodotto', prodotto)
+          .gte('data', inizioAnno).lte('data', data),
+        sb.from('ordini').select('litri,fornitore')
+          .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+          .gte('data', inizioAnno).lte('data', data),
+        sb.from('ordini').select('litri')
+          .eq('tipo_ordine','autoconsumo').in('stato', STATI).eq('prodotto', prodotto)
+          .gte('data', inizioAnno).lte('data', data)
+      ]);
+      function isPhoenix(o) {
+        var f = (o.fornitore || '').toLowerCase();
+        return f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0;
+      }
+      entrate = (entRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      uscite += (uscCliRes.data || []).filter(isPhoenix).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      uscite += (uscStaRes.data || []).filter(isPhoenix).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      uscite += (uscAuRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+    } else if (sede === 'stazione_oppido') {
+      // Entrate: tipo_ordine='stazione_servizio'
+      var entStaRes = await sb.from('ordini').select('litri')
+        .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+        .gte('data', inizioAnno).lte('data', data);
+      entrate = (entStaRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      // Uscite: differenze letture pompe
+      var pompeRes = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true);
+      var ids = (pompeRes.data || []).filter(function(p){ return p.prodotto === prodotto; }).map(function(p){ return p.id; });
+      if (ids.length) {
+        var lettRes = await sb.from('stazione_letture').select('pompa_id,data,lettura')
+          .in('pompa_id', ids).gte('data', inizioAnno).lte('data', data).order('data');
+        var byPompa = {};
+        (lettRes.data || []).forEach(function(l) {
+          if (!byPompa[l.pompa_id]) byPompa[l.pompa_id] = [];
+          byPompa[l.pompa_id].push(l);
+        });
+        Object.keys(byPompa).forEach(function(pid) {
+          var arr = byPompa[pid];
+          for (var j = 1; j < arr.length; j++) {
+            var d = Number(arr[j].lettura) - Number(arr[j-1].lettura);
+            if (d > 0) uscite += d;
+          }
+        });
+      }
+    }
+
+    var calcolata = Math.round(iniziale + entrate - uscite);
+    return { iniziale: iniziale, entrate: Math.round(entrate), uscite: Math.round(uscite), calcolata: calcolata, fonteIniziale: fonteIniziale };
   }
 
 };
