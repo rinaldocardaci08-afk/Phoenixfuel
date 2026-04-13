@@ -229,27 +229,41 @@ var PF_SENTINELLE = [
         .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione');
       var fonte1 = (cisRes.data || []).reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
 
-      // Fonte 2: giacenze_giornaliere ultimo record
-      var ggRes = await sb.from('giacenze_giornaliere')
-        .select('giacenza_teorica,giacenza_rilevata,data')
-        .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
-        .order('data', { ascending: false }).limit(1).maybeSingle();
+     // Fonte 2: giacenze_giornaliere ultimo record
       var fonte2 = null;
-      if (ggRes.data) {
-        fonte2 = ggRes.data.giacenza_rilevata !== null ? Number(ggRes.data.giacenza_rilevata) : Number(ggRes.data.giacenza_teorica || 0);
-      }
+      try {
+        var ggRes = await sb.from('giacenze_giornaliere')
+          .select('data,giacenza_rilevata,giacenza_teorica')
+          .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
+          .order('data', { ascending: false }).limit(1);
+        if (ggRes.data && ggRes.data.length > 0) {
+          var gg0 = ggRes.data[0];
+          fonte2 = gg0.giacenza_rilevata !== null ? Number(gg0.giacenza_rilevata) : Number(gg0.giacenza_teorica || 0);
+        }
+      } catch (e) { /* fonte2 resta null */ }
 
-      // Fonte 3: giacenze_mensili ultimo mese
+     // Fonte 3: giacenze_mensili ultimo mese (teorica calcolata in JS, non esiste in DB)
       var fonte3 = null;
       try {
         var gmRes = await sb.from('giacenze_mensili')
-          .select('giacenza_teorica,mese,anno')
+          .select('giacenza_inizio,eccedenze_viaggio,cali_viaggio,cali_tecnici,giacenza_rilevata,mese,anno')
           .eq('sede', 'deposito_vibo').eq('prodotto', 'Gasolio Autotrazione')
           .order('anno', { ascending: false }).order('mese', { ascending: false }).limit(1);
         if (gmRes.data && gmRes.data.length > 0) {
-          fonte3 = Number(gmRes.data[0].giacenza_teorica || 0);
+          var gm0 = gmRes.data[0];
+          // Se rilevata è valorizzata, usa quella (è ciò che il proprietario ha misurato)
+          if (gm0.giacenza_rilevata !== null && gm0.giacenza_rilevata !== undefined) {
+            fonte3 = Number(gm0.giacenza_rilevata);
+          } else {
+            // Altrimenti calcola teorica = inizio + eccedenze - cali_viaggio - cali_tecnici
+            // (entrate/uscite non sono in giacenze_mensili, sono calcolate dal codice della vista)
+            fonte3 = Number(gm0.giacenza_inizio || 0)
+                   + Number(gm0.eccedenze_viaggio || 0)
+                   - Number(gm0.cali_viaggio || 0)
+                   - Number(gm0.cali_tecnici || 0);
+          }
         }
-      } catch (e) { /* tabella vuota o errore, fonte3 resta null */ }
+      } catch (e) { /* fonte3 resta null */ }
 
       // Fonte 4: calcolata cumulativa dal 01/01 via pfData (stessa logica vista settimanale)
       var fonte4 = null;
