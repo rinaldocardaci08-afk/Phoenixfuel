@@ -124,6 +124,31 @@ async function caricaGiacenzaDashboard() {
   const wrap = document.getElementById('dash-giacenza');
   if (!wrap) return;
   if (!cisterne || !cisterne.length) { wrap.innerHTML = '<div class="loading">Nessuna cisterna configurata</div>'; return; }
+  // Allineamento pfData
+  try {
+    if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+      var oggiISODash = new Date().toISOString().split('T')[0];
+      var prodottiUnici = [...new Set(cisterne.map(function(c) { return c.prodotto; }))];
+      for (var pi = 0; pi < prodottiUnici.length; pi++) {
+        var prod = prodottiUnici[pi];
+        var giac = await pfData.getGiacenzaAllaData('deposito_vibo', prod, oggiISODash);
+        var calcTot = giac.calcolata;
+        var cisDelProd = cisterne.filter(function(c) { return c.prodotto === prod; });
+        var sommaDb = cisDelProd.reduce(function(s,c) { return s + Number(c.livello_attuale || 0); }, 0);
+        if (sommaDb > 0) {
+          cisDelProd.forEach(function(c) {
+            var quota = Number(c.livello_attuale || 0) / sommaDb;
+            c.livello_attuale = Math.round(calcTot * quota);
+          });
+        } else if (cisDelProd.length > 0) {
+          var quotaEqua = Math.round(calcTot / cisDelProd.length);
+          cisDelProd.forEach(function(c) { c.livello_attuale = quotaEqua; });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[caricaGiacenzaDashboard] pfData fallito:', e);
+  }
   const prodottiOrdine = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
   const perProdotto = {};
   cisterne.forEach(c => {
