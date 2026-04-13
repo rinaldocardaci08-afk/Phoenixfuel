@@ -193,6 +193,33 @@ var PF_SENTINELLE = [
     }
   },
   {
+    id: 'alert_das_caricato_stato_confermato',
+    nome: '🚨 Alert DAS firmato caricato ma stato ancora confermato (>1 gg)',
+    atteso: 'Tutti gli ordini con DAS sono consegnato',
+    query: async function() {
+      // Tolleranza: ordini con data < oggi (il giorno stesso può essere ancora in transizione)
+      var oggi = new Date().toISOString().split('T')[0];
+      var res = await sb.from('ordini')
+        .select('id,data,cliente,fornitore,prodotto,litri')
+        .not('das_firmato_url', 'is', null)
+        .neq('das_firmato_url', '')
+        .eq('stato', 'confermato')
+        .lt('data', oggi)
+        .gte('data', '2026-01-01')
+        .order('data', { ascending: false });
+      if (res.error) throw res.error;
+      var anomalie = res.data || [];
+      if (anomalie.length === 0) return 'OK — nessun ordine con DAS in stato sbagliato';
+      var primi = anomalie.slice(0, 3).map(function(o) {
+        return o.data + ' ' + (o.cliente || o.fornitore || '?') + ' ' + Math.round(o.litri) + 'L';
+      });
+      return anomalie.length + ' ordini: ' + primi.join(' | ') + (anomalie.length > 3 ? ' (+' + (anomalie.length - 3) + ')' : '');
+    },
+    confronta: function(ottenuto) {
+      return ottenuto.indexOf('OK') === 0;
+    }
+  },
+  {
     id: 'disallineamento_gasauto_deposito',
     nome: '⚠️ Disallineamento giacenza Gas Auto deposito (4 fonti)',
     atteso: 'Tutte uguali (tolleranza 100 L)',
