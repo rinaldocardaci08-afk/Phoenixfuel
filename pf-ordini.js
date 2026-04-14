@@ -1,4 +1,15 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+
+// ═══════════════════════════════════════════════════════════════════
+// Helper: determina se un nome cliente corrisponde a Phoenix Fuel
+// (rifornimento interno → margine sempre 0, nessun warning)
+// Copre varianti: "Phoenix Fuel Srl", "PhoenixFuel", "phoenix fuel", ecc.
+// ═══════════════════════════════════════════════════════════════════
+function _isClientePhoenix(nomeCliente) {
+  if (!nomeCliente) return false;
+  return String(nomeCliente).toLowerCase().indexOf('phoenix') >= 0;
+}
+
 // ── AREA CLIENTE ──────────────────────────────────────────────────
 async function caricaAreaCliente() {
   if (!utenteCorrente?.cliente_id) return;
@@ -454,12 +465,16 @@ async function caricaPrezzoPerOrdine() {
     // Calcola media margine (con cache per evitare query ripetute)
     let margineDaUsare = Number(match.margine);
     const clienteId = document.getElementById('ord-cliente').value;
-    if (clienteId) {
+    // Guardia Phoenix Fuel: rifornimento interno → margine sempre 0
+    const clienteNomePre = clienteId ? (cacheClienti.find(c=>c.id===clienteId)?.nome || '') : '';
+    if (_isClientePhoenix(clienteNomePre)) {
+      margineDaUsare = 0;
+    } else if (clienteId) {
       const cacheKey = clienteId + '_' + prodotto;
       if (_cacheMarginClienti[cacheKey] !== undefined) {
         margineDaUsare = _cacheMarginClienti[cacheKey];
       } else {
-        const clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome || '';
+        const clienteNome = clienteNomePre;
         if (clienteNome) {
           const { data: ordPrec } = await sb.from('ordini').select('margine').or('cliente_id.eq.' + clienteId + ',cliente.eq.' + clienteNome).eq('prodotto', prodotto).neq('stato','annullato').eq('tipo_ordine','cliente').gt('margine',0).order('data',{ascending:false}).limit(10);
           if (ordPrec && ordPrec.length > 0) {
@@ -641,8 +656,11 @@ async function salvaOrdine() {
   }
   const trasporto = validaNumero(document.getElementById('ord-trasporto-custom').value || '0', 0, 1, 'Trasporto');
   if (trasporto === null) return;
-  const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
-  if (margine <= 0 && tipo === 'cliente') {
+  let margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
+  // Guardia Phoenix Fuel: rifornimento interno → margine sempre 0, nessun warning
+  if (_isClientePhoenix(clienteNome)) {
+    margine = 0;
+  } else if (margine <= 0 && tipo === 'cliente') {
     if (!confirm('Il margine è zero o negativo. Vuoi procedere comunque?')) return;
   }
 
@@ -1447,7 +1465,12 @@ async function salvaModificaOrdine(id, bypassCheck) {
     }
   }
 
-  const { data: ordine } = await sb.from('ordini').select('data').eq('id', id).single();
+  const { data: ordine } = await sb.from('ordini').select('data,cliente').eq('id', id).single();
+  // Guardia Phoenix Fuel: rifornimento interno → margine sempre 0
+  let margineFinale = margine;
+  if (ordine && _isClientePhoenix(ordine.cliente)) {
+    margineFinale = 0;
+  }
   const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
   var modDestVal = document.getElementById('mod-destinazione').value;
   var modDest = modDestVal === '__manuale__' ? (document.getElementById('mod-dest-manuale').value.trim()||null) : (modDestVal || null);
@@ -1461,7 +1484,7 @@ async function salvaModificaOrdine(id, bypassCheck) {
       modSedeNome = modDest;
     }
   }
-  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome }).eq('id', id);
+  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome }).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   // Reset valori originali
   _modOrigCosto = _modOrigTrasporto = _modOrigMargine = _modOrigPrezzoNetto = null;
