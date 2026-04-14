@@ -346,12 +346,14 @@ async function confermaUscitaDeposito(ordineId, auto) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;
   // ── LOCK DIFENSIVO: impedisce doppi scarichi ──
-  // Se l'ordine ha già cisterna_id valorizzato significa che è già stato scaricato.
-  // Senza questo check, click multipli o chiamate programmatiche doppie causano
-  // decrementi ripetuti della stessa cisterna.
-  if (ordine.cisterna_id) {
+  // Fix 14/04 sera: controllo caricato_deposito invece di cisterna_id.
+  // Prima controllava solo cisterna_id, ma un ordine può avere cisterna_id
+  // valorizzato come pre-assegnazione (es. smistamento o selettore aperto
+  // senza conferma) SENZA essere stato davvero scaricato. caricato_deposito=true
+  // è il vero flag di "uscita eseguita sulle cisterne".
+  if (ordine.caricato_deposito === true) {
     if (!auto) {
-      toast('⚠ Ordine già scaricato da una cisterna. Usa ↩️ per annullare prima di riprovare.');
+      toast('⚠ Ordine già scaricato dalla cisterna. Usa ↩️ per annullare prima di riprovare.');
     }
     return;
   }
@@ -430,7 +432,9 @@ async function confermaSceltaCisternaUscita(ordineId) {
 
 async function _eseguiUscitaDeposito(ordineId, ordine, cis) {
   await aggiornaCisterna(cis.id, ordine.litri, 'uscita', ordineId, ordine.data);
-  await sb.from('ordini').update({ stato:'confermato', cisterna_id:cis.id }).eq('id', ordineId);
+  // Fix 14/04 sera: set caricato_deposito=true per il nuovo lock difensivo
+  // (prima usava cisterna_id come flag, ora usa caricato_deposito)
+  await sb.from('ordini').update({ stato:'confermato', cisterna_id:cis.id, caricato_deposito:true }).eq('id', ordineId);
   _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente + ' da ' + cis.nome + ' (CMP € ' + Number(cis.costo_medio||0).toFixed(4) + ')');
   toast('Uscita registrata da ' + cis.nome + '!');
   caricaDeposito();
@@ -2356,7 +2360,7 @@ async function annullaOperazioneDeposito(ordineId, tipoOperazione) {
         data: new Date().toISOString().split('T')[0],
         note: 'Compensativo: annullamento scarico ordine'
       }]);
-      await sb.from('ordini').update({ stato: nuovoStato, cisterna_id: null }).eq('id', ordineId);
+      await sb.from('ordini').update({ stato: nuovoStato, cisterna_id: null, caricato_deposito: false }).eq('id', ordineId);
     } else {
       // Annullamento carico: trovo tutti i movimenti 'entrata' di questo ordine e inverto ciascuno
       var { data: movimenti } = await sb.from('movimenti_cisterne').select('*').eq('ordine_id', ordineId).eq('tipo', 'entrata');
