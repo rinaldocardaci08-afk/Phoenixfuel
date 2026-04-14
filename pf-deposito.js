@@ -150,6 +150,66 @@ async function caricaDeposito() {
   _popolaSelAnnoGiac('giac-dep-anno');
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// pfDepositoRicalcolaCisterne — funzione canonica auto-healing
+// ═══════════════════════════════════════════════════════════════════
+// Riallinea cisterne.livello_attuale al valore calcolato canonico
+// (pfData.getGiacenzaAllaData) per tutte le cisterne di un prodotto.
+//
+// Comandamenti del proprietario (stabiliti 13/04):
+//   1. giacenza = iniziale + entrate − uscite
+//   2. solo le rettifiche modificano il flusso (nessuna toppa silenziosa)
+//
+// Va chiamata DOPO ogni operazione che modifica il livello cisterna
+// (carico, uscita, smistamento, autoconsumo, annullamento).
+// Non tocca costo_medio: il CMP resta gestito dal flusso originale.
+// Distribuisce il totale calcolato proporzionalmente sulle cisterne
+// del prodotto (preserva il peso relativo tra cisterne).
+// ═══════════════════════════════════════════════════════════════════
+async function pfDepositoRicalcolaCisterne(prodotto) {
+  if (!prodotto) return;
+  if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
+    console.warn('[pfDepositoRicalcolaCisterne] pfData non disponibile, skip');
+    return;
+  }
+  try {
+    var oggi = new Date().toISOString().split('T')[0];
+    var giac = await pfData.getGiacenzaAllaData('deposito_vibo', prodotto, oggi);
+    var totCalc = Math.max(0, Math.round(giac.calcolata));
+
+    var { data: cisterne, error: errCis } = await sb.from('cisterne')
+      .select('id,nome,livello_attuale')
+      .eq('sede', 'deposito_vibo').eq('prodotto', prodotto)
+      .order('nome');
+    if (errCis || !cisterne || !cisterne.length) return;
+
+    var sommaDb = cisterne.reduce(function(s, c) {
+      return s + Number(c.livello_attuale || 0);
+    }, 0);
+
+    // Distribuzione proporzionale; se DB tutto a zero, divide equamente
+    for (var i = 0; i < cisterne.length; i++) {
+      var c = cisterne[i];
+      var nuovoLiv;
+      if (sommaDb > 0) {
+        var quota = Number(c.livello_attuale || 0) / sommaDb;
+        nuovoLiv = Math.round(totCalc * quota);
+      } else {
+        nuovoLiv = Math.round(totCalc / cisterne.length);
+      }
+      // Skip update se valore già corretto (evita scritture inutili)
+      if (Math.round(Number(c.livello_attuale || 0)) === nuovoLiv) continue;
+      await sb.from('cisterne').update({
+        livello_attuale: nuovoLiv,
+        updated_at: new Date().toISOString()
+      }).eq('id', c.id);
+    }
+    console.log('[pfDepositoRicalcolaCisterne] ✓ ' + prodotto + ' riallineato a ' + totCalc + ' L');
+  } catch (e) {
+    console.warn('[pfDepositoRicalcolaCisterne] errore (non bloccante):', e);
+  }
+}
+
 async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLitro) {
   const { data: cis } = await sb.from('cisterne').select('*').eq('id', cisternaId).single();
   if (!cis) return;
@@ -182,6 +242,8 @@ async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLi
       ordine_id: ordineId
     }]);
   }
+  // Auto-healing: riallinea cisterne al calcolato pfData
+  await pfDepositoRicalcolaCisterne(cis.prodotto);
 }
 
 async function apriModaleAssegnaCisterna(ordineId) {
@@ -695,6 +757,8 @@ async function riceviAutoconsumo(ordineId, litri) {
 
   await sb.from('ordini').update({ caricato_deposito: true }).eq('id', ordineId);
   toast('✅ ' + fmtL(litri) + ' L di ' + ord.prodotto + ' ricevuti in "' + cis.nome + '"');
+  // Auto-healing: riallinea cisterne al calcolato pfData
+  await pfDepositoRicalcolaCisterne(ord.prodotto || cis.prodotto);
   caricaAutoconsumo();
 }
 
@@ -769,6 +833,8 @@ async function salvaPrelievoAutoconsumo() {
   toast(r1._offline ? '⚡ Prelievo ' + fmtL(litri) + ' L salvato offline' : '⛽ Prelievo di ' + fmtL(litri) + ' L ' + prodotto + ' registrato per ' + mezzoTarga);
   document.getElementById('ac-litri').value = '';
   document.getElementById('ac-note').value = '';
+  // Auto-healing: riallinea cisterne al calcolato pfData
+  await pfDepositoRicalcolaCisterne(prodotto);
   caricaAutoconsumo();
 }
 
@@ -825,6 +891,8 @@ async function eliminaPrelievo(id) {
     await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
   }
   toast('Prelievo eliminato');
+  // Auto-healing: riallinea cisterne al calcolato pfData
+  await pfDepositoRicalcolaCisterne(prodPrel);
   caricaAutoconsumo();
 }
 
@@ -1866,6 +1934,9 @@ async function confermaSmistamento() {
   // 8. Audit
   _auditLog('smistamento', 'ordini', ordine.fornitore + ' ' + fmtL(totLitri) + 'L ' + ordine.prodotto + ' → ' + righe.length + ' clienti, carico ' + (carico ? carico.id.substring(0,8) : '—'));
 
+  // 9. Auto-healing: riallinea cisterne al calcolato pfData (corregge formula livelloAtt+residuo)
+  await pfDepositoRicalcolaCisterne(ordine.prodotto);
+
   toast('Smistamento completato! ' + righe.length + ' ordini + carico + DAS creati.');
   chiudiModal();
   if (typeof caricaOrdini === 'function') caricaOrdini();
@@ -2298,6 +2369,8 @@ async function annullaOperazioneDeposito(ordineId, tipoOperazione) {
     }
 
     _auditLog('annulla_' + tipoOperazione + '_deposito', 'ordini', 'Annullato ' + tipoOperazione + ' ordine ' + ordineId + ' (' + fmtL(ordine.litri) + ' ' + ordine.prodotto + ')');
+    // Auto-healing: riallinea cisterne al calcolato pfData (copre entrambi i rami uscita/carico)
+    await pfDepositoRicalcolaCisterne(ordine.prodotto);
     toast('✓ Operazione annullata. Ordine tornato in attesa.');
     caricaDeposito();
     caricaOrdini();
