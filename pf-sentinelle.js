@@ -194,17 +194,21 @@ var PF_SENTINELLE = [
   },
   {
     id: 'alert_das_caricato_stato_confermato',
-    nome: '🚨 Alert DAS firmato caricato ma stato ancora confermato (>1 gg)',
+    nome: '🚨 Alert DAS firmato caricato ma stato ancora confermato (>3 gg)',
     atteso: 'Tutti gli ordini con DAS sono consegnato',
     query: async function() {
-      // Tolleranza: ordini con data < oggi (il giorno stesso può essere ancora in transizione)
-      var oggi = new Date().toISOString().split('T')[0];
+      // Tolleranza 3 giorni: copre weekend lungo (venerdì→lunedì)
+      // Un ordine è "rosso" solo se la sua data è più vecchia di 3 giorni
+      // ma lo stato è ancora 'confermato' nonostante DAS firmato caricato.
+      var oggi = new Date();
+      var limite = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() - 3);
+      var limiteISO = limite.toISOString().split('T')[0];
       var res = await sb.from('ordini')
         .select('id,data,cliente,fornitore,prodotto,litri')
         .not('das_firmato_url', 'is', null)
         .neq('das_firmato_url', '')
         .eq('stato', 'confermato')
-        .lt('data', oggi)
+        .lt('data', limiteISO)
         .gte('data', '2026-01-01')
         .order('data', { ascending: false });
       if (res.error) throw res.error;
