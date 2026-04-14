@@ -4,7 +4,9 @@ const SEZIONI_SISTEMA = [
   {id:'dashboard',label:'Dashboard',icon:'▦'},
   {id:'ordini',label:'Ordini',icon:'📋'},
   {id:'prezzi',label:'Prezzi giornalieri',icon:'💰'},
-  {id:'deposito',label:'Deposito',icon:'🏗'},
+  {id:'deposito',label:'Deposito',icon:'🏗', sub:[
+    {id:'deposito.modifica-cmp',label:'Modifica CMP cisterne'}
+  ]},
   {id:'consegne',label:'Consegne',icon:'🚚'},
   {id:'vendite',label:'Vendite',icon:'📊', sub:[
     {id:'vendite.ingrosso',label:'Ingrosso'},

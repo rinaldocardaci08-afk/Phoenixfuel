@@ -118,8 +118,9 @@ async function caricaDeposito() {
       gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
       cmpGruppo = totG > 0 ? valGruppo / totG : 0;
     }
-    var isAdmin = utenteCorrente && utenteCorrente.ruolo === 'admin';
-    var cmpEditBtn = isAdmin ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
+    // Guardia permesso modifica CMP: admin sempre, altri solo se sub-permesso 'deposito.modifica-cmp' attivo
+    var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
+    var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
     const cmpLabel = '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong>' + (totG > 0 ? ' · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' : '') + cmpEditBtn + '</div>';
     const distBtn = nCis > 1 ? '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC;white-space:nowrap" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')">⚖️ Distribuisci</button>' : '';
     const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div style="display:flex;align-items:center;gap:10px">' + distBtn + '<div class="dep-product-total">' + totLabel + '</div></div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
@@ -1950,8 +1951,13 @@ async function _trovaCisternaPerProdotto(prodotto) {
 }
 
 
-// ── Modifica manuale CMP deposito (solo admin) ────────────────────
+// ── Modifica manuale CMP deposito (permesso granulare deposito.modifica-cmp) ──
 function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale) {
+  // Guardia: solo utenti con permesso specifico o admin
+  if (typeof _haPermesso === 'function' && !_haPermesso('deposito.modifica-cmp')) {
+    toast('Non hai i permessi per modificare il CMP deposito');
+    return;
+  }
   var html = '<div style="font-size:16px;font-weight:600;margin-bottom:8px">✏️ Modifica CMP — ' + esc(prodNome) + '</div>';
   html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">';
   html += 'CMP attuale: <strong style="font-family:var(--font-mono)">€ ' + Number(cmpAttuale).toFixed(6) + '</strong> · ';
@@ -1970,6 +1976,11 @@ function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale) {
 }
 
 async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
+  // Guardia: stesso controllo permesso anche al commit (difesa in profondità)
+  if (typeof _haPermesso === 'function' && !_haPermesso('deposito.modifica-cmp')) {
+    toast('Non hai i permessi per modificare il CMP deposito');
+    return;
+  }
   var nuovoCMP = parseFloat(document.getElementById('cmp-nuovo-val').value);
   if (isNaN(nuovoCMP) || nuovoCMP <= 0) { toast('Inserisci un valore valido'); return; }
 
