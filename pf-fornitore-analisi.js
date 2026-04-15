@@ -237,8 +237,8 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   var nonPagatiOrdini = []; // solo non pagati e non scaduti
   ordini.forEach(function(o) {
     if (o.pagato_fornitore) return;
-    var ggOrdine = Number(o.giorni_pagamento || ggPagDefault);
-    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
+    // SEMPRE giorni_pagamento del FORNITORE (master), non quelli salvati sull'ordine
+    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggPagDefault);
     var ggResidui = Math.floor((scad - oggi) / 86400000);
     // Scaduta = considerata pagata (Opzione A): salta dal calcolo fido
     if (ggResidui < 0) return;

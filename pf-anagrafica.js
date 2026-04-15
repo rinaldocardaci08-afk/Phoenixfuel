@@ -1930,10 +1930,10 @@ async function caricaFornitori() {
       const ords = ordFornMap[r.nome] || [];
       ords.forEach(o => {
         if (o.pagato_fornitore) return;
-        // Considera scadute come pagate (stessa logica della scheda)
+        // SEMPRE ggPag del fornitore, non quello salvato sull'ordine
         if (o.data) {
           var scad = new Date(o.data);
-          scad.setDate(scad.getDate() + (o.giorni_pagamento || ggPag));
+          scad.setDate(scad.getDate() + ggPag);
           if (scad <= oggi) return; // Scaduta = pagata
         }
         usato += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
@@ -1988,18 +1988,17 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
 
   const fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
   // Opzione A: scaduta = pagata, NON conta nel fido (allineato a pf-fornitore-analisi.js)
-  // I gg pagamento di ogni ordine (o default fornitore) determinano la scadenza.
+  // IMPORTANTE: usa SEMPRE i giorni_pagamento del FORNITORE (master), non quelli salvati sull'ordine
+  // (ordini vecchi possono avere valore "congelato" precedente alla modifica del fornitore)
   var oggi = new Date(); oggi.setHours(0,0,0,0);
-  var ggPagDefault = Number(fornitore.giorni_pagamento || 30);
+  var ggPagFornitore = Number(fornitore.giorni_pagamento || 30);
   var fidoUsato = 0, totNonPagato = 0, totPagato = 0, totScaduto = 0;
   (ordini||[]).forEach(function(o) {
     var costo = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
     if (o.pagato_fornitore) { totPagato += costo; return; }
-    var ggOrdine = Number(o.giorni_pagamento || ggPagDefault);
-    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
+    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggPagFornitore);
     var ggResidui = Math.floor((scad - oggi) / 86400000);
     if (ggResidui < 0) {
-      // Scaduta: NON conta nel fido (Opzione A)
       totScaduto += costo;
     } else {
       fidoUsato += costo;

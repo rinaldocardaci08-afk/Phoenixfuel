@@ -68,8 +68,9 @@ async function _testOrdiniAnomali() {
   var {data:ordini}=await sb.from('ordini').select('data,cliente,prodotto,litri').eq('tipo_ordine','cliente').neq('stato','annullato');
   var chiavi={}, numD=0;
   (ordini||[]).forEach(function(o){var k=o.data+'|'+o.cliente+'|'+o.prodotto+'|'+o.litri;chiavi[k]=(chiavi[k]||0)+1;});
-  Object.values(chiavi).forEach(function(v){if(v>1)numD+=v-1;});
-  _testResults.push({nome:'Ordini potenzialmente duplicati',ok:numD<5,atteso:'< 5',ottenuto:String(numD),note:numD>0?numD+' con stessa data/cliente/prodotto/litri':''});
+  // Soglia 3+: 2 consegne identiche stesso giorno sono normali per grossisti (AP, ENNEGI, Stil.Tra ecc.).
+  Object.values(chiavi).forEach(function(v){if(v>2)numD+=v-1;});
+  _testResults.push({nome:'Ordini sospetti (3+ identici stesso giorno)',ok:numD<5,atteso:'< 5',ottenuto:String(numD),note:numD>0?numD+' con 3+ righe stessa data/cliente/prodotto/litri':''});
 }
 
 function _renderTestResults(wrap) {
