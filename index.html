@@ -1764,6 +1764,21 @@
 
         <!-- GIACENZE MENSILI -->
         <div class="stz-panel" id="stz-giacenze" style="display:none">
+          <!-- MOVIMENTI TOTALI AD OGGI — riconciliazione stazione -->
+          <div class="card" style="margin-bottom:16px;border-left:3px solid #D4A017">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📋 Movimenti totali ad oggi — riconciliazione stazione</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <select id="mvts-prodotto" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                <input type="date" id="mvts-da" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="Da"/>
+                <input type="date" id="mvts-a" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="A"/>
+                <button class="btn-primary" onclick="pfMovimentiStzTotali()" style="font-size:12px;padding:7px 14px;background:#D4A017">▶ Calcola</button>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Giacenza iniziale (al giorno prima di "Da", calcolata via pfData) + entrate − uscite = giacenza calcolata. Confronta con il registro cartaceo.</div>
+            <div id="mvts-risultati"><div style="font-size:11px;color:var(--text-muted);padding:8px">Seleziona prodotto e clicca "Calcola"</div></div>
+          </div>
+
           <!-- Toggle vista a 3: Singolo giorno / Settimanale / Mensile -->
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
             <button id="stzg-btn-giorno" class="btn-primary" onclick="stzgToggleVista('giorno')" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Singolo giorno</button>
@@ -2389,7 +2404,7 @@
 <script src="pf-stz-giac-giorno.js?v=20260413b"></script>
 <script src="pf-stz-giac-week.js?v=20260415f"></script>
 <script src="pf-sentinelle.js?v=20260413f"></script>
-<script src="pf-movimenti-totali.js?v=20260413a"></script>
+<script src="pf-movimenti-totali.js?v=20260415h"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=20260414a"></script>
