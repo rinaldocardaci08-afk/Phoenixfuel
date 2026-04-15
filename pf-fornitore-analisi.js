@@ -314,7 +314,7 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
     h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:12px">';
     h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Fido massimo</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold">' + fmtE(fidoMax) + '</div></div>';
     h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Esposizione</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold;color:' + fidoColor + '">' + fmtE(fidoUsato) + ' <span style="font-size:11px">(' + pctFido + '%)</span></div></div>';
-    h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Disponibile</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold;color:#639922">' + fmtE(fidoResiduo) + '</div></div>';
+    h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Disponibile</div><div style="font-family:Courier New,monospace;font-size:18px;font-weight:bold;color:' + (fidoResiduo < 0 ? '#A32D2D' : '#639922') + '">' + fmtE(fidoResiduo) + '</div></div>';
     h += '<div><div style="font-size:10px;color:#888;text-transform:uppercase">Termini</div><div style="font-family:Courier New,monospace;font-size:14px;font-weight:600">' + ggPagDefault + ' giorni</div></div>';
     h += '</div>';
 

@@ -1526,7 +1526,7 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-edit" onclick="toggleClienteAttivo(\'' + r.id + '\',' + (r.attivo !== false) + ')" title="' + (r.attivo !== false ? 'Disattiva cliente' : 'Riattiva cliente') + '">' + (r.attivo !== false ? '🔒' : '🔓') + '</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }
 
   var html = attivi.map(rigaCliente).join('');
@@ -1545,15 +1545,6 @@ function filtraClienti() {
     const testo = tr.textContent.toLowerCase();
     tr.style.display = !q || testo.includes(q) ? '' : 'none';
   });
-}
-
-async function toggleClienteAttivo(id, attualeAttivo) {
-  const azione = attualeAttivo ? 'disattivare' : 'riattivare';
-  if (!confirm('Vuoi ' + azione + ' questo cliente?\n\n' + (attualeAttivo ? 'Non comparirà più nelle selezioni per nuovi ordini, ma resterà visibile nello storico.' : 'Tornerà selezionabile per nuovi ordini.'))) return;
-  const { error } = await sb.from('clienti').update({ attivo: !attualeAttivo }).eq('id', id);
-  if (error) { toast('Errore: ' + error.message); return; }
-  toast(attualeAttivo ? '🔒 Cliente disattivato' : '🔓 Cliente riattivato');
-  caricaClienti();
 }
 
 // ── SCHEDA CLIENTE CON GESTIONE PAGAMENTI ────────────────────────
@@ -1950,7 +1941,7 @@ async function caricaFornitori() {
       residuo = fidoMax - usato;
     }
     const basi=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.basi_carico?.nome).filter(Boolean).join(', '):'—';
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono)">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + ggPag + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + String(r.nome||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono);color:'+(residuo<0?'#A32D2D':'inherit')+';font-weight:'+(residuo<0?'600':'normal')+'">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + ggPag + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + String(r.nome||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }).join('');
 }
 
@@ -1996,11 +1987,24 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
   }
 
   const fidoMax = Number(fornitore.fido_massimo||0) || Number(fornitore.fido||0);
-  var fidoUsato = 0, totNonPagato = 0, totPagato = 0;
+  // Opzione A: scaduta = pagata, NON conta nel fido (allineato a pf-fornitore-analisi.js)
+  // I gg pagamento di ogni ordine (o default fornitore) determinano la scadenza.
+  var oggi = new Date(); oggi.setHours(0,0,0,0);
+  var ggPagDefault = Number(fornitore.giorni_pagamento || 30);
+  var fidoUsato = 0, totNonPagato = 0, totPagato = 0, totScaduto = 0;
   (ordini||[]).forEach(function(o) {
     var costo = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
-    if (o.pagato_fornitore) { totPagato += costo; }
-    else { fidoUsato += costo; totNonPagato += costo; }
+    if (o.pagato_fornitore) { totPagato += costo; return; }
+    var ggOrdine = Number(o.giorni_pagamento || ggPagDefault);
+    var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
+    var ggResidui = Math.floor((scad - oggi) / 86400000);
+    if (ggResidui < 0) {
+      // Scaduta: NON conta nel fido (Opzione A)
+      totScaduto += costo;
+    } else {
+      fidoUsato += costo;
+      totNonPagato += costo;
+    }
   });
   var fidoResiduo = fidoMax > 0 ? fidoMax - fidoUsato : 0;
   var pctFido = fidoMax > 0 ? Math.round((fidoUsato / fidoMax) * 100) : 0;
@@ -2017,7 +2021,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
     html += '<div style="display:flex;gap:12px;justify-content:flex-end;margin-bottom:6px">';
     html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Fido</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600">' + fmtE(fidoMax) + '</div></div>';
     html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Utilizzato</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:' + fidoColor + '">' + fmtE(fidoUsato) + '</div></div>';
-    html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Disponibile</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#639922">' + fmtE(fidoResiduo) + '</div></div>';
+    html += '<div style="text-align:center"><div style="font-size:9px;color:var(--text-muted)">Disponibile</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:' + (fidoResiduo < 0 ? '#A32D2D' : '#639922') + '">' + fmtE(fidoResiduo) + '</div></div>';
     html += '</div>';
     html += '<div style="height:8px;width:100%;background:var(--border);border-radius:4px"><div style="height:100%;width:' + Math.min(100,pctFido) + '%;background:' + fidoColor + ';border-radius:4px;transition:width 0.3s"></div></div>';
     html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + pctFido + '% utilizzato</div>';
