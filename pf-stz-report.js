@@ -727,7 +727,7 @@ async function stampaReportStazioneMese() {
 
   var [pompeRes, lettRes, prezziRes, costiRes] = await Promise.all([
     sb.from('stazione_pompe').select('id,nome,prodotto,ordine').eq('attiva',true).order('ordine'),
-    sb.from('stazione_letture').select('pompa_id,data,lettura').gte('data', giornoPrima).lte('data', a).order('data'),
+    sb.from('stazione_letture').select('pompa_id,data,lettura,litri_prezzo_diverso,prezzo_diverso').gte('data', giornoPrima).lte('data', a).order('data'),
     sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a).order('data'),
     sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a).order('data')
   ]);
@@ -765,6 +765,25 @@ async function stampaReportStazioneMese() {
     if (!prezziByGP[k]) prezziByGP[k] = [];
     prezziByGP[k].push(Number(p.prezzo_litro));
   });
+  // Cambi prezzo intra-giorno: aggregati dalle letture (campo litri_prezzo_diverso/prezzo_diverso)
+  // Per ogni (data, prodotto): {litriPD: somma, prezzoPD: media ponderata}
+  var cambiByGP = {};
+  letture.forEach(function(l) {
+    var litriPD = Number(l.litri_prezzo_diverso || 0);
+    var prezzoPD = Number(l.prezzo_diverso || 0);
+    if (litriPD <= 0 || prezzoPD <= 0) return;
+    var pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+    var k = l.data + '_' + pompa.prodotto;
+    if (!cambiByGP[k]) cambiByGP[k] = { litriTot: 0, valoreTot: 0 };
+    cambiByGP[k].litriTot += litriPD;
+    cambiByGP[k].valoreTot += litriPD * prezzoPD;
+  });
+  // Funzione: dato (data, prodotto), ritorna prezzo del cambio (media ponderata se più pompe stesso giorno)
+  function getCambioPrezzo(data, prodotto) {
+    var c = cambiByGP[data + '_' + prodotto];
+    if (!c || c.litriTot <= 0) return null;
+    return { prezzo: c.valoreTot / c.litriTot, litri: c.litriTot };
+  }
   var costiByGP = {};
   costiAll.forEach(function(c){
     var k = c.data + '_' + c.prodotto;
@@ -811,30 +830,58 @@ async function stampaReportStazioneMese() {
     var costiGas  = (costiByGP[r.data+'_Gasolio Autotrazione'] || []);
     var prezziBenz = (prezziByGP[r.data+'_Benzina'] || []);
     var costiBenz  = (costiByGP[r.data+'_Benzina'] || []);
-    // Numero di "varianti" del giorno = max tra cambi prezzo registrati (Gas o Benz)
-    var nVarGas = Math.max(prezziGas.length, costiGas.length, 1);
-    var nVarBenz = Math.max(prezziBenz.length, costiBenz.length, 1);
-    var nRighe = Math.max(nVarGas, nVarBenz);
+    // Cambi prezzo intra-giorno letti dalle letture pompe
+    var cambioGas = getCambioPrezzo(r.data, 'Gasolio Autotrazione');
+    var cambioBenz = getCambioPrezzo(r.data, 'Benzina');
+    var hasCambioGas = !!cambioGas;
+    var hasCambioBenz = !!cambioBenz;
+    var nRighe = (hasCambioGas || hasCambioBenz) ? 2 : 1;
+
+    // subRows: riga 0 = prezzo standard del giorno, riga 1 = cambio prezzo (se presente)
+    var prezzoStdGas = prezziGas.length ? prezziGas[prezziGas.length-1] : null;
+    var costoStdGas = costiGas.length ? costiGas[costiGas.length-1] : null;
+    var prezzoStdBenz = prezziBenz.length ? prezziBenz[prezziBenz.length-1] : null;
+    var costoStdBenz = costiBenz.length ? costiBenz[costiBenz.length-1] : null;
 
     var subRows = [];
-    for (var i = 0; i < nRighe; i++) {
+    if (nRighe === 1) {
       subRows.push({
-        gasPrezzo: prezziGas[i] != null ? prezziGas[i] : prezziGas[prezziGas.length-1],
-        gasCosto: costiGas[i] != null ? costiGas[i] : costiGas[costiGas.length-1],
-        benzPrezzo: prezziBenz[i] != null ? prezziBenz[i] : prezziBenz[prezziBenz.length-1],
-        benzCosto: costiBenz[i] != null ? costiBenz[i] : costiBenz[costiBenz.length-1]
+        gasPrezzo: prezzoStdGas, gasCosto: costoStdGas,
+        benzPrezzo: prezzoStdBenz, benzCosto: costoStdBenz,
+        labelGas: '', labelBenz: ''
+      });
+    } else {
+      // Riga 0: prezzo standard
+      subRows.push({
+        gasPrezzo: prezzoStdGas, gasCosto: costoStdGas,
+        benzPrezzo: prezzoStdBenz, benzCosto: costoStdBenz,
+        labelGas: hasCambioGas ? ' (std)' : '',
+        labelBenz: hasCambioBenz ? ' (std)' : ''
+      });
+      // Riga 1: prezzo cambiato (se Gas o Benz)
+      subRows.push({
+        gasPrezzo: hasCambioGas ? cambioGas.prezzo : prezzoStdGas,
+        gasCosto: costoStdGas,
+        benzPrezzo: hasCambioBenz ? cambioBenz.prezzo : prezzoStdBenz,
+        benzCosto: costoStdBenz,
+        labelGas: hasCambioGas ? ' (cambio: ' + Math.round(cambioGas.litri) + 'L)' : '',
+        labelBenz: hasCambioBenz ? ' (cambio: ' + Math.round(cambioBenz.litri) + 'L)' : ''
       });
     }
-    // Margine giornaliero: usa medie costi/prezzi giorno (no double count)
-    var prezzoMedioGas = prezziGas.length ? prezziGas.reduce(function(a,b){return a+b;},0)/prezziGas.length : 0;
-    var costoMedioGas = costiGas.length ? costiGas.reduce(function(a,b){return a+b;},0)/costiGas.length : 0;
-    var prezzoMedioBenz = prezziBenz.length ? prezziBenz.reduce(function(a,b){return a+b;},0)/prezziBenz.length : 0;
-    var costoMedioBenz = costiBenz.length ? costiBenz.reduce(function(a,b){return a+b;},0)/costiBenz.length : 0;
 
-    var prezzoNetGas = prezzoMedioGas / 1.22;
-    var prezzoNetBenz = prezzoMedioBenz / 1.22;
-    var margGiornoGas = (prezzoNetGas - costoMedioGas) * r.totGas;
-    var margGiornoBenz = (prezzoNetBenz - costoMedioBenz) * r.totBenz;
+    // Margine giornaliero: tiene conto dei cambi prezzo (litri al prezzo std + litri al prezzo cambio)
+    var costoG = costoStdGas || 0;
+    var costoB = costoStdBenz || 0;
+    var litriCambioGas = hasCambioGas ? cambioGas.litri : 0;
+    var litriCambioBenz = hasCambioBenz ? cambioBenz.litri : 0;
+    var litriStdGas = Math.max(0, r.totGas - litriCambioGas);
+    var litriStdBenz = Math.max(0, r.totBenz - litriCambioBenz);
+    var prezzoNetStdGas = (prezzoStdGas || 0) / 1.22;
+    var prezzoNetCambioGas = hasCambioGas ? cambioGas.prezzo / 1.22 : 0;
+    var prezzoNetStdBenz = (prezzoStdBenz || 0) / 1.22;
+    var prezzoNetCambioBenz = hasCambioBenz ? cambioBenz.prezzo / 1.22 : 0;
+    var margGiornoGas = (prezzoNetStdGas - costoG) * litriStdGas + (prezzoNetCambioGas - costoG) * litriCambioGas;
+    var margGiornoBenz = (prezzoNetStdBenz - costoB) * litriStdBenz + (prezzoNetCambioBenz - costoB) * litriCambioBenz;
     var margGiorno = margGiornoGas + margGiornoBenz;
     var margLitroGiorno = r.totLitri > 0 ? margGiorno / r.totLitri : 0;
 
@@ -847,7 +894,7 @@ async function stampaReportStazioneMese() {
     righeP2.push({
       data: r.data, dt: r.dt, ggLabel: r.ggLabel,
       subRows: subRows,
-      cambioGas: nVarGas > 1, cambioBenz: nVarBenz > 1, nRighe: nRighe,
+      cambioGas: hasCambioGas, cambioBenz: hasCambioBenz, nRighe: nRighe,
       margGiorno: margGiorno, margLitroGiorno: margLitroGiorno,
       gasMargL: r.totGas > 0 ? margGiornoGas/r.totGas : 0,
       benzMargL: r.totBenz > 0 ? margGiornoBenz/r.totBenz : 0
@@ -994,12 +1041,13 @@ async function stampaReportStazioneMese() {
           html += '<td rowspan="' + r.nRighe + '" style="vertical-align:top;border-right:0.5px solid #3a3a35">' + dStr + ' ' + r.ggLabel;
           html += '<div style="font-size:9px;color:#FAC775;margin-top:3px">⚡ ' + r.nRighe + ' prezzi</div></td>';
         }
-        var lab = r.nRighe === 2 ? (idx===0?' (mattina)':' (pomer.)') : ' #' + (idx+1);
-        html += '<td style="text-align:center"><span style="color:#9a978a;font-size:10px">' + (s.gasPrezzo!=null ? f3(s.gasPrezzo)+lab : '—') + '</span></td>';
+        var labGas = s.labelGas || '';
+        var labBenz = s.labelBenz || '';
+        html += '<td style="text-align:center"><span style="color:#9a978a;font-size:10px">' + (s.gasPrezzo!=null ? f3(s.gasPrezzo)+labGas : '—') + '</span></td>';
         html += '<td>' + (s.gasCosto!=null ? f3(s.gasCosto) : '—') + '</td>';
         var mgL = (s.gasPrezzo!=null && s.gasCosto!=null) ? (s.gasPrezzo/1.22 - s.gasCosto) : null;
         html += '<td style="color:#C0DD97">' + (mgL!=null ? (mgL>=0?'+':'')+f3(mgL) : '—') + '</td>';
-        html += '<td style="text-align:center"><span style="color:#9a978a;font-size:10px">' + (s.benzPrezzo!=null ? f3(s.benzPrezzo)+lab : '—') + '</span></td>';
+        html += '<td style="text-align:center"><span style="color:#9a978a;font-size:10px">' + (s.benzPrezzo!=null ? f3(s.benzPrezzo)+labBenz : '—') + '</span></td>';
         html += '<td>' + (s.benzCosto!=null ? f3(s.benzCosto) : '—') + '</td>';
         var mbL = (s.benzPrezzo!=null && s.benzCosto!=null) ? (s.benzPrezzo/1.22 - s.benzCosto) : null;
         html += '<td style="color:#B5D4F4">' + (mbL!=null ? (mbL>=0?'+':'')+f3(mbL) : '—') + '</td>';
