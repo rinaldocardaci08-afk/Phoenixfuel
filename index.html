@@ -1602,7 +1602,19 @@
             </div>
           </div>
           <div class="card" style="margin-top:16px">
-            <div class="card-title">Storico marginalità</div>
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Storico marginalità</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <select id="rep-marg-anno" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                <select id="rep-marg-mese" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="01">Gen</option><option value="02">Feb</option><option value="03">Mar</option>
+                  <option value="04">Apr</option><option value="05">Mag</option><option value="06">Giu</option>
+                  <option value="07">Lug</option><option value="08">Ago</option><option value="09">Set</option>
+                  <option value="10">Ott</option><option value="11">Nov</option><option value="12">Dic</option>
+                </select>
+                <button class="btn-primary" onclick="stampaReportStazioneMese()" style="font-size:12px;padding:7px 14px;background:#1a1a18;color:#FAC775">📄 Report mese PDF</button>
+              </div>
+            </div>
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Gasolio L</th><th>Benzina L</th><th>Venduto €</th><th>Costo €</th><th>Margine €</th><th>€/L</th></tr></thead>
             <tbody id="marg-storico-tabella"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
@@ -2420,7 +2432,7 @@
 <script src="pf-stz-marginalita.js?v=1775149951158"></script>
 <script src="pf-stz-magazzino.js?v=1775149951158"></script>
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
-<script src="pf-stz-report.js?v=1775149951158"></script>
+<script src="pf-stz-report.js?v=20260415j"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260412a"></script>
 <script src="pf-stz-giac-giorno.js?v=20260413b"></script>
