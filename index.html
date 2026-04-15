@@ -2292,6 +2292,17 @@
           </div>
         </div>
 
+        <!-- BACKUP & RIPRISTINO (solo admin) -->
+        <div class="card" style="margin-top:16px;border-left:3px solid #FAC775">
+          <div class="card-title">💾 Backup & ripristino DB</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Backup automatico ogni notte alle 03:00. Qui puoi creare uno snapshot manuale prima di operazioni rischiose, oppure ripristinare il DB da uno snapshot esistente.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-primary" style="background:#639922" onclick="apriCreaSnapshot()">💾 Crea snapshot ora</button>
+            <button class="btn-primary" style="background:#A32D2D" onclick="apriRipristinaSnapshot()">↶ Ripristina da snapshot</button>
+          </div>
+          <div id="snapshot-output" style="margin-top:12px;font-size:12px"></div>
+        </div>
+
       </div>
 
       <!-- BACHECA AVVISI -->
@@ -2441,7 +2452,7 @@
 <script src="pf-movimenti-totali.js?v=20260415h"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
-<script src="pf-admin.js?v=20260414a"></script>
+<script src="pf-admin.js?v=20260415k"></script>
 <script src="pf-dashboard.js?v=20260415i"></script>
 <script src="pf-home.js?v=1775149951158"></script>
 <script src="pf-benchmark.js?v=1775149951158"></script>

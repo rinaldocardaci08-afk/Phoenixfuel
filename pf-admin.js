@@ -641,3 +641,165 @@ async function stampaStoricoChiusure(sede) {
 
   w.document.open(); w.document.write(html); w.document.close();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// BACKUP & RIPRISTINO DB (solo admin)
+// ═══════════════════════════════════════════════════════════════════
+const _SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
+const _BACKUP_FN_URL = _SUPABASE_URL + '/functions/v1/backup-nightly';
+const _RESTORE_FN_URL = _SUPABASE_URL + '/functions/v1/restore-backup';
+
+function _isAdmin() {
+  return utenteCorrente && utenteCorrente.ruolo === 'admin';
+}
+
+// ── CREA SNAPSHOT MANUALE ──
+function apriCreaSnapshot() {
+  if (!_isAdmin()) { toast('Solo admin'); return; }
+  var h = '<div style="font-size:18px;font-weight:600;margin-bottom:8px;color:#27500A">💾 Crea snapshot manuale</div>';
+  h += '<div style="background:#EAF3DE;border-left:3px solid #639922;padding:12px 14px;border-radius:0 8px 8px 0;margin-bottom:14px;font-size:13px;line-height:1.5">';
+  h += '<strong>Cosa fa:</strong><br>';
+  h += '• Esporta tutte le 47 tabelle del database in un file JSON<br>';
+  h += '• Salva il file in Supabase Storage (bucket "backups")<br>';
+  h += '• Nome file: <code>backup-AAAA-MM-GG.json</code><br><br>';
+  h += '<strong>Quando usarlo:</strong><br>';
+  h += '• Prima di modifiche strutturali al codice/DB<br>';
+  h += '• Prima di operazioni di import/export massive<br>';
+  h += '• Quando vuoi un punto di ripristino "fresh" (l\'ultimo backup automatico è di stanotte 03:00)<br><br>';
+  h += '<strong>⚠️ Nota:</strong> se hai già fatto uno snapshot oggi, verrà SOVRASCRITTO (file con stessa data).';
+  h += '</div>';
+  h += '<div style="display:flex;gap:8px;margin-top:12px">';
+  h += '<button class="btn-primary" style="flex:1;background:#639922" onclick="eseguiSnapshot()">💾 Crea snapshot ora</button>';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:10px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+  apriModal(h);
+}
+
+async function eseguiSnapshot() {
+  var out = document.getElementById('snapshot-output');
+  if (out) out.innerHTML = '<div style="padding:10px;background:#EAF3DE;border-radius:6px">⏳ Snapshot in corso (può richiedere 30-60 secondi)...</div>';
+  chiudiModalePermessi();
+  toast('Snapshot avviato...');
+  try {
+    var resp = await fetch(_BACKUP_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    var data = await resp.json();
+    if (!data.ok) {
+      if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ Errore: ' + esc(data.error || 'sconosciuto') + '</div>';
+      toast('Snapshot fallito');
+      return;
+    }
+    var sizeMB = (data.sizeBytes / 1024 / 1024).toFixed(2);
+    if (out) out.innerHTML = '<div style="padding:10px;background:#EAF3DE;border-radius:6px;color:#27500A">✅ <strong>Snapshot completato</strong><br>File: <code>' + esc(data.filename) + '</code><br>Record salvati: ' + data.totRecords.toLocaleString('it-IT') + '<br>Dimensione: ' + sizeMB + ' MB</div>';
+    toast('✅ Snapshot creato: ' + data.filename);
+    if (typeof _auditLog === 'function') _auditLog('snapshot_manuale', 'sistema', data.filename + ' (' + data.totRecords + ' record, ' + sizeMB + ' MB)');
+  } catch (e) {
+    if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ Errore rete: ' + esc(e.message) + '</div>';
+    toast('Errore snapshot');
+  }
+}
+
+// ── RIPRISTINA DA SNAPSHOT ──
+async function apriRipristinaSnapshot() {
+  if (!_isAdmin()) { toast('Solo admin'); return; }
+
+  toast('Carico elenco snapshot disponibili...');
+  // Lista snapshot disponibili dal bucket
+  var { data: files, error } = await sb.storage.from('backups').list('', { limit: 100, sortBy:{column:'created_at',order:'desc'} });
+  if (error) { toast('Errore lettura backup: ' + error.message); return; }
+  if (!files || !files.length) { toast('Nessun snapshot disponibile'); return; }
+
+  var snapshotList = files.filter(function(f){ return /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(f.name); });
+  if (!snapshotList.length) { toast('Nessun snapshot valido'); return; }
+
+  var h = '<div style="font-size:18px;font-weight:600;margin-bottom:8px;color:#791F1F">⚠️ Ripristina database da snapshot</div>';
+  h += '<div style="background:#FCEBEB;border:2px solid #E24B4A;padding:14px;border-radius:8px;margin-bottom:14px;font-size:13px;line-height:1.6">';
+  h += '<strong style="color:#791F1F">⛔ ATTENZIONE — OPERAZIONE DISTRUTTIVA</strong><br><br>';
+  h += '• <strong>TUTTI</strong> i dati attuali del database (47 tabelle) verranno <strong>CANCELLATI</strong><br>';
+  h += '• Verranno sostituiti con i dati dello snapshot scelto<br>';
+  h += '• <strong>Tutti i dati inseriti dopo lo snapshot andranno persi</strong> (es. ordini di oggi, letture, cassa, DAS firmati)<br>';
+  h += '• L\'operazione richiede 2-5 minuti durante i quali il gestionale non sarà utilizzabile<br>';
+  h += '• Se durante il ripristino qualcuno sta usando il gestionale, possono verificarsi corruzioni<br><br>';
+  h += '<strong style="color:#791F1F">Per sicurezza, verrà creato uno snapshot di emergenza PRIMA del ripristino.</strong>';
+  h += '</div>';
+
+  h += '<div style="margin-bottom:12px"><label style="font-size:12px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Scegli snapshot da ripristinare</label>';
+  h += '<select id="snap-file" style="width:100%;font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);margin-top:4px">';
+  snapshotList.forEach(function(f) {
+    var dataStr = f.name.replace('backup-','').replace('.json','');
+    var sizeMB = f.metadata && f.metadata.size ? (f.metadata.size/1024/1024).toFixed(2) + ' MB' : '—';
+    h += '<option value="' + esc(f.name) + '">' + esc(dataStr) + ' · ' + sizeMB + ' · ' + esc(f.name) + '</option>';
+  });
+  h += '</select></div>';
+
+  h += '<div style="margin-bottom:14px"><label style="font-size:12px;color:#791F1F;font-weight:600">Per confermare, digita esattamente: <code>RIPRISTINA</code></label>';
+  h += '<input type="text" id="snap-conferma" placeholder="RIPRISTINA" style="width:100%;font-size:14px;font-family:var(--font-mono);padding:8px 12px;border:1.5px solid #E24B4A;border-radius:8px;background:var(--bg);color:var(--text);margin-top:4px;text-transform:uppercase" />';
+  h += '</div>';
+
+  h += '<div style="display:flex;gap:8px">';
+  h += '<button class="btn-primary" style="flex:1;background:#A32D2D" onclick="eseguiRipristino()">⛔ Conferma ripristino DB</button>';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:10px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+  apriModal(h);
+}
+
+async function eseguiRipristino() {
+  var filename = document.getElementById('snap-file').value;
+  var conferma = (document.getElementById('snap-conferma').value || '').trim();
+  if (conferma !== 'RIPRISTINA') { toast('Devi digitare esattamente "RIPRISTINA" in maiuscolo'); return; }
+  if (!filename) { toast('Seleziona uno snapshot'); return; }
+
+  var out = document.getElementById('snapshot-output');
+  chiudiModalePermessi();
+
+  // 1. Snapshot di emergenza prima
+  if (out) out.innerHTML = '<div style="padding:10px;background:#FAEEDA;border-radius:6px">⏳ STEP 1/2: Creazione snapshot di emergenza prima del ripristino...</div>';
+  toast('Step 1/2: snapshot emergenza...');
+  try {
+    var sResp = await fetch(_BACKUP_FN_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    var sData = await sResp.json();
+    if (!sData.ok) {
+      if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ Snapshot emergenza fallito. Ripristino ANNULLATO per sicurezza.<br>Errore: ' + esc(sData.error || '') + '</div>';
+      toast('Ripristino annullato (snapshot emergenza fallito)');
+      return;
+    }
+  } catch (e) {
+    if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ Snapshot emergenza fallito (rete). Ripristino ANNULLATO.</div>';
+    return;
+  }
+
+  // 2. Ripristino vero
+  if (out) out.innerHTML = '<div style="padding:10px;background:#FAEEDA;border-radius:6px">⏳ STEP 2/2: Ripristino in corso da <code>' + esc(filename) + '</code> (2-5 minuti)...</div>';
+  toast('Step 2/2: ripristino in corso...');
+  try {
+    var rResp = await fetch(_RESTORE_FN_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ filename: filename, confirm: 'RIPRISTINA' })
+    });
+    var rData = await rResp.json();
+    if (!rData.ok && (!rData.errors || rData.errors.length > 5)) {
+      if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ <strong>Ripristino fallito</strong><br>Errori: ' + (rData.errors||[]).slice(0,5).map(esc).join('<br>') + '<br><br>⚠️ Il DB potrebbe essere in stato inconsistente. Contatta supporto.</div>';
+      toast('Ripristino fallito');
+      return;
+    }
+    var msg = '✅ <strong>Ripristino completato</strong><br>';
+    msg += 'File: <code>' + esc(filename) + '</code><br>';
+    msg += 'Record cancellati: ' + (rData.deleted||0).toLocaleString('it-IT') + '<br>';
+    msg += 'Record reinseriti: ' + (rData.inserted||0).toLocaleString('it-IT') + '<br>';
+    if (rData.errors && rData.errors.length) {
+      msg += '<br><span style="color:#854F0B">⚠️ Avvisi: ' + rData.errors.length + ' (controllare console)</span>';
+      console.warn('Errori ripristino:', rData.errors);
+    }
+    msg += '<br><br><strong>Ricarica la pagina (Ctrl+Shift+R) per vedere i dati ripristinati.</strong>';
+    if (out) out.innerHTML = '<div style="padding:12px;background:#EAF3DE;border-radius:6px;color:#27500A">' + msg + '</div>';
+    toast('✅ Ripristino completato');
+    if (typeof _auditLog === 'function') _auditLog('ripristino_db', 'sistema', filename + ' (' + (rData.inserted||0) + ' record reinseriti)');
+  } catch (e) {
+    if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ Errore rete durante ripristino: ' + esc(e.message) + '</div>';
+    toast('Errore ripristino');
+  }
+}
