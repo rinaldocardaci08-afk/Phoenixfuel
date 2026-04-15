@@ -350,30 +350,16 @@ async function caricaCarichiDashboard() {
   var date = Object.keys(perData).sort().reverse();
   var html = '';
   date.forEach(function(d) {
-    html += '<div style="font-size:11px;color:var(--text-muted);padding:6px 10px;background:var(--bg);border-radius:6px;margin:10px 0 6px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">' + fmtD(d) + (d === oggiStr ? ' · OGGI' : ' · IERI') + '</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:6px;margin:14px 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">' + fmtD(d) + (d === oggiStr ? ' · OGGI' : ' · IERI') + '</div>';
     perData[d].forEach(function(c) {
-      var ordini = (c.carico_ordini || []).map(co => co.ordini).filter(Boolean);
-      var totLitri = ordini.reduce((s,o) => s + Number(o.litri || 0), 0);
-      var capacita = c.mezzi && c.mezzi.capacita_totale ? Number(c.mezzi.capacita_totale) : 0;
-      var pct = capacita > 0 ? Math.round((totLitri / capacita) * 100) : 0;
-      var barColor = pct < 50 ? '#639922' : (pct < 80 ? '#BA7517' : '#185FA5');
-      html += '<div style="background:var(--surface);border:0.5px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:6px">';
-      html += '<div style="display:grid;grid-template-columns:1fr 1fr 90px 1fr 90px;gap:10px;align-items:center;font-size:12px">';
-      html += '<div><span style="color:var(--text-muted);font-size:10px;text-transform:uppercase">Mezzo</span><div style="font-weight:500">' + esc(c.mezzo_targa || '—') + '</div></div>';
-      html += '<div><span style="color:var(--text-muted);font-size:10px;text-transform:uppercase">Autista</span><div>' + esc(c.autista || '—') + '</div></div>';
-      html += '<div><span style="color:var(--text-muted);font-size:10px;text-transform:uppercase">Litri</span><div style="font-family:var(--font-mono);font-weight:500">' + fmtL(totLitri) + '</div></div>';
-      html += '<div><span style="color:var(--text-muted);font-size:10px;text-transform:uppercase">Riempimento ' + (capacita>0 ? pct+'%' : '—') + '</span>';
-      html += '<div style="height:8px;background:var(--bg);border-radius:999px;overflow:hidden;margin-top:3px"><div style="height:100%;width:' + Math.min(pct,100) + '%;background:' + barColor + ';border-radius:999px"></div></div></div>';
-      html += '<div style="text-align:center">' + (typeof badgeStato==='function' ? badgeStato(c.stato) : c.stato) + '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + ordini.length + ' consegne</div></div>';
-      html += '</div>';
-      if (ordini.length) {
-        html += '<div style="margin-top:8px;padding-top:8px;border-top:0.5px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;font-size:11px">';
-        ordini.forEach(function(o,i) {
-          html += '<div><span style="color:var(--text-muted)">' + (i+1) + '.</span> <span style="font-weight:500">' + esc(o.cliente||'—') + '</span><span style="color:var(--text-muted)"> · ' + esc(o.prodotto||'—') + ' · ' + fmtL(o.litri||0) + ' L</span></div>';
-        });
-        html += '</div>';
+      if (typeof _renderCardCarico === 'function') {
+        html += _renderCardCarico(c, { mostraAzioni: false });
+      } else {
+        // Fallback se pf-logistica non caricato
+        var ordini = (c.carico_ordini || []).map(co => co.ordini).filter(Boolean);
+        var totLitri = ordini.reduce((s,o) => s + Number(o.litri || 0), 0);
+        html += '<div style="background:var(--surface);border:0.5px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:6px">' + esc(c.mezzo_targa||'—') + ' · ' + esc(c.autista||'—') + ' · ' + fmtL(totLitri) + ' L</div>';
       }
-      html += '</div>';
     });
   });
   cont.innerHTML = html;
