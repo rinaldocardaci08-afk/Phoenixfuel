@@ -242,6 +242,23 @@ var PF_SENTINELLE = [
       var prodotti = Object.keys(cisterneByProd);
       if (!prodotti.length) return 'OK — nessuna cisterna deposito';
 
+      // 1.bis AUTO-HEAL: riallinea cisterne alla cascata pfData prima del confronto.
+      // pfData è la fonte canonica; cisterne.livello_attuale è snapshot derivato.
+      if (typeof pfDepositoRicalcolaCisterne === 'function') {
+        for (var k = 0; k < prodotti.length; k++) {
+          await pfDepositoRicalcolaCisterne(prodotti[k]);
+        }
+        // Ri-leggi i livelli aggiornati
+        var cisRes2 = await sb.from('cisterne').select('prodotto,livello_attuale').eq('sede','deposito_vibo');
+        if (!cisRes2.error) {
+          cisterneByProd = {};
+          (cisRes2.data || []).forEach(function(c) {
+            if (!c.prodotto) return;
+            cisterneByProd[c.prodotto] = (cisterneByProd[c.prodotto] || 0) + Number(c.livello_attuale || 0);
+          });
+        }
+      }
+
       // 2. Per ogni prodotto: calc via pfData
       var oggi = new Date().toISOString().split('T')[0];
       var risultati = [];
