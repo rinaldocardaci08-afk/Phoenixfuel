@@ -541,15 +541,58 @@ async function eseguiScaricaDeposito(ordiniIdsStr) {
 }
 
 async function caricaCarichi() {
-  const { data } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordini(cliente,prodotto,litri,note))').order('data',{ascending:false}).limit(20);
-  const tbody = document.getElementById('tabella-carichi');
-  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun carico pianificato</td></tr>'; return; }
-  tbody.innerHTML = data.map(c => {
-    const totLitri = c.carico_ordini ? c.carico_ordini.reduce((s,o)=>s+Number(o.ordini?.litri||0),0) : 0;
-    const nConsegne = c.carico_ordini ? c.carico_ordini.length : 0;
-    const prodotti = c.carico_ordini ? [...new Set(c.carico_ordini.map(o=>o.ordini?.prodotto).filter(Boolean))].join(', ') : '—';
-    return '<tr><td>' + fmtD(c.data) + '</td><td>' + (c.mezzo_targa||'—') + '</td><td>' + (c.autista||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + prodotti + '</td><td>' + nConsegne + ' consegne</td><td>' + badgeStato(c.stato) + ' <button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')">🖨️</button><button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')">👁</button><button class="btn-danger" onclick="eliminaRecord(\'carichi\',\'' + c.id + '\',caricaCarichi)">x</button></td></tr>';
-  }).join('');
+  const cont = document.getElementById('tabella-carichi');
+  const { data } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordini(cliente,prodotto,litri,note)), mezzi(capacita_totale,targa)').order('data',{ascending:false}).limit(20);
+  if (!data || !data.length) { cont.innerHTML = '<div class="loading">Nessun carico pianificato</div>'; return; }
+
+  // Raggruppamento per data
+  var perData = {};
+  data.forEach(function(c){
+    var k = c.data || '—';
+    if (!perData[k]) perData[k] = [];
+    perData[k].push(c);
+  });
+  var date = Object.keys(perData).sort().reverse();
+
+  var html = '';
+  date.forEach(function(d) {
+    html += '<div style="font-size:12px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:6px;margin:14px 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">' + fmtD(d) + '</div>';
+    perData[d].forEach(function(c) {
+      var ordini = (c.carico_ordini || []).map(function(co){ return co.ordini; }).filter(Boolean);
+      var totLitri = ordini.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      var capacita = c.mezzi && c.mezzi.capacita_totale ? Number(c.mezzi.capacita_totale) : 0;
+      var pct = capacita > 0 ? Math.round((totLitri / capacita) * 100) : 0;
+      var barColor = pct < 50 ? '#639922' : (pct < 80 ? '#BA7517' : '#185FA5');
+      var nConsegne = ordini.length;
+
+      html += '<div style="background:var(--surface);border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px">';
+      // Riga superiore
+      html += '<div style="display:grid;grid-template-columns:110px 110px 90px 1fr 100px 110px;gap:12px;align-items:center">';
+      html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Mezzo</div><div style="font-weight:500">' + esc(c.mezzo_targa || '—') + '</div></div>';
+      html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Autista</div><div>' + esc(c.autista || '—') + '</div></div>';
+      html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-weight:500">' + fmtL(totLitri) + '</div></div>';
+      html += '<div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Riempimento ' + (capacita > 0 ? pct + '%' : '—') + (capacita > 0 ? ' (cap. ' + fmtL(capacita) + ')' : '') + '</div>';
+      html += '<div style="height:10px;background:var(--bg);border-radius:999px;overflow:hidden"><div style="width:' + Math.min(pct,100) + '%;height:100%;background:' + barColor + ';border-radius:999px"></div></div></div>';
+      html += '<div style="text-align:center">' + badgeStato(c.stato) + '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + nConsegne + ' consegne</div></div>';
+      html += '<div style="text-align:right">';
+      html += '<button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')">🖨️</button>';
+      html += '<button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')">👁</button>';
+      html += '<button class="btn-danger" onclick="eliminaRecord(\'carichi\',\'' + c.id + '\',caricaCarichi)">x</button>';
+      html += '</div>';
+      html += '</div>';
+
+      // Riga inferiore: clienti+prodotti
+      if (ordini.length) {
+        html += '<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-size:12px">';
+        ordini.forEach(function(o, i) {
+          html += '<div><span style="color:var(--text-muted);font-weight:500">' + (i+1) + '.</span> <span style="font-weight:500">' + esc(o.cliente || '—') + '</span><span style="color:var(--text-muted)"> · ' + esc(o.prodotto || '—') + ' · ' + fmtL(o.litri || 0) + ' L</span></div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+  });
+  cont.innerHTML = html;
 }
 
 function apriFoglioViaggio(caricoId) {
@@ -1009,7 +1052,6 @@ async function apriDirottamento(ordineId, caricoId) {
 
   html += '<div style="display:flex;gap:8px">';
   html += '<button class="btn-primary" style="flex:1;padding:12px;font-size:14px;background:#D85A30" onclick="eseguiDirottamento()">Conferma dirottamento</button>';
-  html += '<button style="padding:12px 16px;font-size:13px;background:#6B5FCC;color:#fff;border:0;border-radius:var(--radius);cursor:pointer;font-weight:600" onclick="eseguiRientroMerce()" title="Rientro merce TOTALE in deposito (no nuovo cliente)">↩️ Rientro merce</button>';
   html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Annulla</button>';
   html += '</div>';
 
@@ -1175,120 +1217,6 @@ async function eseguiDirottamento() {
 
   _auditLog('dirottamento', 'ordini', (isTotale ? 'TOTALE' : 'PARZIALE ' + litriDiv + 'L') + ' da ' + d.ordine.cliente + ' a ' + nuovoCliente.nome);
   toast('✅ Dirottamento completato!');
-  chiudiModalePermessi();
-  if (d.caricoId) apriDettaglioCarico(d.caricoId);
-  else caricaConsegne();
-}
-
-// ══════════════════════════════════════════════════════════════════
-// RIENTRO MERCE — l'autista non scarica e torna in deposito
-// Crea entrata_deposito stessa quantità totale + DAS rientro auto.
-// L'ordine originale resta nello stato attuale + nota collegamento.
-// ══════════════════════════════════════════════════════════════════
-async function eseguiRientroMerce() {
-  var d = window._dirottamento; if (!d) return;
-
-  // Ricarica stato fresh dal DB per sicurezza
-  var { data: ordineFresh } = await sb.from('ordini').select('stato').eq('id', d.ordine.id).single();
-  if (!ordineFresh) { toast('Ordine non trovato'); return; }
-  if (ordineFresh.stato === 'consegnato' || ordineFresh.stato === 'annullato') {
-    toast('Ordine ' + ordineFresh.stato + ': rientro non applicabile');
-    chiudiModalePermessi();
-    return;
-  }
-  if (ordineFresh.stato === 'programmato') {
-    toast('Ordine ancora programmato (prodotto non caricato). Per annullarlo usa "Annulla ordine".');
-    return;
-  }
-  // Stato atteso: 'confermato' (camion partito col carico)
-
-  var tot = Number(d.ordine.litri);
-  if (!confirm('RIENTRO MERCE TOTALE\n\n' + d.ordine.cliente + ' · ' + d.ordine.prodotto + ' · ' + fmtL(tot) + '\n\nCrea entrata in deposito ' + fmtL(tot) + ' L con DAS "RIENTRO MERCE".\nL\'ordine originale resta tracciato con nota di rientro.\n\nProcedere?')) return;
-
-  toast('Rientro merce in corso...');
-
-  var oggi = new Date().toISOString().split('T')[0];
-  var costo = Number(d.ordine.costo_litro || 0);
-
-  // 1. Crea ordine entrata_deposito
-  var nuovoOrdine = {
-    data: oggi,
-    tipo_ordine: 'entrata_deposito',
-    cliente: 'Phoenix Fuel Srl',
-    cliente_id: null,
-    prodotto: d.ordine.prodotto,
-    litri: tot,
-    fornitore: 'Rientro merce',
-    costo_litro: costo,
-    trasporto_litro: 0,
-    margine: 0,
-    iva: d.ordine.iva,
-    stato: 'consegnato',
-    caricato_deposito: true,
-    pagato_fornitore: true,  // operazione interna: nessun debito
-    note: 'Rientro merce da ordine ' + d.ordine.id + ' (' + d.ordine.cliente + ')'
-  };
-
-  // Cisterna 1 del prodotto come default
-  var { data: cisterneProd } = await sb.from('cisterne')
-    .select('id').eq('sede','deposito_vibo').eq('prodotto', d.ordine.prodotto)
-    .order('nome').limit(1);
-  if (cisterneProd && cisterneProd.length) nuovoOrdine.cisterna_id = cisterneProd[0].id;
-
-  var { data: rientro, error: errRientro } = await sb.from('ordini').insert([nuovoOrdine]).select().single();
-  if (errRientro) { toast('Errore creazione rientro: ' + errRientro.message); return; }
-
-  // 2. Aggiorna ordine originale con nota collegamento (stato invariato)
-  await sb.from('ordini').update({
-    note: (d.ordine.note ? d.ordine.note + ' | ' : '') + 'RIENTRO MERCE → ordine ' + rientro.id
-  }).eq('id', d.ordine.id);
-
-  // 3. Crea DAS RIENTRO MERCE (mittente=cliente originale, dest=PhoenixFuel)
-  if (d.das) {
-    var info = _dasDescrProdotti[d.ordine.prodotto] || _dasDescrProdotti['Gasolio Autotrazione'];
-    var pesoNetto = Math.round(tot * info.densita_amb / 1000);
-    var litri15 = Math.round(tot * info.densita_amb / info.densita_15);
-    var dasRientro = {
-      anno: new Date(oggi).getFullYear(),
-      ordine_id: rientro.id,
-      carico_id: null,  // rientro non genera nuovo carico
-      data: oggi,
-      // Mittente = cliente originale che NON ha scaricato
-      mittente_codice: 'RIENTRO',
-      mittente_piva: '',
-      mittente_ragsoc: d.ordine.cliente,
-      mittente_indirizzo: d.ordine.destinazione || '',
-      mittente_citta: '',
-      // Destinatario = PhoenixFuel deposito
-      dest_piva: d.das.mittente_piva || '',
-      dest_ragsoc: d.das.mittente_ragsoc || 'PHOENIX FUEL SRL',
-      dest_indirizzo: d.das.mittente_indirizzo || '',
-      dest_citta: d.das.mittente_citta || '',
-      mezzo_targa: d.das.mezzo_targa,
-      autista: d.das.autista,
-      prodotto: d.ordine.prodotto,
-      codice_prodotto: info.codice,
-      descrizione_adr: info.adr,
-      litri_ambiente: tot,
-      litri_15: litri15,
-      peso_netto_kg: pesoNetto,
-      densita_ambiente: info.densita_amb,
-      densita_15: info.densita_15,
-      note_dirottamento: 'RIENTRO MERCE'
-    };
-    var { error: errDas } = await sb.from('das_documenti').insert([dasRientro]);
-    if (errDas) console.warn('Errore DAS rientro:', errDas.message);
-  }
-
-  // 4. Riallinea cisterne (cascata 1→2→3)
-  if (typeof pfDepositoRicalcolaCisterne === 'function') {
-    await pfDepositoRicalcolaCisterne(d.ordine.prodotto);
-  }
-
-  if (typeof _auditLog === 'function') {
-    _auditLog('rientro_merce', 'ordini', 'TOTALE ' + tot + 'L da ' + d.ordine.cliente + ' (ordine ' + d.ordine.id + ' → ' + rientro.id + ')');
-  }
-  toast('✅ Rientro merce completato!');
   chiudiModalePermessi();
   if (d.caricoId) apriDettaglioCarico(d.caricoId);
   else caricaConsegne();
