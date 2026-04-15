@@ -2040,7 +2040,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
       var tot = costoUnitario * Number(o.litri);
       var isPagato = o.pagato_fornitore === true;
       var scadData = new Date(o.data);
-      scadData.setDate(scadData.getDate() + (o.giorni_pagamento || ggPag));
+      scadData.setDate(scadData.getDate() + ggPag);
       var scadISO = scadData.toISOString().split('T')[0];
       var isScaduto = !isPagato && scadData <= oggi;
       var tipoLabel = o.tipo_ordine === 'stazione_servizio' ? '<span class="badge purple" style="font-size:9px">Stazione</span>' : o.tipo_ordine === 'entrata_deposito' ? '<span class="badge teal" style="font-size:9px">Deposito</span>' : '<span class="badge blue" style="font-size:9px">' + esc(o.tipo_ordine) + '</span>';
