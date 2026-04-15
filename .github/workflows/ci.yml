@@ -1,0 +1,63 @@
+name: PhoenixFuel CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint sintassi JS (node -c su tutti i .js)
+        run: |
+          set -e
+          fail=0
+          for f in $(ls *.js 2>/dev/null); do
+            if ! node -c "$f" 2>/tmp/err; then
+              echo "::error file=$f::Errore sintassi"
+              cat /tmp/err
+              fail=1
+            fi
+          done
+          if [ $fail -eq 1 ]; then
+            echo "❌ Errori di sintassi rilevati"
+            exit 1
+          fi
+          echo "✓ Tutti i file JS hanno sintassi valida"
+
+      - name: Verifica script referenziati in index.html esistono
+        run: |
+          set -e
+          fail=0
+          for src in $(grep -oE 'src="[^"]+\.js' index.html | sed 's/src="//' | sed 's/?v=.*$//'); do
+            # Skip URL esterne
+            if echo "$src" | grep -qE '^https?://'; then continue; fi
+            if [ ! -f "$src" ]; then
+              echo "::error file=index.html::Script referenziato non trovato: $src"
+              fail=1
+            fi
+          done
+          if [ $fail -eq 1 ]; then exit 1; fi
+          echo "✓ Tutti gli script referenziati in index.html esistono"
+
+      - name: Warning cache bust mancante
+        run: |
+          # Per ogni .js modificato in questo commit, controlla che ?v= sia stato aggiornato
+          changed_js=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '\.js$' | grep -v '^\.github/' || true)
+          changed_index=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '^index.html$' || true)
+          if [ -n "$changed_js" ] && [ -z "$changed_index" ]; then
+            echo "::warning::File JS modificati senza aggiornare il cache-bust in index.html:"
+            echo "$changed_js"
+            echo "Considera di aggiornare il parametro ?v= corrispondente."
+          fi
+          echo "✓ Check cache-bust completato"
