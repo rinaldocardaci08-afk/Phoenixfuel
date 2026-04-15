@@ -137,43 +137,41 @@
 
       <!-- DASHBOARD -->
       <div class="section" id="s-dashboard">
-        <!-- KPI INGROSSO IERI -->
+        <!-- ─── INGROSSO IERI ─── -->
         <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Ingrosso — ieri</div>
         <div class="grid4">
           <div class="kpi"><div class="kpi-label">Fatturato ieri</div><div class="kpi-value" id="kpi-fatturato">—</div></div>
           <div class="kpi"><div class="kpi-label">Litri ieri</div><div class="kpi-value" id="kpi-litri">—</div></div>
-          <div class="kpi"><div class="kpi-label">Margine medio</div><div class="kpi-value" id="kpi-margine">—</div></div>
+          <div class="kpi"><div class="kpi-label">Margine ieri</div><div class="kpi-value" id="kpi-margine">—</div></div>
           <div class="kpi"><div class="kpi-label">Ordini ieri</div><div class="kpi-value" id="kpi-ordini">—</div></div>
         </div>
-        <!-- KPI INGROSSO MESE -->
-        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📋 Ingrosso — mese corrente</div>
-        <div class="grid4">
-          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="kpi-ingr-mese-fatt">—</div></div>
-          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="kpi-ingr-mese-litri">—</div></div>
-          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Margine mese</div><div class="kpi-value" id="kpi-ingr-mese-margine">—</div></div>
-          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="kpi-ingr-mese-ordini">—</div></div>
+
+        <!-- ─── INGROSSO MESE (cockpit confronto stesso periodo) ─── -->
+        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📊 Ingrosso — mese vs stesso periodo mese prec.</div>
+        <div class="grid4" style="margin-bottom:12px">
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Fatturato mese (no IVA)</div><div class="kpi-value" id="ck-fatt-mese">—</div><div id="ck-fatt-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="ck-litri-mese">—</div><div id="ck-litri-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Margine totale mese</div><div class="kpi-value" id="ck-marg-tot-mese">—</div><div id="ck-marg-tot-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Margine €/L mese</div><div class="kpi-value" id="ck-margine-medio">—</div><div id="ck-margine-delta" style="font-size:10px;margin-top:2px"></div></div>
         </div>
-        <!-- KPI DETTAGLIO IERI -->
-        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">⛽ Dettaglio stazione — ieri</div>
+
+        <!-- ─── STAZIONE IERI ─── -->
+        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">⛽ Stazione — ieri</div>
         <div class="grid4">
           <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso ieri pompe</div><div class="kpi-value" id="kpi-dett-incasso">—</div></div>
           <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Litri venduti ieri</div><div class="kpi-value" id="kpi-dett-litri">—</div></div>
-          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Incasso mese stazione</div><div class="kpi-value" id="kpi-dett-mese">—</div></div>
-          <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Margine ieri stazione</div><div class="kpi-value" id="kpi-dett-margine" style="color:#639922">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Margine ieri stazione</div><div class="kpi-value" id="kpi-dett-margine">—</div></div>
+          <div class="kpi" style="background:#EEEDFE"><div class="kpi-label">Margine €/L ieri</div><div class="kpi-value" id="kpi-dett-marg-litro">—</div></div>
         </div>
 
-        <!-- COCKPIT: confronto mese e alert operativi -->
-        <div style="margin-bottom:4px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📊 Cockpit — confronto mese corrente vs precedente</div>
+        <!-- ─── STAZIONE MESE (cockpit confronto stesso periodo) ─── -->
+        <div style="margin-bottom:4px;margin-top:8px;font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:0.6px;font-weight:500">📊 Stazione — mese vs stesso periodo mese prec.</div>
         <div class="grid4" style="margin-bottom:12px">
-          <div class="kpi"><div class="kpi-label">Fatturato mese</div><div class="kpi-value" id="ck-fatt-mese">—</div><div id="ck-fatt-delta" style="font-size:10px;margin-top:2px"></div></div>
-          <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="ck-litri-mese">—</div><div id="ck-litri-delta" style="font-size:10px;margin-top:2px"></div></div>
-          <div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value" id="ck-margine-medio">—</div><div id="ck-margine-delta" style="font-size:10px;margin-top:2px"></div></div>
-          <div class="kpi"><div class="kpi-label">Ordini mese</div><div class="kpi-value" id="ck-ordini-mese">—</div><div id="ck-ordini-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#FAEEDA"><div class="kpi-label">Incasso mese</div><div class="kpi-value" id="cks-incasso-mese">—</div><div id="cks-incasso-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#FAEEDA"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="cks-litri-mese">—</div><div id="cks-litri-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#FAEEDA"><div class="kpi-label">Margine totale mese</div><div class="kpi-value" id="cks-marg-tot-mese">—</div><div id="cks-marg-tot-delta" style="font-size:10px;margin-top:2px"></div></div>
+          <div class="kpi" style="background:#FAEEDA"><div class="kpi-label">Margine €/L mese</div><div class="kpi-value" id="cks-margine-medio">—</div><div id="cks-margine-delta" style="font-size:10px;margin-top:2px"></div></div>
         </div>
-
-        <!-- Alert operativi -->
-        <div id="dash-alert-operativi" style="margin-bottom:16px"></div>
-        <div id="dash-alert-futures" style="display:none;margin-bottom:8px"></div>
 
         <!-- GIACENZA DEPOSITO -->
         <div class="card" style="margin-bottom:16px">
@@ -182,6 +180,30 @@
             <div class="loading">Caricamento...</div>
           </div>
         </div>
+
+        <!-- GIACENZA STAZIONE -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Giacenza stazione Oppido</div>
+          <div class="grid4" id="dash-giacenza-stz">
+            <div class="loading">Caricamento...</div>
+          </div>
+        </div>
+
+        <!-- ALERT OPERATIVI (collassabile) -->
+        <div id="dash-alert-wrapper" style="display:none;margin-bottom:16px">
+          <div onclick="dashToggleAlert()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:#FCEBEB;border:0.5px solid #F09595;border-left:3px solid #E24B4A;border-radius:10px;padding:10px 14px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span id="dash-alert-badge" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#E24B4A;animation:pf-pulse 1.2s infinite"></span>
+              <span style="font-weight:600;color:#791F1F" id="dash-alert-titolo">⚠️ Alert operativi</span>
+            </div>
+            <span id="dash-alert-chevron" style="color:#791F1F;font-size:13px">▼ apri</span>
+          </div>
+          <div id="dash-alert-tendina" style="display:none;margin-top:8px"></div>
+        </div>
+        <style>@keyframes pf-pulse {0%,100% {opacity:1;transform:scale(1)} 50% {opacity:0.4;transform:scale(1.4)}}</style>
+
+        <!-- Alert futures (separato, esistente) -->
+        <div id="dash-alert-futures" style="display:none;margin-bottom:8px"></div>
 
         <!-- NOTIFICHE -->
         <div id="dash-notifiche" style="display:none;margin-bottom:16px"></div>
@@ -209,10 +231,10 @@
           </div>
         </div>
 
+        <!-- CARICHI PIANIFICATI OGGI E IERI (sostituisce ordini recenti) -->
         <div class="card">
-          <div class="card-title">Ordini recenti</div>
-          <table><thead><tr><th>Data</th><th>Cliente</th><th>Prodotto</th><th>Litri</th><th>Totale</th><th>Stato</th></tr></thead>
-          <tbody id="dashboard-ordini"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+          <div class="card-title">🚛 Carichi pianificati — oggi e ieri</div>
+          <div id="dashboard-carichi"><div class="loading">Caricamento...</div></div>
         </div>
       </div>
 
@@ -2408,7 +2430,7 @@
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=1775149951158"></script>
 <script src="pf-admin.js?v=20260414a"></script>
-<script src="pf-dashboard.js?v=1775149951158"></script>
+<script src="pf-dashboard.js?v=20260415i"></script>
 <script src="pf-home.js?v=1775149951158"></script>
 <script src="pf-benchmark.js?v=1775149951158"></script>
 <script src="pf-futures.js?v=1775149951158"></script>
