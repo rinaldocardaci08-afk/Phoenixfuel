@@ -646,7 +646,7 @@ async function stampaStoricoChiusure(sede) {
 // BACKUP & RIPRISTINO DB (solo admin)
 // ═══════════════════════════════════════════════════════════════════
 const _SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
-const _BACKUP_FN_URL = _SUPABASE_URL + '/functions/v1/backup-nightly';
+const _BACKUP_FN_URL = _SUPABASE_URL + '/functions/v1/quick-responder';
 const _RESTORE_FN_URL = _SUPABASE_URL + '/functions/v1/restore-backup';
 
 function _isAdmin() {
