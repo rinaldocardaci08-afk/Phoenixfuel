@@ -1009,6 +1009,7 @@ async function apriDirottamento(ordineId, caricoId) {
 
   html += '<div style="display:flex;gap:8px">';
   html += '<button class="btn-primary" style="flex:1;padding:12px;font-size:14px;background:#D85A30" onclick="eseguiDirottamento()">Conferma dirottamento</button>';
+  html += '<button style="padding:12px 16px;font-size:13px;background:#6B5FCC;color:#fff;border:0;border-radius:var(--radius);cursor:pointer;font-weight:600" onclick="eseguiRientroMerce()" title="Rientro merce TOTALE in deposito (no nuovo cliente)">↩️ Rientro merce</button>';
   html += '<button onclick="chiudiModalePermessi()" style="padding:12px 20px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Annulla</button>';
   html += '</div>';
 
@@ -1174,6 +1175,120 @@ async function eseguiDirottamento() {
 
   _auditLog('dirottamento', 'ordini', (isTotale ? 'TOTALE' : 'PARZIALE ' + litriDiv + 'L') + ' da ' + d.ordine.cliente + ' a ' + nuovoCliente.nome);
   toast('✅ Dirottamento completato!');
+  chiudiModalePermessi();
+  if (d.caricoId) apriDettaglioCarico(d.caricoId);
+  else caricaConsegne();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RIENTRO MERCE — l'autista non scarica e torna in deposito
+// Crea entrata_deposito stessa quantità totale + DAS rientro auto.
+// L'ordine originale resta nello stato attuale + nota collegamento.
+// ══════════════════════════════════════════════════════════════════
+async function eseguiRientroMerce() {
+  var d = window._dirottamento; if (!d) return;
+
+  // Ricarica stato fresh dal DB per sicurezza
+  var { data: ordineFresh } = await sb.from('ordini').select('stato').eq('id', d.ordine.id).single();
+  if (!ordineFresh) { toast('Ordine non trovato'); return; }
+  if (ordineFresh.stato === 'consegnato' || ordineFresh.stato === 'annullato') {
+    toast('Ordine ' + ordineFresh.stato + ': rientro non applicabile');
+    chiudiModalePermessi();
+    return;
+  }
+  if (ordineFresh.stato === 'programmato') {
+    toast('Ordine ancora programmato (prodotto non caricato). Per annullarlo usa "Annulla ordine".');
+    return;
+  }
+  // Stato atteso: 'confermato' (camion partito col carico)
+
+  var tot = Number(d.ordine.litri);
+  if (!confirm('RIENTRO MERCE TOTALE\n\n' + d.ordine.cliente + ' · ' + d.ordine.prodotto + ' · ' + fmtL(tot) + '\n\nCrea entrata in deposito ' + fmtL(tot) + ' L con DAS "RIENTRO MERCE".\nL\'ordine originale resta tracciato con nota di rientro.\n\nProcedere?')) return;
+
+  toast('Rientro merce in corso...');
+
+  var oggi = new Date().toISOString().split('T')[0];
+  var costo = Number(d.ordine.costo_litro || 0);
+
+  // 1. Crea ordine entrata_deposito
+  var nuovoOrdine = {
+    data: oggi,
+    tipo_ordine: 'entrata_deposito',
+    cliente: 'Phoenix Fuel Srl',
+    cliente_id: null,
+    prodotto: d.ordine.prodotto,
+    litri: tot,
+    fornitore: 'Rientro merce',
+    costo_litro: costo,
+    trasporto_litro: 0,
+    margine: 0,
+    iva: d.ordine.iva,
+    stato: 'consegnato',
+    caricato_deposito: true,
+    pagato_fornitore: true,  // operazione interna: nessun debito
+    note: 'Rientro merce da ordine ' + d.ordine.id + ' (' + d.ordine.cliente + ')'
+  };
+
+  // Cisterna 1 del prodotto come default
+  var { data: cisterneProd } = await sb.from('cisterne')
+    .select('id').eq('sede','deposito_vibo').eq('prodotto', d.ordine.prodotto)
+    .order('nome').limit(1);
+  if (cisterneProd && cisterneProd.length) nuovoOrdine.cisterna_id = cisterneProd[0].id;
+
+  var { data: rientro, error: errRientro } = await sb.from('ordini').insert([nuovoOrdine]).select().single();
+  if (errRientro) { toast('Errore creazione rientro: ' + errRientro.message); return; }
+
+  // 2. Aggiorna ordine originale con nota collegamento (stato invariato)
+  await sb.from('ordini').update({
+    note: (d.ordine.note ? d.ordine.note + ' | ' : '') + 'RIENTRO MERCE → ordine ' + rientro.id
+  }).eq('id', d.ordine.id);
+
+  // 3. Crea DAS RIENTRO MERCE (mittente=cliente originale, dest=PhoenixFuel)
+  if (d.das) {
+    var info = _dasDescrProdotti[d.ordine.prodotto] || _dasDescrProdotti['Gasolio Autotrazione'];
+    var pesoNetto = Math.round(tot * info.densita_amb / 1000);
+    var litri15 = Math.round(tot * info.densita_amb / info.densita_15);
+    var dasRientro = {
+      anno: new Date(oggi).getFullYear(),
+      ordine_id: rientro.id,
+      carico_id: null,  // rientro non genera nuovo carico
+      data: oggi,
+      // Mittente = cliente originale che NON ha scaricato
+      mittente_codice: 'RIENTRO',
+      mittente_piva: '',
+      mittente_ragsoc: d.ordine.cliente,
+      mittente_indirizzo: d.ordine.destinazione || '',
+      mittente_citta: '',
+      // Destinatario = PhoenixFuel deposito
+      dest_piva: d.das.mittente_piva || '',
+      dest_ragsoc: d.das.mittente_ragsoc || 'PHOENIX FUEL SRL',
+      dest_indirizzo: d.das.mittente_indirizzo || '',
+      dest_citta: d.das.mittente_citta || '',
+      mezzo_targa: d.das.mezzo_targa,
+      autista: d.das.autista,
+      prodotto: d.ordine.prodotto,
+      codice_prodotto: info.codice,
+      descrizione_adr: info.adr,
+      litri_ambiente: tot,
+      litri_15: litri15,
+      peso_netto_kg: pesoNetto,
+      densita_ambiente: info.densita_amb,
+      densita_15: info.densita_15,
+      note_dirottamento: 'RIENTRO MERCE'
+    };
+    var { error: errDas } = await sb.from('das_documenti').insert([dasRientro]);
+    if (errDas) console.warn('Errore DAS rientro:', errDas.message);
+  }
+
+  // 4. Riallinea cisterne (cascata 1→2→3)
+  if (typeof pfDepositoRicalcolaCisterne === 'function') {
+    await pfDepositoRicalcolaCisterne(d.ordine.prodotto);
+  }
+
+  if (typeof _auditLog === 'function') {
+    _auditLog('rientro_merce', 'ordini', 'TOTALE ' + tot + 'L da ' + d.ordine.cliente + ' (ordine ' + d.ordine.id + ' → ' + rientro.id + ')');
+  }
+  toast('✅ Rientro merce completato!');
   chiudiModalePermessi();
   if (d.caricoId) apriDettaglioCarico(d.caricoId);
   else caricaConsegne();

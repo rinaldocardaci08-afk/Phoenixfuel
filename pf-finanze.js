@@ -28,7 +28,7 @@ async function caricaFinanze() {
       .eq('tipo_ordine','cliente').neq('stato','annullato').eq('pagato',false)
       .gte('data_scadenza',daISO).lte('data_scadenza',aISO),
     sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore')
-      .neq('stato','annullato').eq('pagato_fornitore',false).not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').gte('data',daISO),
+      .neq('stato','annullato').eq('pagato_fornitore',false).not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').not('fornitore','ilike','%rientro%').gte('data',daISO),
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
       .gte('data',inizioMeseISO).lte('data',fineMeseISO).order('data'),
     sb.from('fornitori').select('nome,giorni_pagamento,colore')
