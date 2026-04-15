@@ -179,7 +179,7 @@ async function pfDepositoRicalcolaCisterne(prodotto) {
     var totCalc = Math.max(0, Math.round(giac.calcolata));
 
     var { data: cisterne, error: errCis } = await sb.from('cisterne')
-      .select('id,nome,livello_attuale')
+      .select('id,nome,livello_attuale,capacita_max')
       .eq('sede', 'deposito_vibo').eq('prodotto', prodotto)
       .order('nome');
     if (errCis || !cisterne || !cisterne.length) return;
@@ -187,25 +187,42 @@ async function pfDepositoRicalcolaCisterne(prodotto) {
     var sommaDb = cisterne.reduce(function(s, c) {
       return s + Number(c.livello_attuale || 0);
     }, 0);
+    var delta = totCalc - Math.round(sommaDb);
+    if (delta === 0) {
+      console.log('[pfDepositoRicalcolaCisterne] ✓ ' + prodotto + ' già allineato (' + totCalc + ' L)');
+      return;
+    }
 
-    // Distribuzione proporzionale; se DB tutto a zero, divide equamente
-    for (var i = 0; i < cisterne.length; i++) {
+    // Applica delta a CASCATA cisterna 1 → 2 → 3.
+    // Delta positivo: riempie da cisterna 1 verso le successive (rispetta capacita_max).
+    // Delta negativo: scarica da cisterna 1 verso le successive (mai sotto 0).
+    var residuo = delta;
+    var modifiche = [];
+    for (var i = 0; i < cisterne.length && residuo !== 0; i++) {
       var c = cisterne[i];
-      var nuovoLiv;
-      if (sommaDb > 0) {
-        var quota = Number(c.livello_attuale || 0) / sommaDb;
-        nuovoLiv = Math.round(totCalc * quota);
+      var liv = Number(c.livello_attuale || 0);
+      var cap = Number(c.capacita_max || 0);
+      var nuovo;
+      if (residuo > 0) {
+        var spazio = cap > 0 ? Math.max(0, cap - liv) : residuo;
+        var aggiungi = Math.min(residuo, spazio);
+        nuovo = Math.round(liv + aggiungi);
+        residuo -= aggiungi;
       } else {
-        nuovoLiv = Math.round(totCalc / cisterne.length);
+        var togli = Math.min(-residuo, liv);
+        nuovo = Math.round(liv - togli);
+        residuo += togli;
       }
-      // Skip update se valore già corretto (evita scritture inutili)
-      if (Math.round(Number(c.livello_attuale || 0)) === nuovoLiv) continue;
+      if (nuovo === Math.round(liv)) continue;
       await sb.from('cisterne').update({
-        livello_attuale: nuovoLiv,
+        livello_attuale: nuovo,
         updated_at: new Date().toISOString()
       }).eq('id', c.id);
+      modifiche.push(c.nome + ': ' + Math.round(liv) + '→' + nuovo);
     }
-    console.log('[pfDepositoRicalcolaCisterne] ✓ ' + prodotto + ' riallineato a ' + totCalc + ' L');
+    var msg = '[pfDepositoRicalcolaCisterne] ✓ ' + prodotto + ' delta ' + (delta>=0?'+':'') + delta + ' L (tot ' + totCalc + ') | ' + modifiche.join(', ');
+    if (residuo !== 0) msg += ' ⚠️ residuo non assorbibile: ' + residuo + ' L';
+    console.log(msg);
   } catch (e) {
     console.warn('[pfDepositoRicalcolaCisterne] errore (non bloccante):', e);
   }
