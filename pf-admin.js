@@ -696,6 +696,7 @@ async function eseguiSnapshot() {
     if (out) out.innerHTML = '<div style="padding:10px;background:#EAF3DE;border-radius:6px;color:#27500A">✅ <strong>Snapshot completato</strong><br>File: <code>' + esc(data.filename) + '</code><br>Record salvati: ' + data.totRecords.toLocaleString('it-IT') + '<br>Dimensione: ' + sizeMB + ' MB</div>';
     toast('✅ Snapshot creato: ' + data.filename);
     if (typeof _auditLog === 'function') _auditLog('snapshot_manuale', 'sistema', data.filename + ' (' + data.totRecords + ' record, ' + sizeMB + ' MB)');
+    caricaListaSnapshot(); // refresh lista dopo creazione
   } catch (e) {
     if (out) out.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F">❌ Errore rete: ' + esc(e.message) + '</div>';
     toast('Errore snapshot');
@@ -803,3 +804,84 @@ async function eseguiRipristino() {
     toast('Errore ripristino');
   }
 }
+
+// ── LISTA STORICA SNAPSHOT ──
+async function caricaListaSnapshot() {
+  if (!_isAdmin()) return;
+  var wrap = document.getElementById('snapshot-lista');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:8px">Carico storico backup...</div>';
+  try {
+    var { data: files, error } = await sb.storage.from('backups').list('', {
+      limit: 50, sortBy: { column: 'created_at', order: 'desc' }
+    });
+    if (error) throw error;
+    var snap = (files||[]).filter(function(f){ return /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(f.name); });
+    if (!snap.length) {
+      wrap.innerHTML = '<div style="padding:10px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text-muted)">Nessun backup ancora creato</div>';
+      return;
+    }
+    var html = '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:500;margin-bottom:6px">📜 Storico backup (' + snap.length + ')</div>';
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;overflow:hidden">';
+    snap.slice(0, 10).forEach(function(f, i) {
+      var dataStr = f.name.replace('backup-','').replace('.json','');
+      var sizeMB = f.metadata && f.metadata.size ? (f.metadata.size/1024/1024).toFixed(2) : '—';
+      var created = f.created_at ? new Date(f.created_at).toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+      var bgRow = i === 0 ? 'background:#EAF3DE' : '';
+      var badge = i === 0 ? '<span style="background:#27500A;color:#EAF3DE;padding:1px 6px;border-radius:4px;font-size:9px;margin-left:6px">PIÙ RECENTE</span>' : '';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:0.5px solid var(--border);' + bgRow + '">';
+      html += '<div style="flex:1;font-size:12px"><span style="font-family:var(--font-mono);font-weight:500">' + esc(dataStr) + '</span>' + badge;
+      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + esc(created) + ' · ' + sizeMB + ' MB · <code style="font-size:9px">' + esc(f.name) + '</code></div></div>';
+      html += '<button class="btn-edit" style="font-size:11px;padding:4px 10px" onclick="ripristinaSnapshotDiretto(\'' + esc(f.name) + '\')" title="Ripristina questo backup">↶ Ripristina</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    if (snap.length > 10) html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">... e altri ' + (snap.length-10) + ' backup più vecchi (retention 30gg)</div>';
+    wrap.innerHTML = html;
+  } catch(e) {
+    wrap.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F;font-size:11px">❌ Errore lettura backup: ' + esc(e.message) + '</div>';
+  }
+}
+
+// Wrapper per ripristino diretto da bottone lista (apre stessa modale ma con file pre-selezionato)
+async function ripristinaSnapshotDiretto(filename) {
+  if (!_isAdmin()) { toast('Solo admin'); return; }
+  var h = '<div style="font-size:18px;font-weight:600;margin-bottom:8px;color:#791F1F">⚠️ Ripristina backup: ' + esc(filename) + '</div>';
+  h += '<div style="background:#FCEBEB;border:2px solid #E24B4A;padding:14px;border-radius:8px;margin-bottom:14px;font-size:13px;line-height:1.6">';
+  h += '<strong style="color:#791F1F">⛔ ATTENZIONE — OPERAZIONE DISTRUTTIVA</strong><br><br>';
+  h += '• <strong>TUTTI</strong> i dati attuali del database (47 tabelle) verranno <strong>CANCELLATI</strong><br>';
+  h += '• Verranno sostituiti con i dati di <code>' + esc(filename) + '</code><br>';
+  h += '• <strong>Tutti i dati inseriti dopo il backup andranno persi</strong><br>';
+  h += '• L\'operazione richiede 2-5 minuti<br><br>';
+  h += '<strong style="color:#791F1F">Verrà creato uno snapshot di emergenza PRIMA del ripristino.</strong>';
+  h += '</div>';
+  h += '<input type="hidden" id="snap-file" value="' + esc(filename) + '" />';
+  h += '<div style="margin-bottom:14px"><label style="font-size:12px;color:#791F1F;font-weight:600">Per confermare, digita esattamente: <code>RIPRISTINA</code></label>';
+  h += '<input type="text" id="snap-conferma" placeholder="RIPRISTINA" style="width:100%;font-size:14px;font-family:var(--font-mono);padding:8px 12px;border:1.5px solid #E24B4A;border-radius:8px;background:var(--bg);color:var(--text);margin-top:4px;text-transform:uppercase" />';
+  h += '</div>';
+  h += '<div style="display:flex;gap:8px">';
+  h += '<button class="btn-primary" style="flex:1;background:#A32D2D" onclick="eseguiRipristino()">⛔ Conferma ripristino DB</button>';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:10px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+  apriModal(h);
+}
+
+// Auto-load lista snapshot quando si apre la sezione admin
+(function() {
+  function _maybeLoad() {
+    if (document.getElementById('snapshot-lista') && _isAdmin()) {
+      caricaListaSnapshot();
+    }
+  }
+  // Aggancio: quando l'utente clicca un nav-item che porta in admin
+  document.addEventListener('click', function(e) {
+    var n = e.target && e.target.closest && e.target.closest('.nav-item');
+    if (n && /utenti|admin/i.test(n.textContent || '')) {
+      setTimeout(_maybeLoad, 400);
+    }
+  });
+  // Anche al primo caricamento se siamo già su admin
+  document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(_maybeLoad, 1500);
+  });
+})();
