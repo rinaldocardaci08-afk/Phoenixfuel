@@ -1,5 +1,75 @@
 // PhoenixFuel — Stazione: Core, Dashboard, Ricezione ordini
 // PhoenixFuel — Stazione Oppido
+
+// ═══════════════════════════════════════════════════════════════════
+// pfStzRicalcolaCisterne — auto-heal cisterne stazione
+// ═══════════════════════════════════════════════════════════════════
+// Riallinea SUM(cisterne.livello_attuale) per prodotto al valore canonico
+// pfData.getGiacenzaAllaData('stazione_oppido', prodotto, oggi).calcolata.
+// Il delta viene applicato a cascata cisterna 1 → 2 → ... rispettando
+// capacita_max in carico e mai sotto 0 in scarico.
+// Non tocca costo_medio: il CMP resta gestito dal flusso originale.
+// Va chiamata DOPO ogni operazione che modifica i livelli (ricezione
+// ordini, rettifiche, magazzino).
+// ═══════════════════════════════════════════════════════════════════
+async function pfStzRicalcolaCisterne(prodotto) {
+  if (!prodotto) return;
+  if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
+    console.warn('[pfStzRicalcolaCisterne] pfData non disponibile, skip');
+    return;
+  }
+  try {
+    var oggi = new Date().toISOString().split('T')[0];
+    var giac = await pfData.getGiacenzaAllaData('stazione_oppido', prodotto, oggi);
+    var totCalc = Math.max(0, Math.round(giac.calcolata));
+
+    var { data: cisterne, error: errCis } = await sb.from('cisterne')
+      .select('id,nome,livello_attuale,capacita_max')
+      .eq('sede', 'stazione_oppido').eq('prodotto', prodotto)
+      .order('nome');
+    if (errCis || !cisterne || !cisterne.length) return;
+
+    var sommaDb = cisterne.reduce(function(s, c) {
+      return s + Number(c.livello_attuale || 0);
+    }, 0);
+    var delta = totCalc - Math.round(sommaDb);
+    if (delta === 0) {
+      console.log('[pfStzRicalcolaCisterne] ✓ ' + prodotto + ' già allineato (' + totCalc + ' L)');
+      return;
+    }
+
+    var residuo = delta;
+    var modifiche = [];
+    for (var i = 0; i < cisterne.length && residuo !== 0; i++) {
+      var c = cisterne[i];
+      var liv = Number(c.livello_attuale || 0);
+      var cap = Number(c.capacita_max || 0);
+      var nuovo;
+      if (residuo > 0) {
+        var spazio = cap > 0 ? Math.max(0, cap - liv) : residuo;
+        var aggiungi = Math.min(residuo, spazio);
+        nuovo = Math.round(liv + aggiungi);
+        residuo -= aggiungi;
+      } else {
+        var togli = Math.min(-residuo, liv);
+        nuovo = Math.round(liv - togli);
+        residuo += togli;
+      }
+      if (nuovo === Math.round(liv)) continue;
+      await sb.from('cisterne').update({
+        livello_attuale: nuovo,
+        updated_at: new Date().toISOString()
+      }).eq('id', c.id);
+      modifiche.push(c.nome + ': ' + Math.round(liv) + '→' + nuovo);
+    }
+    var msg = '[pfStzRicalcolaCisterne] ✓ ' + prodotto + ' delta ' + (delta>=0?'+':'') + delta + ' L (tot ' + totCalc + ') | ' + modifiche.join(', ');
+    if (residuo !== 0) msg += ' ⚠️ residuo non assorbibile: ' + residuo + ' L';
+    console.log(msg);
+  } catch (e) {
+    console.warn('[pfStzRicalcolaCisterne] errore (non bloccante):', e);
+  }
+}
+
 // ── STAZIONE OPPIDO ──────────────────────────────────────────────
 function switchStazioneTab(btn) {
   document.querySelectorAll('.stz-tab').forEach(b => { b.style.background='var(--bg)'; b.style.color='var(--text)'; b.style.border='0.5px solid var(--border)'; b.classList.remove('active'); });
@@ -171,6 +241,9 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
   const { error } = await sb.from('ordini').update({ ricevuto_stazione: true }).eq('id', ordineId);
   if (error) { toast('Errore: ' + error.message); return; }
 
+  // Auto-heal cisterne: riallinea alla cascata pfData (stazione)
+  try { await pfStzRicalcolaCisterne(prodotto); } catch (e) { console.warn('pfStzRicalcolaCisterne errore:', e); }
+
   toast('✅ ' + fmtL(totAssegnati) + ' ricevuti — CMP aggiornato a € ' + cmpNuovo.toFixed(4) + '/L');
   chiudiModal();
   caricaOrdiniDaCaricare();
@@ -182,6 +255,18 @@ function _destroyStzDashCharts() { Object.values(_stzDashCharts).forEach(c=>c.de
 
 async function caricaStazioneDashboard() {
   await caricaOrdiniDaCaricare();
+
+  // Auto-heal cisterne stazione: riallinea alla cascata pfData per ogni prodotto
+  // (analogo alla sentinella deposito - garantisce che la dashboard mostri sempre dati canonici)
+  try {
+    var { data: prodCisterne } = await sb.from('cisterne').select('prodotto').eq('sede','stazione_oppido');
+    var prodSet = {};
+    (prodCisterne || []).forEach(function(c){ if(c.prodotto) prodSet[c.prodotto] = true; });
+    var prodList = Object.keys(prodSet);
+    for (var i = 0; i < prodList.length; i++) {
+      await pfStzRicalcolaCisterne(prodList[i]);
+    }
+  } catch (e) { console.warn('auto-heal stazione errore:', e); }
 
   const oggi = oggiISO;
   const inizioMese = oggi.substring(0,8) + '01';
