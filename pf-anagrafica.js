@@ -1526,7 +1526,7 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-edit" onclick="toggleClienteAttivo(\'' + r.id + '\',' + (r.attivo !== false) + ')" title="' + (r.attivo !== false ? 'Disattiva cliente' : 'Riattiva cliente') + '">' + (r.attivo !== false ? '🔒' : '🔓') + '</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }
 
   var html = attivi.map(rigaCliente).join('');
@@ -1545,6 +1545,15 @@ function filtraClienti() {
     const testo = tr.textContent.toLowerCase();
     tr.style.display = !q || testo.includes(q) ? '' : 'none';
   });
+}
+
+async function toggleClienteAttivo(id, attualeAttivo) {
+  const azione = attualeAttivo ? 'disattivare' : 'riattivare';
+  if (!confirm('Vuoi ' + azione + ' questo cliente?\n\n' + (attualeAttivo ? 'Non comparirà più nelle selezioni per nuovi ordini, ma resterà visibile nello storico.' : 'Tornerà selezionabile per nuovi ordini.'))) return;
+  const { error } = await sb.from('clienti').update({ attivo: !attualeAttivo }).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast(attualeAttivo ? '🔒 Cliente disattivato' : '🔓 Cliente riattivato');
+  caricaClienti();
 }
 
 // ── SCHEDA CLIENTE CON GESTIONE PAGAMENTI ────────────────────────
