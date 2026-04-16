@@ -7,9 +7,9 @@
 var _uniData = null; // cache dati globale per questa tab
 
 async function caricaUnificata() {
-  var cont = document.getElementById('uni-content');
-  if (!cont) return;
-  cont.innerHTML = '<div class="loading" style="padding:24px">Caricamento dati...</div>';
+  var el = document.getElementById('uni-pompe');
+  if (!el) return;
+  el.innerHTML = '<div class="loading" style="padding:24px">Caricamento dati...</div>';
 
   var limDate = new Date(); limDate.setDate(limDate.getDate() - 90);
   var limISO = limDate.toISOString().split('T')[0];
@@ -29,7 +29,7 @@ async function caricaUnificata() {
   var costi = costiRes.data || [];
   var cisterne = cisRes.data || [];
 
-  if (!pompe.length) { cont.innerHTML = '<div class="loading">Nessuna pompa configurata</div>'; return; }
+  if (!pompe.length) { el.innerHTML = '<div class="loading">Nessuna pompa configurata</div>'; return; }
 
   var _oggiISO = new Date().toISOString().split('T')[0];
   var _dateSet = new Set(letture.map(function(l) { return l.data; }));
