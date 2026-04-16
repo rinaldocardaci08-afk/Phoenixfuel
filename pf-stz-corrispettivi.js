@@ -162,6 +162,7 @@ function _corrRender() {
     html += '<td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">' + (r.contatiContanti ? _fmtC(r.contatiContanti) : '—') + '</td>';
     // Spese + rimborsi
     html += '<td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);color:#E24B4A">' + (r.spese ? _fmtC(r.spese) : '—') + '</td>';
+    html += '<td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);color:#E24B4A">' + (r.rimborsi ? _fmtC(r.rimborsi) : '—') + '</td>';
     // Incassi resti (crediti)
     html += '<td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">' + (r.crediti ? _fmtC(r.crediti) : '—') + '</td>';
     // Diff busta
@@ -190,7 +191,7 @@ function _corrRender() {
       html += '<tr style="background:#E6F1FB;border-bottom:2px solid #378ADD">';
       html += '<td colspan="2" style="padding:6px;font-weight:500;color:#0C447C;font-size:10px">↳ Versamento ' + vDataFmt + '</td>';
       html += '<td colspan="4" style="padding:6px;font-size:10px;color:#0C447C">' + esc(v.banca || '') + ' — ' + esc(v.note || '') + '</td>';
-      html += '<td colspan="3" style="padding:6px;font-size:10px;color:#0C447C">Giorni: ' + giorniCop + '</td>';
+      html += '<td colspan="4" style="padding:6px;font-size:10px;color:#0C447C">Giorni: ' + giorniCop + '</td>';
       html += '<td style="padding:6px"></td>';
       html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#0C447C">' + _fmtC(Number(v.importo_versato || 0)) + '</td>';
       html += '<td style="padding:6px;text-align:center">';
@@ -212,6 +213,7 @@ function _corrRender() {
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A;background:rgba(99,153,34,0.1)">' + _fmtC(totContanti) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _fmtC(totContati) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _fmtC(totSpese) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _fmtC(totRimborsi) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _fmtC(totCrediti) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + (totDiff >= 0 ? '+' : '') + _fmtC(totDiff) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A;background:rgba(99,153,34,0.1)">' + _fmtC(totDaVersare) + '</td>';
