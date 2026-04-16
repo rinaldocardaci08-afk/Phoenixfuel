@@ -366,11 +366,18 @@ async function uploadDasOrdine(ordineId, inputId, tipoOrdine) {
 // ── ELIMINA DAS DA ORDINE ───────────────────────────────────────
 async function eliminaDocDas(ordineId, percorso, tipoOrdine) {
   if (!confirm('Eliminare questo DAS allegato?')) return;
-  await sb.storage.from('Das').remove([percorso]);
-  await sb.from('documenti_ordine').delete().eq('ordine_id', ordineId).eq('percorso_storage', percorso);
-  toast('DAS eliminato');
-  if (tipoOrdine === 'stazione_servizio') caricaDasOrdiniStazione();
-  else caricaDasOrdiniDeposito();
+  try {
+    var { error: errStorage } = await sb.storage.from('Das').remove([percorso]);
+    if (errStorage) { toast('Errore storage: ' + errStorage.message); return; }
+    var { error: errDb } = await sb.from('documenti_ordine').delete().eq('ordine_id', ordineId).eq('percorso_storage', percorso);
+    if (errDb) { toast('Errore DB (file rimosso ma record resta): ' + errDb.message); return; }
+    toast('DAS eliminato');
+    if (tipoOrdine === 'stazione_servizio') caricaDasOrdiniStazione();
+    else caricaDasOrdiniDeposito();
+  } catch (e) {
+    console.error('[eliminaDocDas]', e);
+    toast('Errore eliminazione DAS');
+  }
 }
 
 // ── STORICO DAS STAZIONE ────────────────────────────────────────
@@ -442,36 +449,54 @@ async function _uploadAllegato(file, tipo, data, rifId, rifTabella, extra) {
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   var pathStorage = cartella + '/' + yyyy + '/' + mm + '/' + Date.now() + '_' + safeName;
 
-  var { error: errUp } = await sb.storage.from(BUCKET_ALLEGATI).upload(pathStorage, file, { contentType: file.type });
-  if (errUp) { toast('Errore upload: ' + errUp.message); return null; }
+  try {
+    var { error: errUp } = await sb.storage.from(BUCKET_ALLEGATI).upload(pathStorage, file, { contentType: file.type });
+    if (errUp) { toast('Errore upload: ' + errUp.message); return null; }
 
-  var record = Object.assign({
-    tipo: tipo,
-    data: data,
-    riferimento_id: rifId || null,
-    riferimento_tabella: rifTabella || null,
-    nome_file: file.name,
-    path_storage: pathStorage,
-    bucket: BUCKET_ALLEGATI,
-    mime_type: file.type,
-    dimensione_bytes: file.size,
-    caricato_da: utenteCorrente ? utenteCorrente.nome : null
-  }, extra || {});
+    var record = Object.assign({
+      tipo: tipo,
+      data: data,
+      riferimento_id: rifId || null,
+      riferimento_tabella: rifTabella || null,
+      nome_file: file.name,
+      path_storage: pathStorage,
+      bucket: BUCKET_ALLEGATI,
+      mime_type: file.type,
+      dimensione_bytes: file.size,
+      caricato_da: utenteCorrente ? utenteCorrente.nome : null
+    }, extra || {});
 
-  var { data: inserted, error: errDb } = await sb.from('allegati').insert([record]).select().single();
-  if (errDb) { toast('Errore DB: ' + errDb.message); return null; }
-  return inserted;
+    var { data: inserted, error: errDb } = await sb.from('allegati').insert([record]).select().single();
+    if (errDb) {
+      // Rollback: rimuove file da Storage se insert DB fallisce (evita orfani)
+      try { await sb.storage.from(BUCKET_ALLEGATI).remove([pathStorage]); } catch(_) {}
+      toast('Errore DB: ' + errDb.message);
+      return null;
+    }
+    return inserted;
+  } catch (e) {
+    console.error('[_uploadAllegato]', e);
+    toast('Errore upload allegato');
+    return null;
+  }
 }
 
 async function eliminaAllegato(id, pathStorage, callback) {
   if (!confirm('Eliminare questo allegato?')) return;
-  if (pathStorage) {
-    await sb.storage.from(BUCKET_ALLEGATI).remove([pathStorage]);
+  try {
+    if (pathStorage) {
+      var { error: errSt } = await sb.storage.from(BUCKET_ALLEGATI).remove([pathStorage]);
+      if (errSt) console.warn('[eliminaAllegato] storage:', errSt.message);
+    }
+    var { error: errDb } = await sb.from('allegati').delete().eq('id', id);
+    if (errDb) { toast('Errore DB: ' + errDb.message); return; }
+    toast('Allegato eliminato');
+    aggiornaIndicatoreStorage();
+    if (typeof callback === 'function') callback();
+  } catch (e) {
+    console.error('[eliminaAllegato]', e);
+    toast('Errore eliminazione');
   }
-  await sb.from('allegati').delete().eq('id', id);
-  toast('Allegato eliminato');
-  aggiornaIndicatoreStorage();
-  if (typeof callback === 'function') callback();
 }
 
 function _getPublicUrl(path) {
