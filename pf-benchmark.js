@@ -247,19 +247,24 @@ async function _calcolaBenchmarkDaMedia(data, mostraToast) {
     perProdotto[p.prodotto].count++;
   });
 
+  // AUDIT T3: upsert sequenziali → Promise.all
+  var entries = Object.entries(perProdotto);
+  var upsertPromises = entries.map(function(ent) {
+    var prodotto = ent[0];
+    var v = ent[1];
+    var media = Math.round((v.somma / v.count) * 10000) / 10000;
+    return sb.from('benchmark_prezzi').upsert({ data: data, prodotto: prodotto, prezzo: media }, { onConflict: 'data,prodotto' })
+      .then(function(res) { return { prodotto: prodotto, media: media, count: v.count, error: res.error }; });
+  });
+  var results = await Promise.all(upsertPromises);
   var salvati = 0;
   var dettagli = [];
-  var entries = Object.entries(perProdotto);
-  for (var i = 0; i < entries.length; i++) {
-    var prodotto = entries[i][0];
-    var v = entries[i][1];
-    var media = Math.round((v.somma / v.count) * 10000) / 10000;
-    var { error } = await sb.from('benchmark_prezzi').upsert({ data: data, prodotto: prodotto, prezzo: media }, { onConflict: 'data,prodotto' });
-    if (!error) {
+  results.forEach(function(r) {
+    if (!r.error) {
       salvati++;
-      dettagli.push(prodotto + ': € ' + media.toFixed(4) + ' (media ' + v.count + ' fornitori)');
+      dettagli.push(r.prodotto + ': € ' + r.media.toFixed(4) + ' (media ' + r.count + ' fornitori)');
     }
-  }
+  });
 
   if (salvati > 0) {
     if (mostraToast) toast('Benchmark aggiornato: ' + dettagli.join(' · '));
