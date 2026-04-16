@@ -209,6 +209,7 @@ async function _sgwCalcolaSerie(anno, prodotto, finoA) {
   var [entRes, lettRes] = await Promise.all([
     sb.from('ordini').select('data,litri')
       .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
+      .eq('ricevuto_stazione', true)
       .gte('data', daISO).lte('data', aISO),
     pompaIdsDelProdotto.length > 0
       ? sb.from('stazione_letture').select('pompa_id,data,lettura')

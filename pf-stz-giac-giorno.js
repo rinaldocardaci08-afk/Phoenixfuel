@@ -66,14 +66,16 @@ async function caricaStzGiacenzaGiorno() {
   var giacOggi = giacOggiRes.data || [];
 
   // ── ENTRATE via pfData (migrazione) ──
+  // Solo ordini effettivamente RICEVUTI in stazione. Ordini confermati ma non ancora
+  // ricevuti non devono influire sulla giacenza (coerente con pfData.getGiacenzaAllaData).
   var entrateOrdini = [];
   try {
     if (typeof pfData !== 'undefined' && pfData.getOrdini) {
       var tuttiOrd = await pfData.getOrdini({ da: data, a: data });
-      entrateOrdini = tuttiOrd.filter(function(o) { return o.tipo_ordine === 'stazione_servizio'; });
+      entrateOrdini = tuttiOrd.filter(function(o) { return o.tipo_ordine === 'stazione_servizio' && o.ricevuto_stazione === true; });
     } else {
       // Fallback se pfData non è caricato
-      var res = await sb.from('ordini').select('prodotto,litri,stato').eq('tipo_ordine', 'stazione_servizio').eq('data', data).in('stato', ['confermato', 'consegnato']);
+      var res = await sb.from('ordini').select('prodotto,litri,stato').eq('tipo_ordine', 'stazione_servizio').eq('data', data).in('stato', ['confermato', 'consegnato']).eq('ricevuto_stazione', true);
       entrateOrdini = res.data || [];
     }
   } catch (e) {
@@ -421,7 +423,7 @@ async function _stzgAssicuraCatena(dataTarget) {
     sb.from('stazione_pompe').select('id,nome,prodotto,attiva').eq('attiva', true),
     sb.from('giacenze_giornaliere').select('*').eq('sede', 'stazione_oppido').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data'),
     sb.from('stazione_letture').select('pompa_id,lettura,data').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data'),
-    sb.from('ordini').select('data,prodotto,litri,tipo_ordine,stato').eq('tipo_ordine', 'stazione_servizio').gte('data', DATA_INIZIO).lte('data', dataTarget).in('stato', ['confermato','consegnato'])
+    sb.from('ordini').select('data,prodotto,litri,tipo_ordine,stato').eq('tipo_ordine', 'stazione_servizio').gte('data', DATA_INIZIO).lte('data', dataTarget).in('stato', ['confermato','consegnato']).eq('ricevuto_stazione', true)
   ]);
 
   var pompe = pompeRes.data || [];
