@@ -163,12 +163,6 @@ async function caricaStzGiacenzaGiorno() {
 
   _stzGiornoDati = { data: data, righe: righeProd, letturePresenti: letturePresenti };
 
-  // ── LOG CONSOLE PER VERIFICA SENTINELLE ──
-  console.log('[pf-stz-giac-giorno] ' + data + ' — letture oggi: ' + lettOggi.length + ', letture gg prec: ' + lettPrec.length);
-  righeProd.forEach(function(r) {
-    console.log('  ' + r.prodotto + ': apertura ' + r.apertura + ', entrate +' + r.entrate + ', uscite -' + r.uscite + ', teorica ' + r.teorica + (r.rilevata !== '' ? ', rilevata ' + r.rilevata : ''));
-  });
-
   // ── RENDER ──
   _stzGiornoRender();
 
@@ -523,15 +517,12 @@ async function _stzgAssicuraCatena(dataTarget) {
   }
 
   if (daInserire.length === 0) {
-    console.log('[_stzgAssicuraCatena] catena già completa fino a ' + dataTarget);
     return;
   }
 
-  console.log('[_stzgAssicuraCatena] inserimento ' + daInserire.length + ' record da ' + daInserire[0].data + ' a ' + daInserire[daInserire.length - 1].data);
   var res = await sb.from('giacenze_giornaliere').upsert(daInserire, { onConflict: 'data,sede,prodotto' });
   if (res.error) {
     console.error('[_stzgAssicuraCatena] errore upsert:', res.error);
     throw res.error;
   }
-  console.log('[_stzgAssicuraCatena] ✓ ' + daInserire.length + ' record salvati');
 }

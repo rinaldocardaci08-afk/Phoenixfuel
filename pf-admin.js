@@ -229,12 +229,16 @@ async function calcolaGiacenzeAnno(sede) {
   let prodottiDati = {};
 
   if (sede === 'deposito_vibo') {
-    // Entrate: ordini entrata_deposito confermati
-    const { data: entrate } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','entrata_deposito').neq('stato','annullato').gte('data', da).lte('data', a);
-    // Uscite: ordini da deposito (PhoenixFuel) verso clienti + stazione + autoconsumo
-    const { data: usciteClienti } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','cliente').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a);
-    const { data: usciteStazione } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a);
-    const { data: usciteAutoconsumo } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','autoconsumo').neq('stato','annullato').gte('data', da).lte('data', a);
+    // AUDIT T3: 6 query sequenziali → Promise.all (4-5× più veloce)
+    const [entrateRes, usciteClientiRes, usciteStazioneRes, usciteAutoconsumoRes, rettRes, cisterneProdRes] = await Promise.all([
+      sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','entrata_deposito').neq('stato','annullato').gte('data', da).lte('data', a),
+      sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','cliente').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a),
+      sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a),
+      sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','autoconsumo').neq('stato','annullato').gte('data', da).lte('data', a),
+      sb.from('rettifiche_inventario').select('prodotto,giacenza_sistema,giacenza_rilevata').eq('tipo','deposito').eq('confermata',true).gte('data', da).lte('data', a),
+      sb.from('cisterne').select('prodotto').eq('sede', sede)
+    ]);
+    const entrate = entrateRes.data, usciteClienti = usciteClientiRes.data, usciteStazione = usciteStazioneRes.data, usciteAutoconsumo = usciteAutoconsumoRes.data, rett = rettRes.data, cisterneProd = cisterneProdRes.data;
 
     (entrate||[]).forEach(r => {
       if (!prodottiDati[r.prodotto]) prodottiDati[r.prodotto] = { entrate:0, uscite:0 };
@@ -246,16 +250,12 @@ async function calcolaGiacenzeAnno(sede) {
         prodottiDati[r.prodotto].uscite += Number(r.litri);
       });
     });
-    // Aggiungi rettifiche deposito
-    const { data: rett } = await sb.from('rettifiche_inventario').select('prodotto,giacenza_sistema,giacenza_rilevata').eq('tipo','deposito').eq('confermata',true).gte('data', da).lte('data', a);
     (rett||[]).forEach(r => {
       if (!prodottiDati[r.prodotto]) prodottiDati[r.prodotto] = { entrate:0, uscite:0 };
       const diff = Number(r.giacenza_rilevata) - Number(r.giacenza_sistema);
       if (diff > 0) prodottiDati[r.prodotto].entrate += diff;
       else prodottiDati[r.prodotto].uscite += Math.abs(diff);
     });
-    // Aggiungi prodotti dalle cisterne anche se senza movimenti nel periodo
-    const { data: cisterneProd } = await sb.from('cisterne').select('prodotto').eq('sede', sede);
     (cisterneProd||[]).forEach(c => {
       if (c.prodotto && !prodottiDati[c.prodotto]) {
         prodottiDati[c.prodotto] = { entrate:0, uscite:0 };
@@ -263,17 +263,20 @@ async function calcolaGiacenzeAnno(sede) {
     });
 
   } else if (sede === 'stazione_oppido') {
-    // Entrate: ordini stazione_servizio confermati
-    const { data: entrate } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').gte('data', da).lte('data', a);
+    // AUDIT T3: 4 query sequenziali → Promise.all
+    const [entrateRes, pompeRes, lettureRes, rettRes] = await Promise.all([
+      sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').gte('data', da).lte('data', a),
+      sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true),
+      sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', da).lte('data', a).order('data'),
+      sb.from('rettifiche_inventario').select('prodotto,giacenza_sistema,giacenza_rilevata').eq('tipo','stazione').eq('confermata',true).gte('data', da).lte('data', a)
+    ]);
+    const entrate = entrateRes.data, pompe = pompeRes.data, letture = lettureRes.data, rett = rettRes.data;
+
     (entrate||[]).forEach(r => {
       if (!prodottiDati[r.prodotto]) prodottiDati[r.prodotto] = { entrate:0, uscite:0 };
       prodottiDati[r.prodotto].entrate += Number(r.litri);
     });
-    // Uscite: vendite da letture pompe
-    const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
     const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p.prodotto; });
-    const { data: letture } = await sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', da).lte('data', a).order('data');
-    // Prima lettura dell'anno e ultima per ogni pompa
     const lettPerPompa = {};
     (letture||[]).forEach(l => {
       if (!lettPerPompa[l.pompa_id]) lettPerPompa[l.pompa_id] = [];
@@ -289,8 +292,6 @@ async function calcolaGiacenzeAnno(sede) {
       if (!prodottiDati[prodotto]) prodottiDati[prodotto] = { entrate:0, uscite:0 };
       prodottiDati[prodotto].uscite += litriVenduti;
     });
-    // Aggiungi rettifiche stazione
-    const { data: rett } = await sb.from('rettifiche_inventario').select('prodotto,giacenza_sistema,giacenza_rilevata').eq('tipo','stazione').eq('confermata',true).gte('data', da).lte('data', a);
     (rett||[]).forEach(r => {
       if (!prodottiDati[r.prodotto]) prodottiDati[r.prodotto] = { entrate:0, uscite:0 };
       const diff = Number(r.giacenza_rilevata) - Number(r.giacenza_sistema);
@@ -299,14 +300,16 @@ async function calcolaGiacenzeAnno(sede) {
     });
 
   } else if (sede === 'autoconsumo') {
-    // Entrate: ordini autoconsumo ricevuti
-    const { data: entrate } = await sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','autoconsumo').neq('stato','annullato').eq('caricato_deposito',true).gte('data', da).lte('data', a);
+    // AUDIT T3: 2 query → Promise.all
+    const [entrateRes, prelieviRes] = await Promise.all([
+      sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','autoconsumo').neq('stato','annullato').eq('caricato_deposito',true).gte('data', da).lte('data', a),
+      sb.from('prelievi_autoconsumo').select('litri').gte('data', da).lte('data', a)
+    ]);
+    const entrate = entrateRes.data, prelievi = prelieviRes.data;
     (entrate||[]).forEach(r => {
       if (!prodottiDati[r.prodotto]) prodottiDati[r.prodotto] = { entrate:0, uscite:0 };
       prodottiDati[r.prodotto].entrate += Number(r.litri);
     });
-    // Uscite: prelievi autoconsumo
-    const { data: prelievi } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', da).lte('data', a);
     const prodAC = 'Gasolio Autotrazione';
     if (!prodottiDati[prodAC]) prodottiDati[prodAC] = { entrate:0, uscite:0 };
     (prelievi||[]).forEach(r => { prodottiDati[prodAC].uscite += Number(r.litri); });
