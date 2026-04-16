@@ -23,7 +23,7 @@
       #stz-totali-live > div { display:flex; flex-wrap:wrap; gap:16px; }
       #marg-totali-live { position:relative !important; top:auto !important; min-width:0 !important; max-width:100% !important; margin-top:12px; }
       /* Stack 2-column flex layouts */
-      #stz-letture-layout, #stz-marg-layout { flex-direction:column !important; }
+      #stz-letture-layout, #stz-marg-layout, #uni-layout { flex-direction:column !important; }
       /* Contatore inputs responsive */
       .stz-lettura-input { width:100% !important; max-width:100% !important; font-size:16px !important; box-sizing:border-box; }
       /* Cambio prezzo inputs */
@@ -1361,6 +1361,7 @@
         <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
           <button class="btn-primary stz-tab active" data-tab="stz-dashboard" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px">📊 Dashboard</button>
           <button class="btn-primary stz-tab" data-tab="stz-magazzino" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Magazzino</button>
+          <button class="btn-primary stz-tab" data-tab="stz-unificata" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Letture & Marginalità</button>
           <button class="btn-primary stz-tab" data-tab="stz-letture" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Totalizzatori</button>
           <button class="btn-primary stz-tab" data-tab="stz-marginalita" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Marginalità</button>
           <button class="btn-primary stz-tab" data-tab="stz-foglio" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Foglio giornaliero</button>
@@ -1409,6 +1410,38 @@
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Versamento €</th></tr></thead>
             <tbody id="stz-dash-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- LETTURE & MARGINALITÀ UNIFICATA (v1 READ-ONLY) -->
+        <div class="stz-panel" id="stz-unificata" style="display:none">
+          <div class="card">
+            <!-- Barra navigazione: frecce + data + badge + Per prodotto + (Salva disabilitato) -->
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:15px;font-weight:500">Letture & marginalità</span>
+                <button onclick="_uniGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+                <span id="uni-data-label" style="font-family:var(--font-mono);font-size:13px;font-weight:500"></span>
+                <span id="uni-data-badge" style="padding:3px 10px;border-radius:8px;font-size:11px;font-weight:600;display:none"></span>
+                <span id="uni-data-day" style="padding:3px 10px;border-radius:8px;font-size:11px;font-weight:500;display:none"></span>
+                <button onclick="_uniGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+                <input type="date" id="uni-data-input" onchange="_uniVaiAlGiorno()" style="font-size:12px;height:32px;width:135px" />
+                <button id="uni-btn-vista" onclick="_uniToggleVista()" style="background:var(--bg);border:0.5px solid var(--border);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px">📊 Per prodotto</button>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <span style="font-size:10px;color:var(--text-muted);background:#FAEEDA;padding:4px 8px;border-radius:6px;color:#633806">👁️ Versione di verifica — solo lettura</span>
+              </div>
+            </div>
+            <!-- Layout 2 colonne: pompe + pannello scuro -->
+            <div id="uni-layout" style="display:flex;gap:20px;align-items:flex-start">
+              <div id="uni-content" style="flex:1;min-width:0">
+                <div id="uni-pompe"><div class="loading" style="padding:24px">Caricamento...</div></div>
+              </div>
+              <div id="uni-panel" style="position:sticky;top:80px;min-width:200px;max-width:240px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:14px;padding:20px;color:#fff;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.15)">
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.5);margin-bottom:16px;font-weight:600">Marginalità live</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.3);text-align:center">Caricamento...</div>
+              </div>
             </div>
           </div>
         </div>
@@ -2451,9 +2484,10 @@
 <script src="pf-anagrafica.js?v=20260415r"></script>
 <script src="pf-data.js?v=20260416f"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
-<script src="pf-stz-core.js?v=20260416i"></script>
+<script src="pf-stz-core.js?v=20260416j"></script>
 <script src="pf-stz-letture.js?v=1775149951158"></script>
 <script src="pf-stz-marginalita.js?v=1775149951158"></script>
+<script src="pf-stz-unificata.js?v=20260416j"></script>
 <script src="pf-stz-magazzino.js?v=1775149951158"></script>
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
 <script src="pf-stz-report.js?v=20260415l"></script>
