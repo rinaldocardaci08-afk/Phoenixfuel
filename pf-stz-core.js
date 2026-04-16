@@ -2,20 +2,27 @@
 // PhoenixFuel — Stazione Oppido
 
 // ═══════════════════════════════════════════════════════════════════
-// pfStzRicalcolaCisterne — auto-heal cisterne stazione
+// pfStzRicalcolaCisterne — DISATTIVATO (16/04/2026)
 // ═══════════════════════════════════════════════════════════════════
-// Riallinea SUM(cisterne.livello_attuale) per prodotto al valore canonico
-// pfData.getGiacenzaAllaData('stazione_oppido', prodotto, oggi).calcolata.
-// Il delta viene applicato a cascata cisterna 1 → 2 → ... rispettando
-// capacita_max in carico e mai sotto 0 in scarico.
-// Non tocca costo_medio: il CMP resta gestito dal flusso originale.
-// Va chiamata DOPO ogni operazione che modifica i livelli (ricezione
-// ordini, rettifiche, magazzino).
+// L'auto-heal causava carichi fantasma rimettendo automaticamente i
+// litri di ordini non ancora confermati con "Ricevi". La cisterna ora
+// mostra SEMPRE e SOLO il valore in DB. Aggiornamento via:
+//   - bottone Ricevi (riceviOrdineStazione)
+//   - rettifiche inventario manuali
+//   - distribuzione tra cisterne (distribuisci)
+// Nessuna logica magica in background.
 // ═══════════════════════════════════════════════════════════════════
 async function pfStzRicalcolaCisterne(prodotto) {
+  // NO-OP: lascio la cisterna come sta nel DB.
+  // Se serve heal manuale in futuro, chiamare pfStzRicalcolaCisterneForzato().
+  return;
+}
+
+// Versione forzata, NON chiamata in automatico, disponibile per manutenzione
+async function pfStzRicalcolaCisterneForzato(prodotto) {
   if (!prodotto) return;
   if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
-    console.warn('[pfStzRicalcolaCisterne] pfData non disponibile, skip');
+    console.warn('[pfStzRicalcolaCisterneForzato] pfData non disponibile, skip');
     return;
   }
   try {
