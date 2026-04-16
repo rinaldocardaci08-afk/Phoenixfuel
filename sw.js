@@ -1,48 +1,27 @@
-var CACHE_NAME = 'phoenixfuel-v31';
+// Phoenix Fuel Service Worker
+// STRATEGIA:
+// - File con ?v=... (JS/CSS versionati) → network first sempre, cache solo come fallback offline
+// - File statici senza versione (HTML, icone) → cache first con refresh in background
+// - API supabase/google → solo network, mai cache
+// ═══════════════════════════════════════════════════════════════════
+
+var CACHE_NAME = 'phoenixfuel-v32';
 var FILES_TO_CACHE = [
   '/',
   '/index.html',
   '/style.css',
   '/login.html',
-  '/manifest.json',
-  '/pf-config.js',
-  '/pf-ordini.js',
-  '/pf-deposito.js',
-  '/pf-anagrafica.js',
-  '/pf-stz-core.js',
-  '/pf-stz-letture.js',
-  '/pf-stz-marginalita.js',
-  '/pf-stz-magazzino.js',
-  '/pf-stz-cassa.js',
-  '/pf-stz-report.js',
-  '/pf-stz-foglio.js',
-  '/pf-stz-giacenze.js',
-  '/pf-logistica.js',
-  '/pf-admin.js',
-  '/pf-dashboard.js',
-  '/pf-home.js',
-  '/pf-benchmark.js',
-  '/pf-futures.js',
-  '/pf-finanze.js',
-  '/pf-allegati.js',
-  '/pf-system.js',
-  '/pf-push.js',
-  '/pf-test.js'
+  '/manifest.json'
 ];
 
 self.addEventListener('install', function(event) {
   event.waitUntil(
     caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(FILES_TO_CACHE).catch(function(err) {
-        console.warn('SW: cache addAll parziale, continuo...', err);
-        return Promise.all(
-          FILES_TO_CACHE.map(function(url) {
-            return cache.add(url).catch(function() {
-              console.warn('SW: skip cache per', url);
-            });
-          })
-        );
-      });
+      return Promise.all(
+        FILES_TO_CACHE.map(function(url) {
+          return cache.add(url).catch(function() {});
+        })
+      );
     })
   );
   self.skipWaiting();
@@ -62,23 +41,54 @@ self.addEventListener('activate', function(event) {
 
 self.addEventListener('fetch', function(event) {
   var url = event.request.url;
+
+  // API esterne: sempre network
   if (url.indexOf('supabase.co') >= 0 || url.indexOf('googleapis.com') >= 0 || url.indexOf('cdn') >= 0) {
     event.respondWith(
-      fetch(event.request).catch(function() { return caches.match(event.request); })
+      fetch(event.request).catch(function() {
+        return caches.match(event.request);
+      })
     );
     return;
   }
+
+  // File versionati (?v=...): SEMPRE dalla rete, cache solo in caso di offline totale.
+  // Non salviamo in cache perché il versioning garantisce che il browser
+  // veda nomi diversi a ogni deploy → la cache vecchia viene ignorata automaticamente.
+  if (url.indexOf('?v=') >= 0) {
+    event.respondWith(
+      fetch(event.request).catch(function() {
+        return caches.match(event.request) || new Response('Offline', { status: 503 });
+      })
+    );
+    return;
+  }
+
+  // Altri file statici (HTML, icone, ecc): cache first con refresh in background
   event.respondWith(
-    fetch(event.request).then(function(response) {
-      if (response && response.status === 200) {
-        var clone = response.clone();
-        caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
-      }
-      return response;
-    }).catch(function() {
-      return caches.match(event.request).then(function(r) {
-        return r || new Response('Offline — ricarica quando torni online', { headers: { 'Content-Type': 'text/html' } });
+    caches.match(event.request).then(function(cached) {
+      var fetchPromise = fetch(event.request).then(function(response) {
+        if (response && response.status === 200) {
+          var clone = response.clone();
+          caches.open(CACHE_NAME).then(function(cache) {
+            cache.put(event.request, clone);
+          });
+        }
+        return response;
+      }).catch(function() {
+        return cached || new Response('Offline — ricarica quando torni online', {
+          headers: { 'Content-Type': 'text/html' }
+        });
       });
+      // Restituisce cache se presente, ma aggiorna in background
+      return cached || fetchPromise;
     })
   );
+});
+
+// Messaggio dalla pagina per forzare skipWaiting quando si rileva una nuova versione
+self.addEventListener('message', function(event) {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });

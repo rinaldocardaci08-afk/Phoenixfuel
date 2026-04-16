@@ -2446,7 +2446,7 @@
 <script src="pf-ordini.js?v=20260416b"></script>
 <script src="pf-deposito.js?v=20260414d"></script>
 <script src="pf-anagrafica.js?v=20260415r"></script>
-<script src="pf-data.js?v=20260413b"></script>
+<script src="pf-data.js?v=20260416f"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
 <script src="pf-stz-core.js?v=20260415g"></script>
 <script src="pf-stz-letture.js?v=1775149951158"></script>
@@ -2465,7 +2465,7 @@
 <script src="pf-admin.js?v=20260416c"></script>
 <script src="pf-dashboard.js?v=20260415m"></script>
 <script src="pf-home.js?v=1775149951158"></script>
-<script src="pf-benchmark.js?v=1775149951158"></script>
+<script src="pf-benchmark.js?v=20260416e"></script>
 <script src="pf-futures.js?v=1775149951158"></script>
 <script src="pf-test.js?v=20260416b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
@@ -2476,14 +2476,28 @@
 <script src="pf-dep-giac-week.js?v=20260411e"></script>
 <script src="pf-system.js?v=1775149951158"></script>
 <script>
+// Service Worker con AUTO-RELOAD: quando rileva una nuova versione attiva,
+// ricarica la pagina automaticamente senza bisogno di Ctrl+Shift+R manuale.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(function(reg) {
     reg.addEventListener('updatefound', function() {
       var w = reg.installing;
       w.addEventListener('statechange', function() {
-        if (w.state === 'activated') console.log('PhoenixFuel PWA aggiornata');
+        if (w.state === 'installed' && navigator.serviceWorker.controller) {
+          // Nuova versione pronta → skip waiting e reload
+          w.postMessage({ type: 'SKIP_WAITING' });
+        }
       });
     });
+    // Controlla aggiornamenti ogni 5 minuti
+    setInterval(function() { reg.update(); }, 5 * 60 * 1000);
+  });
+  // Reload quando il nuovo SW prende il controllo
+  var _swReloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function() {
+    if (_swReloading) return;
+    _swReloading = true;
+    window.location.reload();
   });
 }
 </script>
