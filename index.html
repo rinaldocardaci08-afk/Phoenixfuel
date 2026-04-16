@@ -1366,7 +1366,7 @@
           <button class="btn-primary stz-tab" data-tab="stz-marginalita" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Marginalità</button>
           <button class="btn-primary stz-tab" data-tab="stz-foglio" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Foglio giornaliero</button>
           <button class="btn-primary stz-tab" data-tab="stz-cassa" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏧 Cassa</button>
-          <button class="btn-primary stz-tab" data-tab="stz-versamenti" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏦 Versamenti</button>
+          <button class="btn-primary stz-tab" data-tab="stz-corrispettivi" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Corrispettivi & Versamenti</button>
           <button class="btn-primary stz-tab" data-tab="stz-prezzi" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Prezzi pompa</button>
           <button class="btn-primary stz-tab" data-tab="stz-giacenze" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenza</button>
           <button class="btn-primary stz-tab" data-tab="stz-report" onclick="switchStazioneTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Report</button>
@@ -1572,6 +1572,99 @@
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Contanti</th><th>POS</th><th>Totale</th><th>Note</th><th></th></tr></thead>
             <tbody id="stz-storico-versamenti"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- CORRISPETTIVI & VERSAMENTI BANCARI -->
+        <div class="stz-panel" id="stz-corrispettivi" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Corrispettivi & versamenti bancari</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <select id="corr-anno" onchange="caricaCorrispettivi()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                <select id="corr-mese" onchange="caricaCorrispettivi()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="01">Gen</option><option value="02">Feb</option><option value="03">Mar</option>
+                  <option value="04">Apr</option><option value="05">Mag</option><option value="06">Giu</option>
+                  <option value="07">Lug</option><option value="08">Ago</option><option value="09">Set</option>
+                  <option value="10">Ott</option><option value="11">Nov</option><option value="12">Dic</option>
+                </select>
+                <button class="btn-primary" onclick="_corrStampaPDF()" style="font-size:12px;padding:7px 14px;background:#1a1a18;color:#FAC775">📄 Corrispettivi PDF</button>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table style="font-size:11px;white-space:nowrap">
+                <thead><tr style="background:#1a1a18;color:#e8e8e5">
+                  <th style="padding:8px 4px;width:30px;font-size:10px;text-align:center">☑</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:left">Data</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right">Venduto</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right;color:#87CEFA">Nexi</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right;color:#87CEFA">PagoBanc.</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right;color:#87CEFA">Aziendali</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right;background:rgba(255,255,255,0.08);color:#FAC775">Contanti</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right">Busta</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right;color:#FF6B6B">Spese</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right">Crediti</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right">Diff.</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:right;background:rgba(255,255,255,0.08);color:#7CFC00">Da versare</th>
+                  <th style="padding:8px 6px;font-size:10px;text-align:center">Vers.</th>
+                </tr></thead>
+                <tbody id="corr-tabella"><tr><td colspan="13" class="loading" style="padding:16px">Caricamento...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Card riassuntive -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px">
+            <div id="corr-carte-pct" style="background:var(--bg-card);padding:10px 14px;border-radius:8px"></div>
+            <div id="corr-cont-pct" style="background:var(--bg-card);padding:10px 14px;border-radius:8px"></div>
+            <div id="corr-vers-banca" style="background:var(--bg-card);padding:10px 14px;border-radius:8px"></div>
+          </div>
+
+          <!-- Registra versamento (appare quando selezioni giorni) -->
+          <div id="corr-registra-panel" style="display:none;margin-top:16px;background:var(--bg);border:2px solid #639922;border-radius:12px;padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <div style="font-size:14px;font-weight:500;color:#27500A">💰 Registra versamento contanti</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+              <div style="background:var(--bg-card);padding:10px;border-radius:8px">
+                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Giorni selezionati</div>
+                <div id="corr-reg-giorni" style="font-family:var(--font-mono);font-size:13px;font-weight:500;margin-top:2px">—</div>
+              </div>
+              <div style="background:#EAF3DE;padding:10px;border-radius:8px">
+                <div style="font-size:10px;color:#27500A;text-transform:uppercase">Totale da versare</div>
+                <div id="corr-reg-totale" style="font-family:var(--font-mono);font-size:18px;font-weight:600;color:#27500A;margin-top:2px">€ 0</div>
+              </div>
+              <div style="background:var(--bg-card);padding:10px;border-radius:8px">
+                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Importo versato</div>
+                <input type="number" id="corr-reg-importo" step="0.01" placeholder="0.00" oninput="this.dataset.touched='1';_corrAggiornaSelezionati()" style="width:100%;font-family:var(--font-mono);font-size:16px;font-weight:500;text-align:right;margin-top:2px;height:32px" />
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+              <div>
+                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Data versamento</div>
+                <input type="date" id="corr-reg-data" style="width:100%;font-size:13px;height:34px" />
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Banca</div>
+                <select id="corr-reg-banca" style="width:100%;font-size:13px;height:34px">
+                  <option value="MPS Oppido Mamertina">MPS Oppido Mamertina</option>
+                  <option value="Intesa Polistena">Intesa Polistena</option>
+                  <option value="BCC">BCC</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-bottom:12px">
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Note</div>
+              <input type="text" id="corr-reg-note" placeholder="Es. Ieroianni MPS €7.446" style="width:100%;font-size:12px;height:34px" />
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <button class="btn-primary" onclick="_corrRegistraVersamento()" style="background:#27500A;color:#fff;padding:10px 20px;font-size:13px;font-weight:500">💾 Registra versamento</button>
+              <label style="background:var(--bg-card);border:0.5px dashed var(--border);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer;color:var(--text-muted)">
+                📎 Allega ricevuta banca
+                <input type="file" id="corr-reg-file" accept=".pdf,.jpg,.jpeg,.png" style="display:none" />
+              </label>
+              <span id="corr-reg-diff" style="font-size:11px;color:var(--text-muted)"></span>
             </div>
           </div>
         </div>
@@ -2534,6 +2627,7 @@
 <script src="pf-stz-letture.js?v=1775149951158"></script>
 <script src="pf-stz-marginalita.js?v=1775149951158"></script>
 <script src="pf-stz-unificata.js?v=20260416j"></script>
+<script src="pf-stz-corrispettivi.js?v=20260416j"></script>
 <script src="pf-stz-magazzino.js?v=1775149951158"></script>
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
 <script src="pf-stz-report.js?v=20260415l"></script>
