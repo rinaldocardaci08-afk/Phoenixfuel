@@ -19,6 +19,7 @@ async function eseguiTestAutomatizzati() {
   await _testCMPStazione();
   await _testCoerenzaReport();
   await _testOrdiniAnomali();
+  await _testConsegneIncoerenti();
   _renderTestResults(wrap);
 }
 
@@ -157,6 +158,60 @@ async function _testOrdiniAnomali() {
     items: sospetti.map(function(o){return {id:o.id,data:o.data,cliente:o.cliente,prodotto:o.prodotto,litri:o.litri,valore:''};}),
     suggerimento:'3+ ordini identici stessa data sono rari. Controlla in Ordini o Storico consegne: se sono duplicati da import cancella i più vecchi.'
   });
+}
+
+async function _testConsegneIncoerenti() {
+  // Ordini cliente dell'anno corrente con DAS firmato + data < oggi-2gg
+  // che NON hanno stato='consegnato' (e non sono annullati).
+  var anno = new Date().getFullYear();
+  var da = anno + '-01-01', a = anno + '-12-31';
+  var oggiD = new Date(); oggiD.setHours(0,0,0,0);
+  var limite = new Date(oggiD); limite.setDate(limite.getDate() - 2);
+  var limiteISO = limite.toISOString().split('T')[0];
+
+  var { data: ordini } = await sb.from('ordini')
+    .select('id,data,cliente,prodotto,litri,stato,das_firmato_url,caricato_deposito')
+    .eq('tipo_ordine','cliente')
+    .neq('stato','annullato')
+    .neq('stato','consegnato')
+    .not('das_firmato_url','is',null)
+    .gte('data', da).lte('data', a)
+    .lte('data', limiteISO);
+
+  var incoerenti = (ordini||[]).filter(function(o){ return !!o.das_firmato_url; });
+  _pushTest({
+    nome:'Consegne incoerenti (DAS firmato ma stato ≠ consegnato)', ok:incoerenti.length===0,
+    atteso:'0', ottenuto:String(incoerenti.length),
+    note:incoerenti.length>0?incoerenti.length+' ordini con DAS ma stato '+incoerenti[0].stato:'',
+    items: incoerenti.map(function(o){return {id:o.id,data:o.data,cliente:o.cliente,prodotto:o.prodotto,litri:o.litri,valore:'stato: '+o.stato+(o.caricato_deposito?'':' · caricato_deposito: false')};}),
+    suggerimento:'Ordini del 2026 (>2gg fa) con DAS firmato allegato ma stato non consegnato. Apri ogni ordine e salva (con il fix di oggi il sistema forzerà consegnato), oppure lancia UPDATE SQL: update ordini set stato=\'consegnato\', caricato_deposito=true where id in (...)'
+  });
+}
+
+// ── TEST PER SEZIONE LOGISTICA: stesso controllo senza admin ──
+async function verificaConsegneLogistica() {
+  var wrap = document.getElementById('logistica-verifica-risultato');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="loading">Verifica in corso...</div>';
+  // Riusa lo stesso motore: pulisco risultati precedenti e lancio solo il test consegne.
+  _testResults = [];
+  window._testItemsMap = window._testItemsMap || {};
+  await _testConsegneIncoerenti();
+  var t = _testResults[0];
+  var hasItems = !t.ok && window._testItemsMap[t.nome] && window._testItemsMap[t.nome].length;
+  var html = '';
+  if (t.ok) {
+    html = '<div style="padding:14px;background:#EAF3DE;border-left:3px solid #639922;border-radius:0 8px 8px 0;color:#27500A;font-size:13px"><strong>✅ Tutto in ordine</strong><br>Nessuna consegna del ' + new Date().getFullYear() + ' ha anomalie. Ogni ordine con DAS firmato è correttamente in stato consegnato.</div>';
+  } else {
+    var nomeEsc = String(t.nome).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    html = '<div style="padding:14px;background:#FCEBEB;border-left:3px solid #E24B4A;border-radius:0 8px 8px 0;color:#791F1F;font-size:13px">';
+    html += '<strong>⚠️ Trovate ' + t.ottenuto + ' consegne incoerenti</strong><br>';
+    html += 'Ordini del ' + new Date().getFullYear() + ' con DAS firmato allegato ma stato diverso da <code>consegnato</code>.<br>';
+    html += '<button onclick="apriDettaglioTest(\'' + nomeEsc + '\')" style="margin-top:10px;font-size:12px;padding:6px 14px;background:#A32D2D;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:500">🔍 Vedi elenco ordini</button>';
+    html += '</div>';
+  }
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:8px;text-align:right">Verifica eseguita il ' + new Date().toLocaleString('it-IT') + '</div>';
+  wrap.innerHTML = html;
 }
 
 function _renderTestResults(wrap) {

@@ -1345,8 +1345,13 @@ async function apriModaleOrdine(id) {
 
   let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Modifica ordine</div>';
   html += '<div class="form-grid">';
-  html += '<div class="form-group"><label>Stato</label><select id="mod-stato">';
-  ['in attesa','confermato','programmato','annullato'].forEach(s => { html += '<option value="' + s + '"' + (r.stato===s?' selected':'') + '>' + s + '</option>'; });
+  // Stato: se c'è DAS firmato l'ordine è consegnato e lo stato è bloccato.
+  var hasDas = !!(r.das_firmato_url);
+  html += '<div class="form-group"><label>Stato' + (hasDas ? ' <span style="font-size:10px;color:#639922;font-weight:500">🔒 DAS firmato</span>' : '') + '</label><select id="mod-stato"' + (hasDas ? ' disabled title="Stato bloccato: DAS firmato allegato. Per cambiare stato rimuovi prima il DAS."' : '') + '>';
+  // Se DAS presente mostro solo consegnato (disabilitato), altrimenti mostro tutti gli altri.
+  var statiVisibili = hasDas ? ['consegnato'] : ['in attesa','confermato','programmato','consegnato','annullato'];
+  var statoSel = hasDas ? 'consegnato' : r.stato;
+  statiVisibili.forEach(s => { html += '<option value="' + s + '"' + (statoSel===s?' selected':'') + '>' + s + '</option>'; });
   html += '</select></div>';
   html += '<div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="' + r.litri + '" /></div>';
   html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.0001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
@@ -1465,11 +1470,18 @@ async function salvaModificaOrdine(id, bypassCheck) {
     }
   }
 
-  const { data: ordine } = await sb.from('ordini').select('data,cliente').eq('id', id).single();
+  const { data: ordine } = await sb.from('ordini').select('data,cliente,das_firmato_url,caricato_deposito,stato').eq('id', id).single();
   // Guardia Phoenix Fuel: rifornimento interno → margine sempre 0
   let margineFinale = margine;
   if (ordine && _isClientePhoenix(ordine.cliente)) {
     margineFinale = 0;
+  }
+  // Guardia DAS firmato: se allegato, stato resta 'consegnato' e caricato_deposito resta true.
+  // Non importa cosa dice la UI o cosa l'utente ha cliccato: il DAS firmato è prova di consegna.
+  var statoDaSalvare = document.getElementById('mod-stato').value;
+  var hasDasOrd = ordine && ordine.das_firmato_url;
+  if (hasDasOrd) {
+    statoDaSalvare = 'consegnato';
   }
   const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
   var modDestVal = document.getElementById('mod-destinazione').value;
@@ -1484,7 +1496,12 @@ async function salvaModificaOrdine(id, bypassCheck) {
       modSedeNome = modDest;
     }
   }
-  const { error } = await sb.from('ordini').update({ stato:document.getElementById('mod-stato').value, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome }).eq('id', id);
+  var updatePayload = { stato: statoDaSalvare, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome };
+  // Se DAS firmato, blocca anche caricato_deposito a true (l'uscita deposito è stata fatta)
+  if (hasDasOrd) {
+    updatePayload.caricato_deposito = true;
+  }
+  const { error } = await sb.from('ordini').update(updatePayload).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
   // Reset valori originali
   _modOrigCosto = _modOrigTrasporto = _modOrigMargine = _modOrigPrezzoNetto = null;
@@ -1914,29 +1931,14 @@ function apriListinoFascePDF() {
   var prodottiDisp = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
   var h = '<div style="font-size:17px;font-weight:600;margin-bottom:6px">📊 Genera listino fasce pagamento</div>';
   h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Inserisci costo base + trasporto + margini per le 4 fasce. Il PDF si apre in una nuova finestra.</div>';
-
-  // ── Filtro prodotto in cima ──
-  h += '<div class="form-group" style="margin-bottom:14px"><label style="font-weight:600">Prodotto</label><select id="lfp-prodotto" onchange="_lfpCmpReset()" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">';
+  h += '<div class="form-grid">';
+  h += '<div class="form-group"><label>Prodotto</label><select id="lfp-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">';
   prodottiDisp.forEach(function(p) { h += '<option value="' + p + '">' + p + '</option>'; });
   h += '</select></div>';
-
-  // ── Calcolatore CMP ponderato (opzionale) ──
-  h += '<div style="background:var(--bg);border-radius:10px;padding:14px 16px;margin-bottom:16px">';
-  h += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:10px">Calcolatore costo medio ponderato (opzionale)</div>';
-  h += '<div id="lfp-cmp-righe"></div>';
-  h += '<div style="display:flex;gap:8px;margin-top:8px"><button type="button" onclick="_lfpCmpAggiungi()" style="font-size:12px;padding:6px 12px;border:0.5px solid var(--border);background:var(--bg);border-radius:6px;cursor:pointer">+ aggiungi fornitore</button></div>';
-  h += '<div id="lfp-cmp-output" style="display:none;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface);border-radius:8px;border:0.5px solid var(--border);margin-top:12px">';
-  h += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">CMP calcolato</div><div id="lfp-cmp-valore" style="font-family:var(--font-mono);font-size:18px;font-weight:600">—</div><div id="lfp-cmp-tot" style="font-size:11px;color:var(--text-muted)">—</div></div>';
-  h += '<button type="button" onclick="_lfpCmpUsa()" style="background:#639922;color:white;border:0;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer">↓ Usa come costo base</button>';
-  h += '</div></div>';
-
-  // ── Form fasce esistente ──
-  h += '<div class="form-grid">';
   h += '<div class="form-group"><label>Costo base €/L</label><input type="number" id="lfp-costo" step="0.0001" placeholder="1.6570" style="font-family:var(--font-mono);font-size:16px" autofocus /></div>';
   h += '<div class="form-group"><label>IVA %</label><select id="lfp-iva"><option value="22">22%</option><option value="10">10%</option></select></div>';
   h += '<div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lfp-trasp-consumo" step="0.0001" value="0.0190" style="font-family:var(--font-mono)" /></div>';
   h += '<div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lfp-trasp-rete" step="0.0001" value="0.0140" style="font-family:var(--font-mono)" /></div>';
-  h += '<div class="form-group"></div>';
   h += '<div class="form-group"></div>';
   h += '<div class="form-group"><label>Marg. Dilazionato</label><input type="number" id="lfp-marg-dil" step="0.001" value="0.060" style="font-family:var(--font-mono)" /></div>';
   h += '<div class="form-group"><label>Marg. 30gg</label><input type="number" id="lfp-marg-30" step="0.001" value="0.040" style="font-family:var(--font-mono)" /></div>';
@@ -1948,110 +1950,6 @@ function apriListinoFascePDF() {
   h += '<button onclick="chiudiModalePermessi()" style="padding:10px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Annulla</button>';
   h += '</div>';
   apriModal(h);
-  // Inizializza con 2 righe vuote
-  _lfpCmpRighe = 0;
-  _lfpCmpAggiungi();
-  _lfpCmpAggiungi();
-}
-
-// ───────────── Calcolatore CMP ponderato ─────────────
-var _lfpCmpRighe = 0;
-var _lfpCmpFornCache = {}; // {prodotto: [{fornitore, costo_litro, data}]}
-
-async function _lfpCmpCaricaFornitori(prodotto) {
-  if (_lfpCmpFornCache[prodotto]) return _lfpCmpFornCache[prodotto];
-  // Prendi prezzo più recente per ogni fornitore di questo prodotto
-  var { data } = await sb.from('prezzi').select('fornitore,costo_litro,data').eq('prodotto', prodotto).order('data',{ascending:false});
-  var visti = {};
-  (data || []).forEach(function(p) {
-    if (!p.fornitore) return;
-    if (!visti[p.fornitore]) visti[p.fornitore] = { fornitore: p.fornitore, costo_litro: Number(p.costo_litro), data: p.data };
-  });
-  var arr = Object.values(visti).sort(function(a,b){ return a.fornitore.localeCompare(b.fornitore); });
-  _lfpCmpFornCache[prodotto] = arr;
-  return arr;
-}
-
-async function _lfpCmpAggiungi() {
-  var prodotto = document.getElementById('lfp-prodotto').value;
-  var fornitori = await _lfpCmpCaricaFornitori(prodotto);
-  _lfpCmpRighe++;
-  var idx = _lfpCmpRighe;
-  var opt = '<option value="">Seleziona...</option>' + fornitori.map(function(f){
-    return '<option value="' + esc(f.fornitore) + '" data-costo="' + f.costo_litro + '">' + esc(f.fornitore) + ' (€' + f.costo_litro.toFixed(4) + ')</option>';
-  }).join('');
-  var riga = document.createElement('div');
-  riga.id = 'lfp-cmp-r-' + idx;
-  riga.style.cssText = 'display:grid;grid-template-columns:1fr 100px 110px 50px 28px;gap:8px;align-items:end;margin-bottom:8px';
-  riga.innerHTML =
-    '<div><label style="font-size:10px;color:var(--text-muted)">Fornitore</label><select id="lfp-cmp-f-' + idx + '" onchange="_lfpCmpAggCosto(' + idx + ');_lfpCmpRicalcola()" style="width:100%">' + opt + '</select></div>' +
-    '<div><label style="font-size:10px;color:var(--text-muted)">Costo €/L</label><input type="number" id="lfp-cmp-c-' + idx + '" step="0.0001" style="font-family:var(--font-mono);width:100%" oninput="_lfpCmpRicalcola()" /></div>' +
-    '<div><label style="font-size:10px;color:var(--text-muted)">Litri</label><input type="number" id="lfp-cmp-l-' + idx + '" step="100" style="font-family:var(--font-mono);width:100%" oninput="_lfpCmpRicalcola()" /></div>' +
-    '<div style="text-align:right;font-family:var(--font-mono);font-weight:600;padding-bottom:8px" id="lfp-cmp-p-' + idx + '">—</div>' +
-    '<div style="padding-bottom:6px"><button type="button" onclick="_lfpCmpRimuovi(' + idx + ')" title="Rimuovi" style="background:none;border:0;color:var(--text-muted);font-size:16px;cursor:pointer">×</button></div>';
-  document.getElementById('lfp-cmp-righe').appendChild(riga);
-}
-
-function _lfpCmpAggCosto(idx) {
-  var sel = document.getElementById('lfp-cmp-f-' + idx);
-  var opt = sel.options[sel.selectedIndex];
-  var costo = opt && opt.dataset.costo ? parseFloat(opt.dataset.costo) : '';
-  document.getElementById('lfp-cmp-c-' + idx).value = costo || '';
-}
-
-function _lfpCmpRimuovi(idx) {
-  var el = document.getElementById('lfp-cmp-r-' + idx);
-  if (el) el.remove();
-  _lfpCmpRicalcola();
-}
-
-function _lfpCmpReset() {
-  document.getElementById('lfp-cmp-righe').innerHTML = '';
-  document.getElementById('lfp-cmp-output').style.display = 'none';
-  _lfpCmpRighe = 0;
-  _lfpCmpAggiungi();
-  _lfpCmpAggiungi();
-}
-
-function _lfpCmpRicalcola() {
-  var righe = document.querySelectorAll('[id^="lfp-cmp-r-"]');
-  var totLitri = 0, totCosto = 0;
-  var dati = [];
-  righe.forEach(function(r) {
-    var idx = r.id.replace('lfp-cmp-r-','');
-    var c = parseFloat(document.getElementById('lfp-cmp-c-' + idx).value) || 0;
-    var l = parseFloat(document.getElementById('lfp-cmp-l-' + idx).value) || 0;
-    if (c > 0 && l > 0) {
-      totLitri += l;
-      totCosto += c * l;
-      dati.push({ idx: idx, l: l });
-    } else {
-      document.getElementById('lfp-cmp-p-' + idx).textContent = '—';
-    }
-  });
-  // Aggiorna percentuali
-  dati.forEach(function(d) {
-    var pct = totLitri > 0 ? Math.round((d.l / totLitri) * 100) : 0;
-    document.getElementById('lfp-cmp-p-' + d.idx).textContent = pct + '%';
-  });
-  // Output CMP
-  var out = document.getElementById('lfp-cmp-output');
-  if (totLitri > 0 && dati.length >= 2) {
-    var cmp = totCosto / totLitri;
-    document.getElementById('lfp-cmp-valore').textContent = '€ ' + cmp.toFixed(4) + ' /L';
-    document.getElementById('lfp-cmp-tot').textContent = 'su ' + totLitri.toLocaleString('it-IT') + ' L totali';
-    out.style.display = 'flex';
-    out.dataset.cmp = cmp.toFixed(4);
-  } else {
-    out.style.display = 'none';
-  }
-}
-
-function _lfpCmpUsa() {
-  var cmp = document.getElementById('lfp-cmp-output').dataset.cmp;
-  if (!cmp) return;
-  document.getElementById('lfp-costo').value = cmp;
-  toast('✓ CMP copiato come costo base');
 }
 
 function _lfpGeneraPDF() {

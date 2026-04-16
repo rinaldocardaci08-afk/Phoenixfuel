@@ -2028,6 +2028,16 @@
 
         <!-- PANEL: CARICHI -->
         <div class="log-panel" id="log-carichi">
+          <!-- VERIFICA CONSEGNE INCOERENTI -->
+          <div class="card" style="margin-bottom:16px;border-left:3px solid #BA7517">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>🔍 Verifica consegne</span>
+              <button class="btn-primary" onclick="verificaConsegneLogistica()" style="font-size:12px;padding:7px 14px">Esegui verifica</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Controlla tutti gli ordini dell'anno corrente (oltre 2 giorni fa) che hanno il DAS firmato allegato ma non sono ancora in stato "consegnato". Serve a trovare rapidamente ordini che avrebbero dovuto essere chiusi ma non lo sono.</div>
+            <div id="logistica-verifica-risultato"></div>
+          </div>
+
           <!-- PIANIFICAZIONE CARICO -->
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Pianifica nuovo carico</div>
@@ -2433,7 +2443,7 @@
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
 <script src="pf-config.js?v=1775149951158"></script>
-<script src="pf-ordini.js?v=20260414b"></script>
+<script src="pf-ordini.js?v=20260416b"></script>
 <script src="pf-deposito.js?v=20260414d"></script>
 <script src="pf-anagrafica.js?v=20260415r"></script>
 <script src="pf-data.js?v=20260413b"></script>
@@ -2457,7 +2467,7 @@
 <script src="pf-home.js?v=1775149951158"></script>
 <script src="pf-benchmark.js?v=1775149951158"></script>
 <script src="pf-futures.js?v=1775149951158"></script>
-<script src="pf-test.js?v=20260416a"></script>
+<script src="pf-test.js?v=20260416b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-allegati.js?v=1775149951158"></script>
