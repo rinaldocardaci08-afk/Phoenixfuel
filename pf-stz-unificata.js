@@ -91,6 +91,9 @@ async function caricaUnificata() {
   };
 
   _uniRenderGiorno(0);
+  _uniRenderStoricoMarg();
+  _uniRenderStoricoLett(0);
+  _uniRenderStoricoCMP();
 }
 
 // ── Navigazione ◀ ▶ + input data ──
@@ -492,4 +495,219 @@ function _uniRenderPanel(totGasolio, totBenzina) {
       '<div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.4px">€/L margine medio</div>' +
       '<div style="font-family:var(--font-mono);font-size:22px;font-weight:800;color:#7CFC00">€ ' + margMedio.toFixed(4) + '</div>' +
     '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STORICO MARGINALITÀ — tabella mensile
+// ═══════════════════════════════════════════════════════════════════
+function _uniRenderStoricoMarg() {
+  var m = _uniData;
+  if (!m) return;
+  var tbody = document.getElementById('uni-storico-marg-tabella');
+  if (!tbody) return;
+
+  // Selettori anno/mese
+  var selAnno = document.getElementById('uni-rep-marg-anno');
+  var selMese = document.getElementById('uni-rep-marg-mese');
+  if (selAnno && !selAnno.options.length) {
+    var annoCorr = new Date().getFullYear();
+    for (var a = annoCorr; a >= annoCorr - 2; a--) {
+      selAnno.innerHTML += '<option value="' + a + '">' + a + '</option>';
+    }
+  }
+  if (selMese && !selMese.value) {
+    selMese.value = String(new Date().getMonth() + 1).padStart(2, '0');
+  }
+
+  var anno = selAnno ? selAnno.value : String(new Date().getFullYear());
+  var mese = selMese ? selMese.value : String(new Date().getMonth() + 1).padStart(2, '0');
+  var prefix = anno + '-' + mese;
+
+  // Filtra date del mese
+  var dateMese = m.dateUniche.filter(function(d) { return d.startsWith(prefix); }).sort();
+
+  var totGasL = 0, totBenL = 0, totVenduto = 0, totCosto = 0, totMarg = 0;
+  var html = '';
+
+  dateMese.forEach(function(data, i) {
+    var lettGiorno = m.lettureByData[data] || [];
+    var gasL = 0, benL = 0, vendN = 0, costN = 0;
+
+    lettGiorno.forEach(function(l) {
+      var pompa = m.pompeMap[l.pompa_id];
+      if (!pompa) return;
+      var storPompa = (m.lettureByPompa[l.pompa_id] || []).slice().sort(function(a, b) { return b.data.localeCompare(a.data); });
+      var myIdx = storPompa.findIndex(function(x) { return x.id === l.id; });
+      var prec = myIdx < storPompa.length - 1 ? storPompa[myIdx + 1] : null;
+      var litri = prec ? Number(l.lettura) - Number(prec.lettura) : 0;
+      if (litri < 0) litri = 0;
+
+      var prezzo = Number(m.prezziMap[data + '_' + pompa.prodotto] || 0);
+      var prezzoN = prezzo ? prezzo / 1.22 : 0;
+      var costo = Number(m.costiMap[data + '_' + pompa.prodotto] || 0);
+      if (!costo && m.cmpCorrente[pompa.prodotto]) costo = m.cmpCorrente[pompa.prodotto];
+
+      var isGas = pompa.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+      if (isGas) gasL += litri; else benL += litri;
+      vendN += litri * prezzoN;
+      costN += litri * costo;
+    });
+
+    var marg = vendN - costN;
+    var totL = gasL + benL;
+    var margL = totL > 0 ? marg / totL : 0;
+    totGasL += gasL; totBenL += benL; totVenduto += vendN; totCosto += costN; totMarg += marg;
+
+    var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+    var bgRow = i % 2 === 1 ? 'background:var(--bg-card)' : '';
+    var mColor = marg >= 0 ? '#639922' : '#E24B4A';
+    html += '<tr style="border-bottom:0.5px solid var(--border);' + bgRow + '">';
+    html += '<td style="padding:6px;font-family:var(--font-mono)">' + dataFmt + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtL(gasL) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtL(benL) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtE(vendN) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtE(costN) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + ';font-weight:500">' + fmtE(marg) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + margL.toFixed(4) + '</td>';
+    html += '</tr>';
+  });
+
+  // Riga totale
+  var totL = totGasL + totBenL;
+  var margLTot = totL > 0 ? totMarg / totL : 0;
+  html += '<tr style="background:#EAF3DE;font-weight:500">';
+  html += '<td style="padding:8px 6px;color:#27500A">TOTALE</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtL(totGasL) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtL(totBenL) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totVenduto) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totCosto) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totMarg) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + margLTot.toFixed(4) + '</td>';
+  html += '</tr>';
+
+  tbody.innerHTML = html || '<tr><td colspan="7" style="padding:12px;color:var(--text-muted);text-align:center">Nessun dato per questo mese</td></tr>';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STORICO TOTALIZZATORI — vista per giorno con frecce
+// ═══════════════════════════════════════════════════════════════════
+var _uniLettIdx = 0;
+
+function _uniLettGiorno(dir) {
+  if (!_uniData) return;
+  var nuovoIdx = _uniLettIdx + dir;
+  if (nuovoIdx < 0 || nuovoIdx >= _uniData.dateUniche.length) return;
+  _uniRenderStoricoLett(nuovoIdx);
+}
+
+function _uniRenderStoricoLett(idx) {
+  var m = _uniData;
+  if (!m) return;
+  _uniLettIdx = idx;
+  var data = m.dateUniche[idx];
+  if (!data) return;
+
+  var elLabel = document.getElementById('uni-lett-data-label');
+  if (elLabel) {
+    elLabel.textContent = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  var tbody = document.getElementById('uni-storico-lett-tabella');
+  if (!tbody) return;
+
+  var lettGiorno = (m.lettureByData[data] || []).slice().sort(function(a, b) {
+    return ((m.pompeMap[a.pompa_id] || {}).ordine || 99) - ((m.pompeMap[b.pompa_id] || {}).ordine || 99);
+  });
+
+  var html = '';
+  var totLitri = 0, totVenduto = 0;
+
+  lettGiorno.forEach(function(l, i) {
+    var pompa = m.pompeMap[l.pompa_id];
+    if (!pompa) return;
+    var _pi = cacheProdotti.find(function(pp) { return pp.nome === pompa.prodotto; });
+    var colore = _pi ? _pi.colore : '#888';
+
+    var storPompa = (m.lettureByPompa[l.pompa_id] || []).slice().sort(function(a, b) { return b.data.localeCompare(a.data); });
+    var myIdx = storPompa.findIndex(function(x) { return x.id === l.id; });
+    var prec = myIdx < storPompa.length - 1 ? storPompa[myIdx + 1] : null;
+    var litri = prec ? Number(l.lettura) - Number(prec.lettura) : 0;
+    if (litri < 0) litri = 0;
+    var precVal = prec ? Math.round(Number(prec.lettura)).toLocaleString('it-IT') : '—';
+    var oggiVal = Math.round(Number(l.lettura)).toLocaleString('it-IT');
+    var prezzo = Number(m.prezziMap[data + '_' + pompa.prodotto] || 0);
+    var venduto = litri * prezzo;
+    totLitri += litri;
+    totVenduto += venduto;
+
+    var bgRow = i % 2 === 1 ? 'background:var(--bg-card)' : '';
+    html += '<tr style="border-bottom:0.5px solid var(--border);' + bgRow + '">';
+    html += '<td style="padding:6px"><span style="display:inline-block;width:6px;height:6px;background:' + colore + ';border-radius:50%;margin-right:4px"></span>' + esc(pompa.nome) + '</td>';
+    html += '<td style="padding:6px;color:var(--text-muted)">' + esc(pompa.prodotto) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + precVal + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + oggiVal + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:500">' + fmtL(litri) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (prezzo ? prezzo.toFixed(3) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:#639922;font-weight:500">' + fmtE(venduto) + '</td>';
+    html += '</tr>';
+  });
+
+  // Riga totale
+  html += '<tr style="background:#EAF3DE;font-weight:500">';
+  html += '<td colspan="4" style="padding:8px 6px;color:#27500A">TOTALE</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtL(totLitri) + '</td>';
+  html += '<td style="padding:8px 6px"></td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totVenduto) + '</td>';
+  html += '</tr>';
+
+  tbody.innerHTML = html || '<tr><td colspan="7" style="padding:12px;color:var(--text-muted);text-align:center">Nessuna lettura</td></tr>';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STORICO CMP — variazioni costo medio ponderato
+// ═══════════════════════════════════════════════════════════════════
+function _uniRenderStoricoCMP() {
+  var m = _uniData;
+  if (!m) return;
+
+  // Card CMP corrente
+  var elCorr = document.getElementById('uni-cmp-corrente');
+  if (elCorr && m.cmpCorrente) {
+    var h = '';
+    Object.keys(m.cmpCorrente).forEach(function(prod) {
+      var val = m.cmpCorrente[prod];
+      if (val > 0) {
+        h += '<div style="display:inline-block;background:var(--bg-card);padding:8px 14px;border-radius:8px;margin-right:10px;margin-bottom:6px">';
+        h += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">' + esc(prod) + '</div>';
+        h += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500">€ ' + val.toFixed(4) + '</div>';
+        h += '</div>';
+      }
+    });
+    elCorr.innerHTML = h || '<div style="color:var(--text-muted)">Nessun CMP disponibile</div>';
+  }
+
+  // Tabella storico
+  var tbody = document.getElementById('uni-storico-cmp-tabella');
+  if (!tbody) return;
+
+  var storico = (m.cmpStorico || []).slice(0, 20);
+  if (!storico.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:12px;color:var(--text-muted);text-align:center">Nessuna variazione registrata</td></tr>';
+    return;
+  }
+
+  var html = '';
+  storico.forEach(function(r, i) {
+    var dataFmt = r.created_at ? new Date(r.created_at).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : '—';
+    var bgRow = i % 2 === 1 ? 'background:var(--bg-card)' : '';
+    html += '<tr style="border-bottom:0.5px solid var(--border);' + bgRow + '">';
+    html += '<td style="padding:6px;font-family:var(--font-mono)">' + dataFmt + '</td>';
+    html += '<td style="padding:6px">' + esc(r.prodotto || '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.cmp_precedente ? Number(r.cmp_precedente).toFixed(4) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.litri_caricati ? fmtL(Number(r.litri_caricati)) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.costo_carico ? Number(r.costo_carico).toFixed(4) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:500">' + (r.cmp_nuovo ? Number(r.cmp_nuovo).toFixed(4) : '—') + '</td>';
+    html += '</tr>';
+  });
+  tbody.innerHTML = html;
 }

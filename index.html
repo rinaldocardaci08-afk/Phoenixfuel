@@ -1446,9 +1446,51 @@
           </div>
           <!-- Azioni rapide -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-            <button class="btn-primary" onclick="switchStazioneTab(document.querySelector('[data-tab=stz-marginalita]'));setTimeout(function(){stampaReportStazioneMese()},500)" style="font-size:12px;padding:7px 14px;background:#1a1a18;color:#FAC775">📄 Report mese PDF</button>
-            <button class="btn-primary" onclick="switchStazioneTab(document.querySelector('[data-tab=stz-letture]'))" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Storico letture</button>
-            <button class="btn-primary" onclick="switchStazioneTab(document.querySelector('[data-tab=stz-marginalita]'))" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Storico marginalità</button>
+            <button class="btn-primary" onclick="stampaReportStazioneMese()" style="font-size:12px;padding:7px 14px;background:#1a1a18;color:#FAC775">📄 Report mese PDF</button>
+            <button class="btn-primary" onclick="stampaReportLetture()" style="font-size:12px;padding:7px 14px;background:#6B5FCC;color:#fff">🖨️ Report letture</button>
+          </div>
+          <!-- STORICO MARGINALITÀ -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Storico marginalità</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <select id="uni-rep-marg-anno" onchange="_uniRenderStoricoMarg()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+                <select id="uni-rep-marg-mese" onchange="_uniRenderStoricoMarg()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+                  <option value="01">Gen</option><option value="02">Feb</option><option value="03">Mar</option>
+                  <option value="04">Apr</option><option value="05">Mag</option><option value="06">Giu</option>
+                  <option value="07">Lug</option><option value="08">Ago</option><option value="09">Set</option>
+                  <option value="10">Ott</option><option value="11">Nov</option><option value="12">Dic</option>
+                </select>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Data</th><th>Gasolio L</th><th>Benzina L</th><th>Venduto €</th><th>Costo €</th><th>Margine €</th><th>€/L</th></tr></thead>
+              <tbody id="uni-storico-marg-tabella"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+          <!-- STORICO TOTALIZZATORI -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>Storico totalizzatori e vendite</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <button onclick="_uniLettGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
+                <span id="uni-lett-data-label" style="font-family:var(--font-mono);font-size:13px;font-weight:500"></span>
+                <button onclick="_uniLettGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Pompa</th><th>Prodotto</th><th>Lettura prec.</th><th>Lettura oggi</th><th>Litri venduti</th><th>Prezzo €/L</th><th>Venduto €</th></tr></thead>
+              <tbody id="uni-storico-lett-tabella"><tr><td colspan="7" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
+          </div>
+          <!-- STORICO CMP -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title">📊 Costo medio ponderato (CMP) — storico variazioni</div>
+            <div id="uni-cmp-corrente" style="margin-bottom:12px"></div>
+            <div style="overflow-x:auto">
+              <table><thead><tr><th>Data</th><th>Prodotto</th><th>CMP prec.</th><th>Litri caricati</th><th>Costo carico</th><th>CMP nuovo</th></tr></thead>
+              <tbody id="uni-storico-cmp-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
+            </div>
           </div>
         </div>
         <div class="stz-panel" id="stz-letture" style="display:none">
