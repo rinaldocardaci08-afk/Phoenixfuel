@@ -85,7 +85,10 @@
         <button class="hamburger no-desktop" onclick="toggleSidebar()">☰</button>
         <span class="topbar-title" id="page-title">Dashboard</span>
       </div>
-      <span class="topbar-date" id="topbar-date"></span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button onclick="forzaAggiornamentoApp()" title="Svuota cache e ricarica il programma — usa se vedi dati vecchi" style="background:var(--bg);border:0.5px solid var(--border);color:var(--text);cursor:pointer;font-size:11px;padding:5px 10px;border-radius:6px;display:flex;align-items:center;gap:4px">🔄 <span class="no-mobile">Aggiorna</span></button>
+        <span class="topbar-date" id="topbar-date"></span>
+      </div>
     </div>
     <div class="content">
 
@@ -2475,6 +2478,34 @@
 <script src="pf-dep-giacenze.js?v=1775149951158"></script>
 <script src="pf-dep-giac-week.js?v=20260411e"></script>
 <script src="pf-system.js?v=1775149951158"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// forzaAggiornamentoApp — Svuota CACHE del browser + SW e ricarica da zero.
+// Usato dal bottone "🔄 Aggiorna" in topbar quando l'utente vede dati vecchi.
+// NON tocca dati utenti/DB: solo cache locale e SW.
+// ═══════════════════════════════════════════════════════════════════
+async function forzaAggiornamentoApp() {
+  if (!confirm('Svuotare la cache e ricaricare?\n\nIl programma tornerà subito con l\'ultima versione aggiornata.')) return;
+  try {
+    // 1. Unregister tutti i Service Workers
+    if ('serviceWorker' in navigator) {
+      var regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(function(r) { return r.unregister(); }));
+    }
+    // 2. Cancella tutte le caches
+    if ('caches' in window) {
+      var keys = await caches.keys();
+      await Promise.all(keys.map(function(k) { return caches.delete(k); }));
+    }
+    // 3. Bypass cache browser: reload con timestamp in query string forza rete
+    var url = new URL(window.location.href);
+    url.searchParams.set('_r', Date.now());
+    window.location.replace(url.toString());
+  } catch (e) {
+    alert('Errore: ' + (e.message || e) + '\n\nProva a chiudere e riaprire il browser.');
+  }
+}
+</script>
 <script>
 // Service Worker con AUTO-RELOAD: quando rileva una nuova versione attiva,
 // ricarica la pagina automaticamente senza bisogno di Ctrl+Shift+R manuale.
