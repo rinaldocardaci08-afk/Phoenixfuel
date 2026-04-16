@@ -1444,9 +1444,13 @@
               </div>
             </div>
           </div>
+          <!-- Azioni rapide -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn-primary" onclick="switchStazioneTab(document.querySelector('[data-tab=stz-marginalita]'));setTimeout(function(){stampaReportStazioneMese()},500)" style="font-size:12px;padding:7px 14px;background:#1a1a18;color:#FAC775">📄 Report mese PDF</button>
+            <button class="btn-primary" onclick="switchStazioneTab(document.querySelector('[data-tab=stz-letture]'))" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Storico letture</button>
+            <button class="btn-primary" onclick="switchStazioneTab(document.querySelector('[data-tab=stz-marginalita]'))" style="font-size:12px;padding:7px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Storico marginalità</button>
+          </div>
         </div>
-
-        <!-- LETTURE CONTATORI -->
         <div class="stz-panel" id="stz-letture" style="display:none">
           <div class="card" style="margin-bottom:16px">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
