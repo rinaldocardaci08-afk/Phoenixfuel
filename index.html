@@ -1668,9 +1668,27 @@
               <span id="corr-reg-diff" style="font-size:11px;color:var(--text-muted)"></span>
             </div>
           </div>
+          <!-- Storico versamenti bancari -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title">🏦 Storico versamenti bancari</div>
+            <div style="overflow-x:auto">
+              <table style="font-size:11px">
+                <thead><tr>
+                  <th style="padding:8px 6px;text-align:left">Data versamento</th>
+                  <th style="padding:8px 6px;text-align:left">Banca</th>
+                  <th style="padding:8px 6px;text-align:right">Importo versato</th>
+                  <th style="padding:8px 6px;text-align:right">Importo atteso</th>
+                  <th style="padding:8px 6px;text-align:right">Differenza</th>
+                  <th style="padding:8px 6px;text-align:left">Giorni coperti</th>
+                  <th style="padding:8px 6px;text-align:left">Note</th>
+                  <th style="padding:8px 6px;text-align:center">Ricevuta</th>
+                  <th style="padding:8px 6px;text-align:center"></th>
+                </tr></thead>
+                <tbody id="corr-storico-vers"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
         </div>
-
-        <!-- MAGAZZINO -->
         <div class="stz-panel" id="stz-magazzino" style="display:none">
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Cisterne stazione Oppido</div>

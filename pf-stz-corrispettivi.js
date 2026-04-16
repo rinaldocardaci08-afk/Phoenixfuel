@@ -106,6 +106,7 @@ async function caricaCorrispettivi() {
 
   _corrData = { righe: righe, versamenti: versamenti, anno: anno, mese: mese };
   _corrRender();
+  _corrRenderStoricoVers();
 }
 
 function _corrRender() {
@@ -362,4 +363,64 @@ function _corrStampaPDF() {
 function _fmtC(v) {
   if (typeof v !== 'number' || isNaN(v)) return '—';
   return v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STORICO VERSAMENTI BANCARI
+// ═══════════════════════════════════════════════════════════════════
+function _corrRenderStoricoVers() {
+  var m = _corrData;
+  if (!m) return;
+  var tbody = document.getElementById('corr-storico-vers');
+  if (!tbody) return;
+
+  // Carica TUTTI i versamenti (non solo del mese selezionato)
+  sb.from('versamenti_banca').select('*').order('data_versamento', { ascending: false }).limit(50)
+    .then(function(res) {
+      var vers = res.data || [];
+      if (!vers.length) {
+        tbody.innerHTML = '<tr><td colspan="9" style="padding:12px;color:var(--text-muted);text-align:center">Nessun versamento registrato</td></tr>';
+        return;
+      }
+
+      var html = '';
+      vers.forEach(function(v, i) {
+        var dataFmt = new Date(v.data_versamento + 'T12:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        var giorniCop = (v.giorni_coperti || []).map(function(g) {
+          return new Date(g + 'T12:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+        }).join(', ');
+        var diff = Number(v.differenza || 0);
+        var diffCol = Math.abs(diff) < 0.01 ? '#639922' : '#E24B4A';
+        var bgRow = i % 2 === 1 ? 'background:var(--bg-card)' : '';
+
+        html += '<tr style="border-bottom:0.5px solid var(--border);' + bgRow + '">';
+        html += '<td style="padding:6px;font-family:var(--font-mono);font-weight:500">' + dataFmt + '</td>';
+        html += '<td style="padding:6px">' + esc(v.banca || '—') + '</td>';
+        html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:500">' + _fmtC(Number(v.importo_versato || 0)) + '</td>';
+        html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + _fmtC(Number(v.importo_atteso || 0)) + '</td>';
+        html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + diffCol + '">' + (diff >= 0 ? '+' : '') + _fmtC(diff) + '</td>';
+        html += '<td style="padding:6px;font-size:10px;color:var(--text-muted)">' + giorniCop + '</td>';
+        html += '<td style="padding:6px;font-size:11px">' + esc(v.note || '—') + '</td>';
+        // Ricevuta: link se c'è, pallino rosso se manca
+        if (v.ricevuta_url) {
+          html += '<td style="padding:6px;text-align:center"><a href="' + v.ricevuta_url + '" target="_blank" style="background:#378ADD;color:white;padding:3px 8px;border-radius:4px;font-size:10px;text-decoration:none">📎 Vedi</a></td>';
+        } else {
+          html += '<td style="padding:6px;text-align:center"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#E24B4A" title="Ricevuta mancante"></span></td>';
+        }
+        // Bottone elimina
+        html += '<td style="padding:6px;text-align:center"><button onclick="_corrEliminaVersamento(\'' + v.id + '\')" style="background:transparent;border:0.5px solid var(--border);padding:3px 6px;border-radius:4px;cursor:pointer;font-size:10px;color:#E24B4A" title="Elimina">✕</button></td>';
+        html += '</tr>';
+      });
+
+      tbody.innerHTML = html;
+    });
+}
+
+// ── Elimina versamento ──
+async function _corrEliminaVersamento(id) {
+  if (!confirm('Eliminare questo versamento bancario?')) return;
+  var { error } = await sb.from('versamenti_banca').delete().eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('Versamento eliminato');
+  caricaCorrispettivi();
 }
