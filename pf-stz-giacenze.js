@@ -127,7 +127,7 @@ async function caricaGiacenzeMensili() {
 
   var [ordiniRes, lettRes, lettPrecRes] = await Promise.all([
     sb.from('ordini').select('data,prodotto,litri').eq('tipo_ordine', 'stazione_servizio')
-      .neq('stato', 'annullato').gte('data', daISO).lte('data', aISO),
+      .neq('stato', 'annullato').eq('ricevuto_stazione', true).gte('data', daISO).lte('data', aISO),
     sb.from('stazione_letture').select('data,pompa_id,lettura')
       .gte('data', daISO).lte('data', aISO).order('data'),
     sb.from('stazione_letture').select('pompa_id,lettura,data')

@@ -96,8 +96,11 @@ async function _pfMvtCalcola(sede, prefix) {
       nAu = (uscAuRes.data || []).length;
     } else if (sede === 'stazione_oppido') {
       // Entrate: tipo_ordine='stazione_servizio' (ricezioni dal deposito)
+      // FILTRO: solo ordini effettivamente ricevuti (ricevuto_stazione=true).
+      // Ordini confermati ma non ancora ricevuti NON devono influire sulla giacenza.
       var entStaRes = await sb.from('ordini').select('litri')
         .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+        .eq('ricevuto_stazione', true)
         .gte('data', da).lte('data', a);
       entrate = (entStaRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
       nEnt = (entStaRes.data || []).length;
