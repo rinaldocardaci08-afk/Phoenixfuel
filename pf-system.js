@@ -41,9 +41,16 @@ async function caricaBacheca() {
   var q = sb.from('bacheca_avvisi').select('*').order('created_at', { ascending: false }).limit(50);
   if (filtro === 'non_letto') q = q.eq('letto', false);
   else if (filtro) q = q.eq('tipo', filtro);
-  var { data: avvisi } = await q;
+  var { data: avvisi, error: errQuery } = await q;
   var lista = document.getElementById('bacheca-lista');
   if (!lista) return;
+
+  // Log errore query (diagnosi: se RLS blocca o colonna manca, lo vediamo qui)
+  if (errQuery) {
+    console.error('[caricaBacheca] errore query:', errQuery);
+    lista.innerHTML = '<div style="text-align:center;padding:20px;color:#E24B4A">⚠️ Errore caricamento avvisi: ' + esc(errQuery.message || String(errQuery)) + '</div>';
+    return;
+  }
 
   if (!avvisi || !avvisi.length) {
     lista.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Nessun avviso</div>';
@@ -71,22 +78,26 @@ async function caricaBacheca() {
   lista.innerHTML = avvisi.map(function(a) {
     var cls = 'bacheca-item';
     if (!a.letto) cls += ' non-letto';
-    if (a.priorita === 'urgente') cls += ' urgente';
+    // Priorità visiva: 'urgente' o 'alta' (la Edge Function sentinelle usa 'alta')
+    if (a.priorita === 'urgente' || a.priorita === 'alta') cls += ' urgente';
     if (a.tipo === 'sistema') cls += ' sistema';
     var dataFmt = new Date(a.created_at).toLocaleString('it-IT', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
     var postLabel = { 'ufficio':'Ufficio', 'stazione_oppido':'Stazione', 'deposito_vibo':'Deposito', 'logistica':'Logistica' };
+    // Mittente difensivo: legge mittente_nome, mittente (vecchio schema trigger) o fallback
+    var mittenteVis = a.mittente_nome || a.mittente || 'Sistema';
+    var prioLabel = (a.priorita === 'urgente') ? 'URGENTE' : (a.priorita === 'alta' ? 'ALTA' : '');
 
     return '<div class="' + cls + '" onclick="segnaLettoAvviso(\'' + a.id + '\',this)">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px">' +
         '<div style="display:flex;align-items:center;gap:6px">' +
           (tipoBadge[a.tipo] || '') +
-          (a.priorita === 'urgente' ? '<span class="badge red" style="font-size:9px">URGENTE</span>' : '') +
+          (prioLabel ? '<span class="badge red" style="font-size:9px">' + prioLabel + '</span>' : '') +
           (!a.letto ? '<span style="width:8px;height:8px;border-radius:50%;background:#E24B4A;display:inline-block"></span>' : '') +
         '</div>' +
         '<span style="font-size:10px;color:var(--text-muted)">' + dataFmt + '</span>' +
       '</div>' +
       '<div style="font-size:13px;line-height:1.5;margin-bottom:6px">' + esc(a.messaggio) + '</div>' +
-      '<div style="font-size:10px;color:var(--text-muted)">Da: <strong>' + esc(a.mittente_nome || 'Sistema') + '</strong>' +
+      '<div style="font-size:10px;color:var(--text-muted)">Da: <strong>' + esc(mittenteVis) + '</strong>' +
         (a.postazione ? ' · ' + (postLabel[a.postazione] || a.postazione) : '') +
         (a.chiave_dedup && contaDedup[a.chiave_dedup] >= 3 ? ' · <span style="color:#BA7517">ripetuto ' + contaDedup[a.chiave_dedup] + 'x</span>' : '') +
       '</div>' +

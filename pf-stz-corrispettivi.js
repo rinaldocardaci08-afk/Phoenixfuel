@@ -304,20 +304,35 @@ async function _corrRegistraVersamento() {
 
   // Upload ricevuta se presente
   var fileInput = document.getElementById('corr-reg-file');
+  var uploadedPath = null; // per rollback in caso di errore insert DB
   if (fileInput && fileInput.files && fileInput.files.length) {
     var file = fileInput.files[0];
-    var path = 'versamenti-banca/' + dataVers + '_' + Date.now() + '_' + file.name;
-    var { error: upErr } = await sb.storage.from('allegati').upload(path, file);
-    if (!upErr) {
-      var { data: urlData } = sb.storage.from('allegati').getPublicUrl(path);
-      record.ricevuta_url = urlData.publicUrl;
+    if (file.size > 15 * 1024 * 1024) { toast('File ricevuta troppo grande (max 15MB)'); return; }
+    // Sanitizza filename (come in pf-allegati.js): rimuove accenti, spazi, caratteri speciali
+    var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    var path = 'versamenti-banca/' + dataVers + '_' + Date.now() + '_' + safeName;
+    var { error: upErr } = await sb.storage.from('allegati').upload(path, file, { contentType: file.type });
+    if (upErr) {
+      toast('Errore upload ricevuta: ' + (upErr.message || upErr));
+      console.error('[registraVersamento] upload fallito:', upErr);
+      return; // blocca: utente capisce che non è andato
     }
+    var { data: urlData } = sb.storage.from('allegati').getPublicUrl(path);
+    record.ricevuta_url = urlData.publicUrl;
+    uploadedPath = path;
   }
 
   var { error } = await sb.from('versamenti_banca').insert([record]);
-  if (error) { toast('Errore: ' + error.message); return; }
+  if (error) {
+    // Rollback Storage: se insert DB fallisce, rimuove il file caricato (evita orfani)
+    if (uploadedPath) {
+      try { await sb.storage.from('allegati').remove([uploadedPath]); } catch(_) {}
+    }
+    toast('Errore: ' + error.message);
+    return;
+  }
 
-  toast('Versamento registrato!');
+  toast('Versamento registrato!' + (uploadedPath ? ' (ricevuta allegata)' : ''));
   document.getElementById('corr-registra-panel').style.display = 'none';
   caricaCorrispettivi();
 }
