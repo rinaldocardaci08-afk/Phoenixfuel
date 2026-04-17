@@ -1929,10 +1929,32 @@ function stampaListinoFasce() {
 // ═══════════════════════════════════════════════════════════════════
 function apriListinoFascePDF() {
   var prodottiDisp = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
-  var h = '<div style="font-size:17px;font-weight:600;margin-bottom:6px">📊 Genera listino fasce pagamento</div>';
-  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Inserisci costo base + trasporto + margini per le 4 fasce. Il PDF si apre in una nuova finestra.</div>';
+  var dataRif = (document.getElementById('filtro-data-prezzi') && document.getElementById('filtro-data-prezzi').value) || (typeof oggiISO !== 'undefined' ? oggiISO : new Date().toISOString().split('T')[0]);
+  var dataRifFmt = new Date(dataRif + 'T12:00:00').toLocaleDateString('it-IT', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
+
+  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:6px">';
+  h += '<div style="font-size:17px;font-weight:600">📊 Genera listino fasce pagamento</div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);background:var(--bg);padding:4px 10px;border-radius:8px">Data riferimento: <strong>' + dataRifFmt + '</strong></div>';
+  h += '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Prezzi fornitori auto-richiamati dal listino del giorno selezionato in Prezzi giornalieri.</div>';
+
+  // ── CALCOLATORE CMP PONDERATO ──
+  h += '<div style="background:var(--bg);border-radius:10px;padding:14px 16px;margin-bottom:16px;border:0.5px solid var(--border)">';
+  h += '<div style="font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:12px">🧮 Calcolatore costo medio ponderato (opzionale)</div>';
+  h += '<div id="lfp-cmp-intestazione" style="display:grid;grid-template-columns:minmax(0,1fr) 110px 110px 60px 30px;gap:10px;margin-bottom:6px;font-size:11px;color:var(--text-muted)">';
+  h += '<div>Fornitore</div><div style="text-align:right">Costo €/L</div><div style="text-align:right">Litri</div><div style="text-align:right">%</div><div></div>';
+  h += '</div>';
+  h += '<div id="lfp-cmp-righe"></div>';
+  h += '<div style="margin-top:4px;margin-bottom:12px"><button type="button" onclick="_lfpAggiungiRiga()" style="font-size:12px;padding:5px 12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text)">+ Aggiungi riga</button></div>';
+  h += '<div style="border-top:0.5px solid var(--border);padding-top:12px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">';
+  h += '<div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:12px;color:var(--text-muted)">Totale ponderato:</span><span id="lfp-cmp-totale" style="font-family:var(--font-mono);font-size:20px;font-weight:500">€ 0,0000</span></div>';
+  h += '<button type="button" onclick="_lfpUsaCostoBase()" style="font-size:12px;padding:7px 14px;background:#E6F1FB;color:#0C447C;border:0.5px solid #378ADD;border-radius:6px;font-weight:500;cursor:pointer">↓ Usa come costo base</button>';
+  h += '</div>';
+  h += '</div>';
+
+  // ── FASCE PAGAMENTO (come prima) ──
   h += '<div class="form-grid">';
-  h += '<div class="form-group"><label>Prodotto</label><select id="lfp-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">';
+  h += '<div class="form-group"><label>Prodotto</label><select id="lfp-prodotto" onchange="_lfpRipopolaFornitori()" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">';
   prodottiDisp.forEach(function(p) { h += '<option value="' + p + '">' + p + '</option>'; });
   h += '</select></div>';
   h += '<div class="form-group"><label>Costo base €/L</label><input type="number" id="lfp-costo" step="0.0001" placeholder="1.6570" style="font-family:var(--font-mono);font-size:16px" autofocus /></div>';
@@ -1949,7 +1971,125 @@ function apriListinoFascePDF() {
   h += '<button class="btn-primary" style="flex:1;background:#639922" onclick="_lfpGeneraPDF()">📄 Genera PDF</button>';
   h += '<button onclick="chiudiModalePermessi()" style="padding:10px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">Annulla</button>';
   h += '</div>';
+
+  // Salva la data di riferimento per le query async
+  window._lfpDataRif = dataRif;
+  window._lfpCmpCalcolato = 0;
+
   apriModal(h);
+
+  // Inizializza 2 righe + popola dropdown fornitori dopo apertura modale
+  setTimeout(function() {
+    _lfpAggiungiRiga();
+    _lfpAggiungiRiga();
+  }, 50);
+}
+
+// ── Popola dropdown fornitori da prezzi(data,prodotto) + PhoenixFuel Deposito (CMP attuale) ──
+async function _lfpRipopolaFornitori() {
+  var data = window._lfpDataRif || (document.getElementById('filtro-data-prezzi') && document.getElementById('filtro-data-prezzi').value) || new Date().toISOString().split('T')[0];
+  var prodSel = document.getElementById('lfp-prodotto');
+  var prod = prodSel ? prodSel.value : 'Gasolio Autotrazione';
+
+  // Query parallele: prezzi del giorno + cisterne deposito
+  var [prezziRes, cisterneRes] = await Promise.all([
+    sb.from('prezzi').select('fornitore,costo_litro,trasporto_litro').eq('data', data).eq('prodotto', prod).order('fornitore'),
+    sb.from('cisterne').select('livello_attuale,costo_medio').eq('sede', 'deposito_vibo').eq('prodotto', prod)
+  ]);
+
+  // Calcolo CMP attuale deposito = Σ(livello × costo_medio) / Σ(livello)
+  var cisterne = cisterneRes.data || [];
+  var totL = 0, totV = 0;
+  cisterne.forEach(function(c) {
+    var l = Number(c.livello_attuale || 0);
+    var cm = Number(c.costo_medio || 0);
+    if (l > 0 && cm > 0) { totL += l; totV += l * cm; }
+  });
+  var cmpDep = totL > 0 ? (totV / totL) : 0;
+
+  // Costruisce le options (stesso HTML per tutte le righe)
+  var opts = '<option value="">Seleziona fornitore...</option>';
+  (prezziRes.data || []).forEach(function(p) {
+    var costo = Number(p.costo_litro || 0) + Number(p.trasporto_litro || 0);
+    opts += '<option value="' + costo.toFixed(4) + '">' + esc(p.fornitore) + ' (€ ' + costo.toFixed(4).replace('.', ',') + ')</option>';
+  });
+  if (cmpDep > 0) {
+    opts += '<option value="' + cmpDep.toFixed(4) + '" data-dep="1">PhoenixFuel Deposito (CMP € ' + cmpDep.toFixed(4).replace('.', ',') + ')</option>';
+  }
+
+  // Applica a tutti i dropdown delle righe esistenti (mantiene la selezione se ancora valida)
+  document.querySelectorAll('.lfp-cmp-fornitore').forEach(function(sel) {
+    var prevVal = sel.value;
+    sel.innerHTML = opts;
+    sel.value = prevVal; // resta su vuoto se il valore non esiste più
+    // Ricalcola il costo della riga se il fornitore era valido
+    var costoInp = sel.closest('.lfp-cmp-riga').querySelector('.lfp-cmp-costo');
+    if (costoInp) costoInp.value = sel.value ? Number(sel.value).toFixed(4).replace('.', ',') : '';
+  });
+  _lfpRicalcola();
+}
+
+// ── Aggiunge una riga al calcolatore ──
+function _lfpAggiungiRiga() {
+  var wrap = document.getElementById('lfp-cmp-righe');
+  if (!wrap) return;
+  var html = '<div class="lfp-cmp-riga" style="display:grid;grid-template-columns:minmax(0,1fr) 110px 110px 60px 30px;gap:10px;align-items:center;margin-bottom:8px">';
+  html += '<select class="lfp-cmp-fornitore" onchange="_lfpRiaggiornaCosto(this)" style="height:34px;font-size:12px"><option value="">Caricamento...</option></select>';
+  html += '<input type="text" class="lfp-cmp-costo" readonly style="font-family:var(--font-mono);text-align:right;background:var(--bg-card);height:34px" placeholder="—" />';
+  html += '<input type="number" class="lfp-cmp-litri" step="1" oninput="_lfpRicalcola()" style="font-family:var(--font-mono);text-align:right;height:34px" placeholder="0" />';
+  html += '<div class="lfp-cmp-perc" style="text-align:right;font-family:var(--font-mono);font-weight:500;color:#378ADD;font-size:12px">—</div>';
+  html += '<button type="button" onclick="this.closest(\'.lfp-cmp-riga\').remove();_lfpRicalcola()" title="Rimuovi riga" style="background:transparent;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;padding:0;line-height:1">×</button>';
+  html += '</div>';
+  wrap.insertAdjacentHTML('beforeend', html);
+  _lfpRipopolaFornitori();
+}
+
+// ── Quando cambia il fornitore in una riga, aggiorna il costo ──
+function _lfpRiaggiornaCosto(sel) {
+  var row = sel.closest('.lfp-cmp-riga');
+  if (!row) return;
+  var costoInp = row.querySelector('.lfp-cmp-costo');
+  costoInp.value = sel.value ? Number(sel.value).toFixed(4).replace('.', ',') : '';
+  _lfpRicalcola();
+}
+
+// ── Ricalcola totale ponderato + percentuali su tutte le righe ──
+function _lfpRicalcola() {
+  var righe = document.querySelectorAll('.lfp-cmp-riga');
+  var totL = 0, totV = 0;
+  var dati = [];
+  righe.forEach(function(r) {
+    var costo = parseFloat(String(r.querySelector('.lfp-cmp-costo').value || '0').replace(',', '.')) || 0;
+    var litri = parseFloat(r.querySelector('.lfp-cmp-litri').value) || 0;
+    dati.push({ row: r, costo: costo, litri: litri });
+    if (costo > 0 && litri > 0) { totL += litri; totV += costo * litri; }
+  });
+  var cmp = totL > 0 ? (totV / totL) : 0;
+
+  // Aggiorna percentuali per riga
+  dati.forEach(function(d) {
+    var perc = (totL > 0 && d.litri > 0 && d.costo > 0) ? (d.litri / totL * 100) : 0;
+    d.row.querySelector('.lfp-cmp-perc').textContent = perc > 0 ? perc.toFixed(1).replace('.', ',') + '%' : '—';
+  });
+
+  // Aggiorna totale
+  var totEl = document.getElementById('lfp-cmp-totale');
+  if (totEl) {
+    totEl.innerHTML = '€ ' + cmp.toFixed(4).replace('.', ',') + (totL > 0 ? ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">su ' + totL.toLocaleString('it-IT') + ' L</span>' : '');
+  }
+  window._lfpCmpCalcolato = cmp;
+}
+
+// ── Copia il CMP calcolato nel campo Costo base ──
+function _lfpUsaCostoBase() {
+  var cmp = window._lfpCmpCalcolato || 0;
+  if (!cmp || cmp <= 0) { toast('Compila almeno una riga con fornitore e litri'); return; }
+  var inp = document.getElementById('lfp-costo');
+  if (!inp) return;
+  inp.value = cmp.toFixed(4);
+  inp.style.background = '#E6F1FB';
+  inp.style.borderColor = '#378ADD';
+  toast('✓ Costo base aggiornato a € ' + cmp.toFixed(4).replace('.', ','));
 }
 
 function _lfpGeneraPDF() {
