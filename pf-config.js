@@ -291,7 +291,16 @@ function fmtMe(n) {
   const col = v > 0.005 ? '#27500A' : (v < -0.005 ? '#A32D2D' : 'var(--text-muted)');
   return '<strong style="color:' + col + '">' + txt + '</strong>';
 }
-function badgeStato(stato) {
+function badgeStato(stato, record) {
+  // Se passato l'intero record, rileva stati "virtuali" di visualizzazione:
+  // - ordini stazione_servizio già ricevuti ma senza DAS → label "ricevuto"
+  if (record && typeof record === 'object') {
+    if (record.tipo_ordine === 'stazione_servizio'
+        && record.ricevuto_stazione === true
+        && (stato === 'confermato' || stato === 'in_consegna')) {
+      return '<span class="badge teal" title="Ricevuto dalla stazione. Diventerà consegnato al caricamento del DAS firmato">ricevuto</span>';
+    }
+  }
   const map = { 'confermato':'green','consegnato':'teal','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };
   const labels = { 'entrata_deposito':'deposito','stazione_servizio':'stazione','autoconsumo':'autoconsumo' };
   return '<span class="badge ' + (map[esc(stato)]||'amber') + '">' + esc(labels[stato]||stato) + '</span>';
