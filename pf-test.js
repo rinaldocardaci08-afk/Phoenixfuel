@@ -207,7 +207,10 @@ async function verificaConsegneLogistica() {
     html = '<div style="padding:14px;background:#FCEBEB;border-left:3px solid #E24B4A;border-radius:0 8px 8px 0;color:#791F1F;font-size:13px">';
     html += '<strong>⚠️ Trovate ' + t.ottenuto + ' consegne incoerenti</strong><br>';
     html += 'Ordini del ' + new Date().getFullYear() + ' con DAS firmato allegato ma stato diverso da <code>consegnato</code>.<br>';
-    html += '<button onclick="apriDettaglioTest(\'' + nomeEsc + '\')" style="margin-top:10px;font-size:12px;padding:6px 14px;background:#A32D2D;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:500">🔍 Vedi elenco ordini</button>';
+    html += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">';
+    html += '<button onclick="apriDettaglioTest(\'' + nomeEsc + '\')" style="font-size:12px;padding:6px 14px;background:#A32D2D;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:500">🔍 Vedi elenco ordini</button>';
+    html += '<button onclick="sanaConsegneIncoerenti()" style="font-size:12px;padding:6px 14px;background:#639922;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:500">✅ Sana automaticamente</button>';
+    html += '</div>';
     html += '</div>';
   }
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:8px;text-align:right">Verifica eseguita il ' + new Date().toLocaleString('it-IT') + '</div>';
@@ -281,6 +284,48 @@ function esportaTestCSV(nomeTest) {
   a.click();
   URL.revokeObjectURL(url);
   toast('CSV scaricato');
+}
+
+// ── SANATORIA CONSEGNE INCOERENTI ──
+// Porta stato='consegnato' su tutti gli ordini che hanno das_firmato_url
+// valorizzato ma stato='confermato'. Sana il bug del trigger che non sempre
+// parte al momento dell'upload DAS.
+async function sanaConsegneIncoerenti() {
+  if (!confirm('Confermi la sanatoria?\n\nPorterà a stato=consegnato tutti gli ordini con DAS firmato allegato ma ancora in stato=confermato.\n\nL\'operazione è sicura e reversibile (i movimenti cisterne NON vengono toccati).')) return;
+
+  toast('Sanatoria in corso...');
+  try {
+    // UPDATE atomico: solo ordini con das_firmato_url non vuoto e stato in ['confermato','in_consegna']
+    var { data, error } = await sb.from('ordini')
+      .update({ stato: 'consegnato' })
+      .in('stato', ['confermato', 'in_consegna'])
+      .not('das_firmato_url', 'is', null)
+      .neq('das_firmato_url', '')
+      .gte('data', '2026-01-01')
+      .select('id,data,cliente,prodotto,litri');
+
+    if (error) {
+      toast('Errore sanatoria: ' + error.message);
+      console.error('sanaConsegneIncoerenti:', error);
+      return;
+    }
+
+    var n = (data || []).length;
+    if (n === 0) {
+      toast('✅ Nessun ordine da sanare');
+    } else {
+      toast('✅ Sanati ' + n + ' ordini');
+      console.log('Sanatoria consegne: ' + n + ' ordini aggiornati', data);
+    }
+
+    // Rilancia la verifica per aggiornare il pannello
+    if (typeof verificaConsegneLogistica === 'function') {
+      await verificaConsegneLogistica();
+    }
+  } catch(e) {
+    toast('Eccezione sanatoria: ' + (e.message || e));
+    console.error(e);
+  }
 }
 
 // Fine test automatizzati

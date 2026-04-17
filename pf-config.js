@@ -504,20 +504,30 @@ async function caricaUtentiOnline() {
 }
 
 // ── _aggiornaStatoConsegnato ──────────────────────────────────────
-// Chiamata dopo upload DAS firmato: porta l'ordine a stato 'consegnato'
-// Solo se lo stato attuale lo permette (non annullato, non già consegnato)
+// Chiamata dopo upload DAS firmato: porta l'ordine a stato 'consegnato'.
+// Logica: UPDATE atomico — se l'ordine ha das_firmato_url valorizzato e
+// stato in ['confermato','in_consegna'], lo porta a 'consegnato'.
+// Non esclude ordini non-cliente: anche entrate deposito/stazione_servizio
+// con DAS firmato sono "consegnate" a tutti gli effetti.
 async function _aggiornaStatoConsegnato(ordineId) {
   if (!ordineId) return;
   try {
-    const { data: ord } = await sb.from('ordini').select('stato,tipo_ordine,das_firmato_url').eq('id', ordineId).single();
-    if (!ord) return;
-    // Solo ordini cliente con DAS firmato allegato, non già consegnati o annullati
-    if (ord.stato === 'consegnato' || ord.stato === 'annullato') return;
-    if (ord.tipo_ordine && ord.tipo_ordine !== 'cliente') return;
-    if (!ord.das_firmato_url) return; // DAS firmato obbligatorio
-    await sb.from('ordini').update({ stato: 'consegnato' }).eq('id', ordineId);
-    console.log('Ordine ' + ordineId + ' → consegnato');
+    var { data, error } = await sb.from('ordini')
+      .update({ stato: 'consegnato' })
+      .eq('id', ordineId)
+      .in('stato', ['confermato', 'in_consegna'])
+      .not('das_firmato_url', 'is', null)
+      .neq('das_firmato_url', '')
+      .select('id,stato');
+    if (error) {
+      console.error('_aggiornaStatoConsegnato update fallito:', error);
+      if (typeof toast === 'function') toast('Stato ordine non aggiornato: ' + error.message);
+      return;
+    }
+    if (data && data.length) {
+      console.log('Ordine ' + ordineId + ' → consegnato (confermato via UPDATE)');
+    }
   } catch(e) {
-    console.warn('_aggiornaStatoConsegnato:', e);
+    console.warn('_aggiornaStatoConsegnato eccezione:', e);
   }
 }
