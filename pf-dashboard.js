@@ -289,18 +289,27 @@ async function caricaCockpitStazione() {
 async function caricaGiacenzaStazioneDashboard() {
   const wrap = document.getElementById('dash-giacenza-stz');
   if (!wrap) return;
-  // Auto-heal alla cascata pfData prima di mostrare
-  try {
-    var { data: prods } = await sb.from('cisterne').select('prodotto').eq('sede','stazione_oppido');
-    var setP = {}; (prods||[]).forEach(c => { if(c.prodotto) setP[c.prodotto] = true; });
-    if (typeof pfStzRicalcolaCisterne === 'function') {
-      var lp = Object.keys(setP);
-      for (var i=0; i<lp.length; i++) await pfStzRicalcolaCisterne(lp[i]);
-    }
-  } catch(e) { console.warn('auto-heal stazione dash:', e); }
 
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido');
   if (!cisterne || !cisterne.length) { wrap.innerHTML = '<div class="loading">Nessuna cisterna stazione</div>'; return; }
+
+  // Allineamento ripartizione (nuova logica 18/04/2026): usa pfData.getRipartizioneCisterneStazione
+  // che deriva i livelli per cisterna dalla giacenza calcolata (fonte unica di verità).
+  // Non tocca il DB, sovrascrive solo i valori visualizzati.
+  try {
+    const prodottiUnici = [...new Set(cisterne.map(c => c.prodotto).filter(Boolean))];
+    for (let pi = 0; pi < prodottiUnici.length; pi++) {
+      const prod = prodottiUnici[pi];
+      const ripart = await pfData.getRipartizioneCisterneStazione(prod);
+      if (ripart && ripart.length) {
+        cisterne.forEach(c => {
+          const match = ripart.find(r => r.id === c.id);
+          if (match) c.livello_attuale = match.livello_ripartito;
+        });
+      }
+    }
+  } catch(e) { console.warn('[caricaGiacenzaStazioneDashboard] ripartizione fallita:', e); }
+
   const prodottiOrdine = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO'];
   const perProdotto = {};
   cisterne.forEach(c => {

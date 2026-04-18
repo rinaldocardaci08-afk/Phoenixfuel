@@ -195,6 +195,24 @@ async function caricaGiacenzeStazione() {
       perProdotto[c.prodotto].push(c);
     });
 
+    // Applica ripartizione coerente con giacenza calcolata (fonte unica di verità)
+    // Per ogni prodotto richiama pfData.getRipartizioneCisterneStazione e sovrascrive livello_attuale
+    // con livello_ripartito. Niente più doppia contabilità DB vs calcolato.
+    const prodottiKeys = Object.keys(perProdotto);
+    for (let pi = 0; pi < prodottiKeys.length; pi++) {
+      try {
+        const prod = prodottiKeys[pi];
+        const cisRipart = await pfData.getRipartizioneCisterneStazione(prod);
+        if (cisRipart && cisRipart.length) {
+          // Allinea livello_attuale alla ripartizione calcolata
+          perProdotto[prod].forEach(c => {
+            const match = cisRipart.find(r => r.id === c.id);
+            if (match) c.livello_attuale = match.livello_ripartito;
+          });
+        }
+      } catch(e) { console.warn('[caricaGiacenzeStazione] ripartizione fallita per', prodottiKeys[pi], e); }
+    }
+
     Object.entries(perProdotto).forEach(([prodNome, gruppo]) => {
       const prodInfo = cacheProdotti.find(p => p.nome === prodNome);
       const colore = prodInfo ? prodInfo.colore : '#888';

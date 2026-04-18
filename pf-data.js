@@ -288,6 +288,123 @@ window.pfData = {
 
     var calcolata = Math.round(iniziale + entrate - uscite);
     return { iniziale: iniziale, entrate: Math.round(entrate), uscite: Math.round(uscite), calcolata: calcolata, fonteIniziale: fonteIniziale };
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // RIPARTIZIONE CISTERNE STAZIONE (nuova logica 18/04/2026)
+  //
+  // Regola:
+  //   - Giacenza totale = getGiacenzaAllaData (fonte unica di verità)
+  //   - Ripartizione: valori in cisterne.livello_attuale sono il
+  //     "punto di partenza" deciso dall'operatore (ricevi/distribuisci/rettifica).
+  //     La differenza tra totale_cisterne_db e totale_reale viene assorbita
+  //     secondo la regola prodotto:
+  //       * GASOLIO: scarica prima dalla GRANDE (capacita_max maggiore),
+  //         quando arriva a 0 scarica dalla piccola.
+  //       * BENZINA: scarica 50/50 su entrambe.
+  //     Per incrementi (raro, caricato manualmente): riempie prima la GRANDE
+  //     fino al max, poi la piccola (gasolio) / 50-50 (benzina).
+  //
+  // Parametri:
+  //   prodotto : 'Gasolio Autotrazione' | 'Benzina' (altri: fallback proporzionale)
+  //   data     : ISO, default oggi
+  //
+  // Ritorna: array cisterne con proprietà aggiuntiva `livello_ripartito`
+  //          (che sovrascrive livello_attuale nelle viste).
+  // ─────────────────────────────────────────────────────────────────
+  async getRipartizioneCisterneStazione(prodotto, data) {
+    data = data || new Date().toISOString().split('T')[0];
+
+    var [cisRes, giac] = await Promise.all([
+      sb.from('cisterne').select('*')
+        .eq('sede', 'stazione_oppido').eq('prodotto', prodotto)
+        .order('capacita_max', { ascending: false }),
+      this.getGiacenzaAllaData('stazione_oppido', prodotto, data)
+    ]);
+
+    var cisterne = cisRes.data || [];
+    if (!cisterne.length) return [];
+
+    var totReale = Math.max(0, Number(giac.calcolata || 0));
+    var totDb = cisterne.reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
+    var delta = totReale - totDb; // positivo = arrivato più merce; negativo = uscita
+
+    // Mantieni una copia modificabile del livello di partenza
+    cisterne.forEach(function(c) { c.livello_ripartito = Number(c.livello_attuale || 0); });
+
+    if (Math.abs(delta) < 1) {
+      // totale DB coincide col reale (a meno di arrotondamenti) → nessuna ripartizione necessaria
+      return cisterne;
+    }
+
+    var isBenzina = /benzina/i.test(prodotto);
+    var isGasolio = /gasolio/i.test(prodotto);
+
+    if (isBenzina) {
+      // 50/50 su tutte le cisterne (gestisce anche >2 cisterne per generalità)
+      var n = cisterne.length;
+      var quotaPerCisterna = delta / n;
+      cisterne.forEach(function(c) {
+        c.livello_ripartito = Math.max(0, Math.min(Number(c.capacita_max || 0), c.livello_ripartito + quotaPerCisterna));
+      });
+    } else if (isGasolio) {
+      // Ordinate già per capacita_max DESC (grande prima, piccola dopo)
+      var grande = cisterne[0];
+      var piccole = cisterne.slice(1);
+
+      if (delta < 0) {
+        // USCITA: scarica prima dalla GRANDE fino a 0, poi dalle piccole in ordine
+        var daScaricare = -delta;
+        if (grande.livello_ripartito >= daScaricare) {
+          grande.livello_ripartito -= daScaricare;
+          daScaricare = 0;
+        } else {
+          daScaricare -= grande.livello_ripartito;
+          grande.livello_ripartito = 0;
+        }
+        for (var i = 0; i < piccole.length && daScaricare > 0; i++) {
+          var p = piccole[i];
+          if (p.livello_ripartito >= daScaricare) {
+            p.livello_ripartito -= daScaricare;
+            daScaricare = 0;
+          } else {
+            daScaricare -= p.livello_ripartito;
+            p.livello_ripartito = 0;
+          }
+        }
+      } else {
+        // ENTRATA (raro senza intervento operatore): riempie grande fino al max, resto alle piccole
+        var daCaricare = delta;
+        var capGrandeResidua = Number(grande.capacita_max || 0) - grande.livello_ripartito;
+        if (capGrandeResidua > 0) {
+          var aggGrande = Math.min(capGrandeResidua, daCaricare);
+          grande.livello_ripartito += aggGrande;
+          daCaricare -= aggGrande;
+        }
+        for (var j = 0; j < piccole.length && daCaricare > 0; j++) {
+          var pp = piccole[j];
+          var capResidua = Number(pp.capacita_max || 0) - pp.livello_ripartito;
+          var aggPiccola = Math.min(capResidua, daCaricare);
+          pp.livello_ripartito += aggPiccola;
+          daCaricare -= aggPiccola;
+        }
+      }
+    } else {
+      // Fallback per altri prodotti: ripartizione proporzionale alla capacita_max
+      var capTot = cisterne.reduce(function(s,c){ return s + Number(c.capacita_max || 0); }, 0);
+      if (capTot > 0) {
+        cisterne.forEach(function(c) {
+          c.livello_ripartito = Math.round(totReale * Number(c.capacita_max || 0) / capTot);
+        });
+      }
+    }
+
+    // Arrotonda e clippa
+    cisterne.forEach(function(c) {
+      c.livello_ripartito = Math.max(0, Math.min(Number(c.capacita_max || 0), Math.round(c.livello_ripartito)));
+    });
+
+    return cisterne;
   }
 
 };
