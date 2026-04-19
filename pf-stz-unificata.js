@@ -303,63 +303,72 @@ function _uniRenderPerPompa(data) {
       // Se la pompa ha gia' una lettura per questa data (caso parziale o correzione), pre-compila
       var letturaOggiEsistente = pompeConLettura[pompa.id];
       var oggiVal = letturaOggiEsistente ? String(Math.round(Number(letturaOggiEsistente.lettura))) : '';
-      var oggiBadge = letturaOggiEsistente
-        ? '<span style="font-size:9px;background:#639922;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px">SALVATA</span>'
-        : '<span style="font-size:9px;background:#E24B4A;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px">DA INSERIRE</span>';
+      var litriPdSaved = letturaOggiEsistente ? Number(letturaOggiEsistente.litri_prezzo_diverso || 0) : 0;
+      var prezzoPdSaved = letturaOggiEsistente ? Number(letturaOggiEsistente.prezzo_diverso || 0) : 0;
 
-      // Prezzo/costo: eredita dal giorno precedente se presente (cosi' l'operatore trova
-      // un valore pre-compilato ragionevole). Se non c'e', placeholder CMP per il costo.
+      // Prezzo vendita + costo: eredita dal giorno corrente o dall'ultimo disponibile
       var prezzoSaved = Number(m.prezziMap[data + '_' + pompa.prodotto] || 0);
       var costoSaved = Number(m.costiMap[data + '_' + pompa.prodotto] || 0);
-      // Fallback: prendi ultimo prezzo/costo disponibile del prodotto
       if (!prezzoSaved) {
-        var chiavi = Object.keys(m.prezziMap).filter(function(k){ return k.endsWith('_' + pompa.prodotto); }).sort().reverse();
+        var chiavi = Object.keys(m.prezziMap).filter(function(kk){ return kk.endsWith('_' + pompa.prodotto); }).sort().reverse();
         if (chiavi.length) prezzoSaved = Number(m.prezziMap[chiavi[0]] || 0);
       }
       if (!costoSaved) {
-        var chiaviC = Object.keys(m.costiMap).filter(function(k){ return k.endsWith('_' + pompa.prodotto); }).sort().reverse();
+        var chiaviC = Object.keys(m.costiMap).filter(function(kk){ return kk.endsWith('_' + pompa.prodotto); }).sort().reverse();
         if (chiaviC.length) costoSaved = Number(m.costiMap[chiaviC[0]] || 0);
       }
       var prezzoVal = prezzoSaved > 0 ? prezzoSaved.toFixed(3) : '';
       var costoVal = costoSaved > 0 ? costoSaved.toFixed(4) : '';
       var cmpProd = m.cmpCorrente && m.cmpCorrente[pompa.prodotto] ? m.cmpCorrente[pompa.prodotto] : 0;
-      var costoPlaceholder = cmpProd > 0 ? cmpProd.toFixed(4) + ' (CMP)' : '';
+      var costoPlaceholder = cmpProd > 0 ? cmpProd.toFixed(4) + ' (CMP)' : '0.000000';
 
+      // ──── CARD POMPA (stile identico tab Totalizzatori originale) ────
       html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
+      // Header
       html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + '</span></div>';
-
-      // Riga 1: Contatori
-      html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
-      // Giorno prec. (sola lettura)
+      // Contatori meccanici
+      html += '<div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap">';
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Giorno prec.</div>';
       html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#f0f0f0;letter-spacing:3px">' + precRaw + '</span></div></div>';
-      // Oggi (INPUT EDITABILE - pre-compilato se esiste lettura parziale)
-      html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Oggi' + oggiBadge + '</div>';
-      html += '<input type="number" step="1" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" value="' + oggiVal + '" oninput="_uniMarkDirty()" placeholder="0" style="background:#1a1a1a;border:0.5px solid #2a2a2a;border-radius:8px;padding:10px 12px;font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#7CFC00;letter-spacing:3px;width:200px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4);outline:none" />';
-      html += '</div>';
+      html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600">Oggi</div>';
+      html += '<input type="number" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" value="' + oggiVal + '" placeholder="00000000" step="0.01" max="99999999" oninput="_uniCalcolaLive()" style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;padding:8px 12px;border:none;border-radius:8px;background:#1a1a1a;color:#7CFC00;width:200px;max-width:100%;text-align:left;letter-spacing:3px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)" /></div>';
       html += '</div>';
 
-      // Riga 2: Prezzo + Costo (sincronizzati per prodotto)
-      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border)">';
-      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita €/L IVA</div>';
-      html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\')" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:110px" />';
-      html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoSaved ? '€ ' + (prezzoSaved / 1.22).toFixed(4) + ' netto' : '') + '</div></div>';
+      // Box calcolo LIVE grande (popolato da _uniCalcolaLive)
+      html += '<div id="uni-calc-' + pompa.id + '" style="padding:10px 14px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px;font-size:14px"></div>';
 
-      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L netto</div>';
-      html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\')" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:130px" />';
-      html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (costoSaved ? '€ ' + (costoSaved * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
+      // Prezzo + Costo + Margine (riga editabile)
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px">';
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Prezzo vendita €/L IVA</div>';
+      html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\');_uniCalcolaLive()" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%" />';
+      html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">' + (prezzoSaved ? '€ ' + (prezzoSaved / 1.22).toFixed(4) + ' netto' : '') + '</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Costo €/L netto</div>';
+      html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\');_uniCalcolaLive()" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%" />';
+      html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">' + (costoSaved ? '€ ' + (costoSaved * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Margine €/L</div>';
+      html += '<div class="uni-margine-cell" data-pompa="' + pompa.id + '" style="font-family:var(--font-mono);font-size:16px;font-weight:700;padding:6px 0">—</div></div>';
+      html += '</div>';
+
+      // Riga gialla Cambio prezzo (stile IDENTICO tab Totalizzatori)
+      html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#FFF8E1;border:0.5px solid #F0D080;border-radius:8px">';
+      html += '<span style="font-size:14px;color:#8B6914;font-weight:600;white-space:nowrap">⚡ Cambio prezzo:</span>';
+      html += '<span style="font-size:14px;color:#8B6914">Litri</span>';
+      html += '<input type="number" class="uni-litri-div" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" value="' + (litriPdSaved || '') + '" placeholder="0" step="0.01" oninput="_uniCalcolaLive()" style="font-family:var(--font-mono);font-size:17px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:130px;text-align:right" />';
+      html += '<span style="font-size:14px;color:#8B6914">€/L</span>';
+      html += '<input type="number" class="uni-prezzo-div" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" value="' + (prezzoPdSaved || '') + '" placeholder="0.000" step="0.001" oninput="_uniCalcolaLive()" style="font-family:var(--font-mono);font-size:17px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:130px;text-align:right" />';
       html += '</div>';
 
       html += '</div>'; // chiudi card pompa
     });
 
-    // Bottone UNIFICATO salva tutto (contatori + prezzi + costi)
+    // Bottone UNIFICATO salva tutto
     html += '<div id="uni-salva-wrap" style="position:sticky;bottom:10px;background:var(--bg-card);padding:12px;border-radius:10px;border:0.5px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:14px">';
-    html += '<button id="uni-btn-salva" class="btn-primary" onclick="_uniSalvaTutto()" style="width:100%;padding:14px;font-size:15px;font-weight:600">💾 Salva giornata ' + data + ' (contatori + prezzi + costi)</button>';
+    html += '<button id="uni-btn-salva" class="btn-primary" onclick="_uniSalvaTutto()" style="width:100%;padding:14px;font-size:15px;font-weight:600">💾 Salva giornata ' + data + ' (contatori + prezzi + costi + cambio prezzo)</button>';
     html += '</div>';
 
     el.innerHTML = html;
-    _uniRenderPanel(totGasolio, totBenzina);
+    // Lancia subito il calcolo live (mostra 0 o valori sensati anche prima dell'input)
+    _uniCalcolaLive();
     return;
   }
 
@@ -912,6 +921,93 @@ function _uniMarkDirty() {
   if (_uniData) _uniData.dirty = true;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// CALCOLO LIVE (copia di calcolaLettureVendite della tab Totalizzatori)
+// Aggiorna box pompa + margine + pannello marginalita' destra a ogni input
+// ══════════════════════════════════════════════════════════════════
+function _uniCalcolaLive() {
+  if (!_uniData) return;
+  _uniData.dirty = true;
+
+  var pompe = _uniData.pompe || [];
+  var data = _uniData.dateUniche[_uniData.indice];
+  var totLitri = 0, totEuro = 0;
+  var litriGasolio = 0, euroGasolio = 0, litriBenzina = 0, euroBenzina = 0;
+  var margGasolio = 0, margBenzina = 0;
+
+  pompe.forEach(function(p) {
+    var inpLett = document.querySelector('.uni-lettura-input[data-pompa="' + p.id + '"]');
+    var elCalc = document.getElementById('uni-calc-' + p.id);
+    var elMarg = document.querySelector('.uni-margine-cell[data-pompa="' + p.id + '"]');
+    if (!inpLett || !elCalc) return;
+
+    var valOggi = parseFloat(inpLett.value);
+    var valPrec = parseFloat(inpLett.dataset.prec) || 0;
+
+    var inpPrezzo = document.querySelector('.uni-prezzo-input[data-prodotto="' + p.prodotto + '"]');
+    var inpCosto = document.querySelector('.uni-costo-input[data-prodotto="' + p.prodotto + '"]');
+    var inpLitriDiv = document.querySelector('.uni-litri-div[data-pompa="' + p.id + '"]');
+    var inpPrezzoDiv = document.querySelector('.uni-prezzo-div[data-pompa="' + p.id + '"]');
+
+    var prezzoStd = inpPrezzo ? (parseFloat(inpPrezzo.value) || 0) : 0;
+    var costo = inpCosto ? (parseFloat(inpCosto.value) || 0) : 0;
+    if (!costo && _uniData.cmpCorrente && _uniData.cmpCorrente[p.prodotto]) costo = _uniData.cmpCorrente[p.prodotto];
+    var litriDiv = inpLitriDiv ? (parseFloat(inpLitriDiv.value) || 0) : 0;
+    var prezzoDiv = inpPrezzoDiv ? (parseFloat(inpPrezzoDiv.value) || 0) : 0;
+
+    if (!isNaN(valOggi) && valPrec > 0) {
+      var litri = valOggi - valPrec;
+      var litriStd = Math.max(0, litri - litriDiv);
+      var euroStd = litriStd * prezzoStd;
+      var euroDiv = litriDiv * prezzoDiv;
+      var euro = euroStd + euroDiv;
+
+      var calcHtml = '<div style="display:flex;gap:16px;font-size:16px;margin-bottom:4px">'
+        + '<span style="color:var(--text-muted)">Litri totali: <strong style="font-family:var(--font-mono)">' + (litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo') + '</strong></span>'
+        + '<span style="color:#1a1a18">Venduto: <strong style="font-family:var(--font-mono);color:#639922">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></span>'
+        + '</div>';
+      if (litriDiv > 0 && prezzoDiv > 0) {
+        calcHtml += '<div style="font-size:13px;color:var(--text-muted);padding-top:4px;border-top:0.5px dashed var(--border)">'
+          + '<div>↳ ' + litriStd.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoStd.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroStd.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong></div>'
+          + '<div style="color:#1a1a18">↳ ' + litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoDiv.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroDiv.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong> <span style="font-size:10px;background:#1a1a18;color:#fff;padding:1px 5px;border-radius:4px">cambio prezzo</span></div>'
+          + '</div>';
+      }
+      elCalc.innerHTML = calcHtml;
+
+      // Margine pompa
+      if (elMarg) {
+        var prezzoN = prezzoStd > 0 ? prezzoStd / 1.22 : 0;
+        var margL = prezzoN > 0 && costo > 0 ? prezzoN - costo : 0;
+        var margTot = margL * litri;
+        var mColor = margL >= 0 ? '#639922' : '#E24B4A';
+        elMarg.innerHTML = (costo > 0 && prezzoStd > 0)
+          ? '<span style="color:' + mColor + '">€ ' + margL.toFixed(4) + '</span><div style="font-size:10px;color:var(--text-muted);font-weight:400">tot ' + margTot.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>'
+          : '—';
+      }
+
+      // Accumula per pannello destra
+      if (litri >= 0) {
+        totLitri += litri; totEuro += euro;
+        var isGasolio = p.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+        var margLNetto = (prezzoStd > 0 && costo > 0) ? (prezzoStd / 1.22) - costo : 0;
+        var margLDivNetto = (prezzoDiv > 0 && costo > 0) ? (prezzoDiv / 1.22) - costo : 0;
+        var margPompaTot = (margLNetto * litriStd) + (margLDivNetto * litriDiv);
+        if (isGasolio) { litriGasolio += litri; euroGasolio += euro; margGasolio += margPompaTot; }
+        else { litriBenzina += litri; euroBenzina += euro; margBenzina += margPompaTot; }
+      }
+    } else {
+      elCalc.innerHTML = '<span style="color:var(--text-muted);font-size:15px">Litri: <strong style="font-family:var(--font-mono)">—</strong> · Venduto: <strong style="font-family:var(--font-mono)">€ —</strong></span>';
+      if (elMarg) elMarg.innerHTML = '—';
+    }
+  });
+
+  // Aggiorna pannello marginalita' a destra (stile identico pannello tab marginalita')
+  _uniRenderPanel(
+    { litri: litriGasolio, euro: euroGasolio, marg: margGasolio },
+    { litri: litriBenzina, euro: euroBenzina, marg: margBenzina }
+  );
+}
+
 // Salva le letture del giorno corrente
 async function _uniSalvaLetture() {
   if (!_uniData) return;
@@ -1145,11 +1241,18 @@ async function _uniSalvaTutto() {
     var inp = inputs[i];
     var val = parseFloat(inp.value);
     if (isNaN(val) || val <= 0) continue;
+    // Cambio prezzo per questa pompa
+    var inpLd = document.querySelector('.uni-litri-div[data-pompa="' + inp.dataset.pompa + '"]');
+    var inpPd = document.querySelector('.uni-prezzo-div[data-pompa="' + inp.dataset.pompa + '"]');
+    var litriPd = inpLd ? (parseFloat(inpLd.value) || 0) : 0;
+    var prezzoPd = inpPd ? (parseFloat(inpPd.value) || 0) : 0;
     daSalvareL.push({
       pompaId: inp.dataset.pompa,
       prodotto: inp.dataset.prodotto,
       valNuovo: val,
-      valGiornoPrec: Number(inp.dataset.prec || 0)
+      valGiornoPrec: Number(inp.dataset.prec || 0),
+      litriPd: litriPd,
+      prezzoPd: prezzoPd
     });
   }
 
@@ -1209,9 +1312,20 @@ async function _uniSalvaTutto() {
   var ops = [];
   daSalvareL.forEach(function(ds) {
     ops.push(sb.from('stazione_letture').upsert(
-      { pompa_id: ds.pompaId, data: data, lettura: ds.valNuovo, litri_prezzo_diverso: 0, prezzo_diverso: 0 },
+      { pompa_id: ds.pompaId, data: data, lettura: ds.valNuovo, litri_prezzo_diverso: ds.litriPd || 0, prezzo_diverso: ds.prezzoPd || 0 },
       { onConflict: 'pompa_id,data' }
     ));
+    // Se c'e' cambio prezzo, salva anche la chiave "(cambio prezzo)" in stazione_prezzi
+    // per compatibilita' con il resto del sistema
+    var cpKey = ds.prodotto + ' (cambio prezzo)';
+    if (ds.litriPd > 0 && ds.prezzoPd > 0) {
+      ops.push(sb.from('stazione_prezzi').upsert(
+        { data: data, prodotto: cpKey, prezzo_litro: ds.prezzoPd },
+        { onConflict: 'data,prodotto' }
+      ));
+    } else {
+      ops.push(sb.from('stazione_prezzi').delete().eq('data', data).eq('prodotto', cpKey));
+    }
   });
   Object.keys(prezziMap).forEach(function(p) {
     ops.push(sb.from('stazione_prezzi').upsert({ data: data, prodotto: p, prezzo_litro: prezziMap[p] }, { onConflict: 'data,prodotto' }));
