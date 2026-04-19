@@ -247,6 +247,32 @@ async function salvaLetture() {
   if (!data) { toast('Seleziona una data'); return; }
   if (!_checkSaved('btn-salva-letture')) return;
   const inputs = document.querySelectorAll('.stz-lettura-input');
+
+  // ═══ PRE-SALVATAGGIO: leggo stato PRIMA dell'upsert ═══
+  // Per ogni pompa raccolgo: valore_vecchio del giorno X (se esisteva),
+  // valore_precedente (giorno < X più recente). Servono per calcolare
+  // di quanto scalare/compensare le cisterne dopo il salvataggio.
+  var infoPompe = []; // { pompaId, prodotto, valNuovo, valVecchioGiornoX, valGiornoPrec }
+  for (const inp of inputs) {
+    const val = parseFloat(inp.value);
+    if (isNaN(val)) continue;
+    const pompaId = inp.dataset.pompa;
+    const prodotto = inp.dataset.prodotto;
+
+    // Lettura esistente per (pompa, giorno X) - se c'è, è un re-save
+    var oldSameDay = await sb.from('stazione_letture')
+      .select('lettura').eq('pompa_id', pompaId).eq('data', data).maybeSingle();
+    var valVecchioGiornoX = oldSameDay.data ? Number(oldSameDay.data.lettura) : null;
+
+    // Lettura più recente in data strettamente precedente
+    var prec = await sb.from('stazione_letture')
+      .select('lettura,data').eq('pompa_id', pompaId).lt('data', data)
+      .order('data', { ascending: false }).limit(1).maybeSingle();
+    var valGiornoPrec = prec.data ? Number(prec.data.lettura) : null;
+
+    infoPompe.push({ pompaId: pompaId, prodotto: prodotto, valNuovo: val, valVecchioGiornoX: valVecchioGiornoX, valGiornoPrec: valGiornoPrec });
+  }
+
   var upserts = [], cpOps = [], _offlineBatch = [];
   for (const inp of inputs) {
     const val = parseFloat(inp.value);
@@ -271,6 +297,36 @@ async function salvaLetture() {
   var errore = results.find(r => r.error);
   if (errore) { toast('Errore: ' + errore.error.message); return; }
   await Promise.all(cpOps);
+
+  // ═══ Aggancio cisterne stazione (19/04/2026) ═══
+  // Applica delta al cisterna collegata alla pompa:
+  // - Primo salvataggio: delta = valNuovo - valGiornoPrec → scala tutto il delta
+  // - Re-save stesso giorno: delta = valNuovo - valVecchioGiornoX → scala SOLO
+  //   la differenza correttiva (i delta gia' applicati al primo salva non si
+  //   ri-applicano; invariante "somma cisterne = calcolato" mantenuta).
+  // Non blocca mai il salvataggio letture: try/catch isola gli errori.
+  if (!anyOffline) {
+    try {
+      for (var ip = 0; ip < infoPompe.length; ip++) {
+        var info = infoPompe[ip];
+        var deltaToApply = 0;
+        if (info.valVecchioGiornoX !== null) {
+          // Re-save stesso giorno: scalo solo la correzione
+          deltaToApply = info.valNuovo - info.valVecchioGiornoX;
+        } else if (info.valGiornoPrec !== null) {
+          // Nuovo inserimento giorno X: scalo tutto il delta vs giorno precedente
+          deltaToApply = info.valNuovo - info.valGiornoPrec;
+        } else {
+          // Primissima lettura della pompa: niente da scalare
+          continue;
+        }
+        if (deltaToApply > 0 && typeof applicaUscitaCisterne === 'function') {
+          await applicaUscitaCisterne('stazione_oppido', info.prodotto, deltaToApply, info.pompaId);
+        }
+      }
+    } catch(e) { console.error('[salvaLetture] aggancio cisterne errore (non bloccante):', e); }
+  }
+
   toast(anyOffline ? '⚡ ' + upserts.length + ' letture salvate offline' : upserts.length + ' letture salvate!');
   _markSaved('btn-salva-letture');
 
