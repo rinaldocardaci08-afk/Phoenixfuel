@@ -22,11 +22,51 @@ function switchDepositoTab(btn) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// cisternasvg — render cerchio con liquido animato (v2 — 19/04/2026)
+// ═══════════════════════════════════════════════════════════════════
 function cisternasvg(pct, colore) {
   pct = Math.max(0, Math.min(100, pct));
-  const altMax=80, liv=Math.round((pct/100)*altMax), y=10+(altMax-liv);
-  const fill = pct<20?'#E24B4A':pct<35?'#BA7517':colore;
-  return '<svg class="dep-cisterna-svg" viewBox="0 0 60 100" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="10" width="50" height="80" rx="4" fill="#e8e7e3" stroke="#ccc" stroke-width="1"/><rect x="5" y="' + y + '" width="50" height="' + liv + '" rx="2" fill="' + fill + '" opacity="0.85"/><rect x="5" y="10" width="50" height="80" rx="4" fill="none" stroke="#bbb" stroke-width="1.5"/><rect x="20" y="5" width="20" height="8" rx="2" fill="#ccc"/><line x1="5" y1="30" x2="8" y2="30" stroke="#bbb" stroke-width="1"/><line x1="5" y1="50" x2="8" y2="50" stroke="#bbb" stroke-width="1"/><line x1="5" y1="70" x2="8" y2="70" stroke="#bbb" stroke-width="1"/></svg>';
+  // Livello liquido: y=0 full, y=100 vuoto → y = 100 - pct
+  var y = 100 - pct;
+  var uid = 'clipC' + Math.random().toString(36).slice(2, 9);
+  // Tono più chiaro per onda superiore
+  var c2 = _schiarisciColore(colore, 0.18);
+  var liquido = pct > 0
+    ? '<g clip-path="url(#' + uid + ')">' +
+        '<rect x="0" y="' + y + '" width="100" height="' + (100 - y) + '" fill="' + colore + '"/>' +
+        '<path class="wave-path" fill="' + c2 + '" d="M-20,' + y + ' Q-10,' + (y - 4) + ' 0,' + y + ' T20,' + y + ' T40,' + y + ' T60,' + y + ' T80,' + y + ' T100,' + y + ' T120,' + y + ' V' + (y + 8) + ' H-20 Z"/>' +
+      '</g>'
+    : '';
+  return '<svg class="dep-cisterna-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">' +
+    '<defs><clipPath id="' + uid + '"><circle cx="50" cy="50" r="45"/></clipPath></defs>' +
+    '<rect x="42" y="2" width="16" height="5" fill="#1a2332" rx="1"/>' +
+    '<circle cx="50" cy="50" r="45" fill="white" stroke="#1a2332" stroke-width="2"/>' +
+    liquido +
+    '<line x1="50" y1="5" x2="50" y2="95" stroke="#1a2332" stroke-width="1"/>' +
+    '</svg>';
+}
+
+// Helper: schiarisce un colore hex di una quota [0..1]
+function _schiarisciColore(hex, q) {
+  if (!hex || hex[0] !== '#' || hex.length !== 7) return hex || '#888';
+  var r = parseInt(hex.slice(1, 3), 16);
+  var g = parseInt(hex.slice(3, 5), 16);
+  var b = parseInt(hex.slice(5, 7), 16);
+  r = Math.min(255, Math.round(r + (255 - r) * q));
+  g = Math.min(255, Math.round(g + (255 - g) * q));
+  b = Math.min(255, Math.round(b + (255 - b) * q));
+  return '#' + [r, g, b].map(function(v) { return v.toString(16).padStart(2, '0'); }).join('');
+}
+
+// Helper: decide colore testo su badge (nero/bianco) secondo luminosità
+function _testoSuColore(hex) {
+  if (!hex || hex[0] !== '#' || hex.length !== 7) return '#1a2332';
+  var r = parseInt(hex.slice(1, 3), 16);
+  var g = parseInt(hex.slice(3, 5), 16);
+  var b = parseInt(hex.slice(5, 7), 16);
+  var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1a2332' : '#ffffff';
 }
 
 async function caricaDeposito() {
@@ -100,12 +140,23 @@ async function caricaDeposito() {
       const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
       const cmp = Number(c.costo_medio||0);
       totG += livAtt;
-      cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
-        '<div class="dep-cisterna-name">' + c.nome + '</div>' +
-        cisternasvg(pct, colore) +
-        '<div class="dep-cisterna-litri">' + _sep(livAtt.toLocaleString('it-IT')) + ' ' + um + '</div>' +
-        '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(capMax.toLocaleString('it-IT')) + ' ' + um + '</div>' +
-        (cmp > 0 ? '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmp.toFixed(4) + '</strong></div>' : '') +
+      // Estrai numero cisterna dal nome (es. "Cisterna 1" → "1", altrimenti usa il nome intero)
+      var matchNum = (c.nome || '').match(/(\d+)\s*$/);
+      var numCis = matchNum ? matchNum[1] : esc(c.nome || '');
+      var coloreTesto = _testoSuColore(colore);
+      var labelColor = pct < 10 ? '#d32f2f' : '#1a2332';
+      cisHtml += '<div class="dep-cisterna-v2' + (pct < 30 ? ' alert' : '') + '" style="--prod-color:' + colore + ';--prod-text:' + coloreTesto + '">' +
+        '<div class="hdr"><div class="badge">' + esc(prodNome) + '</div><div class="num">' + numCis + '</div></div>' +
+        '<div class="centro">' +
+          '<div class="tank-wrap">' + cisternasvg(pct, colore) + '</div>' +
+          '<div class="barra-wrap">' +
+            '<div class="barra">' + (pct > 0 ? '<div class="barra-fill" style="height:' + pct + '%"></div>' : '') + '</div>' +
+            '<div class="barra-label" style="bottom:' + pct + '%;color:' + labelColor + '">' + pct + '%</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="litri-wrap"><div class="litri-box"><span class="litri-valore">' + livAtt.toLocaleString('it-IT') + '</span><span class="litri-unita">' + um + '</span></div></div>' +
+        '<div class="info"><span class="pct">' + pct + '%</span> · cap. ' + capMax.toLocaleString('it-IT') + ' ' + um + '</div>' +
+        (cmp > 0 ? '<div class="cmp">CMP € ' + cmp.toFixed(4) + '</div>' : '') +
         '</div>';
     });
 
@@ -121,9 +172,22 @@ async function caricaDeposito() {
     // Guardia permesso modifica CMP: admin sempre, altri solo se sub-permesso 'deposito.modifica-cmp' attivo
     var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
     var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
-    const cmpLabel = '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong>' + (totG > 0 ? ' · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' : '') + cmpEditBtn + '</div>';
-    const distBtn = nCis > 1 ? '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC;white-space:nowrap" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')">⚖️ Distribuisci</button>' : '';
-    const cardHtml = '<div class="card"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div style="display:flex;align-items:center;gap:10px">' + distBtn + '<div class="dep-product-total">' + totLabel + '</div></div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+    const cmpLabel = '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong>' + (totG > 0 ? ' · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' : '') + cmpEditBtn + '</div>';
+    const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
+    // Percentuale totale prodotto rispetto capacità gruppo
+    const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
+    const pctTotHtml = '<div class="tot-pct"><span class="val">' + pctGruppo + '%</span> della capacità totale</div>';
+    const cardHtml = '<div class="dep-blocco-v2" style="--prod-color:' + colore + '">' +
+      '<div class="dep-product-header-v2">' +
+        '<div class="titolo-row"><div class="pallino"></div><div class="titolo">' + esc(prodNome) + '</div></div>' +
+        '<div class="sub">' + subLabel + '</div>' +
+        cmpLabel +
+        '<div class="azioni">' + distBtn +
+          '<div class="tot-wrap"><div class="tot-litri">' + totLabel.replace(/\s*L$/, '').replace(/\s*pz$/, '') + '<span class="u">' + um + '</span></div>' + pctTotHtml + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="dep-cisterne-grid-v2">' + cisHtml + '</div>' +
+      '</div>';
 
     if (categoria === 'benzine') { htmlBenzine += cardHtml; totaleStoccato += totG; capacitaTotale += capGruppo; } else { htmlMagazzino += cardHtml; }
   });
