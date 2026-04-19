@@ -403,16 +403,23 @@ function _uniRenderPerPompa(data) {
     // Risultato litri venduti
     html += '<div style="font-size:13px;margin-bottom:10px;font-family:var(--font-mono)">Litri totali: <strong>' + fmtL(litriTot) + '</strong>   Venduto: <strong style="color:#639922">' + fmtE(litriTot * prezzo) + '</strong></div>';
 
-    // ── Riga Prezzo / Costo / Margine ──
+    // ── Riga Prezzo / Costo / Margine (EDITABILI - Fase 2) ──
+    // Prezzo e costo sono PER PRODOTTO, non per pompa: gli input con lo stesso
+    // data_prodotto si sincronizzano via _uniSyncProdotto on input.
+    var prezzoVal = prezzo ? prezzo.toFixed(3) : '';
+    var costoVal = costoSaved ? Number(costoSaved).toFixed(4) : '';
+    var costoPlaceholder = isCMP ? costoN.toFixed(4) + ' (CMP)' : '';
+
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:start;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
-    // Col 1: Prezzo vendita
-    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (prezzo ? '€ ' + prezzo.toFixed(3) + ' <span style="font-size:10px;color:var(--text-muted)">IVA</span>' : '<span style="color:#E24B4A">—</span>') + '</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted)">' + (prezzoN ? '€ ' + prezzoN.toFixed(4) + ' netto' : '') + '</div></div>';
-    // Col 2: Costo
-    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (costoN ? costoN.toFixed(4) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '<span style="color:#E24B4A">—</span>') + '</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted)">' + (costoN ? '€ ' + (costoN * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
+    // Col 1: Prezzo vendita (editabile)
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita €/L IVA</div>';
+    html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\')" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:110px" />';
+    html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoN ? '€ ' + prezzoN.toFixed(4) + ' netto' : '') + '</div></div>';
+
+    // Col 2: Costo (editabile)
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L netto' + cmpBadge + '</div>';
+    html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\')" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:130px" />';
+    html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (costoN ? '€ ' + (costoN * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
     // Col 3: Margine
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div>';
     html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costoN > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>';
@@ -487,6 +494,11 @@ function _uniRenderPerPompa(data) {
 
     html += '</div>'; // chiudi card pompa
   });
+
+  // Bottone "Salva prezzi/costi" del giorno (sticky) - Fase 2
+  html += '<div id="uni-salva-pc-wrap" style="position:sticky;bottom:10px;background:var(--bg-card);padding:12px;border-radius:10px;border:0.5px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:14px;display:flex;gap:8px">';
+  html += '<button id="uni-btn-salva-pc" class="btn-primary" onclick="_uniSalvaPrezziCosti()" style="flex:1;padding:12px;font-size:14px;font-weight:600">💰 Salva prezzi e costi ' + data + '</button>';
+  html += '</div>';
 
   el.innerHTML = html;
   _uniRenderPanel(totGasolio, totBenzina);
@@ -956,5 +968,132 @@ async function _uniSalvaLetture() {
   toast('✅ ' + daSalvare.length + ' letture salvate per il ' + data);
 
   // Ricarica tab per avere dati freschi
+  caricaUnificata();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SALVATAGGIO PREZZI E COSTI (Fase 2 - 19/04/2026)
+// ══════════════════════════════════════════════════════════════════
+
+// Sincronizza input prezzo/costo tra card dello stesso prodotto + aggiorna netto/IVA live
+function _uniSyncProdotto(srcInput, tipo) {
+  if (!_uniData) return;
+  _uniData.dirty = true;
+  var prodotto = srcInput.dataset.prodotto;
+  var val = parseFloat(srcInput.value);
+  var clsInput = tipo === 'prezzo' ? '.uni-prezzo-input' : '.uni-costo-input';
+  var clsSub = tipo === 'prezzo' ? '.uni-prezzo-netto' : '.uni-costo-iva';
+
+  // Sincronizza TUTTI gli input dello stesso prodotto (pompe multiple condividono valore)
+  document.querySelectorAll(clsInput).forEach(function(inp) {
+    if (inp.dataset.prodotto === prodotto && inp !== srcInput) inp.value = srcInput.value;
+  });
+
+  // Aggiorna subtesto (netto per prezzo, IVA per costo)
+  document.querySelectorAll(clsSub).forEach(function(el) {
+    if (el.dataset.prodotto !== prodotto) return;
+    if (isNaN(val) || val <= 0) { el.textContent = ''; return; }
+    if (tipo === 'prezzo') el.textContent = '€ ' + (val / 1.22).toFixed(4) + ' netto';
+    else el.textContent = '€ ' + (val * 1.22).toFixed(3) + ' IVA';
+  });
+
+  // Ricalcolo live del pannello marginalita'
+  _uniRicalcolaPanel();
+}
+
+// Ricalcola pannello marginalita' usando i valori CORRENTI negli input
+function _uniRicalcolaPanel() {
+  if (!_uniData) return;
+  var data = _uniData.dateUniche[_uniData.indice];
+  if (!data) return;
+  var lettureGiorno = _uniData.lettureByData[data] || [];
+
+  // Map prodotto -> { prezzo, costo } leggendo dagli input (se presenti) o dai dati salvati
+  var valMap = {};
+  document.querySelectorAll('.uni-prezzo-input').forEach(function(inp) {
+    var p = inp.dataset.prodotto;
+    if (!valMap[p]) valMap[p] = {};
+    valMap[p].prezzo = parseFloat(inp.value) || 0;
+  });
+  document.querySelectorAll('.uni-costo-input').forEach(function(inp) {
+    var p = inp.dataset.prodotto;
+    if (!valMap[p]) valMap[p] = {};
+    valMap[p].costo = parseFloat(inp.value) || 0;
+  });
+
+  var totGasolio = { litri: 0, euro: 0, marg: 0 };
+  var totBenzina = { litri: 0, euro: 0, marg: 0 };
+
+  lettureGiorno.forEach(function(l) {
+    var pompa = _uniData.pompeMap[l.pompa_id];
+    if (!pompa) return;
+    var storPompa = (_uniData.lettureByPompa[l.pompa_id] || []).slice().sort(function(a, b) { return b.data.localeCompare(a.data); });
+    var myIdx = storPompa.findIndex(function(x) { return x.id === l.id; });
+    var prec = myIdx < storPompa.length - 1 ? storPompa[myIdx + 1] : null;
+    var litriTot = prec ? Number(l.lettura) - Number(prec.lettura) : 0;
+    if (litriTot < 0) litriTot = 0;
+    var litriPD = Number(l.litri_prezzo_diverso || 0);
+    var litriStd = litriPD > 0 ? Math.max(0, litriTot - litriPD) : litriTot;
+    var vm = valMap[pompa.prodotto] || {};
+    var prezzo = vm.prezzo || 0;
+    var costo = vm.costo || 0;
+    if (!costo && _uniData.cmpCorrente && _uniData.cmpCorrente[pompa.prodotto]) costo = _uniData.cmpCorrente[pompa.prodotto];
+    var prezzoN = prezzo ? (prezzo / 1.22) : 0;
+    var margL = prezzoN > 0 && costo > 0 ? prezzoN - costo : 0;
+    var margTot = margL * litriStd;
+    var isGasolio = pompa.prodotto.toLowerCase().indexOf('gasolio') >= 0;
+    if (costo > 0 && litriStd > 0) {
+      if (isGasolio) { totGasolio.litri += litriStd; totGasolio.euro += litriStd * prezzoN; totGasolio.marg += margTot; }
+      else { totBenzina.litri += litriStd; totBenzina.euro += litriStd * prezzoN; totBenzina.marg += margTot; }
+    }
+  });
+
+  _uniRenderPanel(totGasolio, totBenzina);
+}
+
+// Salva prezzi e costi del giorno (stazione_prezzi + stazione_costi)
+async function _uniSalvaPrezziCosti() {
+  if (!_uniData) return;
+  var data = _uniData.dateUniche[_uniData.indice];
+  if (!data) return;
+
+  // Raccogli valori unici per prodotto (i duplicati tra pompe dello stesso prodotto sono gia' sincronizzati)
+  var prezziMap = {}, costiMap = {};
+  document.querySelectorAll('.uni-prezzo-input').forEach(function(inp) {
+    var p = inp.dataset.prodotto;
+    var v = parseFloat(inp.value);
+    if (!isNaN(v) && v > 0 && prezziMap[p] === undefined) prezziMap[p] = v;
+  });
+  document.querySelectorAll('.uni-costo-input').forEach(function(inp) {
+    var p = inp.dataset.prodotto;
+    var v = parseFloat(inp.value);
+    if (!isNaN(v) && v > 0 && costiMap[p] === undefined) costiMap[p] = v;
+  });
+
+  var nPrezzi = Object.keys(prezziMap).length;
+  var nCosti = Object.keys(costiMap).length;
+  if (!nPrezzi && !nCosti) { toast('Nessun valore da salvare'); return; }
+
+  var btn = document.getElementById('uni-btn-salva-pc');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
+
+  var ops = [];
+  Object.keys(prezziMap).forEach(function(p) {
+    ops.push(sb.from('stazione_prezzi').upsert({ data: data, prodotto: p, prezzo_litro: prezziMap[p] }, { onConflict: 'data,prodotto' }));
+  });
+  Object.keys(costiMap).forEach(function(p) {
+    ops.push(sb.from('stazione_costi').upsert({ data: data, prodotto: p, costo_litro: costiMap[p] }, { onConflict: 'data,prodotto' }));
+  });
+
+  var results = await Promise.all(ops);
+  var errore = results.find(function(r) { return r.error; });
+  if (errore) {
+    toast('Errore: ' + errore.error.message);
+    if (btn) { btn.disabled = false; btn.textContent = '💰 Salva prezzi e costi ' + data; }
+    return;
+  }
+
+  _uniData.dirty = false;
+  toast('✅ Salvati ' + nPrezzi + ' prezzi e ' + nCosti + ' costi per il ' + data);
   caricaUnificata();
 }
