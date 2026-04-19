@@ -247,7 +247,10 @@ async function caricaGiacenzeStazione() {
       let cmpGruppo = 0, valGruppo = 0;
       gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
       cmpGruppo = totG > 0 ? valGruppo / totG : 0;
-      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
+      // Guardia permesso modifica CMP: admin sempre, altri solo se sub-permesso 'deposito.modifica-cmp' attivo
+      var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
+      var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
+      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + '</div>' : '';
       const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
       const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
       const pctTotHtml = '<div class="tot-pct"><span class="val">' + pctGruppo + '%</span> della capacità totale</div>';
