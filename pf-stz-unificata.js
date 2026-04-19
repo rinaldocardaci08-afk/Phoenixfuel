@@ -730,17 +730,23 @@ function _uniRenderStoricoMarg() {
   var tbody = document.getElementById('uni-storico-marg-tabella');
   if (!tbody) return;
 
-  // Selettori anno/mese
+  // Selettori anno/mese - preset su mese/anno CORRENTE al primo caricamento
   var selAnno = document.getElementById('uni-rep-marg-anno');
   var selMese = document.getElementById('uni-rep-marg-mese');
+  var oggi = new Date();
+  var annoAttuale = String(oggi.getFullYear());
+  var meseAttuale = String(oggi.getMonth() + 1).padStart(2, '0');
   if (selAnno && !selAnno.options.length) {
-    var annoCorr = new Date().getFullYear();
+    var annoCorr = oggi.getFullYear();
     for (var a = annoCorr; a >= annoCorr - 2; a--) {
       selAnno.innerHTML += '<option value="' + a + '">' + a + '</option>';
     }
+    selAnno.value = annoAttuale;
   }
-  if (selMese && !selMese.value) {
-    selMese.value = String(new Date().getMonth() + 1).padStart(2, '0');
+  // Il select mese ha option pre-scritte in HTML: forzo preset al mese corrente solo se non e' gia' stato toccato
+  if (selMese && !selMese.dataset.inizializzato) {
+    selMese.value = meseAttuale;
+    selMese.dataset.inizializzato = '1';
   }
 
   var anno = selAnno ? selAnno.value : String(new Date().getFullYear());
