@@ -195,20 +195,10 @@ async function caricaGiacenzeStazione() {
       perProdotto[c.prodotto].push(c);
     });
 
-    // Applica ripartizione coerente con giacenza calcolata (fonte unica di verità)
-    const prodottiKeys = Object.keys(perProdotto);
-    for (let pi = 0; pi < prodottiKeys.length; pi++) {
-      try {
-        const prod = prodottiKeys[pi];
-        const cisRipart = await pfData.getRipartizioneCisterneStazione(prod);
-        if (cisRipart && cisRipart.length) {
-          perProdotto[prod].forEach(c => {
-            const match = cisRipart.find(r => r.id === c.id);
-            if (match) c.livello_attuale = match.livello_ripartito;
-          });
-        }
-      } catch(e) { console.warn('[caricaGiacenzeStazione] ripartizione fallita per', prodottiKeys[pi], e); }
-    }
+    // NOTA (19/04/2026): rimosso blocco di ripartizione in memoria via pfData.
+    // Le cisterne a DB sono ora mantenute allineate al calcolato tramite
+    // agganci nei flussi (applicaUscitaCisterne su letture, DAS firmato, Ricevi,
+    // Distribuisci). Non serve piu' ricalcolare a runtime.
 
     Object.entries(perProdotto).forEach(([prodNome, gruppo]) => {
       const prodInfo = cacheProdotti.find(p => p.nome === prodNome);
