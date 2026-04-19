@@ -11,8 +11,11 @@ async function caricaUnificata() {
   if (!el) return;
   el.innerHTML = '<div class="loading" style="padding:24px">Caricamento dati...</div>';
 
-  var limDate = new Date(); limDate.setDate(limDate.getDate() - 90);
-  var limISO = limDate.toISOString().split('T')[0];
+  // Finestra generosa: dal 1/1 dell'anno scorso fino a oggi.
+  // Il limite di 90 giorni tagliava le letture di gennaio e rendeva impossibile calcolare
+  // il delta del primo giorno utile (la "giorno prec." non era nella finestra).
+  var annoCorr = new Date().getFullYear();
+  var limISO = (annoCorr - 1) + '-01-01';
 
   var [lettRes, pompeRes, prezziRes, costiRes, cisRes, cmpRes] = await Promise.all([
     sb.from('stazione_letture').select('*').gte('data', limISO).order('data', { ascending: false }),
