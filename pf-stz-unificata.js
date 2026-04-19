@@ -339,9 +339,9 @@ function _uniRenderPerPompa(data) {
       html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#f0f0f0;letter-spacing:3px">' + precRaw + '</span></div></div>';
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600">Oggi</div>';
       html += '<input type="number" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" value="' + oggiVal + '" placeholder="00000000" step="0.01" max="99999999" oninput="_uniMarkDirty();_uniCalcolaLive()" style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;padding:8px 12px;border:none;border-radius:8px;background:#1a1a1a;color:#7CFC00;width:200px;max-width:100%;text-align:left;letter-spacing:3px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)" /></div>';
-      // Litri erogati (grande, colore prodotto) - popolato da _uniCalcolaLive
+      // Litri erogati (grande, colore prodotto su sfondo scuro per contrasto)
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Litri erogati</div>';
-      html += '<div id="uni-litri-' + pompa.id + '" style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:' + colore + ';padding:8px 0">—</div></div>';
+      html += '<div id="uni-litri-' + pompa.id + '" style="background:#2a2a2a;border-radius:8px;padding:8px 14px;display:inline-block;font-family:var(--font-mono);font-size:28px;font-weight:800;color:' + colore + ';box-shadow:inset 0 2px 4px rgba(0,0,0,0.3)">—</div></div>';
       html += '</div>';
 
       // Box calcolo LIVE (popolato da _uniCalcolaLive) - mostra solo euro + dettaglio cambio prezzo
