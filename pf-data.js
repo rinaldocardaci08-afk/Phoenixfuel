@@ -293,8 +293,28 @@ window.pfData = {
       }
     }
 
-    var calcolata = Math.round(iniziale + entrate - uscite);
-    return { iniziale: iniziale, entrate: Math.round(entrate), uscite: Math.round(uscite), calcolata: calcolata, fonteIniziale: fonteIniziale };
+    // 3. Rettifiche confermate [01/01, data] — NUOVA CASCATA 19/04/2026
+    // Le rettifiche (manuali o da chiusura mese) modificano la giacenza calcolata:
+    //   differenza > 0 (eccedenza) → aumenta giacenza
+    //   differenza < 0 (calo/ammanco) → diminuisce giacenza
+    // Causali incluse: cali_viaggio, cali_tecnici, eccedenze_viaggio, scatti_vuoto,
+    // manuale, altro. Giacenza_rilevata NON entra qui (solo informativa).
+    var tipoRett = sede === 'deposito_vibo' ? 'deposito' : 'stazione';
+    var rettRes = await sb.from('rettifiche_inventario')
+      .select('differenza,data,causale,origine')
+      .eq('tipo', tipoRett).eq('prodotto', prodotto).eq('confermata', true)
+      .gte('data', inizioAnno).lte('data', data);
+    var rettifiche = (rettRes.data || []).reduce(function(s,r){ return s + Number(r.differenza || 0); }, 0);
+
+    var calcolata = Math.round(iniziale + entrate - uscite + rettifiche);
+    return {
+      iniziale: iniziale,
+      entrate: Math.round(entrate),
+      uscite: Math.round(uscite),
+      rettifiche: Math.round(rettifiche),
+      calcolata: calcolata,
+      fonteIniziale: fonteIniziale
+    };
   }
 
 };
