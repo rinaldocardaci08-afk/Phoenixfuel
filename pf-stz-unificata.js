@@ -248,25 +248,20 @@ function _uniRenderPerPompa(data) {
   var totBenzina = { litri: 0, euro: 0, marg: 0 };
 
   // Determina lo STATO della giornata:
-  // - 'editabile' : primo giorno da compilare OPPURE giorno con letture parziali (non tutte le pompe)
-  // - 'storico'   : giorno con letture complete (tutte le pompe salvate)
+  // - 'editabile' : giorno con letture (complete o parziali) OPPURE primo giorno da compilare
+  //                 => tutti i contatori SEMPRE modificabili
   // - 'futuro'    : data successiva al primoGiornoDaCompilare e senza letture -> consultabile, non editabile
   var statoGiorno;
   var numLetture = lettureGiorno.length;
   var nPompeTot = m.pompe.length;
   var pompeConLettura = {};
   lettureGiorno.forEach(function(l) { pompeConLettura[l.pompa_id] = l; });
-  var lettureComplete = numLetture >= nPompeTot;
 
-  if (lettureComplete) {
-    statoGiorno = 'storico'; // tutte le pompe hanno lettura => vista storico con edit di prezzi/costi
-  } else if (data === m.primoGiornoDaCompilare || (numLetture > 0 && !lettureComplete)) {
-    // Primo giorno da compilare OPPURE giorno con letture parziali (devi poter completare)
+  if (numLetture > 0 || data === m.primoGiornoDaCompilare) {
+    // Qualsiasi giorno con letture (anche una) oppure il primo da compilare = sempre editabile
     statoGiorno = 'editabile';
-  } else if (data > m.primoGiornoDaCompilare) {
-    statoGiorno = 'futuro'; // giorno futuro non compilabile ma consultabile
   } else {
-    statoGiorno = 'futuro'; // passato senza letture: trattalo come vista vuota (non si compila da qui)
+    statoGiorno = 'futuro'; // giorno senza letture, non il primo da compilare: consultabile ma non editabile
   }
 
   // Caso FUTURO: giorni futuri/vuoti senza letture, mostra pompe VUOTE non editabili, senza banner di blocco
@@ -281,12 +276,21 @@ function _uniRenderPerPompa(data) {
     return;
   }
 
-  // Caso EDITABILE: giorno da compilare (anche con letture parziali), input attivi per TUTTE le pompe
+  // Caso EDITABILE: input attivi per TUTTE le pompe
   if (statoGiorno === 'editabile') {
-    var messaggio = numLetture > 0
-      ? '<strong>Completa i dati del giorno</strong><br><span style="font-size:12px">Mancano letture per alcune pompe. Puoi anche correggere quelle gia\' salvate — verranno sovrascritte.</span>'
-      : '<strong>Compila i dati di oggi</strong><br><span style="font-size:12px">Inserisci contatori, prezzo di vendita e costo per ciascun prodotto. I litri erogati si calcolano come differenza vs giorno precedente.</span>';
-    html += '<div style="background:#E6F1FB;border-left:4px solid #378ADD;border-radius:8px;padding:12px 16px;margin-bottom:14px;color:#0C447C">' + messaggio + '</div>';
+    var lettureComplete = numLetture >= nPompeTot;
+    var messaggio;
+    if (lettureComplete) {
+      messaggio = '<strong>Giornata compilata</strong><br><span style="font-size:12px">Tutti i contatori sono salvati. Puoi correggerli se necessario — il Salva sovrascrivera\' i valori esistenti.</span>';
+    } else if (numLetture > 0) {
+      messaggio = '<strong>Completa i dati del giorno</strong><br><span style="font-size:12px">Mancano letture per alcune pompe. Puoi anche correggere quelle gia\' salvate — verranno sovrascritte.</span>';
+    } else {
+      messaggio = '<strong>Compila i dati di oggi</strong><br><span style="font-size:12px">Inserisci contatori, prezzo di vendita e costo per ciascun prodotto. I litri erogati si calcolano come differenza vs giorno precedente.</span>';
+    }
+    var bannerColor = lettureComplete ? '#EAF3DE' : '#E6F1FB';
+    var bannerBorder = lettureComplete ? '#639922' : '#378ADD';
+    var bannerText = lettureComplete ? '#27500A' : '#0C447C';
+    html += '<div style="background:' + bannerColor + ';border-left:4px solid ' + bannerBorder + ';border-radius:8px;padding:12px 16px;margin-bottom:14px;color:' + bannerText + '">' + messaggio + '</div>';
 
     m.pompe.forEach(function(pompa) {
       var _pi = cacheProdotti.find(function(pp) { return pp.nome === pompa.prodotto; });
