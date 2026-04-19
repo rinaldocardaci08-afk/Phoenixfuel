@@ -74,39 +74,11 @@ async function caricaDeposito() {
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo').order('tipo').order('nome');
   if (!cisterne) return;
 
-  // ═══════════════════════════════════════════════════════════════════
-  // ALLINEAMENTO IN MEMORIA al calcolo canonico pfData.getGiacenzaAllaData
-  // Comandamento: giacenza = iniziale + entrate − uscite.
-  // cisterne.livello_attuale sul DB può essere disallineata (bug noto),
-  // quindi qui lo sovrascriviamo in memoria con il calcolato per prodotto.
-  // Distribuiamo il totale per prodotto sulle cisterne del prodotto in
-  // proporzione al loro livello_attuale DB (così almeno il peso relativo
-  // tra cisterne dello stesso prodotto è preservato).
-  // ═══════════════════════════════════════════════════════════════════
-  try {
-    if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
-      var oggi = new Date().toISOString().split('T')[0];
-      var prodottiUnici = [...new Set(cisterne.map(function(c) { return c.prodotto; }))];
-      for (var pi = 0; pi < prodottiUnici.length; pi++) {
-        var prod = prodottiUnici[pi];
-        var giac = await pfData.getGiacenzaAllaData('deposito_vibo', prod, oggi);
-        var calcTot = giac.calcolata;
-        var cisDelProd = cisterne.filter(function(c) { return c.prodotto === prod; });
-        var sommaDb = cisDelProd.reduce(function(s,c) { return s + Number(c.livello_attuale || 0); }, 0);
-        if (sommaDb > 0) {
-          cisDelProd.forEach(function(c) {
-            var quota = Number(c.livello_attuale || 0) / sommaDb;
-            c.livello_attuale = Math.round(calcTot * quota);
-          });
-        } else if (cisDelProd.length > 0) {
-          var quotaEqua = Math.round(calcTot / cisDelProd.length);
-          cisDelProd.forEach(function(c) { c.livello_attuale = quotaEqua; });
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[caricaDeposito] allineamento calcolato fallito, uso DB:', e);
-  }
+  // NOTA (19/04/2026): rimosso blocco di allineamento proporzionale in memoria.
+  // Le cisterne a DB sono ora mantenute allineate al calcolato pfData tramite
+  // i nuovi agganci (applicaUscitaCisterne, aggiornaCisterna, DAS firmato).
+  // Non serve piu' ricalcolare a runtime, quindi carico senza query sequenziali
+  // che rallentavano l'apertura della sezione.
 
   // Raggruppa cisterne per tipo
   const tipi = [...new Set(cisterne.map(c => c.tipo))];
@@ -230,10 +202,30 @@ async function caricaDeposito() {
 // Distribuisce il totale calcolato proporzionalmente sulle cisterne
 // del prodotto (preserva il peso relativo tra cisterne).
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// pfDepositoRicalcolaCisterne — DISATTIVATO (19/04/2026)
+// ═══════════════════════════════════════════════════════════════════
+// Era un auto-heal che ridistribuiva i litri sulle cisterne a cascata
+// 1→2→3 in base al calcolato pfData. Causava:
+//   1) sovrascrittura del Distribuisci manuale dell'operatore
+//   2) rallentamento significativo delle viste (query pfData + loop update)
+//
+// Ora i flussi scrivono direttamente sulle cisterne secondo la loro
+// regola fisica (applicaUscitaCisterne + aggiornaCisterna + DAS firmato),
+// quindi il DB resta allineato senza bisogno di auto-heal.
+//
+// Versione forzata disponibile per manutenzione: pfDepositoRicalcolaCisterneForzato.
+// ═══════════════════════════════════════════════════════════════════
 async function pfDepositoRicalcolaCisterne(prodotto) {
+  // NO-OP: rispetto lo stato DB, il Distribuisci manuale non viene piu' toccato.
+  return;
+}
+
+// Versione forzata, NON chiamata in automatico, disponibile per manutenzione
+async function pfDepositoRicalcolaCisterneForzato(prodotto) {
   if (!prodotto) return;
   if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
-    console.warn('[pfDepositoRicalcolaCisterne] pfData non disponibile, skip');
+    console.warn('[pfDepositoRicalcolaCisterneForzato] pfData non disponibile, skip');
     return;
   }
   try {
@@ -252,13 +244,11 @@ async function pfDepositoRicalcolaCisterne(prodotto) {
     }, 0);
     var delta = totCalc - Math.round(sommaDb);
     if (delta === 0) {
-      console.log('[pfDepositoRicalcolaCisterne] ✓ ' + prodotto + ' già allineato (' + totCalc + ' L)');
+      console.log('[pfDepositoRicalcolaCisterneForzato] ✓ ' + prodotto + ' già allineato (' + totCalc + ' L)');
       return;
     }
 
     // Applica delta a CASCATA cisterna 1 → 2 → 3.
-    // Delta positivo: riempie da cisterna 1 verso le successive (rispetta capacita_max).
-    // Delta negativo: scarica da cisterna 1 verso le successive (mai sotto 0).
     var residuo = delta;
     var modifiche = [];
     for (var i = 0; i < cisterne.length && residuo !== 0; i++) {
@@ -283,11 +273,11 @@ async function pfDepositoRicalcolaCisterne(prodotto) {
       }).eq('id', c.id);
       modifiche.push(c.nome + ': ' + Math.round(liv) + '→' + nuovo);
     }
-    var msg = '[pfDepositoRicalcolaCisterne] ✓ ' + prodotto + ' delta ' + (delta>=0?'+':'') + delta + ' L (tot ' + totCalc + ') | ' + modifiche.join(', ');
+    var msg = '[pfDepositoRicalcolaCisterneForzato] ✓ ' + prodotto + ' delta ' + (delta>=0?'+':'') + delta + ' L (tot ' + totCalc + ') | ' + modifiche.join(', ');
     if (residuo !== 0) msg += ' ⚠️ residuo non assorbibile: ' + residuo + ' L';
     console.log(msg);
   } catch (e) {
-    console.warn('[pfDepositoRicalcolaCisterne] errore (non bloccante):', e);
+    console.warn('[pfDepositoRicalcolaCisterneForzato] errore (non bloccante):', e);
   }
 }
 
