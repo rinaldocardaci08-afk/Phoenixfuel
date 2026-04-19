@@ -29,6 +29,10 @@ async function caricaHome() {
   } else {
     if (panelOnline) panelOnline.style.display = 'none';
   }
+
+  // Alert ordini in sospeso (DAS firmato ma non ancora ricevuto alla destinazione)
+  await _caricaAlertOrdiniSospesi();
+
   var container = document.getElementById('home-feed');
   if (!container) return;
   container.innerHTML = '<div class="loading">Caricamento bacheca...</div>';
@@ -632,4 +636,78 @@ async function toggleTimerPost(id, nuovoStato) {
   await sb.from('bacheca_post').update({ contenuto: JSON.stringify(td), updated_at: new Date().toISOString() }).eq('id', id);
   toast(nuovoStato ? '▶ Contatore riavviato' : '⏸ Contatore stoppato');
   caricaHome();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ALERT ORDINI IN SOSPESO (DAS firmato ma non ricevuto)
+// ══════════════════════════════════════════════════════════════════
+// Mostra un banner rosso fisso in home se ci sono:
+// - autoconsumo con das_firmato_url valorizzato e caricato_deposito=false
+// - stazione_servizio (fornitore Phoenix) con das_firmato_url valorizzato
+//   e ricevuto_stazione=false
+// I litri sono gia' usciti dal deposito ma non ancora ricevuti a destinazione.
+// Scompare automaticamente quando l'operatore preme "Ricevi" sul lato giusto.
+async function _caricaAlertOrdiniSospesi() {
+  var container = document.getElementById('home-alert-sospesi');
+  if (!container) {
+    // Crea il container se non esiste, subito prima di #home-feed
+    var feed = document.getElementById('home-feed');
+    if (!feed || !feed.parentNode) return;
+    container = document.createElement('div');
+    container.id = 'home-alert-sospesi';
+    container.style.marginBottom = '16px';
+    feed.parentNode.insertBefore(container, feed);
+  }
+
+  try {
+    // Query: ordini autoconsumo + stazione_servizio Phoenix con DAS firmato ma non ricevuti
+    var { data: ordini, error } = await sb.from('ordini')
+      .select('id,tipo_ordine,prodotto,litri,data,fornitore,cliente,das_firmato_url,ricevuto_stazione,caricato_deposito')
+      .in('tipo_ordine', ['autoconsumo', 'stazione_servizio'])
+      .not('das_firmato_url', 'is', null)
+      .neq('das_firmato_url', '')
+      .neq('stato', 'annullato');
+    if (error) { container.innerHTML = ''; return; }
+
+    // Filtra: solo quelli davvero in sospeso (non ancora ricevuti)
+    var sospesi = (ordini || []).filter(function(o) {
+      if (o.tipo_ordine === 'autoconsumo') return !o.caricato_deposito;
+      if (o.tipo_ordine === 'stazione_servizio') {
+        var forn = (o.fornitore || '').toLowerCase();
+        // Solo Phoenix (smistamenti interni); gli arrivi diretti da Eni/Ludoil non contano
+        return forn.indexOf('phoenix') >= 0 && !o.ricevuto_stazione;
+      }
+      return false;
+    });
+
+    if (!sospesi.length) { container.innerHTML = ''; return; }
+
+    // Raggruppa per tipo per messaggio piu' chiaro
+    var nAuto = sospesi.filter(function(o){ return o.tipo_ordine === 'autoconsumo'; }).length;
+    var nStaz = sospesi.filter(function(o){ return o.tipo_ordine === 'stazione_servizio'; }).length;
+    var totLitri = sospesi.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+
+    var parti = [];
+    if (nAuto > 0) parti.push(nAuto + (nAuto === 1 ? ' ordine autoconsumo' : ' ordini autoconsumo'));
+    if (nStaz > 0) parti.push(nStaz + (nStaz === 1 ? ' ordine stazione' : ' ordini stazione'));
+
+    var html = '<div style="background:#FEE2E2;border:2px solid #DC2626;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 8px rgba(220,38,38,0.15)">';
+    html += '<div style="font-size:24px;line-height:1">🔴</div>';
+    html += '<div style="flex:1">';
+    html += '<div style="font-weight:700;color:#991B1B;font-size:14px;margin-bottom:4px">Ordini in sospeso — litri usciti dal deposito, in attesa di ricezione</div>';
+    html += '<div style="font-size:12px;color:#7F1D1D">' + parti.join(' + ') + ' per un totale di <strong>' + totLitri.toLocaleString('it-IT') + ' L</strong></div>';
+    // Dettaglio (massimo 5 per non sovraffollare)
+    var dettaglio = sospesi.slice(0, 5).map(function(o) {
+      var dest = o.tipo_ordine === 'autoconsumo' ? 'Autoconsumo' : 'Stazione';
+      var dataFmt = o.data ? new Date(o.data + 'T12:00:00').toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'}) : '';
+      return '• ' + dataFmt + ' → ' + dest + ': ' + Number(o.litri).toLocaleString('it-IT') + ' L ' + o.prodotto;
+    }).join('<br>');
+    if (dettaglio) html += '<div style="font-size:11px;color:#7F1D1D;margin-top:6px;line-height:1.6">' + dettaglio + (sospesi.length > 5 ? '<br>• … e altri ' + (sospesi.length - 5) : '') + '</div>';
+    html += '</div>';
+    html += '</div>';
+    container.innerHTML = html;
+  } catch(e) {
+    console.warn('[_caricaAlertOrdiniSospesi] errore:', e);
+    container.innerHTML = '';
+  }
 }

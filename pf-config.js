@@ -615,6 +615,13 @@ async function applicaUscitaCisterne(sede, prodotto, litriUscita, pompaId) {
 // stato in ['confermato','in_consegna'], lo porta a 'consegnato'.
 // Non esclude ordini non-cliente: anche entrate deposito/stazione_servizio
 // con DAS firmato sono "consegnate" a tutti gli effetti.
+//
+// AGGANCIO CISTERNE (19/04/2026):
+// Per ordini 'stazione_servizio' (fornitore Phoenix) e 'autoconsumo', al
+// momento del DAS firmato il deposito si scarica FISICAMENTE (i litri sono
+// usciti col camion). L'ordine resta "in transito" finche' non viene ricevuto
+// alla stazione/autoconsumo. Anti-doppio-scarico: controllo in movimenti_cisterne
+// se esiste gia' un movimento 'uscita' per questo ordine, nel caso salto.
 async function _aggiornaStatoConsegnato(ordineId) {
   if (!ordineId) return;
   try {
@@ -624,7 +631,7 @@ async function _aggiornaStatoConsegnato(ordineId) {
       .in('stato', ['confermato', 'in_consegna'])
       .not('das_firmato_url', 'is', null)
       .neq('das_firmato_url', '')
-      .select('id,stato');
+      .select('id,stato,tipo_ordine,prodotto,litri,fornitore');
     if (error) {
       console.error('_aggiornaStatoConsegnato update fallito:', error);
       if (typeof toast === 'function') toast('Stato ordine non aggiornato: ' + error.message);
@@ -632,6 +639,40 @@ async function _aggiornaStatoConsegnato(ordineId) {
     }
     if (data && data.length) {
       console.log('Ordine ' + ordineId + ' → consegnato (confermato via UPDATE)');
+      // Aggancio scarico deposito per stazione_servizio e autoconsumo (se non gia' scaricato)
+      var ord = data[0];
+      var deveScaricare = false;
+      if (ord.tipo_ordine === 'autoconsumo') {
+        deveScaricare = true;
+      } else if (ord.tipo_ordine === 'stazione_servizio') {
+        var forn = (ord.fornitore || '').toLowerCase();
+        // Solo se il fornitore e' Phoenix (= smistamento interno dal deposito)
+        // Se il fornitore e' Eni/Ludoil/ecc., i litri arrivano direttamente alla stazione
+        // e non passano dal deposito, quindi non scarico nulla.
+        if (forn.indexOf('phoenix') >= 0) deveScaricare = true;
+      }
+      if (deveScaricare && typeof applicaUscitaCisterne === 'function') {
+        try {
+          // Anti-doppio-scarico: se esiste gia' un movimento 'uscita' per questo ordine, salto
+          var movRes = await sb.from('movimenti_cisterne').select('id')
+            .eq('ordine_id', ordineId).eq('tipo', 'uscita').limit(1);
+          if (movRes.data && movRes.data.length) {
+            console.log('[_aggiornaStatoConsegnato] ordine ' + ordineId + ' gia scaricato dal deposito, skip');
+          } else {
+            await applicaUscitaCisterne('deposito_vibo', ord.prodotto, Number(ord.litri || 0));
+            // Traccia il movimento per anti-doppio-scarico futuro
+            await sb.from('movimenti_cisterne').insert([{
+              ordine_id: ordineId,
+              tipo: 'uscita',
+              litri: Number(ord.litri || 0),
+              data: new Date().toISOString().split('T')[0],
+              note: 'Scarico automatico al DAS firmato (' + ord.tipo_ordine + ')'
+            }]);
+          }
+        } catch(eScarico) {
+          console.error('[_aggiornaStatoConsegnato] errore scarico deposito:', eScarico);
+        }
+      }
     }
   } catch(e) {
     console.warn('_aggiornaStatoConsegnato eccezione:', e);
