@@ -289,8 +289,8 @@ function _uniRenderPerPompa(data) {
   // Caso EDITABILE: giorno da compilare, input attivi per TUTTE le pompe
   if (statoGiorno === 'editabile') {
     html += '<div style="background:#E6F1FB;border-left:4px solid #378ADD;border-radius:8px;padding:12px 16px;margin-bottom:14px;color:#0C447C">';
-    html += '<strong>Inserisci i contatori di oggi</strong><br>';
-    html += '<span style="font-size:12px">Scrivi il valore attuale del totalizzatore di ciascuna pompa. I litri erogati verranno calcolati come differenza rispetto al giorno precedente.</span>';
+    html += '<strong>Compila i dati di oggi</strong><br>';
+    html += '<span style="font-size:12px">Inserisci contatori, prezzo di vendita e costo per ciascun prodotto. I litri erogati si calcolano come differenza vs giorno precedente.</span>';
     html += '</div>';
 
     m.pompe.forEach(function(pompa) {
@@ -305,9 +305,29 @@ function _uniRenderPerPompa(data) {
       }
       var precRaw = prec ? String(Math.round(Number(prec.lettura))) : '—';
 
+      // Prezzo/costo: eredita dal giorno precedente se presente (cosi' l'operatore trova
+      // un valore pre-compilato ragionevole). Se non c'e', placeholder CMP per il costo.
+      var prezzoSaved = Number(m.prezziMap[data + '_' + pompa.prodotto] || 0);
+      var costoSaved = Number(m.costiMap[data + '_' + pompa.prodotto] || 0);
+      // Fallback: prendi ultimo prezzo/costo disponibile del prodotto
+      if (!prezzoSaved) {
+        var chiavi = Object.keys(m.prezziMap).filter(function(k){ return k.endsWith('_' + pompa.prodotto); }).sort().reverse();
+        if (chiavi.length) prezzoSaved = Number(m.prezziMap[chiavi[0]] || 0);
+      }
+      if (!costoSaved) {
+        var chiaviC = Object.keys(m.costiMap).filter(function(k){ return k.endsWith('_' + pompa.prodotto); }).sort().reverse();
+        if (chiaviC.length) costoSaved = Number(m.costiMap[chiaviC[0]] || 0);
+      }
+      var prezzoVal = prezzoSaved > 0 ? prezzoSaved.toFixed(3) : '';
+      var costoVal = costoSaved > 0 ? costoSaved.toFixed(4) : '';
+      var cmpProd = m.cmpCorrente && m.cmpCorrente[pompa.prodotto] ? m.cmpCorrente[pompa.prodotto] : 0;
+      var costoPlaceholder = cmpProd > 0 ? cmpProd.toFixed(4) + ' (CMP)' : '';
+
       html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
       html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + '</span></div>';
-      html += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+
+      // Riga 1: Contatori
+      html += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
       // Giorno prec. (sola lettura)
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Giorno prec.</div>';
       html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#f0f0f0;letter-spacing:3px">' + precRaw + '</span></div></div>';
@@ -316,12 +336,24 @@ function _uniRenderPerPompa(data) {
       html += '<input type="number" step="1" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" oninput="_uniMarkDirty()" placeholder="0" style="background:#1a1a1a;border:0.5px solid #2a2a2a;border-radius:8px;padding:10px 12px;font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#7CFC00;letter-spacing:3px;width:200px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4);outline:none" />';
       html += '</div>';
       html += '</div>';
+
+      // Riga 2: Prezzo + Costo (sincronizzati per prodotto)
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border)">';
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita €/L IVA</div>';
+      html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\')" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:110px" />';
+      html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoSaved ? '€ ' + (prezzoSaved / 1.22).toFixed(4) + ' netto' : '') + '</div></div>';
+
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L netto</div>';
+      html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\')" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:130px" />';
+      html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (costoSaved ? '€ ' + (costoSaved * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
       html += '</div>';
+
+      html += '</div>'; // chiudi card pompa
     });
 
-    // Bottone salva sticky
+    // Bottone UNIFICATO salva tutto (contatori + prezzi + costi)
     html += '<div id="uni-salva-wrap" style="position:sticky;bottom:10px;background:var(--bg-card);padding:12px;border-radius:10px;border:0.5px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:14px">';
-    html += '<button id="uni-btn-salva" class="btn-primary" onclick="_uniSalvaLetture()" style="width:100%;padding:14px;font-size:15px;font-weight:600">💾 Salva letture ' + data + '</button>';
+    html += '<button id="uni-btn-salva" class="btn-primary" onclick="_uniSalvaTutto()" style="width:100%;padding:14px;font-size:15px;font-weight:600">💾 Salva giornata ' + data + ' (contatori + prezzi + costi)</button>';
     html += '</div>';
 
     el.innerHTML = html;
@@ -1095,5 +1127,127 @@ async function _uniSalvaPrezziCosti() {
 
   _uniData.dirty = false;
   toast('✅ Salvati ' + nPrezzi + ' prezzi e ' + nCosti + ' costi per il ' + data);
+  caricaUnificata();
+}
+
+// Salva TUTTO il giorno (contatori + prezzi + costi) in un solo passaggio
+async function _uniSalvaTutto() {
+  if (!_uniData) return;
+  var data = _uniData.dateUniche[_uniData.indice];
+  if (!data) return;
+
+  // ───── 1. Raccogli letture ─────
+  var inputs = document.querySelectorAll('.uni-lettura-input');
+  var daSalvareL = [];
+  for (var i = 0; i < inputs.length; i++) {
+    var inp = inputs[i];
+    var val = parseFloat(inp.value);
+    if (isNaN(val) || val <= 0) continue;
+    daSalvareL.push({
+      pompaId: inp.dataset.pompa,
+      prodotto: inp.dataset.prodotto,
+      valNuovo: val,
+      valGiornoPrec: Number(inp.dataset.prec || 0)
+    });
+  }
+
+  // ───── 2. Raccogli prezzi/costi ─────
+  var prezziMap = {}, costiMap = {};
+  document.querySelectorAll('.uni-prezzo-input').forEach(function(ip) {
+    var p = ip.dataset.prodotto;
+    var v = parseFloat(ip.value);
+    if (!isNaN(v) && v > 0 && prezziMap[p] === undefined) prezziMap[p] = v;
+  });
+  document.querySelectorAll('.uni-costo-input').forEach(function(ic) {
+    var p = ic.dataset.prodotto;
+    var v = parseFloat(ic.value);
+    if (!isNaN(v) && v > 0 && costiMap[p] === undefined) costiMap[p] = v;
+  });
+
+  // Se non c'e' nulla da salvare, esci
+  if (!daSalvareL.length && !Object.keys(prezziMap).length && !Object.keys(costiMap).length) {
+    toast('Nessun dato da salvare');
+    return;
+  }
+
+  // ───── 3. Validazioni letture ─────
+  if (daSalvareL.length) {
+    var lettureEsistenti = _uniData.lettureByData[data] || [];
+    if (lettureEsistenti.length > 0) {
+      if (!confirm('Dati gia' + "'" + ' presenti per il ' + data + '. Vuoi sovrascrivere?')) return;
+    }
+    for (var j = 0; j < daSalvareL.length; j++) {
+      var ds = daSalvareL[j];
+      if (ds.valGiornoPrec > 0 && ds.valNuovo < ds.valGiornoPrec) {
+        var nomeP = (_uniData.pompeMap[ds.pompaId] || {}).nome || 'pompa';
+        if (!confirm(nomeP + ': lettura (' + ds.valNuovo + ') inferiore al giorno prec. (' + ds.valGiornoPrec + '). Sovrascrivere comunque?')) return;
+      }
+    }
+  }
+
+  // ───── 4. Pre-save info per aggancio cisterne ─────
+  var infoPerCisterne = [];
+  if (daSalvareL.length) {
+    var existingLetture = _uniData.lettureByData[data] || [];
+    for (var k = 0; k < daSalvareL.length; k++) {
+      var d2 = daSalvareL[k];
+      var existingItem = existingLetture.find(function(l) { return l.pompa_id === d2.pompaId; });
+      infoPerCisterne.push({
+        pompaId: d2.pompaId, prodotto: d2.prodotto, valNuovo: d2.valNuovo,
+        valVecchioGiornoX: existingItem ? Number(existingItem.lettura) : null,
+        valGiornoPrec: d2.valGiornoPrec
+      });
+    }
+  }
+
+  // ───── 5. Esegui upsert ─────
+  var btn = document.getElementById('uni-btn-salva');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
+
+  var ops = [];
+  daSalvareL.forEach(function(ds) {
+    ops.push(sb.from('stazione_letture').upsert(
+      { pompa_id: ds.pompaId, data: data, lettura: ds.valNuovo, litri_prezzo_diverso: 0, prezzo_diverso: 0 },
+      { onConflict: 'pompa_id,data' }
+    ));
+  });
+  Object.keys(prezziMap).forEach(function(p) {
+    ops.push(sb.from('stazione_prezzi').upsert({ data: data, prodotto: p, prezzo_litro: prezziMap[p] }, { onConflict: 'data,prodotto' }));
+  });
+  Object.keys(costiMap).forEach(function(p) {
+    ops.push(sb.from('stazione_costi').upsert({ data: data, prodotto: p, costo_litro: costiMap[p] }, { onConflict: 'data,prodotto' }));
+  });
+
+  var results = await Promise.all(ops);
+  var errore = results.find(function(r) { return r.error; });
+  if (errore) {
+    toast('Errore: ' + errore.error.message);
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salva giornata ' + data; }
+    return;
+  }
+
+  // ───── 6. Aggancio cisterne (solo per letture nuove) ─────
+  try {
+    for (var h = 0; h < infoPerCisterne.length; h++) {
+      var ic = infoPerCisterne[h];
+      var deltaToApply = 0;
+      if (ic.valVecchioGiornoX !== null && ic.valVecchioGiornoX !== undefined) {
+        deltaToApply = ic.valNuovo - ic.valVecchioGiornoX;
+      } else if (ic.valGiornoPrec > 0) {
+        deltaToApply = ic.valNuovo - ic.valGiornoPrec;
+      }
+      if (deltaToApply > 0 && typeof applicaUscitaCisterne === 'function') {
+        await applicaUscitaCisterne('stazione_oppido', ic.prodotto, deltaToApply, ic.pompaId);
+      }
+    }
+  } catch(e) { console.error('[_uniSalvaTutto] aggancio cisterne errore (non bloccante):', e); }
+
+  _uniData.dirty = false;
+  var msg = '✅ Salvati';
+  if (daSalvareL.length) msg += ' ' + daSalvareL.length + ' contatori';
+  if (Object.keys(prezziMap).length) msg += ', ' + Object.keys(prezziMap).length + ' prezzi';
+  if (Object.keys(costiMap).length) msg += ', ' + Object.keys(costiMap).length + ' costi';
+  toast(msg + ' per il ' + data);
+
   caricaUnificata();
 }
