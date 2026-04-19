@@ -88,8 +88,15 @@ async function caricaUnificata() {
   // Aggiungi il primo giorno da compilare al set dateUniche se non presente
   if (dateUniche.indexOf(primoGiornoDaCompilare) < 0) {
     dateUniche.push(primoGiornoDaCompilare);
-    dateUniche.sort().reverse();
   }
+  // Aggiungi DOMANI (giorno dopo oggi) come giorno futuro consultabile
+  var domani = new Date(_oggiISO + 'T12:00:00');
+  domani.setDate(domani.getDate() + 1);
+  var domaniISO = domani.toISOString().split('T')[0];
+  if (dateUniche.indexOf(domaniISO) < 0) {
+    dateUniche.push(domaniISO);
+  }
+  dateUniche.sort().reverse();
 
   // CMP corrente per prodotto (media ponderata cisterne)
   var cmpCorrente = {};
@@ -143,20 +150,6 @@ function _uniGiorno(dir) {
   if (_uniData.dirty) {
     if (!confirm('Hai modifiche non salvate. Vuoi perderle?')) return;
     _uniData.dirty = false;
-  }
-
-  // Blocco navigazione "avanti": se siamo sul giorno corrente da compilare e vuoi andare
-  // a un giorno successivo (dir = -1 perche' dateUniche e' DESC), blocca se non hai salvato
-  // quel giorno oppure se vorresti saltare un giorno mancante.
-  if (dir === -1) {
-    var dataCorrente = _uniData.dateUniche[_uniData.indice];
-    // Se la data corrente e' il primo giorno da compilare e non ci sono ancora letture,
-    // non si puo' andare avanti
-    var letteCorrente = (_uniData.lettureByData[dataCorrente] || []).length;
-    if (dataCorrente === _uniData.primoGiornoDaCompilare && letteCorrente < _uniData.pompe.length) {
-      toast('Salva prima le letture del ' + dataCorrente);
-      return;
-    }
   }
 
   _uniRenderGiorno(nuovoIdx);
@@ -219,6 +212,7 @@ function _uniRenderGiorno(idx) {
     var diff = Math.round((sel - oggi) / 86400000);
     if (diff === 0) { elBadge.textContent = 'OGGI'; elBadge.style.background = '#D85A30'; elBadge.style.color = '#fff'; elBadge.style.display = 'inline-block'; }
     else if (diff === -1) { elBadge.textContent = 'IERI'; elBadge.style.background = '#BA7517'; elBadge.style.color = '#fff'; elBadge.style.display = 'inline-block'; }
+    else if (diff === 1) { elBadge.textContent = 'DOMANI'; elBadge.style.background = '#378ADD'; elBadge.style.color = '#fff'; elBadge.style.display = 'inline-block'; }
     else { elBadge.style.display = 'none'; }
   }
   if (elDay) {
@@ -254,28 +248,29 @@ function _uniRenderPerPompa(data) {
   var totBenzina = { litri: 0, euro: 0, marg: 0 };
 
   // Determina lo STATO della giornata:
-  // - 'editabile'       : data == primoGiornoDaCompilare e nessuna lettura completa
-  // - 'storico'         : data ha letture (tutte o parziali) - mostra i dati, editabili
-  // - 'bloccato'        : data e' FUTURA (dopo primoGiornoDaCompilare) e senza letture
+  // - 'editabile' : primo giorno da compilare OPPURE giorno con letture parziali (non tutte le pompe)
+  // - 'storico'   : giorno con letture complete (tutte le pompe salvate)
+  // - 'futuro'    : data successiva al primoGiornoDaCompilare e senza letture -> consultabile, non editabile
   var statoGiorno;
   var numLetture = lettureGiorno.length;
   var nPompeTot = m.pompe.length;
-  if (numLetture > 0) {
-    statoGiorno = 'storico'; // esiste almeno una lettura => si vede come storico
-  } else if (data === m.primoGiornoDaCompilare) {
-    statoGiorno = 'editabile'; // e' oggi/primo giorno da riempire
+  var pompeConLettura = {};
+  lettureGiorno.forEach(function(l) { pompeConLettura[l.pompa_id] = l; });
+  var lettureComplete = numLetture >= nPompeTot;
+
+  if (lettureComplete) {
+    statoGiorno = 'storico'; // tutte le pompe hanno lettura => vista storico con edit di prezzi/costi
+  } else if (data === m.primoGiornoDaCompilare || (numLetture > 0 && !lettureComplete)) {
+    // Primo giorno da compilare OPPURE giorno con letture parziali (devi poter completare)
+    statoGiorno = 'editabile';
   } else if (data > m.primoGiornoDaCompilare) {
-    statoGiorno = 'bloccato'; // giorno futuro non compilabile
+    statoGiorno = 'futuro'; // giorno futuro non compilabile ma consultabile
   } else {
-    statoGiorno = 'storico'; // passato vuoto (strano, ma non editabile)
+    statoGiorno = 'futuro'; // passato senza letture: trattalo come vista vuota (non si compila da qui)
   }
 
-  // Caso BLOCCATO: giorni futuri senza letture, mostra messaggio e pompe VUOTE non editabili
-  if (statoGiorno === 'bloccato') {
-    html += '<div style="background:#FAEEDA;border-left:4px solid #BA7517;border-radius:8px;padding:12px 16px;margin-bottom:14px;color:#633806">';
-    html += '<strong>Giorno non ancora compilabile</strong><br>';
-    html += '<span style="font-size:12px">Prima compila le letture del <strong>' + m.primoGiornoDaCompilare + '</strong>. Non puoi saltare giorni.</span>';
-    html += '</div>';
+  // Caso FUTURO: giorni futuri/vuoti senza letture, mostra pompe VUOTE non editabili, senza banner di blocco
+  if (statoGiorno === 'futuro') {
     m.pompe.forEach(function(pompa) {
       var _pi = cacheProdotti.find(function(pp) { return pp.nome === pompa.prodotto; });
       var colore = _pi ? _pi.colore : '#888';
@@ -286,12 +281,12 @@ function _uniRenderPerPompa(data) {
     return;
   }
 
-  // Caso EDITABILE: giorno da compilare, input attivi per TUTTE le pompe
+  // Caso EDITABILE: giorno da compilare (anche con letture parziali), input attivi per TUTTE le pompe
   if (statoGiorno === 'editabile') {
-    html += '<div style="background:#E6F1FB;border-left:4px solid #378ADD;border-radius:8px;padding:12px 16px;margin-bottom:14px;color:#0C447C">';
-    html += '<strong>Compila i dati di oggi</strong><br>';
-    html += '<span style="font-size:12px">Inserisci contatori, prezzo di vendita e costo per ciascun prodotto. I litri erogati si calcolano come differenza vs giorno precedente.</span>';
-    html += '</div>';
+    var messaggio = numLetture > 0
+      ? '<strong>Completa i dati del giorno</strong><br><span style="font-size:12px">Mancano letture per alcune pompe. Puoi anche correggere quelle gia\' salvate — verranno sovrascritte.</span>'
+      : '<strong>Compila i dati di oggi</strong><br><span style="font-size:12px">Inserisci contatori, prezzo di vendita e costo per ciascun prodotto. I litri erogati si calcolano come differenza vs giorno precedente.</span>';
+    html += '<div style="background:#E6F1FB;border-left:4px solid #378ADD;border-radius:8px;padding:12px 16px;margin-bottom:14px;color:#0C447C">' + messaggio + '</div>';
 
     m.pompe.forEach(function(pompa) {
       var _pi = cacheProdotti.find(function(pp) { return pp.nome === pompa.prodotto; });
@@ -304,6 +299,13 @@ function _uniRenderPerPompa(data) {
         if (storPompa[k].data < data) { prec = storPompa[k]; break; }
       }
       var precRaw = prec ? String(Math.round(Number(prec.lettura))) : '—';
+
+      // Se la pompa ha gia' una lettura per questa data (caso parziale o correzione), pre-compila
+      var letturaOggiEsistente = pompeConLettura[pompa.id];
+      var oggiVal = letturaOggiEsistente ? String(Math.round(Number(letturaOggiEsistente.lettura))) : '';
+      var oggiBadge = letturaOggiEsistente
+        ? '<span style="font-size:9px;background:#639922;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px">SALVATA</span>'
+        : '<span style="font-size:9px;background:#E24B4A;color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px">DA INSERIRE</span>';
 
       // Prezzo/costo: eredita dal giorno precedente se presente (cosi' l'operatore trova
       // un valore pre-compilato ragionevole). Se non c'e', placeholder CMP per il costo.
@@ -331,9 +333,9 @@ function _uniRenderPerPompa(data) {
       // Giorno prec. (sola lettura)
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Giorno prec.</div>';
       html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#f0f0f0;letter-spacing:3px">' + precRaw + '</span></div></div>';
-      // Oggi (INPUT EDITABILE)
-      html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Oggi</div>';
-      html += '<input type="number" step="1" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" oninput="_uniMarkDirty()" placeholder="0" style="background:#1a1a1a;border:0.5px solid #2a2a2a;border-radius:8px;padding:10px 12px;font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#7CFC00;letter-spacing:3px;width:200px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4);outline:none" />';
+      // Oggi (INPUT EDITABILE - pre-compilato se esiste lettura parziale)
+      html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Oggi' + oggiBadge + '</div>';
+      html += '<input type="number" step="1" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" value="' + oggiVal + '" oninput="_uniMarkDirty()" placeholder="0" style="background:#1a1a1a;border:0.5px solid #2a2a2a;border-radius:8px;padding:10px 12px;font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#7CFC00;letter-spacing:3px;width:200px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4);outline:none" />';
       html += '</div>';
       html += '</div>';
 
