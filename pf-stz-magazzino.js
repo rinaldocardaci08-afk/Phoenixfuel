@@ -196,15 +196,12 @@ async function caricaGiacenzeStazione() {
     });
 
     // Applica ripartizione coerente con giacenza calcolata (fonte unica di verità)
-    // Per ogni prodotto richiama pfData.getRipartizioneCisterneStazione e sovrascrive livello_attuale
-    // con livello_ripartito. Niente più doppia contabilità DB vs calcolato.
     const prodottiKeys = Object.keys(perProdotto);
     for (let pi = 0; pi < prodottiKeys.length; pi++) {
       try {
         const prod = prodottiKeys[pi];
         const cisRipart = await pfData.getRipartizioneCisterneStazione(prod);
         if (cisRipart && cisRipart.length) {
-          // Allinea livello_attuale alla ripartizione calcolata
           perProdotto[prod].forEach(c => {
             const match = cisRipart.find(r => r.id === c.id);
             if (match) c.livello_attuale = match.livello_ripartito;
@@ -227,22 +224,45 @@ async function caricaGiacenzeStazione() {
         const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
         const cmp = Number(c.costo_medio||0);
         totG += livAtt;
-        cisHtml += '<div class="dep-cisterna' + (pct < 30 ? ' alert' : '') + '">' +
-          '<div class="dep-cisterna-name">' + c.nome + '</div>' +
-          cisternasvg(pct, colore) +
-          '<div class="dep-cisterna-litri">' + _sep(livAtt.toLocaleString('it-IT')) + ' L</div>' +
-          '<div class="dep-cisterna-pct">' + pct + '% · cap. ' + _sep(capMax.toLocaleString('it-IT')) + ' L</div>' +
-          (cmp > 0 ? '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmp.toFixed(4) + '</strong></div>' : '') +
+        // Estrai numero da nome (es "Benzina Staz. 1" → "1")
+        var matchNum = (c.nome || '').match(/(\d+)\s*$/);
+        var numCis = matchNum ? matchNum[1] : esc(c.nome || '');
+        var coloreTesto = typeof _testoSuColore === 'function' ? _testoSuColore(colore) : '#ffffff';
+        var labelColor = pct < 10 ? '#dc2626' : '#0f172a';
+        cisHtml += '<div class="dep-cisterna-v2' + (pct < 30 ? ' alert' : '') + '" style="--prod-color:' + colore + ';--prod-text:' + coloreTesto + '">' +
+          '<div class="hdr"><div class="badge">' + esc(prodNome) + '</div><div class="num">' + numCis + '</div></div>' +
+          '<div class="centro">' +
+            '<div class="tank-wrap">' + cisternasvg(pct, colore) + '</div>' +
+            '<div class="barra-wrap">' +
+              '<div class="barra">' + (pct > 0 ? '<div class="barra-fill" style="height:' + pct + '%"></div>' : '') + '</div>' +
+              '<div class="barra-label" style="bottom:' + pct + '%;color:' + labelColor + '">' + pct + '%</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="litri-wrap"><div class="litri-box"><span class="litri-valore">' + livAtt.toLocaleString('it-IT') + '</span><span class="litri-unita">L</span></div></div>' +
+          '<div class="info"><span class="pct">' + pct + '%</span> · cap. ' + capMax.toLocaleString('it-IT') + ' L</div>' +
+          (cmp > 0 ? '<div class="cmp">CMP € ' + cmp.toFixed(4) + '</div>' : '') +
           '</div>';
       });
 
       const subLabel = nCis + (nCis === 1 ? ' cisterna' : ' cisterne') + ' · ' + _sep(capGruppo.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
-      // CMP medio ponderato per il gruppo
       let cmpGruppo = 0, valGruppo = 0;
       gruppo.forEach(c => { valGruppo += Number(c.livello_attuale||0) * Number(c.costo_medio||0); });
       cmpGruppo = totG > 0 ? valGruppo / totG : 0;
-      const cmpLabel = cmpGruppo > 0 ? '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
-      cisHtmlAll += '<div style="margin-bottom:12px"><div class="dep-product-header"><div class="dep-product-dot" style="background:' + colore + '"></div><div><div class="dep-product-title">' + esc(prodNome) + '</div><div class="dep-product-sub">' + subLabel + '</div>' + cmpLabel + '</div><div style="display:flex;align-items:center;gap:10px">' + (nCis > 1 ? '<button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC;white-space:nowrap" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')">⚖️ Distribuisci</button>' : '') + '<div class="dep-product-total">' + fmtL(totG) + '</div></div></div><div class="dep-cisterne-grid">' + cisHtml + '</div></div>';
+      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong></div>' : '';
+      const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
+      const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
+      const pctTotHtml = '<div class="tot-pct"><span class="val">' + pctGruppo + '%</span> della capacità totale</div>';
+      cisHtmlAll += '<div class="dep-blocco-v2" style="--prod-color:' + colore + '">' +
+        '<div class="dep-product-header-v2">' +
+          '<div class="titolo-row"><div class="pallino"></div><div class="titolo">' + esc(prodNome) + '</div></div>' +
+          '<div class="sub">' + subLabel + '</div>' +
+          cmpLabel +
+          '<div class="azioni">' + distBtn +
+            '<div class="tot-wrap"><div class="tot-litri">' + totG.toLocaleString('it-IT') + '<span class="u">L</span></div>' + pctTotHtml + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="dep-cisterne-grid-v2">' + cisHtml + '</div>' +
+        '</div>';
     });
   } else {
     cisHtmlAll = '<div class="loading">Nessuna cisterna configurata per la stazione</div>';
