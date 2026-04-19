@@ -327,39 +327,45 @@ function _uniRenderPerPompa(data) {
       var costoPlaceholder = cmpProd > 0 ? cmpProd.toFixed(4) + ' (CMP)' : '0.000000';
 
       // ──── CARD POMPA (stile identico tab Totalizzatori originale) ────
+      var rigaCpVisibile = (litriPdSaved > 0 || prezzoPdSaved > 0); // se gia' valorizzata, mostra subito
       html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
-      // Header
-      html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + '</span></div>';
+      // Header con bottone CAMBIO PREZZO a destra
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted)">' + esc(pompa.prodotto) + '</span>';
+      html += '<button id="uni-cp-btn-' + pompa.id + '" onclick="_uniToggleCambioPrezzo(\'' + pompa.id + '\')" style="margin-left:auto;padding:6px 12px;background:' + (rigaCpVisibile ? '#F0D080' : '#FFF8E1') + ';border:1px solid #BA7517;border-radius:20px;cursor:pointer;font-size:12px;font-weight:700;color:#8B6914;white-space:nowrap">⚡ CAMBIO PREZZO</button>';
+      html += '</div>';
       // Contatori meccanici
       html += '<div style="display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap">';
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Giorno prec.</div>';
       html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#f0f0f0;letter-spacing:3px">' + precRaw + '</span></div></div>';
       html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:600">Oggi</div>';
-      html += '<input type="number" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" value="' + oggiVal + '" placeholder="00000000" step="0.01" max="99999999" oninput="_uniCalcolaLive()" style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;padding:8px 12px;border:none;border-radius:8px;background:#1a1a1a;color:#7CFC00;width:200px;max-width:100%;text-align:left;letter-spacing:3px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)" /></div>';
+      html += '<input type="number" class="uni-lettura-input" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" data-prec="' + (prec ? prec.lettura : 0) + '" value="' + oggiVal + '" placeholder="00000000" step="0.01" max="99999999" oninput="_uniMarkDirty();_uniCalcolaLive()" style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;padding:8px 12px;border:none;border-radius:8px;background:#1a1a1a;color:#7CFC00;width:200px;max-width:100%;text-align:left;letter-spacing:3px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)" /></div>';
+      // Litri erogati (grande, colore prodotto) - popolato da _uniCalcolaLive
+      html += '<div style="flex:1;min-width:160px"><div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Litri erogati</div>';
+      html += '<div id="uni-litri-' + pompa.id + '" style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:' + colore + ';padding:8px 0">—</div></div>';
       html += '</div>';
 
-      // Box calcolo LIVE grande (popolato da _uniCalcolaLive)
+      // Box calcolo LIVE (popolato da _uniCalcolaLive) - mostra solo euro + dettaglio cambio prezzo
       html += '<div id="uni-calc-' + pompa.id + '" style="padding:10px 14px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px;font-size:14px"></div>';
 
-      // Prezzo + Costo + Margine (riga editabile)
+      // Prezzo + Costo + Margine (riga editabile) - costo in rosso
       html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px">';
       html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Prezzo vendita €/L IVA</div>';
       html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\');_uniCalcolaLive()" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%" />';
       html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">' + (prezzoSaved ? '€ ' + (prezzoSaved / 1.22).toFixed(4) + ' netto' : '') + '</div></div>';
-      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Costo €/L netto</div>';
-      html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\');_uniCalcolaLive()" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%" />';
-      html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">' + (costoSaved ? '€ ' + (costoSaved * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
+      html += '<div><div style="font-size:11px;color:#B91C1C;text-transform:uppercase;margin-bottom:4px;font-weight:700">Costo €/L netto</div>';
+      html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\');_uniCalcolaLive()" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:700;padding:6px 10px;border:1px solid #B91C1C;border-radius:6px;background:#FEF2F2;color:#991B1B;width:100%" />';
+      html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:#B91C1C;margin-top:2px">' + (costoSaved ? '€ ' + (costoSaved * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
       html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Margine €/L</div>';
       html += '<div class="uni-margine-cell" data-pompa="' + pompa.id + '" style="font-family:var(--font-mono);font-size:16px;font-weight:700;padding:6px 0">—</div></div>';
       html += '</div>';
 
-      // Riga gialla Cambio prezzo (stile IDENTICO tab Totalizzatori)
-      html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#FFF8E1;border:0.5px solid #F0D080;border-radius:8px">';
+      // Riga gialla Cambio prezzo - nascosta di default, toggle via bottone
+      html += '<div id="uni-cp-riga-' + pompa.id + '" style="display:' + (rigaCpVisibile ? 'flex' : 'none') + ';align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;background:#FFF8E1;border:0.5px solid #F0D080;border-radius:8px">';
       html += '<span style="font-size:14px;color:#8B6914;font-weight:600;white-space:nowrap">⚡ Cambio prezzo:</span>';
       html += '<span style="font-size:14px;color:#8B6914">Litri</span>';
-      html += '<input type="number" class="uni-litri-div" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" value="' + (litriPdSaved || '') + '" placeholder="0" step="0.01" oninput="_uniCalcolaLive()" style="font-family:var(--font-mono);font-size:17px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:130px;text-align:right" />';
+      html += '<input type="number" class="uni-litri-div" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" value="' + (litriPdSaved || '') + '" placeholder="0" step="0.01" oninput="_uniMarkDirty();_uniCalcolaLive()" style="font-family:var(--font-mono);font-size:17px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:130px;text-align:right" />';
       html += '<span style="font-size:14px;color:#8B6914">€/L</span>';
-      html += '<input type="number" class="uni-prezzo-div" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" value="' + (prezzoPdSaved || '') + '" placeholder="0.000" step="0.001" oninput="_uniCalcolaLive()" style="font-family:var(--font-mono);font-size:17px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:130px;text-align:right" />';
+      html += '<input type="number" class="uni-prezzo-div" data-pompa="' + pompa.id + '" data-prodotto="' + esc(pompa.prodotto) + '" value="' + (prezzoPdSaved || '') + '" placeholder="0.000" step="0.001" oninput="_uniMarkDirty();_uniCalcolaLive()" style="font-family:var(--font-mono);font-size:17px;font-weight:600;padding:8px 12px;border:0.5px solid #F0D080;border-radius:8px;background:#fff;color:#1a1a18;width:130px;text-align:right" />';
       html += '</div>';
 
       html += '</div>'; // chiudi card pompa
@@ -671,28 +677,39 @@ function _uniRenderPanel(totGasolio, totBenzina) {
     '<div style="margin-bottom:14px">' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#BA7517"></div><span style="font-size:11px;font-weight:600;color:#fff">GASOLIO</span></div>' +
       '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#fff">' + totGasolio.litri.toLocaleString('it-IT', { maximumFractionDigits: 0 }) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto netto</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:#7CFC00">' + fmtN(totGasolio.euro) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.25)">Venduto IVA</span><span style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.4)">' + fmtN(totGasolio.euro * 1.22) + '</span></div>' +
+      // Venduto IVA grande e bianco (primario)
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-size:10px;color:rgba(255,255,255,0.7);font-weight:600">Venduto IVA</span><span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:#ffffff">' + fmtN(totGasolio.euro * 1.22) + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.3)">Venduto netto</span><span style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.5)">' + fmtN(totGasolio.euro) + '</span></div>' +
       '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Margine netto</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:800;color:' + (totGasolio.marg >= 0 ? '#7CFC00' : '#FF6B6B') + '">' + fmtN(totGasolio.marg) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.25)">Margine IVA</span><span style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.4)">' + fmtN(totGasolio.marg * 1.22) + '</span></div>' +
     '</div>' +
     // Benzina
     '<div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;margin-bottom:14px">' +
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><div style="width:8px;height:8px;border-radius:50%;background:#378ADD"></div><span style="font-size:11px;font-weight:600;color:#87CEFA">BENZINA</span></div>' +
       '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#87CEFA">' + totBenzina.litri.toLocaleString('it-IT', { maximumFractionDigits: 0 }) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto netto</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:#7CFC00">' + fmtN(totBenzina.euro) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.25)">Venduto IVA</span><span style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.4)">' + fmtN(totBenzina.euro * 1.22) + '</span></div>' +
+      // Venduto IVA grande e bianco
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><span style="font-size:10px;color:rgba(255,255,255,0.7);font-weight:600">Venduto IVA</span><span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:#ffffff">' + fmtN(totBenzina.euro * 1.22) + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.3)">Venduto netto</span><span style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.5)">' + fmtN(totBenzina.euro) + '</span></div>' +
       '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Margine netto</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:800;color:' + (totBenzina.marg >= 0 ? '#7CFC00' : '#FF6B6B') + '">' + fmtN(totBenzina.marg) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.25)">Margine IVA</span><span style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.4)">' + fmtN(totBenzina.marg * 1.22) + '</span></div>' +
     '</div>' +
     // Totale
     '<div style="border-top:1px solid rgba(255,255,255,0.15);padding-top:12px">' +
-      '<div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:6px">TOTALE GIORNATA</div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Litri</span><span style="font-family:var(--font-mono);font-size:18px;font-weight:800;color:#fff">' + totLitri.toLocaleString('it-IT', { maximumFractionDigits: 0 }) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Venduto netto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:800;color:#7CFC00">' + fmtN(totEuro) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:9px;color:rgba(255,255,255,0.25)">Venduto IVA</span><span style="font-family:var(--font-mono);font-size:12px;color:rgba(255,255,255,0.4)">' + fmtN(totEuro * 1.22) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between;margin-bottom:1px"><span style="font-size:9px;color:rgba(255,255,255,0.4)">Margine netto</span><span style="font-family:var(--font-mono);font-size:16px;font-weight:800;color:' + (totMarg >= 0 ? '#7CFC00' : '#FF6B6B') + '">' + fmtN(totMarg) + '</span></div>' +
-      '<div style="display:flex;justify-content:space-between"><span style="font-size:9px;color:rgba(255,255,255,0.25)">Margine IVA</span><span style="font-family:var(--font-mono);font-size:12px;color:rgba(255,255,255,0.4)">' + fmtN(totMarg * 1.22) + '</span></div>' +
+      '<div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:10px">TOTALE GIORNATA</div>' +
+      // Totale LITRI - grande bianco
+      '<div style="margin-bottom:8px;padding:10px;background:rgba(255,255,255,0.08);border-radius:8px;text-align:center">' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:2px">Totale litri</div>' +
+        '<div style="font-family:var(--font-mono);font-size:24px;font-weight:800;color:#ffffff">' + totLitri.toLocaleString('it-IT', { maximumFractionDigits: 0 }) + '</div>' +
+      '</div>' +
+      // Totale VENDITE IVA - grande bianco
+      '<div style="margin-bottom:8px;padding:10px;background:rgba(255,255,255,0.08);border-radius:8px;text-align:center">' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:2px">Vendite IVA</div>' +
+        '<div style="font-family:var(--font-mono);font-size:24px;font-weight:800;color:#ffffff">' + fmtN(totEuro * 1.22) + '</div>' +
+      '</div>' +
+      // Totale MARGINE - grande verde
+      '<div style="margin-bottom:6px;padding:10px;background:rgba(255,255,255,0.08);border-radius:8px;text-align:center">' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:2px">Margine totale</div>' +
+        '<div style="font-family:var(--font-mono);font-size:22px;font-weight:800;color:' + (totMarg >= 0 ? '#7CFC00' : '#FF6B6B') + '">' + fmtN(totMarg) + '</div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:4px"><span style="font-size:9px;color:rgba(255,255,255,0.3)">Venduto netto</span><span style="font-family:var(--font-mono);font-size:10px;color:rgba(255,255,255,0.4)">' + fmtN(totEuro) + '</span></div>' +
     '</div>' +
     // €/L margine medio
     '<div style="margin-top:14px;padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;text-align:center">' +
@@ -925,13 +942,32 @@ function _uniMarkDirty() {
   if (_uniData) _uniData.dirty = true;
 }
 
+// Toggle visibilita' riga "Cambio prezzo" per una pompa
+function _uniToggleCambioPrezzo(pompaId) {
+  var riga = document.getElementById('uni-cp-riga-' + pompaId);
+  var btn = document.getElementById('uni-cp-btn-' + pompaId);
+  if (!riga) return;
+  if (riga.style.display === 'none') {
+    riga.style.display = 'flex';
+    if (btn) btn.style.background = '#F0D080';
+    // Focus sull'input litri per facilitare input
+    var inp = riga.querySelector('.uni-litri-div');
+    if (inp) setTimeout(function(){ inp.focus(); }, 50);
+  } else {
+    riga.style.display = 'none';
+    if (btn) btn.style.background = '#FFF8E1';
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════
 // CALCOLO LIVE (copia di calcolaLettureVendite della tab Totalizzatori)
 // Aggiorna box pompa + margine + pannello marginalita' destra a ogni input
 // ══════════════════════════════════════════════════════════════════
 function _uniCalcolaLive() {
   if (!_uniData) return;
-  _uniData.dirty = true;
+  // NON marcare dirty qui: _uniCalcolaLive si invoca anche al render iniziale.
+  // dirty viene settato solo dagli handler oninput reali tramite _uniMarkDirty()
+  // o dai sync prodotto/input utente.
 
   var pompe = _uniData.pompe || [];
   var data = _uniData.dateUniche[_uniData.indice];
@@ -966,12 +1002,20 @@ function _uniCalcolaLive() {
       var euroDiv = litriDiv * prezzoDiv;
       var euro = euroStd + euroDiv;
 
-      var calcHtml = '<div style="display:flex;gap:16px;font-size:16px;margin-bottom:4px">'
-        + '<span style="color:var(--text-muted)">Litri totali: <strong style="font-family:var(--font-mono)">' + (litri >= 0 ? litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' L' : '⚠ negativo') + '</strong></span>'
-        + '<span style="color:#1a1a18">Venduto: <strong style="font-family:var(--font-mono);color:#639922">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></span>'
-        + '</div>';
+      // Box grande litri erogati accanto al contatore
+      var elLitri = document.getElementById('uni-litri-' + p.id);
+      if (elLitri) {
+        if (litri >= 0) {
+          elLitri.innerHTML = litri.toLocaleString('it-IT', {maximumFractionDigits:2}) + ' <span style="font-size:16px;font-weight:500;color:var(--text-muted)">L</span>';
+        } else {
+          elLitri.innerHTML = '<span style="color:#E24B4A;font-size:16px">⚠ negativo</span>';
+        }
+      }
+
+      // Box calcolo: solo euro venduto e dettaglio cambio prezzo (litri sono sopra ora)
+      var calcHtml = '<div style="font-size:15px"><span style="color:var(--text-muted)">Venduto: </span><strong style="font-family:var(--font-mono);color:#639922;font-size:18px">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>';
       if (litriDiv > 0 && prezzoDiv > 0) {
-        calcHtml += '<div style="font-size:13px;color:var(--text-muted);padding-top:4px;border-top:0.5px dashed var(--border)">'
+        calcHtml += '<div style="font-size:13px;color:var(--text-muted);padding-top:6px;margin-top:6px;border-top:0.5px dashed var(--border)">'
           + '<div>↳ ' + litriStd.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoStd.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroStd.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong></div>'
           + '<div style="color:#1a1a18">↳ ' + litriDiv.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoDiv.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroDiv.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong> <span style="font-size:10px;background:#1a1a18;color:#fff;padding:1px 5px;border-radius:4px">cambio prezzo</span></div>'
           + '</div>';
@@ -1000,7 +1044,9 @@ function _uniCalcolaLive() {
         else { litriBenzina += litri; euroBenzina += euro; margBenzina += margPompaTot; }
       }
     } else {
-      elCalc.innerHTML = '<span style="color:var(--text-muted);font-size:15px">Litri: <strong style="font-family:var(--font-mono)">—</strong> · Venduto: <strong style="font-family:var(--font-mono)">€ —</strong></span>';
+      elCalc.innerHTML = '<span style="color:var(--text-muted);font-size:15px">Venduto: <strong style="font-family:var(--font-mono)">€ —</strong></span>';
+      var elLitriVuoto = document.getElementById('uni-litri-' + p.id);
+      if (elLitriVuoto) elLitriVuoto.innerHTML = '—';
       if (elMarg) elMarg.innerHTML = '—';
     }
   });
