@@ -512,6 +512,103 @@ async function caricaUtentiOnline() {
   wrap.innerHTML = html;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// applicaUscitaCisterne — scala litri dalle cisterne fisiche
+// ══════════════════════════════════════════════════════════════════
+// Chiamata DOPO ogni uscita registrata (vendita cliente, lettura pompa,
+// autoconsumo, smistamento). Scala i litri dalle cisterne secondo la
+// regola per sede/prodotto.
+//
+// REGOLA COSTITUZIONALE (19/04/2026): i litri comandano tutto. Le
+// cisterne devono riflettere la somma calcolata da pfData. Questa
+// funzione mantiene l'allineamento tra ogni uscita registrata e lo
+// stato fisico dichiarato delle cisterne.
+//
+// Parametri:
+//   sede       : 'deposito_vibo' | 'stazione_oppido'
+//   prodotto   : nome prodotto
+//   litriUscita: litri da sottrarre (numero positivo)
+//   pompaId    : opzionale - per Benzina stazione, scala dalla cisterna
+//                collegata alla pompa (tabella pompe_cisterne)
+//
+// Regole scarico:
+//   - Benzina stazione con pompaId -> cisterna specifica collegata
+//     (erogatore dedicato, cisterne indipendenti)
+//   - Gasolio stazione -> grande prima (capacita_max maggiore), poi piccola
+//   - Deposito -> sequenziale per nome (1, 2, 3)
+//
+// Clip a 0, no negativi. Se non riesce ad assorbire tutto, logga
+// warning: pfData resta la verita', la cisterna si "ferma a 0" e
+// la sentinella segnalera' il buco.
+// ══════════════════════════════════════════════════════════════════
+async function applicaUscitaCisterne(sede, prodotto, litriUscita, pompaId) {
+  if (!sede || !prodotto) return;
+  litriUscita = Number(litriUscita || 0);
+  if (litriUscita <= 0) return;
+
+  try {
+    // 1. Caso speciale: Benzina stazione con pompa specifica
+    if (sede === 'stazione_oppido' && /benzina/i.test(prodotto) && pompaId) {
+      var linkRes = await sb.from('pompe_cisterne')
+        .select('cisterna_id').eq('pompa_id', pompaId).maybeSingle();
+      if (linkRes.data && linkRes.data.cisterna_id) {
+        var cisRes = await sb.from('cisterne')
+          .select('id,nome,livello_attuale').eq('id', linkRes.data.cisterna_id).single();
+        if (cisRes.data) {
+          var nuovo = Math.max(0, Number(cisRes.data.livello_attuale || 0) - litriUscita);
+          var updErr = await sb.from('cisterne').update({
+            livello_attuale: Math.round(nuovo),
+            updated_at: new Date().toISOString()
+          }).eq('id', cisRes.data.id);
+          if (updErr && updErr.error) console.error('[applicaUscitaCisterne] update benzina:', updErr.error);
+          return;
+        }
+      }
+      console.warn('[applicaUscitaCisterne] Benzina staz senza mapping pompa, fallback sequenziale');
+    }
+
+    // 2. Tutti gli altri casi: sequenziale
+    // Stazione: capacita_max DESC (grande prima)
+    // Deposito: nome ASC (Gasolio Autotrazione 1, 2, 3)
+    var isStazione = sede === 'stazione_oppido';
+    var orderField = isStazione ? 'capacita_max' : 'nome';
+    var orderAsc = isStazione ? false : true;
+
+    var cisRes = await sb.from('cisterne').select('id,nome,livello_attuale')
+      .eq('sede', sede).eq('prodotto', prodotto)
+      .order(orderField, { ascending: orderAsc });
+
+    if (!cisRes.data || !cisRes.data.length) {
+      console.warn('[applicaUscitaCisterne] nessuna cisterna per', sede, prodotto);
+      return;
+    }
+
+    var daScalare = litriUscita;
+    var modifiche = [];
+    for (var i = 0; i < cisRes.data.length && daScalare > 0; i++) {
+      var c = cisRes.data[i];
+      var attuale = Number(c.livello_attuale || 0);
+      if (attuale <= 0) continue;
+      var sottratto = Math.min(attuale, daScalare);
+      var nuovoLiv = Math.round(attuale - sottratto);
+      var res = await sb.from('cisterne').update({
+        livello_attuale: nuovoLiv,
+        updated_at: new Date().toISOString()
+      }).eq('id', c.id);
+      if (res && res.error) {
+        console.error('[applicaUscitaCisterne] update ' + c.nome + ':', res.error);
+        continue;
+      }
+      modifiche.push(c.nome + ': ' + Math.round(attuale) + '->' + nuovoLiv);
+      daScalare -= sottratto;
+    }
+
+    console.log('[applicaUscitaCisterne] ' + sede + '/' + prodotto + ' -' + litriUscita + ' L: ' + modifiche.join(', ') + (daScalare > 0 ? ' [RESIDUO ' + daScalare + ' L non assorbibile]' : ''));
+  } catch(e) {
+    console.error('[applicaUscitaCisterne] eccezione:', e);
+  }
+}
+
 // ── _aggiornaStatoConsegnato ──────────────────────────────────────
 // Chiamata dopo upload DAS firmato: porta l'ordine a stato 'consegnato'.
 // Logica: UPDATE atomico — se l'ordine ha das_firmato_url valorizzato e
