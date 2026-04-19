@@ -134,15 +134,14 @@ async function caricaDeposito() {
     let totG = 0;
 
     let cisHtml = '';
-    gruppo.forEach(c => {
+    gruppo.forEach((c, idx) => {
       const capMax = Number(c.capacita_max);
       const livAtt = Number(c.livello_attuale);
       const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
       const cmp = Number(c.costo_medio||0);
       totG += livAtt;
-      // Estrai numero cisterna dal nome (es. "Cisterna 1" → "1", altrimenti usa il nome intero)
-      var matchNum = (c.nome || '').match(/(\d+)\s*$/);
-      var numCis = matchNum ? matchNum[1] : esc(c.nome || '');
+      // Numero progressivo dentro il gruppo (1, 2, 3…)
+      var numCis = idx + 1;
       var coloreTesto = _testoSuColore(colore);
       var labelColor = pct < 10 ? '#d32f2f' : '#1a2332';
       cisHtml += '<div class="dep-cisterna-v2' + (pct < 30 ? ' alert' : '') + '" style="--prod-color:' + colore + ';--prod-text:' + coloreTesto + '">' +

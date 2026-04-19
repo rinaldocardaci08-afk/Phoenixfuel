@@ -218,15 +218,14 @@ async function caricaGiacenzeStazione() {
       let totG = 0;
 
       let cisHtml = '';
-      gruppo.forEach(c => {
+      gruppo.forEach((c, idx) => {
         const capMax = Number(c.capacita_max);
         const livAtt = Number(c.livello_attuale);
         const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
         const cmp = Number(c.costo_medio||0);
         totG += livAtt;
-        // Estrai numero da nome (es "Benzina Staz. 1" → "1")
-        var matchNum = (c.nome || '').match(/(\d+)\s*$/);
-        var numCis = matchNum ? matchNum[1] : esc(c.nome || '');
+        // Numero progressivo dentro il gruppo (1, 2, 3…) — evita di prendere la capacità dal nome
+        var numCis = idx + 1;
         var coloreTesto = typeof _testoSuColore === 'function' ? _testoSuColore(colore) : '#ffffff';
         var labelColor = pct < 10 ? '#dc2626' : '#0f172a';
         cisHtml += '<div class="dep-cisterna-v2' + (pct < 30 ? ' alert' : '') + '" style="--prod-color:' + colore + ';--prod-text:' + coloreTesto + '">' +
