@@ -54,7 +54,7 @@ async function caricaGiacenzeMensiliDeposito() {
 
   // Carica dati salvati (stessa tabella giacenze_mensili con sede='deposito_vibo')
   var { data: salvati } = await sb.from('giacenze_mensili')
-    .select('id,anno,mese,prodotto,sede,giacenza_inizio,entrate,venduto,eccedenze_viaggio,cali_viaggio,scatti_vuoto,cali_tecnici,giacenza_rilevata,note,chiuso_il,chiuso_da').eq('anno', anno).eq('sede','deposito_vibo').order('mese');
+    .select('*').eq('anno', anno).eq('sede','deposito_vibo').order('mese');
   var salvMap = {};
   (salvati||[]).forEach(function(s){ salvMap[s.prodotto+'_'+s.mese]=s; });
 
