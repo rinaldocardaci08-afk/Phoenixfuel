@@ -48,7 +48,15 @@
   }
 
   function _btnStyle() {
-    return 'padding:0 9px;height:100%;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-weight:700;font-size:13px;line-height:1;color:var(--text);flex:0 0 auto;user-select:none';
+    // font-size:inherit → eredita la dimensione dall'input vicino (16px, 13px, 12px...)
+    // align-self:stretch → matching automatico dell'altezza con l'input
+    // box-sizing:border-box + padding verticale zero → il solo padding orizzontale
+    //   fa allargare, l'altezza viene dal flex stretch del wrapper.
+    return 'padding:0 12px;align-self:stretch;box-sizing:border-box;'
+         + 'border:0.5px solid var(--border);border-radius:6px;background:var(--bg);'
+         + 'cursor:pointer;font-weight:700;font-size:inherit;line-height:1;'
+         + 'color:var(--text);flex:0 0 auto;user-select:none;'
+         + 'display:inline-flex;align-items:center;justify-content:center';
   }
 
   function _mkBtn(label, title, onclick) {

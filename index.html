@@ -267,7 +267,7 @@
         <div class="card" style="margin-bottom:16px;background:#E6F1FB;border:1px solid #85B7EB">
           <div class="card-title"><span style="background:#D4A017;color:#fff;padding:5px 16px;border-radius:8px;font-size:15px">Nuovo ordine</span></div>
           <div class="form-grid">
-            <div class="form-group"><label style="font-weight:700;color:#0C447C">Data</label><input type="date" id="ord-data" onchange="aggiornaSelezioniOrdine();_labelGiorno('ord-data')" style="border:1px solid #85B7EB" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#0C447C">Data</label><input type="date" id="ord-data" data-nav="day" onchange="aggiornaSelezioniOrdine();_labelGiorno('ord-data')" style="border:1px solid #85B7EB" /></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Tipo ordine</label>
               <select id="ord-tipo" onchange="toggleTipoOrdine()" style="border:1px solid #85B7EB">
                 <option value="cliente">Vendita a cliente</option>
@@ -319,7 +319,7 @@
             <span>Ordini del giorno</span>
             <div style="display:flex;gap:8px;align-items:center">
               <button onclick="navigaOrdiniGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
-              <input type="date" id="ordini-giorno-data" onchange="caricaOrdiniGiorno();_labelGiorno('ordini-giorno-data')" style="font-size:16px;font-weight:600;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text)" />
+              <input type="date" id="ordini-giorno-data" data-nav="day" onchange="caricaOrdiniGiorno();_labelGiorno('ordini-giorno-data')" style="font-size:16px;font-weight:600;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text)" />
               <button onclick="navigaOrdiniGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               <span id="ordini-giorno-count" style="font-size:13px;color:var(--text-muted)"></span>
               <button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#6B5FCC" onclick="stampaOrdiniGiorno()">🖨️ PDF</button>
@@ -352,8 +352,8 @@
           </div>
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Genera file Easyfatt-XML per Danea. Ordini cliente → ordine cliente, entrate deposito → ordine fornitore, autoconsumo → autofattura. Gli ordini stazione (mov. interno) sono esclusi.</div>
           <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
-            <div class="form-group" style="margin:0"><label style="font-size:11px">Da</label><input type="date" id="danea-da" /></div>
-            <div class="form-group" style="margin:0"><label style="font-size:11px">A</label><input type="date" id="danea-a" /></div>
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Da</label><input type="date" id="danea-da" data-nav="day" /></div>
+            <div class="form-group" style="margin:0"><label style="font-size:11px">A</label><input type="date" id="danea-a" data-nav="day" /></div>
             <div class="form-group" style="margin:0"><label style="font-size:11px">Tipo</label>
               <select id="danea-tipo" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="tutti">Tutti (clienti + fornitori + autofatture)</option>
@@ -400,8 +400,8 @@
                 <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option><option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
                 <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option><option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
               </select>
-              <input type="date" id="filtro-da-ordini" onchange="caricaStoricoOrdini()" title="Da data" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
-              <input type="date" id="filtro-a-ordini" onchange="caricaStoricoOrdini()" title="A data" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <input type="date" id="filtro-da-ordini" data-nav="day" onchange="caricaStoricoOrdini()" title="Da data" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <input type="date" id="filtro-a-ordini" data-nav="day" onchange="caricaStoricoOrdini()" title="A data" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
               <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="caricaStoricoOrdini()">🔍 Cerca</button>
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaStoricoOrdini()">🖨️ PDF</button>
             </div>
@@ -423,7 +423,7 @@
               <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
               <button onclick="scorriGiornoPrezzi(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
-              <input type="date" id="filtro-data-prezzi" style="font-size:16px;padding:9px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;min-width:170px;text-align:center" onchange="_renderLabelPrezzi();caricaPrezzi()" />
+              <input type="date" id="filtro-data-prezzi" data-nav="day" style="font-size:16px;padding:9px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;min-width:170px;text-align:center" onchange="_renderLabelPrezzi();caricaPrezzi()" />
               <button onclick="scorriGiornoPrezzi(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
             </div>
           </div>
@@ -436,7 +436,7 @@
         <div class="card" style="background:#FDF3D0;border:1px solid #D4A017">
           <div class="card-title"><span style="background:#D4A017;color:#fff;padding:5px 16px;border-radius:8px;font-size:15px">Inserisci prezzo giornaliero</span></div>
           <div class="form-grid">
-            <div class="form-group"><label style="font-weight:700;color:#633806">Data</label><input type="date" id="pr-data" style="border:1px solid #D4A017" onchange="" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#633806">Data</label><input type="date" id="pr-data" data-nav="day" style="border:1px solid #D4A017" onchange="" /></div>
             <div class="form-group"><label style="font-weight:700;color:#633806">Fornitore</label><select id="pr-fornitore" onchange="caricaBasiPerFornitore()" style="border:1px solid #D4A017"><option value="">Seleziona...</option></select></div>
             <div class="form-group"><label style="font-weight:700;color:#633806">Base di carico</label><select id="pr-base" style="border:1px solid #D4A017"><option value="">Nessuna (opzionale)</option></select></div>
             <div class="form-group"><label style="font-weight:700;color:#633806">Prodotto</label>
@@ -537,7 +537,7 @@
               </select>
               <select id="mov-anno" onchange="caricaMovimentiDeposito('mese')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)"></select>
               <span style="font-size:11px;color:var(--text-muted)">oppure</span>
-              <input type="date" id="mov-data" onchange="caricaMovimentiDeposito('data')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
+              <input type="date" id="mov-data" data-nav="day" onchange="caricaMovimentiDeposito('data')" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)" />
               <span style="font-size:11px;color:var(--text-muted)">oppure</span>
               <button class="btn-edit" onclick="caricaMovimentiDeposito('ultimi')" style="font-size:12px;padding:6px 12px">Ultimi 10</button>
               <select id="mov-tipo-eu" onchange="_movAppliaRicerca()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">
@@ -609,8 +609,8 @@
               <span>📋 Movimenti totali ad oggi — riconciliazione con DAS/registro</span>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                 <select id="mvt-prodotto" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
-                <input type="date" id="mvt-da" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="Da"/>
-                <input type="date" id="mvt-a" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="A"/>
+                <input type="date" id="mvt-da" data-nav="day" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="Da"/>
+                <input type="date" id="mvt-a" data-nav="day" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="A"/>
                 <button class="btn-primary" onclick="pfMovimentiTotali()" style="font-size:12px;padding:7px 14px;background:#D4A017">▶ Calcola</button>
               </div>
             </div>
@@ -641,7 +641,7 @@
             <div class="card-title">Lettura giornaliera asta cisterne</div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Inserisci la giacenza rilevata da lettura asta per ogni prodotto. Il sistema calcola entrate/uscite del giorno e la differenza con la giacenza teorica.</div>
             <div class="form-grid">
-              <div class="form-group"><label>Data rilevazione</label><input type="date" id="gg-data" onchange="caricaGiacenzeGiornaliere()" /></div>
+              <div class="form-group"><label>Data rilevazione</label><input type="date" id="gg-data" data-nav="day" onchange="caricaGiacenzeGiornaliere()" /></div>
               <div class="form-group"><label>Soglia alert (litri)</label><input type="number" id="gg-soglia" value="500" step="100" style="font-family:var(--font-mono)" onchange="GG_SOGLIA_ALERT=parseInt(this.value)||500" /></div>
             </div>
             <div id="gg-form-prodotti"></div>
@@ -858,9 +858,9 @@
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px" onclick="apriReportVendite()">📊 Report PDF</button>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="apriReportMensile()">📅 Mensile</button>
                 <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
-                <input type="date" id="vend-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeIngrosso()" />
+                <input type="date" id="vend-da" data-nav="day" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeIngrosso()" />
                 <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
-                <input type="date" id="vend-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeIngrosso()" />
+                <input type="date" id="vend-a" data-nav="day" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeIngrosso()" />
                 <select id="vend-prodotto" onchange="caricaVenditeIngrosso()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                   <option value="">Tutti i prodotti</option>
                 </select>
@@ -901,9 +901,9 @@
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#D85A30" onclick="stampaReportAnnualeDettaglio()">📊 Report annuale</button>
                 <select id="vdett-anno" style="font-size:12px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
                 <label style="font-size:12px;color:var(--text-muted);font-weight:500">Da:</label>
-                <input type="date" id="vdett-da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
+                <input type="date" id="vdett-da" data-nav="day" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
                 <label style="font-size:12px;color:var(--text-muted);font-weight:500">A:</label>
-                <input type="date" id="vdett-a" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
+                <input type="date" id="vdett-a" data-nav="day" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" onchange="caricaVenditeDettaglio()" />
               </div>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Ricavi da letture pompe × prezzo pompa. Costo da ordini stazione_servizio (trasferimenti interni).</div>
@@ -932,9 +932,9 @@
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#639922" onclick="stampaReportAnnuale()">📊 Report PDF</button>
                 <select id="vann-anno" onchange="cambiaAnnoVenditeAnnuali()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"></select>
                 <span style="font-size:11px;color:var(--text-muted);font-weight:500;margin-left:6px">Dal</span>
-                <input type="date" id="vann-da" onchange="caricaVenditeAnnuali()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"/>
+                <input type="date" id="vann-da" data-nav="day" onchange="caricaVenditeAnnuali()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"/>
                 <span style="font-size:11px;color:var(--text-muted);font-weight:500">al</span>
-                <input type="date" id="vann-a" onchange="caricaVenditeAnnuali()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"/>
+                <input type="date" id="vann-a" data-nav="day" onchange="caricaVenditeAnnuali()" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500"/>
                 <button class="btn-primary" style="font-size:11px;padding:6px 10px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="resetVenditeAnnualiPeriodo()" title="Ripristina inizio anno → oggi">↺</button>
               </div>
             </div>
@@ -1121,15 +1121,15 @@
               </div>
               <div class="form-group">
                 <label>Dal</label>
-                <input type="date" id="nf-dal" onchange="caricaOrdiniFatturabili()">
+                <input type="date" id="nf-dal" data-nav="day" onchange="caricaOrdiniFatturabili()">
               </div>
               <div class="form-group">
                 <label>Al</label>
-                <input type="date" id="nf-al" onchange="caricaOrdiniFatturabili()">
+                <input type="date" id="nf-al" data-nav="day" onchange="caricaOrdiniFatturabili()">
               </div>
               <div class="form-group">
                 <label>Data fattura *</label>
-                <input type="date" id="nf-data">
+                <input type="date" id="nf-data" data-nav="day">
               </div>
             </div>
           </div>
@@ -1205,7 +1205,7 @@
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Inserisci prezzo di riferimento</div>
           <div class="form-grid">
-            <div class="form-group"><label>Data</label><input type="date" id="bench-data" /></div>
+            <div class="form-group"><label>Data</label><input type="date" id="bench-data" data-nav="day" /></div>
             <div class="form-group"><label>Prodotto</label>
               <select id="bench-prodotto" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="Gasolio Autotrazione">Gasolio Autotrazione</option>
@@ -1465,7 +1465,7 @@
                 <span id="uni-data-badge" style="padding:3px 10px;border-radius:8px;font-size:11px;font-weight:600;display:none"></span>
                 <span id="uni-data-day" style="padding:3px 10px;border-radius:8px;font-size:11px;font-weight:500;display:none"></span>
                 <button onclick="_uniGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
-                <input type="date" id="uni-data-input" onchange="_uniVaiAlGiorno()" style="font-size:12px;height:32px;width:135px" />
+                <input type="date" id="uni-data-input" data-nav="day" onchange="_uniVaiAlGiorno()" style="font-size:12px;height:32px;width:135px" />
                 <button id="uni-btn-vista" onclick="_uniToggleVista()" style="background:var(--bg);border:0.5px solid var(--border);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px">📊 Per prodotto</button>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
@@ -1538,7 +1538,7 @@
               <span>Totalizzatori giornalieri</span>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <div style="display:flex;align-items:center;gap:6px">
-                  <input type="date" id="stz-data-lettura" onchange="caricaFormLetture();_labelGiorno('stz-data-lettura')" style="font-size:16px;font-weight:600;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text)" />
+                  <input type="date" id="stz-data-lettura" data-nav="day" onchange="caricaFormLetture();_labelGiorno('stz-data-lettura')" style="font-size:16px;font-weight:600;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text)" />
                 </div>
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportLetture()">🖨️ Report</button>
               </div>
@@ -1579,7 +1579,7 @@
             <div class="card-title">Imposta prezzi pompa</div>
             <div id="stz-prezzi-hint" style="margin-bottom:12px"></div>
             <div class="form-grid">
-              <div class="form-group"><label>Data</label><input type="date" id="stz-data-prezzo" /></div>
+              <div class="form-group"><label>Data</label><input type="date" id="stz-data-prezzo" data-nav="day" /></div>
               <div class="form-group"><label>Gasolio €/L <span id="stz-hint-gasolio" style="font-size:11px;color:var(--text-muted);font-weight:400"></span></label><input type="number" id="stz-prezzo-gasolio" step="0.001" placeholder="1.789" /></div>
               <div class="form-group"><label>Benzina €/L <span id="stz-hint-benzina" style="font-size:11px;color:var(--text-muted);font-weight:400"></span></label><input type="number" id="stz-prezzo-benzina" step="0.001" placeholder="1.889" /></div>
             </div>
@@ -1599,7 +1599,7 @@
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Registra versamento</div>
             <div class="form-grid">
-              <div class="form-group"><label>Data</label><input type="date" id="stz-data-vers" /></div>
+              <div class="form-group"><label>Data</label><input type="date" id="stz-data-vers" data-nav="day" /></div>
               <div class="form-group"><label>Contanti €</label><input type="number" id="stz-vers-cash" step="0.01" placeholder="0.00" /></div>
               <div class="form-group"><label>POS €</label><input type="number" id="stz-vers-pos-input" step="0.01" placeholder="0.00" /></div>
               <div class="form-group"><label>Note</label><input type="text" id="stz-vers-note" placeholder="Es. versamento settimanale" /></div>
@@ -1683,7 +1683,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
               <div>
                 <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Data versamento</div>
-                <input type="date" id="corr-reg-data" style="width:100%;font-size:13px;height:34px" />
+                <input type="date" id="corr-reg-data" data-nav="day" style="width:100%;font-size:13px;height:34px" />
               </div>
               <div>
                 <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Banca</div>
@@ -1747,8 +1747,8 @@
                   <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option><option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
                   <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option><option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
                 </select>
-                <input type="date" id="stz-acq-da" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="Da" onchange="caricaReportAcquistiStazione()" />
-                <input type="date" id="stz-acq-a" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="A" onchange="caricaReportAcquistiStazione()" />
+                <input type="date" id="stz-acq-da" data-nav="day" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="Da" onchange="caricaReportAcquistiStazione()" />
+                <input type="date" id="stz-acq-a" data-nav="day" style="font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" title="A" onchange="caricaReportAcquistiStazione()" />
                 <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="stampaReportAcquistiStazione()">🖨️ Stampa PDF</button>
               </div>
             </div>
@@ -1867,7 +1867,7 @@
               <span>Registro cassa giornaliero</span>
               <div style="display:flex;align-items:center;gap:6px">
                 <button onclick="cassaGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
-                <input type="date" id="cassa-data" onchange="caricaCassa();_labelGiorno('cassa-data')" style="font-size:16px;padding:8px 12px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;text-align:center;min-width:160px" />
+                <input type="date" id="cassa-data" data-nav="day" onchange="caricaCassa();_labelGiorno('cassa-data')" style="font-size:16px;padding:8px 12px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;text-align:center;min-width:160px" />
                 <button onclick="cassaGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               </div>
             </div>
@@ -1964,7 +1964,7 @@
               <span>📋 Foglio giornaliero stazione</span>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <button onclick="fgGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
-                <input type="date" id="fg-data" onchange="caricaFoglioGiornaliero();_labelGiorno('fg-data')" style="font-size:16px;padding:8px 12px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;text-align:center;min-width:160px" />
+                <input type="date" id="fg-data" data-nav="day" onchange="caricaFoglioGiornaliero();_labelGiorno('fg-data')" style="font-size:16px;padding:8px 12px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;text-align:center;min-width:160px" />
                 <button onclick="fgGiorno(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
               </div>
             </div>
@@ -2034,8 +2034,8 @@
               <span>📋 Movimenti totali ad oggi — riconciliazione stazione</span>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                 <select id="mvts-prodotto" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
-                <input type="date" id="mvts-da" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="Da"/>
-                <input type="date" id="mvts-a" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="A"/>
+                <input type="date" id="mvts-da" data-nav="day" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="Da"/>
+                <input type="date" id="mvts-a" data-nav="day" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="A"/>
                 <button class="btn-primary" onclick="pfMovimentiStzTotali()" style="font-size:12px;padding:7px 14px;background:#D4A017">▶ Calcola</button>
               </div>
             </div>
@@ -2272,7 +2272,7 @@
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Pianifica nuovo carico</div>
             <div class="form-grid">
-              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" onchange="caricaOrdiniPerCarico();_labelGiorno('car-data')" /></div>
+              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" data-nav="day" onchange="caricaOrdiniPerCarico();_labelGiorno('car-data')" /></div>
               <div class="form-group"><label>Vettore</label><select id="car-trasportatore" onchange="aggiornaVeicoliVettore()"><option value="">Nostro mezzo</option></select></div>
               <div class="form-group"><label>Mezzo</label><select id="car-mezzo"><option value="">Seleziona mezzo...</option></select></div>
               <div class="form-group"><label>Autista</label><select id="car-autista"><option value="">Seleziona autista...</option></select></div>
@@ -2296,8 +2296,8 @@
             <div class="card-title">Report viaggi per vettore</div>
             <div class="form-grid">
               <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
-              <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" /></div>
-              <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" /></div>
+              <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" data-nav="day" /></div>
+              <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" data-nav="day" /></div>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
               <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
@@ -2416,7 +2416,7 @@
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Nuovo prelievo</div>
           <div class="form-grid">
-            <div class="form-group"><label>Data</label><input type="date" id="ac-data" /></div>
+            <div class="form-group"><label>Data</label><input type="date" id="ac-data" data-nav="day" /></div>
             <div class="form-group"><label>Prodotto</label><select id="ac-prodotto"><option value="Gasolio Autotrazione">Gasolio Autotrazione</option></select></div>
             <div class="form-group"><label>Camion</label><select id="ac-mezzo"><option value="">Seleziona camion...</option></select></div>
             <div class="form-group"><label>Litri</label><input type="number" id="ac-litri" placeholder="0" /></div>
@@ -2430,8 +2430,8 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>📋 Registro prelievi</span>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <input type="date" id="ac-filtro-da" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
-              <input type="date" id="ac-filtro-a" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
+              <input type="date" id="ac-filtro-da" data-nav="day" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
+              <input type="date" id="ac-filtro-a" data-nav="day" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)" />
               <select id="ac-filtro-anno" onchange="resetFiltroCamion();caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)"></select>
               <select id="ac-filtro-camion" onchange="caricaPrelievi()" style="padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg)">
                 <option value="">Tutti i camion</option>
@@ -2673,7 +2673,7 @@
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
 <script src="pf-config.js?v=20260419d"></script>
-<script src="pf-date-nav.js?v=20260420a"></script>
+<script src="pf-date-nav.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260417b"></script>
 <script src="pf-deposito.js?v=20260420a"></script>
 <script src="pf-anagrafica.js?v=20260415r"></script>
