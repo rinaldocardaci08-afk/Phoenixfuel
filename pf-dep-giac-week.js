@@ -199,7 +199,7 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
   // Il flusso DAS firmato porta gli ordini da 'confermato' a 'consegnato',
   // entrambi rappresentano uscite/entrate effettivamente avvenute.
   var STATI_VALIDI = ['confermato','consegnato'];
-  var [entRes, uscCliRes, uscStaRes, uscAuRes] = await Promise.all([
+  var [entRes, uscCliRes, uscStaRes, uscAuRes, rettRes] = await Promise.all([
     sb.from('ordini').select('data,litri')
       .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
       .gte('data', daISO).lte('data', aISO),
@@ -211,13 +211,16 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
       .gte('data', daISO).lte('data', aISO),
     sb.from('ordini').select('data,litri')
       .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
+      .gte('data', daISO).lte('data', aISO),
+    sb.from('rettifiche_inventario').select('data,differenza,causale,origine,note')
+      .eq('tipo','deposito').eq('prodotto', prodotto).eq('confermata', true)
       .gte('data', daISO).lte('data', aISO)
   ]);
 
-  // 3. Aggregazione per data (Map<dateStr, {entrate, uscite}>)
+  // 3. Aggregazione per data (Map<dateStr, {entrate, uscite, rettifica, rettDett}>)
   var perGiorno = {};
   function bucket(d) {
-    if (!perGiorno[d]) perGiorno[d] = { entrate: 0, uscite: 0 };
+    if (!perGiorno[d]) perGiorno[d] = { entrate: 0, uscite: 0, rettifica: 0, rettDett: [] };
     return perGiorno[d];
   }
   (entRes.data || []).forEach(function(o){
@@ -236,6 +239,17 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
   (uscAuRes.data || []).forEach(function(o){
     bucket(o.data).uscite += Number(o.litri || 0);
   });
+  // Rettifiche confermate: entrano come movimento con segno
+  (rettRes.data || []).forEach(function(r){
+    var b = bucket(r.data);
+    b.rettifica += Number(r.differenza || 0);
+    b.rettDett.push({
+      causale: r.causale || 'manuale',
+      origine: r.origine || 'manuale',
+      differenza: Number(r.differenza || 0),
+      note: r.note || ''
+    });
+  });
 
   // 4. Cammina giorno per giorno dall'01/01 al giorno target
   var serie = [];
@@ -243,14 +257,16 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
   var d = new Date(anno, 0, 1);
   while (d <= finoA) {
     var iso = _dgwISO(d);
-    var b = perGiorno[iso] || { entrate: 0, uscite: 0 };
+    var b = perGiorno[iso] || { entrate: 0, uscite: 0, rettifica: 0, rettDett: [] };
     var iniziale = corrente;
-    var calcolata = Math.round((iniziale + b.entrate - b.uscite) * 100) / 100;
+    var calcolata = Math.round((iniziale + b.entrate - b.uscite + b.rettifica) * 100) / 100;
     serie.push({
       data: iso,
       iniziale: iniziale,
       entrate: b.entrate,
       uscite: b.uscite,
+      rettifica: b.rettifica,
+      rettDett: b.rettDett,
       calcolata: calcolata
     });
     corrente = calcolata;
@@ -422,7 +438,26 @@ function _dgwRender() {
     html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.entrate>0?colEntrate:txtM)+'">'+fmtL(s.entrate)+'</div>';
     html += '<div style="font-size:10px;color:'+colUscite+'">− Uscite</div>';
     html += '<div style="font-family:var(--font-mono);font-size:12px;color:'+(s.uscite>0?colUscite:txtM)+'">'+fmtL(s.uscite)+'</div>';
-    var deltaGiorno = Math.round((Number(s.entrate)||0) - (Number(s.uscite)||0));
+
+    // Riga rettifica (solo se c'è movimento di rettifica quel giorno)
+    var rett = Number(s.rettifica || 0);
+    if (rett !== 0) {
+      var colRett = rett > 0 ? colEntrate : colUscite;
+      var segnoRett = rett > 0 ? '+' : '−';
+      // Tooltip: breakdown per causale del giorno
+      var tipRett = (s.rettDett || []).map(function(d){
+        var lbl = d.causale === 'cali_viaggio' ? 'cali viaggio' :
+                  d.causale === 'cali_tecnici' ? 'cali tecnici' :
+                  d.causale === 'eccedenze_viaggio' ? 'eccedenze viaggio' :
+                  d.causale === 'scatti_vuoto' ? 'scatti a vuoto' :
+                  d.causale === 'manuale' ? 'manuale' : (d.causale || 'altro');
+        return lbl + ' ' + (d.differenza>0?'+':'') + Math.round(d.differenza) + ' L' + (d.note ? ' — ' + d.note : '');
+      }).join('\n');
+      html += '<div title="'+esc(tipRett)+'" style="font-size:10px;color:'+colRett+';margin-top:3px;cursor:help">± Rettifica 🔧</div>';
+      html += '<div title="'+esc(tipRett)+'" style="font-family:var(--font-mono);font-size:12px;color:'+colRett+';cursor:help">'+segnoRett+fmtL(Math.abs(rett))+'</div>';
+    }
+
+    var deltaGiorno = Math.round((Number(s.entrate)||0) - (Number(s.uscite)||0) + rett);
     var colDeltaG, txtDeltaG;
     if (deltaGiorno > 0) { colDeltaG = colEntrate; txtDeltaG = '+'+fmtL(deltaGiorno); }
     else if (deltaGiorno < 0) { colDeltaG = colUscite; txtDeltaG = fmtL(deltaGiorno); }
@@ -438,7 +473,7 @@ function _dgwRender() {
     if (rilevataValSalv !== null) {
       sugg = rilevataValSalv;
     } else if (rilevataPrev !== null) {
-      sugg = Math.round(rilevataPrev + s.entrate - s.uscite);
+      sugg = Math.round(rilevataPrev + s.entrate - s.uscite + (s.rettifica || 0));
     } else {
       sugg = Math.round(s.calcolata);
     }
