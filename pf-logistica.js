@@ -345,7 +345,46 @@ async function caricaTrasportatori() {
   const opts = '<option value="">Seleziona...</option>' + data.map(t => '<option value="' + t.id + '">' + t.nome + '</option>').join('');
   if (selTrA) selTrA.innerHTML = opts;
   if (selTrM) selTrM.innerHTML = opts;
-  tbody.innerHTML = data.map(t => '<tr><td><strong>' + t.nome + '</strong></td><td>' + (t.telefono||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.autisti?t.autisti.map(a=>a.nome).join(', '):'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.mezzi_trasportatori?t.mezzi_trasportatori.map(m=>m.targa).join(', '):'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'trasportatori\',\'' + t.id + '\',caricaTrasportatori)">x</button></td></tr>').join('');
+  tbody.innerHTML = data.map(t => '<tr><td><strong>' + esc(t.nome) + '</strong></td><td>' + esc(t.telefono||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.autisti?t.autisti.map(a=>esc(a.nome)).join(', '):'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.mezzi_trasportatori?t.mezzi_trasportatori.map(m=>esc(m.targa)).join(', '):'—') + '</td><td style="white-space:nowrap"><button onclick="_modificaTrasportatore(\'' + t.id + '\')" title="Modifica" style="padding:4px 8px;background:#fff;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;font-size:13px;margin-right:4px">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'trasportatori\',\'' + t.id + '\',caricaTrasportatori)">x</button></td></tr>').join('');
+}
+
+async function _modificaTrasportatore(id) {
+  var { data: t, error } = await sb.from('trasportatori').select('*').eq('id', id).single();
+  if (error || !t) { toast('Errore caricamento vettore'); return; }
+
+  var h = '<h3 style="margin:0 0 16px">✏️ Modifica vettore</h3>';
+  h += '<div style="display:grid;gap:10px">';
+  h += '<div class="form-group"><label>Nome azienda</label><input type="text" id="tr-edit-nome" value="' + esc(t.nome||'') + '" /></div>';
+  h += '<div class="form-group"><label>P.IVA</label><input type="text" id="tr-edit-piva" value="' + esc(t.piva||'') + '" /></div>';
+  h += '<div class="form-group"><label>Telefono</label><input type="text" id="tr-edit-tel" value="' + esc(t.telefono||'') + '" /></div>';
+  h += '<div class="form-group"><label>Email</label><input type="email" id="tr-edit-email" value="' + esc(t.email||'') + '" /></div>';
+  h += '<div class="form-group"><label>Note</label><input type="text" id="tr-edit-note" value="' + esc(t.note||'') + '" /></div>';
+  h += '<div class="form-group"><label>Stato</label><select id="tr-edit-attivo"><option value="true"' + (t.attivo !== false ? ' selected' : '') + '>Attivo</option><option value="false"' + (t.attivo === false ? ' selected' : '') + '>Disattivato</option></select></div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:8px;margin-top:16px">';
+  h += '<button class="btn-primary" style="flex:1" onclick="_salvaModificaTrasportatore(\'' + id + '\')">💾 Salva modifiche</button>';
+  h += '<button onclick="chiudiModal()" style="padding:10px 20px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '</div>';
+
+  apriModal(h);
+}
+
+async function _salvaModificaTrasportatore(id) {
+  var nome = document.getElementById('tr-edit-nome').value.trim();
+  if (!nome) { toast('Il nome è obbligatorio'); return; }
+  var record = {
+    nome: nome,
+    piva: document.getElementById('tr-edit-piva').value.trim() || null,
+    telefono: document.getElementById('tr-edit-tel').value.trim() || null,
+    email: document.getElementById('tr-edit-email').value.trim() || null,
+    note: document.getElementById('tr-edit-note').value.trim() || null,
+    attivo: document.getElementById('tr-edit-attivo').value === 'true'
+  };
+  var { error } = await sb.from('trasportatori').update(record).eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✓ Vettore aggiornato');
+  chiudiModal();
+  caricaTrasportatori();
 }
 
 async function salvaAutista() {
