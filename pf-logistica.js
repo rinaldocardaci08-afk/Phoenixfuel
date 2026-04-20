@@ -748,6 +748,38 @@ async function creaNuovoCarico() {
       if (totLitri > Number(mezzo.capacita_totale)) { toast('Portata superata! Totale: ' + fmtL(totLitri) + ' Capienza: ' + fmtL(mezzo.capacita_totale)); return; }
     }
   }
+
+  // Prima di creare il carico in DB, chiedo all'operatore le densità
+  // da usare sui DAS. Se annulla, NIENTE viene inserito in DB.
+  const { data: ordiniCaricoPre } = await sb.from('ordini').select('*').in('id', ordiniSel);
+  if (typeof pfApriPopupDensita === 'function') {
+    pfApriPopupDensita(
+      ordiniCaricoPre || [],
+      function(densitaByProdotto) {
+        _creaCaricoConDensita({
+          data: data, mezzoVal: mezzoVal, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
+          ordiniSel: ordiniSel, mezzoId: mezzoId, densitaByProdotto: densitaByProdotto
+        });
+      },
+      function() {
+        toast('Creazione carico annullata');
+      }
+    );
+    return;
+  }
+
+  // Fallback (popup non disponibile): vecchio comportamento senza densità custom
+  _creaCaricoConDensita({
+    data: data, mezzoVal: mezzoVal, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
+    ordiniSel: ordiniSel, mezzoId: mezzoId, densitaByProdotto: null
+  });
+}
+
+// Fase 2 della creazione carico: dopo che l'operatore ha confermato
+// le densità nel popup (o senza popup in modalità fallback).
+async function _creaCaricoConDensita(args) {
+  const { data, mezzoTarga, autista, trId, ordiniSel, mezzoId, densitaByProdotto } = args;
+
   const record = {data, mezzo_id:mezzoId, mezzo_targa:mezzoTarga.split(' (')[0], autista, trasportatore_id:trId, stato:'programmato'};
   const { data: carico, error } = await sb.from('carichi').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
@@ -773,7 +805,8 @@ async function creaNuovoCarico() {
   const { data: ordiniCarico } = await sb.from('ordini').select('*').in('id', ordiniSel);
 
   // ═══ GENERA DAS AUTOMATICI per ogni ordine del carico ═══
-  await _generaDasPerCarico(carico.id, ordiniCarico || [], mezzoTarga.split(' (')[0], autista, data);
+  // Passa le densità raccolte dal popup (se presenti) per sovrascrivere i default tabellari
+  await _generaDasPerCarico(carico.id, ordiniCarico || [], mezzoTarga.split(' (')[0], autista, data, densitaByProdotto);
 
   const ordiniDeposito = (ordiniCarico||[]).filter(o => o.fornitore && o.fornitore.toLowerCase().includes('phoenix'));
   if (ordiniDeposito.length > 0) {
@@ -1133,7 +1166,7 @@ var _dasDescrProdotti = {
   }
 };
 
-async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
+async function _generaDasPerCarico(caricoId, ordini, targa, autista, data, densitaByProdotto) {
   if (!ordini || !ordini.length) return;
   var anno = new Date(data).getFullYear();
   var dasInserts = [];
@@ -1181,9 +1214,18 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
     }
 
     var info = _dasDescrProdotti[o.prodotto] || _dasDescrProdotti['Gasolio Autotrazione'];
+    // Se l'operatore ha fornito densità specifiche via popup, le applichiamo
+    // (codice ADR e descrizione restano dalla tabella standard).
+    var densAmb = info.densita_amb;
+    var dens15 = info.densita_15;
+    if (densitaByProdotto && densitaByProdotto[o.prodotto]) {
+      var custom = densitaByProdotto[o.prodotto];
+      if (isFinite(custom.amb) && custom.amb > 0) densAmb = Number(custom.amb);
+      if (isFinite(custom.d15) && custom.d15 > 0) dens15 = Number(custom.d15);
+    }
     var litri = Number(o.litri);
-    var pesoNetto = Math.round(litri * info.densita_amb / 1000);
-    var litri15 = Math.round(litri * info.densita_amb / info.densita_15);
+    var pesoNetto = Math.round(litri * densAmb / 1000);
+    var litri15 = Math.round(litri * densAmb / dens15);
 
     dasInserts.push({
       anno: anno,
@@ -1205,8 +1247,8 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
       litri_ambiente: litri,
       litri_15: litri15,
       peso_netto_kg: pesoNetto,
-      densita_ambiente: info.densita_amb,
-      densita_15: info.densita_15
+      densita_ambiente: densAmb,
+      densita_15: dens15
     });
   }
 
