@@ -466,6 +466,9 @@ async function _modificaTrasportatore(id) {
   h += '<div class="form-group"><label>P.IVA</label><input type="text" id="tr-edit-piva" value="' + esc(t.piva||'') + '" /></div>';
   h += '<div class="form-group"><label>Telefono</label><input type="text" id="tr-edit-tel" value="' + esc(t.telefono||'') + '" /></div>';
   h += '<div class="form-group"><label>Email</label><input type="email" id="tr-edit-email" value="' + esc(t.email||'') + '" /></div>';
+  h += '<div class="form-group" style="grid-column:span 2"><label>Indirizzo</label><input type="text" id="tr-edit-ind" value="' + esc(t.indirizzo||'') + '" placeholder="Via e numero civico" /></div>';
+  h += '<div class="form-group"><label>Città</label><input type="text" id="tr-edit-citta" value="' + esc(t.citta||'') + '" /></div>';
+  h += '<div class="form-group"><label>Provincia</label><input type="text" id="tr-edit-prov" value="' + esc(t.provincia||'') + '" placeholder="VV" maxlength="2" style="text-transform:uppercase" /></div>';
   h += '<div class="form-group" style="grid-column:span 2"><label>Note</label><input type="text" id="tr-edit-note" value="' + esc(t.note||'') + '" /></div>';
   h += '<div class="form-group"><label>Stato</label><select id="tr-edit-attivo"><option value="true"' + (t.attivo !== false ? ' selected' : '') + '>Attivo</option><option value="false"' + (t.attivo === false ? ' selected' : '') + '>Disattivato</option></select></div>';
   h += '</div>';
@@ -533,6 +536,9 @@ async function _salvaModificaTrasportatore(id) {
     piva: document.getElementById('tr-edit-piva').value.trim() || null,
     telefono: document.getElementById('tr-edit-tel').value.trim() || null,
     email: document.getElementById('tr-edit-email').value.trim() || null,
+    indirizzo: document.getElementById('tr-edit-ind').value.trim() || null,
+    citta: document.getElementById('tr-edit-citta').value.trim() || null,
+    provincia: document.getElementById('tr-edit-prov').value.trim().toUpperCase() || null,
     note: document.getElementById('tr-edit-note').value.trim() || null,
     attivo: document.getElementById('tr-edit-attivo').value === 'true'
   };
@@ -1124,6 +1130,26 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
   var anno = new Date(data).getFullYear();
   var dasInserts = [];
 
+  // Recupero il trasportatore_id del carico per valorizzare il vettore.
+  // Se NULL → mezzo proprio (vettore = Phoenix Fuel, campi null, fallback sul mittente in view).
+  // Se valorizzato → leggo anagrafica trasportatore esterno.
+  var vettore = { piva: null, ragsoc: null, indirizzo: null };
+  if (caricoId) {
+    var caricoRes = await sb.from('carichi').select('trasportatore_id').eq('id', caricoId).maybeSingle();
+    var trId = caricoRes.data && caricoRes.data.trasportatore_id;
+    if (trId) {
+      var trRes = await sb.from('trasportatori').select('nome,piva,indirizzo,citta,provincia').eq('id', trId).maybeSingle();
+      if (trRes.data) {
+        vettore.piva = trRes.data.piva || null;
+        vettore.ragsoc = trRes.data.nome || null;
+        var ind = trRes.data.indirizzo || '';
+        var cit = trRes.data.citta || '';
+        var pr  = trRes.data.provincia ? ' (' + trRes.data.provincia + ')' : '';
+        vettore.indirizzo = (ind + (ind && cit ? ' — ' : '') + cit + pr).trim() || null;
+      }
+    }
+  }
+
   // Precarica tutti i clienti necessari in una sola query
   var clientiIds = ordini.map(function(o){return o.cliente_id;}).filter(Boolean);
   var clientiMap = {};
@@ -1162,6 +1188,9 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data) {
       dest_citta: dest.citta,
       mezzo_targa: targa,
       autista: autista,
+      vettore_piva: vettore.piva,
+      vettore_ragsoc: vettore.ragsoc,
+      vettore_indirizzo: vettore.indirizzo,
       prodotto: o.prodotto,
       codice_prodotto: info.codice,
       descrizione_adr: info.adr,
@@ -1230,7 +1259,18 @@ async function stampaDas(dasId) {
   html += '<div class="df"><div class="dfl">Modalità trasporto:</div><div class="dfv">Trasporto stradale</div></div>';
   html += '<div class="df"><div class="dfl">Tipo mezzo:</div><div class="dfv">Veicolo</div></div>';
   html += '<div class="df"><div class="dfl">Identificativo mezzo:</div><div class="dfv" style="font-size:13px;font-weight:700;letter-spacing:1px">' + esc(das.mezzo_targa || '') + '</div></div>';
-  html += '<div class="df"><div class="dfl">Primo vettore:</div><div class="dfv">' + esc(das.mittente_piva) + ' — ' + esc(das.mittente_ragsoc) + '</div></div>';
+  // Primo vettore: se valorizzato (carico con trasportatore esterno) usa quello,
+  // altrimenti fallback sul mittente (mezzi propri Phoenix Fuel).
+  var vettoreHtml;
+  if (das.vettore_piva || das.vettore_ragsoc) {
+    vettoreHtml = esc(das.vettore_piva || '') + (das.vettore_piva && das.vettore_ragsoc ? ' — ' : '') + esc(das.vettore_ragsoc || '');
+    if (das.vettore_indirizzo) {
+      vettoreHtml += '<div style="font-size:10px;color:#555;margin-top:2px">' + esc(das.vettore_indirizzo) + '</div>';
+    }
+  } else {
+    vettoreHtml = esc(das.mittente_piva) + ' — ' + esc(das.mittente_ragsoc);
+  }
+  html += '<div class="df"><div class="dfl">Primo vettore:</div><div class="dfv">' + vettoreHtml + '</div></div>';
   html += '<div class="df"><div class="dfl">Primo incaricato del trasporto:</div><div class="dfv">' + esc(das.autista || '') + '</div></div>';
 
   // Prodotto
