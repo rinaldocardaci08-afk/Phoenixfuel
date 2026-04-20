@@ -512,27 +512,218 @@ async function _eseguiUscitaDeposito(ordineId, ordine, cis) {
 }
 
 // ── RETTIFICHE INVENTARIO ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// STORICO RETTIFICHE UNIFICATO (v2 — 20/04/2026)
+// Filtri: sede, prodotto, causale, anno | KPI per causale | badge
+// Distingue rettifiche manuali vs chiusura mese
+// State: window._rettFiltri[tipo]
+// ═══════════════════════════════════════════════════════════════════
+window._rettDatiCompleti = window._rettDatiCompleti || {};
+window._rettFiltri = window._rettFiltri || {};
+
+var _RETT_CAUSALI = {
+  cali_viaggio: { label:'Cali viaggio', bg:'#FCEBEB', color:'#791F1F' },
+  cali_tecnici: { label:'Cali tecnici', bg:'#FAEEDA', color:'#633806' },
+  eccedenze_viaggio: { label:'Eccedenze viaggio', bg:'#EAF3DE', color:'#27500A' },
+  scatti_vuoto: { label:'Scatti a vuoto', bg:'#EEEDFE', color:'#3C3489' },
+  manuale: { label:'Manuale', bg:'#E6F1FB', color:'#0C447C' },
+  altro: { label:'Altro', bg:'#F1EFE8', color:'#444441' }
+};
+var _RETT_ORIGINE = { manuale:'Manuale', chiusura_mese:'Chiusura mese' };
+
 async function caricaRettifiche(tipo) {
-  const tbodyId = tipo === 'deposito' ? 'rett-deposito-storico' : 'rett-stazione-storico';
-  const tbody = document.getElementById(tbodyId);
-  if (!tbody) return;
-  const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false}).limit(100);
-  if (!data || !data.length) { tbody.innerHTML = '<tr><td colspan="8" class="loading">Nessuna rettifica</td></tr>'; return; }
-  tbody.innerHTML = data.map(r => {
-    const diff = Number(r.differenza);
-    const diffColor = diff > 0 ? '#639922' : diff < 0 ? '#E24B4A' : 'var(--text)';
-    const diffLabel = (diff > 0 ? '+' : '') + _sep(diff.toLocaleString('it-IT')).replace(/\./g, "'") + ' L';
-    const statoBadge = r.confermata ? '<span class="badge green">Confermata</span>' : '<span class="badge amber">In attesa</span>';
-    const cisNome = r.cisterne ? r.cisterne.nome : '—';
-    let azioni = '';
+  var areaId = tipo === 'deposito' ? 'rett-deposito-area' : 'rett-stazione-area';
+  var area = document.getElementById(areaId);
+  if (!area) return;
+
+  area.innerHTML = '<div class="loading">Caricamento rettifiche...</div>';
+
+  // Inizializza filtri se primo caricamento
+  if (!window._rettFiltri[tipo]) {
+    window._rettFiltri[tipo] = {
+      prodotto: '', causale: '', origine: '', anno: String(new Date().getFullYear())
+    };
+  }
+
+  // Query: tutte le rettifiche del tipo (massimo 500 per limite ragionevole)
+  var { data } = await sb.from('rettifiche_inventario')
+    .select('*, cisterne(nome,prodotto)')
+    .eq('tipo', tipo)
+    .order('data', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  window._rettDatiCompleti[tipo] = data || [];
+  _rendRettifiche(tipo);
+}
+
+function _rendRettifiche(tipo) {
+  var areaId = tipo === 'deposito' ? 'rett-deposito-area' : 'rett-stazione-area';
+  var area = document.getElementById(areaId);
+  if (!area) return;
+  var dati = window._rettDatiCompleti[tipo] || [];
+  var filtri = window._rettFiltri[tipo];
+
+  // Estraggo opzioni disponibili dai dati
+  var prodottiSet = {}, anniSet = {};
+  dati.forEach(function(r){
+    var prod = (r.cisterne && r.cisterne.prodotto) || r.prodotto || '';
+    if (prod) prodottiSet[prod] = true;
+    if (r.data) anniSet[r.data.substring(0,4)] = true;
+  });
+  var prodotti = Object.keys(prodottiSet).sort();
+  var anni = Object.keys(anniSet).sort().reverse();
+
+  // Applico filtri
+  var dFilt = dati.filter(function(r){
+    var prod = (r.cisterne && r.cisterne.prodotto) || r.prodotto || '';
+    if (filtri.prodotto && prod !== filtri.prodotto) return false;
+    if (filtri.causale && (r.causale || 'manuale') !== filtri.causale) return false;
+    if (filtri.origine && (r.origine || 'manuale') !== filtri.origine) return false;
+    if (filtri.anno && (!r.data || r.data.substring(0,4) !== filtri.anno)) return false;
+    return true;
+  });
+
+  // Aggrego per causale (solo confermate, filtrate)
+  var perCausale = {};
+  dFilt.forEach(function(r){
+    if (!r.confermata) return;
+    var c = r.causale || 'manuale';
+    if (!perCausale[c]) perCausale[c] = { totale: 0, n: 0 };
+    perCausale[c].totale += Number(r.differenza || 0);
+    perCausale[c].n++;
+  });
+
+  function fmt(n){ return Math.round(n).toLocaleString('it-IT'); }
+  function fmtSigned(n){ return (n>0?'+':(n<0?'−':'')) + fmt(Math.abs(n)) + ' L'; }
+  function fmtD(s){ try { return new Date(s).toLocaleDateString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric'}); } catch(e){ return s; } }
+
+  var h = '';
+
+  // RIGA FILTRI
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:10px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;align-items:center">';
+  h += '<span style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px">Filtri:</span>';
+  // Prodotto
+  h += '<select onchange="_rettCambiaFiltro(\''+tipo+'\',\'prodotto\',this.value)" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">';
+  h += '<option value="">Tutti i prodotti</option>';
+  prodotti.forEach(function(p){
+    h += '<option value="'+esc(p)+'"'+(filtri.prodotto===p?' selected':'')+'>'+esc(p)+'</option>';
+  });
+  h += '</select>';
+  // Causale
+  h += '<select onchange="_rettCambiaFiltro(\''+tipo+'\',\'causale\',this.value)" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">';
+  h += '<option value="">Tutte le causali</option>';
+  Object.keys(_RETT_CAUSALI).forEach(function(c){
+    h += '<option value="'+c+'"'+(filtri.causale===c?' selected':'')+'>'+_RETT_CAUSALI[c].label+'</option>';
+  });
+  h += '</select>';
+  // Origine
+  h += '<select onchange="_rettCambiaFiltro(\''+tipo+'\',\'origine\',this.value)" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">';
+  h += '<option value="">Tutte le origini</option>';
+  h += '<option value="manuale"'+(filtri.origine==='manuale'?' selected':'')+'>Manuali</option>';
+  h += '<option value="chiusura_mese"'+(filtri.origine==='chiusura_mese'?' selected':'')+'>Da chiusura mese</option>';
+  h += '</select>';
+  // Anno
+  h += '<select onchange="_rettCambiaFiltro(\''+tipo+'\',\'anno\',this.value)" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text)">';
+  h += '<option value="">Tutti gli anni</option>';
+  anni.forEach(function(a){
+    h += '<option value="'+a+'"'+(filtri.anno===a?' selected':'')+'>'+a+'</option>';
+  });
+  h += '</select>';
+  // Reset filtri
+  if (filtri.prodotto || filtri.causale || filtri.origine || (filtri.anno && filtri.anno !== String(new Date().getFullYear()))) {
+    h += '<button onclick="_rettResetFiltri(\''+tipo+'\')" style="font-size:11px;padding:5px 10px;background:none;border:0.5px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text-muted)" title="Azzera filtri">✕ Reset</button>';
+  }
+  h += '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">'+dFilt.length+' rettifich'+(dFilt.length===1?'a':'e')+' · mostrate</span>';
+  h += '</div>';
+
+  // KPI PER CAUSALE
+  if (Object.keys(perCausale).length) {
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px">';
+    Object.keys(perCausale).forEach(function(c){
+      var info = _RETT_CAUSALI[c] || _RETT_CAUSALI.altro;
+      var v = perCausale[c];
+      h += '<div style="background:'+info.bg+';padding:10px 12px;border-radius:6px">';
+      h += '<div style="font-size:10px;color:'+info.color+';text-transform:uppercase;letter-spacing:0.4px;font-weight:500">'+info.label+'</div>';
+      h += '<div style="font-family:var(--font-mono);font-size:17px;font-weight:600;color:'+info.color+';margin-top:2px">'+fmtSigned(v.totale)+'</div>';
+      h += '<div style="font-size:10px;color:'+info.color+';opacity:0.7">'+v.n+(v.n===1?' operazione':' operazioni')+'</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+
+  // TABELLA RETTIFICHE
+  if (!dFilt.length) {
+    h += '<div style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px">';
+    h += dati.length === 0 ? 'Nessuna rettifica ancora registrata.' : 'Nessuna rettifica corrisponde ai filtri selezionati.';
+    h += '</div>';
+    area.innerHTML = h;
+    return;
+  }
+
+  h += '<div style="overflow-x:auto">';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  h += '<thead><tr>';
+  h += '<th style="text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Data</th>';
+  h += '<th style="text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Cisterna/Prodotto</th>';
+  h += '<th style="text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Causale</th>';
+  h += '<th style="text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Origine</th>';
+  h += '<th style="text-align:right;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Δ Litri</th>';
+  h += '<th style="text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Note</th>';
+  h += '<th style="text-align:left;padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg);font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted)">Stato</th>';
+  h += '<th style="padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg)"></th>';
+  h += '</tr></thead><tbody>';
+
+  dFilt.forEach(function(r){
+    var diff = Number(r.differenza || 0);
+    var diffCol = diff > 0 ? '#27500A' : diff < 0 ? '#A32D2D' : 'var(--text)';
+    var cisNome = (r.cisterne && r.cisterne.nome) || '—';
+    var prod = (r.cisterne && r.cisterne.prodotto) || r.prodotto || '—';
+    var infoC = _RETT_CAUSALI[r.causale || 'manuale'] || _RETT_CAUSALI.altro;
+    var infoO = _RETT_ORIGINE[r.origine] || r.origine || 'Manuale';
+    var statoBadge = r.confermata
+      ? '<span style="background:#EAF3DE;color:#27500A;font-size:10px;padding:2px 8px;border-radius:3px;font-weight:500">Confermata</span>'
+      : '<span style="background:#FAEEDA;color:#633806;font-size:10px;padding:2px 8px;border-radius:3px;font-weight:500">In attesa</span>';
+
+    var azioni = '';
     if (!r.confermata) {
-      azioni = '<button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="confermaRettifica(\'' + r.id + '\',\'' + tipo + '\')">✓ Conferma</button> ';
-      azioni += '<button class="btn-danger" style="font-size:10px;padding:3px 6px" onclick="eliminaRettifica(\'' + r.id + '\',\'' + tipo + '\')">x</button>';
+      azioni += '<button onclick="confermaRettifica(\''+r.id+'\',\''+tipo+'\')" style="font-size:10px;padding:3px 8px;background:#27500A;color:#fff;border:none;border-radius:3px;cursor:pointer;margin-right:3px">✓ Conferma</button>';
+      azioni += '<button onclick="eliminaRettifica(\''+r.id+'\',\''+tipo+'\')" style="font-size:10px;padding:3px 6px;background:#A32D2D;color:#fff;border:none;border-radius:3px;cursor:pointer">✕</button>';
+    } else if (r.origine !== 'chiusura_mese') {
+      azioni = '<span style="font-size:10px;color:var(--text-muted)">'+esc(r.confermata_da || '')+'</span>';
     } else {
-      azioni = '<span style="font-size:10px;color:var(--text-hint)">' + (r.confermata_da || '') + '</span>';
+      azioni = '<span style="font-size:10px;color:var(--text-muted);font-style:italic" title="Eliminabile solo riaprendo il mese dalla sezione Giacenze mensili">auto</span>';
     }
-    return '<tr><td>' + fmtD(r.data) + '</td><td>' + esc(cisNome) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.giacenza_sistema||0) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmtL(r.giacenza_rilevata) + '</td><td style="font-family:var(--font-mono);color:' + diffColor + ';font-weight:600">' + diffLabel + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td>' + statoBadge + '</td><td>' + azioni + '</td></tr>';
-  }).join('');
+
+    h += '<tr style="border-bottom:0.5px solid var(--border)">';
+    h += '<td style="padding:8px 10px;font-family:var(--font-mono)">'+fmtD(r.data)+'</td>';
+    h += '<td style="padding:8px 10px">';
+    h += '<div style="font-weight:500">'+esc(cisNome)+'</div>';
+    h += '<div style="font-size:10px;color:var(--text-muted)">'+esc(prod)+'</div>';
+    h += '</td>';
+    h += '<td style="padding:8px 10px"><span style="background:'+infoC.bg+';color:'+infoC.color+';font-size:10px;padding:2px 8px;border-radius:3px;font-weight:500">'+infoC.label+'</span></td>';
+    h += '<td style="padding:8px 10px;color:var(--text-muted);font-size:10px">'+esc(infoO)+'</td>';
+    h += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);font-weight:600;color:'+diffCol+'">'+fmtSigned(diff)+'</td>';
+    h += '<td style="padding:8px 10px;font-size:10px;color:var(--text-muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.note||'')+'">'+esc(r.note||'—')+'</td>';
+    h += '<td style="padding:8px 10px">'+statoBadge+'</td>';
+    h += '<td style="padding:8px 10px">'+azioni+'</td>';
+    h += '</tr>';
+  });
+
+  h += '</tbody></table></div>';
+
+  area.innerHTML = h;
+}
+
+function _rettCambiaFiltro(tipo, campo, valore) {
+  if (!window._rettFiltri[tipo]) window._rettFiltri[tipo] = {};
+  window._rettFiltri[tipo][campo] = valore;
+  _rendRettifiche(tipo);
+}
+
+function _rettResetFiltri(tipo) {
+  window._rettFiltri[tipo] = { prodotto: '', causale: '', origine: '', anno: String(new Date().getFullYear()) };
+  _rendRettifiche(tipo);
 }
 
 async function nuovaRettifica(tipo) {
