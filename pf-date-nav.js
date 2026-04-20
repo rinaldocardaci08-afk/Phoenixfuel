@@ -81,11 +81,35 @@
     // Crea wrapper flex attorno all'input.
     var wrap = document.createElement('span');
     wrap.className = 'pf-datenav';
-    wrap.style.cssText = 'display:inline-flex;align-items:stretch;gap:4px;vertical-align:middle;max-width:100%';
+    wrap.style.cssText = 'display:inline-flex;align-items:stretch;gap:4px;vertical-align:middle';
 
-    // Inserisce il wrapper al posto dell'input, poi mette l'input dentro.
+    // Rileva il contesto del parent per decidere se il wrapper debba
+    // espandersi a tutta la larghezza (come l'input originale).
+    // - Grid cell (parent display:grid)
+    // - Flex column (parent display:flex;flex-direction:column) → es. .form-group
+    // - Block normale
+    // In tutti questi il wrapper deve width:100% per occupare lo spazio
+    // che prima occupava l'input (evita sovrapposizioni con celle adiacenti).
+    // In flex-row (es. card-title con altri bottoni) lascio width auto.
     var parent = inp.parentNode;
     if (!parent) { STATS.skippati++; return; }
+    var csp;
+    try { csp = window.getComputedStyle(parent); } catch(e) { csp = null; }
+    var expandFull = false;
+    if (csp) {
+      var disp = csp.display;
+      var fdir = csp.flexDirection || '';
+      if (disp === 'block' || disp === 'grid' || disp === 'inline-grid') expandFull = true;
+      else if ((disp === 'flex' || disp === 'inline-flex') && (fdir === 'column' || fdir === 'column-reverse')) expandFull = true;
+    }
+    if (expandFull) {
+      wrap.style.width = '100%';
+      wrap.style.maxWidth = '100%';
+    } else {
+      wrap.style.maxWidth = '100%';
+    }
+
+    // Inserisce il wrapper al posto dell'input, poi mette l'input dentro.
     parent.insertBefore(wrap, inp);
 
     // Pulsante ◀ (prev)
@@ -103,6 +127,13 @@
     wrap.appendChild(btnPrev);
     wrap.appendChild(inp);            // sposta l'input dentro il wrapper
     wrap.appendChild(btnNext);
+
+    // Se il wrapper è width:100%, l'input deve occupare lo spazio rimanente
+    // dopo le due frecce, con un minimo sensato per il picker nativo.
+    if (expandFull) {
+      inp.style.flex = '1 1 0';
+      inp.style.minWidth = '110px';
+    }
 
     inp.setAttribute(MARK_ATTR, '1');
     STATS.attivati++;
