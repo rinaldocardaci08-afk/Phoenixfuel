@@ -710,9 +710,297 @@
     _renderReport();
   };
 
-  // ── Export (TURNO 3 placeholder) ─────────────────────────────────
-  window.pfMvtDettExportPDF = function() { toast('Export PDF in arrivo nel prossimo turno'); };
-  window.pfMvtDettExportExcel = function() { toast('Export Excel in arrivo nel prossimo turno'); };
+  // ── Export PDF (finestra stampa-ready) ───────────────────────────
+  window.pfMvtDettExportPDF = function() {
+    if (!_report) { toast('Nessun report da esportare'); return; }
+    var cfg = _report.cfg;
+    var d = _report.dati;
+
+    var totAcq = _sumLitri(d.acquisti);
+    var totRie = _sumLitri(d.rientri);
+    var totRp = _sumDiff(d.rettEccedenze);
+    var totEntrate = totAcq + totRie + totRp;
+
+    var totVen = _sumLitri(d.vendite);
+    var totSta = _sumLitri(d.stazione);
+    var totAut = _sumLitri(d.autoconsumo);
+    var totRm = Math.abs(_sumDiff(d.rettCali));
+    var totUscite = totVen + totSta + totAut + totRm;
+
+    var saldo = totEntrate - totUscite;
+    var rettNetto = totRp - totRm;
+
+    var prodLabel = cfg.prodotti.length === 1 ? cfg.prodotti[0] :
+                    (_stato && cfg.prodotti.length === _stato.prodottiDisponibili.length ? 'Tutti i prodotti' :
+                      cfg.prodotti.join(', '));
+
+    var w = _apriReport('Dettaglio movimenti Deposito'); if (!w) return;
+
+    var css = ''
+      + '*{box-sizing:border-box;margin:0;padding:0}'
+      + 'body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#222;background:#fff;padding:20px 28px 80px;font-size:11px;line-height:1.4}'
+      + 'h1{font-size:18px;margin-bottom:4px;color:#111}'
+      + '.sub{color:#666;font-size:11px;margin-bottom:14px}'
+      + '.divider{border-top:2px solid #D4A017;margin:10px 0 16px}'
+      + '.riassunto{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:18px;border:0.5px solid #ddd;border-radius:4px;padding:10px 8px;background:#fafaf8}'
+      + '.riassunto .box{text-align:center;padding:4px 6px;border-right:0.5px solid #ddd}'
+      + '.riassunto .box:last-child{border-right:none}'
+      + '.riassunto .label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:3px}'
+      + '.riassunto .val{font-family:Menlo,monospace;font-size:12px;font-weight:700}'
+      + '.saldo{background:rgba(212,160,23,0.12);border:0.5px solid #D4A017;border-radius:4px;padding:10px 14px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center}'
+      + '.saldo .lab{font-weight:700;text-transform:uppercase;letter-spacing:0.3px;font-size:11px}'
+      + '.saldo .v{font-family:Menlo,monospace;font-size:18px;font-weight:700}'
+      + '.sez{margin-bottom:14px;page-break-inside:avoid}'
+      + '.sez-head{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;color:#fff;border-radius:3px;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.3px}'
+      + '.sez table{width:100%;border-collapse:collapse;margin-top:4px}'
+      + '.sez th{background:#f4f2ec;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#666;padding:4px 6px;text-align:left;border-bottom:0.5px solid #ddd;font-weight:600}'
+      + '.sez td{padding:3px 6px;border-bottom:0.5px solid #eee;font-size:10px}'
+      + '.sez td.num{font-family:Menlo,monospace;text-align:right;font-weight:600;white-space:nowrap}'
+      + '.sez td.dt{font-family:Menlo,monospace;color:#666;font-size:9px;white-space:nowrap;width:70px}'
+      + '.tot-gruppo{font-weight:700;background:#fafaf8;border-top:0.5px solid #bbb}'
+      + '.vuoto{text-align:center;padding:8px;color:#888;font-style:italic;font-size:10px}'
+      + '.footer{margin-top:18px;text-align:center;color:#999;font-size:9px;border-top:0.5px solid #eee;padding-top:8px}'
+      + '@media print{body{padding:10mm}.no-print{display:none !important}.sez-head{-webkit-print-color-adjust:exact;print-color-adjust:exact}.riassunto,.saldo{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'
+      + '.no-print{position:fixed;bottom:16px;right:16px;display:flex;gap:6px;z-index:99}'
+      + '.no-print button{border:none;padding:9px 16px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.15)}';
+
+    var h = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Dettaglio movimenti Deposito — ' + esc2(cfg.etichetta) + '</title><style>' + css + '</style></head><body>';
+    h += '<h1>📊 Dettaglio movimenti Deposito</h1>';
+    h += '<div class="sub">' + esc2(cfg.etichetta) + ' &middot; Deposito Vibo &middot; ' + esc2(prodLabel) + '</div>';
+    h += '<div class="divider"></div>';
+
+    // Riassunto in riga
+    h += '<div class="riassunto">';
+    h += _pdfKpi('Entrate', '+' + _fmtL(totEntrate), '#27500A');
+    h += _pdfKpi('Uscite clienti', '−' + _fmtL(totVen), '#791F1F');
+    h += _pdfKpi('Uscite stazione', '−' + _fmtL(totSta), '#791F1F');
+    h += _pdfKpi('Autoconsumo', '−' + _fmtL(totAut), '#791F1F');
+    h += _pdfKpi('Rettifiche netto', _fmtLSigned(rettNetto), rettNetto >= 0 ? '#27500A' : '#791F1F');
+    h += _pdfKpi('Uscite totali', '−' + _fmtL(totUscite), '#791F1F');
+    h += '</div>';
+
+    // Saldo
+    var saldoCol = saldo >= 0 ? '#27500A' : '#791F1F';
+    h += '<div class="saldo"><div class="lab">Saldo netto periodo</div><div class="v" style="color:' + saldoCol + '">' + _fmtLSigned(saldo) + '</div></div>';
+
+    // Sezioni Entrate
+    h += _pdfSezione('ENTRATE &mdash; Acquisti da fornitori',  '#639922', d.acquisti,     'acquisti',  cfg, '+');
+    h += _pdfSezione('ENTRATE &mdash; Rientri merce',          '#639922', d.rientri,      'rientri',   cfg, '+');
+    h += _pdfSezione('ENTRATE &mdash; Rettifiche eccedenze',   '#639922', d.rettEccedenze,'rettifica', cfg, '+');
+
+    // Sezioni Uscite
+    h += _pdfSezione('USCITE &mdash; Vendite a clienti',        '#A32D2D', d.vendite,     'vendite',   cfg, '−');
+    h += _pdfSezione('USCITE &mdash; Consegne a stazione Oppido','#A32D2D', d.stazione,    'stazione',  cfg, '−');
+    h += _pdfSezione('USCITE &mdash; Autoconsumo',              '#A32D2D', d.autoconsumo, 'autoconsumo',cfg, '−');
+    h += _pdfSezione('USCITE &mdash; Rettifiche cali/ammanchi', '#A32D2D', d.rettCali,    'rettifica', cfg, '−');
+
+    h += '<div class="footer">PhoenixFuel · generato il ' + _fmtIT(new Date().toISOString().split('T')[0]) + '</div>';
+
+    h += '<div class="no-print">';
+    h += '  <button onclick="window.print()" style="background:#D4A017;color:#fff">🖨️ Stampa / PDF</button>';
+    h += '  <button onclick="window.close()" style="background:#E24B4A;color:#fff">✕ Chiudi</button>';
+    h += '</div>';
+
+    h += '</body></html>';
+
+    w.document.open();
+    w.document.write(h);
+    w.document.close();
+  };
+
+  function _pdfKpi(label, val, col) {
+    return '<div class="box"><div class="label">' + esc2(label) + '</div><div class="val" style="color:' + col + '">' + esc2(val) + '</div></div>';
+  }
+
+  function _pdfSezione(titolo, col, righe, tipo, cfg, segno) {
+    var h = '<div class="sez">';
+    h += '<div class="sez-head" style="background:' + col + '">';
+    h += '  <span>' + titolo + '</span>';
+    var tot;
+    if (tipo === 'rettifica') tot = Math.abs(_sumDiff(righe));
+    else tot = _sumLitri(righe);
+    h += '  <span style="font-family:Menlo,monospace">' + (tot === 0 ? '0 L' : segno + _fmtL(tot)) + ' &middot; ' + (righe ? righe.length : 0) + ' op.</span>';
+    h += '</div>';
+
+    if (!righe || !righe.length) {
+      h += '<div class="vuoto">Nessun movimento nel periodo</div></div>';
+      return h;
+    }
+
+    var showProd = cfg.prodotti.length > 1;
+    h += '<table>';
+    h += '<thead><tr><th>Data</th>';
+    if (showProd) h += '<th>Prodotto</th>';
+    h += '<th>Descrizione</th><th style="text-align:right">Litri</th></tr></thead><tbody>';
+
+    righe.forEach(function(r) {
+      var lit = tipo === 'rettifica' ? Math.abs(Number(r.differenza || 0)) : Number(r.litri || 0);
+      var desc = _pdfRigaDesc(tipo, r);
+      h += '<tr>';
+      h += '<td class="dt">' + _fmtIT(r.data) + '</td>';
+      if (showProd) h += '<td>' + esc2(r.prodotto || '') + '</td>';
+      h += '<td>' + desc + '</td>';
+      h += '<td class="num" style="color:' + col + '">' + segno + _fmtL(lit) + '</td>';
+      h += '</tr>';
+    });
+
+    // Totale gruppo
+    h += '<tr class="tot-gruppo">';
+    h += '<td colspan="' + (showProd ? 3 : 2) + '" style="text-align:right;padding:5px 8px">Totale</td>';
+    h += '<td class="num" style="color:' + col + '">' + (tot === 0 ? '0 L' : segno + _fmtL(tot)) + '</td>';
+    h += '</tr>';
+
+    h += '</tbody></table></div>';
+    return h;
+  }
+
+  function _pdfRigaDesc(tipo, r) {
+    if (tipo === 'acquisti') {
+      var base = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+      return esc2(r.fornitore || '—') + (base ? ' · <span style="color:#888">' + esc2(base) + '</span>' : '');
+    }
+    if (tipo === 'rientri') return 'da ' + esc2(r.cliente || r.note || 'rientro');
+    if (tipo === 'vendite') return esc2(r.cliente || '—');
+    if (tipo === 'stazione') return 'Stazione Oppido';
+    if (tipo === 'autoconsumo') return 'Autoconsumo' + (r.note ? ' · <span style="color:#888">' + esc2(r.note) + '</span>' : '');
+    if (tipo === 'rettifica') {
+      var caus = _labelCausale(r.causale);
+      var orig = r.origine === 'chiusura_mese' ? ' · chiusura mese' : '';
+      var note = r.note ? ' · ' + esc2(r.note) : '';
+      return caus + '<span style="color:#888">' + orig + note + '</span>';
+    }
+    return '';
+  }
+
+  // ── Export Excel (SheetJS) ────────────────────────────────────────
+  window.pfMvtDettExportExcel = function() {
+    if (!_report) { toast('Nessun report da esportare'); return; }
+    if (typeof XLSX === 'undefined') { toast('Libreria Excel non caricata'); return; }
+
+    var cfg = _report.cfg;
+    var d = _report.dati;
+
+    var totAcq = _sumLitri(d.acquisti);
+    var totRie = _sumLitri(d.rientri);
+    var totRp = _sumDiff(d.rettEccedenze);
+    var totEntrate = totAcq + totRie + totRp;
+
+    var totVen = _sumLitri(d.vendite);
+    var totSta = _sumLitri(d.stazione);
+    var totAut = _sumLitri(d.autoconsumo);
+    var totRm = Math.abs(_sumDiff(d.rettCali));
+    var totUscite = totVen + totSta + totAut + totRm;
+    var saldo = totEntrate - totUscite;
+    var rettNetto = totRp - totRm;
+
+    var wb = XLSX.utils.book_new();
+
+    // ─ Foglio 1: RIASSUNTO ─────────────────────────────────────────
+    var prodLabel = cfg.prodotti.length === 1 ? cfg.prodotti[0] :
+                    (_stato && cfg.prodotti.length === _stato.prodottiDisponibili.length ? 'Tutti i prodotti' :
+                     cfg.prodotti.join(', '));
+    var riass = [
+      ['DETTAGLIO MOVIMENTI DEPOSITO'],
+      ['Periodo', cfg.etichetta],
+      ['Dal', _fmtIT(cfg.da), 'Al', _fmtIT(cfg.a)],
+      ['Deposito', 'Vibo Valentia'],
+      ['Prodotti', prodLabel],
+      [],
+      ['GRUPPO', 'OPERAZIONI', 'LITRI'],
+      ['Entrate — Acquisti da fornitori', d.acquisti.length, Math.round(totAcq)],
+      ['Entrate — Rientri merce', d.rientri.length, Math.round(totRie)],
+      ['Entrate — Rettifiche eccedenze', d.rettEccedenze.length, Math.round(totRp)],
+      ['TOTALE ENTRATE', d.acquisti.length + d.rientri.length + d.rettEccedenze.length, Math.round(totEntrate)],
+      [],
+      ['Uscite — Vendite a clienti', d.vendite.length, -Math.round(totVen)],
+      ['Uscite — Consegne a stazione Oppido', d.stazione.length, -Math.round(totSta)],
+      ['Uscite — Autoconsumo', d.autoconsumo.length, -Math.round(totAut)],
+      ['Uscite — Rettifiche cali/ammanchi', d.rettCali.length, -Math.round(totRm)],
+      ['TOTALE USCITE', d.vendite.length + d.stazione.length + d.autoconsumo.length + d.rettCali.length, -Math.round(totUscite)],
+      [],
+      ['SALDO NETTO PERIODO', '', Math.round(saldo)],
+      ['Rettifiche netto (eccedenze − cali)', '', Math.round(rettNetto)]
+    ];
+    var wsR = XLSX.utils.aoa_to_sheet(riass);
+    wsR['!cols'] = [{wch:40},{wch:14},{wch:16}];
+    XLSX.utils.book_append_sheet(wb, wsR, 'Riassunto');
+
+    // ─ Foglio 2-8: UN FOGLIO PER GRUPPO ────────────────────────────
+    _xlsxFoglioOrdini(wb, 'Acquisti', d.acquisti, cfg, 'acquisti');
+    _xlsxFoglioOrdini(wb, 'Rientri merce', d.rientri, cfg, 'rientri');
+    _xlsxFoglioRettifiche(wb, 'Rettifiche eccedenze', d.rettEccedenze);
+    _xlsxFoglioOrdini(wb, 'Vendite', d.vendite, cfg, 'vendite');
+    _xlsxFoglioOrdini(wb, 'Stazione Oppido', d.stazione, cfg, 'stazione');
+    _xlsxFoglioOrdini(wb, 'Autoconsumo', d.autoconsumo, cfg, 'autoconsumo');
+    _xlsxFoglioRettifiche(wb, 'Rettifiche cali', d.rettCali);
+
+    var fname = 'MovimentiDeposito_' + cfg.da + '_' + cfg.a + '.xlsx';
+    XLSX.writeFile(wb, fname);
+    toast('✓ Excel esportato');
+  };
+
+  function _xlsxFoglioOrdini(wb, nome, righe, cfg, tipo) {
+    var rows = [];
+    if (tipo === 'acquisti') rows.push(['Data','Prodotto','Fornitore','Base carico','Litri']);
+    else if (tipo === 'rientri') rows.push(['Data','Prodotto','Da (cliente)','Note','Litri']);
+    else if (tipo === 'vendite') rows.push(['Data','Prodotto','Cliente','Fornitore ordine','Litri']);
+    else if (tipo === 'stazione') rows.push(['Data','Prodotto','Fornitore ordine','Litri']);
+    else if (tipo === 'autoconsumo') rows.push(['Data','Prodotto','Note','Litri']);
+
+    (righe || []).forEach(function(r) {
+      if (tipo === 'acquisti') {
+        var base = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+        rows.push([_fmtIT(r.data), r.prodotto || '', r.fornitore || '', base, Math.round(Number(r.litri || 0))]);
+      } else if (tipo === 'rientri') {
+        rows.push([_fmtIT(r.data), r.prodotto || '', r.cliente || '', r.note || '', Math.round(Number(r.litri || 0))]);
+      } else if (tipo === 'vendite') {
+        rows.push([_fmtIT(r.data), r.prodotto || '', r.cliente || '', r.fornitore || '', Math.round(Number(r.litri || 0))]);
+      } else if (tipo === 'stazione') {
+        rows.push([_fmtIT(r.data), r.prodotto || '', r.fornitore || '', Math.round(Number(r.litri || 0))]);
+      } else if (tipo === 'autoconsumo') {
+        rows.push([_fmtIT(r.data), r.prodotto || '', r.note || '', Math.round(Number(r.litri || 0))]);
+      }
+    });
+
+    // Riga totale
+    var tot = (righe || []).reduce(function(s,r){ return s + Number(r.litri || 0); }, 0);
+    if (righe && righe.length) {
+      var vuoti = rows[0].length - 2;
+      var totRow = ['TOTALE'];
+      for (var i = 0; i < vuoti; i++) totRow.push('');
+      totRow.push(Math.round(tot));
+      rows.push([]);
+      rows.push(totRow);
+    }
+
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    var colWidths = rows[0].map(function(){ return {wch:18}; });
+    colWidths[colWidths.length - 1] = {wch:14}; // Litri
+    ws['!cols'] = colWidths;
+    XLSX.utils.book_append_sheet(wb, ws, nome.substring(0, 31));
+  }
+
+  function _xlsxFoglioRettifiche(wb, nome, righe) {
+    var rows = [['Data','Prodotto','Causale','Origine','Note','Litri (± delta)']];
+    (righe || []).forEach(function(r) {
+      rows.push([
+        _fmtIT(r.data),
+        r.prodotto || '',
+        _labelCausale(r.causale),
+        r.origine === 'chiusura_mese' ? 'Chiusura mese' : (r.origine || 'Manuale'),
+        r.note || '',
+        Math.round(Number(r.differenza || 0))
+      ]);
+    });
+    var tot = (righe || []).reduce(function(s,r){ return s + Number(r.differenza || 0); }, 0);
+    if (righe && righe.length) {
+      rows.push([]);
+      rows.push(['TOTALE','','','','', Math.round(tot)]);
+    }
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{wch:12},{wch:22},{wch:20},{wch:16},{wch:30},{wch:16}];
+    XLSX.utils.book_append_sheet(wb, ws, nome.substring(0, 31));
+  }
 
 
   // Esporta entry point
