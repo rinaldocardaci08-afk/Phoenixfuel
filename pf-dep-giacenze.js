@@ -54,7 +54,7 @@ async function caricaGiacenzeMensiliDeposito() {
 
   // Carica dati salvati (stessa tabella giacenze_mensili con sede='deposito_vibo')
   var { data: salvati } = await sb.from('giacenze_mensili')
-    .select('*').eq('anno', anno).eq('sede','deposito_vibo').order('mese');
+    .select('id,anno,mese,prodotto,sede,giacenza_inizio,entrate,venduto,eccedenze_viaggio,cali_viaggio,scatti_vuoto,cali_tecnici,giacenza_rilevata,note,chiuso_il,chiuso_da').eq('anno', anno).eq('sede','deposito_vibo').order('mese');
   var salvMap = {};
   (salvati||[]).forEach(function(s){ salvMap[s.prodotto+'_'+s.mese]=s; });
 
@@ -134,6 +134,7 @@ async function caricaGiacenzeMensiliDeposito() {
       var uscite    = usciteMese[k]   || 0;
       var eccedenze = Number(salv.eccedenze_viaggio || 0);
       var caliV     = Number(salv.cali_viaggio || 0);
+      var scattiV   = Number(salv.scatti_vuoto || 0);
       var coeff     = _depGmCoeff[prod] || 0.00020;
       var caliSug   = Math.round(entrate * coeff * 100) / 100;
       // caliTecnici: usa il valore manuale se inserito, altrimenti suggerito DM55/2000
@@ -141,14 +142,19 @@ async function caricaGiacenzeMensiliDeposito() {
       var caliTec   = caliManuale ? Number(salv.cali_tecnici) : caliSug;
       var giacRilev = (salv.giacenza_rilevata !== undefined && salv.giacenza_rilevata !== null)
                       ? Number(salv.giacenza_rilevata) : null;
-      var giacPresunta = Math.round((giacCorr + entrate + eccedenze - caliV - caliTec - uscite) * 100) / 100;
+      var giacPresunta = Math.round((giacCorr + entrate + eccedenze - caliV - caliTec - scattiV - uscite) * 100) / 100;
       var diffMese  = giacRilev !== null ? Math.round((giacPresunta - giacRilev) * 100) / 100 : null;
       if (diffMese !== null) diffCum = Math.round((diffCum + diffMese) * 100) / 100;
       risultato[prod].push({
         mese:m, giacInizio:Math.round(giacCorr), entrate:entrate, uscite:uscite,
         eccedenze:eccedenze, caliViaggio:caliV, caliSuggeriti:caliSug, caliTecnici:caliTec, caliManuale:caliManuale,
         giacPresunta:giacPresunta, giacRilevata:giacRilev,
-        diffMese:diffMese, diffCumulata:(giacRilev!==null ? diffCum : null)
+        diffMese:diffMese, diffCumulata:(giacRilev!==null ? diffCum : null),
+        // Stato chiusura (19/04/2026) - NUOVO
+        id: salv.id || null,
+        chiusoIl: salv.chiuso_il || null,
+        chiusoDa: salv.chiuso_da || null,
+        scattiVuoto: Number(salv.scatti_vuoto || 0)
       });
       giacCorr = giacRilev !== null ? giacRilev : giacPresunta;
     }
@@ -197,6 +203,7 @@ function renderGiacenzeMensiliDeposito() {
       { key:'eccedenze',  label:'+ Eccedenze viaggio',     bg:'#FAEEDA', color:'#633806', input:'eccedenze_viaggio' },
       { key:'caliViaggio',label:'- Cali viaggio',          bg:'#FAEEDA', color:'#633806', input:'cali_viaggio', neg:true },
       { key:'caliTecnici',label:'- Cali tecnici',          bg:'#EEEDFE', color:'#3C3489', input:'cali_tecnici', neg:true, suggerito:'caliSuggeriti', manuale:'caliManuale' },
+      { key:'scattiVuoto',label:'- Scatti a vuoto',        bg:'#EEEDFE', color:'#3C3489', input:'scatti_vuoto', neg:true },
       { key:'giacPresunta',label:'= Giacenza teorica',     bg:'#EAF3DE', color:'#27500A', auto:true, bold:true },
     ];
 
@@ -206,6 +213,7 @@ function renderGiacenzeMensiliDeposito() {
       mesiIdx.forEach(function(i) {
         var d = dati[i];
         var val = d[riga.key];
+        var meseChiuso = !!d.chiusoIl;
         if (riga.input && !riga.auto) {
           var savedVal = val !== null && val !== undefined ? val : '';
           html += '<td style="padding:3px 4px;border:0.5px solid var(--border)">';
@@ -213,12 +221,13 @@ function renderGiacenzeMensiliDeposito() {
           html += 'data-prod="'+esc(prod)+'" data-mese="'+(i+1)+'" data-campo="'+riga.input+'" ';
           html += 'value="'+(savedVal||'')+'" placeholder="0" step="0.01" ';
           html += 'oninput="aggiornaRigheDeposito(this)" ';
+          if (meseChiuso) html += 'disabled ';
           // Stile input: bordo verde se valore manuale inserito, normale altrimenti
           // Distingui tra valore manuale e suggerito DM55
           var isManualeOra = riga.manuale ? d[riga.manuale] : false;
           var borderStile = isManualeOra ? '1.5px solid #27500A' : '0.5px solid var(--border)';
-          var bgStile = isManualeOra ? '#fff' : '#f8f7ff';
-          html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:'+borderStile+';border-radius:4px;background:'+bgStile+';color:#1a1a18;text-align:right">';
+          var bgStile = meseChiuso ? '#eee' : (isManualeOra ? '#fff' : '#f8f7ff');
+          html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:'+borderStile+';border-radius:4px;background:'+bgStile+';color:#1a1a18;text-align:right'+(meseChiuso?';cursor:not-allowed;opacity:0.6':'')+'">';
           // Hint sotto input
           if (riga.suggerito) {
             if (isManualeOra) {
@@ -236,9 +245,9 @@ function renderGiacenzeMensiliDeposito() {
       html += '</tr>';
     });
 
-    // Riga giacenza rilevata (input)
+    // Riga giacenza rilevata (input) - solo informativa, resta editabile anche con mese chiuso
     html += '<tr style="background:#fff;border-top:2px solid #D85A30">';
-    html += '<td style="padding:5px 8px;border:0.5px solid var(--border);font-size:10px;font-weight:700;color:#D85A30">📏 Giacenza rilevata (asta)</td>';
+    html += '<td style="padding:5px 8px;border:0.5px solid var(--border);font-size:10px;font-weight:700;color:#D85A30">📏 Giacenza rilevata (asta) <span style="font-weight:400;font-size:9px;color:var(--text-muted)">solo osservazione</span></td>';
     mesiIdx.forEach(function(i){
       var d = dati[i];
       var rilev = d.giacRilevata;
@@ -280,6 +289,29 @@ function renderGiacenzeMensiliDeposito() {
     });
     html += '</tr>';
 
+    // Riga bottoni CHIUSURA MESE (19/04/2026 - nuovo)
+    html += '<tr style="background:#fafafa">';
+    html += '<td style="padding:6px 8px;border:0.5px solid var(--border);font-size:10px;color:var(--text-muted);font-weight:600">🔒 Chiusura mese</td>';
+    mesiIdx.forEach(function(i){
+      var d = dati[i];
+      var mese = i+1;
+      html += '<td style="padding:6px 4px;border:0.5px solid var(--border);text-align:center">';
+      if (d.chiusoIl) {
+        var dataChius = new Date(d.chiusoIl).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'});
+        html += '<div style="font-size:9px;color:#27500A;margin-bottom:4px">🔒 ' + dataChius + '</div>';
+        html += '<button onclick="_depRiapriMese(\''+esc(prod)+'\','+mese+')" style="padding:3px 8px;background:#fff;border:0.5px solid #A32D2D;color:#A32D2D;border-radius:4px;cursor:pointer;font-size:10px;font-weight:600" title="Riapri mese (solo admin)">🔓 Riapri</button>';
+      } else {
+        var haValori = d.eccedenze>0 || d.caliViaggio>0 || d.caliTecnici>0 || (d.scattiVuoto||0)>0;
+        if (haValori) {
+          html += '<button onclick="_depChiudiMese(\''+esc(prod)+'\','+mese+')" style="padding:4px 10px;background:#D85A30;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:10px;font-weight:600">🔒 Chiudi</button>';
+        } else {
+          html += '<span style="font-size:9px;color:var(--text-muted)">—</span>';
+        }
+      }
+      html += '</td>';
+    });
+    html += '</tr>';
+
     html += '</tbody></table></div>';
   });
 
@@ -301,10 +333,11 @@ function aggiornaRigheDeposito(input) {
   if (campo === 'eccedenze_viaggio') d.eccedenze    = val;
   else if (campo === 'cali_viaggio') d.caliViaggio  = val;
   else if (campo === 'cali_tecnici') d.caliTecnici  = val;
+  else if (campo === 'scatti_vuoto') d.scattiVuoto  = val;
   else if (campo === 'giacenza_rilevata') d.giacRilevata = val || null;
 
   // Ricalcola giacenza presunta
-  d.giacPresunta = Math.round((d.giacInizio + d.entrate + d.eccedenze - d.caliViaggio - d.caliTecnici - d.uscite) * 100) / 100;
+  d.giacPresunta = Math.round((d.giacInizio + d.entrate + d.eccedenze - d.caliViaggio - d.caliTecnici - (d.scattiVuoto||0) - d.uscite) * 100) / 100;
   d.diffMese = d.giacRilevata !== null ? Math.round((d.giacPresunta - d.giacRilevata) * 100) / 100 : null;
 
   // Ri-render trimestre corrente
@@ -420,4 +453,141 @@ async function esportaGiacenzeMensiliDeposito() {
   });
   XLSX.writeFile(wb, 'GiacenzeMensiliDeposito_'+_depGmDati.anno+'.xlsx');
   toast('✓ Excel esportato');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CHIUSURA MENSILE — genera rettifiche automatiche dai 4 campi causale
+// (cali_viaggio, cali_tecnici, eccedenze_viaggio, scatti_vuoto).
+// giacenza_rilevata NON entra mai nelle rettifiche (solo informativa).
+// 19/04/2026
+// ═══════════════════════════════════════════════════════════════════
+async function _depChiudiMese(prodotto, mese) {
+  if (!_depGmDati) { toast('Dati non caricati'); return; }
+  var anno = _depGmDati.anno;
+
+  // Trova una cisterna deposito_vibo per questo prodotto (serve per rettifiche_inventario.cisterna_id)
+  var { data: cisterne, error: errCis } = await sb.from('cisterne')
+    .select('id,nome').eq('sede','deposito_vibo').eq('prodotto', prodotto).order('nome').limit(1);
+  if (errCis || !cisterne || !cisterne.length) {
+    toast('Errore: cisterna deposito per ' + prodotto + ' non trovata');
+    return;
+  }
+  var cisternaId = cisterne[0].id;
+
+  // Legge la riga giacenze_mensili (se esiste l'id viene dal cache, altrimenti la recupero)
+  var dati = _depGmDati.mesi[prodotto];
+  var d = dati[mese - 1];
+  if (!d) { toast('Dati mese non trovati'); return; }
+
+  // Prima mi assicuro che la riga giacenze_mensili esista e abbia un id
+  var mensileId = d.id;
+  if (!mensileId) {
+    // Upsert "preventivo" per ottenere id
+    var upRes = await sb.from('giacenze_mensili').upsert({
+      anno: anno, sede: 'deposito_vibo', prodotto: prodotto, mese: mese,
+      eccedenze_viaggio: d.eccedenze || 0,
+      cali_viaggio: d.caliViaggio || 0,
+      cali_tecnici: d.caliTecnici || 0,
+      scatti_vuoto: d.scattiVuoto || 0
+    }, { onConflict: 'anno,sede,prodotto,mese' }).select('id').single();
+    if (upRes.error) { toast('Errore preparazione: ' + upRes.error.message); return; }
+    mensileId = upRes.data.id;
+  }
+
+  // Costruisco lista rettifiche da creare (solo per campi != 0)
+  var ultimoGiorno = new Date(anno, mese, 0).toISOString().split('T')[0]; // ultimo giorno del mese
+  var utente = (typeof utenteCorrente !== 'undefined' && utenteCorrente) ? (utenteCorrente.nome || utenteCorrente.email) : 'sistema';
+
+  var daCreare = [];
+  if (Number(d.eccedenze||0) > 0) daCreare.push({
+    causale: 'eccedenze_viaggio', differenza: Number(d.eccedenze)
+  });
+  if (Number(d.caliViaggio||0) > 0) daCreare.push({
+    causale: 'cali_viaggio', differenza: -Number(d.caliViaggio)
+  });
+  if (Number(d.caliTecnici||0) > 0) daCreare.push({
+    causale: 'cali_tecnici', differenza: -Number(d.caliTecnici)
+  });
+  if (Number(d.scattiVuoto||0) > 0) daCreare.push({
+    causale: 'scatti_vuoto', differenza: -Number(d.scattiVuoto)
+  });
+
+  if (!daCreare.length) {
+    if (!confirm('Nessuna causale valorizzata per ' + prodotto + ' ' + _depGmMesi[mese-1] + '. Vuoi chiudere il mese comunque (senza generare rettifiche)?')) return;
+  }
+
+  var mese2 = ('0'+mese).slice(-2);
+  if (!confirm('Chiudere ' + _depGmMesi[mese-1] + ' ' + anno + ' per ' + prodotto + '?\n\nVerranno generate ' + daCreare.length + ' rettifiche automatiche con causali:\n' + daCreare.map(function(x){return '• ' + x.causale + ': ' + (x.differenza>0?'+':'') + x.differenza + ' L';}).join('\n') + '\n\nIl mese sarà bloccato (i valori non saranno più modificabili).')) return;
+
+  // Inserisco rettifiche (una per causale)
+  if (daCreare.length) {
+    var records = daCreare.map(function(x){
+      return {
+        tipo: 'deposito',
+        data: ultimoGiorno,
+        cisterna_id: cisternaId,
+        prodotto: prodotto,
+        giacenza_sistema: 0,
+        giacenza_rilevata: 0,
+        differenza: x.differenza,
+        causale: x.causale,
+        origine: 'chiusura_mese',
+        chiusura_giacenza_id: mensileId,
+        confermata: true,
+        confermata_da: utente,
+        confermata_il: new Date().toISOString(),
+        note: 'Chiusura ' + _depGmMesi[mese-1] + ' ' + anno + ' — auto-generata'
+      };
+    });
+    var insRes = await sb.from('rettifiche_inventario').insert(records);
+    if (insRes.error) { toast('Errore rettifiche: ' + insRes.error.message); return; }
+  }
+
+  // Marco il mese come chiuso
+  var updRes = await sb.from('giacenze_mensili').update({
+    chiuso_il: new Date().toISOString(),
+    chiuso_da: utente
+  }).eq('id', mensileId);
+  if (updRes.error) { toast('Errore chiusura: ' + updRes.error.message); return; }
+
+  toast('✓ Mese chiuso — ' + daCreare.length + ' rettifiche generate');
+  await caricaGiacenzeMensiliDeposito();
+}
+
+async function _depRiapriMese(prodotto, mese) {
+  if (!_depGmDati) { toast('Dati non caricati'); return; }
+  var anno = _depGmDati.anno;
+
+  // Verifica permesso admin
+  var ruolo = (typeof utenteCorrente !== 'undefined' && utenteCorrente) ? utenteCorrente.ruolo : null;
+  if (ruolo !== 'admin') { toast('Solo gli admin possono riaprire un mese chiuso'); return; }
+
+  if (!confirm('Riaprire ' + _depGmMesi[mese-1] + ' ' + anno + ' per ' + prodotto + '?\n\nVerranno eliminate tutte le rettifiche auto-generate dalla chiusura (le rettifiche manuali NON vengono toccate).\n\nI valori del mese torneranno modificabili.')) return;
+
+  // Recupero id della giacenza mensile
+  var dati = _depGmDati.mesi[prodotto];
+  var d = dati[mese - 1];
+  var mensileId = d && d.id;
+  if (!mensileId) {
+    // Cerco nel DB
+    var gmRes = await sb.from('giacenze_mensili').select('id')
+      .eq('anno', anno).eq('sede','deposito_vibo').eq('prodotto', prodotto).eq('mese', mese).maybeSingle();
+    if (!gmRes.data) { toast('Record mensile non trovato'); return; }
+    mensileId = gmRes.data.id;
+  }
+
+  // Cancello rettifiche auto-generate (solo quelle con origine=chiusura_mese e chiusura_giacenza_id matchante)
+  var delRes = await sb.from('rettifiche_inventario').delete()
+    .eq('origine', 'chiusura_mese').eq('chiusura_giacenza_id', mensileId);
+  if (delRes.error) { toast('Errore eliminazione rettifiche: ' + delRes.error.message); return; }
+
+  // Rimuovo flag chiusura
+  var updRes = await sb.from('giacenze_mensili').update({
+    chiuso_il: null,
+    chiuso_da: null
+  }).eq('id', mensileId);
+  if (updRes.error) { toast('Errore riapertura: ' + updRes.error.message); return; }
+
+  toast('✓ Mese riaperto — rettifiche auto eliminate');
+  await caricaGiacenzeMensiliDeposito();
 }
