@@ -777,7 +777,7 @@
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="generaElencoVenditeGiorno()">📊 Elenco vendite</button>
               <label style="font-size:13px;color:var(--text-muted);font-weight:500">Data:</label>
-              <input type="date" id="filtro-data-consegne" style="font-size:16px;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:600;max-width:200px" onchange="caricaConsegne();_labelGiorno('filtro-data-consegne')" />
+              <input type="date" id="filtro-data-consegne" data-nav="day" style="font-size:16px;padding:8px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:600;max-width:200px" onchange="caricaConsegne();_labelGiorno('filtro-data-consegne')" />
             </div>
           </div>
 
@@ -804,8 +804,8 @@
                 <option value="01">Gennaio</option><option value="02">Febbraio</option><option value="03">Marzo</option><option value="04">Aprile</option><option value="05">Maggio</option><option value="06">Giugno</option>
                 <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option><option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
               </select>
-              <input type="date" id="filtro-da-consegne" title="Da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
-              <input type="date" id="filtro-a-consegne" title="A" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <input type="date" id="filtro-da-consegne" data-nav="day" title="Da" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
+              <input type="date" id="filtro-a-consegne" data-nav="day" title="A" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
               <select id="filtro-docs-consegne" onchange="filtraStoricoConsegne()" style="font-size:12px;padding:7px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
                 <option value="">Tutti i documenti</option>
                 <option value="manca_das">Manca DAS firmato</option>
@@ -2673,6 +2673,7 @@
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
 <script src="pf-config.js?v=20260419d"></script>
+<script src="pf-date-nav.js?v=20260420a"></script>
 <script src="pf-ordini.js?v=20260417b"></script>
 <script src="pf-deposito.js?v=20260420a"></script>
 <script src="pf-anagrafica.js?v=20260415r"></script>
