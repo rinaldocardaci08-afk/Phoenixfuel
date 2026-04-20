@@ -467,18 +467,12 @@
     var rettNetto = totRp - totRm;
     var saldo = totEntrate - totUscite;
 
-    // Etichetta prodotti
-    var prodLabel;
-    if (cfg.prodotti.length === 1) prodLabel = cfg.prodotti[0];
-    else if (_stato && cfg.prodotti.length === _stato.prodottiDisponibili.length) prodLabel = 'tutti i prodotti';
-    else prodLabel = cfg.prodotti.length + ' prodotti';
-
     var h = '';
     // ── Header ──────────────────────────────────────────────────────
-    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding-bottom:14px;border-bottom:2px solid #D4A017">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #D4A017">';
     h += '  <div>';
     h += '    <div style="font-size:18px;font-weight:700;margin-bottom:4px">📊 Dettaglio movimenti Deposito</div>';
-    h += '    <div style="font-size:13px;color:var(--text-muted)">' + esc2(cfg.etichetta) + ' · Deposito Vibo · ' + esc2(prodLabel) + '</div>';
+    h += '    <div style="font-size:13px;color:var(--text-muted)">' + esc2(cfg.etichetta) + ' · Deposito Vibo</div>';
     h += '  </div>';
     h += '  <div style="display:flex;gap:8px;flex-wrap:wrap">';
     h += '    <button onclick="pfMvtDettApri()" title="Cambia filtri" style="padding:9px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">🎛️ Filtri</button>';
@@ -487,6 +481,9 @@
     h += '    <button onclick="pfMvtDettChiudi()" style="padding:9px 14px;border:none;border-radius:6px;background:#D4A017;color:#fff;cursor:pointer;font-size:12px;font-weight:600">✕ Chiudi</button>';
     h += '  </div>';
     h += '</div>';
+
+    // ── Fascia prodotto filtrato (centrata, grande, colorata) ────────
+    h += _renderFasciaProdotto(cfg);
 
     // ── 3 colonne ───────────────────────────────────────────────────
     h += '<div style="display:grid;grid-template-columns:1fr 1fr 260px;gap:14px;align-items:start" class="mvt-dett-grid">';
@@ -522,6 +519,50 @@
   }
   function _sumDiff(rows) {
     return (rows || []).reduce(function(s,r){ return s + Number(r.differenza || 0); }, 0);
+  }
+
+  // ── Fascia prodotto filtrato (grande, centrata, colorata) ────────
+  function _renderFasciaProdotto(cfg) {
+    var h = '<div style="margin-bottom:16px;display:flex;justify-content:center">';
+
+    if (cfg.prodotti.length === 1) {
+      var p = cfg.prodotti[0];
+      var col = COLORI_PROD[p] || '#888';
+      // Hex → rgba helper inline
+      var rgba = _hexToRgba(col, 0.12);
+      h += '<div style="display:flex;align-items:center;gap:14px;padding:14px 28px;background:' + rgba + ';border:1.5px solid ' + col + ';border-radius:10px;min-width:320px">';
+      h += '  <div style="width:22px;height:22px;border-radius:50%;background:' + col + ';box-shadow:0 0 0 3px ' + _hexToRgba(col, 0.25) + ';flex:0 0 auto"></div>';
+      h += '  <div>';
+      h += '    <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.6px;color:' + col + ';font-weight:600;opacity:0.85">Prodotto filtrato</div>';
+      h += '    <div style="font-size:22px;font-weight:700;color:' + col + ';line-height:1.1;margin-top:2px;text-transform:uppercase;letter-spacing:0.5px">' + esc2(p) + '</div>';
+      h += '  </div>';
+      h += '</div>';
+    } else {
+      var tuttiSelez = _stato && cfg.prodotti.length === _stato.prodottiDisponibili.length;
+      var titolo = tuttiSelez ? 'Tutti i prodotti' : cfg.prodotti.length + ' prodotti selezionati';
+      h += '<div style="padding:12px 24px;background:linear-gradient(90deg,rgba(212,160,23,0.06),rgba(212,160,23,0.12),rgba(212,160,23,0.06));border:1px solid rgba(212,160,23,0.4);border-radius:10px;text-align:center;min-width:320px">';
+      h += '  <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.6px;color:#B88813;font-weight:600;margin-bottom:4px">Prodotti filtrati</div>';
+      h += '  <div style="font-size:18px;font-weight:700;color:#7A5B0B;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.4px">' + esc2(titolo) + '</div>';
+      h += '  <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap">';
+      cfg.prodotti.forEach(function(p) {
+        var c = COLORI_PROD[p] || '#888';
+        h += '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:' + _hexToRgba(c, 0.15) + ';border:0.5px solid ' + c + ';border-radius:20px;font-size:11px;font-weight:600;color:' + c + '">';
+        h += '<span style="width:8px;height:8px;border-radius:50%;background:' + c + '"></span>';
+        h += esc2(p);
+        h += '</span>';
+      });
+      h += '  </div>';
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function _hexToRgba(hex, alpha) {
+    var h = (hex || '#888').replace('#','');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    var r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
   // ── Render singola colonna (Entrate o Uscite) ────────────────────
@@ -630,8 +671,8 @@
     }
 
     var h = '';
-    h += '<div style="display:grid;grid-template-columns:56px 1fr auto;gap:8px;align-items:center;padding:5px 8px;background:var(--bg-card);border-radius:5px;font-size:12px">';
-    h += '  <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:11px">' + data + '</div>';
+    h += '<div style="display:grid;grid-template-columns:88px 1fr auto;gap:10px;align-items:center;padding:5px 8px;background:var(--bg-card);border-radius:5px;font-size:12px">';
+    h += '  <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:11px;white-space:nowrap">' + data + '</div>';
     h += '  <div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">';
     if (showBadge) {
       h += '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + colProd + ';margin-right:6px;vertical-align:middle" title="' + esc2(prodotto) + '"></span>';
@@ -743,6 +784,12 @@
       + '.sub{color:#666;font-size:11px;margin-bottom:14px}'
       + '.divider{border-top:2px solid #D4A017;margin:10px 0 16px}'
       + '.riassunto{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:18px;border:0.5px solid #ddd;border-radius:4px;padding:10px 8px;background:#fafaf8}'
+      + '.fascia-prod{margin:0 0 16px;padding:12px 22px;border-radius:6px;text-align:center;page-break-inside:avoid}'
+      + '.fascia-prod .lab{font-size:9px;text-transform:uppercase;letter-spacing:0.6px;font-weight:700;margin-bottom:4px;opacity:0.85}'
+      + '.fascia-prod .nom{font-size:18px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;line-height:1.1}'
+      + '.fascia-prod .multi{display:flex;justify-content:center;flex-wrap:wrap;gap:6px;margin-top:8px}'
+      + '.fascia-prod .multi span{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:12px;font-size:9px;font-weight:700}'
+      + '.fascia-prod .multi .dot{width:6px;height:6px;border-radius:50%;display:inline-block}'
       + '.riassunto .box{text-align:center;padding:4px 6px;border-right:0.5px solid #ddd}'
       + '.riassunto .box:last-child{border-right:none}'
       + '.riassunto .label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:3px}'
@@ -766,8 +813,11 @@
 
     var h = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Dettaglio movimenti Deposito — ' + esc2(cfg.etichetta) + '</title><style>' + css + '</style></head><body>';
     h += '<h1>📊 Dettaglio movimenti Deposito</h1>';
-    h += '<div class="sub">' + esc2(cfg.etichetta) + ' &middot; Deposito Vibo &middot; ' + esc2(prodLabel) + '</div>';
+    h += '<div class="sub">' + esc2(cfg.etichetta) + ' &middot; Deposito Vibo</div>';
     h += '<div class="divider"></div>';
+
+    // Fascia prodotto (PDF)
+    h += _pdfFasciaProdotto(cfg);
 
     // Riassunto in riga
     h += '<div class="riassunto">';
@@ -810,6 +860,36 @@
 
   function _pdfKpi(label, val, col) {
     return '<div class="box"><div class="label">' + esc2(label) + '</div><div class="val" style="color:' + col + '">' + esc2(val) + '</div></div>';
+  }
+
+  function _pdfFasciaProdotto(cfg) {
+    var h = '';
+    if (cfg.prodotti.length === 1) {
+      var p = cfg.prodotti[0];
+      var c = COLORI_PROD[p] || '#888';
+      var bg = _hexToRgba(c, 0.12);
+      h += '<div class="fascia-prod" style="background:' + bg + ';border:1.5px solid ' + c + ';color:' + c + '">';
+      h += '  <div class="lab">Prodotto filtrato</div>';
+      h += '  <div class="nom">' + esc2(p) + '</div>';
+      h += '</div>';
+    } else {
+      var tuttiSelez = _stato && cfg.prodotti.length === _stato.prodottiDisponibili.length;
+      var titolo = tuttiSelez ? 'Tutti i prodotti' : cfg.prodotti.length + ' prodotti selezionati';
+      h += '<div class="fascia-prod" style="background:rgba(212,160,23,0.1);border:1px solid rgba(212,160,23,0.5);color:#7A5B0B">';
+      h += '  <div class="lab" style="color:#B88813">Prodotti filtrati</div>';
+      h += '  <div class="nom">' + esc2(titolo) + '</div>';
+      h += '  <div class="multi">';
+      cfg.prodotti.forEach(function(p) {
+        var c = COLORI_PROD[p] || '#888';
+        h += '<span style="background:' + _hexToRgba(c, 0.15) + ';border:0.5px solid ' + c + ';color:' + c + '">';
+        h += '<span class="dot" style="background:' + c + '"></span>';
+        h += esc2(p);
+        h += '</span>';
+      });
+      h += '  </div>';
+      h += '</div>';
+    }
+    return h;
   }
 
   function _pdfSezione(titolo, col, righe, tipo, cfg, segno) {
