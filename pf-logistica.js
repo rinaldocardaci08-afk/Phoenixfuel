@@ -446,6 +446,8 @@ async function _eliminaMezzoProprio(mezzoId, targa) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('✓ Mezzo eliminato');
   _modificaPhoenixFuel();
+  caricaTrasportatori();
+  if (typeof caricaMezziPropri === 'function') caricaMezziPropri();
 }
 
 async function _modificaTrasportatore(id) {
@@ -560,6 +562,7 @@ async function _salvaAutistaInline(autistaId, trId) {
   var { error } = await sb.from('autisti').update(rec).eq('id', autistaId);
   if (error) { toast('Errore: ' + error.message); return; }
   toast('✓ Autista aggiornato');
+  caricaTrasportatori();
 }
 
 async function _eliminaAutistaInline(autistaId, trId) {
@@ -567,8 +570,9 @@ async function _eliminaAutistaInline(autistaId, trId) {
   var { error } = await sb.from('autisti').delete().eq('id', autistaId);
   if (error) { toast('Errore: ' + error.message); return; }
   toast('✓ Autista eliminato');
-  // Riapri il modale con dati aggiornati
+  // Riapri il modale con dati aggiornati + refresh tabella sotto
   _modificaTrasportatore(trId);
+  caricaTrasportatori();
 }
 
 async function _aggiungiAutista(trId) {
@@ -582,6 +586,7 @@ async function _aggiungiAutista(trId) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('+ Autista aggiunto - compila e 💾');
   _modificaTrasportatore(trId);
+  caricaTrasportatori();
 }
 
 // ─── MEZZI inline ────────────────────────────────────────────────
@@ -596,6 +601,7 @@ async function _salvaMezzoInline(mezzoId, trId) {
   var { error } = await sb.from('mezzi_trasportatori').update(rec).eq('id', mezzoId);
   if (error) { toast('Errore: ' + error.message); return; }
   toast('✓ Mezzo aggiornato');
+  caricaTrasportatori();
 }
 
 async function _eliminaMezzoInline(mezzoId, trId) {
@@ -604,6 +610,7 @@ async function _eliminaMezzoInline(mezzoId, trId) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('✓ Mezzo eliminato');
   _modificaTrasportatore(trId);
+  caricaTrasportatori();
 }
 
 async function _aggiungiMezzoEsterno(trId) {
@@ -616,6 +623,7 @@ async function _aggiungiMezzoEsterno(trId) {
   if (error) { toast('Errore: ' + error.message); return; }
   toast('+ Mezzo aggiunto - compila targa e 💾');
   _modificaTrasportatore(trId);
+  caricaTrasportatori();
 }
 
 async function salvaAutista() {
