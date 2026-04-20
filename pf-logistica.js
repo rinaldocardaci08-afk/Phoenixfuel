@@ -316,6 +316,7 @@ async function salvaModificaMezzo(id) {
   toast('Mezzo ' + targa + ' aggiornato!');
   chiudiModalePermessi();
   caricaMezziPropri();
+  caricaTrasportatori();
 }
 
 function aggiungiScomparto() {
@@ -337,15 +338,114 @@ async function salvaTrasportatore() {
 }
 
 async function caricaTrasportatori() {
-  const { data } = await sb.from('trasportatori').select('*, autisti(*), mezzi_trasportatori(*)').order('nome');
+  // Carico in parallelo: vettori esterni + mezzi propri Phoenix Fuel
+  var [trasRes, mezziPropriRes] = await Promise.all([
+    sb.from('trasportatori').select('*, autisti(*), mezzi_trasportatori(*)').order('nome'),
+    sb.from('mezzi').select('id,targa,descrizione,capacita_totale,autista_default,attivo').order('targa')
+  ]);
+  const data = trasRes.data || [];
+  const mezziPropri = mezziPropriRes.data || [];
   const tbody = document.getElementById('tabella-trasportatori');
-  if (!data||!data.length) { tbody.innerHTML = '<tr><td colspan="5" class="loading">Nessun trasportatore</td></tr>'; return; }
+  if (!tbody) return;
+
   const selTrA = document.getElementById('at-trasportatore');
   const selTrM = document.getElementById('me-trasportatore');
-  const opts = '<option value="">Seleziona...</option>' + data.map(t => '<option value="' + t.id + '">' + t.nome + '</option>').join('');
+  const opts = '<option value="">Seleziona...</option>' + data.map(t => '<option value="' + t.id + '">' + esc(t.nome) + '</option>').join('');
   if (selTrA) selTrA.innerHTML = opts;
   if (selTrM) selTrM.innerHTML = opts;
-  tbody.innerHTML = data.map(t => '<tr><td><strong>' + esc(t.nome) + '</strong></td><td>' + esc(t.telefono||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.autisti?t.autisti.map(a=>esc(a.nome)).join(', '):'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.mezzi_trasportatori?t.mezzi_trasportatori.map(m=>esc(m.targa)).join(', '):'—') + '</td><td style="white-space:nowrap"><button onclick="_modificaTrasportatore(\'' + t.id + '\')" title="Modifica" style="padding:4px 8px;background:#fff;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;font-size:13px;margin-right:4px">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'trasportatori\',\'' + t.id + '\',caricaTrasportatori)">x</button></td></tr>').join('');
+
+  // Riga speciale Phoenix Fuel (mezzi propri) SEMPRE in cima
+  var mezziPropriAttivi = mezziPropri.filter(function(m){ return m.attivo !== false; });
+  var autistiPropri = mezziPropriAttivi.map(function(m){ return m.autista_default; }).filter(function(a){ return a && a.trim(); });
+  var autistiUnici = Array.from(new Set(autistiPropri));
+  var targhePropri = mezziPropriAttivi.map(function(m){ return esc(m.targa); });
+
+  var phoenixRow = '<tr style="background:#FFF8F4;border-left:3px solid #D85A30">' +
+    '<td><strong style="color:#D85A30">🏠 Phoenix Fuel (mezzi propri)</strong><div style="font-size:10px;color:var(--text-muted);margin-top:2px">Vettore interno — ' + mezziPropriAttivi.length + ' mezzi</div></td>' +
+    '<td style="color:var(--text-muted);font-size:11px">interno</td>' +
+    '<td style="font-size:11px;color:var(--text-muted)">' + (autistiUnici.length ? autistiUnici.map(esc).join(', ') : '—') + '</td>' +
+    '<td style="font-size:11px;color:var(--text-muted)">' + (targhePropri.length ? targhePropri.join(', ') : '—') + '</td>' +
+    '<td style="white-space:nowrap">' +
+      '<button onclick="_modificaPhoenixFuel()" title="Gestisci mezzi propri" style="padding:4px 8px;background:#fff;border:0.5px solid #D85A30;color:#D85A30;border-radius:4px;cursor:pointer;font-size:13px;margin-right:4px">✏️</button>' +
+      '<span style="font-size:10px;color:var(--text-muted);font-style:italic">non eliminabile</span>' +
+    '</td></tr>';
+
+  if (!data.length) {
+    tbody.innerHTML = phoenixRow + '<tr><td colspan="5" class="loading">Nessun vettore esterno ancora inserito</td></tr>';
+    return;
+  }
+
+  var righeVettori = data.map(t => '<tr><td><strong>' + esc(t.nome) + '</strong></td><td>' + esc(t.telefono||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.autisti?t.autisti.map(a=>esc(a.nome)).join(', '):'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + (t.mezzi_trasportatori?t.mezzi_trasportatori.map(m=>esc(m.targa)).join(', '):'—') + '</td><td style="white-space:nowrap"><button onclick="_modificaTrasportatore(\'' + t.id + '\')" title="Modifica" style="padding:4px 8px;background:#fff;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;font-size:13px;margin-right:4px">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'trasportatori\',\'' + t.id + '\',caricaTrasportatori)">x</button></td></tr>').join('');
+
+  tbody.innerHTML = phoenixRow + righeVettori;
+}
+
+// Modale gestione "Phoenix Fuel (mezzi propri)" - aggrega mezzi da tabella 'mezzi'
+async function _modificaPhoenixFuel() {
+  var { data: mezzi, error } = await sb.from('mezzi').select('*, scomparti_mezzo(*)').order('targa');
+  if (error) { toast('Errore: ' + error.message); return; }
+  mezzi = mezzi || [];
+
+  var h = '<h3 style="margin:0 0 4px;color:#D85A30">🏠 Phoenix Fuel — Mezzi propri</h3>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Vettore interno dell\'azienda. Gestione mezzi con scomparti cisterna e autista default.</div>';
+
+  // SEZIONE MEZZI PROPRI
+  h += '<div style="background:#f9f9f7;border:0.5px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+  h += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">🚗 Mezzi (' + mezzi.length + ')</div>';
+  h += '<button onclick="_aggiungiMezzoProprio()" style="padding:4px 10px;background:#D85A30;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">+ Aggiungi mezzo</button>';
+  h += '</div>';
+
+  if (mezzi.length) {
+    h += '<div style="display:flex;flex-direction:column;gap:6px">';
+    mezzi.forEach(function(m) {
+      var numScomp = (m.scomparti_mezzo || []).length;
+      var attivoLabel = m.attivo === false ? ' <span style="background:#FCEBEB;color:#791F1F;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600">DISATTIVATO</span>' : '';
+      h += '<div style="background:#fff;padding:8px 10px;border:0.5px solid var(--border);border-radius:4px;display:flex;justify-content:space-between;align-items:center">';
+      h += '<div style="flex:1">';
+      h += '<div style="font-weight:600;font-family:var(--font-mono);font-size:13px">' + esc(m.targa) + attivoLabel + '</div>';
+      h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(m.descrizione || '—') + ' · ' + fmtL(m.capacita_totale || 0) + ' · Autista: ' + esc(m.autista_default || '—') + ' · ' + numScomp + ' scompart' + (numScomp === 1 ? 'o' : 'i') + '</div>';
+      h += '</div>';
+      h += '<div style="display:flex;gap:4px">';
+      h += '<button onclick="chiudiModal(); setTimeout(function(){apriModaleMezzo(\'' + m.id + '\');},100);" title="Modifica" style="padding:5px 10px;background:#fff;border:0.5px solid #D85A30;color:#D85A30;border-radius:4px;cursor:pointer;font-size:12px">✏️</button>';
+      h += '<button onclick="_eliminaMezzoProprio(\'' + m.id + '\',\'' + esc(m.targa) + '\')" title="Elimina" style="padding:5px 10px;background:#A32D2D;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">🗑</button>';
+      h += '</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+  } else {
+    h += '<div style="color:var(--text-muted);font-size:12px;font-style:italic;text-align:center;padding:10px">Nessun mezzo proprio. Clicca "+ Aggiungi mezzo" per iniziare.</div>';
+  }
+  h += '</div>';
+
+  h += '<div style="display:flex;justify-content:flex-end">';
+  h += '<button onclick="chiudiModal()" style="padding:10px 20px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button>';
+  h += '</div>';
+
+  apriModal(h);
+}
+
+async function _aggiungiMezzoProprio() {
+  var { data: nuovo, error } = await sb.from('mezzi').insert([{
+    targa: 'XX000XX',
+    descrizione: null,
+    capacita_totale: 0,
+    attivo: true
+  }]).select('id').single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('+ Mezzo aggiunto - apri per configurarlo');
+  chiudiModal();
+  setTimeout(function(){ apriModaleMezzo(nuovo.id); }, 100);
+}
+
+async function _eliminaMezzoProprio(mezzoId, targa) {
+  if (!confirm('Eliminare il mezzo ' + targa + '? Saranno rimossi anche gli scomparti associati.')) return;
+  // Prima cancello scomparti (foreign key)
+  await sb.from('scomparti_mezzo').delete().eq('mezzo_id', mezzoId);
+  var { error } = await sb.from('mezzi').delete().eq('id', mezzoId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✓ Mezzo eliminato');
+  _modificaPhoenixFuel();
 }
 
 async function _modificaTrasportatore(id) {
