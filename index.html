@@ -617,6 +617,17 @@
             <div id="mvt-risultati"><div style="font-size:11px;color:var(--text-muted);padding:8px">Seleziona prodotto e clicca "Calcola"</div></div>
           </div>
 
+          <!-- DETTAGLIO MOVIMENTI DEPOSITO — report raggruppato per categoria -->
+          <div class="card" style="margin-bottom:16px;border-left:3px solid #D4A017;background:linear-gradient(90deg,rgba(212,160,23,0.06),transparent 60%)">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:240px">
+                <div style="font-size:15px;font-weight:600;margin-bottom:4px">📊 Dettaglio movimenti Deposito</div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Report completo dei movimenti per periodo o mese, raggruppati per categoria (acquisti, rientri, vendite, consegne stazione, autoconsumo, rettifiche). Esportabile in PDF ed Excel.</div>
+              </div>
+              <button onclick="pfMvtDettApri()" style="padding:12px 22px;border:none;border-radius:8px;background:#D4A017;color:#fff;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 2px 6px rgba(212,160,23,0.35);white-space:nowrap">▶ Apri report</button>
+            </div>
+          </div>
+
           <!-- SENTINELLE AUTOMATICHE -->
           <div class="card" style="margin-bottom:16px;border-left:3px solid #378ADD">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -2648,6 +2659,7 @@
 <script src="pf-stz-giac-week.js?v=20260420a"></script>
 <script src="pf-sentinelle.js?v=20260413f"></script>
 <script src="pf-movimenti-totali.js?v=20260420b"></script>
+<script src="pf-movimenti-dettaglio.js?v=20260420a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=20260420g"></script>
 <script src="pf-admin.js?v=20260416c"></script>
