@@ -717,4 +717,35 @@
 
   // Esporta entry point
   window.pfMvtDettApri = pfMvtDettApri;
+
+  // ── Shortcut: apre direttamente il report con periodo preimpostato ─
+  // Bypassa il mini-modale filtri. Usa tutti i prodotti disponibili.
+  window.pfMvtDettShortcut = async function(tipo) {
+    if (!_stato) _stato = _statoIniziale();
+    if (!_stato.prodottiDisponibili.length) {
+      _stato.prodottiDisponibili = await _caricaProdotti();
+      _stato.prodotti = _stato.prodottiDisponibili.slice();
+    }
+    var oggi = new Date();
+    var y = oggi.getFullYear();
+    var oggiISO = oggi.toISOString().split('T')[0];
+    var cfg;
+    if (tipo === 'oggi') {
+      cfg = { da: oggiISO, a: oggiISO, prodotti: _stato.prodottiDisponibili.slice(),
+              etichetta: _fmtIT(oggiISO) };
+    } else if (tipo === 'mese_corrente') {
+      var ini = _primoGiornoMese(y, oggi.getMonth());
+      cfg = { da: ini, a: oggiISO, prodotti: _stato.prodottiDisponibili.slice(),
+              etichetta: MESI[oggi.getMonth()] + ' ' + y };
+    } else if (tipo === 'ultimi_30') {
+      cfg = { da: _shiftISO(oggiISO, -29), a: oggiISO, prodotti: _stato.prodottiDisponibili.slice(),
+              etichetta: 'Ultimi 30 giorni (' + _fmtIT(_shiftISO(oggiISO, -29)) + ' → ' + _fmtIT(oggiISO) + ')' };
+    } else if (tipo === 'anno_corrente') {
+      cfg = { da: y + '-01-01', a: oggiISO, prodotti: _stato.prodottiDisponibili.slice(),
+              etichetta: 'Anno ' + y + ' (01/01/' + y + ' → ' + _fmtIT(oggiISO) + ')' };
+    } else {
+      return;
+    }
+    pfMvtDettMostra(cfg);
+  };
 })();

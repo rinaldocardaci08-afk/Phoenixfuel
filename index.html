@@ -510,6 +510,7 @@
           <button class="btn-primary dep-tab active" data-tab="dep-principale" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px">🏗 Deposito</button>
           <button class="btn-primary dep-tab" data-tab="dep-ricezione-das" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📄 Ricezione DAS</button>
           <button class="btn-primary dep-tab" data-tab="dep-giacenze" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Giacenze</button>
+          <button class="btn-primary dep-tab" data-tab="dep-report-movimenti" onclick="switchDepositoTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Movimenti</button>
         </div>
 
         <!-- PANEL: DEPOSITO PRINCIPALE -->
@@ -617,17 +618,6 @@
             <div id="mvt-risultati"><div style="font-size:11px;color:var(--text-muted);padding:8px">Seleziona prodotto e clicca "Calcola"</div></div>
           </div>
 
-          <!-- DETTAGLIO MOVIMENTI DEPOSITO — report raggruppato per categoria -->
-          <div class="card" style="margin-bottom:16px;border-left:3px solid #D4A017;background:linear-gradient(90deg,rgba(212,160,23,0.06),transparent 60%)">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-              <div style="flex:1;min-width:240px">
-                <div style="font-size:15px;font-weight:600;margin-bottom:4px">📊 Dettaglio movimenti Deposito</div>
-                <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Report completo dei movimenti per periodo o mese, raggruppati per categoria (acquisti, rientri, vendite, consegne stazione, autoconsumo, rettifiche). Esportabile in PDF ed Excel.</div>
-              </div>
-              <button onclick="pfMvtDettApri()" style="padding:12px 22px;border:none;border-radius:8px;background:#D4A017;color:#fff;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 2px 6px rgba(212,160,23,0.35);white-space:nowrap">▶ Apri report</button>
-            </div>
-          </div>
-
           <!-- SENTINELLE AUTOMATICHE -->
           <div class="card" style="margin-bottom:16px;border-left:3px solid #378ADD">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -718,6 +708,49 @@
             </div>
           </div>
           <!-- /BLOCCO MENSILE -->
+        </div>
+
+        <!-- PANEL: DETTAGLIO MOVIMENTI — report per periodo/mese -->
+        <div class="dep-panel" id="dep-report-movimenti" style="display:none">
+
+          <!-- HERO: apri report con filtri avanzati -->
+          <div class="card" style="margin-bottom:16px;border-left:3px solid #D4A017;background:linear-gradient(90deg,rgba(212,160,23,0.08),transparent 70%)">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px">
+              <div style="flex:1;min-width:260px">
+                <div style="font-size:16px;font-weight:700;margin-bottom:6px">📊 Dettaglio movimenti Deposito</div>
+                <div style="font-size:13px;color:var(--text-muted);line-height:1.55">Report completo per periodo o mese: entrate raggruppate per acquisti / rientri / eccedenze, uscite per vendite / stazione / autoconsumo / cali. Multi-prodotto. Esportabile in PDF ed Excel.</div>
+              </div>
+              <button onclick="pfMvtDettApri()" style="padding:14px 28px;border:none;border-radius:10px;background:#D4A017;color:#fff;cursor:pointer;font-size:15px;font-weight:600;box-shadow:0 2px 8px rgba(212,160,23,0.4);white-space:nowrap">🎛️ Apri filtri avanzati</button>
+            </div>
+          </div>
+
+          <!-- SHORTCUT: report rapidi su periodi tipici -->
+          <div class="card" style="margin-bottom:16px">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);font-weight:600;margin-bottom:12px">Report rapidi — tutti i prodotti</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+              <button onclick="pfMvtDettShortcut('oggi')" style="padding:16px 14px;border:0.5px solid var(--border);border-radius:10px;background:var(--bg);cursor:pointer;text-align:left;transition:all 0.15s" onmouseover="this.style.background='rgba(212,160,23,0.08)';this.style.borderColor='#D4A017'" onmouseout="this.style.background='var(--bg)';this.style.borderColor='var(--border)'">
+                <div style="font-size:20px;margin-bottom:4px">📅</div>
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">Oggi</div>
+                <div style="font-size:11px;color:var(--text-muted)">Movimenti del giorno corrente</div>
+              </button>
+              <button onclick="pfMvtDettShortcut('mese_corrente')" style="padding:16px 14px;border:0.5px solid var(--border);border-radius:10px;background:var(--bg);cursor:pointer;text-align:left;transition:all 0.15s" onmouseover="this.style.background='rgba(212,160,23,0.08)';this.style.borderColor='#D4A017'" onmouseout="this.style.background='var(--bg)';this.style.borderColor='var(--border)'">
+                <div style="font-size:20px;margin-bottom:4px">🗓️</div>
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">Mese corrente</div>
+                <div style="font-size:11px;color:var(--text-muted)">Dal 1° del mese ad oggi</div>
+              </button>
+              <button onclick="pfMvtDettShortcut('ultimi_30')" style="padding:16px 14px;border:0.5px solid var(--border);border-radius:10px;background:var(--bg);cursor:pointer;text-align:left;transition:all 0.15s" onmouseover="this.style.background='rgba(212,160,23,0.08)';this.style.borderColor='#D4A017'" onmouseout="this.style.background='var(--bg)';this.style.borderColor='var(--border)'">
+                <div style="font-size:20px;margin-bottom:4px">⏱️</div>
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">Ultimi 30 giorni</div>
+                <div style="font-size:11px;color:var(--text-muted)">Rolling window mobile</div>
+              </button>
+              <button onclick="pfMvtDettShortcut('anno_corrente')" style="padding:16px 14px;border:0.5px solid var(--border);border-radius:10px;background:var(--bg);cursor:pointer;text-align:left;transition:all 0.15s" onmouseover="this.style.background='rgba(212,160,23,0.08)';this.style.borderColor='#D4A017'" onmouseout="this.style.background='var(--bg)';this.style.borderColor='var(--border)'">
+                <div style="font-size:20px;margin-bottom:4px">📆</div>
+                <div style="font-weight:600;font-size:14px;margin-bottom:2px">Anno corrente</div>
+                <div style="font-size:11px;color:var(--text-muted)">Dal 1° gennaio ad oggi</div>
+              </button>
+            </div>
+          </div>
+
         </div>
 
       </div>
@@ -2659,7 +2692,7 @@
 <script src="pf-stz-giac-week.js?v=20260420a"></script>
 <script src="pf-sentinelle.js?v=20260413f"></script>
 <script src="pf-movimenti-totali.js?v=20260420b"></script>
-<script src="pf-movimenti-dettaglio.js?v=20260420b"></script>
+<script src="pf-movimenti-dettaglio.js?v=20260420c"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=20260420g"></script>
 <script src="pf-admin.js?v=20260416c"></script>
