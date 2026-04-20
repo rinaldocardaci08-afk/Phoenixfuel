@@ -349,21 +349,77 @@ async function caricaTrasportatori() {
 }
 
 async function _modificaTrasportatore(id) {
-  var { data: t, error } = await sb.from('trasportatori').select('*').eq('id', id).single();
+  var { data: t, error } = await sb.from('trasportatori')
+    .select('*, autisti(*), mezzi_trasportatori(*)').eq('id', id).single();
   if (error || !t) { toast('Errore caricamento vettore'); return; }
 
+  var autisti = (t.autisti || []).sort(function(a,b){ return (a.nome||'').localeCompare(b.nome||''); });
+  var mezzi = (t.mezzi_trasportatori || []).sort(function(a,b){ return (a.targa||'').localeCompare(b.targa||''); });
+
   var h = '<h3 style="margin:0 0 16px">✏️ Modifica vettore</h3>';
-  h += '<div style="display:grid;gap:10px">';
-  h += '<div class="form-group"><label>Nome azienda</label><input type="text" id="tr-edit-nome" value="' + esc(t.nome||'') + '" /></div>';
+
+  // DATI VETTORE
+  h += '<div style="background:#f9f9f7;border:0.5px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px">';
+  h += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:10px">📇 Anagrafica</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div class="form-group"><label>Nome azienda *</label><input type="text" id="tr-edit-nome" value="' + esc(t.nome||'') + '" /></div>';
   h += '<div class="form-group"><label>P.IVA</label><input type="text" id="tr-edit-piva" value="' + esc(t.piva||'') + '" /></div>';
   h += '<div class="form-group"><label>Telefono</label><input type="text" id="tr-edit-tel" value="' + esc(t.telefono||'') + '" /></div>';
   h += '<div class="form-group"><label>Email</label><input type="email" id="tr-edit-email" value="' + esc(t.email||'') + '" /></div>';
-  h += '<div class="form-group"><label>Note</label><input type="text" id="tr-edit-note" value="' + esc(t.note||'') + '" /></div>';
+  h += '<div class="form-group" style="grid-column:span 2"><label>Note</label><input type="text" id="tr-edit-note" value="' + esc(t.note||'') + '" /></div>';
   h += '<div class="form-group"><label>Stato</label><select id="tr-edit-attivo"><option value="true"' + (t.attivo !== false ? ' selected' : '') + '>Attivo</option><option value="false"' + (t.attivo === false ? ' selected' : '') + '>Disattivato</option></select></div>';
   h += '</div>';
-  h += '<div style="display:flex;gap:8px;margin-top:16px">';
-  h += '<button class="btn-primary" style="flex:1" onclick="_salvaModificaTrasportatore(\'' + id + '\')">💾 Salva modifiche</button>';
-  h += '<button onclick="chiudiModal()" style="padding:10px 20px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Annulla</button>';
+  h += '<button class="btn-primary" style="margin-top:10px;width:100%" onclick="_salvaModificaTrasportatore(\'' + id + '\')">💾 Salva anagrafica</button>';
+  h += '</div>';
+
+  // AUTISTI
+  h += '<div style="background:#f9f9f7;border:0.5px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+  h += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">👤 Autisti (' + autisti.length + ')</div>';
+  h += '<button onclick="_aggiungiAutista(\'' + id + '\')" style="padding:4px 10px;background:#D85A30;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">+ Aggiungi</button>';
+  h += '</div>';
+  if (autisti.length) {
+    h += '<div style="display:flex;flex-direction:column;gap:6px">';
+    autisti.forEach(function(a){
+      h += '<div id="aut-row-' + a.id + '" style="display:grid;grid-template-columns:1fr 110px 110px auto auto;gap:6px;align-items:center;background:#fff;padding:6px 8px;border:0.5px solid var(--border);border-radius:4px">';
+      h += '<input type="text" id="aut-nome-' + a.id + '" value="' + esc(a.nome||'') + '" placeholder="Nome" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:4px" />';
+      h += '<input type="text" id="aut-tel-' + a.id + '" value="' + esc(a.telefono||'') + '" placeholder="Telefono" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:4px" />';
+      h += '<input type="text" id="aut-pat-' + a.id + '" value="' + esc(a.patente||'') + '" placeholder="Patente" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:4px" />';
+      h += '<button onclick="_salvaAutistaInline(\'' + a.id + '\',\'' + id + '\')" title="Salva" style="padding:5px 8px;background:#27500A;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">💾</button>';
+      h += '<button onclick="_eliminaAutistaInline(\'' + a.id + '\',\'' + id + '\')" title="Elimina" style="padding:5px 8px;background:#A32D2D;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">🗑</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+  } else {
+    h += '<div style="color:var(--text-muted);font-size:12px;font-style:italic;text-align:center;padding:10px">Nessun autista</div>';
+  }
+  h += '</div>';
+
+  // MEZZI
+  h += '<div style="background:#f9f9f7;border:0.5px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+  h += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">🚚 Mezzi (' + mezzi.length + ')</div>';
+  h += '<button onclick="_aggiungiMezzoEsterno(\'' + id + '\')" style="padding:4px 10px;background:#D85A30;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">+ Aggiungi</button>';
+  h += '</div>';
+  if (mezzi.length) {
+    h += '<div style="display:flex;flex-direction:column;gap:6px">';
+    mezzi.forEach(function(m){
+      h += '<div id="mez-row-' + m.id + '" style="display:grid;grid-template-columns:110px 1fr 90px auto auto;gap:6px;align-items:center;background:#fff;padding:6px 8px;border:0.5px solid var(--border);border-radius:4px">';
+      h += '<input type="text" id="mez-targa-' + m.id + '" value="' + esc(m.targa||'') + '" placeholder="Targa" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:4px;font-family:var(--font-mono);text-transform:uppercase" />';
+      h += '<input type="text" id="mez-desc-' + m.id + '" value="' + esc(m.descrizione||'') + '" placeholder="Descrizione" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:4px" />';
+      h += '<input type="number" id="mez-cap-' + m.id + '" value="' + Number(m.capacita_totale||0) + '" placeholder="Capacità L" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:4px;text-align:right;font-family:var(--font-mono)" />';
+      h += '<button onclick="_salvaMezzoInline(\'' + m.id + '\',\'' + id + '\')" title="Salva" style="padding:5px 8px;background:#27500A;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">💾</button>';
+      h += '<button onclick="_eliminaMezzoInline(\'' + m.id + '\',\'' + id + '\')" title="Elimina" style="padding:5px 8px;background:#A32D2D;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">🗑</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+  } else {
+    h += '<div style="color:var(--text-muted);font-size:12px;font-style:italic;text-align:center;padding:10px">Nessun mezzo</div>';
+  }
+  h += '</div>';
+
+  h += '<div style="display:flex;justify-content:flex-end">';
+  h += '<button onclick="chiudiModal()" style="padding:10px 20px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button>';
   h += '</div>';
 
   apriModal(h);
@@ -382,9 +438,78 @@ async function _salvaModificaTrasportatore(id) {
   };
   var { error } = await sb.from('trasportatori').update(record).eq('id', id);
   if (error) { toast('Errore: ' + error.message); return; }
-  toast('✓ Vettore aggiornato');
-  chiudiModal();
+  toast('✓ Anagrafica aggiornata');
   caricaTrasportatori();
+}
+
+// ─── AUTISTI inline ──────────────────────────────────────────────
+async function _salvaAutistaInline(autistaId, trId) {
+  var nome = document.getElementById('aut-nome-' + autistaId).value.trim();
+  if (!nome) { toast('Nome obbligatorio'); return; }
+  var rec = {
+    nome: nome,
+    telefono: document.getElementById('aut-tel-' + autistaId).value.trim() || null,
+    patente: document.getElementById('aut-pat-' + autistaId).value.trim() || null
+  };
+  var { error } = await sb.from('autisti').update(rec).eq('id', autistaId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✓ Autista aggiornato');
+}
+
+async function _eliminaAutistaInline(autistaId, trId) {
+  if (!confirm('Eliminare questo autista? Il dato sarà rimosso definitivamente.')) return;
+  var { error } = await sb.from('autisti').delete().eq('id', autistaId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✓ Autista eliminato');
+  // Riapri il modale con dati aggiornati
+  _modificaTrasportatore(trId);
+}
+
+async function _aggiungiAutista(trId) {
+  // Inserisco una riga temporanea con valori vuoti, l'utente la compila e salva con 💾
+  var { data: nuovo, error } = await sb.from('autisti').insert([{
+    trasportatore_id: trId,
+    nome: 'Nuovo autista',
+    telefono: null,
+    patente: null
+  }]).select('id').single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('+ Autista aggiunto - compila e 💾');
+  _modificaTrasportatore(trId);
+}
+
+// ─── MEZZI inline ────────────────────────────────────────────────
+async function _salvaMezzoInline(mezzoId, trId) {
+  var targa = document.getElementById('mez-targa-' + mezzoId).value.trim().toUpperCase();
+  if (!targa) { toast('Targa obbligatoria'); return; }
+  var rec = {
+    targa: targa,
+    descrizione: document.getElementById('mez-desc-' + mezzoId).value.trim() || null,
+    capacita_totale: parseFloat(document.getElementById('mez-cap-' + mezzoId).value) || 0
+  };
+  var { error } = await sb.from('mezzi_trasportatori').update(rec).eq('id', mezzoId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✓ Mezzo aggiornato');
+}
+
+async function _eliminaMezzoInline(mezzoId, trId) {
+  if (!confirm('Eliminare questo mezzo? Il dato sarà rimosso definitivamente.')) return;
+  var { error } = await sb.from('mezzi_trasportatori').delete().eq('id', mezzoId);
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('✓ Mezzo eliminato');
+  _modificaTrasportatore(trId);
+}
+
+async function _aggiungiMezzoEsterno(trId) {
+  var { data: nuovo, error } = await sb.from('mezzi_trasportatori').insert([{
+    trasportatore_id: trId,
+    targa: 'XX000XX',
+    descrizione: null,
+    capacita_totale: 0
+  }]).select('id').single();
+  if (error) { toast('Errore: ' + error.message); return; }
+  toast('+ Mezzo aggiunto - compila targa e 💾');
+  _modificaTrasportatore(trId);
 }
 
 async function salvaAutista() {
