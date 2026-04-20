@@ -409,11 +409,18 @@ function _labelGiorno(inputId) {
   var dayId = inputId + '-day';
   var el = document.getElementById(spanId);
   var elDay = document.getElementById(dayId);
+  // Se l'input è stato wrappato da pf-date-nav in un <span class="pf-datenav">,
+  // il badge va inserito DOPO il wrapper (non dentro), altrimenti finisce tra
+  // l'input e la freccia ▶ schiacciando il layout.
+  var anchor = inp;
+  if (anchor.parentNode && anchor.parentNode.classList && anchor.parentNode.classList.contains('pf-datenav')) {
+    anchor = anchor.parentNode;
+  }
   if (!el) {
     el = document.createElement('span');
     el.id = spanId;
     el.style.cssText = 'font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;margin-left:6px;display:none;vertical-align:middle';
-    inp.parentNode.insertBefore(el, inp.nextSibling);
+    anchor.parentNode.insertBefore(el, anchor.nextSibling);
   }
   if (!elDay) {
     elDay = document.createElement('span');
