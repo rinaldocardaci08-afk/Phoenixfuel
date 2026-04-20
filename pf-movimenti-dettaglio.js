@@ -313,25 +313,407 @@
     return _fmtIT(da) + ' → ' + _fmtIT(a);
   }
 
-  // ── TURNO 2 placeholder ──────────────────────────────────────────
-  // Verrà sostituito al prossimo turno con il render 3 colonne completo.
-  window.pfMvtDettMostra = function(cfg) {
-    var prodLabel = cfg.prodotti.length === 1 ? cfg.prodotti[0] :
-                    (cfg.prodotti.length + ' prodotti selezionati');
-    var h = '';
-    h += '<div style="max-width:540px;text-align:center;padding:20px">';
-    h += '  <div style="font-size:40px;margin-bottom:10px">🚧</div>';
-    h += '  <h3 style="margin:0 0 14px">Report dettaglio — in costruzione</h3>';
-    h += '  <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:14px;text-align:left;font-size:13px;margin-bottom:14px">';
-    h += '    <div style="margin-bottom:6px"><span style="color:var(--text-muted)">Periodo:</span> <strong>' + esc2(cfg.etichetta) + '</strong></div>';
-    h += '    <div style="margin-bottom:6px"><span style="color:var(--text-muted)">Deposito:</span> <strong>Vibo Valentia</strong></div>';
-    h += '    <div><span style="color:var(--text-muted)">Prodotti:</span> <strong>' + esc2(prodLabel) + '</strong></div>';
-    h += '  </div>';
-    h += '  <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Il render 3 colonne (Entrate / Uscite / Riassunto) e gli export PDF/Excel arrivano al prossimo turno di sviluppo.</div>';
-    h += '  <button onclick="chiudiModal()" style="margin-top:18px;padding:10px 22px;border:none;border-radius:6px;background:#D4A017;color:#fff;cursor:pointer;font-size:13px;font-weight:600">OK</button>';
-    h += '</div>';
-    apriModal(h);
+  // ── TURNO 2: Render report completo 3 colonne ────────────────────
+  // Palette colori prodotto (allineata a pf-deposito.js)
+  var COLORI_PROD = {
+    'Gasolio Autotrazione':'#D4A017', 'Benzina':'#639922',
+    'Gasolio Agricolo':'#6B5FCC', 'HVO':'#1D9E75', 'AdBlue':'#888'
   };
+
+  // Stato del report attivo (per toggle sezioni senza rifetchare)
+  var _report = null;
+
+  function _isPhoenixFornitore(f) {
+    var s = (f || '').toLowerCase();
+    return s.indexOf('phoenix') >= 0 || s.indexOf('deposito') >= 0;
+  }
+
+  function _fmtL(n) {
+    return Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace(/\./g, "'") + ' L';
+  }
+  function _fmtLSigned(n) {
+    var v = Math.round(Number(n || 0));
+    if (v === 0) return '0 L';
+    return (v > 0 ? '+' : '−') + _fmtL(Math.abs(v));
+  }
+
+  // ── Fetch parallelo di tutti i gruppi ────────────────────────────
+  async function _fetchReportData(cfg) {
+    var STATI = ['confermato','consegnato'];
+    var prods = cfg.prodotti;
+
+    var qAcquisti = sb.from('ordini')
+      .select('id,data,fornitore,prodotto,litri,basi_carico(nome)')
+      .eq('tipo_ordine','entrata_deposito').in('stato', STATI).in('prodotto', prods)
+      .neq('fornitore', 'Rientro merce')
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var qRientri = sb.from('ordini')
+      .select('id,data,prodotto,litri,cliente,note')
+      .eq('tipo_ordine','entrata_deposito').in('stato', STATI).in('prodotto', prods)
+      .eq('fornitore', 'Rientro merce')
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var qRettPlus = sb.from('rettifiche_inventario')
+      .select('id,data,differenza,causale,note,prodotto,origine')
+      .eq('tipo','deposito').eq('confermata', true).in('prodotto', prods)
+      .gt('differenza', 0)
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var qVendite = sb.from('ordini')
+      .select('id,data,cliente,fornitore,prodotto,litri')
+      .eq('tipo_ordine','cliente').in('stato', STATI).in('prodotto', prods)
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var qStazione = sb.from('ordini')
+      .select('id,data,fornitore,prodotto,litri')
+      .eq('tipo_ordine','stazione_servizio').in('stato', STATI).in('prodotto', prods)
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var qAuto = sb.from('ordini')
+      .select('id,data,prodotto,litri,note')
+      .eq('tipo_ordine','autoconsumo').in('stato', STATI).in('prodotto', prods)
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var qRettMinus = sb.from('rettifiche_inventario')
+      .select('id,data,differenza,causale,note,prodotto,origine')
+      .eq('tipo','deposito').eq('confermata', true).in('prodotto', prods)
+      .lt('differenza', 0)
+      .gte('data', cfg.da).lte('data', cfg.a).order('data');
+
+    var [rAcq, rRie, rRp, rVen, rSta, rAut, rRm] = await Promise.all([
+      qAcquisti, qRientri, qRettPlus, qVendite, qStazione, qAuto, qRettMinus
+    ]);
+
+    // Filtro Phoenix/Deposito lato client per vendite e stazione
+    var vendite = (rVen.data || []).filter(function(o){ return _isPhoenixFornitore(o.fornitore); });
+    var stazione = (rSta.data || []).filter(function(o){ return _isPhoenixFornitore(o.fornitore); });
+
+    return {
+      acquisti:     rAcq.data || [],
+      rientri:      rRie.data || [],
+      rettEccedenze: rRp.data || [],
+      vendite:      vendite,
+      stazione:     stazione,
+      autoconsumo:  rAut.data || [],
+      rettCali:     rRm.data || []
+    };
+  }
+
+  // ── Entry point: override del placeholder turno 1 ─────────────────
+  window.pfMvtDettMostra = async function(cfg) {
+    _openOverlay();
+    _renderLoading();
+    try {
+      var dati = await _fetchReportData(cfg);
+      _report = { cfg: cfg, dati: dati, espansi: { acquisti: true, vendite: true } };
+      _renderReport();
+    } catch (err) {
+      _renderError(err);
+    }
+  };
+
+  // ── Overlay custom (più largo del modale standard) ────────────────
+  function _openOverlay() {
+    var ex = document.getElementById('mvt-dett-overlay');
+    if (ex) ex.remove();
+    var div = document.createElement('div');
+    div.id = 'mvt-dett-overlay';
+    div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1005;display:flex;align-items:center;justify-content:center;padding:16px';
+    div.innerHTML = '<div id="mvt-dett-box" style="background:var(--bg-card);width:100%;max-width:1400px;max-height:92vh;overflow:auto;border-radius:12px;padding:0;position:relative;box-shadow:0 10px 40px rgba(0,0,0,0.3)"><div id="mvt-dett-body" style="padding:20px 24px"></div></div>';
+    // click su backdrop chiude
+    div.addEventListener('click', function(e){ if (e.target === div) pfMvtDettChiudi(); });
+    document.body.appendChild(div);
+  }
+
+  window.pfMvtDettChiudi = function() {
+    var ex = document.getElementById('mvt-dett-overlay');
+    if (ex) ex.remove();
+    _report = null;
+  };
+
+  function _renderLoading() {
+    var body = document.getElementById('mvt-dett-body');
+    if (!body) return;
+    body.innerHTML = '<div style="padding:60px 20px;text-align:center"><div style="font-size:32px;margin-bottom:10px">⏳</div><div style="color:var(--text-muted);font-size:13px">Caricamento movimenti in corso...</div></div>';
+  }
+
+  function _renderError(err) {
+    var body = document.getElementById('mvt-dett-body');
+    if (!body) return;
+    body.innerHTML = '<div style="padding:40px 20px;text-align:center"><div style="font-size:32px;margin-bottom:10px">⚠️</div><div style="color:#A32D2D;font-size:14px;margin-bottom:10px"><strong>Errore caricamento dati</strong></div><div style="color:var(--text-muted);font-size:12px;font-family:var(--font-mono);background:var(--bg);padding:10px 14px;border-radius:6px;max-width:500px;margin:0 auto">' + esc2(err.message || String(err)) + '</div><button onclick="pfMvtDettChiudi()" style="margin-top:20px;padding:9px 18px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  }
+
+  // ── Render principale ─────────────────────────────────────────────
+  function _renderReport() {
+    var body = document.getElementById('mvt-dett-body');
+    if (!body || !_report) return;
+
+    var cfg = _report.cfg;
+    var d = _report.dati;
+
+    // Totali gruppi
+    var totAcq = _sumLitri(d.acquisti);
+    var totRie = _sumLitri(d.rientri);
+    var totRp = _sumDiff(d.rettEccedenze);
+    var totEntrate = totAcq + totRie + totRp;
+
+    var totVen = _sumLitri(d.vendite);
+    var totSta = _sumLitri(d.stazione);
+    var totAut = _sumLitri(d.autoconsumo);
+    var totRm = Math.abs(_sumDiff(d.rettCali));
+    var totUscite = totVen + totSta + totAut + totRm;
+
+    var rettNetto = totRp - totRm;
+    var saldo = totEntrate - totUscite;
+
+    // Etichetta prodotti
+    var prodLabel;
+    if (cfg.prodotti.length === 1) prodLabel = cfg.prodotti[0];
+    else if (_stato && cfg.prodotti.length === _stato.prodottiDisponibili.length) prodLabel = 'tutti i prodotti';
+    else prodLabel = cfg.prodotti.length + ' prodotti';
+
+    var h = '';
+    // ── Header ──────────────────────────────────────────────────────
+    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding-bottom:14px;border-bottom:2px solid #D4A017">';
+    h += '  <div>';
+    h += '    <div style="font-size:18px;font-weight:700;margin-bottom:4px">📊 Dettaglio movimenti Deposito</div>';
+    h += '    <div style="font-size:13px;color:var(--text-muted)">' + esc2(cfg.etichetta) + ' · Deposito Vibo · ' + esc2(prodLabel) + '</div>';
+    h += '  </div>';
+    h += '  <div style="display:flex;gap:8px;flex-wrap:wrap">';
+    h += '    <button onclick="pfMvtDettApri()" title="Cambia filtri" style="padding:9px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">🎛️ Filtri</button>';
+    h += '    <button onclick="pfMvtDettExportPDF()" style="padding:9px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">📄 PDF</button>';
+    h += '    <button onclick="pfMvtDettExportExcel()" style="padding:9px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">📊 Excel</button>';
+    h += '    <button onclick="pfMvtDettChiudi()" style="padding:9px 14px;border:none;border-radius:6px;background:#D4A017;color:#fff;cursor:pointer;font-size:12px;font-weight:600">✕ Chiudi</button>';
+    h += '  </div>';
+    h += '</div>';
+
+    // ── 3 colonne ───────────────────────────────────────────────────
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr 260px;gap:14px;align-items:start" class="mvt-dett-grid">';
+
+    // Col 1 — ENTRATE
+    h += _renderColonna('entrate', 'ENTRATE DEPOSITO', '#639922', 'rgba(99,153,34,0.08)', totEntrate, [
+      { key:'acquisti',      label:'Acquisti da fornitori',  tot: totAcq, rows: d.acquisti,      tipo:'acquisti' },
+      { key:'rientri',       label:'Rientri merce',          tot: totRie, rows: d.rientri,       tipo:'rientri' },
+      { key:'rettEccedenze', label:'Rettifiche eccedenze',   tot: totRp,  rows: d.rettEccedenze, tipo:'rettifica' }
+    ], cfg);
+
+    // Col 2 — USCITE
+    h += _renderColonna('uscite', 'USCITE DEPOSITO', '#A32D2D', 'rgba(163,45,45,0.08)', totUscite, [
+      { key:'vendite',    label:'Vendite a clienti',         tot: totVen, rows: d.vendite,    tipo:'vendite' },
+      { key:'stazione',   label:'Consegne a stazione Oppido', tot: totSta, rows: d.stazione,   tipo:'stazione' },
+      { key:'autoconsumo',label:'Autoconsumo',               tot: totAut, rows: d.autoconsumo,tipo:'autoconsumo' },
+      { key:'rettCali',   label:'Rettifiche cali/ammanchi',  tot: totRm,  rows: d.rettCali,   tipo:'rettifica', segno:-1 }
+    ], cfg);
+
+    // Col 3 — RIASSUNTO (sticky)
+    h += _renderRiassunto(totEntrate, totVen, totSta, totAut, rettNetto, saldo);
+
+    h += '</div>';
+
+    // Style responsive mobile
+    h += '<style>@media (max-width:900px){.mvt-dett-grid{grid-template-columns:1fr !important}}</style>';
+
+    body.innerHTML = h;
+  }
+
+  function _sumLitri(rows) {
+    return (rows || []).reduce(function(s,r){ return s + Number(r.litri || 0); }, 0);
+  }
+  function _sumDiff(rows) {
+    return (rows || []).reduce(function(s,r){ return s + Number(r.differenza || 0); }, 0);
+  }
+
+  // ── Render singola colonna (Entrate o Uscite) ────────────────────
+  function _renderColonna(kCol, titolo, colore, bgColore, totale, gruppi, cfg) {
+    var h = '';
+    h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;overflow:hidden">';
+    h += '  <div style="padding:12px 14px;background:' + bgColore + ';border-bottom:2px solid ' + colore + '">';
+    h += '    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:' + colore + ';font-weight:700">' + titolo + '</div>';
+    h += '  </div>';
+
+    gruppi.forEach(function(g, idx) {
+      h += _renderGruppo(kCol, g, colore, cfg, idx === gruppi.length - 1);
+    });
+
+    // Footer totale colonna
+    var segnoT = kCol === 'entrate' ? '+' : '−';
+    h += '  <div style="padding:14px;background:' + bgColore + ';border-top:2px solid ' + colore + ';display:flex;justify-content:space-between;align-items:center">';
+    h += '    <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.4px;color:' + colore + ';font-weight:700">TOTALE ' + (kCol === 'entrate' ? 'ENTRATE' : 'USCITE') + '</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + colore + '">' + segnoT + _fmtL(totale) + '</div>';
+    h += '  </div>';
+
+    h += '</div>';
+    return h;
+  }
+
+  // ── Render singolo gruppo con toggle e lista ─────────────────────
+  function _renderGruppo(kCol, g, colore, cfg, isLast) {
+    var espanso = !!(_report.espansi && _report.espansi[g.key]);
+    var arrow = espanso ? '▼' : '▶';
+    var segno = kCol === 'entrate' ? '+' : '−';
+    var segnoTot = segno + _fmtL(g.tot);
+    var tot = g.rows ? g.rows.length : 0;
+
+    var borderBottom = isLast ? '' : ';border-bottom:0.5px solid var(--border)';
+    var h = '';
+    h += '  <div style="padding:10px 14px;cursor:pointer;user-select:none' + borderBottom + '" onclick="_pfMvtDettToggleGruppo(\'' + g.key + '\')">';
+    h += '    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">';
+    h += '      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">';
+    h += '        <span style="color:var(--text-muted);font-size:11px;font-weight:600;width:12px">' + arrow + '</span>';
+    h += '        <span style="font-weight:600;font-size:13px">' + esc2(g.label) + '</span>';
+    h += '        <span style="font-size:10px;color:var(--text-muted);background:var(--bg);padding:1px 6px;border-radius:10px">' + tot + '</span>';
+    h += '      </div>';
+    h += '      <div style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + colore + ';white-space:nowrap">' + (g.tot === 0 ? '0 L' : segnoTot) + '</div>';
+    h += '    </div>';
+    h += '  </div>';
+
+    if (espanso) {
+      h += '<div style="padding:4px 14px 12px;background:var(--bg)">';
+      if (!g.rows || !g.rows.length) {
+        h += '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:10px">Nessun movimento nel periodo</div>';
+      } else {
+        h += _renderRigheGruppo(kCol, g, colore, cfg);
+      }
+      h += '</div>';
+    }
+    return h;
+  }
+
+  // ── Render righe lista (prime N + espandi) ───────────────────────
+  function _renderRigheGruppo(kCol, g, colore, cfg) {
+    var LIMITE = 6;
+    var mostraTutte = !!(_report.righeTutte && _report.righeTutte[g.key]);
+    var righe = g.rows;
+    var nMostrate = mostraTutte ? righe.length : Math.min(LIMITE, righe.length);
+    var h = '';
+    h += '<div style="display:flex;flex-direction:column;gap:3px">';
+    for (var i = 0; i < nMostrate; i++) {
+      h += _renderRigaMovimento(kCol, g, righe[i], cfg);
+    }
+    if (!mostraTutte && righe.length > LIMITE) {
+      var altre = righe.length - LIMITE;
+      h += '<div onclick="_pfMvtDettMostraTutte(\'' + g.key + '\')" style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-muted);cursor:pointer;font-style:italic;border:0.5px dashed var(--border);border-radius:6px;margin-top:4px">... altre ' + altre + ' righe (mostra tutte)</div>';
+    } else if (mostraTutte && righe.length > LIMITE) {
+      h += '<div onclick="_pfMvtDettMostraTutte(\'' + g.key + '\')" style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-muted);cursor:pointer;font-style:italic;border:0.5px dashed var(--border);border-radius:6px;margin-top:4px">▲ mostra solo prime ' + LIMITE + '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  // ── Render singola riga di movimento ─────────────────────────────
+  function _renderRigaMovimento(kCol, g, r, cfg) {
+    var data = _fmtIT(r.data);
+    var litri = g.tipo === 'rettifica' ? Math.abs(Number(r.differenza || 0)) : Number(r.litri || 0);
+    var segno = kCol === 'entrate' ? '+' : '−';
+    var prodotto = r.prodotto || '';
+    var colProd = COLORI_PROD[prodotto] || '#888';
+    var showBadge = cfg.prodotti.length > 1;
+
+    // Costruisce la colonna "descrizione" in base al tipo
+    var desc = '';
+    if (g.tipo === 'acquisti') {
+      var base = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+      desc = esc2(r.fornitore || '—') + (base ? ' · <span style="color:var(--text-muted);font-size:10px">' + esc2(base) + '</span>' : '');
+    } else if (g.tipo === 'rientri') {
+      desc = '<span style="color:var(--text-muted)">da</span> ' + esc2(r.cliente || (r.note || 'rientro'));
+    } else if (g.tipo === 'vendite') {
+      desc = esc2(r.cliente || '—');
+    } else if (g.tipo === 'stazione') {
+      desc = 'Stazione Oppido';
+    } else if (g.tipo === 'autoconsumo') {
+      desc = 'Autoconsumo' + (r.note ? ' <span style="color:var(--text-muted);font-size:10px">· ' + esc2(r.note) + '</span>' : '');
+    } else if (g.tipo === 'rettifica') {
+      var caus = _labelCausale(r.causale);
+      var orig = r.origine === 'chiusura_mese' ? ' · chiusura mese' : '';
+      desc = caus + '<span style="color:var(--text-muted);font-size:10px">' + orig + '</span>';
+    }
+
+    var h = '';
+    h += '<div style="display:grid;grid-template-columns:56px 1fr auto;gap:8px;align-items:center;padding:5px 8px;background:var(--bg-card);border-radius:5px;font-size:12px">';
+    h += '  <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:11px">' + data + '</div>';
+    h += '  <div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">';
+    if (showBadge) {
+      h += '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + colProd + ';margin-right:6px;vertical-align:middle" title="' + esc2(prodotto) + '"></span>';
+    }
+    h += desc;
+    h += '  </div>';
+    h += '  <div style="font-family:var(--font-mono);font-weight:600;color:' + (kCol === 'entrate' ? '#27500A' : '#791F1F') + ';white-space:nowrap">' + segno + _fmtL(litri) + '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  function _labelCausale(c) {
+    var map = {
+      cali_viaggio:'Cali viaggio', cali_tecnici:'Cali tecnici',
+      eccedenze_viaggio:'Eccedenze viaggio', scatti_vuoto:'Scatti a vuoto',
+      manuale:'Manuale', altro:'Altro'
+    };
+    return map[c] || (c || 'Rettifica');
+  }
+
+  // ── Render riassunto periodo (colonna sticky) ────────────────────
+  function _renderRiassunto(totEntrate, totVen, totSta, totAut, rettNetto, saldo) {
+    var h = '';
+    h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:14px;position:sticky;top:0">';
+    h += '  <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);font-weight:600;margin-bottom:10px;padding-bottom:8px;border-bottom:0.5px solid var(--border)">Riassunto periodo</div>';
+
+    h += '  <div style="margin-bottom:10px">';
+    h += '    <div style="font-size:10px;color:#27500A;text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:2px">Entrate totali</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#27500A">+' + _fmtL(totEntrate) + '</div>';
+    h += '  </div>';
+
+    h += '  <div style="margin-bottom:8px">';
+    h += '    <div style="font-size:10px;color:#791F1F;text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:2px">Uscite clienti</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:13px;color:#791F1F">−' + _fmtL(totVen) + '</div>';
+    h += '  </div>';
+
+    h += '  <div style="margin-bottom:8px">';
+    h += '    <div style="font-size:10px;color:#791F1F;text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:2px">Uscite stazione</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:13px;color:#791F1F">−' + _fmtL(totSta) + '</div>';
+    h += '  </div>';
+
+    h += '  <div style="margin-bottom:8px">';
+    h += '    <div style="font-size:10px;color:#791F1F;text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:2px">Uscite autoconsumo</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:13px;color:#791F1F">−' + _fmtL(totAut) + '</div>';
+    h += '  </div>';
+
+    var rettCol = rettNetto >= 0 ? '#27500A' : '#791F1F';
+    h += '  <div style="margin-bottom:12px">';
+    h += '    <div style="font-size:10px;color:' + rettCol + ';text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:2px">Rettifiche (netto)</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:13px;color:' + rettCol + '">' + _fmtLSigned(rettNetto) + '</div>';
+    h += '  </div>';
+
+    var saldoCol = saldo >= 0 ? '#27500A' : '#791F1F';
+    h += '  <div style="padding-top:12px;border-top:2px solid var(--border)">';
+    h += '    <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-weight:600;margin-bottom:4px">Saldo netto periodo</div>';
+    h += '    <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:' + saldoCol + '">' + _fmtLSigned(saldo) + '</div>';
+    h += '    <div style="font-size:10px;color:var(--text-muted);margin-top:4px;line-height:1.4">entrate − uscite del periodo</div>';
+    h += '  </div>';
+
+    h += '</div>';
+    return h;
+  }
+
+  // ── Handlers toggle gruppi / lista ───────────────────────────────
+  window._pfMvtDettToggleGruppo = function(key) {
+    if (!_report) return;
+    if (!_report.espansi) _report.espansi = {};
+    _report.espansi[key] = !_report.espansi[key];
+    _renderReport();
+  };
+
+  window._pfMvtDettMostraTutte = function(key) {
+    if (!_report) return;
+    if (!_report.righeTutte) _report.righeTutte = {};
+    _report.righeTutte[key] = !_report.righeTutte[key];
+    _renderReport();
+  };
+
+  // ── Export (TURNO 3 placeholder) ─────────────────────────────────
+  window.pfMvtDettExportPDF = function() { toast('Export PDF in arrivo nel prossimo turno'); };
+  window.pfMvtDettExportExcel = function() { toast('Export Excel in arrivo nel prossimo turno'); };
+
 
   // Esporta entry point
   window.pfMvtDettApri = pfMvtDettApri;
