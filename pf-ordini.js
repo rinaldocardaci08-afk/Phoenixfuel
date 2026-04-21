@@ -77,13 +77,90 @@ async function salvaPrezzo() {
   if (!fornitoreNome || fornitoreNome === 'Seleziona...') { toast('Seleziona un fornitore'); return; }
   if (!prodotto) { toast('Seleziona un prodotto'); return; }
   if (isNaN(costo)||costo<=0) { toast('Inserisci il costo per litro'); return; }
+
+  // ═══ FIX 2: VALIDAZIONE SANITÀ PREZZO ═══
+  // Confronta con il BEST del giorno precedente per lo stesso prodotto.
+  // Soft warning se scostamento > 10%, hard block se > 25%.
+  // Evita ripetizioni di errori tipo "1.2436" al posto di "1.5436".
+  const validOk = await _validaSanitaPrezzo(prodotto, costo, data);
+  if (!validOk) return;
+
   const record = { data, fornitore:fornitoreNome, fornitore_id:fornitoreId||null, base_carico_id:baseId, prodotto, costo_litro:costo, trasporto_litro:trasporto, margine, iva:parseInt(document.getElementById('pr-iva').value) };
-  const { error } = await sb.from('prezzi').insert([record]);
+  const { data: inserted, error } = await sb.from('prezzi').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
+  // FIX 1: audit su inserimento prezzo
+  _auditLog('crea_prezzo', 'prezzi',
+    fornitoreNome + ' ' + prodotto + ' €/L ' + costo.toFixed(4) +
+    (trasporto > 0 ? ' (+tr €' + trasporto.toFixed(4) + ')' : '') +
+    ' | data ' + data +
+    (inserted && inserted.id ? ' | id:' + inserted.id : '')
+  );
   toast('Prezzo salvato!');
   caricaPrezzi();
   // Auto-aggiorna benchmark dalla media prezzi del giorno
   _aggiornaBenchmarkAuto(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Validazione sanità prezzo (Fix 2 — 21/04/2026)
+// Confronto col BEST del giorno precedente per stesso prodotto.
+// • scostamento > 10%: warning con conferma
+// • scostamento > 25%: blocco hard (non procede)
+// Se non c'è riferimento storico, passa sempre.
+// ═══════════════════════════════════════════════════════════════════
+async function _validaSanitaPrezzo(prodotto, costoNuovo, dataNuova) {
+  try {
+    // Cerca il costo MINIMO (BEST) nei precedenti 7 giorni per quel prodotto
+    var dataRef = new Date(dataNuova + 'T00:00:00Z');
+    var inizio = new Date(dataRef.getTime() - 7 * 86400000).toISOString().split('T')[0];
+    var fine = new Date(dataRef.getTime() - 86400000).toISOString().split('T')[0];
+
+    var { data: precedenti } = await sb.from('prezzi')
+      .select('fornitore,costo_litro,data')
+      .eq('prodotto', prodotto)
+      .gte('data', inizio)
+      .lte('data', fine)
+      .order('data', { ascending: false });
+
+    if (!precedenti || !precedenti.length) {
+      // Nessun riferimento storico: passo ma avviso
+      return true;
+    }
+
+    // BEST = costo minimo dei precedenti
+    var best = Math.min.apply(null, precedenti.map(function(p){ return Number(p.costo_litro); }));
+    if (!isFinite(best) || best <= 0) return true;
+
+    var delta = (costoNuovo - best) / best;
+    var deltaPct = delta * 100;
+    var deltaStr = (deltaPct >= 0 ? '+' : '') + deltaPct.toFixed(1) + '%';
+
+    // HARD BLOCK se fuori ±25%
+    if (Math.abs(delta) > 0.25) {
+      alert('⛔ Prezzo fuori range plausibile\n\n' +
+        'Costo inserito: €/L ' + costoNuovo.toFixed(4) + '\n' +
+        'BEST ultimi 7gg (' + prodotto + '): €/L ' + best.toFixed(4) + '\n' +
+        'Scostamento: ' + deltaStr + '\n\n' +
+        'Verifica il valore e riprova. Il prezzo non sarà salvato.');
+      return false;
+    }
+
+    // SOFT WARNING se fuori ±10%
+    if (Math.abs(delta) > 0.10) {
+      var msg = '⚠️ Scostamento anomalo dal BEST precedente\n\n' +
+        'Costo inserito: €/L ' + costoNuovo.toFixed(4) + '\n' +
+        'BEST ultimi 7gg (' + prodotto + '): €/L ' + best.toFixed(4) + '\n' +
+        'Scostamento: ' + deltaStr + '\n\n' +
+        'Sei sicuro di voler salvare?';
+      if (!confirm(msg)) return false;
+    }
+
+    return true;
+  } catch(e) {
+    // Non bloccare il salvataggio per errore di validazione
+    console.warn('Validazione prezzo fallita (non bloccante):', e);
+    return true;
+  }
 }
 
 async function salvaPrezzoCliente() {
@@ -1257,6 +1334,65 @@ async function stampaListinoPrezziGiorno() {
   html += '<div style="background:#FDF3D0;border:1px solid #D4A017;border-radius:6px;padding:8px 18px;text-align:center"><div style="font-size:8px;color:#633806;text-transform:uppercase">Quotazioni</div><div style="font-size:20px;font-weight:bold">' + prezzi.length + '</div></div>';
   html += '</div>';
 
+  // ═══ FIX 3 — Rilevamento anomalie nel listino ═══
+  // Confronta ogni prezzo con il BEST degli ultimi 7 giorni per lo stesso prodotto.
+  // Se uno scostamento supera il 15% → banner rosso di avvertimento in cima al PDF,
+  // così chi riceve il listino vede subito che c'è un valore da verificare.
+  try {
+    var dataRef = new Date(data + 'T00:00:00Z');
+    var dataInizio = new Date(dataRef.getTime() - 7 * 86400000).toISOString().split('T')[0];
+    var dataFine = new Date(dataRef.getTime() - 86400000).toISOString().split('T')[0];
+    var prodottiDistinti = Object.keys(perProdotto);
+    var { data: storici } = await sb.from('prezzi')
+      .select('prodotto,costo_litro,data')
+      .in('prodotto', prodottiDistinti)
+      .gte('data', dataInizio)
+      .lte('data', dataFine);
+    var bestPerProd = {};
+    (storici || []).forEach(function(r){
+      var p = r.prodotto;
+      var c = Number(r.costo_litro);
+      if (!isFinite(c) || c <= 0) return;
+      if (bestPerProd[p] === undefined || c < bestPerProd[p]) bestPerProd[p] = c;
+    });
+    var anomalie = [];
+    prodottiDistinti.forEach(function(prod){
+      var ref = bestPerProd[prod];
+      if (!ref || !isFinite(ref)) return;
+      (perProdotto[prod] || []).forEach(function(p){
+        // Skip Phoenix Fuel interno (CMP non è un prezzo di mercato confrontabile)
+        if (p._isDeposito) return;
+        var c = Number(p.costo_litro);
+        if (!isFinite(c) || c <= 0) return;
+        var delta = (c - ref) / ref;
+        if (Math.abs(delta) > 0.15) {
+          anomalie.push({
+            prodotto: prod,
+            fornitore: p.fornitore,
+            base: (p.basi_carico && p.basi_carico.nome) || '—',
+            costo: c,
+            ref: ref,
+            delta: delta
+          });
+        }
+      });
+    });
+    if (anomalie.length) {
+      html += '<div style="background:#FCEBEB;border:2px solid #E24B4A;border-radius:8px;padding:12px 16px;margin-bottom:18px">';
+      html += '<div style="font-size:13px;font-weight:bold;color:#791F1F;margin-bottom:6px">⚠️ ATTENZIONE — prezzo fuori range storico</div>';
+      html += '<div style="font-size:10px;color:#791F1F;margin-bottom:8px">' + anomalie.length + ' ' + (anomalie.length === 1 ? 'quotazione si discosta' : 'quotazioni si discostano') + ' di oltre 15% dal BEST degli ultimi 7 giorni. Verificare prima di utilizzare il listino.</div>';
+      anomalie.forEach(function(a){
+        var deltaStr = (a.delta >= 0 ? '+' : '') + (a.delta * 100).toFixed(1) + '%';
+        html += '<div style="font-size:10px;color:#501313;padding:3px 0;font-family:Courier New,monospace">';
+        html += '• <strong>' + a.fornitore + '</strong> ' + a.prodotto + ' (' + a.base + '): €/L ' + a.costo.toFixed(4);
+        html += ' vs BEST storico €/L ' + a.ref.toFixed(4);
+        html += ' → scostamento <strong>' + deltaStr + '</strong>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+  } catch(e) { /* non bloccante */ }
+
   // Sezioni per prodotto
   prodottiOrdinati.forEach(function(prodotto) {
     var lista = perProdotto[prodotto];
@@ -1698,7 +1834,16 @@ async function editaCella(td, tabella, campo, id, val) {
   td.innerHTML=''; td.appendChild(input); input.focus();
   input.onblur = async () => {
     const nv=parseFloat(input.value);
-    if (!isNaN(nv)) { const{error}=await sb.from(tabella).update({[campo]:nv}).eq('id',id); toast(error?'Errore':'Aggiornato!'); }
+    if (!isNaN(nv)) {
+      const oldVal = Number(val);
+      const{error}=await sb.from(tabella).update({[campo]:nv}).eq('id',id);
+      // Audit su modifica (solo se cambia davvero il valore e no-error)
+      if (!error && oldVal !== nv) {
+        _auditLog('modifica_' + tabella, tabella,
+          'id:' + id + ' | ' + campo + ': ' + oldVal + ' → ' + nv);
+      }
+      toast(error?'Errore':'Aggiornato!');
+    }
     if (tabella==='ordini') caricaOrdini(); else caricaPrezzi();
   };
   input.onkeydown = e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape'){if(tabella==='ordini') caricaOrdini(); else caricaPrezzi();} };
@@ -1706,8 +1851,25 @@ async function editaCella(td, tabella, campo, id, val) {
 
 async function eliminaRecord(tabella, id, callback) {
   if (!confirm('Eliminare questo record?')) return;
+  // Prima di cancellare, leggi il record per avere il dettaglio nel log.
+  // Su 'prezzi' serve particolarmente: un errore di cancellazione deve
+  // essere recuperabile sapendo ESATTAMENTE cosa era stato cancellato.
+  var dettaglio = 'ID: ' + id;
+  try {
+    var { data: riga } = await sb.from(tabella).select('*').eq('id', id).maybeSingle();
+    if (riga) {
+      if (tabella === 'prezzi') {
+        dettaglio = (riga.fornitore || '—') + ' | ' + (riga.prodotto || '—') +
+          ' | €/L ' + Number(riga.costo_litro || 0).toFixed(4) +
+          (riga.trasporto_litro ? ' +tr €' + Number(riga.trasporto_litro).toFixed(4) : '') +
+          ' | data ' + (riga.data || '—') + ' | id:' + id;
+      } else {
+        dettaglio = JSON.stringify(riga).substring(0, 450) + ' | id:' + id;
+      }
+    }
+  } catch(e) { /* fallback all'ID solo */ }
   await sb.from(tabella).delete().eq('id', id);
-  _auditLog('elimina', tabella, 'ID: ' + id);
+  _auditLog('elimina', tabella, dettaglio);
   toast('Eliminato'); callback();
 }
 
