@@ -487,15 +487,28 @@ function _renderSingoloAnno(anno, dati) {
 function _renderConfrontoAnni(anni, datiPerAnno) {
   let html = '';
 
-  // Box totali per anno affiancati
+  // Helper micro-percentuale inline (piccola, sotto il valore)
+  function microDelta(cur, prev) {
+    if (!isFinite(prev) || Math.abs(prev) < 0.001) return '';   // no base → niente delta
+    const pct = ((cur - prev) / Math.abs(prev)) * 100;
+    const col = pct > 0.05 ? '#27500A' : (pct < -0.05 ? '#A32D2D' : '#888');
+    const segno = pct > 0 ? '+' : '';
+    return '<div style="font-size:9px;color:' + col + ';font-weight:600;margin-top:2px;line-height:1">'
+         + segno + pct.toFixed(1) + '%</div>';
+  }
+
+  // ── Box totali per anno affiancati ──
   html += '<div style="display:grid;grid-template-columns:repeat(' + anni.length + ',1fr);gap:10px;margin-bottom:14px">';
   anni.forEach(function(y, i) {
     const t = datiPerAnno[y].tot;
+    const mLordo = t.fattNetto - t.costoAcquisto;
     const mNetto = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
-    // Delta vs anno precedente nella selezione (se c'è)
+    const prev = i > 0 ? datiPerAnno[anni[i-1]].tot : null;
+    const mLordoPrev = prev ? (prev.fattNetto - prev.costoAcquisto) : null;
+    const mNettoPrev = prev ? (prev.fattNetto - prev.costoAcquisto - prev.costoTrasporto) : null;
+
     let deltaBadge = '';
-    if (i > 0) {
-      const prev = datiPerAnno[anni[i-1]].tot;
+    if (prev) {
       const deltaFatt = prev.fattNetto > 0 ? ((t.fattNetto - prev.fattNetto) / prev.fattNetto * 100) : 0;
       const deltaLit = prev.litri > 0 ? ((t.litri - prev.litri) / prev.litri * 100) : 0;
       const colF = deltaFatt > 0.05 ? '#27500A' : (deltaFatt < -0.05 ? '#A32D2D' : '#666');
@@ -507,12 +520,13 @@ function _renderConfrontoAnni(anni, datiPerAnno) {
         + 'Δ Fatt.: <strong style="color:' + colF + '">' + segnoF + deltaFatt.toFixed(1) + '%</strong>'
         + ' <span style="color:#aaa">(vs ' + anni[i-1] + ')</span></div>';
     }
+
     html += '<div style="background:#EEEDFE;border:1px solid #C5C0F0;border-radius:10px;padding:12px 14px">';
     html += '<div style="font-size:18px;font-weight:bold;color:#26215C;text-align:center;margin-bottom:8px">' + y + '</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">';
     html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Litri</div><div style="font-family:Courier New,monospace;font-weight:bold">' + fmtL(t.litri) + '</div></div>';
     html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Fatt. netto</div><div style="font-family:Courier New,monospace;font-weight:bold">' + fmtE(t.fattNetto) + '</div></div>';
-    html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">IVA incl.</div><div style="font-family:Courier New,monospace">' + fmtE(t.fattIva) + '</div></div>';
+    html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Margine lordo</div><div style="font-family:Courier New,monospace;color:#6B5FCC;font-weight:bold">' + fmtE(mLordo) + '</div></div>';
     html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Margine netto</div><div style="font-family:Courier New,monospace;font-weight:bold;color:#27500A">' + fmtE(mNetto) + '</div></div>';
     html += '</div>';
     html += deltaBadge;
@@ -520,78 +534,78 @@ function _renderConfrontoAnni(anni, datiPerAnno) {
   });
   html += '</div>';
 
-  // Tabella wide: riga per mese, gruppi di 3 colonne per anno
+  // ── Tabella wide: 4 colonne per anno (Litri | Fatt.netto | Margine lordo | Margine netto) ──
   html += '<table style="font-size:10px">';
   html += '<thead>';
-  // Header primo livello (anni)
   html += '<tr>';
   html += '<th rowspan="2" style="min-width:55px">Mese</th>';
   anni.forEach(function(y){
-    html += '<th colspan="3" style="background:#26215C">' + y + '</th>';
+    html += '<th colspan="4" style="background:#26215C">' + y + '</th>';
   });
   html += '</tr>';
   html += '<tr>';
   anni.forEach(function(){
-    html += '<th>Litri</th><th>Fatt. netto</th><th>Margine netto</th>';
+    html += '<th>Litri</th><th>Fatt. netto</th><th>Margine lordo</th><th>Margine netto</th>';
   });
   html += '</tr>';
   html += '</thead><tbody>';
 
-  // Righe mesi
+  // Righe mesi con micro-percentuale inline dal secondo anno in poi
   for (let m = 1; m <= 12; m++) {
     html += '<tr>';
     html += '<td class="mese-col" style="background:#fafaf8;font-size:12px">' + m + '</td>';
-    anni.forEach(function(y){
+    anni.forEach(function(y, i){
       const d = datiPerAnno[y].mesi[m];
+      const mLor = d.fattNetto - d.costoAcquisto;
       const mNet = d.fattNetto - d.costoAcquisto - d.costoTrasporto;
       const hasData = d.litri > 0;
       const opacity = !hasData ? ';opacity:0.35' : '';
-      html += '<td class="mono" style="background:#fafaff' + opacity + '">' + fmtL(d.litri) + '</td>';
-      html += '<td class="mono" style="background:#fff' + opacity + '">' + fmtE(d.fattNetto) + '</td>';
-      html += '<td class="mono" style="background:#fafaff;color:' + (mNet >= 0 ? '#27500A' : '#A32D2D') + opacity + '">' + fmtE(mNet) + '</td>';
+
+      // Delta vs stesso mese anno precedente selezionato (non calendario)
+      let dLit = '', dFatt = '', dMLor = '', dMNet = '';
+      if (i > 0) {
+        const dPrev = datiPerAnno[anni[i-1]].mesi[m];
+        const mLorPrev = dPrev.fattNetto - dPrev.costoAcquisto;
+        const mNetPrev = dPrev.fattNetto - dPrev.costoAcquisto - dPrev.costoTrasporto;
+        dLit = microDelta(d.litri, dPrev.litri);
+        dFatt = microDelta(d.fattNetto, dPrev.fattNetto);
+        dMLor = microDelta(mLor, mLorPrev);
+        dMNet = microDelta(mNet, mNetPrev);
+      }
+
+      html += '<td class="mono" style="background:#fafaff;vertical-align:top' + opacity + '">' + fmtL(d.litri) + dLit + '</td>';
+      html += '<td class="mono" style="background:#fff;vertical-align:top' + opacity + '">' + fmtE(d.fattNetto) + dFatt + '</td>';
+      html += '<td class="mono" style="background:#fafaff;vertical-align:top;color:#6B5FCC' + opacity + '">' + fmtE(mLor) + dMLor + '</td>';
+      html += '<td class="mono" style="background:#fff;vertical-align:top;color:' + (mNet >= 0 ? '#27500A' : '#A32D2D') + opacity + '">' + fmtE(mNet) + dMNet + '</td>';
     });
     html += '</tr>';
   }
 
-  // Riga TOTALE
+  // Riga TOTALE con micro-percentuale
   html += '<tr class="totale-row">';
   html += '<td class="mese-col">TOT</td>';
-  anni.forEach(function(y){
+  anni.forEach(function(y, i){
     const t = datiPerAnno[y].tot;
+    const mLor = t.fattNetto - t.costoAcquisto;
     const mNet = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
-    html += '<td class="mono">' + fmtL(t.litri) + '</td>';
-    html += '<td class="mono">' + fmtE(t.fattNetto) + '</td>';
-    html += '<td class="mono" style="color:' + (mNet >= 0 ? '#27500A' : '#A32D2D') + ';font-weight:bold">' + fmtE(mNet) + '</td>';
+
+    let dLit = '', dFatt = '', dMLor = '', dMNet = '';
+    if (i > 0) {
+      const tPrev = datiPerAnno[anni[i-1]].tot;
+      const mLorPrev = tPrev.fattNetto - tPrev.costoAcquisto;
+      const mNetPrev = tPrev.fattNetto - tPrev.costoAcquisto - tPrev.costoTrasporto;
+      dLit = microDelta(t.litri, tPrev.litri);
+      dFatt = microDelta(t.fattNetto, tPrev.fattNetto);
+      dMLor = microDelta(mLor, mLorPrev);
+      dMNet = microDelta(mNet, mNetPrev);
+    }
+
+    html += '<td class="mono" style="vertical-align:top">' + fmtL(t.litri) + dLit + '</td>';
+    html += '<td class="mono" style="vertical-align:top">' + fmtE(t.fattNetto) + dFatt + '</td>';
+    html += '<td class="mono" style="vertical-align:top;color:#6B5FCC">' + fmtE(mLor) + dMLor + '</td>';
+    html += '<td class="mono" style="vertical-align:top;color:' + (mNet >= 0 ? '#27500A' : '#A32D2D') + ';font-weight:bold">' + fmtE(mNet) + dMNet + '</td>';
   });
   html += '</tr>';
-
-  // Riga DELTA % (vs anno precedente selezionato)
-  if (anni.length >= 2) {
-    html += '<tr style="background:#FDF3D0">';
-    html += '<td class="mese-col" style="background:#F4D94E;color:#1a1a18">Δ %</td>';
-    anni.forEach(function(y, i){
-      if (i === 0) {
-        html += '<td colspan="3" style="text-align:center;font-size:10px;color:#666;background:#FDF3D0">— (base)</td>';
-      } else {
-        const t = datiPerAnno[y].tot;
-        const tPrev = datiPerAnno[anni[i-1]].tot;
-        const mNet = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
-        const mNetPrev = tPrev.fattNetto - tPrev.costoAcquisto - tPrev.costoTrasporto;
-        const dL = tPrev.litri > 0 ? ((t.litri - tPrev.litri) / tPrev.litri * 100) : 0;
-        const dF = tPrev.fattNetto > 0 ? ((t.fattNetto - tPrev.fattNetto) / tPrev.fattNetto * 100) : 0;
-        const dM = Math.abs(mNetPrev) > 0.01 ? ((mNet - mNetPrev) / Math.abs(mNetPrev) * 100) : 0;
-        function fmtDelta(n){
-          const c = n > 0.05 ? '#27500A' : (n < -0.05 ? '#A32D2D' : '#666');
-          const s = n > 0 ? '+' : '';
-          return '<span style="color:' + c + ';font-weight:bold">' + s + n.toFixed(1) + '%</span>';
-        }
-        html += '<td class="mono" style="background:#FDF3D0">' + fmtDelta(dL) + '</td>';
-        html += '<td class="mono" style="background:#FDF3D0">' + fmtDelta(dF) + '</td>';
-        html += '<td class="mono" style="background:#FDF3D0">' + fmtDelta(dM) + '</td>';
-      }
-    });
-    html += '</tr>';
-  }
 
   html += '</tbody></table>';
 
