@@ -59,6 +59,100 @@
   .btn-back { background: #666; color: #fff; }
   .filtri-info { font-size: 11px; color: #666; margin-bottom: 12px; }
   .filtri-info strong { color: #1a1a18; }
+
+  /* ── Selezione anni: card in evidenza + dropdown altri anni ── */
+  .anni-box {
+    display: flex;
+    gap: 10px;
+    padding: 12px;
+    background: #fafaf8;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .anno-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #fff;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    color: #333;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .anno-card input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #6B5FCC; }
+  .anno-card .anno-n { font-size: 15px; }
+  .anno-card .anno-tag { font-size: 10px; color: #888; font-weight: normal; text-transform: uppercase; letter-spacing: 0.4px; }
+  .anno-card:hover { border-color: #6B5FCC; }
+  .anno-card.selected { border-color: #6B5FCC; background: #EEEDFE; color: #26215C; box-shadow: 0 2px 4px rgba(107,95,204,0.15); }
+  .anno-card.selected .anno-tag { color: #6B5FCC; }
+
+  .altri-wrap { position: relative; }
+  .altri-btn {
+    padding: 10px 16px;
+    background: #fff;
+    border: 1.5px dashed #aaa;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+    font-family: Arial, sans-serif;
+  }
+  .altri-btn:hover { border-color: #6B5FCC; color: #6B5FCC; }
+  .altri-btn .freccia { font-size: 10px; transition: transform 0.2s; }
+  .altri-btn.aperto .freccia { transform: rotate(180deg); }
+
+  .altri-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 220px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    padding: 8px;
+    display: none;
+    z-index: 10;
+  }
+  .altri-dropdown.aperto { display: block; }
+  .altri-dropdown .alt-anno {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .altri-dropdown .alt-anno:hover { background: #fafaf8; }
+  .altri-dropdown .alt-anno input { width: 15px; height: 15px; accent-color: #6B5FCC; }
+  .altri-dropdown .alt-anno.selected { background: #EEEDFE; color: #26215C; font-weight: bold; }
+
+  .badge-conteggio {
+    display: inline-block;
+    background: #6B5FCC;
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: bold;
+  }
+
+  .anni-info { font-size: 11px; color: #888; font-style: italic; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -70,11 +164,40 @@
     <img src="logo_png.jpeg" class="filtri-logo" onerror="this.style.display='none'" />
   </div>
   <div class="filtri-grid">
-    <div class="filtri-group">
-      <label>Anno</label>
-      <select id="f-anno"></select>
+    <div class="filtri-group" style="grid-column: 1 / -1">
+      <label>Anni (confronto multiplo)</label>
+      <div class="anni-box">
+
+        <!-- Anno corrente -->
+        <label class="anno-card selected" id="card-anno-corrente">
+          <input type="checkbox" class="f-anno-check" checked />
+          <span class="anno-n">—</span>
+          <span class="anno-tag">corrente</span>
+        </label>
+
+        <!-- Anno scorso -->
+        <label class="anno-card" id="card-anno-scorso">
+          <input type="checkbox" class="f-anno-check" />
+          <span class="anno-n">—</span>
+          <span class="anno-tag">scorso</span>
+        </label>
+
+        <!-- Dropdown Altri anni -->
+        <div class="altri-wrap">
+          <button type="button" class="altri-btn" id="altri-btn" onclick="toggleDropdownAnni(event)">
+            <span>🗓 Altri anni</span>
+            <span class="badge-conteggio" id="altri-conteggio" style="display:none">0</span>
+            <span class="freccia">▼</span>
+          </button>
+          <div class="altri-dropdown" id="altri-dropdown">
+            <!-- popolato da JS -->
+          </div>
+        </div>
+
+      </div>
+      <div class="anni-info">📌 I primi due anni sono sempre visibili. Clicca "Altri anni" per confrontare con gli anni passati.</div>
     </div>
-    <div class="filtri-group">
+    <div class="filtri-group" style="grid-column: 1 / -1">
       <label>Prodotti</label>
       <div class="check-wrap" id="f-prodotti">
         <span style="color:#999;font-size:12px">Caricamento prodotti...</span>
@@ -115,12 +238,84 @@ function esc(s) { return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
-// Popola anni
+// Popola anni: 2 card in evidenza (corrente + scorso) + dropdown per gli altri
 const annoCorrente = new Date().getFullYear();
-const selAnno = document.getElementById('f-anno');
-for (let y = annoCorrente; y >= annoCorrente - 10; y--) {
-  selAnno.innerHTML += '<option value="'+y+'">'+y+'</option>';
+const annoScorso = annoCorrente - 1;
+
+(function initAnni() {
+  // Card anno corrente
+  const cardC = document.getElementById('card-anno-corrente');
+  const cbC = cardC.querySelector('.f-anno-check');
+  cbC.value = annoCorrente;
+  cbC.dataset.anno = annoCorrente;
+  cardC.querySelector('.anno-n').textContent = annoCorrente;
+  cbC.addEventListener('change', function(){
+    if (cbC.checked) cardC.classList.add('selected');
+    else cardC.classList.remove('selected');
+  });
+
+  // Card anno scorso
+  const cardS = document.getElementById('card-anno-scorso');
+  const cbS = cardS.querySelector('.f-anno-check');
+  cbS.value = annoScorso;
+  cbS.dataset.anno = annoScorso;
+  cardS.querySelector('.anno-n').textContent = annoScorso;
+  cbS.addEventListener('change', function(){
+    if (cbS.checked) cardS.classList.add('selected');
+    else cardS.classList.remove('selected');
+  });
+
+  // Dropdown: anni da annoScorso-1 fino a annoCorrente-10
+  const dd = document.getElementById('altri-dropdown');
+  let ddHtml = '';
+  for (let y = annoScorso - 1; y >= annoCorrente - 10; y--) {
+    ddHtml += '<label class="alt-anno">'
+           +   '<input type="checkbox" class="f-anno-check" value="' + y + '" data-anno="' + y + '" onchange="onToggleAltroAnno(this)" />'
+           +   '<span>' + y + '</span>'
+           + '</label>';
+  }
+  dd.innerHTML = ddHtml;
+})();
+
+// Toggle dropdown Altri anni
+function toggleDropdownAnni(e) {
+  if (e) e.stopPropagation();
+  const dd = document.getElementById('altri-dropdown');
+  const btn = document.getElementById('altri-btn');
+  dd.classList.toggle('aperto');
+  btn.classList.toggle('aperto');
 }
+
+// Cambio stato singolo anno nel dropdown
+function onToggleAltroAnno(cb) {
+  const label = cb.parentElement;
+  if (cb.checked) label.classList.add('selected');
+  else label.classList.remove('selected');
+  aggiornaBadgeAltriAnni();
+}
+
+function aggiornaBadgeAltriAnni() {
+  const checks = document.querySelectorAll('#altri-dropdown input[type=checkbox]:checked');
+  const badge = document.getElementById('altri-conteggio');
+  if (checks.length > 0) {
+    badge.textContent = checks.length;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Chiude il dropdown se clicchi fuori dal widget
+document.addEventListener('click', function(e){
+  if (!e.target.closest('.altri-wrap')) {
+    const dd = document.getElementById('altri-dropdown');
+    const btn = document.getElementById('altri-btn');
+    if (dd && btn) {
+      dd.classList.remove('aperto');
+      btn.classList.remove('aperto');
+    }
+  }
+});
 
 // Carica prodotti dinamicamente
 let _prodottiCache = [];
@@ -134,14 +329,18 @@ let _prodottiCache = [];
 })();
 
 async function generaReport() {
-  const anno = document.getElementById('f-anno').value;
+  const anni = Array.from(document.querySelectorAll('.f-anno-check:checked'))
+                    .map(cb => parseInt(cb.value, 10))
+                    .filter(Number.isFinite)
+                    .sort(function(a,b){return a-b;});  // asc per delta anno dopo anno
+  if (!anni.length) { alert('Seleziona almeno un anno'); return; }
   const prodotti = Array.from(document.querySelectorAll('.f-prod-check:checked')).map(cb => cb.value);
   if (!prodotti.length) { alert('Seleziona almeno un prodotto'); return; }
 
-  const da = anno + '-01-01';
-  const a = anno + '-12-31';
+  // Query con pagination su tutti gli anni in un colpo solo, poi raggruppo per anno e mese
+  const da = Math.min.apply(null, anni) + '-01-01';
+  const a  = Math.max.apply(null, anni) + '-12-31';
 
-  // Supabase default limit is 1000 - fetch all with pagination
   let allOrdini = [];
   let from = 0;
   const pageSize = 1000;
@@ -154,76 +353,108 @@ async function generaReport() {
     if (batch.length < pageSize) break;
     from += pageSize;
   }
-  const ordini = allOrdini;
-  if (!ordini.length) { alert('Nessun dato per ' + anno); return; }
+  if (!allOrdini.length) { alert('Nessun dato per ' + anni.join(', ')); return; }
 
-  // Calcola per mese
-  const mesi = {};
-  for (let m = 1; m <= 12; m++) mesi[m] = { litri:0, fattNetto:0, fattIva:0, costoAcquisto:0, costoTrasporto:0 };
+  // Aggregazione per anno/mese
+  // struttura: datiPerAnno[anno] = { mesi:{1..12}, tot }
+  const datiPerAnno = {};
+  anni.forEach(function(y) {
+    datiPerAnno[y] = {
+      mesi: {},
+      tot: { litri:0, fattNetto:0, fattIva:0, costoAcquisto:0, costoTrasporto:0 }
+    };
+    for (let m = 1; m <= 12; m++) {
+      datiPerAnno[y].mesi[m] = { litri:0, fattNetto:0, fattIva:0, costoAcquisto:0, costoTrasporto:0 };
+    }
+  });
 
-  ordini.forEach(r => {
-    const mese = parseInt(r.data.split('-')[1]);
+  allOrdini.forEach(function(r){
+    const parts = String(r.data).split('-');
+    const anno = parseInt(parts[0], 10);
+    const mese = parseInt(parts[1], 10);
+    if (!datiPerAnno[anno]) return;   // anno non selezionato (non dovrebbe capitare con il range)
+
     const litri = Number(r.litri);
     const costo = Number(r.costo_litro);
     const trasporto = Number(r.trasporto_litro);
     const margine = Number(r.margine);
     const iva = Number(r.iva) / 100;
 
-    const prezzoNetto = costo + trasporto + margine; // prezzo netto per litro
+    const prezzoNetto = costo + trasporto + margine;
     const fattNetto = prezzoNetto * litri;
     const fattIva = fattNetto * (1 + iva);
     const costoAcq = costo * litri;
     const costoTrasp = trasporto * litri;
 
-    mesi[mese].litri += litri;
-    mesi[mese].fattNetto += fattNetto;
-    mesi[mese].fattIva += fattIva;
-    mesi[mese].costoAcquisto += costoAcq;
-    mesi[mese].costoTrasporto += costoTrasp;
+    const m = datiPerAnno[anno].mesi[mese];
+    m.litri += litri;
+    m.fattNetto += fattNetto;
+    m.fattIva += fattIva;
+    m.costoAcquisto += costoAcq;
+    m.costoTrasporto += costoTrasp;
+
+    const t = datiPerAnno[anno].tot;
+    t.litri += litri;
+    t.fattNetto += fattNetto;
+    t.fattIva += fattIva;
+    t.costoAcquisto += costoAcq;
+    t.costoTrasporto += costoTrasp;
   });
 
-  // Totali annuali
-  let totLitri=0, totFattNetto=0, totFattIva=0, totCostoAcq=0, totCostoTrasp=0;
-  Object.values(mesi).forEach(m => {
-    totLitri += m.litri; totFattNetto += m.fattNetto; totFattIva += m.fattIva;
-    totCostoAcq += m.costoAcquisto; totCostoTrasp += m.costoTrasporto;
-  });
-  const margineTotale = totFattNetto - totCostoAcq - totCostoTrasp; // Margine REALE (dopo trasporto)
-  const margineLordo = totFattNetto - totCostoAcq; // Margine lordo (prima del trasporto)
-
-  // Genera HTML report
+  // ── Render header comune ──
   let html = '';
   html += '<div class="report-header">';
-  html += '<div><div class="report-title">Totale Vendite Mensili Carburanti ' + anno + '</div>';
+  html += '<div><div class="report-title">Totale Vendite Mensili Carburanti — ' + anni.join(' vs ') + '</div>';
   html += '<div class="report-sub">Prodotti: ' + prodotti.join(', ') + '</div></div>';
   html += '<div style="display:flex;align-items:center;gap:12px"><img src="logo_png.jpeg" class="report-logo" onerror="this.style.display=\'none\'" /><div class="company-box">Phoenix Fuel Srl</div></div>';
   html += '</div>';
 
+  if (anni.length === 1) {
+    html += _renderSingoloAnno(anni[0], datiPerAnno[anni[0]]);
+  } else {
+    html += _renderConfrontoAnni(anni, datiPerAnno);
+  }
+
+  html += '<div class="report-footer">PhoenixFuel Srl — Report generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
+
+  document.getElementById('report-page').innerHTML = html;
+  _renderGrafici(anni, datiPerAnno);
+
+  document.getElementById('filtri-panel').style.display = 'none';
+  document.getElementById('report-container').style.display = 'block';
+}
+
+// ── Render singolo anno (layout storico, invariato) ──
+function _renderSingoloAnno(anno, dati) {
+  const mesi = dati.mesi;
+  const t = dati.tot;
+  const margineTotale = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
+  const margineLordo = t.fattNetto - t.costoAcquisto;
+
+  let html = '';
   // Totali annuali
   html += '<div class="totali-row">';
   html += '<div class="t-cell t-label">' + anno + '</div>';
-  html += '<div class="t-cell"><div class="t-head">Litri</div><div class="t-val">' + fmtL(totLitri) + '</div></div>';
-  html += '<div class="t-cell"><div class="t-head">Fatturato netto</div><div class="t-val">' + fmtE(totFattNetto) + '</div></div>';
-  html += '<div class="t-cell"><div class="t-head">Totale IVA inclusa</div><div class="t-val">' + fmtE(totFattIva) + '</div></div>';
-  html += '<div class="t-cell"><div class="t-head">Costo acquisto</div><div class="t-val" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</div></div>';
-  html += '<div class="t-cell"><div class="t-head">Costo trasporto</div><div class="t-val">' + fmtE(totCostoTrasp) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Litri</div><div class="t-val">' + fmtL(t.litri) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Fatturato netto</div><div class="t-val">' + fmtE(t.fattNetto) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Totale IVA inclusa</div><div class="t-val">' + fmtE(t.fattIva) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Costo acquisto</div><div class="t-val" style="color:#A32D2D">' + fmtE(t.costoAcquisto) + '</div></div>';
+  html += '<div class="t-cell"><div class="t-head">Costo trasporto</div><div class="t-val">' + fmtE(t.costoTrasporto) + '</div></div>';
   html += '<div class="t-cell"><div class="t-head">Margine netto</div><div class="t-val" style="color:#639922">' + fmtMe(margineTotale) + '</div></div>';
   html += '</div>';
 
-  // Margini extra
   html += '<div class="margine-extra">';
   html += '<div class="margine-box"><div class="m-label">Margine lordo (Fatt. - Acquisto)</div><div class="m-val" style="color:#6B5FCC">' + fmtMe(margineLordo) + '</div></div>';
   html += '<div class="margine-box" style="background:#EAF3DE;border-color:#97C459"><div class="m-label">Margine netto (Fatt. - Acquisto - Trasporto)</div><div class="m-val" style="color:#639922">' + fmtMe(margineTotale) + '</div></div>';
   html += '</div>';
 
-  // Tabella mesi
   html += '<table>';
   html += '<thead><tr><th>Mese</th><th>Litri</th><th>Fatturato netto</th><th>Totale IVA inclusa</th><th>Costo acquisto</th><th>Costo trasporto</th><th>Margine lordo</th><th>Margine netto</th></tr></thead>';
   html += '<tbody>';
   for (let m = 1; m <= 12; m++) {
     const d = mesi[m];
-    const pm = d.fattNetto - d.costoAcquisto - d.costoTrasporto; // netto
-    const mt = d.fattNetto - d.costoAcquisto; // lordo
+    const pm = d.fattNetto - d.costoAcquisto - d.costoTrasporto;
+    const mt = d.fattNetto - d.costoAcquisto;
     const hasData = d.litri > 0;
     html += '<tr' + (!hasData ? ' style="opacity:0.4"' : '') + '>';
     html += '<td class="mese-col">' + m + '</td>';
@@ -236,60 +467,201 @@ async function generaReport() {
     html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtE(pm) + '</td>';
     html += '</tr>';
   }
-  // Riga totali
   html += '<tr class="totale-row">';
   html += '<td class="mese-col">TOTALE</td>';
-  html += '<td class="mono">' + fmtL(totLitri) + '</td>';
-  html += '<td class="mono">' + fmtE(totFattNetto) + '</td>';
-  html += '<td class="mono">' + fmtE(totFattIva) + '</td>';
-  html += '<td class="mono" style="color:#A32D2D">' + fmtE(totCostoAcq) + '</td>';
-  html += '<td class="mono">' + fmtE(totCostoTrasp) + '</td>';
+  html += '<td class="mono">' + fmtL(t.litri) + '</td>';
+  html += '<td class="mono">' + fmtE(t.fattNetto) + '</td>';
+  html += '<td class="mono">' + fmtE(t.fattIva) + '</td>';
+  html += '<td class="mono" style="color:#A32D2D">' + fmtE(t.costoAcquisto) + '</td>';
+  html += '<td class="mono">' + fmtE(t.costoTrasporto) + '</td>';
   html += '<td class="mono" style="color:#6B5FCC">' + fmtMe(margineLordo) + '</td>';
   html += '<td class="mono" style="color:#639922;font-weight:bold">' + fmtMe(margineTotale) + '</td>';
   html += '</tr></tbody></table>';
 
-  // Grafici
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">';
-  html += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:14px"><div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#333">Litri venduti per mese</div><canvas id="chart-litri-mese" height="200"></canvas></div>';
-  html += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:14px"><div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#333">Fatturato netto per mese</div><canvas id="chart-fatt-mese" height="200"></canvas></div>';
+  return html;
+}
+
+// ── Render confronto multi-anno (wide: una colonna per anno) ──
+// Colonne per anno: Litri | Fatt. netto | Margine netto
+// (evitiamo la tabella di esplodere: le altre metriche restano nella vista singolo anno se serve)
+function _renderConfrontoAnni(anni, datiPerAnno) {
+  let html = '';
+
+  // Box totali per anno affiancati
+  html += '<div style="display:grid;grid-template-columns:repeat(' + anni.length + ',1fr);gap:10px;margin-bottom:14px">';
+  anni.forEach(function(y, i) {
+    const t = datiPerAnno[y].tot;
+    const mNetto = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
+    // Delta vs anno precedente nella selezione (se c'è)
+    let deltaBadge = '';
+    if (i > 0) {
+      const prev = datiPerAnno[anni[i-1]].tot;
+      const deltaFatt = prev.fattNetto > 0 ? ((t.fattNetto - prev.fattNetto) / prev.fattNetto * 100) : 0;
+      const deltaLit = prev.litri > 0 ? ((t.litri - prev.litri) / prev.litri * 100) : 0;
+      const colF = deltaFatt > 0.05 ? '#27500A' : (deltaFatt < -0.05 ? '#A32D2D' : '#666');
+      const colL = deltaLit > 0.05 ? '#27500A' : (deltaLit < -0.05 ? '#A32D2D' : '#666');
+      const segnoF = deltaFatt > 0 ? '+' : '';
+      const segnoL = deltaLit > 0 ? '+' : '';
+      deltaBadge = '<div style="font-size:10px;color:#666;margin-top:4px;line-height:1.5">'
+        + 'Δ Litri: <strong style="color:' + colL + '">' + segnoL + deltaLit.toFixed(1) + '%</strong> · '
+        + 'Δ Fatt.: <strong style="color:' + colF + '">' + segnoF + deltaFatt.toFixed(1) + '%</strong>'
+        + ' <span style="color:#aaa">(vs ' + anni[i-1] + ')</span></div>';
+    }
+    html += '<div style="background:#EEEDFE;border:1px solid #C5C0F0;border-radius:10px;padding:12px 14px">';
+    html += '<div style="font-size:18px;font-weight:bold;color:#26215C;text-align:center;margin-bottom:8px">' + y + '</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">';
+    html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Litri</div><div style="font-family:Courier New,monospace;font-weight:bold">' + fmtL(t.litri) + '</div></div>';
+    html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Fatt. netto</div><div style="font-family:Courier New,monospace;font-weight:bold">' + fmtE(t.fattNetto) + '</div></div>';
+    html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">IVA incl.</div><div style="font-family:Courier New,monospace">' + fmtE(t.fattIva) + '</div></div>';
+    html += '<div><div style="color:#666;font-size:9px;text-transform:uppercase">Margine netto</div><div style="font-family:Courier New,monospace;font-weight:bold;color:#27500A">' + fmtE(mNetto) + '</div></div>';
+    html += '</div>';
+    html += deltaBadge;
+    html += '</div>';
+  });
   html += '</div>';
 
-  html += '<div class="report-footer">PhoenixFuel Srl — Report generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
+  // Tabella wide: riga per mese, gruppi di 3 colonne per anno
+  html += '<table style="font-size:10px">';
+  html += '<thead>';
+  // Header primo livello (anni)
+  html += '<tr>';
+  html += '<th rowspan="2" style="min-width:55px">Mese</th>';
+  anni.forEach(function(y){
+    html += '<th colspan="3" style="background:#26215C">' + y + '</th>';
+  });
+  html += '</tr>';
+  html += '<tr>';
+  anni.forEach(function(){
+    html += '<th>Litri</th><th>Fatt. netto</th><th>Margine netto</th>';
+  });
+  html += '</tr>';
+  html += '</thead><tbody>';
 
-  document.getElementById('report-page').innerHTML = html;
-
-  // Renderizza grafici dopo che il DOM è pronto
-  const labelsMesi = [];
-  const dataLitri = [];
-  const dataFatt = [];
+  // Righe mesi
   for (let m = 1; m <= 12; m++) {
-    labelsMesi.push(MESI[m-1].substring(0,3));
-    dataLitri.push(Math.round(mesi[m].litri));
-    dataFatt.push(Math.round(mesi[m].fattNetto * 100) / 100);
+    html += '<tr>';
+    html += '<td class="mese-col" style="background:#fafaf8;font-size:12px">' + m + '</td>';
+    anni.forEach(function(y){
+      const d = datiPerAnno[y].mesi[m];
+      const mNet = d.fattNetto - d.costoAcquisto - d.costoTrasporto;
+      const hasData = d.litri > 0;
+      const opacity = !hasData ? ';opacity:0.35' : '';
+      html += '<td class="mono" style="background:#fafaff' + opacity + '">' + fmtL(d.litri) + '</td>';
+      html += '<td class="mono" style="background:#fff' + opacity + '">' + fmtE(d.fattNetto) + '</td>';
+      html += '<td class="mono" style="background:#fafaff;color:' + (mNet >= 0 ? '#27500A' : '#A32D2D') + opacity + '">' + fmtE(mNet) + '</td>';
+    });
+    html += '</tr>';
   }
+
+  // Riga TOTALE
+  html += '<tr class="totale-row">';
+  html += '<td class="mese-col">TOT</td>';
+  anni.forEach(function(y){
+    const t = datiPerAnno[y].tot;
+    const mNet = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
+    html += '<td class="mono">' + fmtL(t.litri) + '</td>';
+    html += '<td class="mono">' + fmtE(t.fattNetto) + '</td>';
+    html += '<td class="mono" style="color:' + (mNet >= 0 ? '#27500A' : '#A32D2D') + ';font-weight:bold">' + fmtE(mNet) + '</td>';
+  });
+  html += '</tr>';
+
+  // Riga DELTA % (vs anno precedente selezionato)
+  if (anni.length >= 2) {
+    html += '<tr style="background:#FDF3D0">';
+    html += '<td class="mese-col" style="background:#F4D94E;color:#1a1a18">Δ %</td>';
+    anni.forEach(function(y, i){
+      if (i === 0) {
+        html += '<td colspan="3" style="text-align:center;font-size:10px;color:#666;background:#FDF3D0">— (base)</td>';
+      } else {
+        const t = datiPerAnno[y].tot;
+        const tPrev = datiPerAnno[anni[i-1]].tot;
+        const mNet = t.fattNetto - t.costoAcquisto - t.costoTrasporto;
+        const mNetPrev = tPrev.fattNetto - tPrev.costoAcquisto - tPrev.costoTrasporto;
+        const dL = tPrev.litri > 0 ? ((t.litri - tPrev.litri) / tPrev.litri * 100) : 0;
+        const dF = tPrev.fattNetto > 0 ? ((t.fattNetto - tPrev.fattNetto) / tPrev.fattNetto * 100) : 0;
+        const dM = Math.abs(mNetPrev) > 0.01 ? ((mNet - mNetPrev) / Math.abs(mNetPrev) * 100) : 0;
+        function fmtDelta(n){
+          const c = n > 0.05 ? '#27500A' : (n < -0.05 ? '#A32D2D' : '#666');
+          const s = n > 0 ? '+' : '';
+          return '<span style="color:' + c + ';font-weight:bold">' + s + n.toFixed(1) + '%</span>';
+        }
+        html += '<td class="mono" style="background:#FDF3D0">' + fmtDelta(dL) + '</td>';
+        html += '<td class="mono" style="background:#FDF3D0">' + fmtDelta(dF) + '</td>';
+        html += '<td class="mono" style="background:#FDF3D0">' + fmtDelta(dM) + '</td>';
+      }
+    });
+    html += '</tr>';
+  }
+
+  html += '</tbody></table>';
+
+  return html;
+}
+
+// ── Grafici: singolo anno = 2 grafici; multi-anno = 2 grafici con serie per anno ──
+let _chartLitri = null, _chartFatt = null;
+function _renderGrafici(anni, datiPerAnno) {
+  // Aggiungo i canvas in coda se non già presenti
+  const page = document.getElementById('report-page');
+  if (!page.querySelector('#chart-litri-mese')) {
+    var gridHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">';
+    gridHtml += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:14px"><div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#333">Litri venduti per mese</div><canvas id="chart-litri-mese" height="200"></canvas></div>';
+    gridHtml += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:14px"><div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#333">Fatturato netto per mese</div><canvas id="chart-fatt-mese" height="200"></canvas></div>';
+    gridHtml += '</div>';
+    page.insertAdjacentHTML('beforeend', gridHtml);
+  }
+
+  const labelsMesi = MESI.map(function(m){return m.substring(0,3);});
+
+  // Palette coerente per anni (fino a 6+)
+  const palette = ['#6B5FCC','#D4A017','#639922','#D85A30','#378ADD','#A32D2D','#633806','#0F6E56'];
+
+  const datasetsLitri = anni.map(function(y, i){
+    return {
+      label: String(y),
+      data: Array.from({length:12}, function(_, m){ return Math.round(datiPerAnno[y].mesi[m+1].litri); }),
+      backgroundColor: palette[i % palette.length],
+      borderColor: palette[i % palette.length],
+      borderRadius: 6
+    };
+  });
+  const datasetsFatt = anni.map(function(y, i){
+    return {
+      label: String(y),
+      data: Array.from({length:12}, function(_, m){ return Math.round(datiPerAnno[y].mesi[m+1].fattNetto * 100)/100; }),
+      backgroundColor: palette[i % palette.length],
+      borderColor: palette[i % palette.length],
+      borderRadius: 6
+    };
+  });
 
   const ctxL = document.getElementById('chart-litri-mese');
   if (ctxL) {
-    new Chart(ctxL.getContext('2d'), {
-      type:'bar', data:{
-        labels:labelsMesi,
-        datasets:[{ label:'Litri', data:dataLitri, backgroundColor:'#6B5FCC', borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>_sep(v.toLocaleString('it-IT'))+' L'}}} }
+    if (_chartLitri) _chartLitri.destroy();
+    _chartLitri = new Chart(ctxL.getContext('2d'), {
+      type:'bar',
+      data:{ labels:labelsMesi, datasets: datasetsLitri },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ display: anni.length > 1, position:'top' } },
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:function(v){return _sep(v.toLocaleString('it-IT'))+' L';} } } }
+      }
     });
   }
 
   const ctxF = document.getElementById('chart-fatt-mese');
   if (ctxF) {
-    new Chart(ctxF.getContext('2d'), {
-      type:'bar', data:{
-        labels:labelsMesi,
-        datasets:[{ label:'Fatturato €', data:dataFatt, backgroundColor:'#D4A017', borderRadius:6 }]
-      }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€ '+_sep(v.toLocaleString('it-IT'))}}} }
+    if (_chartFatt) _chartFatt.destroy();
+    _chartFatt = new Chart(ctxF.getContext('2d'), {
+      type:'bar',
+      data:{ labels:labelsMesi, datasets: datasetsFatt },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ display: anni.length > 1, position:'top' } },
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:function(v){return '€ '+_sep(v.toLocaleString('it-IT'));} } } }
+      }
     });
   }
-
-  document.getElementById('filtri-panel').style.display = 'none';
-  document.getElementById('report-container').style.display = 'block';
 }
 
 function tornaFiltri() {
