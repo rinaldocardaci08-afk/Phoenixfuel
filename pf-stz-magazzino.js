@@ -322,7 +322,9 @@ function _calcolaRiepilogoAcquisti(ordini) {
   var totLitri = 0, totImponibile = 0, totIva = 0, totTotale = 0;
   ordini.forEach(function(r) {
     var litri = Number(r.litri);
-    var costoL = Number(r.costo_litro);
+    // Costo REALE per litro alla stazione = costo prodotto + trasporto per portarlo a Oppido.
+    // Senza trasporto il CMP della stazione risulta sottostimato → margine gonfiato.
+    var costoL = Number(r.costo_litro) + Number(r.trasporto_litro || 0);
     var aliquotaIva = Number(r.iva) || 22;
     var imponibile = costoL * litri;
     var iva = imponibile * aliquotaIva / 100;
@@ -366,9 +368,9 @@ async function caricaReportAcquistiStazione() {
 
   // Dettaglio ordini
   html += '<div style="font-size:12px;font-weight:600;color:#6B5FCC;margin-bottom:6px;margin-top:16px;text-transform:uppercase">Dettaglio ordini</div>';
-  html += '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Data</th><th>Prodotto</th><th>Fornitore</th><th>Litri</th><th>€/L netto</th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Data</th><th>Prodotto</th><th>Fornitore</th><th>Litri</th><th>€/L netto<br><span style="font-weight:400;font-size:9px;color:#888">(prodotto + trasporto)</span></th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>';
   ordini.forEach(function(o, i) {
-    var litri = Number(o.litri), costoL = Number(o.costo_litro), aliq = Number(o.iva)||22;
+    var litri = Number(o.litri), costoL = Number(o.costo_litro) + Number(o.trasporto_litro || 0), aliq = Number(o.iva)||22;
     var imp = costoL*litri, iva = imp*aliq/100, tot = imp+iva;
     html += '<tr><td style="text-align:center">'+(i+1)+'</td><td>'+new Date(o.data+'T12:00:00').toLocaleDateString('it-IT')+'</td><td>'+esc(o.prodotto)+'</td><td>'+esc(o.fornitore)+'</td><td style="'+mono+';text-align:right">'+fmtL(litri)+'</td><td style="'+mono+';text-align:right">'+fmt(costoL)+'</td><td style="'+mono+';text-align:right">'+fmtE(imp)+'</td><td style="'+mono+';text-align:right">'+fmtE(iva)+'</td><td style="'+mono+';text-align:right;font-weight:600">'+fmtE(tot)+'</td></tr>';
   });
@@ -395,7 +397,7 @@ async function stampaReportAcquistiStazione() {
   // Dettaglio ordini HTML
   var righeHtml = '';
   ordini.forEach(function(o, i) {
-    var litri = Number(o.litri), costoL = Number(o.costo_litro), aliq = Number(o.iva)||22;
+    var litri = Number(o.litri), costoL = Number(o.costo_litro) + Number(o.trasporto_litro || 0), aliq = Number(o.iva)||22;
     var imp = costoL*litri, iva = imp*aliq/100, tot = imp+iva;
     righeHtml += '<tr><td style="padding:6px 8px;border:1px solid #ddd;text-align:center">'+(i+1)+'</td><td style="padding:6px 8px;border:1px solid #ddd">'+new Date(o.data+'T12:00:00').toLocaleDateString('it-IT')+'</td><td style="padding:6px 8px;border:1px solid #ddd">'+esc(o.prodotto)+'</td><td style="padding:6px 8px;border:1px solid #ddd">'+esc(o.fornitore)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(litri)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmt(costoL)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(imp)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(iva)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(tot)+'</td></tr>';
   });
