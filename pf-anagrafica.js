@@ -664,22 +664,42 @@ async function caricaVenditeDettaglio() {
   });
 
   // Calcola costi per giorno da stazione_costi
+  // IVA standard 22% (Gasolio Auto / Benzina).
+  // - stazione_costi contiene il costo approvvigionamento NETTO IVA (trasferimento interno dal deposito)
+  // - stazione_prezzi contiene il prezzo POMPA IVA INCLUSA (quello reale in cassa)
+  // Logica corretta:
+  //   • incasso mostrato = IVA inclusa (già così qui, nessun scorporo)
+  //   • costo mostrato    = IVA inclusa per coerenza visiva
+  //   • margine           = ricavo NETTO − costo NETTO (l'IVA è partita di giro erario)
+  const IVA = 0.22;
   let totCostoReale = 0;
   const hasCostiReali = Object.keys(costiMargMap).length > 0;
   dateOrdinate.forEach(data => {
     const gg = giorniMap[data];
-    let costoG = 0;
-    // Calcola costo usando dati reali da marginalità
-    const costoGasolio = costiMargMap[data+'_Gasolio Autotrazione'] || 0;
-    const costoBenzina = costiMargMap[data+'_Benzina'] || 0;
-    costoG = (gg.litriG * costoGasolio) + (gg.litriB * costoBenzina);
-    gg.costo = costoG;
-    gg.margine = gg.incasso - costoG;
-    totCostoReale += costoG;
+    // Costo NETTO del giorno (per il margine)
+    const costoGasolioNetto = costiMargMap[data+'_Gasolio Autotrazione'] || 0;
+    const costoBenzinaNetto = costiMargMap[data+'_Benzina'] || 0;
+    const costoGNetto = (gg.litriG * costoGasolioNetto) + (gg.litriB * costoBenzinaNetto);
+    // Costo IVA incl. (per la colonna "Costo approvv.")
+    const costoGIvaIncl = costoGNetto * (1+IVA);
+    // Ricavo netto IVA (per il margine)
+    const ricavoNetto = gg.incasso / (1+IVA);
+    // Dati giornalieri visualizzati
+    gg.costo = costoGIvaIncl;                       // colonna "Costo approvv." = IVA incl.
+    gg.margine = ricavoNetto - costoGNetto;          // margine vero = netto − netto
+    gg._costoNetto = costoGNetto;
+    gg._ricavoNetto = ricavoNetto;
+    totCostoReale += costoGIvaIncl;
   });
-  // Fallback: se non ci sono costi reali, usa quelli dagli ordini stazione
-  const costoApprovv = hasCostiReali ? totCostoReale : costoApprovvOrdini;
-  const margineDettaglio = totIncasso - costoApprovv;
+  // Fallback: se non ci sono costi reali, usa quelli dagli ordini stazione (già netti)
+  // e mostro anche questi in IVA incl. per coerenza colonna.
+  const costoApprovv = hasCostiReali ? totCostoReale : (costoApprovvOrdini * (1+IVA));
+  // Margine totale = ricavo NETTO − costo NETTO
+  const totRicavoNetto = totIncasso / (1+IVA);
+  const totCostoNetto = hasCostiReali
+    ? dateOrdinate.reduce(function(s,d){ return s + (giorniMap[d]._costoNetto || 0); }, 0)
+    : costoApprovvOrdini;
+  const margineDettaglio = totRicavoNetto - totCostoNetto;
 
   // KPI
   document.getElementById('vdett-incasso').textContent = fmtE(totIncasso);
@@ -983,7 +1003,7 @@ async function stampaReportDettaglio() {
   html += '<div style="font-size:12px;color:#666;margin-top:3px">Periodo: <strong>' + daFmt + ' — ' + aFmt + '</strong></div></div>';
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
   html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
-  html += '<table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Tot. Litri</th><th>Incasso €</th><th>Costo approvv.</th><th>Margine €</th></tr></thead><tbody>';
+  html += '<table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Tot. Litri</th><th>Incasso € (IVA incl.)</th><th>Costo approvv. (IVA incl.)</th><th>Margine € (netto IVA)</th></tr></thead><tbody>';
   html += righeHtml + '</tbody></table>';
   html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">🖨️ Stampa / PDF</button>';

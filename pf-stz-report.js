@@ -366,9 +366,19 @@ async function _caricaDatiVenditeMese(anno, mese) {
   var costiMap={}; costiDb.forEach(function(c){costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro);});
   var tutteLetture=[...lettPre,...letture];
   var dateUniche=[...new Set(letture.map(function(l){return l.data;}))].sort();
+  // IVA standard per Gasolio Auto / Benzina = 22%
+  // Dati di input:
+  //   - prezziMap = prezzo POMPA (IVA compresa, es. 1,6200)
+  //   - costiMap  = costo approvvigionamento netto IVA (trasferimento interno)
+  // Output per giorno:
+  //   - incasso          = ciò che entra in cassa (IVA compresa = prezzo pompa × litri)
+  //   - costo            = costo approvvigionamento IVA compresa (per coerenza visiva)
+  //   - margine          = ricavo netto IVA − costo netto IVA (redditività vera, IVA è partita di giro)
+  var IVA = 0.22;
   var righe=[], totV={gasolio:0,benzina:0,incasso:0,costo:0,margine:0};
   dateUniche.forEach(function(data){
-    var gG=0,gB=0,inc=0,costoG=0;
+    var gG=0, gB=0;
+    var incIvaIncl=0, costoIvaIncl=0, ricNetto=0, costoNetto=0;
     pompe.forEach(function(pompa){
       var lettOggi=tutteLetture.find(function(l){return l.pompa_id===pompa.id&&l.data===data;});
       var dp=tutteLetture.filter(function(l){return l.pompa_id===pompa.id&&l.data<data;}).map(function(l){return l.data;}).sort();
@@ -377,23 +387,39 @@ async function _caricaDatiVenditeMese(anno, mese) {
       if(lettOggi&&lettIeri){
         var litri=Number(lettOggi.lettura)-Number(lettIeri.lettura);
         if(litri>0){
-          var prezzo=Number(prezziMap[data+'_'+pompa.prodotto]||0)/1.22;
-          var costo=costiMap[data+'_'+pompa.prodotto]||0;
-          var litriPD=Number(lettOggi.litri_prezzo_diverso||0);
-          var prezzoPD=Number(lettOggi.prezzo_diverso||0)/1.22;
-          var hasCambio=litriPD>0&&prezzoPD>0;
-          var litriStd=hasCambio?Math.max(0,litri-litriPD):litri;
-          if(pompa.prodotto==='Gasolio Autotrazione') gG+=litri; else gB+=litri;
-          inc+=(litriStd*prezzo)+(hasCambio?litriPD*prezzoPD:0);
-          costoG+=litri*costo;
+          // prezzi POMPA (IVA incl.) dal DB
+          var prezzoIvaIncl = Number(prezziMap[data+'_'+pompa.prodotto]||0);
+          var prezzoNetto   = prezzoIvaIncl / (1+IVA);
+          var costoNet      = Number(costiMap[data+'_'+pompa.prodotto]||0);   // già netto
+          var costoIvaInclU = costoNet * (1+IVA);                              // IVA compresa
+          // Cambio prezzo intraday
+          var litriPD     = Number(lettOggi.litri_prezzo_diverso||0);
+          var prezzoPDIva = Number(lettOggi.prezzo_diverso||0);
+          var prezzoPDNet = prezzoPDIva / (1+IVA);
+          var hasCambio   = litriPD>0 && prezzoPDIva>0;
+          var litriStd    = hasCambio ? Math.max(0, litri-litriPD) : litri;
+
+          if (pompa.prodotto==='Gasolio Autotrazione') gG+=litri; else gB+=litri;
+
+          // Incassi reali in cassa (IVA compresa)
+          incIvaIncl += litriStd*prezzoIvaIncl + (hasCambio ? litriPD*prezzoPDIva : 0);
+          // Ricavi netti IVA (per margine)
+          ricNetto   += litriStd*prezzoNetto   + (hasCambio ? litriPD*prezzoPDNet : 0);
+          // Costi: mostro l'IVA incl. nella colonna "Costo", uso il netto per il margine
+          costoIvaIncl += litri*costoIvaInclU;
+          costoNetto   += litri*costoNet;
         }
       }
     });
-    var marg=inc-costoG;
-    totV.gasolio+=gG;totV.benzina+=gB;totV.incasso+=inc;totV.costo+=costoG;totV.margine+=marg;
-    righe.push({data:data,gasolio:gG,benzina:gB,totale:gG+gB,incasso:inc,costo:costoG,margine:marg});
+    var marg = ricNetto - costoNetto;  // margine = solo imponibili, IVA è partita di giro
+    totV.gasolio += gG; totV.benzina += gB;
+    totV.incasso += incIvaIncl;
+    totV.costo   += costoIvaIncl;
+    totV.margine += marg;
+    righe.push({data:data, gasolio:gG, benzina:gB, totale:gG+gB,
+                incasso:incIvaIncl, costo:costoIvaIncl, margine:marg});
   });
-  return {righe:righe,totali:totV};
+  return {righe:righe, totali:totV};
 }
 
 async function stampaReportVenditeStazione() {
@@ -423,7 +449,7 @@ async function stampaReportVenditeStazione() {
   html+='<div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div>';
   html+='<div style="font-size:8px;color:#666">Generato il '+new Date().toLocaleDateString('it-IT')+'</div></div></div>';
 
-  html+='<table><thead><tr><th style="text-align:left;width:50px">Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Costo €</th><th>Margine €</th></tr></thead><tbody>';
+  html+='<table><thead><tr><th style="text-align:left;width:50px">Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso € (IVA incl.)</th><th>Costo € (IVA incl.)</th><th>Margine € (netto IVA)</th></tr></thead><tbody>';
   righe.forEach(function(r,i){
     var mc=r.margine>=0?'#639922':'#E24B4A';
     html+='<tr'+(i%2?' class="alt"':'')+'><td>'+r.data.substring(8)+'/'+r.data.substring(5,7)+'</td><td>'+fmtL(r.gasolio)+'</td><td>'+fmtL(r.benzina)+'</td><td style="font-weight:bold">'+fmtL(r.totale)+'</td><td>'+fmtE(r.incasso)+'</td><td>'+(r.costo>0?fmtE(r.costo):'—')+'</td><td style="font-weight:bold;color:'+mc+'">'+(r.costo>0?fmtMe(r.margine):'—')+'</td></tr>';
@@ -446,7 +472,7 @@ async function esportaVenditeExcel() {
   toast('Generazione Excel vendite...');
   var r=await _caricaDatiVenditeMese(anno,mese);
   if(typeof XLSX==='undefined'){toast('Libreria Excel non caricata');return;}
-  var header=['Data','Gasolio (L)','Benzina (L)','Totale (L)','Incasso €','Costo €','Margine €'];
+  var header=['Data','Gasolio (L)','Benzina (L)','Totale (L)','Incasso € (IVA incl.)','Costo € (IVA incl.)','Margine € (netto IVA)'];
   var rows=[header];
   r.righe.forEach(function(v){rows.push([v.data,v.gasolio,v.benzina,v.totale,Math.round(v.incasso*100)/100,Math.round(v.costo*100)/100,Math.round(v.margine*100)/100]);});
   var t=r.totali;
@@ -649,9 +675,11 @@ function _tabellaAnnuale(datiMesi, totA, maxLitri, nettoIva) {
 
   datiMesi.forEach(function(d, i) {
     if (d.litri === 0 && d.incasso === 0) return;
-    var inc = d.incasso / iva;
-    var cos = d.costo / iva;
-    var marg = inc - cos;
+    var inc = d.incasso / iva;          // colonna Incasso (IVA incl. o netto secondo toggle)
+    var cos = d.costo / iva;            // colonna Costo (idem)
+    // Margine: sempre ricavo netto − costo netto (l'IVA è partita di giro)
+    // d.incasso e d.costo qui sono IVA incl., quindi /1.22 per ottenere il netto in entrambi
+    var marg = (d.incasso / 1.22) - (d.costo / 1.22);
     var mp = inc > 0 ? (marg / inc * 100) : 0;
     var mc = marg >= 0 ? '#639922' : '#E24B4A';
     var barW = Math.round((d.litri / maxLitri) * 100);
@@ -672,7 +700,8 @@ function _tabellaAnnuale(datiMesi, totA, maxLitri, nettoIva) {
   // Riga totale
   var tInc = totA.incasso / iva;
   var tCos = totA.costo / iva;
-  var tMarg = tInc - tCos;
+  // Margine sempre netto IVA (ricavo netto − costo netto)
+  var tMarg = (totA.incasso / 1.22) - (totA.costo / 1.22);
   var tMp = tInc > 0 ? (tMarg / tInc * 100) : 0;
   var tmc = tMarg >= 0 ? '#639922' : '#E24B4A';
   h += '<tr class="tot" style="background:' + totBg + '">';
