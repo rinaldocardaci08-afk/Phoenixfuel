@@ -2387,6 +2387,21 @@
         </div>
         <div id="ac-cisterna-grafica" style="margin-bottom:16px"></div>
 
+        <!-- RICONCILIAZIONE GIACENZA AUTOCONSUMO -->
+        <div class="card" style="margin-bottom:16px;border-left:3px solid #D4A017">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>📐 Riconciliazione giacenza — confronto calcolato vs cisterna</span>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <select id="ac-ric-prodotto" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"></select>
+              <input type="date" id="ac-ric-da" data-nav="day" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="Da"/>
+              <input type="date" id="ac-ric-a" data-nav="day" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" title="A"/>
+              <button class="btn-primary" onclick="pfAcRiconcCalcola()" style="font-size:12px;padding:7px 14px;background:#D4A017">▶ Calcola</button>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Iniziale + Entrate − Prelievi + Rettifiche = Calcolata. Confronta con la cisterna DB per individuare scostamenti e inserire le rettifiche necessarie.</div>
+          <div id="ac-ric-risultati"><div style="font-size:11px;color:var(--text-muted);padding:8px">Seleziona prodotto e periodo, poi clicca "Calcola"</div></div>
+        </div>
+
         <!-- Ordini autoconsumo da ricevere -->
         <div id="ac-da-ricevere" style="margin-bottom:16px"></div>
 
@@ -2444,6 +2459,19 @@
           <tbody id="ac-tabella-prelievi"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
           <div id="ac-totale-prelievi" style="margin-top:8px;font-size:12px;color:var(--text-muted)"></div>
+        </div>
+
+        <!-- RETTIFICHE INVENTARIO AUTOCONSUMO -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>🔧 Rettifiche inventario autoconsumo</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#6B5FCC" onclick="nuovaRettifica('autoconsumo')">+ Nuova rettifica</button>
+              <button class="btn-primary" style="font-size:12px;padding:7px 14px;background:#378ADD" onclick="stampaRettifiche('autoconsumo')">🖨️ Stampa</button>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Se la Riconciliazione sopra mostra un delta, inserisci qui una rettifica per allineare la cisterna alla realtà fisica. Una rettifica confermata aggiorna la cisterna e viene tracciata nello storico.</div>
+          <div id="rett-autoconsumo-area"><div class="loading">Caricamento...</div></div>
         </div>
 
         <!-- GIACENZE FINE ANNO AUTOCONSUMO -->
@@ -2676,7 +2704,7 @@
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260421a"></script>
-<script src="pf-deposito.js?v=20260420a"></script>
+<script src="pf-deposito.js?v=20260421a"></script>
 <script src="pf-anagrafica.js?v=20260415r"></script>
 <script src="pf-data.js?v=20260419f"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>

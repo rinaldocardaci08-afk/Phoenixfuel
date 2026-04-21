@@ -532,7 +532,8 @@ var _RETT_CAUSALI = {
 var _RETT_ORIGINE = { manuale:'Manuale', chiusura_mese:'Chiusura mese' };
 
 async function caricaRettifiche(tipo) {
-  var areaId = tipo === 'deposito' ? 'rett-deposito-area' : 'rett-stazione-area';
+  var areaIdMap = { deposito: 'rett-deposito-area', stazione: 'rett-stazione-area', autoconsumo: 'rett-autoconsumo-area' };
+  var areaId = areaIdMap[tipo];
   var area = document.getElementById(areaId);
   if (!area) return;
 
@@ -558,7 +559,8 @@ async function caricaRettifiche(tipo) {
 }
 
 function _rendRettifiche(tipo) {
-  var areaId = tipo === 'deposito' ? 'rett-deposito-area' : 'rett-stazione-area';
+  var areaIdMap = { deposito: 'rett-deposito-area', stazione: 'rett-stazione-area', autoconsumo: 'rett-autoconsumo-area' };
+  var areaId = areaIdMap[tipo];
   var area = document.getElementById(areaId);
   if (!area) return;
   var dati = window._rettDatiCompleti[tipo] || [];
@@ -727,11 +729,15 @@ function _rettResetFiltri(tipo) {
 }
 
 async function nuovaRettifica(tipo) {
-  const sede = tipo === 'deposito' ? 'deposito_vibo' : 'stazione_oppido';
+  // tipo ∈ {'deposito', 'stazione', 'autoconsumo'}
+  var sedeMap = { deposito: 'deposito_vibo', stazione: 'stazione_oppido', autoconsumo: 'autoconsumo' };
+  var labelMap = { deposito: 'Deposito Vibo', stazione: 'Stazione Oppido', autoconsumo: 'Autoconsumo' };
+  const sede = sedeMap[tipo];
+  if (!sede) { toast('Tipo rettifica non valido'); return; }
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede', sede).order('tipo').order('nome');
   if (!cisterne || !cisterne.length) { toast('Nessuna cisterna trovata'); return; }
 
-  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Nuova rettifica — ' + (tipo === 'deposito' ? 'Deposito Vibo' : 'Stazione Oppido') + '</div>';
+  let html = '<div style="font-size:15px;font-weight:500;margin-bottom:16px">Nuova rettifica — ' + labelMap[tipo] + '</div>';
   html += '<div class="form-grid">';
   html += '<div class="form-group"><label>Data rilevazione</label><input type="date" id="rett-data" value="' + oggiISO + '" /></div>';
   html += '<div class="form-group"><label>Cisterna</label><select id="rett-cisterna" onchange="aggiornaGiacenzaSistema()">';
@@ -828,7 +834,8 @@ async function confermaRettifica(id, tipo) {
   toast('Rettifica confermata — giacenza aggiornata!');
   caricaRettifiche(tipo);
   if (tipo === 'deposito') caricaDeposito();
-  else caricaGiacenzeStazione();
+  else if (tipo === 'stazione') caricaGiacenzeStazione();
+  else if (tipo === 'autoconsumo') caricaAutoconsumo();
 }
 
 async function eliminaRettifica(id, tipo) {
@@ -841,7 +848,8 @@ async function eliminaRettifica(id, tipo) {
 
 async function stampaRettifiche(tipo) {
   var w = _apriReport("Rettifiche inventario"); if (!w) return;
-  const sedeLabel = tipo === 'deposito' ? 'Deposito Vibo' : 'Stazione Oppido';
+  var sedeLabelMap = { deposito: 'Deposito Vibo', stazione: 'Stazione Oppido', autoconsumo: 'Autoconsumo' };
+  const sedeLabel = sedeLabelMap[tipo] || tipo;
   const { data } = await sb.from('rettifiche_inventario').select('*, cisterne(nome)').eq('tipo', tipo).order('data',{ascending:false}).order('created_at',{ascending:false});
   if (!data || !data.length) { toast('Nessuna rettifica da stampare'); return; }
 
@@ -982,6 +990,12 @@ async function caricaAutoconsumo() {
   var selOrdMese = document.getElementById('ac-ord-mese');
   if (selOrdMese) selOrdMese.value = String(new Date().getMonth()+1).padStart(2,'0');
   caricaStoricoOrdiniAutoconsumo();
+
+  // Rettifiche autoconsumo (stesso sistema di deposito/stazione)
+  if (document.getElementById('rett-autoconsumo-area')) caricaRettifiche('autoconsumo');
+
+  // Riconciliazione autoconsumo
+  if (document.getElementById('ac-ric-risultati')) pfAcRiconcInit();
 }
 
 async function caricaOrdiniAutoconsumo() {
@@ -1084,17 +1098,24 @@ async function salvaPrelievoAutoconsumo() {
 
   // Trova la cisterna autoconsumo del prodotto selezionato
   const mappa = window._cisterneAutoconsumo || {};
-  const cis = mappa[prodotto];
-  if (!cis) { toast('Cisterna autoconsumo ' + prodotto + ' non trovata'); return; }
-  if (Number(cis.livello_attuale) < litri) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(cis.livello_attuale) + ' L di ' + prodotto); return; }
+  const cisRef = mappa[prodotto];
+  if (!cisRef) { toast('Cisterna autoconsumo ' + prodotto + ' non trovata'); return; }
+
+  // ═══ FIX race condition — leggo il livello FRESCO dal DB ═══
+  // Il valore in cache (cisRef.livello_attuale) può essere stale se
+  // qualcuno ha salvato o cancellato un prelievo dopo l'ultimo caricaAutoconsumo.
+  const { data: cisFresh } = await sb.from('cisterne').select('id,livello_attuale').eq('id', cisRef.id).single();
+  if (!cisFresh) { toast('Cisterna non trovata in DB'); return; }
+  const livelloFresco = Number(cisFresh.livello_attuale);
+  if (livelloFresco < litri) { toast('Giacenza insufficiente! Disponibili: ' + fmtL(livelloFresco) + ' L di ' + prodotto); return; }
 
   // Registra prelievo (con prodotto)
   const r1 = await _sbWrite('prelievi_autoconsumo', 'insert', [{ data, mezzo_id: mezzoId, mezzo_targa: mezzoTarga, litri, note, prodotto }]);
   if (r1.error) { toast('Errore: ' + r1.error.message); return; }
 
-  // Scala dalla cisterna
-  const nuovoLivello = Number(cis.livello_attuale) - litri;
-  await _sbWrite('cisterne', 'update', { livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }, { id: cis.id });
+  // Scala dalla cisterna (uso il valore fresco appena letto, non la cache)
+  const nuovoLivello = livelloFresco - litri;
+  await _sbWrite('cisterne', 'update', { livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }, { id: cisRef.id });
 
   toast(r1._offline ? '⚡ Prelievo ' + fmtL(litri) + ' L salvato offline' : '⛽ Prelievo di ' + fmtL(litri) + ' L ' + prodotto + ' registrato per ' + mezzoTarga);
   document.getElementById('ac-litri').value = '';
@@ -1146,20 +1167,216 @@ async function eliminaPrelievo(id) {
   if (!confirm('Eliminare questo prelievo? I litri verranno restituiti alla cisterna.')) return;
   const { data: prel } = await sb.from('prelievi_autoconsumo').select('*').eq('id', id).single();
   if (!prel) return;
-  const { error } = await sb.from('prelievi_autoconsumo').delete().eq('id', id);
-  if (error) { toast('Errore: ' + error.message); return; }
-  // Restituisci litri alla cisterna del prodotto corretto (fallback Gasolio Autotrazione per prelievi storici senza campo prodotto)
+  // Leggo il livello attuale cisterna PRIMA della cancellazione del prelievo
+  // (read-before-write per evitare race condition con cache stale)
   const mappa = window._cisterneAutoconsumo || {};
   const prodPrel = prel.prodotto || 'Gasolio Autotrazione';
-  const cis = mappa[prodPrel] || window._cisternaAutoconsumo;
-  if (cis) {
-    const nuovoLivello = Number(cis.livello_attuale) + Number(prel.litri);
-    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cis.id);
+  const cisRef = mappa[prodPrel] || window._cisternaAutoconsumo;
+  let livelloFresco = null;
+  if (cisRef) {
+    const { data: cisFresh } = await sb.from('cisterne').select('livello_attuale').eq('id', cisRef.id).single();
+    if (cisFresh) livelloFresco = Number(cisFresh.livello_attuale);
+  }
+
+  const { error } = await sb.from('prelievi_autoconsumo').delete().eq('id', id);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Audit esteso: chi ha cancellato cosa (analogo a ciò che abbiamo fatto su 'prezzi')
+  if (typeof _auditLog === 'function') {
+    _auditLog('elimina_prelievo_autoconsumo', 'prelievi_autoconsumo',
+      prodPrel + ' ' + fmtL(prel.litri) +
+      ' | mezzo ' + (prel.mezzo_targa || '—') +
+      ' | data ' + (prel.data || '—') +
+      (prel.note ? ' | note: ' + prel.note : '') +
+      ' | id:' + id);
+  }
+
+  // Restituisci i litri alla cisterna usando il valore fresco letto dal DB
+  if (cisRef && livelloFresco !== null) {
+    const nuovoLivello = livelloFresco + Number(prel.litri);
+    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisRef.id);
   }
   toast('Prelievo eliminato');
   // Auto-healing: riallinea cisterne al calcolato pfData
   await pfDepositoRicalcolaCisterne(prodPrel);
   caricaAutoconsumo();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RICONCILIAZIONE AUTOCONSUMO
+// Formula: Giacenza iniziale + Entrate − Prelievi + Rettifiche = Calcolata
+// Confronto con cisterna DB → delta evidenziato se anomalo.
+// Pattern analogo a pfMovimentiTotali per deposito/stazione.
+// ═══════════════════════════════════════════════════════════════════
+async function pfAcRiconcInit() {
+  var daEl = document.getElementById('ac-ric-da');
+  var aEl = document.getElementById('ac-ric-a');
+  var prodEl = document.getElementById('ac-ric-prodotto');
+  if (!daEl || !aEl || !prodEl) return;
+  // Default: inizio anno → oggi
+  var oggi = new Date();
+  if (!daEl.value) daEl.value = oggi.getFullYear() + '-01-01';
+  if (!aEl.value) aEl.value = oggi.toISOString().split('T')[0];
+  // Popola dropdown prodotti da cisterne autoconsumo
+  if (prodEl.options.length <= 1) {
+    var { data: cist } = await sb.from('cisterne').select('prodotto').eq('sede','autoconsumo');
+    var set = {};
+    (cist || []).forEach(function(c){ if (c.prodotto) set[c.prodotto] = true; });
+    var ordine = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO','AdBlue'];
+    var prods = ordine.filter(function(p){ return set[p]; });
+    Object.keys(set).forEach(function(p){ if (prods.indexOf(p) < 0) prods.push(p); });
+    prodEl.innerHTML = prods.map(function(p){ return '<option value="'+esc(p)+'">'+esc(p)+'</option>'; }).join('');
+  }
+}
+
+async function pfAcRiconcCalcola() {
+  var prodEl = document.getElementById('ac-ric-prodotto');
+  var daEl = document.getElementById('ac-ric-da');
+  var aEl = document.getElementById('ac-ric-a');
+  var out = document.getElementById('ac-ric-risultati');
+  if (!prodEl || !daEl || !aEl || !out) return;
+  var prodotto = prodEl.value;
+  var da = daEl.value;
+  var a = aEl.value;
+  if (!prodotto || !da || !a) { out.innerHTML = '<div style="color:#A32D2D;padding:8px">Compila tutti i campi</div>'; return; }
+  out.innerHTML = '<div class="loading" style="padding:16px">Calcolo in corso...</div>';
+
+  try {
+    // ── 1. Giacenza iniziale: al giorno prima di "da"
+    // Usa giacenze_annuali se disponibile, altrimenti cascata dai movimenti
+    var giornoPrima = new Date(new Date(da + 'T12:00:00Z').getTime() - 86400000).toISOString().split('T')[0];
+    var annoDa = Number(da.substring(0,4));
+    var iniziale = 0;
+    var fonteIniziale = 'zero (nessun dato)';
+
+    // Prova giacenza annuale chiusa dell'anno precedente
+    var { data: giacAnn } = await sb.from('giacenze_annuali')
+      .select('giacenza_finale_reale,giacenza_finale_stimata')
+      .eq('tipo', 'autoconsumo').eq('prodotto', prodotto).eq('anno', annoDa - 1)
+      .maybeSingle();
+    if (giacAnn) {
+      iniziale = Number(giacAnn.giacenza_finale_reale != null ? giacAnn.giacenza_finale_reale : giacAnn.giacenza_finale_stimata || 0);
+      fonteIniziale = 'giacenza ' + (annoDa - 1) + ' chiusa';
+    } else {
+      // Altrimenti cascata: somma ordini autoconsumo − prelievi + rettifiche dall'inizio dei tempi fino a giornoPrima
+      fonteIniziale = 'cascata storica al ' + _fmtDataIT(giornoPrima);
+    }
+
+    // ── 2. Entrate nel periodo: ordini autoconsumo confermati/consegnati con ricevuto
+    //    tipo_ordine = 'autoconsumo' che hanno caricato_deposito=true (o stato consegnato)
+    var { data: entrateRes } = await sb.from('ordini')
+      .select('id,data,litri,fornitore,caricato_deposito,stato')
+      .eq('tipo_ordine', 'autoconsumo').eq('prodotto', prodotto)
+      .in('stato', ['confermato','consegnato'])
+      .gte('data', da).lte('data', a).order('data');
+    // Tengo solo quelli effettivamente ricevuti (caricato_deposito=true OR stato=consegnato)
+    var entrateRighe = (entrateRes || []).filter(function(o){
+      return o.caricato_deposito === true || o.stato === 'consegnato';
+    });
+    var entrate = entrateRighe.reduce(function(s,r){ return s + Number(r.litri || 0); }, 0);
+
+    // ── 3. Prelievi nel periodo
+    var { data: prelRes } = await sb.from('prelievi_autoconsumo')
+      .select('id,data,litri,mezzo_targa,prodotto,note')
+      .eq('prodotto', prodotto)
+      .gte('data', da).lte('data', a).order('data');
+    // Fallback: prelievi legacy senza campo prodotto → li considero Gasolio Autotrazione (default storico)
+    var prelievi = (prelRes || []);
+    if (prodotto === 'Gasolio Autotrazione') {
+      var { data: prelLegacy } = await sb.from('prelievi_autoconsumo')
+        .select('id,data,litri,mezzo_targa,prodotto,note')
+        .is('prodotto', null)
+        .gte('data', da).lte('data', a);
+      (prelLegacy || []).forEach(function(r){ prelievi.push(r); });
+    }
+    var uscite = prelievi.reduce(function(s,r){ return s + Number(r.litri || 0); }, 0);
+
+    // ── 4. Rettifiche confermate nel periodo
+    var { data: rettRes } = await sb.from('rettifiche_inventario')
+      .select('id,data,differenza,giacenza_sistema,giacenza_rilevata,note')
+      .eq('tipo', 'autoconsumo').eq('prodotto', prodotto).eq('confermata', true)
+      .gte('data', da).lte('data', a).order('data');
+    var rettifiche = (rettRes || []).reduce(function(s,r){ return s + Number(r.differenza || 0); }, 0);
+    var nRett = (rettRes || []).length;
+
+    // ── 5. Giacenza calcolata e confronto con cisterna DB
+    var calcolata = iniziale + entrate - uscite + rettifiche;
+    var { data: cist } = await sb.from('cisterne')
+      .select('livello_attuale')
+      .eq('sede', 'autoconsumo').eq('prodotto', prodotto).maybeSingle();
+    var cisternaDb = cist ? Number(cist.livello_attuale) : null;
+    var delta = cisternaDb !== null ? (cisternaDb - calcolata) : null;
+
+    // ── RENDER ──
+    function fmt(n) { return Math.round(n).toLocaleString('it-IT').replace(/\./g,"'"); }
+    function fmtSigned(n) { return (n > 0 ? '+' : (n < 0 ? '−' : '')) + fmt(Math.abs(n)) + ' L'; }
+
+    var h = '<table style="width:100%;border-collapse:collapse;font-size:13px;font-family:var(--font-mono)">';
+    h += '<tr style="border-bottom:0.5px solid var(--border)">';
+    h += '<td style="padding:10px 14px">Giacenza iniziale al ' + _fmtDataIT(giornoPrima) + '</td>';
+    h += '<td style="padding:10px 14px;text-align:right;color:var(--text-muted);font-size:11px">' + esc(fonteIniziale) + '</td>';
+    h += '<td style="padding:10px 14px;text-align:right;font-weight:600">' + fmt(iniziale) + ' L</td>';
+    h += '</tr>';
+    h += '<tr style="border-bottom:0.5px solid var(--border);background:rgba(99,153,34,0.06)">';
+    h += '<td style="padding:10px 14px;color:#27500A">+ Entrate (ordini ricevuti)</td>';
+    h += '<td style="padding:10px 14px;text-align:right;color:var(--text-muted);font-size:11px">' + entrateRighe.length + ' ordini</td>';
+    h += '<td style="padding:10px 14px;text-align:right;color:#27500A;font-weight:600">+' + fmt(entrate) + ' L</td>';
+    h += '</tr>';
+    h += '<tr style="border-bottom:0.5px solid var(--border);background:rgba(163,45,45,0.06)">';
+    h += '<td style="padding:10px 14px;color:#791F1F">− Prelievi</td>';
+    h += '<td style="padding:10px 14px;text-align:right;color:var(--text-muted);font-size:11px">' + prelievi.length + ' prelievi</td>';
+    h += '<td style="padding:10px 14px;text-align:right;color:#791F1F;font-weight:600">−' + fmt(uscite) + ' L</td>';
+    h += '</tr>';
+    if (nRett > 0) {
+      var rettCol = rettifiche >= 0 ? '#27500A' : '#791F1F';
+      var rettBg = rettifiche >= 0 ? 'rgba(99,153,34,0.06)' : 'rgba(163,45,45,0.06)';
+      h += '<tr style="border-bottom:0.5px solid var(--border);background:' + rettBg + '">';
+      h += '<td style="padding:10px 14px;color:' + rettCol + '">± Rettifiche confermate</td>';
+      h += '<td style="padding:10px 14px;text-align:right;color:var(--text-muted);font-size:11px">' + nRett + (nRett === 1 ? ' rettifica' : ' rettifiche') + '</td>';
+      h += '<td style="padding:10px 14px;text-align:right;color:' + rettCol + ';font-weight:600">' + fmtSigned(rettifiche) + '</td>';
+      h += '</tr>';
+    }
+    h += '<tr style="border-top:2px solid #D4A017;background:rgba(212,160,23,0.12)">';
+    h += '<td style="padding:14px;font-weight:700;font-size:15px">= Giacenza calcolata al ' + _fmtDataIT(a) + '</td>';
+    h += '<td></td>';
+    h += '<td style="padding:14px;text-align:right;font-weight:700;font-size:16px;color:#D4A017">' + fmt(calcolata) + ' L</td>';
+    h += '</tr>';
+    if (cisternaDb !== null) {
+      h += '<tr style="border-top:0.5px solid var(--border);background:var(--bg)">';
+      h += '<td style="padding:10px 14px;color:var(--text-muted)">Giacenza cisterna (DB)</td>';
+      h += '<td></td>';
+      h += '<td style="padding:10px 14px;text-align:right;font-family:var(--font-mono)">' + fmt(cisternaDb) + ' L</td>';
+      h += '</tr>';
+      var deltaAbs = Math.abs(delta);
+      var deltaCol = deltaAbs < 1 ? '#27500A' : (deltaAbs < 50 ? '#BA7517' : '#A32D2D');
+      var deltaIcon = deltaAbs < 1 ? '✅' : '⚠️';
+      h += '<tr style="border-top:2px solid ' + deltaCol + ';background:rgba(' + (deltaAbs < 1 ? '99,153,34' : (deltaAbs < 50 ? '212,160,23' : '163,45,45')) + ',0.08)">';
+      h += '<td style="padding:14px;font-weight:700">' + deltaIcon + ' Δ Delta (DB − calcolata)</td>';
+      h += '<td style="padding:14px;text-align:right;color:' + deltaCol + ';font-size:11px">' + (deltaAbs < 1 ? 'allineato' : deltaAbs < 50 ? 'piccolo scostamento' : 'ANOMALIA — inserire rettifica') + '</td>';
+      h += '<td style="padding:14px;text-align:right;font-weight:700;font-size:15px;color:' + deltaCol + '">' + fmtSigned(delta) + '</td>';
+      h += '</tr>';
+    }
+    h += '</table>';
+
+    // Hint azione
+    if (cisternaDb !== null && Math.abs(delta) >= 50) {
+      h += '<div style="margin-top:14px;padding:12px 14px;background:#FCEBEB;border:1px solid #E24B4A;border-radius:6px;color:#501313;font-size:12px">';
+      h += '<strong>⚠️ Delta elevato rilevato.</strong> Per allineare la cisterna alla realtà fisica, inserisci una rettifica inventario cliccando <strong>➕ Nuova rettifica</strong> qui sotto. ';
+      h += 'Scegli la cisterna autoconsumo del prodotto, inserisci la giacenza rilevata (misurata con asta o contatore), e conferma. ';
+      h += 'La rettifica entrerà nel calcolo e la cisterna DB sarà allineata al valore reale.';
+      h += '</div>';
+    }
+
+    out.innerHTML = h;
+  } catch (err) {
+    out.innerHTML = '<div style="color:#A32D2D;padding:12px">Errore: ' + esc(err.message || String(err)) + '</div>';
+  }
+}
+
+function _fmtDataIT(iso) {
+  if (!iso) return '—';
+  var p = iso.split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso;
 }
 
 async function stampaPrelievi() {
