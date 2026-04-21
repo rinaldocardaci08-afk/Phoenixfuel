@@ -2743,7 +2743,7 @@ function _movRenderBlocchi(entrate, uscite, mostraEntrate, mostraUscite, modo) {
         html += '<td style="padding:' + padCell + '">' + esc(r.prodotto) + '</td>';
         html += '<td style="padding:' + padCell + ';text-align:right;font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>';
         html += '<td style="padding:' + padCell + '">' + contr + '</td>';
-        html += '<td style="padding:' + padCell + '">' + badgeStato(r.stato) + '</td>';
+        html += '<td style="padding:' + padCell + '">' + badgeStato(r.stato, r) + '</td>';
         html += '</tr>';
       });
       html += '</tbody></table>';
@@ -2780,7 +2780,7 @@ function _movRenderBlocchi(entrate, uscite, mostraEntrate, mostraUscite, modo) {
         html += '<td style="padding:' + padCell + '">' + esc(r.prodotto) + '</td>';
         html += '<td style="padding:' + padCell + ';text-align:right;font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>';
         html += '<td style="padding:' + padCell + '">' + contr + '</td>';
-        html += '<td style="padding:' + padCell + '">' + badgeStato(r.stato) + '</td>';
+        html += '<td style="padding:' + padCell + '">' + badgeStato(r.stato, r) + '</td>';
         html += '</tr>';
       });
       html += '</tbody></table>';

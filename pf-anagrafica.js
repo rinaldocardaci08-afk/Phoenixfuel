@@ -51,11 +51,12 @@ async function caricaConsegne() {
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
-      if (r.stato !== 'consegnato' && r.stato !== 'annullato') {
+      if (r.stato !== 'consegnato' && r.stato !== 'annullato'
+          && !(r.tipo_ordine === 'entrata_deposito' && r.caricato_deposito === true)) {
         azioniHtml += '<button style="font-size:10px;padding:3px 10px;background:#D85A30;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:500" onclick="apriDirottamento(\'' + r.id + '\',null)">Dirotta</button>';
       }
 
-      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.destinazione ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td>' + dasSemaforo + '</td><td>' + cartSemaforo + '</td><td>' + azioniHtml + '</td></tr>';
+      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.destinazione ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + dasSemaforo + '</td><td>' + cartSemaforo + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
   }
 
@@ -302,7 +303,7 @@ function filtraStoricoConsegne() {
     var tot = prezzoConIva(r) * Number(r.litri);
     var dasIco = r.das_firmato_url ? '<div style="width:10px;height:10px;border-radius:50%;background:#639922;display:inline-block"></div> <span style="font-size:9px;color:#27500A">OK</span>' : '<div style="width:10px;height:10px;border-radius:50%;background:#E24B4A;display:inline-block"></div> <span style="font-size:9px;color:#791F1F">No</span>';
     var cartIco = r.cartellino_url ? '<div style="width:10px;height:10px;border-radius:50%;background:#639922;display:inline-block"></div> <span style="font-size:9px;color:#27500A">OK</span>' : '<div style="width:10px;height:10px;border-radius:50%;background:#E24B4A;display:inline-block"></div> <span style="font-size:9px;color:#791F1F">No</span>';
-    return '<tr><td>' + fmtD(r.data) + '</td><td><strong>' + esc(r.cliente) + '</strong>' + (r.destinazione ? '<div style="font-size:9px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato) + '</td><td style="text-align:center">' + dasIco + '</td><td style="text-align:center">' + cartIco + '</td></tr>';
+    return '<tr><td>' + fmtD(r.data) + '</td><td><strong>' + esc(r.cliente) + '</strong>' + (r.destinazione ? '<div style="font-size:9px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td class="m">' + fmtL(r.litri) + '</td><td class="m">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td style="text-align:center">' + dasIco + '</td><td style="text-align:center">' + cartIco + '</td></tr>';
   }).join('');
 }
 

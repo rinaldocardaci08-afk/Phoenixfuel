@@ -294,11 +294,18 @@ function fmtMe(n) {
 function badgeStato(stato, record) {
   // Se passato l'intero record, rileva stati "virtuali" di visualizzazione:
   // - ordini stazione_servizio già ricevuti ma senza DAS → label "ricevuto"
+  // - carichi entrata_deposito già ricevuti al deposito → label "ricevuto"
+  //   (evita che restino come "confermato" insieme a ordini cliente ancora da evadere)
   if (record && typeof record === 'object') {
     if (record.tipo_ordine === 'stazione_servizio'
         && record.ricevuto_stazione === true
         && (stato === 'confermato' || stato === 'in_consegna')) {
       return '<span class="badge teal" title="Ricevuto dalla stazione. Diventerà consegnato al caricamento del DAS firmato">ricevuto</span>';
+    }
+    if (record.tipo_ordine === 'entrata_deposito'
+        && record.caricato_deposito === true
+        && stato === 'confermato') {
+      return '<span class="badge teal" title="Carico ricevuto al deposito — litri entrati in cisterna">ricevuto</span>';
     }
   }
   const map = { 'confermato':'green','consegnato':'teal','in attesa':'amber','annullato':'red','programmato':'blue','cliente':'blue','deposito':'teal','entrata_deposito':'teal','stazione_servizio':'purple','autoconsumo':'gray' };

@@ -686,7 +686,7 @@ async function caricaOrdiniPerCarico() {
     }
 
     wrap.innerHTML = ordiniFiltrati.map(o => {
-      const badge = badgeStato(o.stato);
+      const badge = badgeStato(o.stato, o);
       const cId = clienteIdMap[o.cliente];
       const sedi = cId ? (sediMap[cId] || []) : [];
       let sedeHtml = '';
@@ -757,8 +757,10 @@ async function creaNuovoCarico() {
       ordiniCaricoPre || [],
       function(densitaByProdotto) {
         _creaCaricoConDensita({
-          data: data, mezzoVal: mezzoVal, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
-          ordiniSel: ordiniSel, mezzoId: mezzoId, densitaByProdotto: densitaByProdotto
+          data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
+          ordiniSel: ordiniSel, mezzoId: mezzoId,
+          ordiniCarico: ordiniCaricoPre || [],
+          densitaByProdotto: densitaByProdotto
         });
       },
       function() {
@@ -770,15 +772,17 @@ async function creaNuovoCarico() {
 
   // Fallback (popup non disponibile): vecchio comportamento senza densità custom
   _creaCaricoConDensita({
-    data: data, mezzoVal: mezzoVal, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
-    ordiniSel: ordiniSel, mezzoId: mezzoId, densitaByProdotto: null
+    data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
+    ordiniSel: ordiniSel, mezzoId: mezzoId,
+    ordiniCarico: ordiniCaricoPre || [],
+    densitaByProdotto: null
   });
 }
 
 // Fase 2 della creazione carico: dopo che l'operatore ha confermato
 // le densità nel popup (o senza popup in modalità fallback).
 async function _creaCaricoConDensita(args) {
-  const { data, mezzoTarga, autista, trId, ordiniSel, mezzoId, densitaByProdotto } = args;
+  const { data, mezzoTarga, autista, trId, ordiniSel, mezzoId, ordiniCarico, densitaByProdotto } = args;
 
   const record = {data, mezzo_id:mezzoId, mezzo_targa:mezzoTarga.split(' (')[0], autista, trasportatore_id:trId, stato:'programmato'};
   const { data: carico, error } = await sb.from('carichi').insert([record]).select().single();
@@ -801,12 +805,9 @@ async function _creaCaricoConDensita(args) {
   }
   if (sedeUpdates.length) await Promise.all(sedeUpdates);
 
-  // Controlla se ci sono ordini dal deposito PhoenixFuel da scaricare
-  const { data: ordiniCarico } = await sb.from('ordini').select('*').in('id', ordiniSel);
-
   // ═══ GENERA DAS AUTOMATICI per ogni ordine del carico ═══
   // Passa le densità raccolte dal popup (se presenti) per sovrascrivere i default tabellari
-  await _generaDasPerCarico(carico.id, ordiniCarico || [], mezzoTarga.split(' (')[0], autista, data, densitaByProdotto);
+  await _generaDasPerCarico(carico.id, ordiniCarico, mezzoTarga.split(' (')[0], autista, data, densitaByProdotto);
 
   const ordiniDeposito = (ordiniCarico||[]).filter(o => o.fornitore && o.fornitore.toLowerCase().includes('phoenix'));
   if (ordiniDeposito.length > 0) {
@@ -1056,7 +1057,7 @@ async function apriDettaglioCarico(caricoId) {
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">';
     html += '<div><div style="font-size:14px;font-weight:500">' + o.sequenza + '. ' + esc(r.cliente) + '</div>';
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(r.prodotto) + ' · <span style="font-family:var(--font-mono);font-weight:500">' + fmtL(r.litri) + '</span>' + (r.destinazione ? ' · 📍 ' + esc(r.destinazione) : '') + '</div></div>';
-    html += '<div style="display:flex;gap:4px;align-items:center">' + badgeStato(r.stato);
+    html += '<div style="display:flex;gap:4px;align-items:center">' + badgeStato(r.stato, r);
     if (r.stato !== 'confermato' && r.stato !== 'annullato') {
       html += ' <button class="btn-primary" style="font-size:10px;padding:3px 10px" onclick="confermaOrdineSingoloCarico(\'' + r.id + '\',\'' + caricoId + '\')">✅ Conferma</button>';
     }
@@ -1075,7 +1076,8 @@ async function apriDettaglioCarico(caricoId) {
     } else {
       html += '<span style="font-size:10px;color:var(--text-hint)">Nessun DAS</span>';
     }
-    if (r.stato !== 'consegnato' && r.stato !== 'annullato') {
+    if (r.stato !== 'consegnato' && r.stato !== 'annullato'
+        && !(r.tipo_ordine === 'entrata_deposito' && r.caricato_deposito === true)) {
       html += '<button style="font-size:11px;padding:5px 14px;background:#D85A30;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:500;margin-left:auto" onclick="apriDirottamento(\'' + r.id + '\',\'' + caricoId + '\')">Dirottamento</button>';
     }
     html += '</div></div>';
