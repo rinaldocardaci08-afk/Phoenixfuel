@@ -1055,6 +1055,11 @@
             style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
             ⚙️ Impostazioni
           </button>
+          <button class="btn-primary fatt-tab" data-tab="fatt-panel-import"
+            onclick="switchFattureTab(this); if(window.pfFattureImport) window.pfFattureImport.renderFattureImport();"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            📥 Import da Danea
+          </button>
         </div>
 
         <!-- PANEL: ELENCO FATTURE -->
@@ -1180,6 +1185,11 @@
               <div id="cfg-fatt-riepilogo" style="font-size:12px;color:var(--text-muted)">—</div>
             </div>
           </div>
+        </div>
+
+        <!-- PANEL: IMPORT DA DANEA -->
+        <div id="fatt-panel-import" class="fatt-panel" style="display:none">
+          <div id="content-fatture-import"></div>
         </div>
 
       </div>
@@ -2735,6 +2745,7 @@
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-allegati.js?v=20260416d"></script>
 <script src="pf-fatture.js?v=1775149951158"></script>
+<script src="pf-fatture-import.js?v=20260422a"></script>
 <script src="pf-dep-giacenze.js?v=20260419i"></script>
 <script src="pf-dep-giac-week.js?v=20260420a"></script>
 <script src="pf-system.js?v=20260417a"></script>
