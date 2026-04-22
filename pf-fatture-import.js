@@ -399,7 +399,7 @@ async function _onFileSelected(file) {
     _batchId = _parsedData.batch_id;
 
     const s = _parsedData.statistiche;
-    _logAppend(log, 'ok', `✓ Totale fatturato: € ${_sep(s.importo_totale)}`);
+    _logAppend(log, 'ok', `✓ Totale fatturato: € ${_fmtN(s.importo_totale)}`);
     _logAppend(log, 'ok', `✓ Range date: ${s.data_min} → ${s.data_max}`);
 
     prog.style.width = '100%';
@@ -442,7 +442,7 @@ function renderStep3() {
         </div>
         <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px;border-left:4px solid #639922">
           <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Totale</div>
-          <div style="font-size:22px;font-weight:700;font-family:monospace;margin-top:4px">€ ${_sep(s.importo_totale)}</div>
+          <div style="font-size:22px;font-weight:700;font-family:monospace;margin-top:4px">€ ${_fmtN(s.importo_totale)}</div>
           <div style="font-size:10px;color:#888">sanity check</div>
         </div>
         <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px;border-left:4px solid #6B5FCC">
@@ -486,8 +486,8 @@ function renderStep3() {
                   <td style="padding:7px;font-family:monospace;font-weight:700">${esc(ft.numero)}</td>
                   <td style="padding:7px">${_fmtData(ft.data)}</td>
                   <td style="padding:7px">${esc((ft.cessionario_denominazione || '').substring(0, 40))}</td>
-                  <td style="padding:7px;text-align:right;font-family:monospace">€ ${_sep(ft.imponibile_totale || 0)}</td>
-                  <td style="padding:7px;text-align:right;font-family:monospace">€ ${_sep(ft.importo_totale)}</td>
+                  <td style="padding:7px;text-align:right;font-family:monospace">€ ${_fmtN(ft.imponibile_totale || 0)}</td>
+                  <td style="padding:7px;text-align:right;font-family:monospace">€ ${_fmtN(ft.importo_totale)}</td>
                   <td style="padding:7px;text-align:center">${nRighe}</td>
                   <td style="padding:7px;text-align:center">${nDas > 0 ? '✓ ' + nDas : '—'}</td>
                   <td style="padding:7px;text-align:center">${f.pagamenti.length}</td>
@@ -544,6 +544,12 @@ function _fmtData(iso) {
   const p = iso.split('-');
   if (p.length !== 3) return iso;
   return `${p[2]}/${p[1]}/${p[0]}`;
+}
+
+// Formatta numero in formato italiano con 2 decimali (es. 1.542.711,89)
+function _fmtN(n) {
+  if (n === null || n === undefined || isNaN(n)) return '0,00';
+  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 window.pfFattureImport = {
