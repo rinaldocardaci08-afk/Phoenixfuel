@@ -959,16 +959,22 @@ function _renderStep3UI() {
 
     <div class="fi-panel" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
       <div style="font-size:12px;color:#666">
-        💡 Il prossimo step salverà in DB le fatture + righe + scadenze. Gli uncertain richiederanno revisione manuale.
+        ${ms.uncertain + ms.orphan > 0 ? `
+          ⚠ <strong style="color:#A32D2D">${ms.uncertain + ms.orphan} righe non matched</strong>:
+          risolvile con i bottoni "Accetta correzione" o "Crea ordine da fattura" prima di procedere.
+          Fatture con righe matched+servizio verranno importate comunque.
+        ` : `
+          ✓ Tutte le fatture sono matched. Pronte per l'import nel DB.
+        `}
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn-primary" onclick="window.pfFattureImport.renderFattureImport()"
                 style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);font-size:12px">
           ← Nuovo import
         </button>
-        <button class="btn-primary" disabled
-                style="background:#ccc;cursor:not-allowed;font-size:12px" title="Disponibile nello STEP 3C">
-          Procedi all'import (in sviluppo)
+        <button class="btn-primary" id="fi-procedi-import" style="background:#639922;font-size:12px"
+                onclick="window.pfFattureImport._procediImport()">
+          💾 Procedi all'import (${fMatched} fatture)
         </button>
       </div>
     </div>
@@ -1693,6 +1699,332 @@ async function _confermaCreaOrdineDaOrphan(payload64, clienteId, clienteTrovato)
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 3C / 4 — IMPORT EFFETTIVO IN DATABASE
+// Flusso:
+//   1. Crea record in fatture_import_batch (stato='in_corso')
+//   2. Per ogni fattura matched:
+//        2a. UPSERT fatture_emesse (deduplica su PK univoco)
+//        2b. DELETE fatture_righe esistenti + INSERT righe (ri-import sicuro)
+//        2c. DELETE fatture_pagamenti esistenti + INSERT pagamenti
+//   3. UPDATE fatture_import_batch (stato='completato', contatori)
+// Gestisce errori per-fattura (non blocca le altre) con log dettagliato.
+// ═══════════════════════════════════════════════════════════════════════════
+async function _procediImport() {
+  if (!_parsedData || !_parsedData.fatture || !_parsedData.fatture.length) {
+    toast('Nessun dato da importare');
+    return;
+  }
+
+  // Filtra solo fatture in stato 'matched' (come da regola: uncertain da sistemare prima)
+  const fattureImport = _parsedData.fatture.filter(f => f._match_status_fattura === 'matched');
+  if (!fattureImport.length) {
+    toast('⚠️ Nessuna fattura matched da importare');
+    return;
+  }
+
+  const msg = 'Stai per importare ' + fattureImport.length + ' fatture nel database.\n\n' +
+              'Fatture già presenti (stesso cedente/numero/anno) verranno AGGIORNATE, non duplicate.\n\n' +
+              'Confermi?';
+  if (!confirm(msg)) return;
+
+  _setStep(4);
+
+  // Render UI di progress
+  const body = document.getElementById('fi-body');
+  body.innerHTML = `
+    <div class="fi-panel">
+      <h2>💾 Step 4 — Import in database</h2>
+      <div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:13px">Import di <strong>${fattureImport.length}</strong> fatture in corso...</div>
+        <div style="font-size:11px;color:#666" id="fi-import-status">⏳ Inizializzazione...</div>
+      </div>
+      <div class="fi-progress-bg"><div class="fi-progress-fg" id="fi-import-progress" style="width:2%"></div></div>
+      <div class="fi-log" id="fi-import-log">
+        <div class="info">[${_now()}] 🚀 Avvio import</div>
+      </div>
+      <div id="fi-import-kpi" style="display:none;margin-top:14px"></div>
+    </div>
+  `;
+
+  const log = document.getElementById('fi-import-log');
+  const prog = document.getElementById('fi-import-progress');
+  const status = document.getElementById('fi-import-status');
+  const kpi = document.getElementById('fi-import-kpi');
+
+  // Statistiche
+  let nuove = 0, aggiornate = 0, errori = 0;
+  const erroriDett = [];
+  let batchId = _batchId || crypto.randomUUID();
+
+  try {
+    // ── 1. Crea record batch ──
+    const userNome = (typeof utenteCorrente !== 'undefined' && utenteCorrente)
+      ? (utenteCorrente.nome || utenteCorrente.email || 'sconosciuto')
+      : 'sconosciuto';
+    const userId = (typeof utenteCorrente !== 'undefined' && utenteCorrente && utenteCorrente.id)
+      ? utenteCorrente.id : null;
+
+    _logAppend(log, 'info', 'Creo record batch id=' + batchId.substring(0, 8) + '...');
+    const { error: errBatch } = await sb.from('fatture_import_batch').insert([{
+      id: batchId,
+      utente_id: userId,
+      utente_nome: userNome,
+      nome_file: _parsedData._nome_file || 'import_' + new Date().toISOString().slice(0, 10),
+      formato: _parsedData.formato || 'fatturapa_sdi',
+      fatture_totali: _parsedData.fatture.length,
+      fatture_importate: 0,
+      fatture_orfane: _parsedData.match_stats.orphan || 0,
+      fatture_in_revisione: _parsedData.match_stats.uncertain || 0,
+      errori_parsing: _parsedData.anomalie ? _parsedData.anomalie.length : 0,
+      totale_fatturato: _parsedData.statistiche.importo_totale,
+      data_min: _parsedData.statistiche.data_min,
+      data_max: _parsedData.statistiche.data_max,
+      stato: 'in_corso',
+    }]);
+    if (errBatch) {
+      _logAppend(log, 'err', '✗ Batch: ' + errBatch.message);
+      throw new Error('Creazione batch fallita: ' + errBatch.message);
+    }
+    _logAppend(log, 'ok', '✓ Batch creato');
+    prog.style.width = '5%';
+
+    // ── 2. Import fatture una a una ──
+    for (let i = 0; i < fattureImport.length; i++) {
+      const f = fattureImport[i];
+      const ft = f.fattura;
+      const pct = 5 + Math.round(90 * (i + 1) / fattureImport.length);
+      status.textContent = `⏳ Fattura ${i + 1}/${fattureImport.length}: nr ${ft.numero}`;
+
+      try {
+        const ris = await _importFatturaSingola(f, batchId);
+        if (ris.nuova) nuove++;
+        else aggiornate++;
+
+        // Log solo ogni 20 per non intasare UI
+        if ((i + 1) % 20 === 0 || i === fattureImport.length - 1) {
+          _logAppend(log, 'ok', `✓ ${i + 1}/${fattureImport.length} — ultima: nr ${ft.numero}`);
+        }
+      } catch (e) {
+        errori++;
+        erroriDett.push({ nr: ft.numero, data: ft.data, errore: e.message });
+        _logAppend(log, 'err', `✗ nr ${ft.numero}: ${e.message.substring(0, 80)}`);
+      }
+
+      prog.style.width = pct + '%';
+      if ((i + 1) % 5 === 0) await new Promise(r => setTimeout(r, 0)); // yield al browser
+    }
+
+    // ── 3. UPDATE batch: stato completato + contatori ──
+    const statoFinale = errori === 0 ? 'completato' : (errori < fattureImport.length ? 'completato_con_errori' : 'fallito');
+    await sb.from('fatture_import_batch').update({
+      stato: statoFinale,
+      fatture_importate: nuove + aggiornate,
+      errore_msg: erroriDett.length ? JSON.stringify(erroriDett.slice(0, 20)).substring(0, 1000) : null,
+    }).eq('id', batchId);
+
+    _logAppend(log, 'ok', `✓ Import completato: ${nuove} nuove, ${aggiornate} aggiornate, ${errori} errori`);
+    prog.style.width = '100%';
+    prog.style.background = errori === 0
+      ? 'linear-gradient(90deg,#639922,#97C459)'
+      : 'linear-gradient(90deg,#D4A017,#F5BD4B)';
+    status.textContent = errori === 0 ? '✓ Completato' : '⚠ Completato con errori';
+
+    // Audit log
+    if (typeof _auditLog === 'function') {
+      _auditLog('import_fatture_danea', 'fatture_emesse',
+        `batch ${batchId.substring(0, 8)} | ${nuove} nuove + ${aggiornate} aggiornate + ${errori} errori | totale €${_fmtN(_parsedData.statistiche.importo_totale)}`);
+    }
+
+    // ── 4. Render KPI finale ──
+    kpi.style.display = 'block';
+    kpi.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div style="background:#F4FAEC;border:1px solid #97C459;padding:14px;border-radius:8px">
+          <div style="font-size:10px;color:#27500A;text-transform:uppercase;font-weight:600">✓ Nuove</div>
+          <div style="font-size:24px;font-weight:700;font-family:monospace;color:#27500A;margin-top:4px">${nuove}</div>
+        </div>
+        <div style="background:#EEEDFE;border:1px solid #6B5FCC;padding:14px;border-radius:8px">
+          <div style="font-size:10px;color:#26215C;text-transform:uppercase;font-weight:600">↻ Aggiornate</div>
+          <div style="font-size:24px;font-weight:700;font-family:monospace;color:#26215C;margin-top:4px">${aggiornate}</div>
+        </div>
+        <div style="background:${errori > 0 ? '#FDECEC' : '#fafaf8'};border:1px solid ${errori > 0 ? '#E24B4A' : '#ccc'};padding:14px;border-radius:8px">
+          <div style="font-size:10px;color:${errori > 0 ? '#791F1F' : '#666'};text-transform:uppercase;font-weight:600">${errori > 0 ? '✗ Errori' : '— Errori'}</div>
+          <div style="font-size:24px;font-weight:700;font-family:monospace;color:${errori > 0 ? '#791F1F' : '#666'};margin-top:4px">${errori}</div>
+        </div>
+        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px">
+          <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Totale importato</div>
+          <div style="font-size:18px;font-weight:700;font-family:monospace;color:#26215C;margin-top:4px">€ ${_fmtN(_parsedData.statistiche.importo_totale)}</div>
+        </div>
+      </div>
+      ${erroriDett.length > 0 ? `
+        <div style="margin-top:12px;background:#FDECEC;border-left:3px solid #E24B4A;padding:10px 14px;border-radius:4px">
+          <div style="font-size:12px;font-weight:700;color:#791F1F;margin-bottom:6px">Fatture con errori (${erroriDett.length}):</div>
+          <div style="max-height:180px;overflow-y:auto;font-size:11px;font-family:monospace">
+            ${erroriDett.slice(0, 15).map(e => `<div>nr ${esc(e.nr)} del ${_fmtData(e.data)}: ${esc(e.errore.substring(0, 120))}</div>`).join('')}
+            ${erroriDett.length > 15 ? `<div style="color:#666">... e altri ${erroriDett.length - 15} errori</div>` : ''}
+          </div>
+        </div>
+      ` : ''}
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-primary" onclick="window.pfFattureImport.renderFattureImport()"
+                style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);font-size:12px">
+          ← Nuovo import
+        </button>
+        <button class="btn-primary" onclick="location.reload()"
+                style="background:#26215C;font-size:12px">
+          ✓ Torna a Fatture
+        </button>
+      </div>
+    `;
+
+  } catch (e) {
+    console.error('[procediImport] fatale:', e);
+    _logAppend(log, 'err', '✗ Errore fatale: ' + e.message);
+    status.textContent = '✗ Fallito';
+    prog.style.background = 'linear-gradient(90deg,#A32D2D,#E24B4A)';
+
+    // Segna batch come fallito
+    try {
+      await sb.from('fatture_import_batch').update({
+        stato: 'fallito',
+        errore_msg: e.message.substring(0, 500),
+      }).eq('id', batchId);
+    } catch (e2) { /* ignore */ }
+
+    kpi.style.display = 'block';
+    kpi.innerHTML = `
+      <div style="background:#FDECEC;border-left:4px solid #E24B4A;padding:14px;border-radius:6px">
+        <div style="font-size:13px;font-weight:700;color:#791F1F;margin-bottom:6px">✗ Import fallito</div>
+        <div style="font-size:12px;color:#555">Errore: <code>${esc(e.message)}</code></div>
+        <button class="btn-primary" onclick="window.pfFattureImport.renderFattureImport()"
+                style="margin-top:10px;font-size:12px">← Riprova import</button>
+      </div>
+    `;
+  }
+}
+
+// Import di una singola fattura (testa + righe + pagamenti). Transazione lato client:
+// se un insert figlio fallisce, la testa resta ma gli elementi sono coerenti al chunk.
+async function _importFatturaSingola(f, batchId) {
+  const ft = f.fattura;
+
+  // Trova cliente_id nel modo più affidabile: prima PIVA, poi nome esatto
+  let clienteIdFatt = null;
+  if (ft.cessionario_piva) {
+    const pivaNorm = _normalizzaPiva(ft.cessionario_piva);
+    for (const [id, c] of _clientiMap.entries()) {
+      if (c.piva_norm && c.piva_norm === pivaNorm) { clienteIdFatt = id; break; }
+    }
+  }
+  if (!clienteIdFatt && ft.cessionario_denominazione) {
+    const denomNorm = _normalizzaNome(ft.cessionario_denominazione);
+    for (const [id, c] of _clientiMap.entries()) {
+      if (c.nome_norm === denomNorm) { clienteIdFatt = id; break; }
+    }
+  }
+
+  // Aggrega match score/details a livello fattura (media score delle righe prodotto)
+  const righeProdotto = f.righe.filter(r => r.prodotto_normalizzato && r.quantita > 0);
+  const scoreMedio = righeProdotto.length > 0
+    ? Math.round(righeProdotto.reduce((s, r) => s + (r._match?.score || 0), 0) / righeProdotto.length)
+    : null;
+
+  // ── 1. UPSERT fattura_emesse ──
+  const recFatt = {
+    batch_id: batchId,
+    numero: String(ft.numero),
+    data: ft.data,
+    tipo_documento: ft.tipo_documento,
+    divisa: ft.divisa || 'EUR',
+    cedente_piva: ft.cedente_piva,
+    cedente_denominazione: ft.cedente_denominazione,
+    cessionario_piva: ft.cessionario_piva,
+    cessionario_codfiscale: ft.cessionario_codfiscale,
+    cessionario_denominazione: ft.cessionario_denominazione,
+    cessionario_indirizzo: ft.cessionario_indirizzo,
+    cessionario_cap: ft.cessionario_cap,
+    cessionario_comune: ft.cessionario_comune,
+    cessionario_provincia: ft.cessionario_provincia,
+    cessionario_nazione: ft.cessionario_nazione || 'IT',
+    importo_totale: ft.importo_totale,
+    imponibile_totale: ft.imponibile_totale,
+    iva_totale: ft.iva_totale,
+    cliente_id: clienteIdFatt,
+    match_status: f._match_status_fattura || 'matched',
+    match_score: scoreMedio,
+    match_details: null,
+  };
+
+  // UPSERT via PostgREST: usa onConflict sulla chiave dedup.
+  // PostgREST richiede che la chiave sia un indice univoco (l'abbiamo creato).
+  const { data: fattInserted, error: errFatt } = await sb.from('fatture_emesse')
+    .upsert(recFatt, {
+      onConflict: 'cedente_piva,anno,numero',
+      ignoreDuplicates: false,
+    })
+    .select('id, created_at, updated_at')
+    .single();
+
+  if (errFatt) throw new Error('upsert fattura: ' + errFatt.message);
+  if (!fattInserted) throw new Error('upsert fattura: no row returned');
+
+  const fattId = fattInserted.id;
+  // Heuristica "nuova vs aggiornata": se created_at === updated_at → nuova
+  const nuova = fattInserted.created_at === fattInserted.updated_at ||
+                Math.abs(new Date(fattInserted.updated_at) - new Date(fattInserted.created_at)) < 1000;
+
+  // ── 2. DELETE + INSERT righe (ricarica pulita) ──
+  await sb.from('fatture_righe').delete().eq('fattura_id', fattId);
+
+  const righePayload = f.righe.map(r => ({
+    fattura_id: fattId,
+    numero_linea: r.numero_linea,
+    descrizione: r.descrizione ? r.descrizione.substring(0, 2000) : '',
+    prodotto_normalizzato: r.prodotto_normalizzato,
+    codice_articolo: r.codice_articolo,
+    quantita: r.quantita,
+    unita_misura: r.unita_misura,
+    prezzo_unitario: r.prezzo_unitario,
+    prezzo_totale: r.prezzo_totale,
+    aliquota_iva: r.aliquota_iva,
+    das_numero_dogane: r.das_numero_dogane,
+    das_data_str: r.das_data_str,
+    das_data: r.das_data,
+    ordine_danea_numero: r.ordine_danea_numero,
+    ordine_danea_data: r.ordine_danea_data,
+    ordine_id: r._match?.ordine_id || null,
+    riga_match_score: r._match?.score ?? null,
+    riga_match_details: r._match?.dettaglio ? r._match.dettaglio : null,
+  }));
+
+  if (righePayload.length > 0) {
+    const { error: errR } = await sb.from('fatture_righe').insert(righePayload);
+    if (errR) throw new Error('insert righe: ' + errR.message);
+  }
+
+  // ── 3. DELETE + INSERT pagamenti ──
+  await sb.from('fatture_pagamenti').delete().eq('fattura_id', fattId);
+
+  if (f.pagamenti && f.pagamenti.length > 0) {
+    const pagPayload = f.pagamenti.map(p => ({
+      fattura_id: fattId,
+      condizioni_pagamento: p.condizioni_pagamento,
+      modalita_pagamento: p.modalita_pagamento,
+      data_scadenza: p.data_scadenza,
+      importo: p.importo,
+      istituto_finanziario: p.istituto_finanziario,
+      iban: p.iban,
+    }));
+    const { error: errP } = await sb.from('fatture_pagamenti').insert(pagPayload);
+    if (errP) throw new Error('insert pagamenti: ' + errP.message);
+  }
+
+  return { nuova: nuova, fattId: fattId };
+}
+
+
+
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
   _onFileSelected: _onFileSelected,
@@ -1703,6 +2035,7 @@ window.pfFattureImport = {
   _apriCreaOrdineDaOrphan: _apriCreaOrdineDaOrphan,
   _confermaCreaOrdineDaOrphan: _confermaCreaOrdineDaOrphan,
   _aggiornaPreviewOrphan: _aggiornaPreviewOrphan,
+  _procediImport: _procediImport,
 };
 
 })();
