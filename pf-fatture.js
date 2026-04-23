@@ -66,54 +66,357 @@ function switchFattureTab(btn){
 // ═════════════════════════════════════════════════════════════
 
 async function caricaFatture(){
-  const anno  = document.getElementById('fatt-filtro-anno')?.value || new Date().getFullYear();
-  const stato = document.getElementById('fatt-filtro-stato')?.value || '';
-  const clId  = document.getElementById('fatt-filtro-cliente')?.value || '';
+  const anno     = document.getElementById('fatt-filtro-anno')?.value || new Date().getFullYear();
+  const mese     = document.getElementById('fatt-filtro-mese')?.value || '';
+  const clId     = document.getElementById('fatt-filtro-cliente')?.value || '';
+  const search   = (document.getElementById('fatt-filtro-search')?.value || '').trim();
 
   const tb = document.getElementById('fatt-elenco-tbody');
   if(!tb) return;
-  tb.innerHTML = '<tr><td colspan="8" class="loading">Caricamento…</td></tr>';
+  tb.innerHTML = '<tr><td colspan="9" class="loading">Caricamento…</td></tr>';
 
-  let q = sb.from('fatture').select('*').eq('anno', parseInt(anno)).order('numero',{ascending:false});
-  if(stato) q = q.eq('stato', stato);
-  if(clId)  q = q.eq('cliente_id', clId);
+  // Range date in base ad anno+mese (legge da fatture_emesse.data)
+  const annoInt = parseInt(anno);
+  let dataMin, dataMax;
+  if (mese) {
+    const mInt = parseInt(mese);
+    dataMin = `${annoInt}-${String(mInt).padStart(2,'0')}-01`;
+    const lastDay = new Date(annoInt, mInt, 0).getDate();
+    dataMax = `${annoInt}-${String(mInt).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  } else {
+    dataMin = `${annoInt}-01-01`;
+    dataMax = `${annoInt}-12-31`;
+  }
+
+  let q = sb.from('fatture_emesse').select('*').gte('data', dataMin).lte('data', dataMax).order('data', {ascending:false}).order('numero', {ascending:false});
+  if(clId) q = q.eq('cliente_id', clId);
+  if(search){
+    // Filtra su numero o PIVA cessionario o denominazione (ILIKE)
+    q = q.or(`numero.ilike.%${search}%,cessionario_piva.ilike.%${search}%,cessionario_denominazione.ilike.%${search}%`);
+  }
 
   const { data: fatture, error } = await q;
-  if(error){ tb.innerHTML='<tr><td colspan="8" style="color:red">Errore: '+error.message+'</td></tr>'; return; }
+  if(error){ tb.innerHTML='<tr><td colspan="9" style="color:red">Errore: '+_esc(error.message)+'</td></tr>'; return; }
 
   if(!fatture||!fatture.length){
-    tb.innerHTML='<tr><td colspan="8" class="loading">Nessuna fattura per l\'anno '+anno+'</td></tr>';
+    tb.innerHTML='<tr><td colspan="9" class="loading">Nessuna fattura per il periodo selezionato</td></tr>';
     _aggiornaTotaliFatture([]);
     return;
   }
 
   _aggiornaTotaliFatture(fatture);
-  tb.innerHTML = fatture.map(f=>`
-    <tr>
-      <td style="font-family:var(--font-mono);font-weight:600">${f.numero}/${f.anno}</td>
-      <td>${_fmtD(f.data)}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(f.cliente_nome||'—')}</td>
-      <td style="text-align:right;font-family:var(--font-mono)">${_fmtE(f.imponibile)}</td>
-      <td style="text-align:right;font-family:var(--font-mono)">${_fmtE(f.iva)}</td>
-      <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${_fmtE(f.totale)}</td>
-      <td>${badgeFattura(f.stato)}</td>
-      <td>
-        <button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="apriDettaglioFattura('${f.id}')">📄</button>
-        <button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#6B5FCC" onclick="generaXMLFatturaPA('${f.id}')">📥 XML</button>
-        ${f.stato==='bozza'?`<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#2E7D32" onclick="emettiiFattura('${f.id}')">✓ Emetti</button>`:''}
-        ${f.stato==='emessa'?`<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#D85A30" onclick="segnaFatturaPagata('${f.id}')">💰 Pagata</button>`:''}
-      </td>
-    </tr>
-  `).join('');
+
+  // Badge match_status → colore
+  const badgeMatch = (st) => {
+    const map = {
+      'matched':   '<span style="background:#639922;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">✓ Matched</span>',
+      'uncertain': '<span style="background:#D4A017;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">⚠ Revisione</span>',
+      'orphan':    '<span style="background:#A32D2D;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">✗ Orfana</span>',
+      'pending':   '<span style="background:#888;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">· Pending</span>',
+    };
+    return map[st] || `<span style="background:#ccc;padding:2px 8px;border-radius:10px;font-size:10px">${_esc(st||'—')}</span>`;
+  };
+
+  tb.innerHTML = fatture.map(f=>{
+    const clienteShow = f.cessionario_denominazione || '—';
+    const pivaShow = f.cessionario_piva || '—';
+    return `
+      <tr>
+        <td style="font-family:var(--font-mono);font-weight:600">${_esc(f.numero)}/${f.anno||'?'}</td>
+        <td>${_fmtD(f.data)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(clienteShow)}">${_esc(clienteShow)}</td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">${_esc(pivaShow)}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${_fmtE(f.imponibile_totale)}</td>
+        <td style="text-align:right;font-family:var(--font-mono)">${_fmtE(f.iva_totale)}</td>
+        <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${_fmtE(f.importo_totale)}</td>
+        <td>${badgeMatch(f.match_status)}</td>
+        <td>
+          <button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="apriDettaglioFattura('${f.id}')" title="Dettaglio">📄</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Dashboard sopra la tabella (async, non blocca il render elenco)
+  caricaDashboardFatture(fatture, dataMin, dataMax);
 }
 
 function _aggiornaTotaliFatture(fatture){
-  const attive = fatture.filter(f=>f.stato!=='annullata');
-  document.getElementById('fatt-tot-imponibile').textContent = _fmtE(attive.reduce((s,f)=>s+Number(f.imponibile),0));
-  document.getElementById('fatt-tot-iva').textContent        = _fmtE(attive.reduce((s,f)=>s+Number(f.iva),0));
-  document.getElementById('fatt-tot-totale').textContent     = _fmtE(attive.reduce((s,f)=>s+Number(f.totale),0));
-  const emesse = fatture.filter(f=>f.stato==='emessa');
-  document.getElementById('fatt-tot-da-incassare').textContent = _fmtE(emesse.reduce((s,f)=>s+Number(f.totale),0));
+  // Fatture_emesse usa: imponibile_totale, iva_totale, importo_totale (NON imponibile/iva/totale)
+  // Nota: i KPI sono stati sostituiti dalla dashboard integrata. Queste assegnazioni
+  // restano per backward-compat con eventuali markup che ancora usano gli id vecchi.
+  const imp = fatture.reduce((s,f)=>s+Number(f.imponibile_totale||0),0);
+  const iva = fatture.reduce((s,f)=>s+Number(f.iva_totale||0),0);
+  const tot = fatture.reduce((s,f)=>s+Number(f.importo_totale||0),0);
+  const el1 = document.getElementById('fatt-tot-imponibile');
+  const el2 = document.getElementById('fatt-tot-iva');
+  const el3 = document.getElementById('fatt-tot-totale');
+  const el4 = document.getElementById('fatt-tot-da-incassare');
+  if (el1) el1.textContent = _fmtE(imp);
+  if (el2) el2.textContent = _fmtE(iva);
+  if (el3) el3.textContent = _fmtE(tot);
+  if (el4) el4.textContent = _fmtE(tot);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DASHBOARD FATTURE — controllo integrità + KPI del periodo
+// ═══════════════════════════════════════════════════════════════════════════
+// Chiamata da caricaFatture() dopo il render elenco. Popola il blocco
+// #fatt-dashboard sopra la tabella.
+// Query parallele per performance:
+//   - ordini clienti nel periodo (per calcolare "senza fattura")
+//   - fatture_righe con ordine_id popolato (per sottrarre i già fatturati)
+//   - fatture_emesse con match_status='orphan' (fatture senza ordine)
+//   - pagamenti con scadenza futura (incasso previsto)
+// ═══════════════════════════════════════════════════════════════════════════
+async function caricaDashboardFatture(fatture, dataMin, dataMax) {
+  const wrap = document.getElementById('fatt-dashboard');
+  if (!wrap) return;
+
+  wrap.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:14px">⏳ Calcolo dashboard...</div>';
+
+  try {
+    // ── 1. Totali fatturato (calcolati dai dati già caricati) ──
+    const imp = fatture.reduce((s,f)=>s+Number(f.imponibile_totale||0),0);
+    const iva = fatture.reduce((s,f)=>s+Number(f.iva_totale||0),0);
+    const tot = fatture.reduce((s,f)=>s+Number(f.importo_totale||0),0);
+    const nFatture = fatture.length;
+    const fattureOrfane = fatture.filter(f => f.match_status === 'orphan').length;
+
+    // ── 2. Top 5 clienti per totale ──
+    const perCliente = {};
+    fatture.forEach(f => {
+      const key = f.cliente_id || f.cessionario_piva || f.cessionario_denominazione;
+      if (!perCliente[key]) perCliente[key] = { nome: f.cessionario_denominazione || '?', totale: 0, n: 0 };
+      perCliente[key].totale += Number(f.importo_totale||0);
+      perCliente[key].n++;
+    });
+    const top5 = Object.values(perCliente).sort((a,b)=>b.totale-a.totale).slice(0,5);
+
+    // ── 3. Query parallele: ordini senza fattura + incasso previsto ──
+    const [ordiniRes, righeFattRes, pagRes] = await Promise.all([
+      // Ordini clienti consegnati nel periodo
+      sb.from('ordini')
+        .select('id, data, cliente, cliente_id, prodotto, litri, costo_litro, trasporto_litro, margine, iva, stato')
+        .eq('tipo_ordine', 'cliente')
+        .eq('stato', 'consegnato')
+        .gte('data', dataMin).lte('data', dataMax),
+      // fatture_righe con ordine_id popolato nel periodo (join implicito via fattura_id su fatture già caricate)
+      sb.from('fatture_righe')
+        .select('ordine_id, fattura_id')
+        .not('ordine_id', 'is', null)
+        .in('fattura_id', fatture.map(f=>f.id).slice(0, 500)),
+      // Pagamenti futuri per incasso previsto
+      sb.from('fatture_pagamenti')
+        .select('data_scadenza, importo, stato')
+        .in('fattura_id', fatture.map(f=>f.id).slice(0, 500))
+        .neq('stato', 'pagato')
+        .gte('data_scadenza', _oggi()),
+    ]);
+
+    const ordini = ordiniRes.data || [];
+    const righeFatt = righeFattRes.data || [];
+    const pagamenti = pagRes.data || [];
+
+    // Set degli ordine_id già fatturati
+    const ordiniFatturati = new Set(righeFatt.map(r => r.ordine_id));
+    const ordiniSenzaFatt = ordini.filter(o => !ordiniFatturati.has(o.id));
+    const nOrdSenzaFatt = ordiniSenzaFatt.length;
+    const impOrdSenzaFatt = ordiniSenzaFatt.reduce((s,o) => {
+      const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+      return s + noIva * Number(o.litri||0);
+    }, 0);
+
+    // Salva lista per apertura modale
+    window._fattOrdiniSenzaFatt = ordiniSenzaFatt;
+    window._fattFattureOrfane = fatture.filter(f => f.match_status === 'orphan');
+
+    // ── 4. Incasso previsto: 30/60/90 gg ──
+    const oggi = new Date(_oggi());
+    const d30 = new Date(oggi); d30.setDate(d30.getDate()+30);
+    const d60 = new Date(oggi); d60.setDate(d60.getDate()+60);
+    const d90 = new Date(oggi); d90.setDate(d90.getDate()+90);
+    let inc30 = 0, inc60 = 0, inc90 = 0, incOltre = 0;
+    pagamenti.forEach(p => {
+      const scad = new Date(p.data_scadenza);
+      const imp = Number(p.importo||0);
+      if (scad <= d30) inc30 += imp;
+      else if (scad <= d60) inc60 += imp;
+      else if (scad <= d90) inc90 += imp;
+      else incOltre += imp;
+    });
+    const incTot = inc30+inc60+inc90+incOltre;
+
+    // ── 5. Render dashboard ──
+    wrap.innerHTML = `
+      <!-- KPI fatturato (3 card) -->
+      <div class="grid4" style="margin-bottom:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value">${_fmtE(imp)}</div></div>
+        <div class="kpi"><div class="kpi-label">IVA</div><div class="kpi-value">${_fmtE(iva)}</div></div>
+        <div class="kpi" style="background:#EAF3DE"><div class="kpi-label">Totale fatturato</div><div class="kpi-value" style="color:#27500A">${_fmtE(tot)}</div></div>
+        <div class="kpi"><div class="kpi-label">Fatture importate</div><div class="kpi-value">${nFatture}</div></div>
+      </div>
+
+      <!-- Alert controllo integrità -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div style="background:${nOrdSenzaFatt>0?'#FFF7E6':'#F4FAEC'};border-left:4px solid ${nOrdSenzaFatt>0?'#D4A017':'#639922'};padding:12px 14px;border-radius:6px;cursor:${nOrdSenzaFatt>0?'pointer':'default'}"
+             ${nOrdSenzaFatt>0?'onclick="apriListaOrdiniSenzaFattura()"':''}>
+          <div style="font-size:11px;color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'};text-transform:uppercase;font-weight:600">
+            ${nOrdSenzaFatt>0?'⚠':'✓'} Ordini senza fattura
+          </div>
+          <div style="font-size:22px;font-weight:700;font-family:var(--font-mono);color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'};margin-top:4px">${nOrdSenzaFatt}</div>
+          <div style="font-size:11px;color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'}">
+            ${nOrdSenzaFatt>0 ? 'Totale: '+_fmtE(impOrdSenzaFatt)+' · Clicca per lista' : 'Tutti gli ordini del periodo sono fatturati'}
+          </div>
+        </div>
+        <div style="background:${fattureOrfane>0?'#FDECEC':'#F4FAEC'};border-left:4px solid ${fattureOrfane>0?'#A32D2D':'#639922'};padding:12px 14px;border-radius:6px;cursor:${fattureOrfane>0?'pointer':'default'}"
+             ${fattureOrfane>0?'onclick="apriListaFattureOrfane()"':''}>
+          <div style="font-size:11px;color:${fattureOrfane>0?'#791F1F':'#27500A'};text-transform:uppercase;font-weight:600">
+            ${fattureOrfane>0?'✗':'✓'} Fatture senza ordine
+          </div>
+          <div style="font-size:22px;font-weight:700;font-family:var(--font-mono);color:${fattureOrfane>0?'#791F1F':'#27500A'};margin-top:4px">${fattureOrfane}</div>
+          <div style="font-size:11px;color:${fattureOrfane>0?'#791F1F':'#27500A'}">
+            ${fattureOrfane>0 ? 'Clicca per lista · da rivedere' : 'Tutte le fatture sono collegate a un ordine'}
+          </div>
+        </div>
+      </div>
+
+      <!-- Top 5 clienti + Incasso previsto -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="card" style="padding:12px">
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:8px">🏆 Top 5 clienti per fatturato</div>
+          ${top5.length > 0 ? top5.map((c,i) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:0.5px solid var(--border);font-size:12px">
+              <div style="max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                <span style="color:var(--text-muted);font-family:var(--font-mono);margin-right:4px">${i+1}.</span>
+                ${_esc(c.nome.substring(0,35))}
+                <span style="font-size:10px;color:var(--text-muted)"> · ${c.n} ${c.n===1?'fatt.':'fatture'}</span>
+              </div>
+              <span style="font-family:var(--font-mono);font-weight:600">${_fmtE(c.totale)}</span>
+            </div>
+          `).join('') : '<div style="text-align:center;color:var(--text-muted);padding:8px;font-size:11px">Nessun dato</div>'}
+        </div>
+        <div class="card" style="padding:12px">
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:8px">💰 Incasso previsto (scadenzario)</div>
+          ${incTot > 0 ? `
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px">
+              <span style="color:#27500A">Entro 30 giorni:</span><span style="font-family:var(--font-mono);text-align:right;font-weight:600">${_fmtE(inc30)}</span>
+              <span style="color:#8B6A00">31–60 giorni:</span><span style="font-family:var(--font-mono);text-align:right">${_fmtE(inc60)}</span>
+              <span style="color:#8B6A00">61–90 giorni:</span><span style="font-family:var(--font-mono);text-align:right">${_fmtE(inc90)}</span>
+              ${incOltre > 0 ? `<span style="color:#A32D2D">Oltre 90 giorni:</span><span style="font-family:var(--font-mono);text-align:right">${_fmtE(incOltre)}</span>` : ''}
+              <span style="border-top:1px solid var(--border);padding-top:4px;margin-top:2px;font-weight:700">Totale:</span>
+              <span style="font-family:var(--font-mono);text-align:right;font-weight:700;border-top:1px solid var(--border);padding-top:4px;margin-top:2px;color:var(--primary)">${_fmtE(incTot)}</span>
+            </div>
+          ` : '<div style="text-align:center;color:var(--text-muted);padding:8px;font-size:11px">Nessun pagamento futuro</div>'}
+        </div>
+      </div>
+    `;
+
+  } catch (e) {
+    console.error('[caricaDashboardFatture]', e);
+    wrap.innerHTML = '<div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px;border-radius:4px;color:#791F1F;font-size:12px">Errore caricamento dashboard: ' + _esc(e.message) + '</div>';
+  }
+}
+
+// Modale: lista ordini clienti nel periodo senza fattura Danea corrispondente
+function apriListaOrdiniSenzaFattura() {
+  const ord = window._fattOrdiniSenzaFatt || [];
+  if (!ord.length) return;
+  const righe = ord.map(o => {
+    const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+    const totNetto = noIva * Number(o.litri||0);
+    return `
+      <tr style="border-bottom:0.5px solid var(--border)">
+        <td style="padding:5px 8px">${_fmtD(o.data)}</td>
+        <td style="padding:5px 8px">${_esc(o.cliente||'—')}</td>
+        <td style="padding:5px 8px">${_esc(o.prodotto||'—')}</td>
+        <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${Number(o.litri||0).toLocaleString('it-IT')}</td>
+        <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(totNetto)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const totImp = ord.reduce((s,o) => {
+    const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+    return s + noIva * Number(o.litri||0);
+  }, 0);
+
+  const html = `
+    <div style="font-size:13px">
+      <div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:10px 12px;border-radius:4px;margin-bottom:10px;font-size:12px;color:#8B6A00">
+        ⚠ <strong>${ord.length} ordini consegnati</strong> nel periodo <strong>non risultano fatturati</strong> in Danea.
+        Può essere: fattura non ancora emessa, fattura di un altro periodo, ordine consegnato per errore, ecc.
+      </div>
+      <div style="max-height:450px;overflow-y:auto">
+        <table style="width:100%;font-size:11px">
+          <thead style="position:sticky;top:0;background:var(--primary);color:#fff">
+            <tr>
+              <th style="padding:6px 8px;text-align:left">Data</th>
+              <th style="padding:6px 8px;text-align:left">Cliente</th>
+              <th style="padding:6px 8px;text-align:left">Prodotto</th>
+              <th style="padding:6px 8px;text-align:right">Litri</th>
+              <th style="padding:6px 8px;text-align:right">Importo netto</th>
+            </tr>
+          </thead>
+          <tbody>${righe}</tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--primary);background:var(--bg);font-weight:700">
+              <td colspan="4" style="padding:6px 8px;text-align:right">Totale netto mancante:</td>
+              <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#A32D2D">${_fmtE(totImp)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+  apriModale('⚠ Ordini senza fattura — ' + ord.length + ' record', html);
+}
+
+// Modale: lista fatture orfane (senza ordine PhoenixFuel collegato)
+function apriListaFattureOrfane() {
+  const fatt = window._fattFattureOrfane || [];
+  if (!fatt.length) return;
+  const righe = fatt.map(f => `
+    <tr style="border-bottom:0.5px solid var(--border);cursor:pointer" onclick="apriDettaglioFattura('${f.id}')">
+      <td style="padding:5px 8px;font-family:var(--font-mono);font-weight:600">${_esc(f.numero)}/${f.anno}</td>
+      <td style="padding:5px 8px">${_fmtD(f.data)}</td>
+      <td style="padding:5px 8px">${_esc(f.cessionario_denominazione||'—')}</td>
+      <td style="padding:5px 8px;font-family:var(--font-mono);font-size:10px">${_esc(f.cessionario_piva||'—')}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(f.importo_totale)}</td>
+    </tr>
+  `).join('');
+
+  const totImp = fatt.reduce((s,f)=>s+Number(f.importo_totale||0),0);
+
+  const html = `
+    <div style="font-size:13px">
+      <div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px 12px;border-radius:4px;margin-bottom:10px;font-size:12px;color:#791F1F">
+        ✗ <strong>${fatt.length} fatture orfane</strong>: emesse in Danea ma nessuna riga prodotto è stata collegata a un ordine PhoenixFuel al momento dell'import.
+        Clicca una riga per vedere il dettaglio.
+      </div>
+      <div style="max-height:450px;overflow-y:auto">
+        <table style="width:100%;font-size:11px">
+          <thead style="position:sticky;top:0;background:var(--primary);color:#fff">
+            <tr>
+              <th style="padding:6px 8px;text-align:left">N°</th>
+              <th style="padding:6px 8px;text-align:left">Data</th>
+              <th style="padding:6px 8px;text-align:left">Cliente</th>
+              <th style="padding:6px 8px;text-align:left">PIVA</th>
+              <th style="padding:6px 8px;text-align:right">Totale</th>
+            </tr>
+          </thead>
+          <tbody>${righe}</tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--primary);background:var(--bg);font-weight:700">
+              <td colspan="4" style="padding:6px 8px;text-align:right">Totale:</td>
+              <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(totImp)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+  apriModale('✗ Fatture orfane — ' + fatt.length + ' record', html);
 }
 
 async function emettiiFattura(id){
@@ -359,76 +662,124 @@ async function generaFattura(){
 // ═════════════════════════════════════════════════════════════
 
 async function apriDettaglioFattura(id){
-  const { data: f } = await sb.from('fatture').select('*').eq('id', id).single();
-  const { data: righe } = await sb.from('fattura_righe').select('*').eq('fattura_id', id).order('numero_riga');
-  if(!f) return;
+  const { data: f, error: errF } = await sb.from('fatture_emesse').select('*').eq('id', id).single();
+  if(errF || !f){ toast('Fattura non trovata: ' + (errF?.message||'')); return; }
 
-  // Carica DAS collegati alla fattura (sia DAS firmati dal cliente che DAS del fornitore)
-  const { data: dasAllegati } = await sb.from('documenti_ordine')
-    .select('id,nome_file,percorso_storage,ordine_id,tipo')
-    .eq('fattura_id', id)
-    .in('tipo', ['das','das_firmato']);
+  const [{ data: righe }, { data: pagamenti }] = await Promise.all([
+    sb.from('fatture_righe').select('*').eq('fattura_id', id).order('numero_linea'),
+    sb.from('fatture_pagamenti').select('*').eq('fattura_id', id).order('data_scadenza'),
+  ]);
 
-  const html = `
-    <div style="font-size:13px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <div><span style="color:var(--text-muted);font-size:11px">N° Fattura</span><div style="font-weight:700;font-size:16px">${f.numero}/${f.anno}</div></div>
-        <div><span style="color:var(--text-muted);font-size:11px">Stato</span><div style="margin-top:2px">${badgeFattura(f.stato)}</div></div>
-        <div><span style="color:var(--text-muted);font-size:11px">Data</span><div style="font-weight:600">${_fmtD(f.data)}</div></div>
-        <div><span style="color:var(--text-muted);font-size:11px">Scadenza</span><div style="font-weight:600;color:${f.stato==='emessa'?'#C62828':'inherit'}">${_fmtD(f.data_scadenza)}</div></div>
-        <div style="grid-column:1/-1"><span style="color:var(--text-muted);font-size:11px">Cliente</span><div style="font-weight:600">${_esc(f.cliente_nome||'—')}</div></div>
-      </div>
+  const matchBadge = {
+    'matched':   '<span style="background:#639922;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">✓ Matched</span>',
+    'uncertain': '<span style="background:#D4A017;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">⚠ Revisione</span>',
+    'orphan':    '<span style="background:#A32D2D;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">✗ Orfana</span>',
+    'pending':   '<span style="background:#888;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px">· Pending</span>',
+  }[f.match_status] || `<span>${_esc(f.match_status||'—')}</span>`;
 
-      <table style="width:100%;font-size:11px;margin-bottom:12px">
-        <thead><tr style="background:var(--primary);color:#fff">
-          <th style="padding:5px 8px;text-align:left">Riga</th>
-          <th style="padding:5px 8px;text-align:left">Descrizione</th>
-          <th style="padding:5px 8px;text-align:right">Q.tà (L)</th>
-          <th style="padding:5px 8px;text-align:right">Prezzo/L</th>
-          <th style="padding:5px 8px;text-align:right">Imponibile</th>
-          <th style="padding:5px 8px;text-align:center">IVA%</th>
+  // Calcolo riga-per-riga: score e ordine collegato
+  const righeHtml = (righe||[]).map(r=>{
+    const score = r.riga_match_score;
+    const scoreBadge = score != null
+      ? (score >= 5 ? '<span style="color:#639922">✓</span>'
+        : score >= 3 ? '<span style="color:#D4A017">⚠</span>'
+        : '<span style="color:#A32D2D">✗</span>')
+      : '<span style="color:#ccc">—</span>';
+    const ordLink = r.ordine_id
+      ? `<span style="font-size:10px;font-family:monospace;color:#639922" title="Ordine linkato: ${r.ordine_id}">🔗 ord</span>`
+      : '';
+    return `
+      <tr style="border-bottom:0.5px solid var(--border)">
+        <td style="padding:4px 8px">${r.numero_linea}</td>
+        <td style="padding:4px 8px">${_esc((r.descrizione||'').substring(0,80))}${(r.descrizione||'').length>80?'…':''}</td>
+        <td style="padding:4px 8px">${_esc(r.prodotto_normalizzato||'—')}</td>
+        <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${r.quantita ? Number(r.quantita).toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:2}) : '—'}</td>
+        <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${r.prezzo_unitario!=null ? Number(r.prezzo_unitario).toFixed(5) : '—'}</td>
+        <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(r.prezzo_totale)}</td>
+        <td style="padding:4px 8px;text-align:center">${r.aliquota_iva!=null ? r.aliquota_iva + '%' : '—'}</td>
+        <td style="padding:4px 8px;text-align:center">${_esc(r.das_numero_dogane||'—')}</td>
+        <td style="padding:4px 8px;text-align:center">${scoreBadge} ${ordLink}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // Pagamenti
+  const pagHtml = (pagamenti && pagamenti.length) ? `
+    <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💳 Pagamenti (${pagamenti.length})</div>
+      <table style="width:100%;font-size:11px">
+        <thead><tr style="background:var(--bg);color:var(--text-muted)">
+          <th style="padding:4px 8px;text-align:left">Scadenza</th>
+          <th style="padding:4px 8px;text-align:left">Modalità</th>
+          <th style="padding:4px 8px;text-align:right">Importo</th>
+          <th style="padding:4px 8px;text-align:left">IBAN</th>
+          <th style="padding:4px 8px">Stato</th>
         </tr></thead>
         <tbody>
-          ${(righe||[]).map(r=>`
+          ${pagamenti.map(p=>`
             <tr style="border-bottom:0.5px solid var(--border)">
-              <td style="padding:4px 8px">${r.numero_riga}</td>
-              <td style="padding:4px 8px">${_esc(r.descrizione)}</td>
-              <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${Number(r.quantita).toLocaleString('it-IT',{minimumFractionDigits:0})}</td>
-              <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${Number(r.prezzo_unitario).toFixed(5)}</td>
-              <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(r.imponibile)}</td>
-              <td style="padding:4px 8px;text-align:center">${r.aliquota_iva}%</td>
+              <td style="padding:4px 8px">${_fmtD(p.data_scadenza)}</td>
+              <td style="padding:4px 8px">${_esc(p.modalita_pagamento||'—')}</td>
+              <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(p.importo)}</td>
+              <td style="padding:4px 8px;font-family:var(--font-mono);font-size:10px">${_esc(p.iban||'—')}</td>
+              <td style="padding:4px 8px">${_esc(p.stato||'—')}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
+    </div>` : '';
+
+  // Indirizzo cessionario (se presente)
+  const indirizzoShow = [f.cessionario_indirizzo, f.cessionario_cap, f.cessionario_comune, f.cessionario_provincia ? '('+f.cessionario_provincia+')' : '']
+    .filter(Boolean).join(' ');
+
+  const html = `
+    <div style="font-size:13px;max-width:1000px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div><span style="color:var(--text-muted);font-size:11px">N° Fattura</span><div style="font-weight:700;font-size:16px">${_esc(f.numero)}/${f.anno||'?'}</div></div>
+        <div><span style="color:var(--text-muted);font-size:11px">Match</span><div style="margin-top:2px">${matchBadge}${f.match_score!=null ? ' <span style="font-size:10px;color:var(--text-muted)">score '+f.match_score+'/5</span>' : ''}</div></div>
+        <div><span style="color:var(--text-muted);font-size:11px">Data</span><div style="font-weight:600">${_fmtD(f.data)}</div></div>
+        <div><span style="color:var(--text-muted);font-size:11px">Tipo documento</span><div style="font-weight:600">${_esc(f.tipo_documento||'—')}</div></div>
+        <div style="grid-column:1/-1">
+          <span style="color:var(--text-muted);font-size:11px">Cliente</span>
+          <div style="font-weight:600">${_esc(f.cessionario_denominazione||'—')}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            PIVA: <code style="font-family:var(--font-mono)">${_esc(f.cessionario_piva||'—')}</code>
+            ${f.cessionario_codfiscale && f.cessionario_codfiscale!==f.cessionario_piva ? ' · CF: <code>'+_esc(f.cessionario_codfiscale)+'</code>' : ''}
+          </div>
+          ${indirizzoShow ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${_esc(indirizzoShow)}</div>` : ''}
+        </div>
+      </div>
+
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:11px;margin-bottom:12px">
+          <thead><tr style="background:var(--primary);color:#fff">
+            <th style="padding:5px 8px;text-align:left">#</th>
+            <th style="padding:5px 8px;text-align:left">Descrizione</th>
+            <th style="padding:5px 8px;text-align:left">Prodotto</th>
+            <th style="padding:5px 8px;text-align:right">Q.tà</th>
+            <th style="padding:5px 8px;text-align:right">Prezzo/u</th>
+            <th style="padding:5px 8px;text-align:right">Imponibile</th>
+            <th style="padding:5px 8px;text-align:center">IVA</th>
+            <th style="padding:5px 8px;text-align:center">DAS</th>
+            <th style="padding:5px 8px;text-align:center">Match</th>
+          </tr></thead>
+          <tbody>${righeHtml}</tbody>
+        </table>
+      </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;background:var(--bg);border-radius:8px;padding:12px">
-        <div><div style="font-size:10px;color:var(--text-muted)">Imponibile</div><div style="font-family:var(--font-mono);font-weight:600">${_fmtE(f.imponibile)}</div></div>
-        <div><div style="font-size:10px;color:var(--text-muted)">IVA</div><div style="font-family:var(--font-mono);font-weight:600">${_fmtE(f.iva)}</div></div>
-        <div><div style="font-size:10px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:16px;color:var(--primary)">${_fmtE(f.totale)}</div></div>
+        <div><div style="font-size:10px;color:var(--text-muted)">Imponibile</div><div style="font-family:var(--font-mono);font-weight:600">${_fmtE(f.imponibile_totale)}</div></div>
+        <div><div style="font-size:10px;color:var(--text-muted)">IVA</div><div style="font-family:var(--font-mono);font-weight:600">${_fmtE(f.iva_totale)}</div></div>
+        <div><div style="font-size:10px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:16px;color:var(--primary)">${_fmtE(f.importo_totale)}</div></div>
       </div>
 
-      ${f.note?`<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">Note: ${_esc(f.note)}</div>`:''}
-    ${dasAllegati&&dasAllegati.length?`
-    <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">
-      <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📎 DAS firmati allegati</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${dasAllegati.map(d=>{
-          const url=`${SUPABASE_URL}/storage/v1/object/public/Das/${d.percorso_storage}`;
-          return `<a href="${url}" target="_blank"
-            style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#E6F1FB;color:#0C447C;border-radius:8px;font-size:12px;text-decoration:none;border:0.5px solid #85B7EB">
-            📄 ${_esc(d.nome_file||'DAS')}
-          </a>`;
-        }).join('')}
-      </div>
-    </div>`:''}
-    </div>
-    <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn-primary" style="flex:1;background:#6B5FCC" onclick="generaXMLFatturaPA('${f.id}');chiudiModale()">📥 Scarica XML FatturaPA</button>
-      <button class="btn-primary" onclick="stampaFattura('${f.id}')" style="flex:1">🖨️ Stampa PDF</button>
+      ${pagHtml}
+
+      ${f.note ? `<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">Note: ${_esc(f.note)}</div>` : ''}
     </div>
   `;
-  apriModale('Fattura '+f.numero+'/'+f.anno, html);
+  apriModale('Fattura '+_esc(f.numero)+'/'+(f.anno||'?'), html);
 }
 
 // ═════════════════════════════════════════════════════════════

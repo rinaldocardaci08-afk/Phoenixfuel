@@ -1064,13 +1064,8 @@
 
         <!-- PANEL: ELENCO FATTURE -->
         <div id="fatt-panel-elenco" class="fatt-panel">
-          <!-- KPI totali -->
-          <div class="grid4" style="margin-bottom:14px">
-            <div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value" id="fatt-tot-imponibile">—</div></div>
-            <div class="kpi"><div class="kpi-label">IVA</div><div class="kpi-value" id="fatt-tot-iva">—</div></div>
-            <div class="kpi"><div class="kpi-label">Totale fatturato</div><div class="kpi-value" id="fatt-tot-totale">—</div></div>
-            <div class="kpi" style="background:#FFF3CD"><div class="kpi-label">Da incassare</div><div class="kpi-value" id="fatt-tot-da-incassare">—</div></div>
-          </div>
+          <!-- Dashboard controllo integrità (popolato da caricaDashboardFatture) -->
+          <div id="fatt-dashboard"></div>
 
           <!-- Filtri -->
           <div class="card" style="margin-bottom:14px">
@@ -1078,18 +1073,29 @@
               <select id="fatt-filtro-anno" onchange="caricaFatture()"
                 style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
               </select>
-              <select id="fatt-filtro-stato" onchange="caricaFatture()"
+              <select id="fatt-filtro-mese" onchange="caricaFatture()"
                 style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
-                <option value="">Tutti gli stati</option>
-                <option value="bozza">Bozza</option>
-                <option value="emessa">Emessa</option>
-                <option value="pagata">Pagata</option>
-                <option value="annullata">Annullata</option>
+                <option value="">Tutto l'anno</option>
+                <option value="1">Gennaio</option>
+                <option value="2">Febbraio</option>
+                <option value="3">Marzo</option>
+                <option value="4">Aprile</option>
+                <option value="5">Maggio</option>
+                <option value="6">Giugno</option>
+                <option value="7">Luglio</option>
+                <option value="8">Agosto</option>
+                <option value="9">Settembre</option>
+                <option value="10">Ottobre</option>
+                <option value="11">Novembre</option>
+                <option value="12">Dicembre</option>
               </select>
               <select id="fatt-filtro-cliente" onchange="caricaFatture()"
-                style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);min-width:180px">
                 <option value="">Tutti i clienti</option>
               </select>
+              <input type="text" id="fatt-filtro-search" placeholder="🔍 Cerca per numero/PIVA/nome..."
+                onkeyup="if(event.key==='Enter')caricaFatture()"
+                style="flex:1;min-width:200px;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)" />
               <button class="btn-primary" style="font-size:12px;padding:6px 14px" onclick="caricaFatture()">🔍 Filtra</button>
             </div>
           </div>
@@ -1099,15 +1105,15 @@
             <table>
               <thead>
                 <tr>
-                  <th>N° Fattura</th><th>Data</th><th>Cliente</th>
+                  <th>N° Fattura</th><th>Data</th><th>Cliente</th><th>PIVA</th>
                   <th style="text-align:right">Imponibile</th>
                   <th style="text-align:right">IVA</th>
                   <th style="text-align:right">Totale</th>
-                  <th>Stato</th><th>Azioni</th>
+                  <th>Match</th><th>Azioni</th>
                 </tr>
               </thead>
               <tbody id="fatt-elenco-tbody">
-                <tr><td colspan="8" class="loading">Caricamento…</td></tr>
+                <tr><td colspan="9" class="loading">Caricamento…</td></tr>
               </tbody>
             </table>
           </div>
@@ -2714,7 +2720,7 @@
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260421b"></script>
-<script src="pf-deposito.js?v=20260423a"></script>
+<script src="pf-deposito.js?v=20260421b"></script>
 <script src="pf-anagrafica.js?v=20260421b"></script>
 <script src="pf-data.js?v=20260419f"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
@@ -2744,8 +2750,8 @@
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-allegati.js?v=20260416d"></script>
-<script src="pf-fatture.js?v=1775149951158"></script>
-<script src="pf-fatture-import.js?v=20260423f"></script>
+<script src="pf-fatture.js?v=20260423h"></script>
+<script src="pf-fatture-import.js?v=20260422c"></script>
 <script src="pf-dep-giacenze.js?v=20260419i"></script>
 <script src="pf-dep-giac-week.js?v=20260420a"></script>
 <script src="pf-system.js?v=20260417a"></script>
