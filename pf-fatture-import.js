@@ -23,9 +23,10 @@ const MESI = {
 // Soglie scoring (costanti)
 const MATCH_TOLL_DATA_GG      = 2;     // ±2 giorni
 const MATCH_TOLL_LITRI_PCT    = 0.01;  // ±1%
-const MATCH_TOLL_IMPONIBILE_E = 0.50;  // ±€0,50
+const MATCH_TOLL_IMPONIBILE_E = 5.00;  // ±€5 (arrotondamenti Danea vs PhoenixFuel sono tipicamente < €3)
 const MATCH_SOGLIA_MATCHED    = 5;     // score per "matched"
 const MATCH_SOGLIA_UNCERTAIN  = 3;     // score min per "uncertain"
+const CORREZIONE_CONFIRM_E    = 50.00; // se |diff| > €50 chiede confirm aggiuntivo per UPDATE margine
 
 function normalizzaProdotto(desc) {
   const d = (desc || '').toLowerCase();
@@ -1108,6 +1109,29 @@ function _apriDettaglio(idx) {
       </div>
     ` : (st !== 'servizio' ? `<div style="font-size:10px;color:#A32D2D;margin-top:4px">Nessun ordine candidato trovato nel periodo.</div>` : '');
 
+    // Bottone correzione: solo se uncertain + solo criterio rosso = Imponibile + c'è ordine candidato
+    // (criterio principale per correzione rapida: margine dell'ordine si aggiusta per pareggiare l'imponibile fattura)
+    let correzioneHtml = '';
+    if (st === 'uncertain' && ref && m.ordine_id) {
+      const solTutto = d.piva && d.data && d.prodotto && d.litri && !d.imponibile;
+      if (solTutto) {
+        const diffImp = Number(r.prezzo_totale || 0) - Number(ref.imponibile || 0);
+        const segnoDiff = diffImp >= 0 ? '+' : '';
+        correzioneHtml = `
+          <div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:6px 10px;border-radius:4px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-size:10px;color:#8B6A00;flex:1">
+              <strong>Differenza imponibile:</strong> ${segnoDiff}€ ${_fmtN(diffImp)} (fattura − ordine)
+              <br><span style="color:#666">Correggendo: aggiorno il margine dell'ordine di ${segnoDiff}€ ${_fmtN(diffImp / Number(ref.litri || 1))}/L</span>
+            </div>
+            <button class="btn-primary" style="background:#D4A017;font-size:10px;padding:4px 10px"
+                    onclick="window.pfFattureImport._accettaCorrezione('${m.ordine_id}', ${Number(r.prezzo_totale || 0)}, ${Number(ref.imponibile || 0)}, ${Number(ref.litri || 0)}, ${idx})">
+              ✓ Accetta correzione da fattura
+            </button>
+          </div>
+        `;
+      }
+    }
+
     return `
       <div style="padding:10px;border-bottom:1px solid #e8e5dc">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
@@ -1121,6 +1145,7 @@ function _apriDettaglio(idx) {
         <div style="font-size:10px;color:#888;margin-top:2px">${esc((r.descrizione || '').substring(0, 160))}${r.descrizione && r.descrizione.length > 160 ? '…' : ''}</div>
         ${scoringHtml}
         ${refHtml}
+        ${correzioneHtml}
       </div>
     `;
   }).join('');
@@ -1287,12 +1312,79 @@ function _bindCheckboxPiva() {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ACCETTA CORREZIONE DA FATTURA
+// Aggiorna SOLO ordini.margine per far pareggiare l'imponibile ordine con
+// quello fattura. costo_litro e trasporto_litro restano invariati (snapshot).
+// Protezione: confirm se differenza > €50 (arrotondamenti normali < €5, qui
+// chiediamo al boss di convalidare qualsiasi scostamento significativo).
+// ═══════════════════════════════════════════════════════════════════════════
+async function _accettaCorrezione(ordineId, impFattura, impOrdine, litri, idxFattura) {
+  if (!ordineId) { toast('Ordine non identificato'); return; }
+  const diffTot = Number(impFattura) - Number(impOrdine);
+  const diffPerLitro = litri > 0 ? diffTot / litri : 0;
+
+  if (Math.abs(diffTot) > CORREZIONE_CONFIRM_E) {
+    const msg = 'Differenza elevata: €' + _fmtN(diffTot) + '\n\n' +
+                'Ordine attuale: €' + _fmtN(impOrdine) + '\n' +
+                'Fattura: €' + _fmtN(impFattura) + '\n\n' +
+                'Confermi l\'aggiornamento del margine dell\'ordine di €' + _fmtN(diffPerLitro) + '/L ?';
+    if (!confirm(msg)) return;
+  }
+
+  try {
+    // Leggi ordine fresco per lock su margine corrente
+    const { data: ord, error: errR } = await sb.from('ordini')
+      .select('id, data, cliente, prodotto, litri, costo_litro, trasporto_litro, margine, iva')
+      .eq('id', ordineId).single();
+    if (errR || !ord) {
+      toast('Errore lettura ordine: ' + (errR?.message || 'non trovato'));
+      return;
+    }
+
+    // Nuovo margine = margine attuale + diffPerLitro (compensa la differenza)
+    const margineAtt = Number(ord.margine || 0);
+    const margineNuovo = Math.round((margineAtt + diffPerLitro) * 1000000) / 1000000;
+
+    const { error: errU } = await sb.from('ordini')
+      .update({ margine: margineNuovo })
+      .eq('id', ordineId);
+    if (errU) { toast('Errore update: ' + errU.message); return; }
+
+    // Audit log
+    if (typeof _auditLog === 'function') {
+      _auditLog('correzione_ordine_da_fattura', 'ordini',
+        ord.cliente + ' ' + ord.data + ' ' + ord.prodotto +
+        ' | margine ' + margineAtt.toFixed(6) + ' → ' + margineNuovo.toFixed(6) +
+        ' | diff €' + diffTot.toFixed(2) + ' (' + diffPerLitro.toFixed(6) + '/L)' +
+        ' | fonte import Danea batch ' + (_batchId || '?') +
+        ' | ordine_id:' + ordineId);
+    }
+
+    // Aggiorna la copia in memoria così il re-calcolo sia coerente
+    const ordMem = _ordiniPeriodo.find(o => o.id === ordineId);
+    if (ordMem) ordMem.margine = margineNuovo;
+
+    toast('✓ Correzione applicata');
+    chiudiModal();
+
+    // Ricalcola match sulla fattura specifica (e globale) per aggiornare UI
+    _calcolaMatchTutte();
+    _renderStep3UI();
+
+  } catch (e) {
+    console.error('[_accettaCorrezione]', e);
+    toast('Errore: ' + e.message);
+  }
+}
+
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
   _onFileSelected: _onFileSelected,
   _apriDettaglio: _apriDettaglio,
   _togglePivaAll: _togglePivaAll,
   _applicaPivaBatch: _applicaPivaBatch,
+  _accettaCorrezione: _accettaCorrezione,
 };
 
 })();
