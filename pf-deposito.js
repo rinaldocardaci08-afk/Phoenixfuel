@@ -143,7 +143,8 @@ async function caricaDeposito() {
     // Guardia permesso modifica CMP: admin sempre, altri solo se sub-permesso 'deposito.modifica-cmp' attivo
     var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
     var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
-    const cmpLabel = '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong>' + (totG > 0 ? ' · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' : '') + cmpEditBtn + '</div>';
+    var cmpAnalisiBtn = ' <button onclick="_apriAnalisiCMP(\'' + esc(prodNome) + '\',\'deposito_vibo\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Analisi CMP">🔍 Analisi</button>';
+    const cmpLabel = '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong>' + (totG > 0 ? ' · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' : '') + cmpEditBtn + cmpAnalisiBtn + '</div>';
     const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
     // Percentuale totale prodotto rispetto capacità gruppo
     const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
@@ -940,9 +941,9 @@ async function caricaAutoconsumo() {
     }
   }
 
-  // Prelievi mese (esclude eliminati soft-delete)
+  // Prelievi mese
   const inizioMese = oggiISO.substring(0,8) + '01';
-  const { data: prelMese } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', inizioMese).lte('data', oggiISO).neq('eliminato', true);
+  const { data: prelMese } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', inizioMese).lte('data', oggiISO);
   const totMese = (prelMese||[]).reduce((s,p) => s + Number(p.litri), 0);
   document.getElementById('ac-prelievi-mese').textContent = fmtL(totMese);
 
@@ -1135,22 +1136,15 @@ async function caricaPrelievi() {
   const a = document.getElementById('ac-filtro-a').value;
   const filtroCamion = document.getElementById('ac-filtro-camion').value;
   if (!da || !a) return;
-
-  // ── Inietta toggle "mostra eliminati" dinamicamente se non presente ──
-  // (evita di modificare index.html; il toggle viene creato a runtime la prima volta)
-  _assicuraToggleEliminati();
-  const mostraEliminati = document.getElementById('ac-mostra-eliminati')?.checked || false;
-
   let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a);
   if (filtroCamion) q = q.eq('mezzo_targa', filtroCamion);
-  if (!mostraEliminati) q = q.neq('eliminato', true);
   const { data } = await q.order('data',{ascending:false}).order('created_at',{ascending:false});
   const tbody = document.getElementById('ac-tabella-prelievi');
 
-  // Popola dropdown camion (solo se vuoto o cambio periodo). Esclude eliminati.
+  // Popola dropdown camion (solo se vuoto o cambio periodo)
   const sel = document.getElementById('ac-filtro-camion');
   if (sel.options.length <= 1) {
-    const { data: tutti } = await sb.from('prelievi_autoconsumo').select('mezzo_targa').gte('data', da).lte('data', a).neq('eliminato', true);
+    const { data: tutti } = await sb.from('prelievi_autoconsumo').select('mezzo_targa').gte('data', da).lte('data', a);
     const targhe = [...new Set((tutti||[]).map(r => r.mezzo_targa).filter(Boolean))].sort();
     const valPrec = sel.value;
     sel.innerHTML = '<option value="">Tutti i camion</option>' + targhe.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('');
@@ -1163,104 +1157,19 @@ async function caricaPrelievi() {
     return;
   }
   let totLitri = 0;
-  let totEliminati = 0;
   tbody.innerHTML = data.map(function(r) {
-    if (r.eliminato) {
-      totEliminati++;
-      // Riga eliminata: grigio chiaro, testo barrato, motivo in evidenza, no bottone elimina
-      const note = r.note ? esc(r.note) : '';
-      const motivo = r.motivo_eliminazione ? esc(r.motivo_eliminazione) : '—';
-      const chi = r.eliminato_da ? esc(r.eliminato_da) : '?';
-      const quando = r.eliminato_il ? new Date(r.eliminato_il).toLocaleDateString('it-IT') : '';
-      return '<tr style="background:#fafaf8;color:#999;text-decoration:line-through">' +
-        '<td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td>' +
-        '<td>' + esc(r.mezzo_targa||'—') + '</td>' +
-        '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
-        '<td style="font-size:10px;text-decoration:none;color:#A32D2D"><strong>❌ ELIMINATO</strong> ' + (quando ? 'il ' + quando : '') + ' da <strong>' + chi + '</strong><br><span style="color:#666">Motivo: ' + motivo + '</span>' + (note ? '<br><span style="color:#999">Note orig: ' + note + '</span>' : '') + '</td>' +
-        '<td></td>' +
-        '</tr>';
-    }
     totLitri += Number(r.litri);
     return '<tr><td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td><td>' + esc(r.mezzo_targa||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaPrelievo(\'' + r.id + '\')">x</button></td></tr>';
   }).join('');
-  let totStr = 'Totale periodo' + (filtroCamion ? ' (' + filtroCamion + ')' : '') + ': <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + (data.length - totEliminati) + ' prelievi attivi';
-  if (mostraEliminati && totEliminati > 0) totStr += ' <span style="color:#A32D2D">(+' + totEliminati + ' eliminati mostrati)</span>';
-  document.getElementById('ac-totale-prelievi').innerHTML = totStr;
+  document.getElementById('ac-totale-prelievi').innerHTML = 'Totale periodo' + (filtroCamion ? ' (' + filtroCamion + ')' : '') + ': <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + data.length + ' prelievi';
 }
 
-// Crea (una volta sola) il toggle "mostra eliminati" accanto ai filtri del registro prelievi.
-// Non modifica index.html: injection a runtime.
-function _assicuraToggleEliminati() {
-  if (document.getElementById('ac-mostra-eliminati')) return;
-  const filtroCamionEl = document.getElementById('ac-filtro-camion');
-  if (!filtroCamionEl) return;
-  const wrap = document.createElement('label');
-  wrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);cursor:pointer;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg)';
-  wrap.title = 'Mostra anche i prelievi eliminati (soft-delete)';
-  wrap.innerHTML = '<input type="checkbox" id="ac-mostra-eliminati" onchange="caricaPrelievi()" style="margin:0" /> Mostra eliminati';
-  // Inserisci subito dopo il select camion
-  filtroCamionEl.parentNode.insertBefore(wrap, filtroCamionEl.nextSibling);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// ELIMINAZIONE PRELIEVO AUTOCONSUMO — SOFT DELETE (23/04/2026)
-// Regola costituzionale: il prelievo non viene mai cancellato fisicamente
-// dal DB. Si imposta eliminato=true + motivo obbligatorio + chi/quando.
-// In storico viene nascosto di default, mostrabile col toggle dedicato.
-// Guardia anti-doppio-click: la UPDATE usa .eq('eliminato', false) quindi
-// chiamate ripetute non producono rientri multipli in cisterna.
-// ═══════════════════════════════════════════════════════════════════
 async function eliminaPrelievo(id) {
+  if (!confirm('Eliminare questo prelievo? I litri verranno restituiti alla cisterna.')) return;
   const { data: prel } = await sb.from('prelievi_autoconsumo').select('*').eq('id', id).single();
-  if (!prel) { toast('Prelievo non trovato'); return; }
-  if (prel.eliminato) { toast('Prelievo già eliminato'); caricaPrelievi(); return; }
-
-  const prodottoLbl = prel.prodotto || 'Gasolio Autotrazione';
-  const dataLbl = new Date(prel.data).toLocaleDateString('it-IT');
-  const targaLbl = prel.mezzo_targa || '—';
-  const litriLbl = fmtL(prel.litri);
-  const noteOrig = prel.note ? esc(prel.note) : '—';
-
-  let html = '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#A32D2D">🗑️ Elimina prelievo autoconsumo</div>';
-  html += '<div style="background:#fafaf8;padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12px;line-height:1.7">';
-  html += '<div><strong>Data:</strong> ' + dataLbl + '</div>';
-  html += '<div><strong>Prodotto:</strong> ' + esc(prodottoLbl) + '</div>';
-  html += '<div><strong>Camion:</strong> ' + esc(targaLbl) + '</div>';
-  html += '<div><strong>Litri:</strong> ' + litriLbl + '</div>';
-  html += '<div><strong>Note:</strong> ' + noteOrig + '</div>';
-  html += '</div>';
-  html += '<div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:10px 12px;border-radius:4px;margin-bottom:12px;font-size:12px;color:#8B6A00">';
-  html += 'ℹ️ Soft-delete: il prelievo resta nello storico (barrato) con motivo e firma. I <strong>' + litriLbl + '</strong> vengono restituiti alla cisterna.';
-  html += '</div>';
-  html += '<div class="form-group"><label>Motivo eliminazione <span style="color:#A32D2D">*</span></label>';
-  html += '<textarea id="ac-motivo-elim" rows="3" placeholder="Es: prelievo registrato per errore / camion sbagliato / litri errati / duplicato"';
-  html += ' style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;resize:vertical" autofocus></textarea></div>';
-  html += '<div style="display:flex;gap:8px;margin-top:10px">';
-  html += '<button class="btn-primary" style="flex:1;background:#A32D2D" onclick="_confermaEliminaPrelievo(\'' + id + '\')">🗑️ Conferma eliminazione</button>';
-  html += '<button class="btn-primary" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="chiudiModal()">Annulla</button>';
-  html += '</div>';
-  apriModal(html);
-}
-
-async function _confermaEliminaPrelievo(id) {
-  const motivoEl = document.getElementById('ac-motivo-elim');
-  const motivo = (motivoEl?.value || '').trim();
-  if (!motivo || motivo.length < 3) {
-    toast('⚠️ Inserisci un motivo di almeno 3 caratteri');
-    motivoEl?.focus();
-    return;
-  }
-
-  // Read-before-write: livello cisterna corrente + stato prelievo
-  const { data: prel } = await sb.from('prelievi_autoconsumo').select('*').eq('id', id).single();
-  if (!prel) { toast('Prelievo non trovato'); chiudiModal(); return; }
-  if (prel.eliminato) {
-    toast('⚠️ Prelievo già eliminato');
-    chiudiModal();
-    caricaPrelievi();
-    return;
-  }
-
+  if (!prel) return;
+  // Leggo il livello attuale cisterna PRIMA della cancellazione del prelievo
+  // (read-before-write per evitare race condition con cache stale)
   const mappa = window._cisterneAutoconsumo || {};
   const prodPrel = prel.prodotto || 'Gasolio Autotrazione';
   const cisRef = mappa[prodPrel] || window._cisternaAutoconsumo;
@@ -1270,49 +1179,25 @@ async function _confermaEliminaPrelievo(id) {
     if (cisFresh) livelloFresco = Number(cisFresh.livello_attuale);
   }
 
-  // SOFT DELETE con guardia idempotenza: .eq('eliminato', false) garantisce che
-  // un doppio-click non aggiorni due volte e quindi NON produca due rientri.
-  const userNome = (typeof utenteCorrente !== 'undefined' && utenteCorrente)
-    ? (utenteCorrente.nome || utenteCorrente.email || 'sconosciuto')
-    : 'sconosciuto';
-
-  const { data: updated, error } = await sb.from('prelievi_autoconsumo').update({
-    eliminato: true,
-    eliminato_il: new Date().toISOString(),
-    eliminato_da: userNome,
-    motivo_eliminazione: motivo
-  }).eq('id', id).eq('eliminato', false).select();
-
+  const { error } = await sb.from('prelievi_autoconsumo').delete().eq('id', id);
   if (error) { toast('Errore: ' + error.message); return; }
 
-  // ANTI-DOPPIO-RIENTRO: se update non ha toccato righe, NON fare +litri cisterna.
-  // Questo protegge anche da eventuali problemi RLS o race condition futuri.
-  if (!updated || updated.length === 0) {
-    toast('❌ Eliminazione non riuscita (prelievo già eliminato o permessi insufficienti)');
-    chiudiModal();
-    caricaPrelievi();
-    return;
-  }
-
-  // OK: rientro litri in cisterna usando il valore fresco letto
-  if (cisRef && livelloFresco !== null) {
-    const nuovoLivello = livelloFresco + Number(prel.litri);
-    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisRef.id);
-  }
-
-  // Audit log esteso (chi, cosa, perché)
+  // Audit esteso: chi ha cancellato cosa (analogo a ciò che abbiamo fatto su 'prezzi')
   if (typeof _auditLog === 'function') {
     _auditLog('elimina_prelievo_autoconsumo', 'prelievi_autoconsumo',
       prodPrel + ' ' + fmtL(prel.litri) +
       ' | mezzo ' + (prel.mezzo_targa || '—') +
       ' | data ' + (prel.data || '—') +
-      ' | motivo: ' + motivo +
-      (prel.note ? ' | note orig: ' + prel.note : '') +
+      (prel.note ? ' | note: ' + prel.note : '') +
       ' | id:' + id);
   }
 
-  toast('✓ Prelievo eliminato (storico mantenuto con motivo)');
-  chiudiModal();
+  // Restituisci i litri alla cisterna usando il valore fresco letto dal DB
+  if (cisRef && livelloFresco !== null) {
+    const nuovoLivello = livelloFresco + Number(prel.litri);
+    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisRef.id);
+  }
+  toast('Prelievo eliminato');
   // Auto-healing: riallinea cisterne al calcolato pfData
   await pfDepositoRicalcolaCisterne(prodPrel);
   caricaAutoconsumo();
@@ -1391,11 +1276,10 @@ async function pfAcRiconcCalcola() {
     });
     var entrate = entrateRighe.reduce(function(s,r){ return s + Number(r.litri || 0); }, 0);
 
-    // ── 3. Prelievi nel periodo (esclude eliminati soft-delete)
+    // ── 3. Prelievi nel periodo
     var { data: prelRes } = await sb.from('prelievi_autoconsumo')
       .select('id,data,litri,mezzo_targa,prodotto,note')
       .eq('prodotto', prodotto)
-      .neq('eliminato', true)
       .gte('data', da).lte('data', a).order('data');
     // Fallback: prelievi legacy senza campo prodotto → li considero Gasolio Autotrazione (default storico)
     var prelievi = (prelRes || []);
@@ -1403,7 +1287,6 @@ async function pfAcRiconcCalcola() {
       var { data: prelLegacy } = await sb.from('prelievi_autoconsumo')
         .select('id,data,litri,mezzo_targa,prodotto,note')
         .is('prodotto', null)
-        .neq('eliminato', true)
         .gte('data', da).lte('data', a);
       (prelLegacy || []).forEach(function(r){ prelievi.push(r); });
     }
@@ -1503,8 +1386,7 @@ async function stampaPrelievi() {
   const a = document.getElementById('ac-filtro-a').value;
   const filtroCamion = document.getElementById('ac-filtro-camion').value;
   if (!da || !a) { toast('Seleziona il periodo'); return; }
-  // Esclude prelievi eliminati soft-delete dal registro stampato
-  let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a).neq('eliminato', true);
+  let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a);
   if (filtroCamion) q = q.eq('mezzo_targa', filtroCamion);
   const { data } = await q.order('data',{ascending:false});
   if (!data || !data.length) { toast('Nessun prelievo nel periodo'); return; }
@@ -2990,4 +2872,223 @@ async function annullaOperazioneDeposito(ordineId, tipoOperazione) {
     console.error('annullaOperazioneDeposito:', e);
     toast('Errore durante l\'annullamento: ' + (e.message || e));
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALISI CMP — storia variazioni ultimi 15 giorni per prodotto e sede
+// ═══════════════════════════════════════════════════════════════════════════
+// Mostra la catena di calcoli che ha portato al CMP attuale:
+// per ogni entrata merce legge da stazione_cmp_storico:
+//   - data, litri precedenti, CMP precedente
+//   - litri caricati, costo carico
+//   - CMP nuovo risultante
+// Formula ponderata verificabile:
+//   CMP_nuovo = (litri_prec * CMP_prec + litri_caricati * costo_carico) / (litri_prec + litri_caricati)
+// Include tabella + grafico temporale (linea CMP nel tempo).
+// ═══════════════════════════════════════════════════════════════════════════
+async function _apriAnalisiCMP(prodotto, sede) {
+  sede = sede || 'deposito_vibo';
+  var oggi = new Date();
+  var dal = new Date(oggi); dal.setDate(dal.getDate() - 15);
+  var dalISO = dal.toISOString().split('T')[0];
+  var alISO = oggi.toISOString().split('T')[0];
+
+  // Carica storia CMP ultimi 15 giorni
+  var { data: records, error } = await sb.from('stazione_cmp_storico')
+    .select('*')
+    .eq('prodotto', prodotto)
+    .eq('sede', sede)
+    .gte('data', dalISO)
+    .lte('data', alISO)
+    .order('data', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Carica fornitori degli ordini collegati alle variazioni CMP
+  var ordiniIds = (records || []).map(function(r){return r.ordine_id;}).filter(function(id){return !!id;});
+  var fornitoriPerOrdine = {};
+  if (ordiniIds.length > 0) {
+    var { data: ordiniDati } = await sb.from('ordini')
+      .select('id, fornitore')
+      .in('id', ordiniIds);
+    (ordiniDati || []).forEach(function(o) {
+      fornitoriPerOrdine[o.id] = o.fornitore || '—';
+    });
+  }
+
+  // CMP di partenza: quello immediatamente precedente al dalISO
+  var cmpIniziale = await _cmpStoricoAllaData(prodotto, sede, dalISO);
+
+  // Carica CMP corrente (da cisterne, media ponderata)
+  var { data: cisterne } = await sb.from('cisterne')
+    .select('livello_attuale, costo_medio, nome')
+    .eq('prodotto', prodotto).eq('sede', sede);
+  var totL = 0, valTot = 0;
+  (cisterne || []).forEach(function(c) {
+    totL += Number(c.livello_attuale || 0);
+    valTot += Number(c.livello_attuale || 0) * Number(c.costo_medio || 0);
+  });
+  var cmpAttuale = totL > 0 ? valTot / totL : 0;
+
+  // Costruisci righe tabella: per ogni variazione, calcolo verificato
+  var righeHtml = '';
+  var puntiGrafico = [{ data: dalISO, cmp: cmpIniziale, etichetta: 'Inizio periodo' }];
+
+  if (!records || records.length === 0) {
+    righeHtml = '<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Nessuna variazione CMP negli ultimi 15 giorni</td></tr>';
+  } else {
+    records.forEach(function(r, i) {
+      var lp = Number(r.litri_precedenti || 0);
+      var lc = Number(r.litri_caricati || 0);
+      var cp = Number(r.cmp_precedente || 0);
+      var cc = Number(r.costo_carico || 0);
+      var cn = Number(r.cmp_nuovo || 0);
+      // Verifica calcolo (se diverge di più di 0.0001 c'è anomalia)
+      var cnCalcolato = (lp + lc) > 0 ? (lp * cp + lc * cc) / (lp + lc) : 0;
+      var delta = Math.abs(cn - cnCalcolato);
+      var flagAnomalia = delta > 0.0001;
+
+      var dataFmt = _fmtDataIt(r.data);
+      var fornitore = fornitoriPerOrdine[r.ordine_id] || '—';
+      righeHtml += '<tr style="border-bottom:0.5px solid var(--border)">' +
+        '<td style="padding:6px 8px">' + dataFmt + '</td>' +
+        '<td style="padding:6px 8px;font-size:11px" title="' + esc(fornitore) + '">' + esc(fornitore.length > 18 ? fornitore.substring(0, 18) + '…' : fornitore) + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + lp.toLocaleString('it-IT') + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#639922">+' + lc.toLocaleString('it-IT') + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">€ ' + cp.toFixed(4) + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#6B5FCC">€ ' + cc.toFixed(4) + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">€ ' + cn.toFixed(4) + '</td>' +
+        '<td style="padding:6px 8px;text-align:center">' +
+          (flagAnomalia ? '<span style="color:#A32D2D" title="Scostamento calcolo: ' + delta.toFixed(6) + '">⚠</span>' : '<span style="color:#639922">✓</span>') +
+        '</td>' +
+      '</tr>';
+      puntiGrafico.push({ data: r.data, cmp: cn, etichetta: 'Carico ' + (i+1) });
+    });
+  }
+  // Aggiungi punto finale (CMP attuale)
+  puntiGrafico.push({ data: alISO, cmp: cmpAttuale, etichetta: 'Oggi' });
+
+  // Costruisci SVG grafico: linea CMP nel tempo (x=data, y=CMP)
+  var svg = _costruisciGraficoCMP(puntiGrafico);
+
+  // HTML modale
+  var totVariazioni = records ? records.length : 0;
+  var diffTot = cmpAttuale - cmpIniziale;
+  var diffPct = cmpIniziale > 0 ? (diffTot / cmpIniziale) * 100 : 0;
+  var coloreDiff = diffTot >= 0 ? '#A32D2D' : '#27500A';
+  var segnoD = diffTot >= 0 ? '+' : '';
+
+  var html =
+    '<div style="max-width:900px">' +
+      '<h2 style="margin:0 0 4px 0;color:#26215C">🔍 Analisi CMP — ' + esc(prodotto) + '</h2>' +
+      '<div style="color:var(--text-muted);font-size:12px;margin-bottom:14px">Sede: ' + esc(sede) + ' · Periodo: ' + _fmtDataIt(dalISO) + ' → ' + _fmtDataIt(alISO) + ' (15 giorni)</div>' +
+
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">' +
+        '<div class="kpi"><div class="kpi-label">CMP iniziale</div><div class="kpi-value" style="font-size:18px;font-family:var(--font-mono)">€ ' + cmpIniziale.toFixed(4) + '</div></div>' +
+        '<div class="kpi"><div class="kpi-label">CMP attuale</div><div class="kpi-value" style="font-size:18px;font-family:var(--font-mono);color:#26215C">€ ' + cmpAttuale.toFixed(4) + '</div></div>' +
+        '<div class="kpi" style="background:' + (diffTot>=0?'#FDECEC':'#F4FAEC') + '"><div class="kpi-label">Variazione</div><div class="kpi-value" style="font-size:18px;font-family:var(--font-mono);color:' + coloreDiff + '">' + segnoD + '€ ' + Math.abs(diffTot).toFixed(4) + '</div><div style="font-size:10px;color:' + coloreDiff + '">' + segnoD + diffPct.toFixed(2) + '%</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Variazioni</div><div class="kpi-value" style="font-size:18px">' + totVariazioni + '</div></div>' +
+      '</div>' +
+
+      '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:14px">' +
+        '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:6px">📈 Andamento CMP</div>' +
+        svg +
+      '</div>' +
+
+      '<div style="overflow-x:auto">' +
+        '<table style="width:100%;font-size:11px">' +
+          '<thead><tr style="background:var(--primary);color:#fff">' +
+            '<th style="padding:6px 8px;text-align:left">Data</th>' +
+            '<th style="padding:6px 8px;text-align:left">Fornitore</th>' +
+            '<th style="padding:6px 8px;text-align:right">Litri prec.</th>' +
+            '<th style="padding:6px 8px;text-align:right">Entrata (L)</th>' +
+            '<th style="padding:6px 8px;text-align:right">CMP prec.</th>' +
+            '<th style="padding:6px 8px;text-align:right">Costo carico</th>' +
+            '<th style="padding:6px 8px;text-align:right">CMP nuovo</th>' +
+            '<th style="padding:6px 8px;text-align:center">Calc</th>' +
+          '</tr></thead>' +
+          '<tbody>' + righeHtml + '</tbody>' +
+        '</table>' +
+      '</div>' +
+
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:10px;padding:8px;background:var(--bg);border-radius:4px;font-style:italic">' +
+        '<strong>Formula CMP:</strong> CMP<sub>nuovo</sub> = (Litri<sub>prec</sub> × CMP<sub>prec</sub> + Litri<sub>caricati</sub> × Costo<sub>carico</sub>) ÷ (Litri<sub>prec</sub> + Litri<sub>caricati</sub>). ' +
+        'La colonna "Calc" ✓ indica che il CMP storicizzato coincide con il ricalcolo della formula (tolleranza 0,0001 €/L).' +
+      '</div>' +
+
+      '<div style="margin-top:14px;text-align:right">' +
+        '<button class="btn-primary" onclick="chiudiModal()">Chiudi</button>' +
+      '</div>' +
+    '</div>';
+
+  apriModal(html);
+}
+
+// Helper: costruisce SVG grafico temporale CMP (linea, 700x240)
+function _costruisciGraficoCMP(punti) {
+  if (!punti || punti.length < 2) {
+    return '<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:11px">Dati insufficienti per il grafico</div>';
+  }
+  var W = 700, H = 240, PAD_L = 60, PAD_R = 20, PAD_T = 20, PAD_B = 40;
+  var w = W - PAD_L - PAD_R, h = H - PAD_T - PAD_B;
+
+  // Range Y: CMP min/max con padding 5%
+  var cmps = punti.map(function(p){return Number(p.cmp)||0;});
+  var yMin = Math.min.apply(null, cmps);
+  var yMax = Math.max.apply(null, cmps);
+  var yRange = yMax - yMin;
+  if (yRange < 0.001) { yRange = 0.01; } // evita divisione per zero se tutti uguali
+  yMin -= yRange * 0.1;
+  yMax += yRange * 0.1;
+  yRange = yMax - yMin;
+
+  // X: posizione per indice (equispaziato, non cronologico reale)
+  var N = punti.length;
+  function xAt(i) { return PAD_L + (i / (N - 1)) * w; }
+  function yAt(v) { return PAD_T + h - ((v - yMin) / yRange) * h; }
+
+  // Griglia Y (4 linee)
+  var gridY = '';
+  for (var i = 0; i <= 4; i++) {
+    var yv = yMin + (yRange * i / 4);
+    var yp = PAD_T + h - (i / 4) * h;
+    gridY += '<line x1="' + PAD_L + '" y1="' + yp + '" x2="' + (W-PAD_R) + '" y2="' + yp + '" stroke="#e8e5dc" stroke-width="0.5"/>';
+    gridY += '<text x="' + (PAD_L-4) + '" y="' + (yp+3) + '" font-size="9" fill="#888" text-anchor="end">€ ' + yv.toFixed(4) + '</text>';
+  }
+
+  // Linea spezzata
+  var pathD = '';
+  punti.forEach(function(p, i) {
+    var x = xAt(i), y = yAt(Number(p.cmp));
+    pathD += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+  });
+
+  // Punti + etichette
+  var punti_svg = '';
+  punti.forEach(function(p, i) {
+    var x = xAt(i), y = yAt(Number(p.cmp));
+    var coloreP = (i === 0 ? '#888' : (i === N-1 ? '#26215C' : '#6B5FCC'));
+    punti_svg += '<circle cx="' + x + '" cy="' + y + '" r="3.5" fill="' + coloreP + '" />';
+    // Etichetta data sotto
+    if (i === 0 || i === N-1 || N <= 8) {
+      var dataFmt = _fmtDataIt(p.data).substring(0, 5); // gg/mm
+      punti_svg += '<text x="' + x + '" y="' + (H-PAD_B+14) + '" font-size="9" fill="#555" text-anchor="middle">' + dataFmt + '</text>';
+    }
+  });
+
+  return '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" style="background:#fff;border-radius:6px">' +
+    gridY +
+    '<path d="' + pathD + '" fill="none" stroke="#6B5FCC" stroke-width="2" />' +
+    punti_svg +
+    '</svg>';
+}
+
+// Helper formattazione data IT
+function _fmtDataIt(isoDate) {
+  if (!isoDate) return '—';
+  var p = String(isoDate).substring(0, 10).split('-');
+  if (p.length !== 3) return isoDate;
+  return p[2] + '/' + p[1] + '/' + p[0];
 }
