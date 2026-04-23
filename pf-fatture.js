@@ -193,32 +193,42 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     });
     const top5 = Object.values(perCliente).sort((a,b)=>b.totale-a.totale).slice(0,5);
 
-    // ── 3. Query parallele: ordini senza fattura + incasso previsto ──
-    const [ordiniRes, righeFattRes, pagRes] = await Promise.all([
-      // Ordini clienti consegnati nel periodo
+    // ── 3. Query parallele: ordini del periodo + fatture per riepilogo mensile ──
+    // Per il riepilogo mensile servono: dati ordini+fatture dell'intero anno, non solo mese selezionato
+    const annoInt = parseInt(dataMin.substring(0, 4));
+    const annoMin = `${annoInt}-01-01`;
+    const annoMax = `${annoInt}-12-31`;
+
+    const [ordiniRes, righeFattRes, ordiniAnnoRes, fattureAnnoRes] = await Promise.all([
+      // Ordini clienti consegnati nel periodo selezionato (per "senza fattura")
       sb.from('ordini')
         .select('id, data, cliente, cliente_id, prodotto, litri, costo_litro, trasporto_litro, margine, iva, stato')
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
         .gte('data', dataMin).lte('data', dataMax),
-      // fatture_righe con ordine_id popolato nel periodo (join implicito via fattura_id su fatture già caricate)
+      // fatture_righe con ordine_id popolato nel periodo selezionato
       sb.from('fatture_righe')
         .select('ordine_id, fattura_id')
         .not('ordine_id', 'is', null)
         .in('fattura_id', fatture.map(f=>f.id).slice(0, 500)),
-      // Pagamenti futuri per incasso previsto
-      sb.from('fatture_pagamenti')
-        .select('data_scadenza, importo, stato')
-        .in('fattura_id', fatture.map(f=>f.id).slice(0, 500))
-        .neq('stato', 'pagato')
-        .gte('data_scadenza', _oggi()),
+      // Tutti gli ordini clienti consegnati dell'ANNO (per riepilogo mensile)
+      sb.from('ordini')
+        .select('id, data')
+        .eq('tipo_ordine', 'cliente')
+        .eq('stato', 'consegnato')
+        .gte('data', annoMin).lte('data', annoMax),
+      // Tutte le fatture dell'ANNO (per riepilogo mensile)
+      sb.from('fatture_emesse')
+        .select('id, data')
+        .gte('data', annoMin).lte('data', annoMax),
     ]);
 
     const ordini = ordiniRes.data || [];
     const righeFatt = righeFattRes.data || [];
-    const pagamenti = pagRes.data || [];
+    const ordiniAnno = ordiniAnnoRes.data || [];
+    const fattureAnno = fattureAnnoRes.data || [];
 
-    // Set degli ordine_id già fatturati
+    // Set degli ordine_id già fatturati (del periodo selezionato)
     const ordiniFatturati = new Set(righeFatt.map(r => r.ordine_id));
     const ordiniSenzaFatt = ordini.filter(o => !ordiniFatturati.has(o.id));
     const nOrdSenzaFatt = ordiniSenzaFatt.length;
@@ -231,21 +241,19 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     window._fattOrdiniSenzaFatt = ordiniSenzaFatt;
     window._fattFattureOrfane = fatture.filter(f => f.match_status === 'orphan');
 
-    // ── 4. Incasso previsto: 30/60/90 gg ──
-    const oggi = new Date(_oggi());
-    const d30 = new Date(oggi); d30.setDate(d30.getDate()+30);
-    const d60 = new Date(oggi); d60.setDate(d60.getDate()+60);
-    const d90 = new Date(oggi); d90.setDate(d90.getDate()+90);
-    let inc30 = 0, inc60 = 0, inc90 = 0, incOltre = 0;
-    pagamenti.forEach(p => {
-      const scad = new Date(p.data_scadenza);
-      const imp = Number(p.importo||0);
-      if (scad <= d30) inc30 += imp;
-      else if (scad <= d60) inc60 += imp;
-      else if (scad <= d90) inc90 += imp;
-      else incOltre += imp;
-    });
-    const incTot = inc30+inc60+inc90+incOltre;
+    // ── 4. Riepilogo mensile: conteggio ordini vs fatture per ogni mese dell'anno ──
+    const meseLabel = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
+                       'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+    const riepMesi = [];
+    for (let m = 1; m <= 12; m++) {
+      const mPad = String(m).padStart(2,'0');
+      const prefix = `${annoInt}-${mPad}`;
+      const nOrd = ordiniAnno.filter(o => o.data && o.data.startsWith(prefix)).length;
+      const nFatt = fattureAnno.filter(f => f.data && f.data.startsWith(prefix)).length;
+      // Skip mesi completamente vuoti (futuri)
+      if (nOrd === 0 && nFatt === 0) continue;
+      riepMesi.push({ mese: m, label: meseLabel[m-1], ordini: nOrd, fatture: nFatt });
+    }
 
     // ── 5. Render dashboard ──
     wrap.innerHTML = `
@@ -281,7 +289,7 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
         </div>
       </div>
 
-      <!-- Top 5 clienti + Incasso previsto -->
+      <!-- Top 5 clienti + Riepilogo mensile -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
         <div class="card" style="padding:12px">
           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:8px">🏆 Top 5 clienti per fatturato</div>
@@ -297,17 +305,37 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
           `).join('') : '<div style="text-align:center;color:var(--text-muted);padding:8px;font-size:11px">Nessun dato</div>'}
         </div>
         <div class="card" style="padding:12px">
-          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:8px">💰 Incasso previsto (scadenzario)</div>
-          ${incTot > 0 ? `
-            <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px">
-              <span style="color:#27500A">Entro 30 giorni:</span><span style="font-family:var(--font-mono);text-align:right;font-weight:600">${_fmtE(inc30)}</span>
-              <span style="color:#8B6A00">31–60 giorni:</span><span style="font-family:var(--font-mono);text-align:right">${_fmtE(inc60)}</span>
-              <span style="color:#8B6A00">61–90 giorni:</span><span style="font-family:var(--font-mono);text-align:right">${_fmtE(inc90)}</span>
-              ${incOltre > 0 ? `<span style="color:#A32D2D">Oltre 90 giorni:</span><span style="font-family:var(--font-mono);text-align:right">${_fmtE(incOltre)}</span>` : ''}
-              <span style="border-top:1px solid var(--border);padding-top:4px;margin-top:2px;font-weight:700">Totale:</span>
-              <span style="font-family:var(--font-mono);text-align:right;font-weight:700;border-top:1px solid var(--border);padding-top:4px;margin-top:2px;color:var(--primary)">${_fmtE(incTot)}</span>
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:8px">📅 Riepilogo mensile ${annoInt} (ordini vs fatture)</div>
+          ${riepMesi.length > 0 ? `
+            <div style="max-height:220px;overflow-y:auto">
+              <table style="width:100%;font-size:11px">
+                <thead><tr style="color:var(--text-muted);font-size:10px">
+                  <th style="text-align:left;padding:2px 4px">Mese</th>
+                  <th style="text-align:right;padding:2px 4px">Ordini</th>
+                  <th style="text-align:right;padding:2px 4px">Fatture</th>
+                  <th style="text-align:center;padding:2px 4px">Stato</th>
+                </tr></thead>
+                <tbody>
+                  ${riepMesi.map(r => {
+                    const diff = r.ordini - r.fatture;
+                    let stato, colore;
+                    if (r.ordini === 0) { stato = '—'; colore = '#888'; }
+                    else if (diff === 0) { stato = '✓ Chiuso'; colore = '#639922'; }
+                    else if (diff > 0) { stato = `⚠ ${diff} da fatturare`; colore = '#D4A017'; }
+                    else { stato = `+${-diff} extra`; colore = '#6B5FCC'; }
+                    return `
+                      <tr style="border-bottom:0.5px solid var(--border)">
+                        <td style="padding:3px 4px">${r.label}</td>
+                        <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.ordini}</td>
+                        <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.fatture}</td>
+                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600">${stato}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
             </div>
-          ` : '<div style="text-align:center;color:var(--text-muted);padding:8px;font-size:11px">Nessun pagamento futuro</div>'}
+          ` : '<div style="text-align:center;color:var(--text-muted);padding:8px;font-size:11px">Nessun dato per l\'anno ' + annoInt + '</div>'}
         </div>
       </div>
     `;
@@ -342,9 +370,10 @@ function apriListaOrdiniSenzaFattura() {
   }, 0);
 
   const html = `
-    <div style="font-size:13px">
+    <div style="font-size:13px;max-width:900px">
+      <h2 style="margin:0 0 10px 0;color:#26215C">⚠ Ordini senza fattura — ${ord.length} record</h2>
       <div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:10px 12px;border-radius:4px;margin-bottom:10px;font-size:12px;color:#8B6A00">
-        ⚠ <strong>${ord.length} ordini consegnati</strong> nel periodo <strong>non risultano fatturati</strong> in Danea.
+        <strong>${ord.length} ordini consegnati</strong> nel periodo <strong>non risultano fatturati</strong> in Danea.
         Può essere: fattura non ancora emessa, fattura di un altro periodo, ordine consegnato per errore, ecc.
       </div>
       <div style="max-height:450px;overflow-y:auto">
@@ -367,9 +396,12 @@ function apriListaOrdiniSenzaFattura() {
           </tfoot>
         </table>
       </div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn-primary" onclick="chiudiModal()">Chiudi</button>
+      </div>
     </div>
   `;
-  apriModale('⚠ Ordini senza fattura — ' + ord.length + ' record', html);
+  apriModal(html);
 }
 
 // Modale: lista fatture orfane (senza ordine PhoenixFuel collegato)
@@ -389,9 +421,10 @@ function apriListaFattureOrfane() {
   const totImp = fatt.reduce((s,f)=>s+Number(f.importo_totale||0),0);
 
   const html = `
-    <div style="font-size:13px">
+    <div style="font-size:13px;max-width:900px">
+      <h2 style="margin:0 0 10px 0;color:#26215C">✗ Fatture orfane — ${fatt.length} record</h2>
       <div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px 12px;border-radius:4px;margin-bottom:10px;font-size:12px;color:#791F1F">
-        ✗ <strong>${fatt.length} fatture orfane</strong>: emesse in Danea ma nessuna riga prodotto è stata collegata a un ordine PhoenixFuel al momento dell'import.
+        <strong>${fatt.length} fatture orfane</strong>: emesse in Danea ma nessuna riga prodotto è stata collegata a un ordine PhoenixFuel al momento dell'import.
         Clicca una riga per vedere il dettaglio.
       </div>
       <div style="max-height:450px;overflow-y:auto">
@@ -414,9 +447,12 @@ function apriListaFattureOrfane() {
           </tfoot>
         </table>
       </div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn-primary" onclick="chiudiModal()">Chiudi</button>
+      </div>
     </div>
   `;
-  apriModale('✗ Fatture orfane — ' + fatt.length + ' record', html);
+  apriModal(html);
 }
 
 async function emettiiFattura(id){
@@ -735,6 +771,7 @@ async function apriDettaglioFattura(id){
 
   const html = `
     <div style="font-size:13px;max-width:1000px">
+      <h2 style="margin:0 0 8px 0;color:#26215C">Fattura ${_esc(f.numero)}/${f.anno||'?'}</h2>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
         <div><span style="color:var(--text-muted);font-size:11px">N° Fattura</span><div style="font-weight:700;font-size:16px">${_esc(f.numero)}/${f.anno||'?'}</div></div>
         <div><span style="color:var(--text-muted);font-size:11px">Match</span><div style="margin-top:2px">${matchBadge}${f.match_score!=null ? ' <span style="font-size:10px;color:var(--text-muted)">score '+f.match_score+'/5</span>' : ''}</div></div>
@@ -777,9 +814,13 @@ async function apriDettaglioFattura(id){
       ${pagHtml}
 
       ${f.note ? `<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">Note: ${_esc(f.note)}</div>` : ''}
+
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn-primary" onclick="chiudiModal()">Chiudi</button>
+      </div>
     </div>
   `;
-  apriModale('Fattura '+_esc(f.numero)+'/'+(f.anno||'?'), html);
+  apriModal(html);
 }
 
 // ═════════════════════════════════════════════════════════════
