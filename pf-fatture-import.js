@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fatture-import.js — UI import fatture Danea (FatturaPA SDI)
-// Versione: 2026-04-22 v2 (parsing 100% client-side, no Edge Function)
+// Versione: 2026-04-23 v3 (+ STEP 3A matching multi-campo ordini/clienti)
 // ═══════════════════════════════════════════════════════════════════════════
 
 (function() {
@@ -8,6 +8,8 @@
 
 let _parsedData = null;
 let _batchId = null;
+let _ordiniPeriodo = null;   // ordini Supabase del periodo fattura (±3gg)
+let _clientiMap = null;      // Map cliente_id -> { nome, piva, piva_norm }
 
 const DAS_RE = /DAS\s+(?:del\s+(\d{1,2}\s+[A-Za-zàèéìòù]+\s+\d{4}))?\s*(?:nr|n\.?|numero)?[:\s]*(\d{4,10})/i;
 const ORDINE_RE = /Rif\.?\s*Conferma\s+d['']ordine\s+(\d+)\s+del\s+(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i;
@@ -16,6 +18,13 @@ const MESI = {
   'gennaio': 1, 'febbraio': 2, 'marzo': 3, 'aprile': 4, 'maggio': 5, 'giugno': 6,
   'luglio': 7, 'agosto': 8, 'settembre': 9, 'ottobre': 10, 'novembre': 11, 'dicembre': 12
 };
+
+// Soglie scoring (costanti)
+const MATCH_TOLL_DATA_GG      = 2;     // ±2 giorni
+const MATCH_TOLL_LITRI_PCT    = 0.01;  // ±1%
+const MATCH_TOLL_IMPONIBILE_E = 0.50;  // ±€0,50
+const MATCH_SOGLIA_MATCHED    = 5;     // score per "matched"
+const MATCH_SOGLIA_UNCERTAIN  = 3;     // score min per "uncertain"
 
 function normalizzaProdotto(desc) {
   const d = (desc || '').toLowerCase();
@@ -250,6 +259,13 @@ async function renderFattureImport() {
       .fi-log .info { color:#85B7EB; }
       .fi-progress-bg { background:#f0eee6; height:8px; border-radius:4px; overflow:hidden; margin-top:6px; }
       .fi-progress-fg { height:100%; background:linear-gradient(90deg,#6B5FCC,#8B7FDC); transition:width .3s; }
+      .fi-row-matched { background:#F4FAEC !important; }
+      .fi-row-uncertain { background:#FFF7E6 !important; }
+      .fi-row-orphan { background:#FDECEC !important; }
+      .fi-badge-match { display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; }
+      .fi-badge-matched { background:#639922; color:#fff; }
+      .fi-badge-uncertain { background:#D4A017; color:#fff; }
+      .fi-badge-orphan { background:#A32D2D; color:#fff; }
     </style>
   `;
 
@@ -297,7 +313,7 @@ async function _onFileSelected(file) {
   if (!file) return;
   const ok = file.name.toLowerCase().endsWith('.zip') || file.name.toLowerCase().endsWith('.xml');
   if (!ok) {
-    toast('⚠️ Accetto solo file .zip o .xml', 'warning');
+    toast('⚠️ Accetto solo file .zip o .xml');
     return;
   }
 
@@ -425,94 +441,618 @@ async function _onFileSelected(file) {
   }
 }
 
-function renderStep3() {
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 3A — MATCHING MULTI-CAMPO
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Normalizza stringa per confronto fuzzy nome cliente
+function _normalizzaNome(s) {
+  if (!s) return '';
+  return String(s)
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // rimuove accenti
+    .replace(/\bs\.?\s*r\.?\s*l\.?\b/g, '')           // togli "s.r.l."
+    .replace(/\bs\.?\s*p\.?\s*a\.?\b/g, '')           // togli "s.p.a."
+    .replace(/\bs\.?\s*n\.?\s*c\.?\b/g, '')           // togli "s.n.c."
+    .replace(/\bsas\b/g, '')                           // togli "sas"
+    .replace(/\bdi\s+/g, ' ')                          // togli "di "
+    .replace(/[^a-z0-9]+/g, ' ')                       // solo alfanumerici
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Normalizza PIVA (solo cifre, senza prefisso IT)
+function _normalizzaPiva(p) {
+  if (!p) return '';
+  return String(p).replace(/[^0-9]/g, '');
+}
+
+// Differenza in giorni tra due date ISO "YYYY-MM-DD"
+function _diffGiorni(isoA, isoB) {
+  if (!isoA || !isoB) return Infinity;
+  const a = new Date(isoA).getTime();
+  const b = new Date(isoB).getTime();
+  if (isNaN(a) || isNaN(b)) return Infinity;
+  return Math.abs((a - b) / 86400000);
+}
+
+// Calcola imponibile ordine: litri * (costo + trasporto + margine)
+function _imponibileOrdine(o) {
+  const prezzoNoIva = Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0);
+  return prezzoNoIva * Number(o.litri || 0);
+}
+
+// Aggiunge N giorni a una data ISO
+function _addGiorni(iso, n) {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Carica ordini Supabase del periodo + mappa clienti per PIVA lookup
+async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
+  const rangeMin = _addGiorni(dataMin, -MATCH_TOLL_DATA_GG - 1);
+  const rangeMax = _addGiorni(dataMax, MATCH_TOLL_DATA_GG + 1);
+
+  if (logEl) _logAppend(logEl, 'info', `⏳ Carico ordini Supabase ${rangeMin} → ${rangeMax}...`);
+
+  // Ordini tipo_ordine='cliente' (autoconsumo escluso: autofatture non entrano nel matching Danea clienti)
+  const { data: ordini, error: errOrd } = await sb.from('ordini')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore')
+    .eq('tipo_ordine', 'cliente')
+    .neq('stato', 'annullato')
+    .gte('data', rangeMin)
+    .lte('data', rangeMax);
+
+  if (errOrd) throw new Error('Errore caricamento ordini: ' + errOrd.message);
+
+  _ordiniPeriodo = ordini || [];
+  if (logEl) _logAppend(logEl, 'ok', `✓ ${_ordiniPeriodo.length} ordini clienti caricati`);
+
+  // Carica TUTTI i clienti (servono per lookup PIVA da cliente_id)
+  // In produzione ~200-300 clienti, una SELECT one-shot è più efficiente di join ripetuto
+  const { data: clienti, error: errCl } = await sb.from('clienti')
+    .select('id,nome,piva');
+
+  if (errCl) throw new Error('Errore caricamento clienti: ' + errCl.message);
+
+  _clientiMap = new Map();
+  (clienti || []).forEach(c => {
+    _clientiMap.set(c.id, {
+      nome: c.nome,
+      nome_norm: _normalizzaNome(c.nome),
+      piva: c.piva,
+      piva_norm: _normalizzaPiva(c.piva),
+    });
+  });
+
+  if (logEl) _logAppend(logEl, 'ok', `✓ ${_clientiMap.size} clienti in anagrafica`);
+}
+
+// Calcola il match migliore per UNA riga di fattura contro tutti gli ordini candidati
+// Ritorna { ordine_id, ordine_ref, score, dettaglio: {piva, data, prodotto, litri, imponibile} }
+function _calcolaMatchRiga(fattura, riga) {
+  const pivaFattNorm = _normalizzaPiva(fattura.cessionario_piva);
+  const denomFattNorm = _normalizzaNome(fattura.cessionario_denominazione);
+  const dataFatt = fattura.data;
+  const prodottoFatt = riga.prodotto_normalizzato;
+  const litriFatt = Number(riga.quantita || 0);
+  const imponibileFatt = Number(riga.prezzo_totale || 0);
+
+  if (!prodottoFatt || litriFatt <= 0) {
+    return { score: null, ordine_id: null, ordine_ref: null, motivo: 'riga_servizio' };
+  }
+
+  let bestScore = -1;
+  let bestOrdine = null;
+  let bestDettaglio = null;
+
+  for (const o of _ordiniPeriodo) {
+    // Pre-filtro grossolano: prodotto normalizzato deve matchare, altrimenti skip
+    const prodottoOrd = normalizzaProdotto(o.prodotto);
+    if (prodottoFatt !== prodottoOrd) continue;
+
+    // Pre-filtro data: se oltre ±2gg, skip
+    const gg = _diffGiorni(dataFatt, o.data);
+    if (gg > MATCH_TOLL_DATA_GG) continue;
+
+    // ─── Scoring ───
+    const dett = { piva: 0, data: 0, prodotto: 0, litri: 0, imponibile: 0 };
+
+    // 1. PIVA (Entrambi con fallback)
+    //    Primario: cliente_id ordine → clienti.piva ≟ PIVA fattura
+    //    Fallback: nome ordine (snapshot) ≟ denominazione fattura normalizzati
+    let pivaMatch = false;
+    if (o.cliente_id && _clientiMap.has(o.cliente_id)) {
+      const c = _clientiMap.get(o.cliente_id);
+      if (c.piva_norm && pivaFattNorm && c.piva_norm === pivaFattNorm) {
+        pivaMatch = true;
+      }
+    }
+    if (!pivaMatch) {
+      // Fallback su nome
+      const nomeOrdNorm = _normalizzaNome(o.cliente);
+      if (nomeOrdNorm && denomFattNorm && nomeOrdNorm === denomFattNorm) {
+        pivaMatch = true;
+      }
+    }
+    if (pivaMatch) dett.piva = 1;
+
+    // 2. Data ±2gg (già pre-filtrato)
+    dett.data = 1;
+
+    // 3. Prodotto (già pre-filtrato)
+    dett.prodotto = 1;
+
+    // 4. Litri ±1%
+    const litriOrd = Number(o.litri || 0);
+    if (litriOrd > 0) {
+      const deltaPct = Math.abs(litriFatt - litriOrd) / litriOrd;
+      if (deltaPct <= MATCH_TOLL_LITRI_PCT) dett.litri = 1;
+    }
+
+    // 5. Imponibile ±€0,50
+    const impOrd = _imponibileOrdine(o);
+    if (Math.abs(imponibileFatt - impOrd) <= MATCH_TOLL_IMPONIBILE_E) dett.imponibile = 1;
+
+    const score = dett.piva + dett.data + dett.prodotto + dett.litri + dett.imponibile;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestOrdine = o;
+      bestDettaglio = dett;
+    }
+  }
+
+  if (!bestOrdine) {
+    return { score: 0, ordine_id: null, ordine_ref: null, dettaglio: { piva: 0, data: 0, prodotto: 0, litri: 0, imponibile: 0 } };
+  }
+
+  return {
+    score: bestScore,
+    ordine_id: bestOrdine.id,
+    ordine_ref: {
+      data: bestOrdine.data,
+      cliente: bestOrdine.cliente,
+      prodotto: bestOrdine.prodotto,
+      litri: bestOrdine.litri,
+      imponibile: _imponibileOrdine(bestOrdine),
+    },
+    dettaglio: bestDettaglio,
+  };
+}
+
+// Classifica score → stato
+function _classificaMatch(score) {
+  if (score === null) return 'servizio';
+  if (score >= MATCH_SOGLIA_MATCHED) return 'matched';
+  if (score >= MATCH_SOGLIA_UNCERTAIN) return 'uncertain';
+  return 'orphan';
+}
+
+// Itera su tutte le fatture parsate, popola match per ogni riga e stato aggregato per fattura
+function _calcolaMatchTutte() {
+  let totMatched = 0, totUncertain = 0, totOrphan = 0, totServizio = 0;
+
+  for (const f of _parsedData.fatture) {
+    let statoFattura = null; // 'matched' | 'uncertain' | 'orphan'
+
+    for (const r of f.righe) {
+      const m = _calcolaMatchRiga(f.fattura, r);
+      r._match = m;
+      r._match_status = _classificaMatch(m.score);
+
+      if (r._match_status === 'matched') totMatched++;
+      else if (r._match_status === 'uncertain') totUncertain++;
+      else if (r._match_status === 'orphan') totOrphan++;
+      else totServizio++;
+
+      // Aggregazione stato fattura: peggiore tra le righe "non servizio"
+      if (r._match_status !== 'servizio') {
+        const order = { 'matched': 0, 'uncertain': 1, 'orphan': 2 };
+        if (statoFattura === null || order[r._match_status] > order[statoFattura]) {
+          statoFattura = r._match_status;
+        }
+      }
+    }
+
+    f._match_status_fattura = statoFattura || 'servizio';
+  }
+
+  _parsedData.match_stats = {
+    righe_totali: totMatched + totUncertain + totOrphan + totServizio,
+    matched: totMatched,
+    uncertain: totUncertain,
+    orphan: totOrphan,
+    servizio: totServizio,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 3 — RENDER ANTEPRIMA CON MATCH
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function renderStep3() {
   _setStep(3);
   const body = document.getElementById('fi-body');
   const s = _parsedData.statistiche;
 
+  // Loading state durante caricamento ordini + calcolo match
   body.innerHTML = `
     <div class="fi-panel">
-      <h2>📊 Step 3 — Parsing completato, ${s.fatture_parsate} fatture pronte</h2>
+      <h2>🔍 Step 3 — Matching con ordini PhoenixFuel</h2>
+      <div class="fi-progress-bg"><div class="fi-progress-fg" id="fi-match-prog" style="width:10%"></div></div>
+      <div class="fi-log" id="fi-match-log">
+        <div class="info">[${_now()}] 🚀 Avvio matching automatico...</div>
+      </div>
+    </div>
+  `;
 
+  const log = document.getElementById('fi-match-log');
+  const prog = document.getElementById('fi-match-prog');
+
+  try {
+    await _caricaDatiPeriodo(s.data_min, s.data_max, log);
+    prog.style.width = '50%';
+
+    _logAppend(log, 'info', `⏳ Calcolo match su ${s.fatture_parsate} fatture...`);
+    const t0 = performance.now();
+    _calcolaMatchTutte();
+    const ms = Math.round(performance.now() - t0);
+    prog.style.width = '100%';
+    prog.style.background = 'linear-gradient(90deg,#639922,#97C459)';
+
+    const ms2 = _parsedData.match_stats;
+    _logAppend(log, 'ok', `✓ Match calcolato in ${ms}ms: ${ms2.matched} matched, ${ms2.uncertain} uncertain, ${ms2.orphan} orphan, ${ms2.servizio} servizio`);
+
+    setTimeout(() => _renderStep3UI(), 400);
+
+  } catch (e) {
+    console.error('[fatture-import] errore match:', e);
+    _logAppend(log, 'err', `✗ Errore: ${e.message}`);
+    body.innerHTML += `
+      <div class="fi-panel" style="border-left:4px solid #E24B4A">
+        <h2 style="color:#791F1F">✗ Matching fallito</h2>
+        <div style="font-size:12px;color:#666">Errore: <code>${esc(e.message)}</code></div>
+        <button class="btn-primary" onclick="window.pfFattureImport.renderFattureImport()"
+                style="margin-top:10px">← Torna allo step 1</button>
+      </div>
+    `;
+  }
+}
+
+function _renderStep3UI() {
+  const body = document.getElementById('fi-body');
+  const s = _parsedData.statistiche;
+  const ms = _parsedData.match_stats;
+
+  const tot = ms.matched + ms.uncertain + ms.orphan;
+  const pctMatched = tot > 0 ? Math.round(100 * ms.matched / tot) : 0;
+  const pctUncertain = tot > 0 ? Math.round(100 * ms.uncertain / tot) : 0;
+  const pctOrphan = tot > 0 ? 100 - pctMatched - pctUncertain : 0;
+
+  // Aggrega stato per fattura
+  let fMatched = 0, fUncertain = 0, fOrphan = 0, fServizio = 0;
+  for (const f of _parsedData.fatture) {
+    if (f._match_status_fattura === 'matched') fMatched++;
+    else if (f._match_status_fattura === 'uncertain') fUncertain++;
+    else if (f._match_status_fattura === 'orphan') fOrphan++;
+    else fServizio++;
+  }
+
+  body.innerHTML = `
+    <div class="fi-panel">
+      <h2>🔍 Step 3 — Anteprima matching (${s.fatture_parsate} fatture)</h2>
+
+      <!-- KPI globali parsing -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
-        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px;border-left:4px solid #0C447C">
+        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:12px;border-radius:8px;border-left:4px solid #0C447C">
           <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Fatture</div>
-          <div style="font-size:22px;font-weight:700;font-family:monospace;margin-top:4px">${s.fatture_parsate}</div>
-          <div style="font-size:10px;color:#888">da ${_fmtData(s.data_min)} a ${_fmtData(s.data_max)}</div>
+          <div style="font-size:20px;font-weight:700;font-family:monospace;margin-top:4px">${s.fatture_parsate}</div>
+          <div style="font-size:10px;color:#888">${_fmtData(s.data_min)} → ${_fmtData(s.data_max)}</div>
         </div>
-        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px;border-left:4px solid #639922">
+        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:12px;border-radius:8px;border-left:4px solid #639922">
           <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Totale</div>
-          <div style="font-size:22px;font-weight:700;font-family:monospace;margin-top:4px">€ ${_fmtN(s.importo_totale)}</div>
+          <div style="font-size:20px;font-weight:700;font-family:monospace;margin-top:4px">€ ${_fmtN(s.importo_totale)}</div>
           <div style="font-size:10px;color:#888">sanity check</div>
         </div>
-        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px;border-left:4px solid #6B5FCC">
+        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:12px;border-radius:8px;border-left:4px solid #6B5FCC">
           <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Clienti</div>
-          <div style="font-size:22px;font-weight:700;font-family:monospace;margin-top:4px">${s.clienti_unici_denominazione}</div>
+          <div style="font-size:20px;font-weight:700;font-family:monospace;margin-top:4px">${s.clienti_unici_denominazione}</div>
           <div style="font-size:10px;color:#888">${s.clienti_unici_piva} con PIVA</div>
         </div>
-        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:14px;border-radius:8px;border-left:4px solid ${s.errori > 0 ? '#E24B4A' : '#D4A017'}">
-          <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Errori</div>
-          <div style="font-size:22px;font-weight:700;font-family:monospace;margin-top:4px">${s.errori}</div>
-          <div style="font-size:10px;color:#888">${s.errori === 0 ? 'tutti validi' : 'da rivedere'}</div>
+        <div style="background:#fafaf8;border:1px solid #e8e5dc;padding:12px;border-radius:8px;border-left:4px solid #85B7EB">
+          <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Ordini periodo</div>
+          <div style="font-size:20px;font-weight:700;font-family:monospace;margin-top:4px">${_ordiniPeriodo.length}</div>
+          <div style="font-size:10px;color:#888">candidati match</div>
         </div>
       </div>
 
-      <div style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:12px 16px;border-radius:6px;margin-bottom:14px">
-        🚧 <strong>Matching con ordini in sviluppo</strong> — Per ora puoi verificare il parsing.
+      <!-- KPI match righe -->
+      <h3 style="font-size:13px;margin-bottom:8px;color:#26215C">🎯 Risultato matching righe fattura</h3>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div style="background:#F4FAEC;border:1px solid #97C459;padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:#27500A;text-transform:uppercase;font-weight:600">✓ Matched (5/5)</div>
+          <div style="font-size:22px;font-weight:700;font-family:monospace;color:#27500A;margin-top:4px">${ms.matched}</div>
+          <div style="font-size:10px;color:#27500A">${pctMatched}% • auto-import</div>
+        </div>
+        <div style="background:#FFF7E6;border:1px solid #D4A017;padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:#8B6A00;text-transform:uppercase;font-weight:600">⚠ Uncertain (3-4/5)</div>
+          <div style="font-size:22px;font-weight:700;font-family:monospace;color:#8B6A00;margin-top:4px">${ms.uncertain}</div>
+          <div style="font-size:10px;color:#8B6A00">${pctUncertain}% • revisione manuale</div>
+        </div>
+        <div style="background:#FDECEC;border:1px solid #E24B4A;padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:#791F1F;text-transform:uppercase;font-weight:600">✗ Orphan (0-2/5)</div>
+          <div style="font-size:22px;font-weight:700;font-family:monospace;color:#791F1F;margin-top:4px">${ms.orphan}</div>
+          <div style="font-size:10px;color:#791F1F">${pctOrphan}% • senza ordine</div>
+        </div>
+        <div style="background:#f0eee6;border:1px solid #ccc;padding:12px;border-radius:8px">
+          <div style="font-size:10px;color:#666;text-transform:uppercase;font-weight:600">Servizio</div>
+          <div style="font-size:22px;font-weight:700;font-family:monospace;color:#666;margin-top:4px">${ms.servizio}</div>
+          <div style="font-size:10px;color:#666">trasporti, sconti</div>
+        </div>
       </div>
 
-      <h3 style="font-size:13px;margin-bottom:8px;color:#26215C">Anteprima prime 20 fatture</h3>
-      <div style="overflow-x:auto">
+      <!-- Barra distribuzione -->
+      ${tot > 0 ? `
+        <div style="margin-bottom:14px">
+          <div style="font-size:11px;color:#666;margin-bottom:4px">Distribuzione righe prodotto (${tot} righe matchabili)</div>
+          <div style="display:flex;height:22px;border-radius:4px;overflow:hidden;background:#f0eee6">
+            ${pctMatched > 0 ? `<div style="width:${pctMatched}%;background:#639922;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${pctMatched}%</div>` : ''}
+            ${pctUncertain > 0 ? `<div style="width:${pctUncertain}%;background:#D4A017;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${pctUncertain}%</div>` : ''}
+            ${pctOrphan > 0 ? `<div style="width:${pctOrphan}%;background:#A32D2D;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${pctOrphan}%</div>` : ''}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Filtri tabella -->
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="btn-primary fi-filter-btn" data-filter="all"
+                style="background:#26215C;font-size:11px;padding:6px 12px">
+          Tutte (${_parsedData.fatture.length})
+        </button>
+        <button class="btn-primary fi-filter-btn" data-filter="matched"
+                style="background:#639922;font-size:11px;padding:6px 12px">
+          ✓ Matched (${fMatched})
+        </button>
+        <button class="btn-primary fi-filter-btn" data-filter="uncertain"
+                style="background:#D4A017;font-size:11px;padding:6px 12px">
+          ⚠ Uncertain (${fUncertain})
+        </button>
+        <button class="btn-primary fi-filter-btn" data-filter="orphan"
+                style="background:#A32D2D;font-size:11px;padding:6px 12px">
+          ✗ Orphan (${fOrphan})
+        </button>
+        ${fServizio > 0 ? `
+          <button class="btn-primary fi-filter-btn" data-filter="servizio"
+                  style="background:#888;font-size:11px;padding:6px 12px">
+            Solo servizio (${fServizio})
+          </button>
+        ` : ''}
+        <input type="text" id="fi-search" placeholder="🔍 Cerca cliente/numero/PIVA..."
+               style="flex:1;min-width:220px;padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:11px"/>
+      </div>
+
+      <!-- Tabella fatture -->
+      <div style="overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid #e8e5dc;border-radius:6px">
         <table style="width:100%;border-collapse:collapse;font-size:11px">
-          <thead>
-            <tr style="background:#26215C;color:#fff">
+          <thead style="position:sticky;top:0;background:#26215C;color:#fff;z-index:2">
+            <tr>
+              <th style="padding:8px;text-align:left">Stato</th>
               <th style="padding:8px;text-align:left">Nr</th>
               <th style="padding:8px;text-align:left">Data</th>
               <th style="padding:8px;text-align:left">Cliente</th>
+              <th style="padding:8px;text-align:left">PIVA</th>
               <th style="padding:8px;text-align:right">Imponibile</th>
-              <th style="padding:8px;text-align:right">Totale</th>
               <th style="padding:8px;text-align:center">Righe</th>
+              <th style="padding:8px;text-align:center">Match</th>
               <th style="padding:8px;text-align:center">DAS</th>
-              <th style="padding:8px;text-align:center">Pag.</th>
+              <th style="padding:8px;text-align:center">Dett.</th>
             </tr>
           </thead>
-          <tbody>
-            ${_parsedData.fatture.slice(0, 20).map(f => {
-              const ft = f.fattura;
-              const nRighe = f.righe.filter(r => r.quantita > 0).length;
-              const nDas = f.righe.filter(r => r.das_numero_dogane).length;
-              return `
-                <tr style="border-bottom:1px solid #e8e5dc">
-                  <td style="padding:7px;font-family:monospace;font-weight:700">${esc(ft.numero)}</td>
-                  <td style="padding:7px">${_fmtData(ft.data)}</td>
-                  <td style="padding:7px">${esc((ft.cessionario_denominazione || '').substring(0, 40))}</td>
-                  <td style="padding:7px;text-align:right;font-family:monospace">€ ${_fmtN(ft.imponibile_totale || 0)}</td>
-                  <td style="padding:7px;text-align:right;font-family:monospace">€ ${_fmtN(ft.importo_totale)}</td>
-                  <td style="padding:7px;text-align:center">${nRighe}</td>
-                  <td style="padding:7px;text-align:center">${nDas > 0 ? '✓ ' + nDas : '—'}</td>
-                  <td style="padding:7px;text-align:center">${f.pagamenti.length}</td>
-                </tr>
-              `;
-            }).join('')}
+          <tbody id="fi-tbody">
+            ${_renderRigheFatture(_parsedData.fatture)}
           </tbody>
         </table>
       </div>
-      ${_parsedData.fatture.length > 20 ? `
-        <div style="margin-top:8px;font-size:11px;color:#666;text-align:center">
-          ...e altre ${_parsedData.fatture.length - 20} fatture
-        </div>
-      ` : ''}
     </div>
 
-    <div class="fi-panel" style="display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:13px;font-weight:700;color:#26215C">✓ Parsing pronto</div>
-      <button class="btn-primary" onclick="window.pfFattureImport.renderFattureImport()"
-              style="background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
-        ← Torna all'upload
-      </button>
+    <div class="fi-panel" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="font-size:12px;color:#666">
+        💡 Il prossimo step salverà in DB le fatture + righe + scadenze. Gli uncertain richiederanno revisione manuale.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-primary" onclick="window.pfFattureImport.renderFattureImport()"
+                style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);font-size:12px">
+          ← Nuovo import
+        </button>
+        <button class="btn-primary" disabled
+                style="background:#ccc;cursor:not-allowed;font-size:12px" title="Disponibile nello STEP 3C">
+          Procedi all'import (in sviluppo)
+        </button>
+      </div>
     </div>
   `;
+
+  _bindFiltriStep3();
 }
+
+// Render righe tabella fatture
+function _renderRigheFatture(fatture) {
+  if (!fatture || !fatture.length) {
+    return `<tr><td colspan="10" style="padding:20px;text-align:center;color:#666">Nessuna fattura corrispondente ai filtri</td></tr>`;
+  }
+
+  return fatture.map((f, idx) => {
+    const ft = f.fattura;
+    const st = f._match_status_fattura;
+
+    const rowClass = st === 'matched' ? 'fi-row-matched' :
+                     st === 'uncertain' ? 'fi-row-uncertain' :
+                     st === 'orphan' ? 'fi-row-orphan' : '';
+
+    const badgeClass = st === 'matched' ? 'fi-badge-matched' :
+                       st === 'uncertain' ? 'fi-badge-uncertain' :
+                       st === 'orphan' ? 'fi-badge-orphan' : '';
+
+    const badgeLabel = st === 'matched' ? '✓ Match' :
+                       st === 'uncertain' ? '⚠ Incerto' :
+                       st === 'orphan' ? '✗ Orfano' : '— Servizio';
+
+    const righeProdotto = f.righe.filter(r => r.prodotto_normalizzato && r.quantita > 0);
+    const righeMatchate = righeProdotto.filter(r => r._match_status === 'matched').length;
+    const righeDas = f.righe.filter(r => r.das_numero_dogane).length;
+
+    return `
+      <tr class="${rowClass}" data-stato="${st}" data-idx="${idx}"
+          data-cli="${esc((ft.cessionario_denominazione || '').toLowerCase())}"
+          data-num="${esc((ft.numero || '').toLowerCase())}"
+          data-piva="${esc((ft.cessionario_piva || '').toLowerCase())}"
+          style="border-bottom:1px solid #e8e5dc">
+        <td style="padding:7px"><span class="fi-badge-match ${badgeClass}">${badgeLabel}</span></td>
+        <td style="padding:7px;font-family:monospace;font-weight:700">${esc(ft.numero)}</td>
+        <td style="padding:7px">${_fmtData(ft.data)}</td>
+        <td style="padding:7px">${esc((ft.cessionario_denominazione || '').substring(0, 38))}</td>
+        <td style="padding:7px;font-family:monospace;font-size:10px">${esc(ft.cessionario_piva || '—')}</td>
+        <td style="padding:7px;text-align:right;font-family:monospace">€ ${_fmtN(ft.imponibile_totale || 0)}</td>
+        <td style="padding:7px;text-align:center">${righeProdotto.length}</td>
+        <td style="padding:7px;text-align:center;font-family:monospace">${righeMatchate}/${righeProdotto.length}</td>
+        <td style="padding:7px;text-align:center">${righeDas > 0 ? '✓ ' + righeDas : '—'}</td>
+        <td style="padding:7px;text-align:center">
+          <button class="btn-edit" style="padding:3px 8px;font-size:10px"
+                  onclick="window.pfFattureImport._apriDettaglio(${idx})">Apri</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// Filtri tabella step 3
+function _bindFiltriStep3() {
+  let currentFilter = 'all';
+  const tbody = document.getElementById('fi-tbody');
+  const search = document.getElementById('fi-search');
+
+  const applyFilter = () => {
+    const q = (search.value || '').toLowerCase().trim();
+    const rows = tbody.querySelectorAll('tr[data-stato]');
+    let visible = 0;
+    rows.forEach(r => {
+      const st = r.getAttribute('data-stato');
+      const cli = r.getAttribute('data-cli') || '';
+      const num = r.getAttribute('data-num') || '';
+      const piva = r.getAttribute('data-piva') || '';
+
+      const matchFilter = (currentFilter === 'all') || (st === currentFilter);
+      const matchSearch = !q || cli.includes(q) || num.includes(q) || piva.includes(q);
+
+      const show = matchFilter && matchSearch;
+      r.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+  };
+
+  document.querySelectorAll('.fi-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentFilter = btn.getAttribute('data-filter');
+      document.querySelectorAll('.fi-filter-btn').forEach(b => b.style.outline = 'none');
+      btn.style.outline = '3px solid #26215C';
+      applyFilter();
+    });
+  });
+
+  if (search) search.addEventListener('input', applyFilter);
+}
+
+// Modale dettaglio match per singola fattura
+function _apriDettaglio(idx) {
+  const f = _parsedData.fatture[idx];
+  if (!f) return;
+  const ft = f.fattura;
+
+  const righeHtml = f.righe.map(r => {
+    const m = r._match || {};
+    const st = r._match_status || 'servizio';
+    const d = m.dettaglio || {};
+    const ref = m.ordine_ref;
+
+    const badgeClass = st === 'matched' ? 'fi-badge-matched' :
+                       st === 'uncertain' ? 'fi-badge-uncertain' :
+                       st === 'orphan' ? 'fi-badge-orphan' : '';
+    const badgeLabel = st === 'matched' ? '✓' :
+                       st === 'uncertain' ? '⚠' :
+                       st === 'orphan' ? '✗' : '—';
+
+    let scoringHtml = '';
+    if (st !== 'servizio') {
+      const tick = v => v ? '<span style="color:#639922">✓</span>' : '<span style="color:#A32D2D">✗</span>';
+      scoringHtml = `
+        <div style="display:flex;gap:10px;font-size:10px;color:#666;margin-top:4px">
+          <span>${tick(d.piva)} PIVA</span>
+          <span>${tick(d.data)} Data</span>
+          <span>${tick(d.prodotto)} Prodotto</span>
+          <span>${tick(d.litri)} Litri</span>
+          <span>${tick(d.imponibile)} Imponibile</span>
+          <span style="margin-left:auto;font-weight:700">Score: ${m.score ?? '—'}/5</span>
+        </div>
+      `;
+    }
+
+    const refHtml = ref ? `
+      <div style="background:#fafaf8;padding:6px 10px;border-radius:4px;margin-top:4px;font-size:10px;color:#555">
+        <strong>Ordine candidato:</strong>
+        ${_fmtData(ref.data)} · ${esc(ref.cliente)} · ${esc(ref.prodotto)} ·
+        ${_fmtN(ref.litri)} L · € ${_fmtN(ref.imponibile)}
+      </div>
+    ` : (st !== 'servizio' ? `<div style="font-size:10px;color:#A32D2D;margin-top:4px">Nessun ordine candidato trovato nel periodo.</div>` : '');
+
+    return `
+      <div style="padding:10px;border-bottom:1px solid #e8e5dc">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div style="flex:1">
+            <span class="fi-badge-match ${badgeClass}">${badgeLabel}</span>
+            <strong style="margin-left:6px">${esc(r.prodotto_normalizzato || 'Servizio')}</strong>
+            ${r.quantita ? ` · ${_fmtN(r.quantita)} L` : ''}
+            <span style="color:#888;font-size:10px"> · € ${_fmtN(r.prezzo_totale || 0)}</span>
+          </div>
+        </div>
+        <div style="font-size:10px;color:#888;margin-top:2px">${esc((r.descrizione || '').substring(0, 160))}${r.descrizione && r.descrizione.length > 160 ? '…' : ''}</div>
+        ${scoringHtml}
+        ${refHtml}
+      </div>
+    `;
+  }).join('');
+
+  const html = `
+    <div style="max-width:900px">
+      <h2 style="margin:0 0 4px 0;color:#26215C">Fattura ${esc(ft.numero)} · ${_fmtData(ft.data)}</h2>
+      <div style="color:#666;font-size:12px;margin-bottom:10px">
+        ${esc(ft.cessionario_denominazione)} ·
+        PIVA: <code>${esc(ft.cessionario_piva || '—')}</code> ·
+        ${esc(ft.cessionario_comune || '')} ${esc(ft.cessionario_provincia ? '(' + ft.cessionario_provincia + ')' : '')}
+      </div>
+      <div style="display:flex;gap:10px;font-size:11px;margin-bottom:14px;padding:8px 12px;background:#fafaf8;border-radius:6px">
+        <div><strong>Imponibile:</strong> € ${_fmtN(ft.imponibile_totale || 0)}</div>
+        <div><strong>IVA:</strong> € ${_fmtN(ft.iva_totale || 0)}</div>
+        <div><strong>Totale:</strong> € ${_fmtN(ft.importo_totale || 0)}</div>
+        <div style="margin-left:auto"><strong>Pagamenti:</strong> ${f.pagamenti.length}</div>
+      </div>
+      <h3 style="font-size:13px;color:#26215C;margin:0 0 4px 0">Righe (${f.righe.length})</h3>
+      <div style="max-height:400px;overflow-y:auto;border:1px solid #e8e5dc;border-radius:6px">
+        ${righeHtml}
+      </div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn-primary" onclick="chiudiModal()" style="font-size:12px">Chiudi</button>
+      </div>
+    </div>
+  `;
+
+  apriModal(html);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
 
 function _setStep(n) {
   document.querySelectorAll('.fi-step').forEach(s => {
@@ -555,6 +1095,7 @@ function _fmtN(n) {
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
   _onFileSelected: _onFileSelected,
+  _apriDettaglio: _apriDettaglio,
 };
 
 })();
