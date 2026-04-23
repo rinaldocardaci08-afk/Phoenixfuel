@@ -1132,6 +1132,39 @@ function _apriDettaglio(idx) {
       }
     }
 
+    // Bottone CREA ordine: solo se orphan + prodotto riconosciuto + litri > 0
+    // (caso tipico: fattura per vendita non ancora registrata in PhoenixFuel)
+    let creaOrdineHtml = '';
+    if (st === 'orphan' && r.prodotto_normalizzato && r.quantita > 0) {
+      // Encode dei dati fattura per passarli alla funzione (JSON poi base64 per evitare problemi quoting)
+      const payload = JSON.stringify({
+        fattura_idx: idx,
+        riga_numero: r.numero_linea,
+        fattura_nr: ft.numero,
+        fattura_data: ft.data,
+        cessionario_piva: ft.cessionario_piva || '',
+        cessionario_denominazione: ft.cessionario_denominazione || '',
+        prodotto: r.prodotto_normalizzato,
+        litri: r.quantita,
+        imponibile: r.prezzo_totale,
+        aliquota_iva: r.aliquota_iva || 22,
+        das_numero_dogane: r.das_numero_dogane || null,
+      });
+      const payload64 = btoa(unescape(encodeURIComponent(payload)));
+      creaOrdineHtml = `
+        <div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:6px 10px;border-radius:4px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:10px;color:#791F1F;flex:1">
+            <strong>Fattura senza ordine in PhoenixFuel.</strong>
+            <br><span style="color:#666">Puoi creare un ordine corrispondente con dati dalla fattura (dovrai inserire il costo).</span>
+          </div>
+          <button class="btn-primary" style="background:#A32D2D;font-size:10px;padding:4px 10px"
+                  onclick="window.pfFattureImport._apriCreaOrdineDaOrphan('${payload64}')">
+            ➕ Crea ordine da fattura
+          </button>
+        </div>
+      `;
+    }
+
     return `
       <div style="padding:10px;border-bottom:1px solid #e8e5dc">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
@@ -1146,6 +1179,7 @@ function _apriDettaglio(idx) {
         ${scoringHtml}
         ${refHtml}
         ${correzioneHtml}
+        ${creaOrdineHtml}
       </div>
     `;
   }).join('');
@@ -1263,7 +1297,7 @@ async function _applicaPivaBatch() {
     try {
       const { error } = await sb.from('clienti').update({
         piva: p.piva_nuova,
-      }).eq('id', p.cliente_id).is('piva', null);  // guardia: solo se piva era ancora null
+      }).eq('id', p.cliente_id).or('piva.is.null,piva.eq.');  // guardia: solo se piva era null O stringa vuota
 
       if (error) {
         ko++;
@@ -1378,6 +1412,287 @@ async function _accettaCorrezione(ordineId, impFattura, impOrdine, litri, idxFat
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CREA ORDINE DA FATTURA ORPHAN
+// Quando una fattura Danea non trova un ordine corrispondente in PhoenixFuel,
+// l'utente può creare manualmente l'ordine dai dati fattura.
+// L'ordine viene creato in stato 'consegnato' con caricato_deposito=true.
+// L'utente deve inserire manualmente il costo_litro (costo reale nostro).
+// ═══════════════════════════════════════════════════════════════════════════
+async function _apriCreaOrdineDaOrphan(payload64) {
+  let d;
+  try {
+    d = JSON.parse(decodeURIComponent(escape(atob(payload64))));
+  } catch (e) {
+    toast('Errore decodifica dati: ' + e.message);
+    return;
+  }
+
+  // Cerca il cliente in anagrafica (primario: PIVA; fallback: nome esatto)
+  let cliente = null;
+  if (d.cessionario_piva) {
+    const pivaNorm = _normalizzaPiva(d.cessionario_piva);
+    for (const c of _clientiMap.values()) {
+      if (c.piva_norm && c.piva_norm === pivaNorm) { cliente = c; break; }
+    }
+  }
+  if (!cliente && d.cessionario_denominazione) {
+    const denomNorm = _normalizzaNome(d.cessionario_denominazione);
+    for (const c of _clientiMap.values()) {
+      if (c.nome_norm === denomNorm) { cliente = c; break; }
+    }
+  }
+  // Se non trovato, prepara un warning ma consenti creazione senza cliente_id
+  const clienteTrovato = !!cliente;
+  const clienteId = cliente ? [...(_clientiMap.entries())].find(([k, v]) => v === cliente)?.[0] : null;
+  const clienteNome = cliente ? cliente.nome : d.cessionario_denominazione;
+
+  // Importo netto per litro (prezzo di vendita)
+  const impNettoL = d.litri > 0 ? (d.imponibile / d.litri) : 0;
+
+  const html = `
+    <div style="max-width:720px">
+      <h2 style="margin:0 0 10px 0;color:#A32D2D">➕ Crea ordine da fattura orfana</h2>
+
+      ${!clienteTrovato ? `
+        <div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px 12px;border-radius:4px;margin-bottom:12px;font-size:12px;color:#791F1F">
+          ⚠ <strong>Cliente non trovato in anagrafica PhoenixFuel</strong>: l'ordine verrà creato con il nome dalla fattura ma senza link. Crea prima il cliente se vuoi tracciabilità completa (o annulla qui e crealo manualmente).
+        </div>
+      ` : ''}
+
+      <div style="background:#fafaf8;padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12px;line-height:1.8">
+        <div style="display:grid;grid-template-columns:140px 1fr;gap:4px 12px">
+          <strong>Fattura:</strong><span>nr ${esc(d.fattura_nr)} del ${_fmtData(d.fattura_data)}</span>
+          <strong>Cliente:</strong><span>${esc(clienteNome)} ${clienteTrovato ? '<span style="color:#639922;font-size:10px">✓ in anagrafica</span>' : '<span style="color:#A32D2D;font-size:10px">✗ non in anagrafica</span>'}</span>
+          <strong>PIVA:</strong><span style="font-family:monospace">${esc(d.cessionario_piva || '—')}</span>
+          <strong>Prodotto:</strong><span>${esc(d.prodotto)}</span>
+          <strong>Litri:</strong><span style="font-family:monospace">${_fmtN(d.litri)} L</span>
+          <strong>Imponibile fatt.:</strong><span style="font-family:monospace">€ ${_fmtN(d.imponibile)} <span style="color:#666;font-size:10px">(= € ${_fmtN(impNettoL)}/L netto)</span></span>
+          <strong>IVA:</strong><span>${d.aliquota_iva}%</span>
+          ${d.das_numero_dogane ? `<strong>DAS Dogane:</strong><span style="font-family:monospace">${esc(d.das_numero_dogane)}</span>` : ''}
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="form-group">
+          <label>Data ordine <span style="color:#A32D2D">*</span></label>
+          <input type="date" id="fi-orphan-data" value="${esc(d.fattura_data)}"
+                 style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px" />
+        </div>
+        <div class="form-group">
+          <label>Costo €/L <span style="color:#A32D2D">*</span> <span style="color:#666;font-size:10px">(costo di acquisto tuo)</span></label>
+          <input type="number" id="fi-orphan-costo" step="0.0001" placeholder="es. 0.4500" autofocus
+                 oninput="window.pfFattureImport._aggiornaPreviewOrphan()"
+                 style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace" />
+        </div>
+        <div class="form-group">
+          <label>Trasporto €/L <span style="color:#666;font-size:10px">(opzionale)</span></label>
+          <input type="number" id="fi-orphan-trasporto" step="0.0001" value="0"
+                 oninput="window.pfFattureImport._aggiornaPreviewOrphan()"
+                 style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace" />
+        </div>
+        <div class="form-group">
+          <label>Fornitore</label>
+          <input type="text" id="fi-orphan-fornitore" value="PhoenixFuel" readonly
+                 style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;background:#fafaf8" />
+        </div>
+      </div>
+
+      <!-- Preview calcolo -->
+      <div id="fi-orphan-preview" style="background:#EEEDFE;border-left:3px solid #6B5FCC;padding:10px 12px;border-radius:4px;margin-bottom:12px;font-size:12px">
+        <span style="color:#666">Inserisci il costo per vedere il margine risultante...</span>
+      </div>
+
+      <!-- Dati tecnici read-only -->
+      <div style="font-size:10px;color:#666;background:#fafaf8;padding:6px 10px;border-radius:4px;margin-bottom:12px">
+        🛈 L'ordine verrà creato come: tipo_ordine=cliente · stato=consegnato · caricato_deposito=true.<br>
+        Nota: "Creato da import Danea fatt. ${esc(d.fattura_nr)} del ${_fmtData(d.fattura_data)}"
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-primary" onclick="chiudiModal()"
+                style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);font-size:12px">
+          Annulla
+        </button>
+        <button class="btn-primary" id="fi-orphan-conferma" style="background:#639922;font-size:12px" disabled
+                onclick="window.pfFattureImport._confermaCreaOrdineDaOrphan('${payload64}', '${clienteId || ''}', ${clienteTrovato})">
+          ➕ Crea ordine
+        </button>
+      </div>
+    </div>
+  `;
+  apriModal(html);
+}
+
+function _aggiornaPreviewOrphan() {
+  const costo = parseFloat(document.getElementById('fi-orphan-costo')?.value) || 0;
+  const trasporto = parseFloat(document.getElementById('fi-orphan-trasporto')?.value) || 0;
+  const prev = document.getElementById('fi-orphan-preview');
+  const btnConferma = document.getElementById('fi-orphan-conferma');
+  if (!prev) return;
+
+  // Ricalcola dai dati già presenti nel DOM (letti dalla modale)
+  // Approccio: prendiamo litri+imponibile dalle label della modale (semplice: passiamo via dataset o rifacciamo i calcoli)
+  // Più semplice: rileggiamo i dati dal payload nella funzione conferma. Qui facciamo solo enable/disable + preview numerica.
+
+  if (costo <= 0) {
+    prev.innerHTML = '<span style="color:#666">Inserisci il costo per vedere il margine risultante...</span>';
+    if (btnConferma) btnConferma.disabled = true;
+    return;
+  }
+  // Trova litri e imponibile dai dati nel DOM (li mostra la modale)
+  // Più robusto: lo facciamo ricavare al submit. Per ora preview generico:
+  const dati = _estraiDatiOrphanDalDOM();
+  if (!dati) {
+    prev.innerHTML = 'Costo inserito: € ' + _fmtN(costo) + '/L';
+    if (btnConferma) btnConferma.disabled = false;
+    return;
+  }
+  const impNettoL = dati.litri > 0 ? (dati.imponibile / dati.litri) : 0;
+  const margine = impNettoL - costo - trasporto;
+  const imponibileRicalc = (costo + trasporto + margine) * dati.litri;
+
+  const margineTotale = margine * dati.litri;
+  const colore = margine >= 0 ? '#27500A' : '#A32D2D';
+  prev.innerHTML = `
+    <div style="display:grid;grid-template-columns:auto auto auto auto;gap:4px 16px;font-family:monospace;font-size:12px">
+      <strong>Costo totale:</strong><span>€ ${_fmtN(costo * dati.litri)}</span>
+      <strong>Margine €/L:</strong><span style="color:${colore};font-weight:700">€ ${_fmtN(margine)}</span>
+      <strong>Trasporto totale:</strong><span>€ ${_fmtN(trasporto * dati.litri)}</span>
+      <strong>Margine totale:</strong><span style="color:${colore};font-weight:700">€ ${_fmtN(margineTotale)}</span>
+      <strong>Imponibile calc.:</strong><span>€ ${_fmtN(imponibileRicalc)}</span>
+      <strong>Imponibile fatt.:</strong><span>€ ${_fmtN(dati.imponibile)}</span>
+    </div>
+    ${margine < 0 ? '<div style="margin-top:6px;color:#A32D2D;font-size:11px">⚠ Margine negativo: stai vendendo sotto costo</div>' : ''}
+  `;
+  if (btnConferma) btnConferma.disabled = false;
+}
+
+// Helper: estrae litri/imponibile dai dati nella modale (lettura dal nostro payload64 salvato nel DOM)
+function _estraiDatiOrphanDalDOM() {
+  // I dati sono nel payload64 passato a _confermaCreaOrdineDaOrphan. Lo rileggiamo dall'onclick.
+  const btn = document.getElementById('fi-orphan-conferma');
+  if (!btn) return null;
+  const onclick = btn.getAttribute('onclick') || '';
+  const m = onclick.match(/'([A-Za-z0-9+/=]+)'/);
+  if (!m) return null;
+  try {
+    return JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+  } catch (e) {
+    return null;
+  }
+}
+
+async function _confermaCreaOrdineDaOrphan(payload64, clienteId, clienteTrovato) {
+  const costo = parseFloat(document.getElementById('fi-orphan-costo').value);
+  const trasporto = parseFloat(document.getElementById('fi-orphan-trasporto').value) || 0;
+  const dataOrd = document.getElementById('fi-orphan-data').value;
+
+  if (!costo || costo <= 0) { toast('⚠️ Costo obbligatorio'); return; }
+  if (!dataOrd) { toast('⚠️ Data obbligatoria'); return; }
+
+  let d;
+  try {
+    d = JSON.parse(decodeURIComponent(escape(atob(payload64))));
+  } catch (e) {
+    toast('Errore decodifica: ' + e.message);
+    return;
+  }
+
+  const litri = Number(d.litri);
+  const imponibile = Number(d.imponibile);
+  const impNettoL = litri > 0 ? (imponibile / litri) : 0;
+  const margine = Math.round((impNettoL - costo - trasporto) * 1000000) / 1000000;
+
+  // Calcola data_scadenza: data + giorni pagamento cliente (default 30)
+  let ggPag = 30;
+  if (clienteTrovato && clienteId) {
+    try {
+      const { data: cli } = await sb.from('clienti').select('giorni_pagamento').eq('id', clienteId).single();
+      if (cli && cli.giorni_pagamento) ggPag = cli.giorni_pagamento;
+    } catch (e) { /* ignore */ }
+  }
+  const dataScad = new Date(dataOrd);
+  dataScad.setDate(dataScad.getDate() + ggPag);
+  const dataScadISO = dataScad.toISOString().split('T')[0];
+
+  // Mappa prodotto normalizzato → nome prodotto in anagrafica (lo stesso uso del parser)
+  // PhoenixFuel usa 'Gasolio Autotrazione' / 'Gasolio Agricolo' / 'Benzina' / 'HVO' / 'AdBlue'
+  const mapProdotto = {
+    'Gas Auto': 'Gasolio Autotrazione',
+    'Gas Agricolo': 'Gasolio Agricolo',
+    'Benzina': 'Benzina',
+    'HVO': 'HVO',
+    'AdBlue': 'AdBlue',
+  };
+  const prodottoDB = mapProdotto[d.prodotto] || d.prodotto;
+
+  const record = {
+    data: dataOrd,
+    tipo_ordine: 'cliente',
+    cliente: d.cessionario_denominazione,
+    cliente_id: clienteTrovato && clienteId ? clienteId : null,
+    prodotto: prodottoDB,
+    litri: litri,
+    fornitore: 'PhoenixFuel',
+    costo_litro: costo,
+    trasporto_litro: trasporto,
+    margine: margine,
+    iva: Number(d.aliquota_iva) || 22,
+    stato: 'consegnato',
+    caricato_deposito: true,
+    giorni_pagamento: ggPag,
+    data_scadenza: dataScadISO,
+    note: 'Creato da import Danea fatt. ' + d.fattura_nr + ' del ' + _fmtData(d.fattura_data) +
+          (d.das_numero_dogane ? ' · DAS Dogane ' + d.das_numero_dogane : ''),
+  };
+
+  try {
+    const { data: nuovo, error } = await sb.from('ordini').insert([record]).select().single();
+    if (error) { toast('Errore insert: ' + error.message); return; }
+
+    // Audit log
+    if (typeof _auditLog === 'function') {
+      _auditLog('crea_ordine_da_fattura_danea', 'ordini',
+        d.cessionario_denominazione + ' ' + prodottoDB + ' ' + _fmtN(litri) + 'L ' +
+        '€' + _fmtN(imponibile) + ' | costo ' + costo.toFixed(6) + ' margine ' + margine.toFixed(6) +
+        ' | fatt. ' + d.fattura_nr + '/' + d.fattura_data +
+        ' | batch ' + (_batchId || '?'));
+    }
+
+    // Aggiungi il nuovo ordine alla copia locale così il re-match lo trova
+    if (_ordiniPeriodo && nuovo) {
+      _ordiniPeriodo.push({
+        id: nuovo.id,
+        data: nuovo.data,
+        cliente: nuovo.cliente,
+        cliente_id: nuovo.cliente_id,
+        prodotto: nuovo.prodotto,
+        litri: nuovo.litri,
+        costo_litro: nuovo.costo_litro,
+        trasporto_litro: nuovo.trasporto_litro,
+        margine: nuovo.margine,
+        iva: nuovo.iva,
+        tipo_ordine: nuovo.tipo_ordine,
+        stato: nuovo.stato,
+        fornitore: nuovo.fornitore,
+      });
+    }
+
+    toast('✓ Ordine creato e collegato alla fattura');
+    chiudiModal();
+
+    // Ricalcola match: l'orphan diventa matched, gli altri restano coerenti
+    _calcolaMatchTutte();
+    _renderStep3UI();
+
+  } catch (e) {
+    console.error('[_confermaCreaOrdineDaOrphan]', e);
+    toast('Errore: ' + e.message);
+  }
+}
+
+
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
   _onFileSelected: _onFileSelected,
@@ -1385,6 +1700,9 @@ window.pfFattureImport = {
   _togglePivaAll: _togglePivaAll,
   _applicaPivaBatch: _applicaPivaBatch,
   _accettaCorrezione: _accettaCorrezione,
+  _apriCreaOrdineDaOrphan: _apriCreaOrdineDaOrphan,
+  _confermaCreaOrdineDaOrphan: _confermaCreaOrdineDaOrphan,
+  _aggiornaPreviewOrphan: _aggiornaPreviewOrphan,
 };
 
 })();
