@@ -255,8 +255,31 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
       riepMesi.push({ mese: m, label: meseLabel[m-1], ordini: nOrd, fatture: nFatt });
     }
 
+    // ── 4b. Ultimo mese con fatture importate (per banner promemoria) ──
+    const mesiConFatture = riepMesi.filter(r => r.fatture > 0).map(r => r.mese);
+    const ultimoMeseImportato = mesiConFatture.length > 0 ? Math.max(...mesiConFatture) : null;
+    const oggi = new Date();
+    const meseCorrente = oggi.getMonth() + 1;
+    const annoCorrente = oggi.getFullYear();
+    // Mostra banner solo se siamo nell'anno corrente + ultimo mese importato è vecchio di 1+ mese
+    const mostraBannerImport = annoInt === annoCorrente && ultimoMeseImportato && (meseCorrente - ultimoMeseImportato >= 1);
+    const meseLabelLower = meseLabel.map(m => m.toLowerCase());
+
     // ── 5. Render dashboard ──
     wrap.innerHTML = `
+      ${mostraBannerImport ? `
+        <div style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:10px 14px;border-radius:6px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div style="font-size:12px;color:#26215C">
+            ℹ️ Ultimo mese con fatture importate: <strong>${meseLabel[ultimoMeseImportato-1]} ${annoInt}</strong>.
+            Ricordati di importare lo ZIP Danea dei mesi successivi per avere i dati aggiornati.
+          </div>
+          <button class="btn-primary" style="font-size:11px;padding:5px 12px;background:#6B5FCC"
+                  onclick="document.querySelector('[data-tab=fatt-panel-import]')?.click()">
+            📥 Vai a Import Danea
+          </button>
+        </div>
+      ` : ''}
+
       <!-- KPI fatturato (3 card) -->
       <div class="grid4" style="margin-bottom:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
         <div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value">${_fmtE(imp)}</div></div>
@@ -319,10 +342,11 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
                   ${riepMesi.map(r => {
                     const diff = r.ordini - r.fatture;
                     let stato, colore;
-                    if (r.ordini === 0) { stato = '—'; colore = '#888'; }
+                    if (r.ordini === 0 && r.fatture === 0) { stato = '—'; colore = '#888'; }
+                    else if (r.fatture === 0 && r.ordini > 0) { stato = '⏳ Non importato'; colore = '#6B5FCC'; }
                     else if (diff === 0) { stato = '✓ Chiuso'; colore = '#639922'; }
                     else if (diff > 0) { stato = `⚠ ${diff} da fatturare`; colore = '#D4A017'; }
-                    else { stato = `+${-diff} extra`; colore = '#6B5FCC'; }
+                    else { stato = `+${-diff} extra`; colore = '#8B6A00'; }
                     return `
                       <tr style="border-bottom:0.5px solid var(--border)">
                         <td style="padding:3px 4px">${r.label}</td>

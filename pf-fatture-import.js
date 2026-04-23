@@ -2003,6 +2003,22 @@ async function _importFatturaSingola(f, batchId) {
     if (errR) throw new Error('insert righe: ' + errR.message);
   }
 
+  // ── 2.bis — Aggiorna stato ordini matchati a 'consegnato' ──
+  // Regola costituzionale: ordine con fattura Danea collegata = consegnato.
+  // Previene inconsistenze nella dashboard riepilogo mensile.
+  const ordiniDaAggiornare = righePayload
+    .map(r => r.ordine_id)
+    .filter(id => id);  // solo non-null
+  if (ordiniDaAggiornare.length > 0) {
+    const { error: errU } = await sb.from('ordini')
+      .update({ stato: 'consegnato' })
+      .in('id', ordiniDaAggiornare)
+      .neq('stato', 'consegnato');  // evita UPDATE inutili
+    if (errU) console.warn('[import] update stato ordini:', errU.message);
+    // Non throw: se fallisce per qualche motivo (RLS, etc), l'import prosegue
+    // e c'è comunque la sanatoria SQL lanciabile manualmente.
+  }
+
   // ── 3. DELETE + INSERT pagamenti ──
   await sb.from('fatture_pagamenti').delete().eq('fattura_id', fattId);
 
