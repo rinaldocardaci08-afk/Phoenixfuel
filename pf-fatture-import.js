@@ -10,6 +10,7 @@ let _parsedData = null;
 let _batchId = null;
 let _ordiniPeriodo = null;   // ordini Supabase del periodo fattura (±3gg)
 let _clientiMap = null;      // Map cliente_id -> { nome, piva, piva_norm }
+let _pivaDaAggiornare = [];  // [{ cliente_id, nome, piva_nuova, occorrenze, fattura_esempio }]
 
 const DAS_RE = /DAS\s+(?:del\s+(\d{1,2}\s+[A-Za-zàèéìòù]+\s+\d{4}))?\s*(?:nr|n\.?|numero)?[:\s]*(\d{4,10})/i;
 const ORDINE_RE = /Rif\.?\s*Conferma\s+d['']ordine\s+(\d+)\s+del\s+(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i;
@@ -147,13 +148,27 @@ function parseXMLFatturaLocale(xmlString, filename) {
     const codArt = first(l, 'CodiceArticolo');
     const cod = codArt ? txt(codArt, 'CodiceValore') : null;
 
+    // ── FIX AdBlue taniche: Danea fattura AdBlue in "pezzi" (taniche da 1000L).
+    // Se prodotto = AdBlue e quantità piccola (tipicamente 1-5 pezzi) → converti in litri.
+    // Conserva il valore originale in quantita_originale_pz per il dettaglio UI.
+    const prodottoNorm = (qta && qta > 0) ? normalizzaProdotto(desc) : null;
+    let qtaLitri = qta;
+    let qtaOriginalePz = null;
+    let unitaOriginaleStr = txt(l, 'UnitaMisura');
+    if (prodottoNorm === 'AdBlue' && qta && qta > 0 && qta <= 10) {
+      // Euristica: taniche (pz) da 1000L. Se 1 pezzo = 1000L, 2 pezzi = 2000L, ecc.
+      qtaOriginalePz = qta;
+      qtaLitri = qta * 1000;
+    }
+
     righe.push({
       numero_linea: parseInt(txt(l, 'NumeroLinea') || '0'),
       descrizione: desc,
-      prodotto_normalizzato: (qta && qta > 0) ? normalizzaProdotto(desc) : null,
+      prodotto_normalizzato: prodottoNorm,
       codice_articolo: cod,
-      quantita: qta,
-      unita_misura: txt(l, 'UnitaMisura'),
+      quantita: qtaLitri,
+      quantita_originale_pz: qtaOriginalePz,
+      unita_misura: unitaOriginaleStr,
       prezzo_unitario: parseFloat(txt(l, 'PrezzoUnitario') || '0') || null,
       prezzo_totale: prezzo_t,
       aliquota_iva: parseFloat(txt(l, 'AliquotaIVA') || '0') || null,
@@ -546,6 +561,7 @@ function _calcolaMatchRiga(fattura, riga) {
   let bestScore = -1;
   let bestOrdine = null;
   let bestDettaglio = null;
+  let bestPivaDaCompletare = null;
 
   for (const o of _ordiniPeriodo) {
     // Pre-filtro grossolano: prodotto normalizzato deve matchare, altrimenti skip
@@ -562,15 +578,25 @@ function _calcolaMatchRiga(fattura, riga) {
     // 1. PIVA (Entrambi con fallback)
     //    Primario: cliente_id ordine → clienti.piva ≟ PIVA fattura
     //    Fallback: nome ordine (snapshot) ≟ denominazione fattura normalizzati
+    //    Ricaduta: se match per nome ma PhoenixFuel senza PIVA → flag per auto-update
     let pivaMatch = false;
+    let pivaDaCompletare = null; // { cliente_id, nome, piva_nuova } se caso ricaduta
     if (o.cliente_id && _clientiMap.has(o.cliente_id)) {
       const c = _clientiMap.get(o.cliente_id);
       if (c.piva_norm && pivaFattNorm && c.piva_norm === pivaFattNorm) {
         pivaMatch = true;
+      } else if (!c.piva_norm && pivaFattNorm && c.nome_norm && denomFattNorm && c.nome_norm === denomFattNorm) {
+        // Match su nome + PhoenixFuel senza PIVA + fattura con PIVA → candidato auto-completamento
+        pivaMatch = true;
+        pivaDaCompletare = {
+          cliente_id: o.cliente_id,
+          nome: c.nome,
+          piva_nuova: fattura.cessionario_piva,  // conserva formato originale (con IT se presente)
+        };
       }
     }
     if (!pivaMatch) {
-      // Fallback su nome
+      // Fallback su nome (ordine senza cliente_id o cliente_id senza match)
       const nomeOrdNorm = _normalizzaNome(o.cliente);
       if (nomeOrdNorm && denomFattNorm && nomeOrdNorm === denomFattNorm) {
         pivaMatch = true;
@@ -601,11 +627,12 @@ function _calcolaMatchRiga(fattura, riga) {
       bestScore = score;
       bestOrdine = o;
       bestDettaglio = dett;
+      bestPivaDaCompletare = pivaDaCompletare;
     }
   }
 
   if (!bestOrdine) {
-    return { score: 0, ordine_id: null, ordine_ref: null, dettaglio: { piva: 0, data: 0, prodotto: 0, litri: 0, imponibile: 0 } };
+    return { score: 0, ordine_id: null, ordine_ref: null, dettaglio: { piva: 0, data: 0, prodotto: 0, litri: 0, imponibile: 0 }, piva_da_completare: null };
   }
 
   return {
@@ -619,6 +646,7 @@ function _calcolaMatchRiga(fattura, riga) {
       imponibile: _imponibileOrdine(bestOrdine),
     },
     dettaglio: bestDettaglio,
+    piva_da_completare: bestPivaDaCompletare,
   };
 }
 
@@ -633,6 +661,7 @@ function _classificaMatch(score) {
 // Itera su tutte le fatture parsate, popola match per ogni riga e stato aggregato per fattura
 function _calcolaMatchTutte() {
   let totMatched = 0, totUncertain = 0, totOrphan = 0, totServizio = 0;
+  const pivaMap = new Map(); // cliente_id -> { cliente_id, nome, piva_nuova, occorrenze, fattura_esempio }
 
   for (const f of _parsedData.fatture) {
     let statoFattura = null; // 'matched' | 'uncertain' | 'orphan'
@@ -641,6 +670,23 @@ function _calcolaMatchTutte() {
       const m = _calcolaMatchRiga(f.fattura, r);
       r._match = m;
       r._match_status = _classificaMatch(m.score);
+
+      // Raccogli PIVA da auto-completare (solo se match è valido e PIVA presente)
+      if (m.piva_da_completare && m.piva_da_completare.piva_nuova) {
+        const k = m.piva_da_completare.cliente_id;
+        if (pivaMap.has(k)) {
+          pivaMap.get(k).occorrenze++;
+        } else {
+          pivaMap.set(k, {
+            cliente_id: m.piva_da_completare.cliente_id,
+            nome: m.piva_da_completare.nome,
+            piva_nuova: m.piva_da_completare.piva_nuova,
+            occorrenze: 1,
+            fattura_esempio: f.fattura.numero + ' del ' + f.fattura.data,
+            denominazione_fattura: f.fattura.cessionario_denominazione,
+          });
+        }
+      }
 
       if (r._match_status === 'matched') totMatched++;
       else if (r._match_status === 'uncertain') totUncertain++;
@@ -659,12 +705,15 @@ function _calcolaMatchTutte() {
     f._match_status_fattura = statoFattura || 'servizio';
   }
 
+  _pivaDaAggiornare = Array.from(pivaMap.values()).sort((a, b) => b.occorrenze - a.occorrenze);
+
   _parsedData.match_stats = {
     righe_totali: totMatched + totUncertain + totOrphan + totServizio,
     matched: totMatched,
     uncertain: totUncertain,
     orphan: totOrphan,
     servizio: totServizio,
+    piva_da_aggiornare: _pivaDaAggiornare.length,
   };
 }
 
@@ -801,6 +850,56 @@ function _renderStep3UI() {
             ${pctMatched > 0 ? `<div style="width:${pctMatched}%;background:#639922;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${pctMatched}%</div>` : ''}
             ${pctUncertain > 0 ? `<div style="width:${pctUncertain}%;background:#D4A017;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${pctUncertain}%</div>` : ''}
             ${pctOrphan > 0 ? `<div style="width:${pctOrphan}%;background:#A32D2D;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">${pctOrphan}%</div>` : ''}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Pannello batch aggiornamento PIVA -->
+      ${_pivaDaAggiornare.length > 0 ? `
+        <div id="fi-piva-panel" style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:14px 16px;border-radius:6px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#26215C">🆔 PIVA mancanti in anagrafica (${_pivaDaAggiornare.length})</div>
+              <div style="font-size:11px;color:#555;margin-top:2px">Questi clienti PhoenixFuel non hanno la PIVA ma sono stati trovati per nome nelle fatture Danea. Conferma l'aggiornamento anagrafica.</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn-primary" style="font-size:11px;padding:6px 12px" onclick="window.pfFattureImport._togglePivaAll(true)">Seleziona tutti</button>
+              <button class="btn-primary" style="font-size:11px;padding:6px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="window.pfFattureImport._togglePivaAll(false)">Deseleziona tutti</button>
+            </div>
+          </div>
+          <div style="max-height:260px;overflow-y:auto;background:#fff;border-radius:6px;border:1px solid #d9d5f5">
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead style="position:sticky;top:0;background:#6B5FCC;color:#fff;z-index:1">
+                <tr>
+                  <th style="padding:6px;text-align:center;width:30px"><input type="checkbox" id="fi-piva-all" onchange="window.pfFattureImport._togglePivaAll(this.checked)" checked /></th>
+                  <th style="padding:6px;text-align:left">Cliente PhoenixFuel</th>
+                  <th style="padding:6px;text-align:left">Nome in fattura Danea</th>
+                  <th style="padding:6px;text-align:left">PIVA da aggiungere</th>
+                  <th style="padding:6px;text-align:center">Occorrenze</th>
+                  <th style="padding:6px;text-align:left">Esempio</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${_pivaDaAggiornare.map((p, i) => `
+                  <tr style="border-bottom:1px solid #e8e5dc" data-piva-idx="${i}">
+                    <td style="padding:6px;text-align:center">
+                      <input type="checkbox" class="fi-piva-chk" data-idx="${i}" checked />
+                    </td>
+                    <td style="padding:6px">${esc(p.nome)}</td>
+                    <td style="padding:6px;color:#666">${esc((p.denominazione_fattura || '').substring(0, 35))}</td>
+                    <td style="padding:6px;font-family:monospace;font-weight:700">${esc(p.piva_nuova)}</td>
+                    <td style="padding:6px;text-align:center">${p.occorrenze}</td>
+                    <td style="padding:6px;color:#666;font-size:10px">Fatt. ${esc(p.fattura_esempio)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+            <div style="font-size:11px;color:#555" id="fi-piva-counter">${_pivaDaAggiornare.length} selezionati</div>
+            <button class="btn-primary" style="background:#6B5FCC;font-size:12px" onclick="window.pfFattureImport._applicaPivaBatch()">
+              💾 Applica aggiornamenti PIVA selezionati
+            </button>
           </div>
         </div>
       ` : ''}
@@ -962,6 +1061,9 @@ function _bindFiltriStep3() {
   });
 
   if (search) search.addEventListener('input', applyFilter);
+
+  // Bind listener sulle checkbox PIVA (se pannello visibile)
+  _bindCheckboxPiva();
 }
 
 // Modale dettaglio match per singola fattura
@@ -1092,10 +1194,105 @@ function _fmtN(n) {
   return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-COMPLETAMENTO PIVA BATCH
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _togglePivaAll(checked) {
+  document.querySelectorAll('.fi-piva-chk').forEach(chk => {
+    chk.checked = checked;
+  });
+  const allChk = document.getElementById('fi-piva-all');
+  if (allChk) allChk.checked = checked;
+  _aggiornaContatorePiva();
+}
+
+function _aggiornaContatorePiva() {
+  const sel = document.querySelectorAll('.fi-piva-chk:checked').length;
+  const counter = document.getElementById('fi-piva-counter');
+  if (counter) counter.textContent = sel + ' selezionati';
+}
+
+async function _applicaPivaBatch() {
+  const checks = Array.from(document.querySelectorAll('.fi-piva-chk:checked'));
+  if (!checks.length) {
+    toast('⚠️ Nessun cliente selezionato');
+    return;
+  }
+
+  const indices = checks.map(c => parseInt(c.dataset.idx));
+  const daAggiornare = indices.map(i => _pivaDaAggiornare[i]).filter(Boolean);
+
+  if (!confirm('Aggiornare ' + daAggiornare.length + ' clienti con la PIVA trovata in fattura?\n\nOperazione tracciata in audit log.')) return;
+
+  const panel = document.getElementById('fi-piva-panel');
+  if (panel) {
+    panel.style.opacity = '0.6';
+    panel.style.pointerEvents = 'none';
+  }
+
+  let ok = 0, ko = 0;
+  const errori = [];
+
+  for (const p of daAggiornare) {
+    try {
+      const { error } = await sb.from('clienti').update({
+        piva: p.piva_nuova,
+      }).eq('id', p.cliente_id).is('piva', null);  // guardia: solo se piva era ancora null
+
+      if (error) {
+        ko++;
+        errori.push(p.nome + ': ' + error.message);
+      } else {
+        ok++;
+        // Aggiorna la mappa locale così il match seguente beneficia
+        if (_clientiMap.has(p.cliente_id)) {
+          const c = _clientiMap.get(p.cliente_id);
+          c.piva = p.piva_nuova;
+          c.piva_norm = _normalizzaPiva(p.piva_nuova);
+        }
+        // Audit log
+        if (typeof _auditLog === 'function') {
+          _auditLog('autocompleta_piva_cliente', 'clienti',
+            p.nome + ' → PIVA ' + p.piva_nuova + ' (da import Danea, batch ' + (_batchId || '?') + ')');
+        }
+      }
+    } catch (e) {
+      ko++;
+      errori.push(p.nome + ': ' + e.message);
+    }
+  }
+
+  if (panel) {
+    panel.style.opacity = '1';
+    panel.style.pointerEvents = '';
+  }
+
+  if (ko === 0) {
+    toast('✓ ' + ok + ' PIVA aggiornate in anagrafica');
+    // Ricalcola il match con PIVA ora in anagrafica → alcuni uncertain diventano matched
+    _calcolaMatchTutte();
+    _renderStep3UI();
+  } else {
+    alert('✓ ' + ok + ' aggiornate\n✗ ' + ko + ' errori:\n\n' + errori.slice(0, 5).join('\n') + (errori.length > 5 ? '\n...' : ''));
+    _calcolaMatchTutte();
+    _renderStep3UI();
+  }
+}
+
+// Bind listener checkbox dopo render (chiamato da _renderStep3UI tramite _bindFiltriStep3)
+function _bindCheckboxPiva() {
+  document.querySelectorAll('.fi-piva-chk').forEach(chk => {
+    chk.addEventListener('change', _aggiornaContatorePiva);
+  });
+}
+
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
   _onFileSelected: _onFileSelected,
   _apriDettaglio: _apriDettaglio,
+  _togglePivaAll: _togglePivaAll,
+  _applicaPivaBatch: _applicaPivaBatch,
 };
 
 })();
