@@ -940,9 +940,9 @@ async function caricaAutoconsumo() {
     }
   }
 
-  // Prelievi mese
+  // Prelievi mese (esclude eliminati soft-delete)
   const inizioMese = oggiISO.substring(0,8) + '01';
-  const { data: prelMese } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', inizioMese).lte('data', oggiISO);
+  const { data: prelMese } = await sb.from('prelievi_autoconsumo').select('litri').gte('data', inizioMese).lte('data', oggiISO).neq('eliminato', true);
   const totMese = (prelMese||[]).reduce((s,p) => s + Number(p.litri), 0);
   document.getElementById('ac-prelievi-mese').textContent = fmtL(totMese);
 
@@ -1135,15 +1135,22 @@ async function caricaPrelievi() {
   const a = document.getElementById('ac-filtro-a').value;
   const filtroCamion = document.getElementById('ac-filtro-camion').value;
   if (!da || !a) return;
+
+  // ── Inietta toggle "mostra eliminati" dinamicamente se non presente ──
+  // (evita di modificare index.html; il toggle viene creato a runtime la prima volta)
+  _assicuraToggleEliminati();
+  const mostraEliminati = document.getElementById('ac-mostra-eliminati')?.checked || false;
+
   let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a);
   if (filtroCamion) q = q.eq('mezzo_targa', filtroCamion);
+  if (!mostraEliminati) q = q.neq('eliminato', true);
   const { data } = await q.order('data',{ascending:false}).order('created_at',{ascending:false});
   const tbody = document.getElementById('ac-tabella-prelievi');
 
-  // Popola dropdown camion (solo se vuoto o cambio periodo)
+  // Popola dropdown camion (solo se vuoto o cambio periodo). Esclude eliminati.
   const sel = document.getElementById('ac-filtro-camion');
   if (sel.options.length <= 1) {
-    const { data: tutti } = await sb.from('prelievi_autoconsumo').select('mezzo_targa').gte('data', da).lte('data', a);
+    const { data: tutti } = await sb.from('prelievi_autoconsumo').select('mezzo_targa').gte('data', da).lte('data', a).neq('eliminato', true);
     const targhe = [...new Set((tutti||[]).map(r => r.mezzo_targa).filter(Boolean))].sort();
     const valPrec = sel.value;
     sel.innerHTML = '<option value="">Tutti i camion</option>' + targhe.map(t => '<option value="' + esc(t) + '">' + esc(t) + '</option>').join('');
@@ -1156,19 +1163,104 @@ async function caricaPrelievi() {
     return;
   }
   let totLitri = 0;
+  let totEliminati = 0;
   tbody.innerHTML = data.map(function(r) {
+    if (r.eliminato) {
+      totEliminati++;
+      // Riga eliminata: grigio chiaro, testo barrato, motivo in evidenza, no bottone elimina
+      const note = r.note ? esc(r.note) : '';
+      const motivo = r.motivo_eliminazione ? esc(r.motivo_eliminazione) : '—';
+      const chi = r.eliminato_da ? esc(r.eliminato_da) : '?';
+      const quando = r.eliminato_il ? new Date(r.eliminato_il).toLocaleDateString('it-IT') : '';
+      return '<tr style="background:#fafaf8;color:#999;text-decoration:line-through">' +
+        '<td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td>' +
+        '<td>' + esc(r.mezzo_targa||'—') + '</td>' +
+        '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
+        '<td style="font-size:10px;text-decoration:none;color:#A32D2D"><strong>❌ ELIMINATO</strong> ' + (quando ? 'il ' + quando : '') + ' da <strong>' + chi + '</strong><br><span style="color:#666">Motivo: ' + motivo + '</span>' + (note ? '<br><span style="color:#999">Note orig: ' + note + '</span>' : '') + '</td>' +
+        '<td></td>' +
+        '</tr>';
+    }
     totLitri += Number(r.litri);
     return '<tr><td>' + new Date(r.data).toLocaleDateString('it-IT') + '</td><td>' + esc(r.mezzo_targa||'—') + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-danger" onclick="eliminaPrelievo(\'' + r.id + '\')">x</button></td></tr>';
   }).join('');
-  document.getElementById('ac-totale-prelievi').innerHTML = 'Totale periodo' + (filtroCamion ? ' (' + filtroCamion + ')' : '') + ': <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + data.length + ' prelievi';
+  let totStr = 'Totale periodo' + (filtroCamion ? ' (' + filtroCamion + ')' : '') + ': <strong style="font-family:var(--font-mono)">' + fmtL(totLitri) + '</strong> — ' + (data.length - totEliminati) + ' prelievi attivi';
+  if (mostraEliminati && totEliminati > 0) totStr += ' <span style="color:#A32D2D">(+' + totEliminati + ' eliminati mostrati)</span>';
+  document.getElementById('ac-totale-prelievi').innerHTML = totStr;
 }
 
+// Crea (una volta sola) il toggle "mostra eliminati" accanto ai filtri del registro prelievi.
+// Non modifica index.html: injection a runtime.
+function _assicuraToggleEliminati() {
+  if (document.getElementById('ac-mostra-eliminati')) return;
+  const filtroCamionEl = document.getElementById('ac-filtro-camion');
+  if (!filtroCamionEl) return;
+  const wrap = document.createElement('label');
+  wrap.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);cursor:pointer;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg)';
+  wrap.title = 'Mostra anche i prelievi eliminati (soft-delete)';
+  wrap.innerHTML = '<input type="checkbox" id="ac-mostra-eliminati" onchange="caricaPrelievi()" style="margin:0" /> Mostra eliminati';
+  // Inserisci subito dopo il select camion
+  filtroCamionEl.parentNode.insertBefore(wrap, filtroCamionEl.nextSibling);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ELIMINAZIONE PRELIEVO AUTOCONSUMO — SOFT DELETE (23/04/2026)
+// Regola costituzionale: il prelievo non viene mai cancellato fisicamente
+// dal DB. Si imposta eliminato=true + motivo obbligatorio + chi/quando.
+// In storico viene nascosto di default, mostrabile col toggle dedicato.
+// Guardia anti-doppio-click: la UPDATE usa .eq('eliminato', false) quindi
+// chiamate ripetute non producono rientri multipli in cisterna.
+// ═══════════════════════════════════════════════════════════════════
 async function eliminaPrelievo(id) {
-  if (!confirm('Eliminare questo prelievo? I litri verranno restituiti alla cisterna.')) return;
   const { data: prel } = await sb.from('prelievi_autoconsumo').select('*').eq('id', id).single();
-  if (!prel) return;
-  // Leggo il livello attuale cisterna PRIMA della cancellazione del prelievo
-  // (read-before-write per evitare race condition con cache stale)
+  if (!prel) { toast('Prelievo non trovato'); return; }
+  if (prel.eliminato) { toast('Prelievo già eliminato'); caricaPrelievi(); return; }
+
+  const prodottoLbl = prel.prodotto || 'Gasolio Autotrazione';
+  const dataLbl = new Date(prel.data).toLocaleDateString('it-IT');
+  const targaLbl = prel.mezzo_targa || '—';
+  const litriLbl = fmtL(prel.litri);
+  const noteOrig = prel.note ? esc(prel.note) : '—';
+
+  let html = '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#A32D2D">🗑️ Elimina prelievo autoconsumo</div>';
+  html += '<div style="background:#fafaf8;padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12px;line-height:1.7">';
+  html += '<div><strong>Data:</strong> ' + dataLbl + '</div>';
+  html += '<div><strong>Prodotto:</strong> ' + esc(prodottoLbl) + '</div>';
+  html += '<div><strong>Camion:</strong> ' + esc(targaLbl) + '</div>';
+  html += '<div><strong>Litri:</strong> ' + litriLbl + '</div>';
+  html += '<div><strong>Note:</strong> ' + noteOrig + '</div>';
+  html += '</div>';
+  html += '<div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:10px 12px;border-radius:4px;margin-bottom:12px;font-size:12px;color:#8B6A00">';
+  html += 'ℹ️ Soft-delete: il prelievo resta nello storico (barrato) con motivo e firma. I <strong>' + litriLbl + '</strong> vengono restituiti alla cisterna.';
+  html += '</div>';
+  html += '<div class="form-group"><label>Motivo eliminazione <span style="color:#A32D2D">*</span></label>';
+  html += '<textarea id="ac-motivo-elim" rows="3" placeholder="Es: prelievo registrato per errore / camion sbagliato / litri errati / duplicato"';
+  html += ' style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;resize:vertical" autofocus></textarea></div>';
+  html += '<div style="display:flex;gap:8px;margin-top:10px">';
+  html += '<button class="btn-primary" style="flex:1;background:#A32D2D" onclick="_confermaEliminaPrelievo(\'' + id + '\')">🗑️ Conferma eliminazione</button>';
+  html += '<button class="btn-primary" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="chiudiModal()">Annulla</button>';
+  html += '</div>';
+  apriModal(html);
+}
+
+async function _confermaEliminaPrelievo(id) {
+  const motivoEl = document.getElementById('ac-motivo-elim');
+  const motivo = (motivoEl?.value || '').trim();
+  if (!motivo || motivo.length < 3) {
+    toast('⚠️ Inserisci un motivo di almeno 3 caratteri');
+    motivoEl?.focus();
+    return;
+  }
+
+  // Read-before-write: livello cisterna corrente + stato prelievo
+  const { data: prel } = await sb.from('prelievi_autoconsumo').select('*').eq('id', id).single();
+  if (!prel) { toast('Prelievo non trovato'); chiudiModal(); return; }
+  if (prel.eliminato) {
+    toast('⚠️ Prelievo già eliminato');
+    chiudiModal();
+    caricaPrelievi();
+    return;
+  }
+
   const mappa = window._cisterneAutoconsumo || {};
   const prodPrel = prel.prodotto || 'Gasolio Autotrazione';
   const cisRef = mappa[prodPrel] || window._cisternaAutoconsumo;
@@ -1178,25 +1270,49 @@ async function eliminaPrelievo(id) {
     if (cisFresh) livelloFresco = Number(cisFresh.livello_attuale);
   }
 
-  const { error } = await sb.from('prelievi_autoconsumo').delete().eq('id', id);
+  // SOFT DELETE con guardia idempotenza: .eq('eliminato', false) garantisce che
+  // un doppio-click non aggiorni due volte e quindi NON produca due rientri.
+  const userNome = (typeof utenteCorrente !== 'undefined' && utenteCorrente)
+    ? (utenteCorrente.nome || utenteCorrente.email || 'sconosciuto')
+    : 'sconosciuto';
+
+  const { data: updated, error } = await sb.from('prelievi_autoconsumo').update({
+    eliminato: true,
+    eliminato_il: new Date().toISOString(),
+    eliminato_da: userNome,
+    motivo_eliminazione: motivo
+  }).eq('id', id).eq('eliminato', false).select();
+
   if (error) { toast('Errore: ' + error.message); return; }
 
-  // Audit esteso: chi ha cancellato cosa (analogo a ciò che abbiamo fatto su 'prezzi')
+  // ANTI-DOPPIO-RIENTRO: se update non ha toccato righe, NON fare +litri cisterna.
+  // Questo protegge anche da eventuali problemi RLS o race condition futuri.
+  if (!updated || updated.length === 0) {
+    toast('❌ Eliminazione non riuscita (prelievo già eliminato o permessi insufficienti)');
+    chiudiModal();
+    caricaPrelievi();
+    return;
+  }
+
+  // OK: rientro litri in cisterna usando il valore fresco letto
+  if (cisRef && livelloFresco !== null) {
+    const nuovoLivello = livelloFresco + Number(prel.litri);
+    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisRef.id);
+  }
+
+  // Audit log esteso (chi, cosa, perché)
   if (typeof _auditLog === 'function') {
     _auditLog('elimina_prelievo_autoconsumo', 'prelievi_autoconsumo',
       prodPrel + ' ' + fmtL(prel.litri) +
       ' | mezzo ' + (prel.mezzo_targa || '—') +
       ' | data ' + (prel.data || '—') +
-      (prel.note ? ' | note: ' + prel.note : '') +
+      ' | motivo: ' + motivo +
+      (prel.note ? ' | note orig: ' + prel.note : '') +
       ' | id:' + id);
   }
 
-  // Restituisci i litri alla cisterna usando il valore fresco letto dal DB
-  if (cisRef && livelloFresco !== null) {
-    const nuovoLivello = livelloFresco + Number(prel.litri);
-    await sb.from('cisterne').update({ livello_attuale: nuovoLivello, updated_at: new Date().toISOString() }).eq('id', cisRef.id);
-  }
-  toast('Prelievo eliminato');
+  toast('✓ Prelievo eliminato (storico mantenuto con motivo)');
+  chiudiModal();
   // Auto-healing: riallinea cisterne al calcolato pfData
   await pfDepositoRicalcolaCisterne(prodPrel);
   caricaAutoconsumo();
@@ -1275,10 +1391,11 @@ async function pfAcRiconcCalcola() {
     });
     var entrate = entrateRighe.reduce(function(s,r){ return s + Number(r.litri || 0); }, 0);
 
-    // ── 3. Prelievi nel periodo
+    // ── 3. Prelievi nel periodo (esclude eliminati soft-delete)
     var { data: prelRes } = await sb.from('prelievi_autoconsumo')
       .select('id,data,litri,mezzo_targa,prodotto,note')
       .eq('prodotto', prodotto)
+      .neq('eliminato', true)
       .gte('data', da).lte('data', a).order('data');
     // Fallback: prelievi legacy senza campo prodotto → li considero Gasolio Autotrazione (default storico)
     var prelievi = (prelRes || []);
@@ -1286,6 +1403,7 @@ async function pfAcRiconcCalcola() {
       var { data: prelLegacy } = await sb.from('prelievi_autoconsumo')
         .select('id,data,litri,mezzo_targa,prodotto,note')
         .is('prodotto', null)
+        .neq('eliminato', true)
         .gte('data', da).lte('data', a);
       (prelLegacy || []).forEach(function(r){ prelievi.push(r); });
     }
@@ -1385,7 +1503,8 @@ async function stampaPrelievi() {
   const a = document.getElementById('ac-filtro-a').value;
   const filtroCamion = document.getElementById('ac-filtro-camion').value;
   if (!da || !a) { toast('Seleziona il periodo'); return; }
-  let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a);
+  // Esclude prelievi eliminati soft-delete dal registro stampato
+  let q = sb.from('prelievi_autoconsumo').select('*').gte('data', da).lte('data', a).neq('eliminato', true);
   if (filtroCamion) q = q.eq('mezzo_targa', filtroCamion);
   const { data } = await q.order('data',{ascending:false});
   if (!data || !data.length) { toast('Nessun prelievo nel periodo'); return; }
