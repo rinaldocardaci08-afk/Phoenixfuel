@@ -199,18 +199,14 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     const annoMin = `${annoInt}-01-01`;
     const annoMax = `${annoInt}-12-31`;
 
-    const [ordiniRes, righeFattRes, ordiniAnnoRes, fattureAnnoRes] = await Promise.all([
-      // Ordini clienti consegnati nel periodo selezionato (per "senza fattura")
+    const [ordiniRes, ordiniAnnoRes, fattureAnnoRes] = await Promise.all([
+      // Ordini clienti consegnati nel periodo selezionato.
+      // fattura_id popolato = già fatturato. IS NULL = da fatturare.
       sb.from('ordini')
-        .select('id, data, cliente, cliente_id, prodotto, litri, costo_litro, trasporto_litro, margine, iva, stato')
+        .select('id, data, cliente, cliente_id, prodotto, litri, costo_litro, trasporto_litro, margine, iva, stato, fattura_id')
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
         .gte('data', dataMin).lte('data', dataMax),
-      // fatture_righe con ordine_id popolato nel periodo selezionato
-      sb.from('fatture_righe')
-        .select('ordine_id, fattura_id')
-        .not('ordine_id', 'is', null)
-        .in('fattura_id', fatture.map(f=>f.id).slice(0, 500)),
       // Tutti gli ordini clienti consegnati dell'ANNO (per riepilogo mensile)
       sb.from('ordini')
         .select('id, data')
@@ -224,13 +220,11 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     ]);
 
     const ordini = ordiniRes.data || [];
-    const righeFatt = righeFattRes.data || [];
     const ordiniAnno = ordiniAnnoRes.data || [];
     const fattureAnno = fattureAnnoRes.data || [];
 
-    // Set degli ordine_id già fatturati (del periodo selezionato)
-    const ordiniFatturati = new Set(righeFatt.map(r => r.ordine_id));
-    const ordiniSenzaFatt = ordini.filter(o => !ordiniFatturati.has(o.id));
+    // Ordini senza fattura: istantaneo, lettura diretta dal campo fattura_id
+    const ordiniSenzaFatt = ordini.filter(o => !o.fattura_id);
     const nOrdSenzaFatt = ordiniSenzaFatt.length;
     const impOrdSenzaFatt = ordiniSenzaFatt.reduce((s,o) => {
       const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
@@ -290,15 +284,27 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
 
       <!-- Alert controllo integrità -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div style="background:${nOrdSenzaFatt>0?'#FFF7E6':'#F4FAEC'};border-left:4px solid ${nOrdSenzaFatt>0?'#D4A017':'#639922'};padding:12px 14px;border-radius:6px;cursor:${nOrdSenzaFatt>0?'pointer':'default'}"
-             ${nOrdSenzaFatt>0?'onclick="apriListaOrdiniSenzaFattura()"':''}>
-          <div style="font-size:11px;color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'};text-transform:uppercase;font-weight:600">
-            ${nOrdSenzaFatt>0?'⚠':'✓'} Ordini senza fattura
+        <div style="background:${nOrdSenzaFatt>0?'#FFF7E6':'#F4FAEC'};border-left:4px solid ${nOrdSenzaFatt>0?'#D4A017':'#639922'};padding:12px 14px;border-radius:6px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1;cursor:${nOrdSenzaFatt>0?'pointer':'default'}"
+                 ${nOrdSenzaFatt>0?'onclick="apriListaOrdiniSenzaFattura()"':''}>
+              <div style="font-size:11px;color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'};text-transform:uppercase;font-weight:600">
+                ${nOrdSenzaFatt>0?'⚠':'✓'} Ordini senza fattura
+              </div>
+              <div style="font-size:22px;font-weight:700;font-family:var(--font-mono);color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'};margin-top:4px">${nOrdSenzaFatt}</div>
+              <div style="font-size:11px;color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'}">
+                ${nOrdSenzaFatt>0 ? 'Totale: '+_fmtE(impOrdSenzaFatt)+' · Clicca per lista' : 'Tutti gli ordini del periodo sono fatturati'}
+              </div>
+            </div>
+            ${nOrdSenzaFatt>0 ? `
+              <button onclick="event.stopPropagation(); avviaRicalcoloNa1DaDashboard('${dataMin}','${dataMax}')"
+                      title="Rilancia il matcher: cerca fatture con 1 riga che copre più ordini (N:1). Utile quando vedi 'ordini senza fattura' che in realtà sono già stati fatturati insieme ad altri."
+                      style="background:#D4A017;color:white;border:0;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">
+                🔁 Ricalcola match N:1
+              </button>
+            ` : ''}
           </div>
-          <div style="font-size:22px;font-weight:700;font-family:var(--font-mono);color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'};margin-top:4px">${nOrdSenzaFatt}</div>
-          <div style="font-size:11px;color:${nOrdSenzaFatt>0?'#8B6A00':'#27500A'}">
-            ${nOrdSenzaFatt>0 ? 'Totale: '+_fmtE(impOrdSenzaFatt)+' · Clicca per lista' : 'Tutti gli ordini del periodo sono fatturati'}
-          </div>
+          <div id="dashboard-ricalcolo-output" style="margin-top:10px"></div>
         </div>
         <div style="background:${fattureOrfane>0?'#FDECEC':'#F4FAEC'};border-left:4px solid ${fattureOrfane>0?'#A32D2D':'#639922'};padding:12px 14px;border-radius:6px;cursor:${fattureOrfane>0?'pointer':'default'}"
              ${fattureOrfane>0?'onclick="apriListaFattureOrfane()"':''}>
@@ -367,6 +373,36 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
   } catch (e) {
     console.error('[caricaDashboardFatture]', e);
     wrap.innerHTML = '<div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px;border-radius:4px;color:#791F1F;font-size:12px">Errore caricamento dashboard: ' + _esc(e.message) + '</div>';
+  }
+}
+
+// Wrapper chiamato dal bottone "🔁 Ricalcola match N:1" nella card gialla della dashboard.
+// Riusa la funzione _avviaRicalcoloNa1 del modulo pfFattureImport (che conosce il matcher),
+// al termine ricarica la dashboard per vedere i KPI aggiornati.
+async function avviaRicalcoloNa1DaDashboard(dataMin, dataMax) {
+  if (!window.pfFattureImport || !window.pfFattureImport._avviaRicalcoloNa1) {
+    alert('Modulo import fatture non disponibile. Ricarica la pagina.');
+    return;
+  }
+  const labelPeriodo = dataMin.substring(0,7) === dataMax.substring(0,7)
+    ? dataMin.substring(0,7).replace('-', '/')
+    : `${dataMin.substring(0,7).replace('-','/')} → ${dataMax.substring(0,7).replace('-','/')}`;
+  try {
+    await window.pfFattureImport._avviaRicalcoloNa1({
+      dataMin,
+      dataMax,
+      targetElId: 'dashboard-ricalcolo-output',
+      labelPeriodo,
+    });
+    // Alla fine: ricarico l'elenco dopo 1.5s (tempo di leggere il log)
+    // caricaFatture() rilancia anche caricaDashboardFatture internamente.
+    setTimeout(() => {
+      if (typeof caricaFatture === 'function') caricaFatture();
+    }, 1500);
+  } catch(e) {
+    console.error('[dashboard-rim]', e);
+    const out = document.getElementById('dashboard-ricalcolo-output');
+    if (out) out.innerHTML = `<div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:8px;border-radius:4px;color:#791F1F;font-size:11px">Errore: ${_esc(e.message)}</div>`;
   }
 }
 
@@ -725,10 +761,22 @@ async function apriDettaglioFattura(id){
   const { data: f, error: errF } = await sb.from('fatture_emesse').select('*').eq('id', id).single();
   if(errF || !f){ toast('Fattura non trovata: ' + (errF?.message||'')); return; }
 
-  const [{ data: righe }, { data: pagamenti }] = await Promise.all([
+  const [{ data: righe }, { data: pagamenti }, { data: ordCollegati }] = await Promise.all([
     sb.from('fatture_righe').select('*').eq('fattura_id', id).order('numero_linea'),
     sb.from('fatture_pagamenti').select('*').eq('fattura_id', id).order('data_scadenza'),
+    // Ordini agganciati a questa fattura (può essere >1 per riga in match N:1)
+    sb.from('ordini').select('id, fattura_riga_id').eq('fattura_id', id),
   ]);
+
+  // Mappa fattura_riga_id → numero ordini puntati (per badge "🔗 N ord" in UI)
+  const nOrdPerRiga = new Map();
+  const idsOrdPerRiga = new Map();
+  (ordCollegati||[]).forEach(o => {
+    if (!o.fattura_riga_id) return;
+    nOrdPerRiga.set(o.fattura_riga_id, (nOrdPerRiga.get(o.fattura_riga_id)||0) + 1);
+    if (!idsOrdPerRiga.has(o.fattura_riga_id)) idsOrdPerRiga.set(o.fattura_riga_id, []);
+    idsOrdPerRiga.get(o.fattura_riga_id).push(o.id);
+  });
 
   const matchBadge = {
     'matched':   '<span style="background:#639922;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">✓ Matched</span>',
@@ -737,7 +785,7 @@ async function apriDettaglioFattura(id){
     'pending':   '<span style="background:#888;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px">· Pending</span>',
   }[f.match_status] || `<span>${_esc(f.match_status||'—')}</span>`;
 
-  // Calcolo riga-per-riga: score e ordine collegato
+  // Calcolo riga-per-riga: score e ordini collegati
   const righeHtml = (righe||[]).map(r=>{
     const score = r.riga_match_score;
     const scoreBadge = score != null
@@ -745,9 +793,14 @@ async function apriDettaglioFattura(id){
         : score >= 3 ? '<span style="color:#D4A017">⚠</span>'
         : '<span style="color:#A32D2D">✗</span>')
       : '<span style="color:#ccc">—</span>';
-    const ordLink = r.ordine_id
-      ? `<span style="font-size:10px;font-family:monospace;color:#639922" title="Ordine linkato: ${r.ordine_id}">🔗 ord</span>`
-      : '';
+    // Usa conteggio reale da ordini.fattura_riga_id, fallback a ordine_id legacy
+    const nLinkati = nOrdPerRiga.get(r.id) || (r.ordine_id ? 1 : 0);
+    const idsList = idsOrdPerRiga.get(r.id) || (r.ordine_id ? [r.ordine_id] : []);
+    const ordLink = nLinkati >= 2
+      ? `<span style="font-size:10px;font-family:monospace;color:#6B5FCC;font-weight:700" title="Match N:1 — ${nLinkati} ordini: ${idsList.join(', ')}">🔗 ${nLinkati} ord</span>`
+      : nLinkati === 1
+        ? `<span style="font-size:10px;font-family:monospace;color:#639922" title="Ordine: ${idsList[0]||r.ordine_id}">🔗 ord</span>`
+        : '';
     return `
       <tr style="border-bottom:0.5px solid var(--border)">
         <td style="padding:4px 8px">${r.numero_linea}</td>
@@ -1280,10 +1333,13 @@ async function caricaOrdiniFatturabili(){
   if(error){ area.innerHTML='<div style="color:red">Errore: '+error.message+'</div>'; return; }
   if(!ordini||!ordini.length){ area.innerHTML='<div class="loading">Nessun ordine consegnato nel periodo</div>'; return; }
 
-  // Ordini già fatturati
+  // Ordini già fatturati (uso fattura_id diretto, zero scan di fatture_righe)
   const ordineIds = ordini.map(o=>o.id);
-  const { data: righeEsistenti } = await sb.from('fattura_righe').select('ordine_id').not('ordine_id','is',null);
-  const giàFatturatiSet = new Set((righeEsistenti||[]).map(r=>r.ordine_id));
+  const { data: ordFatt } = await sb.from('ordini')
+    .select('id')
+    .in('id', ordineIds.slice(0, 1000))
+    .not('fattura_id', 'is', null);
+  const giàFatturatiSet = new Set((ordFatt||[]).map(o => o.id));
 
   // Filtra: solo quelli con DAS firmato (das_firmato_url) e non ancora fatturati
   const ordiniFatturabili = ordini.filter(o => o.das_firmato_url && !giàFatturatiSet.has(o.id));

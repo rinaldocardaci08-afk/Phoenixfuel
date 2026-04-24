@@ -545,8 +545,71 @@ async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
   if (logEl) _logAppend(logEl, 'ok', `✓ ${_clientiMap.size} clienti in anagrafica`);
 }
 
+// ─── Match N:1 (1 riga fattura → N ordini stesso cliente/prodotto/giorno) ───
+// Usato per i casi Ennegi/Stiltracom: più consegne da 5.000 L stesso giorno
+// raggruppate in 1 sola riga fattura Danea. Enumerazione subset-sum con
+// bitmask (max 8 candidati = 256 combinazioni, trascurabile).
+function _trovaSubsetMatchOrdini(candidati, litriFatt, imponibileFatt) {
+  const n = candidati.length;
+  if (n < 2) return null;              // serve almeno 2 ordini da sommare
+  if (n > 8) return null;              // limite pragmatico: oltre 8 ordini
+                                       // identici nello stesso giorno è anomalo,
+                                       // richiede revisione manuale.
+
+  const tollLitri = Math.max(litriFatt * MATCH_TOLL_LITRI_PCT, 1);  // ±1% con minimo 1L
+  const tollImp = MATCH_TOLL_IMPONIBILE_E;
+
+  let bestIdx = null;
+  let bestSize = Infinity;
+  let bestDeltaLitri = Infinity;
+
+  const total = 1 << n;
+  for (let mask = 3; mask < total; mask++) {           // mask >= 3 = almeno 2 bit
+    let size = 0, sumL = 0, sumI = 0;
+    for (let b = 0; b < n; b++) {
+      if (mask & (1 << b)) {
+        size++;
+        sumL += candidati[b].litri;
+        sumI += candidati[b].imponibile;
+      }
+    }
+    if (size < 2) continue;
+    if (size > bestSize) continue;                     // pruning: già peggio
+
+    const deltaLitri = Math.abs(sumL - litriFatt);
+    if (deltaLitri > tollLitri) continue;
+    if (Math.abs(sumI - imponibileFatt) > tollImp) continue;
+
+    if (size < bestSize || (size === bestSize && deltaLitri < bestDeltaLitri)) {
+      bestSize = size;
+      bestDeltaLitri = deltaLitri;
+      bestIdx = [];
+      for (let b = 0; b < n; b++) if (mask & (1 << b)) bestIdx.push(b);
+    }
+  }
+
+  if (!bestIdx) return null;
+  return bestIdx.map(i => candidati[i]);
+}
+
+// Verifica se un ordine appartiene allo stesso cliente della fattura
+// (PIVA match primario, nome match fallback).
+function _ordineStessoCliente(ordine, pivaFattNorm, denomFattNorm) {
+  if (ordine.cliente_id && _clientiMap.has(ordine.cliente_id)) {
+    const c = _clientiMap.get(ordine.cliente_id);
+    if (c.piva_norm && pivaFattNorm && c.piva_norm === pivaFattNorm) return true;
+    if (!c.piva_norm && pivaFattNorm && c.nome_norm && denomFattNorm && c.nome_norm === denomFattNorm) return true;
+  }
+  const nomeOrdNorm = _normalizzaNome(ordine.cliente);
+  if (nomeOrdNorm && denomFattNorm && nomeOrdNorm === denomFattNorm) return true;
+  return false;
+}
+
 // Calcola il match migliore per UNA riga di fattura contro tutti gli ordini candidati
-// Ritorna { ordine_id, ordine_ref, score, dettaglio: {piva, data, prodotto, litri, imponibile} }
+// Ritorna { ordine_id, ordini_ids, ordine_ref, score, dettaglio, match_tipo }
+//   - ordine_id: "primo ordine" del match (usato come ordine_id "principale" della riga)
+//   - ordini_ids: SEMPRE popolato con array di tutti gli ordini matchati (1 per 1:1, N per N:1)
+//     usato solo in memoria per persistere poi ordini.fattura_riga_id su tutti gli N
 function _calcolaMatchRiga(fattura, riga) {
   const pivaFattNorm = _normalizzaPiva(fattura.cessionario_piva);
   const denomFattNorm = _normalizzaNome(fattura.cessionario_denominazione);
@@ -633,12 +696,59 @@ function _calcolaMatchRiga(fattura, riga) {
   }
 
   if (!bestOrdine) {
-    return { score: 0, ordine_id: null, ordine_ref: null, dettaglio: { piva: 0, data: 0, prodotto: 0, litri: 0, imponibile: 0 }, piva_da_completare: null };
+    return { score: 0, ordine_id: null, ordini_ids: null, ordine_ref: null, dettaglio: { piva: 0, data: 0, prodotto: 0, litri: 0, imponibile: 0 }, piva_da_completare: null };
   }
 
+  // ─── PASS 2: se il match 1:1 non è perfetto (score < 5), tenta N:1 ───
+  // Caso tipico: 2-4 consegne stesso giorno/cliente/prodotto raggruppate
+  // in 1 sola riga fattura Danea (Ennegi, Stiltracom).
+  if (bestScore < 5) {
+    const candidatiN = [];
+    for (const o of _ordiniPeriodo) {
+      if (normalizzaProdotto(o.prodotto) !== prodottoFatt) continue;
+      if (_diffGiorni(dataFatt, o.data) > MATCH_TOLL_DATA_GG) continue;
+      if (!_ordineStessoCliente(o, pivaFattNorm, denomFattNorm)) continue;
+      const litriO = Number(o.litri || 0);
+      if (litriO <= 0) continue;
+      candidatiN.push({
+        id: o.id,
+        litri: litriO,
+        imponibile: _imponibileOrdine(o),
+        data: o.data,
+        cliente: o.cliente,
+        prodotto: o.prodotto,
+      });
+    }
+
+    const subset = _trovaSubsetMatchOrdini(candidatiN, litriFatt, imponibileFatt);
+    if (subset && subset.length >= 2) {
+      subset.sort((a,b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : (a.id < b.id ? -1 : 1)));
+      const sumL = subset.reduce((s,o)=>s + o.litri, 0);
+      const sumI = subset.reduce((s,o)=>s + o.imponibile, 0);
+      return {
+        score: 5,
+        ordine_id: subset[0].id,                      // "principale" su fatture_righe
+        ordini_ids: subset.map(s => s.id),             // tutti gli N → saranno linkati tramite ordini.fattura_riga_id
+        ordine_ref: {
+          data: subset[0].data,
+          cliente: subset[0].cliente,
+          prodotto: subset[0].prodotto,
+          litri: sumL,
+          imponibile: sumI,
+          n_ordini: subset.length,
+        },
+        dettaglio: { piva: 1, data: 1, prodotto: 1, litri: 1, imponibile: 1 },
+        piva_da_completare: null,
+        match_tipo: 'n_a_1',
+      };
+    }
+  }
+
+  // ─── Ritorno match 1:1 (pass 1) ───
   return {
     score: bestScore,
     ordine_id: bestOrdine.id,
+    ordini_ids: [bestOrdine.id],                      // array di 1 per coerenza persistenza
     ordine_ref: {
       data: bestOrdine.data,
       cliente: bestOrdine.cliente,
@@ -648,6 +758,7 @@ function _calcolaMatchRiga(fattura, riga) {
     },
     dettaglio: bestDettaglio,
     piva_da_completare: bestPivaDaCompletare,
+    match_tipo: '1_a_1',
   };
 }
 
@@ -1975,7 +2086,23 @@ async function _importFatturaSingola(f, batchId) {
                 Math.abs(new Date(fattInserted.updated_at) - new Date(fattInserted.created_at)) < 1000;
 
   // ── 2. DELETE + INSERT righe (ricarica pulita) ──
+  // Prima stacco gli ordini linkati alla versione precedente della fattura:
+  // la FK ON DELETE SET NULL gestisce fattura_riga_id, ma fattura_id va gestito a mano.
+  // Stato ordini NON lo ripristino: se era 'consegnato' resta 'consegnato' (è coerente).
+  if (!nuova) {
+    const { error: errUnlink } = await sb.from('ordini')
+      .update({ fattura_id: null, fattura_riga_id: null })
+      .eq('fattura_id', fattId);
+    if (errUnlink) console.warn('[import] unlink ordini pre-sovrascrittura:', errUnlink.message);
+  }
   await sb.from('fatture_righe').delete().eq('fattura_id', fattId);
+
+  // Memo per riagganciare numero_linea → ordini_ids dopo INSERT (la DB restituisce id)
+  const numLineaToOrdiniIds = new Map();
+  f.righe.forEach(r => {
+    const ids = r._match?.ordini_ids;
+    if (ids && ids.length > 0) numLineaToOrdiniIds.set(r.numero_linea, ids);
+  });
 
   const righePayload = f.righe.map(r => ({
     fattura_id: fattId,
@@ -1993,30 +2120,37 @@ async function _importFatturaSingola(f, batchId) {
     das_data: r.das_data,
     ordine_danea_numero: r.ordine_danea_numero,
     ordine_danea_data: r.ordine_danea_data,
-    ordine_id: r._match?.ordine_id || null,
+    ordine_id: r._match?.ordine_id || null,       // "principale" (primo del subset N:1, o unico in 1:1)
     riga_match_score: r._match?.score ?? null,
     riga_match_details: r._match?.dettaglio ? r._match.dettaglio : null,
   }));
 
+  let righeInsertite = [];
   if (righePayload.length > 0) {
-    const { error: errR } = await sb.from('fatture_righe').insert(righePayload);
+    // .insert(...).select() → ritorna righe inserite con id assegnato dal DB
+    const { data: rIns, error: errR } = await sb.from('fatture_righe')
+      .insert(righePayload)
+      .select('id, numero_linea');
     if (errR) throw new Error('insert righe: ' + errR.message);
+    righeInsertite = rIns || [];
   }
 
-  // ── 2.bis — Aggiorna stato ordini matchati a 'consegnato' ──
-  // Regola costituzionale: ordine con fattura Danea collegata = consegnato.
-  // Previene inconsistenze nella dashboard riepilogo mensile.
-  const ordiniDaAggiornare = righePayload
-    .map(r => r.ordine_id)
-    .filter(id => id);  // solo non-null
-  if (ordiniDaAggiornare.length > 0) {
+  // ── 2.bis — Linko ordini a fattura via FK (fattura_id + fattura_riga_id) ──
+  // Regola costituzionale: ordine fatturato → stato = consegnato.
+  // Un UPDATE batch per ogni riga con match (1:1 o N:1).
+  for (const rigaIns of righeInsertite) {
+    const ordiniIds = numLineaToOrdiniIds.get(rigaIns.numero_linea);
+    if (!ordiniIds || ordiniIds.length === 0) continue;
+
     const { error: errU } = await sb.from('ordini')
-      .update({ stato: 'consegnato' })
-      .in('id', ordiniDaAggiornare)
-      .neq('stato', 'consegnato');  // evita UPDATE inutili
-    if (errU) console.warn('[import] update stato ordini:', errU.message);
-    // Non throw: se fallisce per qualche motivo (RLS, etc), l'import prosegue
-    // e c'è comunque la sanatoria SQL lanciabile manualmente.
+      .update({
+        fattura_id: fattId,
+        fattura_riga_id: rigaIns.id,
+        stato: 'consegnato',
+      })
+      .in('id', ordiniIds);
+    if (errU) console.warn(`[import] update ordini riga ${rigaIns.numero_linea}:`, errU.message);
+    // Non throw: l'import prosegue, c'è sempre il ricalcolo batch come sanatoria.
   }
 
   // ── 3. DELETE + INSERT pagamenti ──
@@ -2040,6 +2174,181 @@ async function _importFatturaSingola(f, batchId) {
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════════
+// RICALCOLO MATCH N:1 SU FATTURE STORICHE (nuovo schema ordini.fattura_id)
+//
+// Strategia: scorro tutte le righe fattura del periodo che NON hanno già
+// un subset N:1 (euristica: una fattura_riga_id con 2+ ordini che puntano).
+// Per ogni riga rilancio il matcher; se trova subset N:1:
+//   - popolo ordini.fattura_id + fattura_riga_id sugli ordini extra del subset
+//   - metto stato=consegnato
+// Non tocco fatture_righe né l'ordine "principale" (ordine_id della riga).
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function _avviaRicalcoloNa1(opts) {
+  opts = opts || {};
+  // 2 modalità di invocazione:
+  //  (A) da dashboard Elenco Fatture → passa { dataMin, dataMax, targetElId, labelPeriodo, skipConfirm }
+  //  (B) legacy fallback: legge dropdown nella tab Import (se ancora presente)
+  let dataMin, dataMax, targetElId, labelPeriodo, skipConfirm;
+  if (opts.dataMin && opts.dataMax) {
+    dataMin      = opts.dataMin;
+    dataMax      = opts.dataMax;
+    targetElId   = opts.targetElId || 'fi-rim-output';
+    labelPeriodo = opts.labelPeriodo || `${dataMin} → ${dataMax}`;
+    skipConfirm  = !!opts.skipConfirm;
+  } else {
+    const selAnno = document.getElementById('fi-rim-anno');
+    if (!selAnno) {
+      alert('Impossibile avviare il ricalcolo: parametri mancanti.');
+      return;
+    }
+    const anno = selAnno.value;
+    if (anno === 'all') { dataMin = '2020-01-01'; dataMax = '2099-12-31'; }
+    else { dataMin = `${anno}-01-01`; dataMax = `${anno}-12-31`; }
+    targetElId   = 'fi-rim-output';
+    labelPeriodo = anno === 'all' ? 'TUTTO STORICO' : anno;
+    skipConfirm  = false;
+  }
+
+  const out = document.getElementById(targetElId);
+  if (!out) { alert('Contenitore log non trovato: ' + targetElId); return; }
+
+  if (!skipConfirm && !confirm(`Ricalcolo match N:1 sulle fatture del periodo ${labelPeriodo}.\n\nQuesta operazione:\n• Legge righe fattura + ordini del periodo\n• Rilancia il matcher con logica N:1\n• Linka ordini extra a fattura_id + fattura_riga_id\n• Mette stato=consegnato\n\nNon tocca righe già con 2+ ordini linkati.\n\nProcedere?`)) return;
+
+  const logId = `fi-rim-log-${Date.now()}`;
+  out.innerHTML = `<div class="fi-log" id="${logId}" style="max-height:300px;overflow-y:auto;background:#f6f6f6;border:0.5px solid #ddd;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.5"><div class="info">[${_now()}] 🔁 Avvio ricalcolo match N:1 (${labelPeriodo})...</div></div>`;
+  const log = document.getElementById(logId);
+
+  try {
+    // ── 1. Carica anagrafica clienti + ordini del periodo (buffer ±3gg) ──
+    _logAppend(log, 'info', 'Caricamento ordini + anagrafica clienti...');
+    await _caricaDatiPeriodo(dataMin, dataMax, log);
+    _logAppend(log, 'ok', `✓ ${_ordiniPeriodo.length} ordini in memoria, ${_clientiMap.size} clienti`);
+
+    // ── 2. Carica fatture del periodo ──
+    const { data: fattEmesse, error: errF } = await sb.from('fatture_emesse')
+      .select('id, numero, anno, data, cessionario_piva, cessionario_denominazione')
+      .gte('data', dataMin)
+      .lte('data', dataMax)
+      .order('data');
+    if (errF) throw new Error('fatture_emesse: ' + errF.message);
+    if (!fattEmesse || fattEmesse.length === 0) {
+      _logAppend(log, 'warn', 'Nessuna fattura trovata nel periodo.');
+      return;
+    }
+    _logAppend(log, 'ok', `✓ ${fattEmesse.length} fatture trovate`);
+
+    // ── 3. Carica righe + conteggio ordini già linkati per riga ──
+    _logAppend(log, 'info', 'Caricamento righe fattura...');
+    const fattIds = fattEmesse.map(f => f.id);
+    let righeAll = [];
+    for (let i = 0; i < fattIds.length; i += 500) {
+      const chunk = fattIds.slice(i, i + 500);
+      const { data: rChunk, error: errR } = await sb.from('fatture_righe')
+        .select('id, fattura_id, numero_linea, descrizione, prodotto_normalizzato, codice_articolo, quantita, prezzo_totale, ordine_id, riga_match_score')
+        .in('fattura_id', chunk);
+      if (errR) throw new Error('fatture_righe: ' + errR.message);
+      righeAll = righeAll.concat(rChunk || []);
+    }
+    _logAppend(log, 'ok', `✓ ${righeAll.length} righe`);
+
+    // Conteggio ordini attualmente linkati per fattura_riga_id
+    const righeIds = righeAll.map(r => r.id);
+    const ordiniGiaLinkatiPerRiga = new Map();  // riga_id → count
+    for (let i = 0; i < righeIds.length; i += 500) {
+      const chunk = righeIds.slice(i, i + 500);
+      const { data: oLink, error: errOL } = await sb.from('ordini')
+        .select('id, fattura_riga_id')
+        .in('fattura_riga_id', chunk);
+      if (errOL) throw new Error('conteggio ordini linkati: ' + errOL.message);
+      (oLink || []).forEach(o => {
+        ordiniGiaLinkatiPerRiga.set(o.fattura_riga_id, (ordiniGiaLinkatiPerRiga.get(o.fattura_riga_id) || 0) + 1);
+      });
+    }
+
+    // Indicizza fatture
+    const fattById = new Map();
+    fattEmesse.forEach(f => fattById.set(f.id, f));
+
+    // ── 4. Rilancio matcher riga per riga ──
+    let nRigheValutate = 0;
+    let nMatchNa1Nuovi = 0;
+    let nOrdiniDaLinkare = 0;
+    const updatesPerOrdini = [];  // { riga_id, fattura_id, ordiniExtra: [id,...] }
+
+    for (const r of righeAll) {
+      nRigheValutate++;
+      if (!r.prodotto_normalizzato || !r.quantita || Number(r.quantita) <= 0) continue;
+
+      // Skip se questa riga ha già 2+ ordini linkati (match N:1 già applicato)
+      if ((ordiniGiaLinkatiPerRiga.get(r.id) || 0) >= 2) continue;
+
+      const f = fattById.get(r.fattura_id);
+      if (!f) continue;
+
+      const fattObj = {
+        data: f.data,
+        cessionario_piva: f.cessionario_piva,
+        cessionario_denominazione: f.cessionario_denominazione,
+      };
+      const rigaObj = {
+        prodotto_normalizzato: r.prodotto_normalizzato,
+        quantita: r.quantita,
+        prezzo_totale: r.prezzo_totale,
+      };
+      const m = _calcolaMatchRiga(fattObj, rigaObj);
+
+      // Ci interessa solo se il matcher trova un subset N:1 nuovo
+      if (!m.ordini_ids || m.ordini_ids.length < 2) continue;
+
+      // Gli ordini extra sono quelli del subset diversi da r.ordine_id
+      // (quello principale che è già linkato via fatture_righe.ordine_id
+      // ma che potrebbe non aver ancora fattura_id su ordini — lo includo lo stesso
+      // per sicurezza, l'UPDATE è idempotente).
+      const ordiniExtra = m.ordini_ids;
+
+      updatesPerOrdini.push({
+        riga_id: r.id,
+        fattura_id: r.fattura_id,
+        ordiniExtra,
+      });
+      nMatchNa1Nuovi++;
+      nOrdiniDaLinkare += ordiniExtra.length;
+    }
+
+    _logAppend(log, 'info', `Righe valutate: ${nRigheValutate}`);
+    _logAppend(log, 'ok', `✓ Nuovi match N:1: <strong>${nMatchNa1Nuovi}</strong> (totale ordini da linkare: ${nOrdiniDaLinkare})`);
+
+    if (updatesPerOrdini.length === 0) {
+      _logAppend(log, 'ok', '✓ Nessun aggiornamento da fare. Tutto già ottimale.');
+      return;
+    }
+
+    // ── 5. UPDATE ordini per ogni riga trovata ──
+    _logAppend(log, 'info', `Aggiornamento ordini in DB...`);
+    let nOk = 0, nErr = 0;
+    for (const u of updatesPerOrdini) {
+      const { error: errU } = await sb.from('ordini')
+        .update({
+          fattura_id: u.fattura_id,
+          fattura_riga_id: u.riga_id,
+          stato: 'consegnato',
+        })
+        .in('id', u.ordiniExtra);
+      if (errU) { nErr++; console.warn('[rim]', u.riga_id, errU.message); }
+      else nOk++;
+    }
+    _logAppend(log, 'ok', `✓ ${nOk} righe processate, ${nErr} errori`);
+    _logAppend(log, 'ok', `<strong>✅ Ricalcolo completato.</strong>`);
+    _logAppend(log, 'info', '💡 Ricarica la tab Fatture per vedere la dashboard aggiornata.');
+
+  } catch (err) {
+    console.error('[rim]', err);
+    _logAppend(log, 'err', `✗ Errore: ${err.message}`);
+  }
+}
+
 
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
@@ -2052,6 +2361,7 @@ window.pfFattureImport = {
   _confermaCreaOrdineDaOrphan: _confermaCreaOrdineDaOrphan,
   _aggiornaPreviewOrphan: _aggiornaPreviewOrphan,
   _procediImport: _procediImport,
+  _avviaRicalcoloNa1: _avviaRicalcoloNa1,
 };
 
 })();
