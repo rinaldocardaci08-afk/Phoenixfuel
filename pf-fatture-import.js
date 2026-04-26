@@ -313,44 +313,6 @@ function renderStep1() {
         Anche ZIP grandi (100+ MB) funzionano senza problemi.
       </div>
     </div>
-
-    <div class="fi-panel" style="border-left:3px solid #6B5FCC">
-      <h2>📋 Rivedi fatture già importate</h2>
-      <div style="font-size:12px;color:#555;line-height:1.6;margin-bottom:12px">
-        Carica le fatture <strong>già nel database</strong> e riapri la stessa interfaccia
-        di revisione (Step 3) per sanare incertezze, orfane, oppure aggiornare campi
-        in fatture già confermate.
-      </div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-        <label style="font-size:12px;font-weight:600;color:#555">Anno:</label>
-        <select id="fi-rev-anno" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px">
-          <option value="2026" selected>2026</option>
-          <option value="2025">2025</option>
-          <option value="2024">2024</option>
-          <option value="2023">2023</option>
-        </select>
-        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px">Mese:</label>
-        <select id="fi-rev-mese" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px">
-          <option value="">Tutto l'anno</option>
-          <option value="1">Gennaio</option><option value="2">Febbraio</option>
-          <option value="3">Marzo</option><option value="4">Aprile</option>
-          <option value="5">Maggio</option><option value="6">Giugno</option>
-          <option value="7">Luglio</option><option value="8">Agosto</option>
-          <option value="9">Settembre</option><option value="10">Ottobre</option>
-          <option value="11">Novembre</option><option value="12">Dicembre</option>
-        </select>
-        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px">Mostra:</label>
-        <select id="fi-rev-filtro" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px">
-          <option value="problematiche" selected>🟡 Solo da sistemare (orphan + uncertain + score &lt; 5)</option>
-          <option value="tutte">🟢 Tutte le fatture (sblocco modifica per matched)</option>
-        </select>
-      </div>
-      <button class="btn-primary" style="background:#6B5FCC;font-size:12px;padding:8px 14px"
-              onclick="window.pfFattureImport._caricaDaDb()">
-        📋 Carica fatture e apri revisione
-      </button>
-      <div id="fi-rev-output" style="margin-top:12px"></div>
-    </div>
   `;
 
   const dz = document.getElementById('fi-dropzone');
@@ -1400,6 +1362,58 @@ function _apriDettaglio(idx) {
     `;
   }).join('');
 
+  // ─── Banner PIVA mismatch: cerco cliente in _clientiMap per nome e confronto PIVA ───
+  let bannerPivaHtml = '';
+  const denomFattNorm = _normalizzaNome(ft.cessionario_denominazione);
+  const pivaFattNorm = _normalizzaPiva(ft.cessionario_piva);
+  let clienteTrovato = null; // {id, nome, piva, piva_norm}
+  if (denomFattNorm && _clientiMap) {
+    for (const [id, c] of _clientiMap.entries()) {
+      if (c.nome_norm === denomFattNorm) {
+        clienteTrovato = { id, ...c };
+        break;
+      }
+    }
+  }
+  if (clienteTrovato && pivaFattNorm) {
+    const clienteId = clienteTrovato.id;
+    const pivaPhx = clienteTrovato.piva || '';
+    const pivaPhxNorm = clienteTrovato.piva_norm || '';
+    const pivaDanea = ft.cessionario_piva || '';
+    if (!pivaPhxNorm) {
+      // Caso A: PIVA mancante in PhoenixFuel
+      bannerPivaHtml = `
+        <div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:8px 12px;border-radius:4px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:11px;color:#8B6A00;flex:1">
+            <strong>⚠ PIVA mancante in anagrafica PhoenixFuel</strong><br>
+            Cliente: <strong>${esc(clienteTrovato.nome)}</strong> · PIVA da fattura Danea: <code>${esc(pivaDanea)}</code>
+          </div>
+          <button class="btn-primary" style="background:#D4A017;font-size:11px;padding:5px 10px"
+                  onclick="window.pfFattureImport._aggiornaPivaSingola('${clienteId}', '${esc(pivaDanea).replace(/'/g, "\\'")}', ${idx})">
+            🔄 Inserisci PIVA da fattura
+          </button>
+        </div>
+      `;
+    } else if (pivaPhxNorm !== pivaFattNorm) {
+      // Caso B: PIVA diversa
+      bannerPivaHtml = `
+        <div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:8px 12px;border-radius:4px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:11px;color:#791F1F;flex:1">
+            <strong>✗ PIVA diversa tra anagrafica PhoenixFuel e fattura Danea</strong><br>
+            Cliente: <strong>${esc(clienteTrovato.nome)}</strong><br>
+            PhoenixFuel: <code>${esc(pivaPhx)}</code> · Fattura Danea: <code>${esc(pivaDanea)}</code>
+          </div>
+          <button class="btn-primary" style="background:#A32D2D;font-size:11px;padding:5px 10px"
+                  onclick="window.pfFattureImport._aggiornaPivaSingola('${clienteId}', '${esc(pivaDanea).replace(/'/g, "\\'")}', ${idx})"
+                  title="Sovrascrive la PIVA in anagrafica con quella della fattura Danea (validata SDI)">
+            🔄 Aggiorna a PIVA Danea
+          </button>
+        </div>
+      `;
+    }
+    // Se PIVA combaciano, nessun banner (tutto ok)
+  }
+
   const html = `
     <div style="max-width:900px">
       <h2 style="margin:0 0 4px 0;color:#26215C">Fattura ${esc(ft.numero)} · ${_fmtData(ft.data)}</h2>
@@ -1408,6 +1422,7 @@ function _apriDettaglio(idx) {
         PIVA: <code>${esc(ft.cessionario_piva || '—')}</code> ·
         ${esc(ft.cessionario_comune || '')} ${esc(ft.cessionario_provincia ? '(' + ft.cessionario_provincia + ')' : '')}
       </div>
+      ${bannerPivaHtml}
       <div style="display:flex;gap:10px;font-size:11px;margin-bottom:14px;padding:8px 12px;background:#fafaf8;border-radius:6px">
         <div><strong>Imponibile:</strong> € ${_fmtN(ft.imponibile_totale || 0)}</div>
         <div><strong>IVA:</strong> € ${_fmtN(ft.iva_totale || 0)}</div>
@@ -1569,6 +1584,57 @@ function _bindCheckboxPiva() {
 // Protezione: confirm se differenza > €50 (arrotondamenti normali < €5, qui
 // chiediamo al boss di convalidare qualsiasi scostamento significativo).
 // ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// AGGIORNAMENTO PIVA SINGOLO CLIENTE (dal banner della modale dettaglio)
+// La fattura Danea è validata SDI/Agenzia Entrate → la sua PIVA è autoritativa.
+// Sovrascrive la PIVA in clienti, aggiorna _clientiMap in memoria, ricalcola
+// il match della fattura corrente e ridisegna la modale dettaglio.
+// ═══════════════════════════════════════════════════════════════════════════
+async function _aggiornaPivaSingola(clienteId, pivaNuova, idxFattura) {
+  if (!clienteId || !pivaNuova) { toast('Dati mancanti'); return; }
+
+  // Recupero cliente fresco
+  const { data: cl, error: errR } = await sb.from('clienti')
+    .select('id, nome, piva').eq('id', clienteId).single();
+  if (errR || !cl) { toast('Errore lettura cliente: ' + (errR?.message || 'non trovato')); return; }
+
+  const pivaVecchia = cl.piva || '(vuota)';
+  const msg = 'Aggiornare la PIVA del cliente "' + cl.nome + '"?\n\n' +
+              'Da: ' + pivaVecchia + '\n' +
+              'A:  ' + pivaNuova + '\n\n' +
+              'La nuova PIVA viene dalla fattura Danea (validata SDI/Agenzia Entrate). Confermi?';
+  if (!confirm(msg)) return;
+
+  const { error: errU } = await sb.from('clienti')
+    .update({ piva: pivaNuova })
+    .eq('id', clienteId);
+  if (errU) { toast('Errore update: ' + errU.message); return; }
+
+  // Aggiorno _clientiMap in memoria
+  if (_clientiMap && _clientiMap.has(clienteId)) {
+    const c = _clientiMap.get(clienteId);
+    c.piva = pivaNuova;
+    c.piva_norm = _normalizzaPiva(pivaNuova);
+  }
+
+  // Ricalcolo match per tutte le fatture in memoria (la PIVA può influire su altre)
+  if (typeof _calcolaMatchTutte === 'function' && _parsedData && _parsedData.fatture) {
+    _calcolaMatchTutte();
+  }
+
+  toast('✓ PIVA aggiornata in anagrafica');
+  chiudiModal();
+  // Riapro la modale aggiornata
+  if (idxFattura != null && idxFattura >= 0) {
+    setTimeout(() => _apriDettaglio(idxFattura), 200);
+  } else {
+    // Se siamo in pagina Allineamento o altrove, ricarico Step 3 se c'è
+    if (typeof _renderStep3UI === 'function' && _parsedData && _parsedData.fatture) {
+      _renderStep3UI();
+    }
+  }
+}
+
 async function _accettaCorrezione(ordineId, impFattura, impOrdine, litri, idxFattura) {
   if (!ordineId) { toast('Ordine non identificato'); return; }
   const diffTot = Number(impFattura) - Number(impOrdine);
@@ -3236,6 +3302,7 @@ window.pfFattureImport = {
   _togglePivaAll: _togglePivaAll,
   _applicaPivaBatch: _applicaPivaBatch,
   _accettaCorrezione: _accettaCorrezione,
+  _aggiornaPivaSingola: _aggiornaPivaSingola,
   _apriCreaOrdineDaOrphan: _apriCreaOrdineDaOrphan,
   _confermaCreaOrdineDaOrphan: _confermaCreaOrdineDaOrphan,
   _aggiornaPreviewOrphan: _aggiornaPreviewOrphan,

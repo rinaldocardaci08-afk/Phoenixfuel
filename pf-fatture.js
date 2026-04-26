@@ -353,21 +353,12 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
                     else if (diff === 0) { stato = '✓ Chiuso'; colore = '#639922'; }
                     else if (diff > 0) { stato = `⚠ ${diff} da fatturare`; colore = '#D4A017'; }
                     else { stato = `+${-diff} extra`; colore = '#8B6A00'; }
-                    // Bottone "Sistema" solo per mesi con discrepanze risolvibili
-                    const haRevisione = (diff > 0 || diff < 0) && r.fatture > 0;
-                    const btnRevisione = haRevisione
-                      ? `<button onclick="apriRevisioneMese(${annoInt}, ${r.mese})"
-                                 title="Apri revisione fatture/ordini di ${r.label}"
-                                 style="background:#6B5FCC;color:white;border:0;border-radius:4px;padding:2px 8px;font-size:9px;cursor:pointer;margin-left:4px">
-                           📋 Sistema
-                         </button>`
-                      : '';
                     return `
                       <tr style="border-bottom:0.5px solid var(--border)">
                         <td style="padding:3px 4px">${r.label}</td>
                         <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.ordini}</td>
                         <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.fatture}</td>
-                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600">${stato}${btnRevisione}</td>
+                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600">${stato}</td>
                       </tr>
                     `;
                   }).join('')}
@@ -382,50 +373,6 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
   } catch (e) {
     console.error('[caricaDashboardFatture]', e);
     wrap.innerHTML = '<div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px;border-radius:4px;color:#791F1F;font-size:12px">Errore caricamento dashboard: ' + _esc(e.message) + '</div>';
-  }
-}
-
-// Apre la revisione fatture per uno specifico mese (chiamata dal bottone
-// "📋 Sistema" nel riepilogo mensile della dashboard).
-// Switcha alla tab "Import da Danea", precompila i dropdown anno/mese,
-// e simula il click su "Carica fatture e apri revisione".
-async function apriRevisioneMese(anno, mese) {
-  // 1. Cambio tab a "Import da Danea"
-  const btnImport = document.querySelector('.fatt-tab[data-tab="fatt-panel-import"]');
-  if (btnImport) {
-    btnImport.click();
-  } else {
-    toast('Tab Import non trovata');
-    return;
-  }
-  // 2. Aspetto che la tab abbia renderizzato (renderFattureImport è async)
-  // Faccio polling sui dropdown del pannello revisione DB
-  let tries = 0;
-  const waitDom = () => new Promise(resolve => {
-    const check = () => {
-      const a = document.getElementById('fi-rev-anno');
-      const m = document.getElementById('fi-rev-mese');
-      const f = document.getElementById('fi-rev-filtro');
-      if (a && m && f) return resolve(true);
-      tries++;
-      if (tries > 50) return resolve(false);  // 5s max
-      setTimeout(check, 100);
-    };
-    check();
-  });
-  const ok = await waitDom();
-  if (!ok) { toast('Pannello revisione non pronto'); return; }
-
-  // 3. Precompilo dropdown e clicco
-  document.getElementById('fi-rev-anno').value = String(anno);
-  document.getElementById('fi-rev-mese').value = String(mese);
-  document.getElementById('fi-rev-filtro').value = 'problematiche';
-  // Scroll al pannello viola così Rinaldo lo vede
-  const out = document.getElementById('fi-rev-output');
-  if (out) out.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  // Lancio
-  if (window.pfFattureImport && window.pfFattureImport._caricaDaDb) {
-    await window.pfFattureImport._caricaDaDb();
   }
 }
 
@@ -460,112 +407,562 @@ async function avviaRicalcoloNa1DaDashboard(dataMin, dataMax) {
 }
 
 // Modale: lista ordini clienti nel periodo senza fattura Danea corrispondente
-function apriListaOrdiniSenzaFattura() {
-  const ord = window._fattOrdiniSenzaFatt || [];
-  if (!ord.length) return;
-  const righe = ord.map(o => {
-    const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
-    const totNetto = noIva * Number(o.litri||0);
-    return `
-      <tr style="border-bottom:0.5px solid var(--border)">
-        <td style="padding:5px 8px">${_fmtD(o.data)}</td>
-        <td style="padding:5px 8px">${_esc(o.cliente||'—')}</td>
-        <td style="padding:5px 8px">${_esc(o.prodotto||'—')}</td>
-        <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${Number(o.litri||0).toLocaleString('it-IT')}</td>
-        <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(totNetto)}</td>
-      </tr>
-    `;
-  }).join('');
+// ════════════════════════════════════════════════════════════════════════════
+// PAGINA ALLINEAMENTO ORDINI ↔ FATTURE
+//
+// Modale full-screen che mostra:
+// - SX: ordini consegnati senza fattura (ordini.fattura_id IS NULL)
+// - DX: righe fattura senza ordine (fr.id non puntata da nessun ordini.fattura_riga_id)
+//
+// Su ogni elemento, bottoni operativi:
+//   ordine →  ✏️ Modifica · 🔗 Collega a fattura · 📋 Apri scheda
+//   riga   →  🔗 Collega a ordine · ➕ Crea ordine · 🚫 Ignora
+//
+// Filtri: anno + mese + cliente + cerca
+// ════════════════════════════════════════════════════════════════════════════
 
-  const totImp = ord.reduce((s,o) => {
+// Cache dati per non ricaricare ad ogni interazione
+window._allineamento = {
+  ordini: [],          // ordini senza fattura
+  righeOrfane: [],     // righe fattura senza ordine
+  filtri: { anno: null, mese: null, cliente: '', cerca: '' },
+};
+
+async function apriPaginaAllineamento(annoIniziale, meseIniziale) {
+  const filtri = window._allineamento.filtri;
+  filtri.anno = annoIniziale || filtri.anno || new Date().getFullYear();
+  filtri.mese = meseIniziale != null ? meseIniziale : filtri.mese;
+  // Render scheletro modale
+  const html = `
+    <div style="max-width:1400px;width:95vw">
+      <h2 style="margin:0 0 6px 0;color:#26215C">⚖ Allineamento ordini ↔ fatture</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:10px">
+        Sistema gli ordini senza fattura e le righe fattura senza ordine.
+        I bottoni "🔗 Collega" mostrano solo controparti compatibili (cliente+prodotto+data).
+      </div>
+
+      <!-- Filtri -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fafaf8;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:11px">
+        <label style="font-weight:600;color:#555">Anno:</label>
+        <select id="all-f-anno" onchange="caricaAllineamento()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+          ${[2026,2025,2024,2023].map(y => `<option value="${y}" ${y==filtri.anno?'selected':''}>${y}</option>`).join('')}
+        </select>
+        <label style="font-weight:600;color:#555;margin-left:6px">Mese:</label>
+        <select id="all-f-mese" onchange="caricaAllineamento()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+          <option value="">Tutto l'anno</option>
+          ${['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
+            .map((n,i) => `<option value="${i+1}" ${(i+1)==filtri.mese?'selected':''}>${n}</option>`).join('')}
+        </select>
+        <input id="all-f-cerca" type="text" placeholder="🔍 Cerca cliente / numero fattura..."
+               oninput="filtraAllineamento()" value="${_esc(filtri.cerca||'')}"
+               style="flex:1;min-width:180px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+        <button class="btn-primary" onclick="caricaAllineamento()" style="font-size:11px;padding:4px 10px">🔄 Ricarica</button>
+        <button onclick="chiudiModal()" style="background:#888;color:white;border:0;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer">Chiudi</button>
+      </div>
+
+      <!-- 2 colonne -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;height:65vh">
+        <!-- SX: ordini senza fattura -->
+        <div style="border:1px solid #e8e5dc;border-radius:6px;display:flex;flex-direction:column;overflow:hidden">
+          <div style="background:#FFF7E6;padding:8px 12px;border-bottom:1px solid #e8e5dc">
+            <div style="font-size:12px;font-weight:700;color:#8B6A00">⚠ Ordini senza fattura <span id="all-cnt-ord" style="font-family:monospace">…</span></div>
+            <div style="font-size:10px;color:#8B6A00" id="all-tot-ord"></div>
+          </div>
+          <div id="all-lista-ord" style="flex:1;overflow-y:auto;padding:6px">
+            <div style="text-align:center;color:#888;padding:20px;font-size:11px">Caricamento…</div>
+          </div>
+        </div>
+        <!-- DX: righe fattura senza ordine -->
+        <div style="border:1px solid #e8e5dc;border-radius:6px;display:flex;flex-direction:column;overflow:hidden">
+          <div style="background:#FDECEC;padding:8px 12px;border-bottom:1px solid #e8e5dc">
+            <div style="font-size:12px;font-weight:700;color:#791F1F">✗ Righe fattura senza ordine <span id="all-cnt-fatt" style="font-family:monospace">…</span></div>
+            <div style="font-size:10px;color:#791F1F" id="all-tot-fatt"></div>
+          </div>
+          <div id="all-lista-fatt" style="flex:1;overflow-y:auto;padding:6px">
+            <div style="text-align:center;color:#888;padding:20px;font-size:11px">Caricamento…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  apriModal(html);
+  // Carico dati
+  await caricaAllineamento();
+}
+
+
+async function caricaAllineamento() {
+  const annoEl = document.getElementById('all-f-anno');
+  const meseEl = document.getElementById('all-f-mese');
+  if (!annoEl || !meseEl) return;
+  const anno = parseInt(annoEl.value);
+  const mese = meseEl.value ? parseInt(meseEl.value) : null;
+  window._allineamento.filtri.anno = anno;
+  window._allineamento.filtri.mese = mese;
+
+  let dataMin, dataMax;
+  if (mese) {
+    dataMin = `${anno}-${String(mese).padStart(2,'0')}-01`;
+    const last = new Date(anno, mese, 0).getDate();
+    dataMax = `${anno}-${String(mese).padStart(2,'0')}-${String(last).padStart(2,'0')}`;
+  } else {
+    dataMin = `${anno}-01-01`;
+    dataMax = `${anno}-12-31`;
+  }
+
+  try {
+    // 1. Ordini senza fattura nel periodo
+    const { data: ord, error: errO } = await sb.from('ordini')
+      .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,destinazione,sede_scarico_id,sede_scarico_nome,stato,tipo_ordine,fattura_id,fattura_riga_id')
+      .eq('tipo_ordine','cliente')
+      .neq('stato','annullato')
+      .is('fattura_id', null)
+      .gte('data', dataMin).lte('data', dataMax)
+      .order('data');
+    if (errO) throw errO;
+
+    // 2. Fatture del periodo
+    const { data: fatt, error: errF } = await sb.from('fatture_emesse')
+      .select('id,numero,data,cessionario_piva,cessionario_denominazione')
+      .gte('data', dataMin).lte('data', dataMax)
+      .order('data');
+    if (errF) throw errF;
+
+    if (!fatt || fatt.length === 0) {
+      window._allineamento.ordini = ord || [];
+      window._allineamento.righeOrfane = [];
+      renderAllineamento();
+      return;
+    }
+    const fattById = new Map();
+    fatt.forEach(f => fattById.set(f.id, f));
+    const fattIds = fatt.map(f => f.id);
+
+    // 3. Righe (paginate, oltre 1000)
+    let righe = [];
+    for (let i = 0; i < fattIds.length; i += 500) {
+      const chunk = fattIds.slice(i, i + 500);
+      let from = 0, batch = 1000;
+      while (true) {
+        const { data: r, error: errR } = await sb.from('fatture_righe')
+          .select('id,fattura_id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+          .in('fattura_id', chunk)
+          .range(from, from + batch - 1);
+        if (errR) throw errR;
+        if (!r || r.length === 0) break;
+        righe = righe.concat(r);
+        if (r.length < batch) break;
+        from += batch;
+      }
+    }
+
+    // 4. Identifico righe puntate da almeno 1 ordine in DB
+    const righeIds = righe.map(r => r.id);
+    const righeConOrdine = new Set();
+    for (let i = 0; i < righeIds.length; i += 500) {
+      const chunk = righeIds.slice(i, i + 500);
+      const { data: oLink } = await sb.from('ordini')
+        .select('fattura_riga_id')
+        .in('fattura_riga_id', chunk);
+      (oLink || []).forEach(o => { if (o.fattura_riga_id) righeConOrdine.add(o.fattura_riga_id); });
+    }
+
+    // 5. Filtro: righe "vere", non ignorate, senza ordine
+    const righeOrfane = righe
+      .filter(r => r.prodotto_normalizzato && Number(r.quantita) > 0 && !r.ignora_match && !righeConOrdine.has(r.id))
+      .map(r => ({
+        ...r,
+        _fattura: fattById.get(r.fattura_id) || null,
+      }))
+      .sort((a,b) => {
+        const da = a._fattura?.data || '';
+        const db = b._fattura?.data || '';
+        if (da !== db) return da < db ? -1 : 1;
+        return (parseInt(a._fattura?.numero)||0) - (parseInt(b._fattura?.numero)||0);
+      });
+
+    window._allineamento.ordini = (ord || []).slice();
+    window._allineamento.righeOrfane = righeOrfane;
+    renderAllineamento();
+  } catch (e) {
+    console.error('[allineamento]', e);
+    const el = document.getElementById('all-lista-ord');
+    if (el) el.innerHTML = `<div style="color:#A32D2D;padding:10px;font-size:11px">Errore: ${_esc(e.message)}</div>`;
+  }
+}
+
+
+function renderAllineamento() {
+  const cerca = (window._allineamento.filtri.cerca || '').toLowerCase().trim();
+  const filtraTesto = (testo) => !cerca || (testo || '').toLowerCase().includes(cerca);
+
+  const ordVisibili = window._allineamento.ordini.filter(o =>
+    filtraTesto(o.cliente) || filtraTesto(o.prodotto)
+  );
+  const fattVisibili = window._allineamento.righeOrfane.filter(r =>
+    filtraTesto(r._fattura?.cessionario_denominazione) ||
+    filtraTesto(r._fattura?.numero) ||
+    filtraTesto(r.prodotto_normalizzato)
+  );
+
+  // Header counters
+  const elCntO = document.getElementById('all-cnt-ord');
+  const elCntF = document.getElementById('all-cnt-fatt');
+  const elTotO = document.getElementById('all-tot-ord');
+  const elTotF = document.getElementById('all-tot-fatt');
+  if (elCntO) elCntO.textContent = `(${ordVisibili.length}/${window._allineamento.ordini.length})`;
+  if (elCntF) elCntF.textContent = `(${fattVisibili.length}/${window._allineamento.righeOrfane.length})`;
+  const totOrd = ordVisibili.reduce((s,o) => {
     const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
     return s + noIva * Number(o.litri||0);
   }, 0);
+  const totFatt = fattVisibili.reduce((s,r) => s + Number(r.prezzo_totale||0), 0);
+  if (elTotO) elTotO.textContent = `Totale netto: ${_fmtE(totOrd)}`;
+  if (elTotF) elTotF.textContent = `Totale imponibile: ${_fmtE(totFatt)}`;
+
+  // Render colonne
+  const elListaO = document.getElementById('all-lista-ord');
+  if (elListaO) elListaO.innerHTML = ordVisibili.length
+    ? ordVisibili.map(_renderOrdineAllineamento).join('')
+    : '<div style="text-align:center;color:#888;padding:20px;font-size:11px">Nessun ordine senza fattura nel periodo</div>';
+
+  const elListaF = document.getElementById('all-lista-fatt');
+  if (elListaF) elListaF.innerHTML = fattVisibili.length
+    ? fattVisibili.map(_renderFattAllineamento).join('')
+    : '<div style="text-align:center;color:#888;padding:20px;font-size:11px">Nessuna riga fattura senza ordine nel periodo</div>';
+}
+
+
+function _renderOrdineAllineamento(o) {
+  const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+  const totNetto = noIva * Number(o.litri||0);
+  const dest = o.destinazione || o.sede_scarico_nome || '';
+  const destBadge = dest ? `<span style="font-size:9px;background:#EEEDFE;color:#4933C3;padding:1px 5px;border-radius:3px">📍 ${_esc(dest)}</span>` : '';
+  return `
+    <div style="border:1px solid #e8e5dc;border-radius:5px;padding:6px 8px;margin-bottom:5px;font-size:11px;background:white">
+      <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;color:#26215C">${_fmtD(o.data)} · ${_esc((o.cliente||'').substring(0,40))}</div>
+          <div style="color:#666;margin-top:1px">
+            ${_esc(o.prodotto||'?')} · <span style="font-family:monospace">${Number(o.litri||0).toLocaleString('it-IT')} L · ${_fmtE(totNetto)}</span>
+            ${destBadge}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+          <button onclick="allEditOrdine('${o.id}')" title="Modifica destinazione, litri, prezzi"
+                  style="background:#639922;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">✏️ Modifica</button>
+          <button onclick="allCollegaOrdineAFattura('${o.id}')" title="Collega a una riga fattura"
+                  style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🔗 Collega</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
+function _renderFattAllineamento(r) {
+  const f = r._fattura;
+  return `
+    <div style="border:1px solid #e8e5dc;border-radius:5px;padding:6px 8px;margin-bottom:5px;font-size:11px;background:white">
+      <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;color:#26215C">
+            <span style="font-family:monospace">Fatt ${_esc(f?.numero||'?')}</span> ${_fmtD(f?.data)} ·
+            ${_esc((f?.cessionario_denominazione||'').substring(0,32))}
+          </div>
+          <div style="color:#666;margin-top:1px">
+            ${_esc(r.prodotto_normalizzato)} · <span style="font-family:monospace">${Number(r.quantita||0).toLocaleString('it-IT')} L · ${_fmtE(r.prezzo_totale||0)}</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+          <button onclick="allCollegaFatturaAOrdine('${r.id}', '${r.fattura_id}')" title="Collega a un ordine"
+                  style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🔗 Collega</button>
+          <button onclick="allCreaOrdineDaRiga('${r.id}')" title="Crea ordine PhoenixFuel da questa riga"
+                  style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">➕ Crea</button>
+          <button onclick="allIgnoraRiga('${r.id}')" title="Marca come 'non richiede ordine' (conguagli/abbuoni)"
+                  style="background:#888;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🚫 Ignora</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
+function filtraAllineamento() {
+  const cercaEl = document.getElementById('all-f-cerca');
+  if (!cercaEl) return;
+  window._allineamento.filtri.cerca = cercaEl.value || '';
+  renderAllineamento();
+}
+
+
+// ─── AZIONI ─────────────────────────────────────────────────────────────
+
+// Edit ordine compatto inline (riusa la logica esistente in pf-fatture-import)
+async function allEditOrdine(ordineId) {
+  // Carico ordine fresco
+  const { data: o, error } = await sb.from('ordini')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,destinazione,sede_scarico_id,sede_scarico_nome')
+    .eq('id', ordineId).single();
+  if (error || !o) { toast('Ordine non trovato'); return; }
+
+  // Carico sedi cliente
+  let sediHtml = '<option value="">— Nessuna sede —</option>';
+  if (o.cliente_id) {
+    const { data: sedi } = await sb.from('sedi_scarico')
+      .select('id,nome,comune,attivo,is_default')
+      .eq('cliente_id', o.cliente_id)
+      .eq('attivo', true)
+      .order('is_default',{ascending:false})
+      .order('nome');
+    (sedi||[]).forEach(s => {
+      const sel = s.id === o.sede_scarico_id ? 'selected' : '';
+      sediHtml += `<option value="${s.id}" data-nome="${_esc(s.nome||'')}" ${sel}>${_esc(s.nome||'?')}${s.comune?' · '+_esc(s.comune):''}</option>`;
+    });
+  }
 
   const html = `
-    <div style="font-size:13px;max-width:900px">
-      <h2 style="margin:0 0 10px 0;color:#26215C">⚠ Ordini senza fattura — ${ord.length} record</h2>
-      <div style="background:#FFF7E6;border-left:3px solid #D4A017;padding:10px 12px;border-radius:4px;margin-bottom:10px;font-size:12px;color:#8B6A00">
-        <strong>${ord.length} ordini consegnati</strong> nel periodo <strong>non risultano fatturati</strong> in Danea.
-        Può essere: fattura non ancora emessa, fattura di un altro periodo, ordine consegnato per errore, ecc.
+    <div style="max-width:560px">
+      <h2 style="margin:0 0 4px 0;color:#26215C">✏️ Modifica ordine</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:12px">${_fmtD(o.data)} · ${_esc(o.cliente)} · ${_esc(o.prodotto)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label style="font-size:10px;font-weight:600;color:#555">Litri</label>
+          <input type="number" id="ae-litri" value="${o.litri||0}" step="0.01" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+        <div><label style="font-size:10px;font-weight:600;color:#555">IVA %</label>
+          <input type="number" id="ae-iva" value="${o.iva||22}" step="0.01" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+        <div><label style="font-size:10px;font-weight:600;color:#555">Costo / L (€)</label>
+          <input type="number" id="ae-costo" value="${o.costo_litro||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+        <div><label style="font-size:10px;font-weight:600;color:#555">Trasporto / L (€)</label>
+          <input type="number" id="ae-trasp" value="${o.trasporto_litro||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+        <div><label style="font-size:10px;font-weight:600;color:#555">Margine / L (€)</label>
+          <input type="number" id="ae-marg" value="${o.margine||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+        <div><label style="font-size:10px;font-weight:600;color:#555">Imponibile (auto)</label>
+          <input type="text" id="ae-imp" readonly value="€ ${_fmtN((Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0))*Number(o.litri||0))}" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:3px;font-size:12px;font-family:monospace;background:#fafaf8"></div>
+        <div style="grid-column:1/3"><label style="font-size:10px;font-weight:600;color:#555">Sede di scarico</label>
+          <select id="ae-sede" onchange="document.getElementById('ae-dest').value=this.options[this.selectedIndex].dataset.nome||''" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px">${sediHtml}</select></div>
+        <div style="grid-column:1/3"><label style="font-size:10px;font-weight:600;color:#555">Destinazione (testo libero)</label>
+          <input type="text" id="ae-dest" value="${_esc(o.destinazione||'')}" placeholder="Es. Stazione Saline" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px"></div>
       </div>
-      <div style="max-height:450px;overflow-y:auto">
-        <table style="width:100%;font-size:11px">
-          <thead style="position:sticky;top:0;background:var(--primary);color:#fff">
-            <tr>
-              <th style="padding:6px 8px;text-align:left">Data</th>
-              <th style="padding:6px 8px;text-align:left">Cliente</th>
-              <th style="padding:6px 8px;text-align:left">Prodotto</th>
-              <th style="padding:6px 8px;text-align:right">Litri</th>
-              <th style="padding:6px 8px;text-align:right">Importo netto</th>
-            </tr>
-          </thead>
-          <tbody>${righe}</tbody>
-          <tfoot>
-            <tr style="border-top:2px solid var(--primary);background:var(--bg);font-weight:700">
-              <td colspan="4" style="padding:6px 8px;text-align:right">Totale netto mancante:</td>
-              <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#A32D2D">${_fmtE(totImp)}</td>
-            </tr>
-          </tfoot>
-        </table>
+      <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
+        <button onclick="apriPaginaAllineamento()" style="background:#888;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">Annulla</button>
+        <button onclick="allSalvaEditOrdine('${ordineId}')" style="background:#639922;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">💾 Salva</button>
       </div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn-primary" onclick="chiudiModal()">Chiudi</button>
+    </div>
+  `;
+  apriModal(html);
+  setTimeout(() => {
+    const ricalc = () => {
+      const l = Number(document.getElementById('ae-litri').value)||0;
+      const c = Number(document.getElementById('ae-costo').value)||0;
+      const t = Number(document.getElementById('ae-trasp').value)||0;
+      const m = Number(document.getElementById('ae-marg').value)||0;
+      const el = document.getElementById('ae-imp');
+      if (el) el.value = '€ '+_fmtN((c+t+m)*l);
+    };
+    ['ae-litri','ae-costo','ae-trasp','ae-marg'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', ricalc);
+    });
+  }, 100);
+}
+
+
+async function allSalvaEditOrdine(ordineId) {
+  const litri = Number(document.getElementById('ae-litri').value)||0;
+  if (litri <= 0) { toast('Litri devono essere > 0'); return; }
+  const sedeSel = document.getElementById('ae-sede');
+  const updates = {
+    litri,
+    iva: Number(document.getElementById('ae-iva').value)||22,
+    costo_litro: Number(document.getElementById('ae-costo').value)||0,
+    trasporto_litro: Number(document.getElementById('ae-trasp').value)||0,
+    margine: Number(document.getElementById('ae-marg').value)||0,
+    destinazione: (document.getElementById('ae-dest').value||'').trim() || null,
+    sede_scarico_id: sedeSel?.value || null,
+    sede_scarico_nome: sedeSel?.selectedIndex >= 0 ? (sedeSel.options[sedeSel.selectedIndex].dataset.nome || null) : null,
+  };
+  const { error } = await sb.from('ordini').update(updates).eq('id', ordineId);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('✓ Ordine aggiornato');
+  // Ritorno alla pagina allineamento e ricarico
+  await apriPaginaAllineamento();
+}
+
+
+// Collega ordine → riga fattura (apre dropdown con righe compatibili)
+async function allCollegaOrdineAFattura(ordineId) {
+  const o = window._allineamento.ordini.find(oo => oo.id === ordineId);
+  if (!o) { toast('Ordine non trovato'); return; }
+
+  // Score di compatibilità: stesso prodotto + data±5gg + litri vicini = top
+  const score = (r) => {
+    let s = 0;
+    if (r.prodotto_normalizzato === _normalizzaProdottoIt(o.prodotto)) s += 30;
+    const gg = Math.abs((new Date(o.data) - new Date(r._fattura?.data)) / 86400000);
+    if (gg <= 2) s += 20; else if (gg <= 7) s += 10; else if (gg <= 30) s += 3;
+    if (Math.abs(Number(r.quantita||0) - Number(o.litri||0)) <= 1) s += 15;
+    // Match cliente: confronto su PIVA o nome
+    return s;
+  };
+  const cand = window._allineamento.righeOrfane.slice().sort((a,b) => score(b) - score(a));
+
+  const opzioni = cand.slice(0, 80).map(r => {
+    const f = r._fattura;
+    const vicino = score(r) >= 30 ? '🟢' : '⚪';
+    return `<option value="${r.id}|${r.fattura_id}">${vicino} Fatt ${_esc(f?.numero||'?')}/${_fmtD(f?.data)} · ${_esc((f?.cessionario_denominazione||'').substring(0,30))} · ${_esc(r.prodotto_normalizzato)} · ${Number(r.quantita||0).toLocaleString('it-IT')}L · ${_fmtE(r.prezzo_totale||0)}</option>`;
+  }).join('');
+
+  const html = `
+    <div style="max-width:700px">
+      <h2 style="margin:0 0 6px 0;color:#26215C">🔗 Collega ordine a riga fattura</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:10px">
+        Ordine: <strong>${_fmtD(o.data)} · ${_esc(o.cliente)} · ${_esc(o.prodotto)} · ${Number(o.litri||0).toLocaleString('it-IT')}L</strong>
+      </div>
+      <label style="font-size:11px;font-weight:600;color:#555">Scegli riga fattura (top 80, ordinate per pertinenza):</label>
+      <select id="all-cof-r" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:11px;font-family:monospace;margin-top:4px">
+        <option value="">— Scegli —</option>${opzioni}
+      </select>
+      <div style="font-size:10px;color:#888;margin-top:5px">🟢 = stesso prodotto · ⚪ = altri</div>
+      <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
+        <button onclick="apriPaginaAllineamento()" style="background:#888;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">Annulla</button>
+        <button onclick="allConfermaCollegaOrdine('${ordineId}')" style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Collega</button>
       </div>
     </div>
   `;
   apriModal(html);
 }
 
-// Modale: lista fatture orfane (senza ordine PhoenixFuel collegato)
-function apriListaFattureOrfane() {
-  const fatt = window._fattFattureOrfane || [];
-  if (!fatt.length) return;
-  const righe = fatt.map(f => `
-    <tr style="border-bottom:0.5px solid var(--border);cursor:pointer" onclick="apriDettaglioFattura('${f.id}')">
-      <td style="padding:5px 8px;font-family:var(--font-mono);font-weight:600">${_esc(f.numero)}/${f.anno}</td>
-      <td style="padding:5px 8px">${_fmtD(f.data)}</td>
-      <td style="padding:5px 8px">${_esc(f.cessionario_denominazione||'—')}</td>
-      <td style="padding:5px 8px;font-family:var(--font-mono);font-size:10px">${_esc(f.cessionario_piva||'—')}</td>
-      <td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(f.importo_totale)}</td>
-    </tr>
-  `).join('');
 
-  const totImp = fatt.reduce((s,f)=>s+Number(f.importo_totale||0),0);
+async function allConfermaCollegaOrdine(ordineId) {
+  const sel = document.getElementById('all-cof-r');
+  if (!sel || !sel.value) { toast('Scegli una riga'); return; }
+  const [rigaId, fattId] = sel.value.split('|');
+  const { error } = await sb.from('ordini')
+    .update({ fattura_id: fattId, fattura_riga_id: rigaId, stato: 'consegnato' })
+    .eq('id', ordineId);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('✓ Ordine collegato a fattura');
+  await apriPaginaAllineamento();
+}
 
+
+// Collega riga fattura → ordine
+async function allCollegaFatturaAOrdine(rigaId, fattId) {
+  const r = window._allineamento.righeOrfane.find(rr => rr.id === rigaId);
+  if (!r) { toast('Riga non trovata'); return; }
+
+  const score = (o) => {
+    let s = 0;
+    if (_normalizzaProdottoIt(o.prodotto) === r.prodotto_normalizzato) s += 30;
+    const gg = Math.abs((new Date(r._fattura?.data) - new Date(o.data)) / 86400000);
+    if (gg <= 2) s += 20; else if (gg <= 7) s += 10; else if (gg <= 30) s += 3;
+    if (Math.abs(Number(o.litri||0) - Number(r.quantita||0)) <= 1) s += 15;
+    return s;
+  };
+  const cand = window._allineamento.ordini.slice().sort((a,b) => score(b) - score(a));
+
+  const opzioni = cand.slice(0, 80).map(o => {
+    const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+    const imp = noIva * Number(o.litri||0);
+    const vicino = score(o) >= 30 ? '🟢' : '⚪';
+    return `<option value="${o.id}">${vicino} ${_fmtD(o.data)} · ${_esc((o.cliente||'').substring(0,28))} · ${_esc(o.prodotto)} · ${Number(o.litri||0).toLocaleString('it-IT')}L · ${_fmtE(imp)}</option>`;
+  }).join('');
+
+  const f = r._fattura;
   const html = `
-    <div style="font-size:13px;max-width:900px">
-      <h2 style="margin:0 0 10px 0;color:#26215C">✗ Fatture orfane — ${fatt.length} record</h2>
-      <div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px 12px;border-radius:4px;margin-bottom:10px;font-size:12px;color:#791F1F">
-        <strong>${fatt.length} fatture orfane</strong>: emesse in Danea ma nessuna riga prodotto è stata collegata a un ordine PhoenixFuel al momento dell'import.
-        Clicca una riga per vedere il dettaglio.
+    <div style="max-width:700px">
+      <h2 style="margin:0 0 6px 0;color:#26215C">🔗 Collega riga fattura a ordine</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:10px">
+        Riga: <strong>Fatt ${_esc(f?.numero||'?')}/${_fmtD(f?.data)} · ${_esc(f?.cessionario_denominazione||'')} · ${_esc(r.prodotto_normalizzato)} · ${Number(r.quantita||0).toLocaleString('it-IT')}L · ${_fmtE(r.prezzo_totale||0)}</strong>
       </div>
-      <div style="max-height:450px;overflow-y:auto">
-        <table style="width:100%;font-size:11px">
-          <thead style="position:sticky;top:0;background:var(--primary);color:#fff">
-            <tr>
-              <th style="padding:6px 8px;text-align:left">N°</th>
-              <th style="padding:6px 8px;text-align:left">Data</th>
-              <th style="padding:6px 8px;text-align:left">Cliente</th>
-              <th style="padding:6px 8px;text-align:left">PIVA</th>
-              <th style="padding:6px 8px;text-align:right">Totale</th>
-            </tr>
-          </thead>
-          <tbody>${righe}</tbody>
-          <tfoot>
-            <tr style="border-top:2px solid var(--primary);background:var(--bg);font-weight:700">
-              <td colspan="4" style="padding:6px 8px;text-align:right">Totale:</td>
-              <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">${_fmtE(totImp)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn-primary" onclick="chiudiModal()">Chiudi</button>
+      <label style="font-size:11px;font-weight:600;color:#555">Scegli ordine (top 80, ordinati per pertinenza):</label>
+      <select id="all-cfo-o" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:11px;font-family:monospace;margin-top:4px">
+        <option value="">— Scegli —</option>${opzioni}
+      </select>
+      <div style="font-size:10px;color:#888;margin-top:5px">🟢 = stesso prodotto · ⚪ = altri</div>
+      <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
+        <button onclick="apriPaginaAllineamento()" style="background:#888;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">Annulla</button>
+        <button onclick="allConfermaCollegaFattura('${rigaId}', '${fattId}')" style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Collega</button>
       </div>
     </div>
   `;
   apriModal(html);
+}
+
+
+async function allConfermaCollegaFattura(rigaId, fattId) {
+  const sel = document.getElementById('all-cfo-o');
+  if (!sel || !sel.value) { toast('Scegli un ordine'); return; }
+  const ordineId = sel.value;
+  const { error } = await sb.from('ordini')
+    .update({ fattura_id: fattId, fattura_riga_id: rigaId, stato: 'consegnato' })
+    .eq('id', ordineId);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('✓ Riga collegata a ordine');
+  await apriPaginaAllineamento();
+}
+
+
+async function allIgnoraRiga(rigaId) {
+  if (!confirm('Marcare la riga fattura come "non richiede ordine"?\n\nUsa per conguagli/abbuoni/righe servizio.')) return;
+  const { error } = await sb.from('fatture_righe').update({ ignora_match: true }).eq('id', rigaId);
+  if (error) { toast('Errore: '+error.message); return; }
+  toast('✓ Riga ignorata');
+  await apriPaginaAllineamento();
+}
+
+
+async function allCreaOrdineDaRiga(rigaId) {
+  const r = window._allineamento.righeOrfane.find(rr => rr.id === rigaId);
+  if (!r) { toast('Riga non trovata'); return; }
+  // Riusa il flusso _apriCreaOrdineDaOrphan dell'import (richiede payload base64)
+  const f = r._fattura;
+  const payload = {
+    fattura_idx: -1,        // marca: non in _parsedData (chiamata da fuori)
+    riga_numero: r.numero_linea,
+    fattura_nr: f?.numero,
+    fattura_data: f?.data,
+    cessionario_piva: f?.cessionario_piva || '',
+    cessionario_denominazione: f?.cessionario_denominazione || '',
+    prodotto: r.prodotto_normalizzato,
+    litri: r.quantita,
+    imponibile: r.prezzo_totale,
+    aliquota_iva: 22,
+    das_numero_dogane: null,
+    _from_allineamento: true,
+    _riga_id: r.id,
+    _fattura_id: r.fattura_id,
+  };
+  const payload64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  if (window.pfFattureImport && window.pfFattureImport._apriCreaOrdineDaOrphan) {
+    await window.pfFattureImport._apriCreaOrdineDaOrphan(payload64);
+  } else {
+    toast('Modulo import non disponibile');
+  }
+}
+
+
+// Helper: riproduce normalizzazione prodotto (uguale a quella in pf-fatture-import)
+function _normalizzaProdottoIt(desc) {
+  const d = (desc || '').toLowerCase();
+  if (d.includes('gasolio') && d.includes('autotraz')) return 'Gas Auto';
+  if (d.includes('gasolio') && d.includes('agric')) return 'Gas Agricolo';
+  if (d.includes('benzina')) return 'Benzina';
+  if (d.includes('hvo')) return 'HVO';
+  if (d.includes('adblue') || d.includes('ad blue') || d.includes('ad-blue')) return 'AdBlue';
+  return null;
+}
+
+
+// ─── ENTRY POINT ───
+// Sostituisce le 2 vecchie modali (apriListaOrdiniSenzaFattura + apriListaFattureOrfane).
+// Le card della dashboard chiamano queste funzioni: le ridireziono entrambe alla nuova pagina.
+function apriListaOrdiniSenzaFattura() {
+  apriPaginaAllineamento();
+}
+
+function apriListaFattureOrfane() {
+  apriPaginaAllineamento();
 }
 
 async function emettiiFattura(id){
