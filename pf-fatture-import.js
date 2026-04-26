@@ -290,6 +290,7 @@ async function renderFattureImport() {
 
 function renderStep1() {
   _setStep(1);
+  _modoRevisioneDb = false;       // reset flag se ritorni allo Step 1
   const body = document.getElementById('fi-body');
   body.innerHTML = `
     <div class="fi-panel">
@@ -311,6 +312,44 @@ function renderStep1() {
         💡 Il parsing avviene direttamente nel tuo browser (tutto locale, niente upload).
         Anche ZIP grandi (100+ MB) funzionano senza problemi.
       </div>
+    </div>
+
+    <div class="fi-panel" style="border-left:3px solid #6B5FCC">
+      <h2>📋 Rivedi fatture già importate</h2>
+      <div style="font-size:12px;color:#555;line-height:1.6;margin-bottom:12px">
+        Carica le fatture <strong>già nel database</strong> e riapri la stessa interfaccia
+        di revisione (Step 3) per sanare incertezze, orfane, oppure aggiornare campi
+        in fatture già confermate.
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <label style="font-size:12px;font-weight:600;color:#555">Anno:</label>
+        <select id="fi-rev-anno" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+          <option value="2026" selected>2026</option>
+          <option value="2025">2025</option>
+          <option value="2024">2024</option>
+          <option value="2023">2023</option>
+        </select>
+        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px">Mese:</label>
+        <select id="fi-rev-mese" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+          <option value="">Tutto l'anno</option>
+          <option value="1">Gennaio</option><option value="2">Febbraio</option>
+          <option value="3">Marzo</option><option value="4">Aprile</option>
+          <option value="5">Maggio</option><option value="6">Giugno</option>
+          <option value="7">Luglio</option><option value="8">Agosto</option>
+          <option value="9">Settembre</option><option value="10">Ottobre</option>
+          <option value="11">Novembre</option><option value="12">Dicembre</option>
+        </select>
+        <label style="font-size:12px;font-weight:600;color:#555;margin-left:8px">Mostra:</label>
+        <select id="fi-rev-filtro" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:12px">
+          <option value="problematiche" selected>🟡 Solo da sistemare (orphan + uncertain + score &lt; 5)</option>
+          <option value="tutte">🟢 Tutte le fatture (sblocco modifica per matched)</option>
+        </select>
+      </div>
+      <button class="btn-primary" style="background:#6B5FCC;font-size:12px;padding:8px 14px"
+              onclick="window.pfFattureImport._caricaDaDb()">
+        📋 Carica fatture e apri revisione
+      </button>
+      <div id="fi-rev-output" style="margin-top:12px"></div>
     </div>
   `;
 
@@ -902,6 +941,18 @@ function _renderStep3UI() {
   }
 
   body.innerHTML = `
+    ${_modoRevisioneDb ? `
+    <div style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:12px 16px;border-radius:6px;margin-bottom:14px">
+      <div style="font-size:13px;color:#4933C3;font-weight:700;margin-bottom:4px">
+        📋 MODALITÀ REVISIONE — Stai lavorando su fatture GIÀ NEL DATABASE
+      </div>
+      <div style="font-size:11px;color:#26215C;line-height:1.5">
+        Le fatture mostrate sono già state importate. Modificando i match e cliccando
+        <strong>"Aggiorna match"</strong> in fondo, le righe verranno ricaricate con i nuovi
+        accoppiamenti e gli ordini saranno linkati correttamente. Le fatture <strong>non vengono duplicate</strong>.
+      </div>
+    </div>
+    ` : ''}
     <div class="fi-panel">
       <h2>🔍 Step 3 — Anteprima matching (${s.fatture_parsate} fatture)</h2>
 
@@ -1834,9 +1885,9 @@ async function _procediImport() {
     return;
   }
 
-  const msg = 'Stai per importare ' + fattureImport.length + ' fatture nel database.\n\n' +
-              'Fatture già presenti (stesso cedente/numero/anno) verranno AGGIORNATE, non duplicate.\n\n' +
-              'Confermi?';
+  const msg = _modoRevisioneDb
+    ? 'Stai per AGGIORNARE i match di ' + fattureImport.length + ' fatture già nel database.\n\nLe righe verranno ricaricate (DELETE+INSERT) con i match corretti.\nGli ordini verranno linkati a fattura_id/fattura_riga_id.\n\nConfermi?'
+    : 'Stai per importare ' + fattureImport.length + ' fatture nel database.\n\nFatture già presenti (stesso cedente/numero/anno) verranno AGGIORNATE, non duplicate.\n\nConfermi?';
   if (!confirm(msg)) return;
 
   _setStep(4);
@@ -2563,6 +2614,235 @@ async function _avviaRicalcoloNa1(opts) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CARICAMENTO FATTURE DA DB (per riaprire la UI Step 3 su fatture già importate)
+//
+// Ricostruisce _parsedData con la stessa shape che produrrebbe il parser ZIP,
+// ma leggendo da fatture_emesse + fatture_righe + fatture_pagamenti.
+// Quando _renderStep3UI() viene chiamato, vede la stessa struttura e mostra
+// la classica UI di revisione (matched/uncertain/orphan + dettaglio).
+//
+// Filtri:
+//  - 'problematiche' = solo fatture con almeno una riga score<5 OR match_status orphan/uncertain
+//  - 'tutte'         = tutte le fatture del periodo (matched comprese)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Flag globale: indica che siamo in modalità "revisione DB" (non import nuovo)
+let _modoRevisioneDb = false;
+
+async function _caricaDaDb() {
+  const anno  = document.getElementById('fi-rev-anno').value;
+  const mese  = document.getElementById('fi-rev-mese').value;
+  const filtro = document.getElementById('fi-rev-filtro').value;
+  const out = document.getElementById('fi-rev-output');
+
+  // Range date
+  let dataMin, dataMax;
+  if (mese) {
+    const m = parseInt(mese);
+    dataMin = `${anno}-${String(m).padStart(2,'0')}-01`;
+    const lastDay = new Date(parseInt(anno), m, 0).getDate();
+    dataMax = `${anno}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  } else {
+    dataMin = `${anno}-01-01`;
+    dataMax = `${anno}-12-31`;
+  }
+
+  out.innerHTML = `<div class="fi-log" id="fi-rev-log" style="max-height:200px;overflow-y:auto;background:#f6f6f6;border:0.5px solid #ddd;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.5"><div class="info">[${_now()}] 📋 Caricamento fatture dal DB (${dataMin} → ${dataMax})...</div></div>`;
+  const log = document.getElementById('fi-rev-log');
+
+  try {
+    // 1. Carica fatture del periodo
+    const { data: fattEmesse, error: errF } = await sb.from('fatture_emesse')
+      .select('*')
+      .gte('data', dataMin)
+      .lte('data', dataMax)
+      .order('data').order('numero');
+    if (errF) throw new Error('fatture_emesse: ' + errF.message);
+    if (!fattEmesse || fattEmesse.length === 0) {
+      _logAppend(log, 'warn', 'Nessuna fattura nel periodo.');
+      return;
+    }
+    _logAppend(log, 'ok', `✓ ${fattEmesse.length} fatture caricate`);
+
+    // 2. Carica righe (paginazione)
+    const fattIds = fattEmesse.map(f => f.id);
+    let righeAll = [];
+    for (let i = 0; i < fattIds.length; i += 500) {
+      const chunk = fattIds.slice(i, i + 500);
+      let from = 0, batchSize = 1000;
+      while (true) {
+        const { data: rChunk, error: errR } = await sb.from('fatture_righe')
+          .select('*')
+          .in('fattura_id', chunk)
+          .range(from, from + batchSize - 1);
+        if (errR) throw new Error('fatture_righe: ' + errR.message);
+        if (!rChunk || rChunk.length === 0) break;
+        righeAll = righeAll.concat(rChunk);
+        if (rChunk.length < batchSize) break;
+        from += batchSize;
+      }
+    }
+    _logAppend(log, 'ok', `✓ ${righeAll.length} righe caricate`);
+
+    // 3. Carica pagamenti
+    let pagAll = [];
+    for (let i = 0; i < fattIds.length; i += 500) {
+      const chunk = fattIds.slice(i, i + 500);
+      const { data: pChunk } = await sb.from('fatture_pagamenti')
+        .select('*').in('fattura_id', chunk);
+      pagAll = pagAll.concat(pChunk || []);
+    }
+
+    // 4. Filtro: tutte vs solo problematiche
+    let fattureFiltered = fattEmesse;
+    if (filtro === 'problematiche') {
+      const fattConRigheOk = new Set();
+      righeAll.forEach(r => {
+        if (r.riga_match_score === 5) {
+          if (!fattConRigheOk.has(r.fattura_id)) fattConRigheOk.add(r.fattura_id);
+        }
+      });
+      // "Problematica" = match_status orphan/uncertain OPPURE almeno una riga score<5
+      const righePerFatt = new Map();
+      righeAll.forEach(r => {
+        if (!righePerFatt.has(r.fattura_id)) righePerFatt.set(r.fattura_id, []);
+        righePerFatt.get(r.fattura_id).push(r);
+      });
+      fattureFiltered = fattEmesse.filter(f => {
+        if (f.match_status === 'orphan' || f.match_status === 'uncertain') return true;
+        const righe = righePerFatt.get(f.id) || [];
+        // riga "vera" = ha quantità+prodotto, e score < 5 o null
+        const haRigaProblematica = righe.some(r =>
+          r.prodotto_normalizzato && r.quantita > 0 &&
+          (r.riga_match_score == null || r.riga_match_score < 5)
+        );
+        return haRigaProblematica;
+      });
+      _logAppend(log, 'info', `🟡 Filtrate ${fattureFiltered.length} fatture problematiche su ${fattEmesse.length} totali`);
+    } else {
+      _logAppend(log, 'info', `🟢 Mostrando tutte le ${fattureFiltered.length} fatture del periodo`);
+    }
+
+    if (fattureFiltered.length === 0) {
+      _logAppend(log, 'ok', '✅ Nessuna fattura da revisionare. Tutto in ordine.');
+      return;
+    }
+
+    // 5. Ricostruisco la shape _parsedData attesa da _renderStep3UI
+    const fattIdsFiltered = new Set(fattureFiltered.map(f => f.id));
+    const righeFiltered = righeAll.filter(r => fattIdsFiltered.has(r.fattura_id));
+    const pagFiltered = pagAll.filter(p => fattIdsFiltered.has(p.fattura_id));
+
+    const righePerFatt = new Map();
+    righeFiltered.forEach(r => {
+      if (!righePerFatt.has(r.fattura_id)) righePerFatt.set(r.fattura_id, []);
+      righePerFatt.get(r.fattura_id).push(r);
+    });
+    const pagPerFatt = new Map();
+    pagFiltered.forEach(p => {
+      if (!pagPerFatt.has(p.fattura_id)) pagPerFatt.set(p.fattura_id, []);
+      pagPerFatt.get(p.fattura_id).push(p);
+    });
+
+    // Per ogni fattura del DB costruisco l'oggetto { fattura: {...}, righe: [...], pagamenti: [...], _db_id }
+    const fatture = fattureFiltered.map(f => {
+      const righe = (righePerFatt.get(f.id) || []).sort((a,b) => (a.numero_linea||0) - (b.numero_linea||0));
+      const pagamenti = pagPerFatt.get(f.id) || [];
+      return {
+        _db_id: f.id,                       // <-- marca: viene dal DB, non da XML
+        _db_match_status: f.match_status,    // stato originale persistito
+        fattura: {
+          numero: f.numero,
+          anno: f.anno,
+          data: f.data,
+          tipo_documento: f.tipo_documento,
+          importo_totale: Number(f.importo_totale || 0),
+          imponibile_totale: Number(f.imponibile_totale || 0),
+          iva_totale: Number(f.iva_totale || 0),
+          cessionario_piva: f.cessionario_piva,
+          cessionario_codice_fiscale: f.cessionario_codice_fiscale,
+          cessionario_denominazione: f.cessionario_denominazione,
+          cessionario_indirizzo: f.cessionario_indirizzo,
+          cessionario_cap: f.cessionario_cap,
+          cessionario_comune: f.cessionario_comune,
+          cessionario_provincia: f.cessionario_provincia,
+          cessionario_nazione: f.cessionario_nazione,
+          fattura_xml_filename: f.xml_filename,
+          fattura_xml_id: f.xml_progressivo_invio,
+          batch_id: f.batch_id,
+        },
+        righe: righe.map(r => ({
+          numero_linea: r.numero_linea,
+          descrizione: r.descrizione || '',
+          prodotto_normalizzato: r.prodotto_normalizzato,
+          codice_articolo: r.codice_articolo,
+          quantita: Number(r.quantita || 0),
+          unita_misura: r.unita_misura,
+          prezzo_unitario: Number(r.prezzo_unitario || 0),
+          prezzo_totale: Number(r.prezzo_totale || 0),
+          aliquota_iva: r.aliquota_iva,
+          das_numero_dogane: r.das_numero_dogane,
+          das_data_str: r.das_data_str,
+          das_data: r.das_data,
+          ordine_danea_numero: r.ordine_danea_numero,
+          ordine_danea_data: r.ordine_danea_data,
+          // _db_riga_id: salvo l'id riga DB così l'import sa che è già esistente
+          _db_riga_id: r.id,
+          _db_ordine_id_attuale: r.ordine_id,
+          _db_score: r.riga_match_score,
+        })),
+        pagamenti: pagamenti.map(p => ({
+          modalita: p.modalita,
+          modalita_descrizione: p.modalita_descrizione,
+          data_scadenza: p.data_scadenza,
+          importo_pagamento: Number(p.importo_pagamento || 0),
+          giorni_termine: p.giorni_termine,
+          stato_pagamento: p.stato_pagamento || 'da_pagare',
+        })),
+      };
+    });
+
+    const date = fatture.map(f => f.fattura.data).filter(d => d).sort();
+    const importoTot = fatture.reduce((s,f) => s + (f.fattura.importo_totale||0), 0);
+    const tipi = {};
+    fatture.forEach(f => {
+      const t = f.fattura.tipo_documento || '?';
+      tipi[t] = (tipi[t] || 0) + 1;
+    });
+
+    _parsedData = {
+      batch_id: 'db-revisione-' + Date.now(),
+      formato: 'db_revisione',                 // <-- marca speciale per Step 3
+      fatture: fatture,
+      anomalie: [],
+      statistiche: {
+        file_totali: fatture.length,
+        fatture_parsate: fatture.length,
+        errori: 0,
+        importo_totale: Math.round(importoTot * 100) / 100,
+        data_min: date[0] || dataMin,
+        data_max: date[date.length - 1] || dataMax,
+        tipi_documento: tipi,
+        clienti_unici_piva: new Set(fatture.map(f => f.fattura.cessionario_piva).filter(Boolean)).size,
+        clienti_unici_denominazione: new Set(fatture.map(f => f.fattura.cessionario_denominazione)).size,
+      },
+    };
+    _batchId = _parsedData.batch_id;
+    _modoRevisioneDb = true;
+
+    _logAppend(log, 'ok', '✓ Apertura UI Step 3 con dati DB...');
+
+    // 6. Lancia matching (riusa logica esistente che costruisce _ordiniPeriodo + _clientiMap)
+    setTimeout(() => renderStep3(), 300);
+
+  } catch (err) {
+    console.error('[caricaDaDb]', err);
+    _logAppend(log, 'err', `✗ Errore: ${err.message}`);
+  }
+}
+
+
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
   _onFileSelected: _onFileSelected,
@@ -2575,6 +2855,7 @@ window.pfFattureImport = {
   _aggiornaPreviewOrphan: _aggiornaPreviewOrphan,
   _procediImport: _procediImport,
   _avviaRicalcoloNa1: _avviaRicalcoloNa1,
+  _caricaDaDb: _caricaDaDb,
 };
 
 })();
