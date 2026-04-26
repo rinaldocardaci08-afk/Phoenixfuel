@@ -1333,6 +1333,36 @@ function _apriDettaglio(idx) {
       `;
     }
 
+    // Bottoni azioni di sanatura (sempre disponibili tranne servizio)
+    let azioniSanaturaHtml = '';
+    if (st !== 'servizio' && r.prodotto_normalizzato) {
+      const ordineCorrente = m.ordine_id || '';
+      const btnEdit = ordineCorrente
+        ? `<button class="btn-primary" style="background:#639922;font-size:10px;padding:4px 10px"
+                   onclick="window.pfFattureImport._apriEditOrdine('${ordineCorrente}', ${idx}, ${r.numero_linea})"
+                   title="Modifica destinazione/sede/litri/prezzi dell'ordine collegato">
+             ✏️ Modifica ordine
+           </button>`
+        : '';
+      const ignBg = r._ignora_match ? '#999' : '#26215C';
+      const ignLabel = r._ignora_match ? '🔒 Ignorata' : '🚫 Ignora riga';
+      azioniSanaturaHtml = `
+        <div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed #ddd;flex-wrap:wrap">
+          <button class="btn-primary" style="background:#6B5FCC;font-size:10px;padding:4px 10px"
+                  onclick="window.pfFattureImport._apriForzaMatch(${idx}, ${r.numero_linea})"
+                  title="Aggancia manualmente questa riga a un qualsiasi ordine del periodo">
+            🔗 Forza match
+          </button>
+          ${btnEdit}
+          <button class="btn-primary" style="background:${ignBg};font-size:10px;padding:4px 10px"
+                  onclick="window.pfFattureImport._ignoraRiga(${idx}, ${r.numero_linea})"
+                  title="Marca la riga come 'non richiede ordine' (es. conguaglio/abbuono)">
+            ${ignLabel}
+          </button>
+        </div>
+      `;
+    }
+
     return `
       <div style="padding:10px;border-bottom:1px solid #e8e5dc">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
@@ -1348,6 +1378,7 @@ function _apriDettaglio(idx) {
         ${refHtml}
         ${correzioneHtml}
         ${creaOrdineHtml}
+        ${azioniSanaturaHtml}
       </div>
     `;
   }).join('');
@@ -2174,6 +2205,7 @@ async function _importFatturaSingola(f, batchId) {
     ordine_id: r._match?.ordine_id || null,       // "principale" (primo del subset N:1, o unico in 1:1)
     riga_match_score: r._match?.score ?? null,
     riga_match_details: r._match?.dettaglio ? r._match.dettaglio : null,
+    ignora_match: !!r._ignora_match,
   }));
 
   let righeInsertite = [];
@@ -2615,6 +2647,328 @@ async function _avviaRicalcoloNa1(opts) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// AZIONI DI SANATURA SU RIGHE FATTURA E ORDINI (modalità revisione)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Forza match manuale: apre dropdown con TUTTI gli ordini del periodo
+// (filtro cliente attivo di default, opzione "tutti" disponibile).
+async function _apriForzaMatch(idx, numeroLinea) {
+  const f = _parsedData.fatture[idx];
+  if (!f) return;
+  const r = f.righe.find(rr => rr.numero_linea === numeroLinea);
+  if (!r) return;
+
+  const ft = f.fattura;
+  const pivaFatt = (ft.cessionario_piva || '').replace(/[^0-9A-Z]/gi, '').toUpperCase().replace(/^IT/, '');
+  // Filtra ordini cliente del periodo, ordina per "vicinanza" (cliente match + data ±10gg + prodotto match)
+  const ordini = (_ordiniPeriodo || []).slice();
+
+  function _scoreCandidato(o) {
+    let s = 0;
+    if (o.cliente_id && _clientiMap.has(o.cliente_id)) {
+      const c = _clientiMap.get(o.cliente_id);
+      if (c.piva_norm && pivaFatt && c.piva_norm === pivaFatt) s += 100;
+    }
+    if (normalizzaProdotto(o.prodotto) === r.prodotto_normalizzato) s += 30;
+    const gg = _diffGiorni(ft.data, o.data);
+    if (!isFinite(gg)) {/*nothing*/}
+    else if (gg <= 2) s += 20;
+    else if (gg <= 7) s += 10;
+    else if (gg <= 30) s += 3;
+    if (Math.abs(Number(o.litri||0) - Number(r.quantita||0)) <= 1) s += 15;
+    return s;
+  }
+  ordini.sort((a,b) => _scoreCandidato(b) - _scoreCandidato(a));
+
+  // Limito a 100 ordini più rilevanti per evitare dropdown infinito
+  const top = ordini.slice(0, 100);
+
+  const opzioni = top.map(o => {
+    const imp = _imponibileOrdine(o);
+    const stesso = _scoreCandidato(o) >= 100 ? '🟢' : '⚪';
+    return `<option value="${o.id}">${stesso} ${_fmtData(o.data)} · ${esc((o.cliente||'').substring(0,35))} · ${esc(o.prodotto||'')} · ${_fmtN(o.litri||0)}L · €${_fmtN(imp)}</option>`;
+  }).join('');
+
+  const html = `
+    <div style="max-width:700px">
+      <h2 style="margin:0 0 6px 0;color:#26215C">🔗 Forza match manuale</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:10px">
+        Riga: <strong>${esc(r.prodotto_normalizzato || '?')}</strong> · ${_fmtN(r.quantita)} L · €${_fmtN(r.prezzo_totale)}
+        — Fattura ${esc(ft.numero)}/${_fmtData(ft.data)} ${esc(ft.cessionario_denominazione)}
+      </div>
+      <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:4px">
+        Seleziona ordine da agganciare (top 100, ordinati per pertinenza):
+      </label>
+      <select id="fi-fz-ord-id" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;font-size:11px;font-family:monospace">
+        <option value="">— Scegli un ordine —</option>
+        ${opzioni}
+      </select>
+      <div style="font-size:10px;color:#888;margin-top:6px">
+        🟢 = stesso cliente (PIVA match) · ⚪ = altri ordini del periodo<br>
+        Solo ordini cliente, esclusi annullati. Limite 100 ordini più rilevanti.
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-primary" onclick="chiudiModal()" style="background:#888;font-size:12px">Annulla</button>
+        <button class="btn-primary" style="background:#6B5FCC;font-size:12px"
+                onclick="window.pfFattureImport._applicaForzaMatch(${idx}, ${numeroLinea})">
+          ✓ Aggancia ordine selezionato
+        </button>
+      </div>
+    </div>
+  `;
+  apriModal(html);
+}
+
+function _applicaForzaMatch(idx, numeroLinea) {
+  const sel = document.getElementById('fi-fz-ord-id');
+  const ordineId = sel ? sel.value : '';
+  if (!ordineId) { toast('⚠️ Seleziona un ordine prima'); return; }
+
+  const f = _parsedData.fatture[idx];
+  if (!f) return;
+  const r = f.righe.find(rr => rr.numero_linea === numeroLinea);
+  if (!r) return;
+
+  const ord = (_ordiniPeriodo || []).find(o => o.id === ordineId);
+  if (!ord) { toast('Ordine non trovato'); return; }
+
+  // Aggiorno il match in memoria — l'import poi salva ordine_id sulla riga
+  // e fattura_id/fattura_riga_id sull'ordine come al solito.
+  r._match = {
+    score: 5,
+    ordine_id: ord.id,
+    ordini_ids: [ord.id],
+    ordine_ref: {
+      data: ord.data, cliente: ord.cliente, prodotto: ord.prodotto,
+      litri: Number(ord.litri||0), imponibile: _imponibileOrdine(ord),
+    },
+    dettaglio: { piva: 1, data: 1, prodotto: 1, litri: 1, imponibile: 1 },
+    piva_da_completare: null,
+    match_tipo: 'forzato',
+  };
+  r._match_status = 'matched';
+  r._forzato = true;
+
+  // Ricalcolo stato fattura aggregato
+  let st = null;
+  const order = { matched:0, uncertain:1, orphan:2 };
+  for (const rr of f.righe) {
+    if (rr._match_status && rr._match_status !== 'servizio') {
+      if (st === null || order[rr._match_status] > order[st]) st = rr._match_status;
+    }
+  }
+  f._match_status_fattura = st || 'servizio';
+
+  chiudiModal();
+  toast('✓ Ordine agganciato manualmente');
+  _renderStep3UI();
+}
+
+
+// Ignora riga: marca riga come "non richiede ordine" (conguagli, abbuoni)
+// Salva direttamente in DB la flag ignora_match=true sulla riga.
+async function _ignoraRiga(idx, numeroLinea) {
+  const f = _parsedData.fatture[idx];
+  if (!f) return;
+  const r = f.righe.find(rr => rr.numero_linea === numeroLinea);
+  if (!r) return;
+
+  if (!confirm(`Marcare questa riga come "ignora match"?\n\n${r.prodotto_normalizzato || 'Servizio'} · ${_fmtN(r.quantita)} L · €${_fmtN(r.prezzo_totale)}\n\nLa riga non richiederà più match con un ordine. Usa per conguagli/abbuoni.`)) return;
+
+  // Caso A: stiamo revisionando dal DB → la riga ha _db_riga_id
+  if (r._db_riga_id) {
+    const { error } = await sb.from('fatture_righe')
+      .update({ ignora_match: true })
+      .eq('id', r._db_riga_id);
+    if (error) { toast('Errore: ' + error.message); return; }
+  }
+  // Caso B: import nuovo (riga ancora non in DB) → segno solo in memoria
+  r._ignora_match = true;
+  r._match_status = 'servizio';   // tolta dai problematici
+  r._match = { score: 0, ordine_id: null, ordini_ids: null, ordine_ref: null,
+               dettaglio: {piva:0,data:0,prodotto:0,litri:0,imponibile:0}, piva_da_completare: null };
+
+  // Ricalcolo stato fattura
+  let st = null;
+  const order = { matched:0, uncertain:1, orphan:2 };
+  for (const rr of f.righe) {
+    if (rr._match_status && rr._match_status !== 'servizio') {
+      if (st === null || order[rr._match_status] > order[st]) st = rr._match_status;
+    }
+  }
+  f._match_status_fattura = st || 'servizio';
+
+  toast('✓ Riga ignorata');
+  _renderStep3UI();
+}
+
+
+// Edit ordine compatto: apre mini-modale per modificare i campi più rilevanti
+// dell'ordine candidato (destinazione, sede, litri, prezzi). Salva in DB e
+// rinfresca i dati ordine in memoria.
+async function _apriEditOrdine(ordineId, idx, numeroLinea) {
+  if (!ordineId) { toast('Nessun ordine collegato'); return; }
+
+  // Carico l'ordine fresco dal DB (così edito su dati reali, non match cache)
+  const { data: o, error } = await sb.from('ordini')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,destinazione,sede_scarico_id,sede_scarico_nome,stato')
+    .eq('id', ordineId).single();
+  if (error || !o) { toast('Ordine non trovato: ' + (error?.message||'')); return; }
+
+  // Carico le sedi del cliente (se presente)
+  let sediHtml = '<option value="">— Nessuna sede preimpostata —</option>';
+  if (o.cliente_id) {
+    const { data: sedi } = await sb.from('sedi_scarico')
+      .select('id, nome, indirizzo, comune, attivo, is_default')
+      .eq('cliente_id', o.cliente_id)
+      .eq('attivo', true)
+      .order('is_default', { ascending: false })
+      .order('nome');
+    (sedi || []).forEach(s => {
+      const sel = (s.id === o.sede_scarico_id) ? 'selected' : '';
+      sediHtml += `<option value="${s.id}" data-nome="${esc(s.nome||'')}" ${sel}>
+        ${esc(s.nome || '?')}${s.comune?' · '+esc(s.comune):''}
+      </option>`;
+    });
+  }
+
+  const html = `
+    <div style="max-width:600px">
+      <h2 style="margin:0 0 4px 0;color:#26215C">✏️ Modifica ordine</h2>
+      <div style="font-size:11px;color:#666;margin-bottom:14px">
+        ${_fmtData(o.data)} · ${esc(o.cliente)} · ${esc(o.prodotto)}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Litri</label>
+          <input type="number" id="fi-edt-litri" value="${o.litri||0}" step="0.01" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">IVA %</label>
+          <input type="number" id="fi-edt-iva" value="${o.iva||22}" step="0.01" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Costo / L (€)</label>
+          <input type="number" id="fi-edt-costo" value="${o.costo_litro||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Trasporto / L (€)</label>
+          <input type="number" id="fi-edt-trasp" value="${o.trasporto_litro||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Margine / L (€)</label>
+          <input type="number" id="fi-edt-marg" value="${o.margine||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Imponibile (auto)</label>
+          <input type="text" id="fi-edt-imp" readonly value="€ ${_fmtN((Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0)) * Number(o.litri||0))}" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:4px;font-size:12px;font-family:monospace;background:#fafaf8">
+        </div>
+        <div style="grid-column:1/3">
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Sede di scarico</label>
+          <select id="fi-edt-sede" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px"
+                  onchange="document.getElementById('fi-edt-dest').value = this.options[this.selectedIndex].dataset.nome || ''">
+            ${sediHtml}
+          </select>
+        </div>
+        <div style="grid-column:1/3">
+          <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Destinazione (testo libero)</label>
+          <input type="text" id="fi-edt-dest" value="${esc(o.destinazione||'')}" placeholder="Es. Stazione Saline / Reggio" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px">
+        </div>
+      </div>
+
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-primary" onclick="chiudiModal()" style="background:#888;font-size:12px">Annulla</button>
+        <button class="btn-primary" style="background:#639922;font-size:12px"
+                onclick="window.pfFattureImport._salvaEditOrdine('${ordineId}', ${idx}, ${numeroLinea})">
+          💾 Salva modifiche
+        </button>
+      </div>
+
+      <div style="margin-top:10px;font-size:10px;color:#888">
+        🛈 Le modifiche aggiornano l'ordine nel DB. Imponibile = (costo+trasporto+margine) × litri.
+        Dopo il salvataggio il match della riga fattura verrà ricalcolato.
+      </div>
+    </div>
+  `;
+
+  // Listener per ricalcolo live imponibile
+  apriModal(html);
+  setTimeout(() => {
+    const ricalc = () => {
+      const litri = Number(document.getElementById('fi-edt-litri').value) || 0;
+      const cl = Number(document.getElementById('fi-edt-costo').value) || 0;
+      const tl = Number(document.getElementById('fi-edt-trasp').value) || 0;
+      const mg = Number(document.getElementById('fi-edt-marg').value) || 0;
+      const imp = (cl + tl + mg) * litri;
+      const elImp = document.getElementById('fi-edt-imp');
+      if (elImp) elImp.value = '€ ' + _fmtN(imp);
+    };
+    ['fi-edt-litri','fi-edt-costo','fi-edt-trasp','fi-edt-marg'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', ricalc);
+    });
+  }, 100);
+}
+
+async function _salvaEditOrdine(ordineId, idx, numeroLinea) {
+  const litri = Number(document.getElementById('fi-edt-litri').value) || 0;
+  const iva   = Number(document.getElementById('fi-edt-iva').value) || 22;
+  const cl    = Number(document.getElementById('fi-edt-costo').value) || 0;
+  const tl    = Number(document.getElementById('fi-edt-trasp').value) || 0;
+  const mg    = Number(document.getElementById('fi-edt-marg').value) || 0;
+  const dest  = (document.getElementById('fi-edt-dest').value || '').trim() || null;
+  const sedeSel = document.getElementById('fi-edt-sede');
+  const sedeId = sedeSel ? (sedeSel.value || null) : null;
+  const sedeNome = sedeSel && sedeSel.selectedIndex >= 0 ? (sedeSel.options[sedeSel.selectedIndex].dataset.nome || null) : null;
+
+  if (litri <= 0) { toast('⚠️ Litri devono essere > 0'); return; }
+
+  const updates = {
+    litri,
+    iva,
+    costo_litro: cl,
+    trasporto_litro: tl,
+    margine: mg,
+    destinazione: dest,
+    sede_scarico_id: sedeId,
+    sede_scarico_nome: sedeNome,
+  };
+
+  const { error } = await sb.from('ordini').update(updates).eq('id', ordineId);
+  if (error) { toast('Errore: ' + error.message); return; }
+
+  // Aggiorno l'ordine in memoria (_ordiniPeriodo) così il match si ricalcola subito
+  if (_ordiniPeriodo) {
+    const o = _ordiniPeriodo.find(oo => oo.id === ordineId);
+    if (o) Object.assign(o, updates);
+  }
+
+  // Ricalcolo match per la riga (e per l'intera fattura, per coerenza)
+  const f = _parsedData.fatture[idx];
+  if (f) {
+    for (const r of f.righe) {
+      const m = _calcolaMatchRiga(f.fattura, r);
+      r._match = m;
+      r._match_status = _classificaMatch(m.score);
+    }
+    let st = null;
+    const order = { matched:0, uncertain:1, orphan:2 };
+    for (const rr of f.righe) {
+      if (rr._match_status && rr._match_status !== 'servizio') {
+        if (st === null || order[rr._match_status] > order[st]) st = rr._match_status;
+      }
+    }
+    f._match_status_fattura = st || 'servizio';
+  }
+
+  chiudiModal();
+  toast('✓ Ordine aggiornato e match ricalcolato');
+  _renderStep3UI();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CARICAMENTO FATTURE DA DB (per riaprire la UI Step 3 su fatture già importate)
 //
 // Ricostruisce _parsedData con la stessa shape che produrrebbe il parser ZIP,
@@ -2697,29 +3051,43 @@ async function _caricaDaDb() {
     // 4. Filtro: tutte vs solo problematiche
     let fattureFiltered = fattEmesse;
     if (filtro === 'problematiche') {
-      const fattConRigheOk = new Set();
-      righeAll.forEach(r => {
-        if (r.riga_match_score === 5) {
-          if (!fattConRigheOk.has(r.fattura_id)) fattConRigheOk.add(r.fattura_id);
-        }
-      });
-      // "Problematica" = match_status orphan/uncertain OPPURE almeno una riga score<5
+      // Una riga è "vera" se ha prodotto_normalizzato + quantità > 0
+      // (le righe servizio con prodotto NULL sono ignorate dal matching)
       const righePerFatt = new Map();
       righeAll.forEach(r => {
         if (!righePerFatt.has(r.fattura_id)) righePerFatt.set(r.fattura_id, []);
         righePerFatt.get(r.fattura_id).push(r);
       });
+
+      // Per ogni riga "vera" verifico se c'è un ordine in DB che la punta
+      // (ordini.fattura_riga_id = riga.id). Una riga senza ordine che la punta
+      // È un caso problematico, anche se score=5 storicamente.
+      const righeIds = righeAll.map(r => r.id);
+      const righeConOrdine = new Set();
+      // Carico in chunk per evitare limiti IN()
+      for (let i = 0; i < righeIds.length; i += 500) {
+        const chunk = righeIds.slice(i, i + 500);
+        const { data: oLink } = await sb.from('ordini')
+          .select('fattura_riga_id')
+          .in('fattura_riga_id', chunk);
+        (oLink || []).forEach(o => {
+          if (o.fattura_riga_id) righeConOrdine.add(o.fattura_riga_id);
+        });
+      }
+
       fattureFiltered = fattEmesse.filter(f => {
+        // Esplicitamente problematiche per stato
         if (f.match_status === 'orphan' || f.match_status === 'uncertain') return true;
+        // Almeno una riga "vera" non ignorata e senza ordine che la punta
         const righe = righePerFatt.get(f.id) || [];
-        // riga "vera" = ha quantità+prodotto, e score < 5 o null
-        const haRigaProblematica = righe.some(r =>
-          r.prodotto_normalizzato && r.quantita > 0 &&
-          (r.riga_match_score == null || r.riga_match_score < 5)
+        return righe.some(r =>
+          r.prodotto_normalizzato &&
+          Number(r.quantita) > 0 &&
+          !r.ignora_match &&            // righe marcate "ignora" non sono problematiche
+          !righeConOrdine.has(r.id)
         );
-        return haRigaProblematica;
       });
-      _logAppend(log, 'info', `🟡 Filtrate ${fattureFiltered.length} fatture problematiche su ${fattEmesse.length} totali`);
+      _logAppend(log, 'info', `🟡 Filtrate ${fattureFiltered.length} fatture problematiche su ${fattEmesse.length} totali (${righeConOrdine.size} righe collegate a ordine)`);
     } else {
       _logAppend(log, 'info', `🟢 Mostrando tutte le ${fattureFiltered.length} fatture del periodo`);
     }
@@ -2791,6 +3159,7 @@ async function _caricaDaDb() {
           _db_riga_id: r.id,
           _db_ordine_id_attuale: r.ordine_id,
           _db_score: r.riga_match_score,
+          _ignora_match: !!r.ignora_match,
         })),
         pagamenti: pagamenti.map(p => ({
           modalita: p.modalita,
@@ -2856,6 +3225,11 @@ window.pfFattureImport = {
   _procediImport: _procediImport,
   _avviaRicalcoloNa1: _avviaRicalcoloNa1,
   _caricaDaDb: _caricaDaDb,
+  _apriForzaMatch: _apriForzaMatch,
+  _applicaForzaMatch: _applicaForzaMatch,
+  _ignoraRiga: _ignoraRiga,
+  _apriEditOrdine: _apriEditOrdine,
+  _salvaEditOrdine: _salvaEditOrdine,
 };
 
 })();

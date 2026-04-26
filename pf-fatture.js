@@ -353,12 +353,21 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
                     else if (diff === 0) { stato = '✓ Chiuso'; colore = '#639922'; }
                     else if (diff > 0) { stato = `⚠ ${diff} da fatturare`; colore = '#D4A017'; }
                     else { stato = `+${-diff} extra`; colore = '#8B6A00'; }
+                    // Bottone "Sistema" solo per mesi con discrepanze risolvibili
+                    const haRevisione = (diff > 0 || diff < 0) && r.fatture > 0;
+                    const btnRevisione = haRevisione
+                      ? `<button onclick="apriRevisioneMese(${annoInt}, ${r.mese})"
+                                 title="Apri revisione fatture/ordini di ${r.label}"
+                                 style="background:#6B5FCC;color:white;border:0;border-radius:4px;padding:2px 8px;font-size:9px;cursor:pointer;margin-left:4px">
+                           📋 Sistema
+                         </button>`
+                      : '';
                     return `
                       <tr style="border-bottom:0.5px solid var(--border)">
                         <td style="padding:3px 4px">${r.label}</td>
                         <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.ordini}</td>
                         <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.fatture}</td>
-                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600">${stato}</td>
+                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600">${stato}${btnRevisione}</td>
                       </tr>
                     `;
                   }).join('')}
@@ -373,6 +382,50 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
   } catch (e) {
     console.error('[caricaDashboardFatture]', e);
     wrap.innerHTML = '<div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px;border-radius:4px;color:#791F1F;font-size:12px">Errore caricamento dashboard: ' + _esc(e.message) + '</div>';
+  }
+}
+
+// Apre la revisione fatture per uno specifico mese (chiamata dal bottone
+// "📋 Sistema" nel riepilogo mensile della dashboard).
+// Switcha alla tab "Import da Danea", precompila i dropdown anno/mese,
+// e simula il click su "Carica fatture e apri revisione".
+async function apriRevisioneMese(anno, mese) {
+  // 1. Cambio tab a "Import da Danea"
+  const btnImport = document.querySelector('.fatt-tab[data-tab="fatt-panel-import"]');
+  if (btnImport) {
+    btnImport.click();
+  } else {
+    toast('Tab Import non trovata');
+    return;
+  }
+  // 2. Aspetto che la tab abbia renderizzato (renderFattureImport è async)
+  // Faccio polling sui dropdown del pannello revisione DB
+  let tries = 0;
+  const waitDom = () => new Promise(resolve => {
+    const check = () => {
+      const a = document.getElementById('fi-rev-anno');
+      const m = document.getElementById('fi-rev-mese');
+      const f = document.getElementById('fi-rev-filtro');
+      if (a && m && f) return resolve(true);
+      tries++;
+      if (tries > 50) return resolve(false);  // 5s max
+      setTimeout(check, 100);
+    };
+    check();
+  });
+  const ok = await waitDom();
+  if (!ok) { toast('Pannello revisione non pronto'); return; }
+
+  // 3. Precompilo dropdown e clicco
+  document.getElementById('fi-rev-anno').value = String(anno);
+  document.getElementById('fi-rev-mese').value = String(mese);
+  document.getElementById('fi-rev-filtro').value = 'problematiche';
+  // Scroll al pannello viola così Rinaldo lo vede
+  const out = document.getElementById('fi-rev-output');
+  if (out) out.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Lancio
+  if (window.pfFattureImport && window.pfFattureImport._caricaDaDb) {
+    await window.pfFattureImport._caricaDaDb();
   }
 }
 
