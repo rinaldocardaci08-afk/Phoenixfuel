@@ -514,7 +514,7 @@ async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
 
   // Ordini tipo_ordine='cliente' (autoconsumo escluso: autofatture non entrano nel matching Danea clienti)
   const { data: ordini, error: errOrd } = await sb.from('ordini')
-    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore,destinazione,sede_scarico_id,sede_scarico_nome')
     .eq('tipo_ordine', 'cliente')
     .neq('stato', 'annullato')
     .gte('data', rangeMin)
@@ -2248,13 +2248,22 @@ async function _avviaRicalcoloNa1(opts) {
 
     const fattIds = fattEmesse.map(f => f.id);
     let righeAll = [];
+    // Paginazione DOPPIA: per chunk di fattura_id (limite IN ~1000) e per range
+    // (limite default Supabase 1000 record per query).
     for (let i = 0; i < fattIds.length; i += 500) {
       const chunk = fattIds.slice(i, i + 500);
-      const { data: rChunk, error: errR } = await sb.from('fatture_righe')
-        .select('id, fattura_id, numero_linea, prodotto_normalizzato, quantita, prezzo_totale')
-        .in('fattura_id', chunk);
-      if (errR) throw new Error('fatture_righe: ' + errR.message);
-      righeAll = righeAll.concat(rChunk || []);
+      let from = 0, batchSize = 1000;
+      while (true) {
+        const { data: rChunk, error: errR } = await sb.from('fatture_righe')
+          .select('id, fattura_id, numero_linea, prodotto_normalizzato, quantita, prezzo_totale')
+          .in('fattura_id', chunk)
+          .range(from, from + batchSize - 1);
+        if (errR) throw new Error('fatture_righe: ' + errR.message);
+        if (!rChunk || rChunk.length === 0) break;
+        righeAll = righeAll.concat(rChunk);
+        if (rChunk.length < batchSize) break;
+        from += batchSize;
+      }
     }
     _logAppend(log, 'ok', `✓ ${righeAll.length} righe fattura caricate`);
 
@@ -2358,6 +2367,7 @@ async function _avviaRicalcoloNa1(opts) {
     let nMatchNa1 = 0;      // 1 riga = N ordini (subset-sum)
     let nMatch1aN = 0;      // N righe = 1 ordine multi-consegna? Non previsto, ma diagnostica
     let nResidui = 0;       // righe senza match
+    const residuiDiag = []; // diagnostica residui: { riga, motivo, dettaglio }
     // Aggiornamenti da fare: ordineId → { fattura_id, fattura_riga_id }
     const updatesOrdini = new Map();
 
@@ -2434,7 +2444,28 @@ async function _avviaRicalcoloNa1(opts) {
       );
       for (const rigaItem of righeNonMatch) {
         const cand = _candidatiPerBucket(rigaItem, cliKeyBucket);
-        if (cand.length < 2) { nResidui++; continue; }
+        if (cand.length === 0) {
+          residuiDiag.push({
+            riga: rigaItem,
+            motivo: 'NESSUN_CANDIDATO',
+            dettaglio: 'cliente+prodotto+data±2gg → 0 ordini',
+          });
+          nResidui++;
+          continue;
+        }
+        if (cand.length === 1) {
+          // Tentativo recovery: forse un singolo candidato con tolleranze allentate
+          const c = cand[0];
+          const tollL = Math.max(rigaItem.litri * MATCH_TOLL_LITRI_PCT, 1);
+          const tollI = Math.max(MATCH_TOLL_IMPONIBILE_E, rigaItem.imponibile * 0.005);
+          residuiDiag.push({
+            riga: rigaItem,
+            motivo: 'CANDIDATO_NON_QUADRA',
+            dettaglio: `1 candidato: ${c.litri}L vs ${rigaItem.litri}L (Δ${Math.abs(c.litri-rigaItem.litri).toFixed(0)}L, toll ${tollL.toFixed(0)}L), imp €${c.imponibile.toFixed(2)} vs €${rigaItem.imponibile.toFixed(2)} (Δ€${Math.abs(c.imponibile-rigaItem.imponibile).toFixed(2)}, toll €${tollI.toFixed(2)})`,
+          });
+          nResidui++;
+          continue;
+        }
 
         const subset = _trovaSubsetMatchOrdini(
           cand.map(c => ({ id: c.id, litri: c.litri, imponibile: c.imponibile })),
@@ -2451,6 +2482,14 @@ async function _avviaRicalcoloNa1(opts) {
           }
           nMatchNa1++;
         } else {
+          // Più candidati ma né 1:1 né N:1 quadra
+          const totLitri = cand.reduce((s,c)=>s+c.litri,0);
+          const totImp = cand.reduce((s,c)=>s+c.imponibile,0);
+          residuiDiag.push({
+            riga: rigaItem,
+            motivo: 'NESSUN_SUBSET',
+            dettaglio: `${cand.length} candidati, somma ${totLitri}L €${totImp.toFixed(2)} vs riga ${rigaItem.litri}L €${rigaItem.imponibile.toFixed(2)}`,
+          });
           nResidui++;
         }
       }
@@ -2459,6 +2498,32 @@ async function _avviaRicalcoloNa1(opts) {
     _logAppend(log, 'ok', `✓ Match 1:1 perfetti: <strong>${nMatch1a1}</strong>`);
     _logAppend(log, 'ok', `✓ Match N:1 (subset-sum): <strong>${nMatchNa1}</strong>`);
     _logAppend(log, 'warn', `⚠ Righe senza match: ${nResidui}`);
+
+    // ── DIAGNOSTICA RESIDUI: riepilogo causale + lista dettagliata ──
+    if (residuiDiag.length > 0) {
+      const byMotivo = new Map();
+      residuiDiag.forEach(r => byMotivo.set(r.motivo, (byMotivo.get(r.motivo)||0) + 1));
+      _logAppend(log, 'info', `📊 Residui per causa:`);
+      for (const [m, c] of byMotivo.entries()) {
+        _logAppend(log, 'info', `&nbsp;&nbsp;• ${m}: <strong>${c}</strong>`);
+      }
+      _logAppend(log, 'info', `📋 Dettaglio residui (max 30):`);
+      residuiDiag.slice(0, 30).forEach(r => {
+        const f = r.riga.fattura;
+        _logAppend(log, 'info', `&nbsp;&nbsp;Fatt ${f.numero}/${f.data} ${(f.cessionario_denominazione||'').substring(0,30)} - ${r.riga.riga.prodotto_normalizzato} ${r.riga.litri}L €${r.riga.imponibile.toFixed(2)} → <em>${r.motivo}</em> ${r.dettaglio}`);
+      });
+      // Stampo anche le righe in console per analisi extra
+      console.table(residuiDiag.map(r => ({
+        fattura: `${r.riga.fattura.numero}/${r.riga.fattura.data}`,
+        cliente: (r.riga.fattura.cessionario_denominazione||'').substring(0,40),
+        prod: r.riga.riga.prodotto_normalizzato,
+        litri: r.riga.litri,
+        imp: r.riga.imponibile.toFixed(2),
+        motivo: r.motivo,
+        dettaglio: r.dettaglio,
+      })));
+      _logAppend(log, 'info', '🔍 Vedi anche console F12 → tabella residui per analisi completa');
+    }
     _logAppend(log, 'info', `Ordini da aggiornare: ${updatesOrdini.size}`);
 
     if (updatesOrdini.size === 0) {
