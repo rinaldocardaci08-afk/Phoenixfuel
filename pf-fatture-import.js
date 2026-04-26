@@ -2175,21 +2175,31 @@ async function _importFatturaSingola(f, batchId) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// RICALCOLO MATCH N:1 SU FATTURE STORICHE (nuovo schema ordini.fattura_id)
+// RICALCOLO BIJETTIVO GLOBALE (sostituisce il vecchio ricalcolo N:1)
 //
-// Strategia: scorro tutte le righe fattura del periodo che NON hanno già
-// un subset N:1 (euristica: una fattura_riga_id con 2+ ordini che puntano).
-// Per ogni riga rilancio il matcher; se trova subset N:1:
-//   - popolo ordini.fattura_id + fattura_riga_id sugli ordini extra del subset
-//   - metto stato=consegnato
-// Non tocco fatture_righe né l'ordine "principale" (ordine_id della riga).
+// Invariante ferreo: un ordine non può essere assegnato a 2 fatture diverse.
+// Il matcher originale violava questo invariante quando 2 righe fattura
+// identiche (stesso cliente/giorno/prodotto/litri) trovavano lo stesso
+// "best ordine" score 5/5 e lo linkavano entrambe al primo.
+//
+// Algoritmo:
+//  1) Carico fatture+righe+ordini del periodo, tutti in memoria
+//  2) Raggruppo per "bucket" = (cliente_key, data_tolerant, prodotto_norm)
+//  3) Per ogni bucket applico matching con priorità:
+//     a) Assignment greedy su coppie perfette (litri=uguali)
+//     b) Subset-sum N:1 per righe fattura da coprire con N ordini
+//     c) Residuo = non matchato (revisione manuale)
+//  4) Ogni ordine viene "bruciato" quando assegnato, non più riutilizzabile
+//
+// Sostituisce il precedente _avviaRicalcoloNa1 (che rilanciava il matcher
+// riga-per-riga riproducendo lo stesso bug).
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function _avviaRicalcoloNa1(opts) {
   opts = opts || {};
   // 2 modalità di invocazione:
-  //  (A) da dashboard Elenco Fatture → passa { dataMin, dataMax, targetElId, labelPeriodo, skipConfirm }
-  //  (B) legacy fallback: legge dropdown nella tab Import (se ancora presente)
+  //  (A) da dashboard → { dataMin, dataMax, targetElId, labelPeriodo, skipConfirm }
+  //  (B) legacy fallback dropdown (se ancora presente nella UI import)
   let dataMin, dataMax, targetElId, labelPeriodo, skipConfirm;
   if (opts.dataMin && opts.dataMax) {
     dataMin      = opts.dataMin;
@@ -2199,10 +2209,7 @@ async function _avviaRicalcoloNa1(opts) {
     skipConfirm  = !!opts.skipConfirm;
   } else {
     const selAnno = document.getElementById('fi-rim-anno');
-    if (!selAnno) {
-      alert('Impossibile avviare il ricalcolo: parametri mancanti.');
-      return;
-    }
+    if (!selAnno) { alert('Parametri mancanti.'); return; }
     const anno = selAnno.value;
     if (anno === 'all') { dataMin = '2020-01-01'; dataMax = '2099-12-31'; }
     else { dataMin = `${anno}-01-01`; dataMax = `${anno}-12-31`; }
@@ -2214,141 +2221,282 @@ async function _avviaRicalcoloNa1(opts) {
   const out = document.getElementById(targetElId);
   if (!out) { alert('Contenitore log non trovato: ' + targetElId); return; }
 
-  if (!skipConfirm && !confirm(`Ricalcolo match N:1 sulle fatture del periodo ${labelPeriodo}.\n\nQuesta operazione:\n• Legge righe fattura + ordini del periodo\n• Rilancia il matcher con logica N:1\n• Linka ordini extra a fattura_id + fattura_riga_id\n• Mette stato=consegnato\n\nNon tocca righe già con 2+ ordini linkati.\n\nProcedere?`)) return;
+  if (!skipConfirm && !confirm(`Ricalcolo bijettivo sulle fatture del periodo ${labelPeriodo}.\n\n• Invariante: un ordine = una fattura\n• Accoppia ordini e righe fattura dello stesso bucket (cliente/giorno/prodotto)\n• Risolve il bug "stesso ordine linkato a 2 fatture"\n• Riconosce anche match N:1 (1 riga fattura = somma di N ordini)\n\nProcedere?`)) return;
 
   const logId = `fi-rim-log-${Date.now()}`;
-  out.innerHTML = `<div class="fi-log" id="${logId}" style="max-height:300px;overflow-y:auto;background:#f6f6f6;border:0.5px solid #ddd;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.5"><div class="info">[${_now()}] 🔁 Avvio ricalcolo match N:1 (${labelPeriodo})...</div></div>`;
+  out.innerHTML = `<div class="fi-log" id="${logId}" style="max-height:320px;overflow-y:auto;background:#f6f6f6;border:0.5px solid #ddd;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.5"><div class="info">[${_now()}] 🔁 Avvio ricalcolo bijettivo (${labelPeriodo})...</div></div>`;
   const log = document.getElementById(logId);
 
   try {
-    // ── 1. Carica anagrafica clienti + ordini del periodo (buffer ±3gg) ──
+    // ── 1. Carica anagrafica + ordini del periodo ──
     _logAppend(log, 'info', 'Caricamento ordini + anagrafica clienti...');
     await _caricaDatiPeriodo(dataMin, dataMax, log);
-    _logAppend(log, 'ok', `✓ ${_ordiniPeriodo.length} ordini in memoria, ${_clientiMap.size} clienti`);
+    _logAppend(log, 'ok', `✓ ${_ordiniPeriodo.length} ordini, ${_clientiMap.size} clienti`);
 
-    // ── 2. Carica fatture del periodo ──
+    // ── 2. Carica fatture + righe del periodo ──
     const { data: fattEmesse, error: errF } = await sb.from('fatture_emesse')
       .select('id, numero, anno, data, cessionario_piva, cessionario_denominazione')
       .gte('data', dataMin)
       .lte('data', dataMax)
-      .order('data');
+      .order('data').order('numero');
     if (errF) throw new Error('fatture_emesse: ' + errF.message);
     if (!fattEmesse || fattEmesse.length === 0) {
-      _logAppend(log, 'warn', 'Nessuna fattura trovata nel periodo.');
+      _logAppend(log, 'warn', 'Nessuna fattura nel periodo.');
       return;
     }
-    _logAppend(log, 'ok', `✓ ${fattEmesse.length} fatture trovate`);
+    _logAppend(log, 'ok', `✓ ${fattEmesse.length} fatture caricate`);
 
-    // ── 3. Carica righe + conteggio ordini già linkati per riga ──
-    _logAppend(log, 'info', 'Caricamento righe fattura...');
     const fattIds = fattEmesse.map(f => f.id);
     let righeAll = [];
     for (let i = 0; i < fattIds.length; i += 500) {
       const chunk = fattIds.slice(i, i + 500);
       const { data: rChunk, error: errR } = await sb.from('fatture_righe')
-        .select('id, fattura_id, numero_linea, descrizione, prodotto_normalizzato, codice_articolo, quantita, prezzo_totale, ordine_id, riga_match_score')
+        .select('id, fattura_id, numero_linea, prodotto_normalizzato, quantita, prezzo_totale')
         .in('fattura_id', chunk);
       if (errR) throw new Error('fatture_righe: ' + errR.message);
       righeAll = righeAll.concat(rChunk || []);
     }
-    _logAppend(log, 'ok', `✓ ${righeAll.length} righe`);
+    _logAppend(log, 'ok', `✓ ${righeAll.length} righe fattura caricate`);
 
-    // Conteggio ordini attualmente linkati per fattura_riga_id
-    const righeIds = righeAll.map(r => r.id);
-    const ordiniGiaLinkatiPerRiga = new Map();  // riga_id → count
-    for (let i = 0; i < righeIds.length; i += 500) {
-      const chunk = righeIds.slice(i, i + 500);
-      const { data: oLink, error: errOL } = await sb.from('ordini')
-        .select('id, fattura_riga_id')
-        .in('fattura_riga_id', chunk);
-      if (errOL) throw new Error('conteggio ordini linkati: ' + errOL.message);
-      (oLink || []).forEach(o => {
-        ordiniGiaLinkatiPerRiga.set(o.fattura_riga_id, (ordiniGiaLinkatiPerRiga.get(o.fattura_riga_id) || 0) + 1);
-      });
-    }
-
-    // Indicizza fatture
+    // ── 3. Indicizzo fatture per id, raggruppo righe ──
     const fattById = new Map();
     fattEmesse.forEach(f => fattById.set(f.id, f));
 
-    // ── 4. Rilancio matcher riga per riga ──
-    let nRigheValutate = 0;
-    let nMatchNa1Nuovi = 0;
-    let nOrdiniDaLinkare = 0;
-    const updatesPerOrdini = [];  // { riga_id, fattura_id, ordiniExtra: [id,...] }
+    // ── 4. RESET: per poter ricalcolare pulito, sgancio TUTTI gli ordini
+    //     del periodo (fattura_id=NULL) e successivamente li riassegno.
+    //     Lo stato 'consegnato' NON viene toccato (è coerente con la storia).
+    _logAppend(log, 'info', 'Reset link ordini → fattura nel periodo...');
+    const { error: errReset } = await sb.from('ordini')
+      .update({ fattura_id: null, fattura_riga_id: null })
+      .eq('tipo_ordine', 'cliente')
+      .neq('stato', 'annullato')
+      .gte('data', dataMin)
+      .lte('data', dataMax);
+    if (errReset) throw new Error('reset ordini: ' + errReset.message);
+    _logAppend(log, 'ok', '✓ Reset completato');
 
-    for (const r of righeAll) {
-      nRigheValutate++;
-      if (!r.prodotto_normalizzato || !r.quantita || Number(r.quantita) <= 0) continue;
-
-      // Skip se questa riga ha già 2+ ordini linkati (match N:1 già applicato)
-      if ((ordiniGiaLinkatiPerRiga.get(r.id) || 0) >= 2) continue;
-
-      const f = fattById.get(r.fattura_id);
-      if (!f) continue;
-
-      const fattObj = {
-        data: f.data,
-        cessionario_piva: f.cessionario_piva,
-        cessionario_denominazione: f.cessionario_denominazione,
-      };
-      const rigaObj = {
-        prodotto_normalizzato: r.prodotto_normalizzato,
-        quantita: r.quantita,
-        prezzo_totale: r.prezzo_totale,
-      };
-      const m = _calcolaMatchRiga(fattObj, rigaObj);
-
-      // Ci interessa solo se il matcher trova un subset N:1 nuovo
-      if (!m.ordini_ids || m.ordini_ids.length < 2) continue;
-
-      // Gli ordini extra sono quelli del subset diversi da r.ordine_id
-      // (quello principale che è già linkato via fatture_righe.ordine_id
-      // ma che potrebbe non aver ancora fattura_id su ordini — lo includo lo stesso
-      // per sicurezza, l'UPDATE è idempotente).
-      const ordiniExtra = m.ordini_ids;
-
-      updatesPerOrdini.push({
-        riga_id: r.id,
-        fattura_id: r.fattura_id,
-        ordiniExtra,
-      });
-      nMatchNa1Nuovi++;
-      nOrdiniDaLinkare += ordiniExtra.length;
+    // ── 5. Costruisco i bucket = (cliente_norm, data±2gg, prodotto_norm) ──
+    //     Per ogni ordine determino la "cliente_key" usando PIVA se disponibile,
+    //     altrimenti nome normalizzato, altrimenti cliente_id.
+    function _clienteKey(pivaNorm, denomNorm, cliId) {
+      if (pivaNorm) return 'p:' + pivaNorm;
+      if (denomNorm) return 'n:' + denomNorm;
+      return 'i:' + (cliId || '-');
     }
 
-    _logAppend(log, 'info', `Righe valutate: ${nRigheValutate}`);
-    _logAppend(log, 'ok', `✓ Nuovi match N:1: <strong>${nMatchNa1Nuovi}</strong> (totale ordini da linkare: ${nOrdiniDaLinkare})`);
+    // Filtro righe fattura "reali" (con prodotto_normalizzato + quantità > 0)
+    const righeReali = righeAll.filter(r =>
+      r.prodotto_normalizzato &&
+      r.quantita && Number(r.quantita) > 0
+    );
+    _logAppend(log, 'info', `Righe fattura da matchare: ${righeReali.length}`);
 
-    if (updatesPerOrdini.length === 0) {
-      _logAppend(log, 'ok', '✓ Nessun aggiornamento da fare. Tutto già ottimale.');
+    // Bucketizzo righe fattura
+    const bucketsFatt = new Map(); // key → [righe]
+    for (const r of righeReali) {
+      const f = fattById.get(r.fattura_id);
+      if (!f) continue;
+      const pivaNorm = _normalizzaPiva(f.cessionario_piva);
+      const denomNorm = _normalizzaNome(f.cessionario_denominazione);
+      // Trovo cliente_id via PIVA se possibile
+      let cliId = null;
+      for (const [id, c] of _clientiMap.entries()) {
+        if (pivaNorm && c.piva_norm === pivaNorm) { cliId = id; break; }
+        if (!pivaNorm && denomNorm && !c.piva_norm && c.nome_norm === denomNorm) { cliId = id; break; }
+      }
+      const cliKey = _clienteKey(pivaNorm, denomNorm, cliId);
+      const key = `${cliKey}|${f.data}|${r.prodotto_normalizzato}`;
+      if (!bucketsFatt.has(key)) bucketsFatt.set(key, []);
+      bucketsFatt.get(key).push({
+        riga: r,
+        fattura: f,
+        cliId,
+        litri: Number(r.quantita),
+        imponibile: Number(r.prezzo_totale || 0),
+      });
+    }
+
+    // Bucketizzo ordini con tolleranza ±2gg sulla data → genero più chiavi
+    // per lo stesso ordine se cadono in più "giorni-pivot" di fatture.
+    // Per efficienza indicizzo gli ordini per (cliKey, prodotto_norm) → lista
+    const ordIdx = new Map();  // (cliKey|prodotto_norm) → [ordini]
+    for (const o of _ordiniPeriodo) {
+      const prodNorm = normalizzaProdotto(o.prodotto);
+      if (!prodNorm) continue;
+      const litri = Number(o.litri || 0);
+      if (litri <= 0) continue;
+
+      // Cliente key dell'ordine
+      let pivaNormO = '', denomNormO = '';
+      if (o.cliente_id && _clientiMap.has(o.cliente_id)) {
+        const c = _clientiMap.get(o.cliente_id);
+        pivaNormO = c.piva_norm || '';
+        denomNormO = c.nome_norm || '';
+      }
+      if (!pivaNormO && !denomNormO) denomNormO = _normalizzaNome(o.cliente);
+      const cliKeyO = _clienteKey(pivaNormO, denomNormO, o.cliente_id);
+      const idxKey = `${cliKeyO}|${prodNorm}`;
+      if (!ordIdx.has(idxKey)) ordIdx.set(idxKey, []);
+      ordIdx.get(idxKey).push({
+        id: o.id,
+        data: o.data,
+        litri,
+        imponibile: _imponibileOrdine(o),
+        destinazione: o.destinazione || null,
+        sede_scarico_id: o.sede_scarico_id || null,
+      });
+    }
+
+    _logAppend(log, 'info', `Bucket fatture: ${bucketsFatt.size}, indice ordini: ${ordIdx.size}`);
+
+    // ── 6. Per ogni bucket fatture, trovo i candidati ordini e applico
+    //       assignment bijettivo (greedy con priorità ai match più "larghi").
+    //       Un Set tiene traccia degli ordini GIÀ BRUCIATI globalmente.
+    const ordiniBruciati = new Set();
+    // Conteggi diagnostici
+    let nMatch1a1 = 0;      // 1 riga = 1 ordine con litri uguali
+    let nMatchNa1 = 0;      // 1 riga = N ordini (subset-sum)
+    let nMatch1aN = 0;      // N righe = 1 ordine multi-consegna? Non previsto, ma diagnostica
+    let nResidui = 0;       // righe senza match
+    // Aggiornamenti da fare: ordineId → { fattura_id, fattura_riga_id }
+    const updatesOrdini = new Map();
+
+    // Helper: trova ordini candidati (stesso cliente/prodotto, data ±2gg, non bruciati)
+    function _candidatiPerBucket(bucketItem, cliKeyBucket) {
+      const dataMid = bucketItem.fattura.data;
+      // cerco per cliKeyBucket e per ciascuna possibile variazione prodotto
+      const out = [];
+      const prodNormFatt = bucketItem.riga.prodotto_normalizzato;
+      // Itera sull'indice: stessa cliKey + prodotto
+      const idxKey = `${cliKeyBucket}|${prodNormFatt}`;
+      const lista = ordIdx.get(idxKey) || [];
+      for (const o of lista) {
+        if (ordiniBruciati.has(o.id)) continue;
+        if (_diffGiorni(dataMid, o.data) > MATCH_TOLL_DATA_GG) continue;
+        out.push(o);
+      }
+      return out;
+    }
+
+    // Ordino i bucket per data (prima i più vecchi) e numero fattura → deterministico
+    const bucketsOrdinati = [...bucketsFatt.entries()].sort((a,b) => {
+      const da = a[1][0]?.fattura?.data || '';
+      const db = b[1][0]?.fattura?.data || '';
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+
+    for (const [bucketKey, righeBucket] of bucketsOrdinati) {
+      // cliKey dal primo elemento (tutti stessi)
+      const cliKeyBucket = bucketKey.split('|')[0];
+      // Ordino le righe del bucket per data poi per numero fattura crescente
+      righeBucket.sort((a,b) => {
+        if (a.fattura.data !== b.fattura.data) return a.fattura.data < b.fattura.data ? -1 : 1;
+        const na = parseInt(a.fattura.numero) || 0;
+        const nb = parseInt(b.fattura.numero) || 0;
+        return na - nb;
+      });
+
+      // ── PASSATA A: match 1:1 con litri uguali (coppia perfetta) ──
+      // Per ogni riga del bucket, cerco ordine stesso litraggio, imponibile ~uguale,
+      // non bruciato. Se trovo → link + bruciato. Il match 1:1 perfetto è prioritario
+      // perché è il più sicuro (non ci sono ambiguità di somma).
+      for (const rigaItem of righeBucket) {
+        if (updatesOrdini.size > 0 && [...updatesOrdini.values()].some(u => u.fattura_riga_id === rigaItem.riga.id)) continue;
+        const cand = _candidatiPerBucket(rigaItem, cliKeyBucket);
+        // Filtro: stesso litraggio (±1%, min 1L) + imponibile (±€5 o ±0.5% max(5,imp*0.005))
+        const tollL = Math.max(rigaItem.litri * MATCH_TOLL_LITRI_PCT, 1);
+        const tollI = Math.max(MATCH_TOLL_IMPONIBILE_E, rigaItem.imponibile * 0.005);
+        const perfetti = cand.filter(o =>
+          Math.abs(o.litri - rigaItem.litri) <= tollL &&
+          Math.abs(o.imponibile - rigaItem.imponibile) <= tollI
+        );
+        if (perfetti.length === 0) continue;
+
+        // Tie-breaker: 1) destinazione valorizzata = priorità, 2) id ordine crescente
+        perfetti.sort((a,b) => {
+          const daDest = a.destinazione ? 1 : 0;
+          const dbDest = b.destinazione ? 1 : 0;
+          if (daDest !== dbDest) return dbDest - daDest;  // chi ha dest prima
+          return a.id < b.id ? -1 : 1;
+        });
+        const scelto = perfetti[0];
+        ordiniBruciati.add(scelto.id);
+        updatesOrdini.set(scelto.id, {
+          fattura_id: rigaItem.fattura.id,
+          fattura_riga_id: rigaItem.riga.id,
+        });
+        nMatch1a1++;
+      }
+
+      // ── PASSATA B: subset-sum N:1 per le righe ancora non matchate ──
+      const righeNonMatch = righeBucket.filter(ri =>
+        ![...updatesOrdini.values()].some(u => u.fattura_riga_id === ri.riga.id)
+      );
+      for (const rigaItem of righeNonMatch) {
+        const cand = _candidatiPerBucket(rigaItem, cliKeyBucket);
+        if (cand.length < 2) { nResidui++; continue; }
+
+        const subset = _trovaSubsetMatchOrdini(
+          cand.map(c => ({ id: c.id, litri: c.litri, imponibile: c.imponibile })),
+          rigaItem.litri,
+          rigaItem.imponibile
+        );
+        if (subset && subset.length >= 2) {
+          for (const s of subset) {
+            ordiniBruciati.add(s.id);
+            updatesOrdini.set(s.id, {
+              fattura_id: rigaItem.fattura.id,
+              fattura_riga_id: rigaItem.riga.id,
+            });
+          }
+          nMatchNa1++;
+        } else {
+          nResidui++;
+        }
+      }
+    }
+
+    _logAppend(log, 'ok', `✓ Match 1:1 perfetti: <strong>${nMatch1a1}</strong>`);
+    _logAppend(log, 'ok', `✓ Match N:1 (subset-sum): <strong>${nMatchNa1}</strong>`);
+    _logAppend(log, 'warn', `⚠ Righe senza match: ${nResidui}`);
+    _logAppend(log, 'info', `Ordini da aggiornare: ${updatesOrdini.size}`);
+
+    if (updatesOrdini.size === 0) {
+      _logAppend(log, 'warn', 'Nessun aggiornamento da applicare.');
       return;
     }
 
-    // ── 5. UPDATE ordini per ogni riga trovata ──
-    _logAppend(log, 'info', `Aggiornamento ordini in DB...`);
+    // ── 7. APPLY: raggruppo per (fattura_id, fattura_riga_id) e lancio UPDATE .in() ──
+    // Più efficiente di 1 UPDATE per ordine.
+    const groupByRiga = new Map();  // rigaId → { fattura_id, ordini: [id,...] }
+    for (const [ordId, upd] of updatesOrdini.entries()) {
+      const k = upd.fattura_riga_id;
+      if (!groupByRiga.has(k)) groupByRiga.set(k, { fattura_id: upd.fattura_id, ordini: [] });
+      groupByRiga.get(k).ordini.push(ordId);
+    }
+
+    _logAppend(log, 'info', `Applicazione su DB...`);
     let nOk = 0, nErr = 0;
-    for (const u of updatesPerOrdini) {
+    for (const [rigaId, g] of groupByRiga.entries()) {
       const { error: errU } = await sb.from('ordini')
         .update({
-          fattura_id: u.fattura_id,
-          fattura_riga_id: u.riga_id,
+          fattura_id: g.fattura_id,
+          fattura_riga_id: rigaId,
           stato: 'consegnato',
         })
-        .in('id', u.ordiniExtra);
-      if (errU) { nErr++; console.warn('[rim]', u.riga_id, errU.message); }
+        .in('id', g.ordini);
+      if (errU) { nErr++; console.warn('[rim]', rigaId, errU.message); }
       else nOk++;
     }
-    _logAppend(log, 'ok', `✓ ${nOk} righe processate, ${nErr} errori`);
-    _logAppend(log, 'ok', `<strong>✅ Ricalcolo completato.</strong>`);
-    _logAppend(log, 'info', '💡 Ricarica la tab Fatture per vedere la dashboard aggiornata.');
+    _logAppend(log, 'ok', `✓ ${nOk} righe DB aggiornate, ${nErr} errori`);
+    _logAppend(log, 'ok', `<strong>✅ Ricalcolo bijettivo completato.</strong>`);
+    _logAppend(log, 'info', '💡 Dashboard si ricarica tra 1,5s...');
 
   } catch (err) {
     console.error('[rim]', err);
     _logAppend(log, 'err', `✗ Errore: ${err.message}`);
   }
 }
-
 
 window.pfFattureImport = {
   renderFattureImport: renderFattureImport,
