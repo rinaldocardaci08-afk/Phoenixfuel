@@ -1367,7 +1367,22 @@ function _apriDettaglio(idx) {
   const denomFattNorm = _normalizzaNome(ft.cessionario_denominazione);
   const pivaFattNorm = _normalizzaPiva(ft.cessionario_piva);
   let clienteTrovato = null; // {id, nome, piva, piva_norm}
-  if (denomFattNorm && _clientiMap) {
+
+  // 1. Provo a trovare il cliente via ordine candidato (più affidabile del match per nome)
+  if (_clientiMap) {
+    for (const r of f.righe) {
+      const ordId = r._match?.ordine_id;
+      if (!ordId) continue;
+      const ord = (_ordiniPeriodo || []).find(o => o.id === ordId);
+      if (ord && ord.cliente_id && _clientiMap.has(ord.cliente_id)) {
+        const c = _clientiMap.get(ord.cliente_id);
+        clienteTrovato = { id: ord.cliente_id, ...c };
+        break;
+      }
+    }
+  }
+  // 2. Fallback: cerco per nome normalizzato esatto
+  if (!clienteTrovato && denomFattNorm && _clientiMap) {
     for (const [id, c] of _clientiMap.entries()) {
       if (c.nome_norm === denomFattNorm) {
         clienteTrovato = { id, ...c };
@@ -1422,13 +1437,13 @@ function _apriDettaglio(idx) {
         PIVA: <code>${esc(ft.cessionario_piva || '—')}</code> ·
         ${esc(ft.cessionario_comune || '')} ${esc(ft.cessionario_provincia ? '(' + ft.cessionario_provincia + ')' : '')}
       </div>
-      ${bannerPivaHtml}
       <div style="display:flex;gap:10px;font-size:11px;margin-bottom:14px;padding:8px 12px;background:#fafaf8;border-radius:6px">
         <div><strong>Imponibile:</strong> € ${_fmtN(ft.imponibile_totale || 0)}</div>
         <div><strong>IVA:</strong> € ${_fmtN(ft.iva_totale || 0)}</div>
         <div><strong>Totale:</strong> € ${_fmtN(ft.importo_totale || 0)}</div>
         <div style="margin-left:auto"><strong>Pagamenti:</strong> ${f.pagamenti.length}</div>
       </div>
+      ${bannerPivaHtml}
       <h3 style="font-size:13px;color:#26215C;margin:0 0 4px 0">Righe (${f.righe.length})</h3>
       <div style="max-height:400px;overflow-y:auto;border:1px solid #e8e5dc;border-radius:6px">
         ${righeHtml}
