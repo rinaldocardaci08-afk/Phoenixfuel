@@ -553,7 +553,7 @@ async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
 
   // Ordini tipo_ordine='cliente' (autoconsumo escluso: autofatture non entrano nel matching Danea clienti)
   const { data: ordini, error: errOrd } = await sb.from('ordini')
-    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore,destinazione,sede_scarico_id,sede_scarico_nome')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore,destinazione,sede_scarico_id,sede_scarico_nome,fattura_id,fattura_riga_id')
     .eq('tipo_ordine', 'cliente')
     .neq('stato', 'annullato')
     .gte('data', rangeMin)
@@ -563,6 +563,23 @@ async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
 
   _ordiniPeriodo = ordini || [];
   if (logEl) _logAppend(logEl, 'ok', `✓ ${_ordiniPeriodo.length} ordini clienti caricati`);
+
+  // ─── In modalità revisione DB: escludo dai candidati gli ordini GIÀ LINKATI ───
+  // a fatture che NON sono nel batch corrente (_parsedData.fatture). Così il matcher
+  // non ricolloca lo stesso ordine "AP Petroli 5000L 25/02" a 2 righe diverse:
+  // l'ordine già attaccato a una fattura non torna disponibile per altre.
+  // Eccezione: se la fattura puntata è dentro al batch corrente, lascio l'ordine
+  // visibile (così sganci/rilinka all'interno della revisione).
+  if (_modoRevisioneDb && _parsedData && _parsedData.fatture) {
+    const fattureBatch = new Set(_parsedData.fatture.map(f => f._db_id).filter(Boolean));
+    const prima = _ordiniPeriodo.length;
+    _ordiniPeriodo = _ordiniPeriodo.filter(o => {
+      if (!o.fattura_id) return true;                  // non linkato: sempre disponibile
+      return fattureBatch.has(o.fattura_id);            // linkato ma in batch: ok
+      // altrimenti: linkato a fattura esterna → escluso
+    });
+    if (logEl) _logAppend(logEl, 'info', `⚙ Modalità revisione: filtrati ${prima - _ordiniPeriodo.length} ordini già linkati ad altre fatture (${_ordiniPeriodo.length} disponibili)`);
+  }
 
   // Carica TUTTI i clienti (servono per lookup PIVA da cliente_id)
   // In produzione ~200-300 clienti, una SELECT one-shot è più efficiente di join ripetuto
