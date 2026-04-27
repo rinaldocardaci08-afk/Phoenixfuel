@@ -199,7 +199,7 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     const annoMin = `${annoInt}-01-01`;
     const annoMax = `${annoInt}-12-31`;
 
-    const [ordiniRes, ordiniAnnoRes, fattureAnnoRes] = await Promise.all([
+    const [ordiniRes, ordiniAnnoRes, fattureAnnoRes, righeAnnoRes] = await Promise.all([
       // Ordini clienti consegnati nel periodo selezionato.
       // fattura_id popolato = già fatturato. IS NULL = da fatturare.
       sb.from('ordini')
@@ -217,11 +217,26 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
       sb.from('fatture_emesse')
         .select('id, data')
         .gte('data', annoMin).lte('data', annoMax),
+      // Tutte le righe fattura "vere" (con prodotto+quantità) dell'ANNO
+      // Il riepilogo deve confrontare ordini ↔ righe fattura, non documenti fattura,
+      // perché 1 fattura Danea può aggregare più consegne (più ordini PhoenixFuel).
+      sb.from('fatture_righe')
+        .select('id, fattura_id, prodotto_normalizzato, quantita, ignora_match')
+        .not('prodotto_normalizzato', 'is', null)
+        .gt('quantita', 0),
     ]);
 
     const ordini = ordiniRes.data || [];
     const ordiniAnno = ordiniAnnoRes.data || [];
     const fattureAnno = fattureAnnoRes.data || [];
+    const righeAnnoTutte = righeAnnoRes.data || [];
+
+    // Indicizzo righe per fattura_id e mese (la riga eredita la data dalla fattura)
+    const fattDataById = new Map();
+    fattureAnno.forEach(f => fattDataById.set(f.id, f.data));
+    const righeAnno = righeAnnoTutte
+      .filter(r => fattDataById.has(r.fattura_id) && !r.ignora_match)
+      .map(r => ({ ...r, data: fattDataById.get(r.fattura_id) }));
 
     // Ordini senza fattura: istantaneo, lettura diretta dal campo fattura_id
     const ordiniSenzaFatt = ordini.filter(o => !o.fattura_id);
@@ -243,7 +258,8 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
       const mPad = String(m).padStart(2,'0');
       const prefix = `${annoInt}-${mPad}`;
       const nOrd = ordiniAnno.filter(o => o.data && o.data.startsWith(prefix)).length;
-      const nFatt = fattureAnno.filter(f => f.data && f.data.startsWith(prefix)).length;
+      // Conto le RIGHE fattura del mese (non i documenti) — 1 fattura Danea può aggregare più consegne
+      const nFatt = righeAnno.filter(r => r.data && r.data.startsWith(prefix)).length;
       // Skip mesi completamente vuoti (futuri)
       if (nOrd === 0 && nFatt === 0) continue;
       riepMesi.push({ mese: m, label: meseLabel[m-1], ordini: nOrd, fatture: nFatt });
