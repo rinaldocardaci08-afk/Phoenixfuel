@@ -51,6 +51,7 @@ function switchBancheTab(btn) {
 
   // Carica contenuto specifico al primo accesso
   if (tabId === 'banche-panel-finanziamenti') renderBancheFinanziamenti();
+  if (tabId === 'banche-panel-affidamenti') renderBancheAffidamenti();
 }
 
 // ═══ TAB ISTITUTI ═════════════════════════════════════════════════════════
@@ -777,4 +778,279 @@ async function eliminaFinanziamento(id) {
   const finRes = await sb.from('banche_finanziamenti').select('*');
   _bancheFinanziamenti = finRes.data || [];
   renderBancheFinanziamenti();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB AFFIDAMENTI
+// 7 fidi attivi (cassa, anticipo fatture, ecc.), KPI utilizzo, barre colorate.
+// ═══════════════════════════════════════════════════════════════════════════
+function renderBancheAffidamenti() {
+  const cont = document.getElementById('banche-panel-affidamenti');
+  if (!cont) return;
+
+  const attivi = _bancheAffidamenti.filter(a => a.stato === 'attivo');
+
+  // ─── KPI ───
+  const totAccordato = attivi.reduce((s, a) => s + Number(a.importo_accordato || 0), 0);
+  const totUtilizzato = attivi.reduce((s, a) => s + Number(a.importo_utilizzato || 0), 0);
+  const totResiduo = totAccordato - totUtilizzato;
+  const oggi = new Date();
+  const in30gg = new Date(oggi.getTime() + 30 * 86400000).toISOString().split('T')[0];
+  const oggiStr = oggi.toISOString().split('T')[0];
+  const nRevVicine = attivi.filter(a => a.data_scadenza && a.data_scadenza >= oggiStr && a.data_scadenza <= in30gg).length;
+
+  let html = '';
+
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px">';
+  html += '<div class="kpi"><div class="kpi-label">Totale accordato</div><div class="kpi-value" style="color:#26215C">' + fmtE(totAccordato) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Totale utilizzato</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(totUtilizzato) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Disponibilità residua</div><div class="kpi-value" style="color:#27500A">' + fmtE(totResiduo) + '</div></div>';
+  html += '<div class="kpi" style="' + (nRevVicine > 0 ? 'border:1px solid #D85A30' : '') + '"><div class="kpi-label">Revisioni entro 30gg</div><div class="kpi-value" style="color:' + (nRevVicine > 0 ? '#D85A30' : 'var(--text)') + '">' + nRevVicine + '</div></div>';
+  html += '</div>';
+
+  // ─── Header con bottone nuovo ───
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
+  html += '<div style="font-size:15px;font-weight:600;color:var(--text)">Affidamenti attivi</div>';
+  html += '<div style="display:flex;gap:8px">';
+  if (_isAdminBanche()) {
+    html += '<button class="btn-primary" onclick="apriModalAffidamento()" style="font-size:12px;padding:7px 14px">+ Nuovo affidamento</button>';
+  }
+  html += '</div>';
+  html += '</div>';
+
+  // ─── Tabella ───
+  if (!attivi.length) {
+    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun affidamento attivo</div>';
+  } else {
+    // Sort: per banca, poi per tipo
+    const sortati = attivi.slice().sort((a, b) => {
+      const nomeA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
+      const nomeB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
+      if (nomeA !== nomeB) return nomeA.localeCompare(nomeB);
+      return (a.tipo || '').localeCompare(b.tipo || '');
+    });
+
+    html += '<div style="overflow-x:auto;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
+    ['Banca','Tipo','Accordato','Utilizzato','Utilizzo %','Tasso','CDF','Scadenza',''].forEach(h => {
+      html += '<th style="text-align:left;padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">' + h + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    sortati.forEach(a => {
+      const ist = _bancheIstituti.find(i => i.id === a.istituto_id) || {};
+      const accordato = Number(a.importo_accordato || 0);
+      const utilizzato = Number(a.importo_utilizzato || 0);
+      const pct = accordato > 0 ? (utilizzato / accordato * 100) : 0;
+      const utilizzoColore = pct < 70 ? '#639922' : (pct < 85 ? '#D4A017' : '#A32D2D');
+      const altoUtilizzo = pct > 90;
+      const revisioneVicina = a.data_scadenza && a.data_scadenza >= oggiStr && a.data_scadenza <= in30gg;
+
+      html += '<tr style="border-bottom:0.5px solid var(--border);' + (altoUtilizzo ? 'background:#FCEBEB' : '') + '">';
+      html += '<td style="padding:8px;font-weight:500">' + esc(ist.nome || '—') + '</td>';
+      html += '<td style="padding:8px">' + _badgeTipoFido(a.tipo) + '</td>';
+      html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right">' + fmtE(accordato) + '</td>';
+      // Utilizzato editabile inline
+      html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right;cursor:' + (_isAdminBanche() ? 'pointer' : 'default') + '" ' + (_isAdminBanche() ? 'onclick="modificaUtilizzato(\'' + a.id + '\')" title="Click per modificare"' : '') + '>';
+      html += fmtE(utilizzato);
+      if (a.utilizzato_aggiornato) html += '<div style="font-size:9px;color:var(--text-hint);font-family:inherit;margin-top:2px">' + fmtD(a.utilizzato_aggiornato) + '</div>';
+      html += '</td>';
+      // Barra utilizzo
+      html += '<td style="padding:8px;min-width:140px">';
+      html += '<div style="display:flex;align-items:center;gap:8px">';
+      html += '<div style="flex:1;background:var(--bg);border-radius:10px;height:8px;overflow:hidden">';
+      html += '<div style="width:' + Math.min(pct, 100) + '%;height:100%;background:' + utilizzoColore + ';transition:width 0.3s"></div>';
+      html += '</div>';
+      html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:11px;color:' + utilizzoColore + ';min-width:42px;text-align:right">' + pct.toFixed(1) + '%</div>';
+      html += '</div>';
+      html += '</td>';
+      html += '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + (a.tasso ? Number(a.tasso).toFixed(2) + '%' : '—') + '</td>';
+      html += '<td style="padding:8px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">' + (a.tasso_cdf ? Number(a.tasso_cdf).toFixed(2) + '%' : '—') + '</td>';
+      html += '<td style="padding:8px;font-size:11px">' + (a.data_scadenza ? fmtD(a.data_scadenza) + (revisioneVicina ? ' <span style="font-size:9px;color:#D85A30;background:#FAEEDA;padding:1px 5px;border-radius:8px;margin-left:3px;font-weight:600">⚠ vicina</span>' : '') : '—') + '</td>';
+      html += '<td style="padding:8px;text-align:right;white-space:nowrap">';
+      if (_isAdminBanche()) {
+        html += '<button onclick="apriModalAffidamento(\'' + a.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
+      }
+      html += '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    html += '</div>';
+    html += '<div style="font-size:11px;color:var(--text-hint);margin-top:8px">Click sulla colonna "Utilizzato" per aggiornare l\'importo. CDF = Commissione Disponibilità Fondi sulla quota non utilizzata.</div>';
+  }
+
+  cont.innerHTML = html;
+}
+
+function _badgeTipoFido(t) {
+  const map = {
+    cassa: { label: 'Cassa', bg: '#EEEDFE', col: '#26215C' },
+    anticipo_fatture: { label: 'Antic. fatture', bg: '#EAF3DE', col: '#27500A' },
+    sbf: { label: 'SBF', bg: '#E6F1FB', col: '#0C447C' },
+    castelletto: { label: 'Castelletto', bg: '#FAEEDA', col: '#633806' },
+    autoliquidante: { label: 'Autoliquid.', bg: '#FAEEDA', col: '#633806' },
+    fideiussione: { label: 'Fideiuss.', bg: '#FCEBEB', col: '#791F1F' }
+  };
+  const m = map[t] || { label: t || '—', bg: '#f0f0f0', col: '#666' };
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:' + m.bg + ';color:' + m.col + ';font-size:10px;font-weight:600">' + m.label + '</span>';
+}
+
+// ═══ EDIT INLINE UTILIZZATO ═════════════════════════════════════════════════
+async function modificaUtilizzato(id) {
+  const a = _bancheAffidamenti.find(x => x.id === id);
+  if (!a) return;
+  const nuovo = prompt('Importo utilizzato (€):\n\nFido: ' + (_bancheIstituti.find(i => i.id === a.istituto_id)?.nome || '') + ' — ' + a.tipo + '\nAccordato: ' + fmtE(a.importo_accordato), Number(a.importo_utilizzato || 0));
+  if (nuovo === null) return;
+  const v = Number(nuovo);
+  if (isNaN(v) || v < 0) { toast('⚠ Importo non valido'); return; }
+  if (v > Number(a.importo_accordato)) {
+    if (!confirm('⚠ L\'utilizzato (' + fmtE(v) + ') è MAGGIORE dell\'accordato (' + fmtE(a.importo_accordato) + ').\n\nProcedere comunque?')) return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  const { error } = await sb.from('banche_affidamenti').update({
+    importo_utilizzato: v,
+    utilizzato_aggiornato: today,
+    updated_at: new Date().toISOString()
+  }).eq('id', id);
+  if (error) { toast('❌ ' + error.message); return; }
+  toast('✓ Utilizzato aggiornato');
+
+  // Refresh dati e re-render
+  const r = await sb.from('banche_affidamenti').select('*');
+  _bancheAffidamenti = r.data || [];
+  renderBancheAffidamenti();
+}
+
+// ═══ MODALE NUOVO/MODIFICA AFFIDAMENTO ═════════════════════════════════════
+function apriModalAffidamento(id) {
+  const a = id ? _bancheAffidamenti.find(x => x.id === id) : null;
+  const titolo = a ? '✏️ Modifica affidamento' : '+ Nuovo affidamento';
+
+  let html = '<div style="max-width:620px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:14px">' + titolo + '</div>';
+
+  html += '<div style="display:grid;gap:10px">';
+
+  // Banca + tipo
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Banca *</label>';
+  html += '<select id="mod-aff-istituto" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  _bancheIstituti.forEach(i => {
+    html += '<option value="' + i.id + '" ' + (a?.istituto_id === i.id ? 'selected' : '') + '>' + esc(i.nome) + '</option>';
+  });
+  html += '</select></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Tipo fido *</label>';
+  html += '<select id="mod-aff-tipo" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  ['cassa','anticipo_fatture','sbf','castelletto','autoliquidante','fideiussione'].forEach(t => {
+    const lab = { cassa:'Cassa', anticipo_fatture:'Anticipo fatture', sbf:'SBF', castelletto:'Castelletto', autoliquidante:'Autoliquidante', fideiussione:'Fideiussione' }[t];
+    html += '<option value="' + t + '" ' + ((a?.tipo || 'cassa') === t ? 'selected' : '') + '>' + lab + '</option>';
+  });
+  html += '</select></div>';
+  html += '</div>';
+
+  // Conto corrente collegato
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Conto corrente collegato</label>';
+  html += '<select id="mod-aff-conto" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<option value="" ' + (!a?.conto_id ? 'selected' : '') + '>— Nessun conto specifico —</option>';
+  _bancheConti.forEach(c => {
+    const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '';
+    html += '<option value="' + c.id + '" ' + (a?.conto_id === c.id ? 'selected' : '') + '>' + esc(istNome) + ' — ' + esc(c.descrizione) + '</option>';
+  });
+  html += '</select></div>';
+
+  // Importi
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += _campo('Importo accordato (€) *', 'mod-aff-accordato', a?.importo_accordato ?? '', 'number', '0');
+  html += _campo('Importo utilizzato (€)', 'mod-aff-utilizzato', a?.importo_utilizzato ?? 0, 'number', '0');
+  html += '</div>';
+
+  // Tassi
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += _campo('Tasso annuo %', 'mod-aff-tasso', a?.tasso ?? '', 'number', '0.00');
+  html += _campo('CDF (% disponibilità non utiliz.)', 'mod-aff-cdf', a?.tasso_cdf ?? '', 'number', '0.00');
+  html += '</div>';
+
+  // Date
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += _campo('Data delibera', 'mod-aff-delibera', a?.data_delibera || '', 'date');
+  html += _campo('Data scadenza/revisione', 'mod-aff-scadenza', a?.data_scadenza || '', 'date');
+  html += '</div>';
+
+  // Stato
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
+  html += '<select id="mod-aff-stato" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  ['attivo','chiuso','rinnovato'].forEach(s => {
+    html += '<option value="' + s + '" ' + ((a?.stato || 'attivo') === s ? 'selected' : '') + '>' + s + '</option>';
+  });
+  html += '</select></div>';
+
+  html += _campo('Note', 'mod-aff-note', a?.note || '', 'textarea');
+  html += '</div>';
+
+  // Pulsanti azione
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  if (a && id) {
+    html += '<button onclick="eliminaAffidamento(\'' + id + '\')" style="background:#A32D2D;color:white;border:0;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-right:auto">🗑 Elimina</button>';
+  }
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="salvaAffidamento(' + (id ? "'"+id+"'" : 'null') + ')" class="btn-primary" style="font-size:12px;padding:8px 14px">💾 Salva</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function salvaAffidamento(id) {
+  const accordato = Number(document.getElementById('mod-aff-accordato').value);
+  if (!accordato || accordato <= 0) { toast('⚠ Importo accordato obbligatorio (>0)'); return; }
+
+  const utilizzato = Number(document.getElementById('mod-aff-utilizzato').value) || 0;
+  const today = new Date().toISOString().split('T')[0];
+
+  const payload = {
+    istituto_id: document.getElementById('mod-aff-istituto').value,
+    conto_id: document.getElementById('mod-aff-conto').value || null,
+    tipo: document.getElementById('mod-aff-tipo').value,
+    importo_accordato: accordato,
+    importo_utilizzato: utilizzato,
+    utilizzato_aggiornato: today,
+    tasso: Number(document.getElementById('mod-aff-tasso').value) || null,
+    tasso_cdf: Number(document.getElementById('mod-aff-cdf').value) || null,
+    data_delibera: document.getElementById('mod-aff-delibera').value || null,
+    data_scadenza: document.getElementById('mod-aff-scadenza').value || null,
+    stato: document.getElementById('mod-aff-stato').value,
+    note: document.getElementById('mod-aff-note').value.trim() || null,
+    updated_at: new Date().toISOString()
+  };
+
+  let res;
+  if (id) {
+    res = await sb.from('banche_affidamenti').update(payload).eq('id', id);
+  } else {
+    res = await sb.from('banche_affidamenti').insert(payload);
+  }
+
+  if (res.error) { toast('❌ ' + res.error.message); return; }
+  toast('✓ ' + (id ? 'Affidamento aggiornato' : 'Affidamento creato'));
+  chiudiModal();
+
+  // Refresh
+  const r = await sb.from('banche_affidamenti').select('*');
+  _bancheAffidamenti = r.data || [];
+  renderBancheAffidamenti();
+}
+
+async function eliminaAffidamento(id) {
+  if (!confirm('Eliminare questo affidamento?')) return;
+  const { error } = await sb.from('banche_affidamenti').delete().eq('id', id);
+  if (error) { toast('❌ ' + error.message); return; }
+  toast('✓ Affidamento eliminato');
+  chiudiModal();
+  const r = await sb.from('banche_affidamenti').select('*');
+  _bancheAffidamenti = r.data || [];
+  renderBancheAffidamenti();
 }
