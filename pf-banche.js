@@ -580,7 +580,6 @@ async function apriPianoFinanziamento(id) {
 
     rate.forEach(r => {
       const pagata = r.data_scadenza <= oggi;
-      const isProssima = !pagata && rate.find(x => !pagata && x.numero === r.numero);
       const styleRiga = pagata ? 'background:#FAFAF8;color:var(--text-hint)' : '';
       html += '<tr style="border-bottom:0.5px solid var(--border);' + styleRiga + '">';
       html += '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + r.numero + '</td>';
