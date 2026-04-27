@@ -555,6 +555,83 @@ function _badgeStato(s) {
   return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:' + m.bg + ';color:' + m.col + ';font-size:10px;font-weight:600">' + m.label + '</span>';
 }
 
+// ═══ GENERATORE PIANO DI AMMORTAMENTO FRANCESE ═══════════════════════════
+// Calcola le rate con formula francese (rata costante, capitale crescente).
+// Valido per tipo_tasso 'fisso' (e approssimazione 'variabile' al tasso corrente).
+// Per 'misto' / 'zero_coupon' è un fallback ragionevole ma non perfetto.
+function _generaRateFrancese(params) {
+  const { capitale, tasso, durata_rate, frequenza, data_prima_rata } = params;
+  const periodiPerAnno = { mensile: 12, trimestrale: 4, semestrale: 2, annuale: 1 }[frequenza] || 12;
+  const mesiPerPeriodo = { mensile: 1, trimestrale: 3, semestrale: 6, annuale: 12 }[frequenza] || 1;
+  const i = (Number(tasso || 0) / 100) / periodiPerAnno;
+  const n = Number(durata_rate);
+  const C = Number(capitale);
+
+  if (!C || !n || !data_prima_rata) return [];
+
+  // Rata costante (formula francese; se i=0 → divisione semplice)
+  const rata = i === 0 ? (C / n) : (C * i / (1 - Math.pow(1 + i, -n)));
+
+  const rate = [];
+  let residuo = C;
+  const dInizio = new Date(data_prima_rata + 'T12:00:00');
+
+  for (let j = 1; j <= n; j++) {
+    const interesse = residuo * i;
+    let capitaleQ = rata - interesse;
+    // Ultima rata: chiude esattamente il residuo (per evitare residui di centesimi)
+    if (j === n) capitaleQ = residuo;
+    residuo = Math.max(0, residuo - capitaleQ);
+
+    const dScad = new Date(dInizio);
+    dScad.setMonth(dScad.getMonth() + (j - 1) * mesiPerPeriodo);
+
+    rate.push({
+      numero: j,
+      data_scadenza: dScad.toISOString().split('T')[0],
+      rata: Math.round((capitaleQ + interesse) * 100) / 100,
+      quota_capitale: Math.round(capitaleQ * 100) / 100,
+      quota_interessi: Math.round(interesse * 100) / 100,
+      residuo_capitale: Math.round(residuo * 100) / 100
+    });
+  }
+
+  return rate;
+}
+
+// Cancella il piano esistente e rigenera dal payload corrente
+async function _rigeneraPianoFinanziamento(finId, payload) {
+  // Cancella le rate esistenti
+  const del = await sb.from('banche_finanziamenti_rate').delete().eq('finanziamento_id', finId);
+  if (del.error) {
+    toast('❌ Errore cancellazione piano: ' + del.error.message);
+    return false;
+  }
+
+  // Genera nuove rate
+  const rate = _generaRateFrancese({
+    capitale: payload.capitale,
+    tasso: payload.tasso || 0,
+    durata_rate: payload.durata_rate,
+    frequenza: payload.frequenza,
+    data_prima_rata: payload.data_prima_rata
+  });
+
+  if (!rate.length) {
+    toast('⚠ Impossibile generare piano: parametri insufficienti');
+    return false;
+  }
+
+  // Inserisci con finanziamento_id
+  const insertData = rate.map(r => ({ ...r, finanziamento_id: finId }));
+  const ins = await sb.from('banche_finanziamenti_rate').insert(insertData);
+  if (ins.error) {
+    toast('❌ Errore inserimento piano: ' + ins.error.message);
+    return false;
+  }
+  return true;
+}
+
 // ═══ MODALE PIANO DI AMMORTAMENTO ═════════════════════════════════════════
 async function apriPianoFinanziamento(id) {
   const f = _bancheFinanziamenti.find(x => x.id === id);
@@ -645,6 +722,38 @@ async function apriPianoFinanziamento(id) {
   apriModal(html);
 }
 
+// ═══ HELPER SYNC DATA FINE ⇄ DURATA (modale finanziamento) ═══════════════
+// Quando cambia durata, frequenza o data prima rata → ricalcola data fine
+function _syncDataFineDaDurata() {
+  const dpr = document.getElementById('mod-fin-prima-rata');
+  const durEl = document.getElementById('mod-fin-durata');
+  const freqEl = document.getElementById('mod-fin-frequenza');
+  const dataFineEl = document.getElementById('mod-fin-data-fine');
+  if (!dpr || !durEl || !freqEl || !dataFineEl) return;
+  const durata = Number(durEl.value);
+  if (!dpr.value || !durata) { dataFineEl.value = ''; return; }
+  const k = { mensile: 1, trimestrale: 3, semestrale: 6, annuale: 12 }[freqEl.value] || 1;
+  const d = new Date(dpr.value + 'T12:00:00');
+  d.setMonth(d.getMonth() + (durata - 1) * k);
+  dataFineEl.value = d.toISOString().split('T')[0];
+}
+
+// Quando l'utente cambia la data fine → ricalcola durata
+function _syncDurataDaDataFine() {
+  const dpr = document.getElementById('mod-fin-prima-rata');
+  const durEl = document.getElementById('mod-fin-durata');
+  const freqEl = document.getElementById('mod-fin-frequenza');
+  const dataFineEl = document.getElementById('mod-fin-data-fine');
+  if (!dpr || !durEl || !freqEl || !dataFineEl) return;
+  if (!dpr.value || !dataFineEl.value) return;
+  const k = { mensile: 1, trimestrale: 3, semestrale: 6, annuale: 12 }[freqEl.value] || 1;
+  const dStart = new Date(dpr.value + 'T12:00:00');
+  const dEnd = new Date(dataFineEl.value + 'T12:00:00');
+  const mesi = (dEnd.getFullYear() - dStart.getFullYear()) * 12 + (dEnd.getMonth() - dStart.getMonth());
+  const durata = Math.round(mesi / k) + 1;
+  if (durata > 0) durEl.value = durata;
+}
+
 // ═══ MODALE NUOVO/MODIFICA FINANZIAMENTO ══════════════════════════════════
 function apriModalFinanziamento(id) {
   const f = id ? _bancheFinanziamenti.find(x => x.id === id) : null;
@@ -658,7 +767,7 @@ function apriModalFinanziamento(id) {
   // Banca + numero contratto
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Banca *</label>';
-  html += '<select id="mod-fin-istituto" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-istituto" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   _bancheIstituti.forEach(i => {
     html += '<option value="' + i.id + '" ' + (f?.istituto_id === i.id ? 'selected' : '') + '>' + esc(i.nome) + '</option>';
   });
@@ -672,14 +781,14 @@ function apriModalFinanziamento(id) {
   // Tipologia + categoria
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Tipologia *</label>';
-  html += '<select id="mod-fin-tipologia" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-tipologia" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['mutuo_ipotecario','prestito','finanziamento_agevolato','leasing'].forEach(t => {
     const lab = { mutuo_ipotecario:'Mutuo ipotecario', prestito:'Prestito', finanziamento_agevolato:'Agevolato', leasing:'Leasing' }[t];
     html += '<option value="' + t + '" ' + ((f?.tipologia || 'prestito') === t ? 'selected' : '') + '>' + lab + '</option>';
   });
   html += '</select></div>';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Categoria</label>';
-  html += '<select id="mod-fin-categoria" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-categoria" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   html += '<option value="" ' + (!f?.categoria ? 'selected' : '') + '>—</option>';
   html += '<option value="finalizzato" ' + (f?.categoria === 'finalizzato' ? 'selected' : '') + '>Finalizzato</option>';
   html += '<option value="liquidita" ' + (f?.categoria === 'liquidita' ? 'selected' : '') + '>Liquidità</option>';
@@ -691,28 +800,34 @@ function apriModalFinanziamento(id) {
   html += _campo('Capitale (€) *', 'mod-fin-capitale', f?.capitale ?? '', 'number', '0');
   html += _campo('Tasso TAN %', 'mod-fin-tasso', f?.tasso ?? '', 'number', '0.00');
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Tipo tasso</label>';
-  html += '<select id="mod-fin-tipo-tasso" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-tipo-tasso" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['fisso','variabile','misto','zero_coupon'].forEach(t => {
     html += '<option value="' + t + '" ' + ((f?.tipo_tasso || 'fisso') === t ? 'selected' : '') + '>' + t + '</option>';
   });
   html += '</select></div>';
   html += '</div>';
 
-  // Durata + frequenza
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
-  html += _campo('Durata (n. rate) *', 'mod-fin-durata', f?.durata_rate ?? '', 'number', '120');
+  // Durata + frequenza + data fine (sincronizzati)
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Durata (n. rate) *</label>';
+  html += '<input type="number" id="mod-fin-durata" value="' + (f?.durata_rate ?? '') + '" placeholder="120" oninput="_syncDataFineDaDurata()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px"></div>';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Frequenza *</label>';
-  html += '<select id="mod-fin-frequenza" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-frequenza" onchange="_syncDataFineDaDurata()" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['mensile','trimestrale','semestrale','annuale'].forEach(t => {
     html += '<option value="' + t + '" ' + ((f?.frequenza || 'mensile') === t ? 'selected' : '') + '>' + t + '</option>';
   });
   html += '</select></div>';
+  // Data fine: calcolata da durata, ma editabile (ricalcola durata)
+  const dataFineCalc = f && f.data_prima_rata && f.durata_rate ? _calcDataFine(f) : '';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data fine (auto)</label>';
+  html += '<input type="date" id="mod-fin-data-fine" value="' + (dataFineCalc || '') + '" oninput="_syncDurataDaDataFine()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px"></div>';
   html += '</div>';
 
   // Date
   html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
   html += _campo('Data erogazione *', 'mod-fin-erog', f?.data_erogazione || '', 'date');
-  html += _campo('Data prima rata *', 'mod-fin-prima-rata', f?.data_prima_rata || '', 'date');
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data prima rata *</label>';
+  html += '<input id="mod-fin-prima-rata" type="date" value="' + esc(String(f?.data_prima_rata || '')) + '" oninput="_syncDataFineDaDurata()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
   html += _campo('Rata calcolata (€)', 'mod-fin-rata', f?.rata ?? '', 'number', '0.00');
   html += '</div>';
 
@@ -722,7 +837,7 @@ function apriModalFinanziamento(id) {
   // Stato + data estinzione
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
-  html += '<select id="mod-fin-stato" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-stato" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['attivo','estinto','rinegoziato'].forEach(s => {
     html += '<option value="' + s + '" ' + ((f?.stato || 'attivo') === s ? 'selected' : '') + '>' + s + '</option>';
   });
@@ -783,20 +898,51 @@ async function salvaFinanziamento(id) {
     updated_at: new Date().toISOString()
   };
 
+  // Snapshot del finanziamento precedente per rilevare cambi che richiedono rigenerazione piano
+  const oldF = id ? _bancheFinanziamenti.find(x => x.id === id) : null;
+
   let res;
+  let finId = id;
   if (id) {
     res = await sb.from('banche_finanziamenti').update(payload).eq('id', id);
   } else {
-    res = await sb.from('banche_finanziamenti').insert(payload);
+    const ins = await sb.from('banche_finanziamenti').insert(payload).select().single();
+    res = { error: ins.error };
+    if (ins.data) finId = ins.data.id;
   }
 
   if (res.error) { toast('❌ ' + res.error.message); return; }
-  toast('✓ ' + (id ? 'Finanziamento aggiornato' : 'Finanziamento creato'));
+
+  // ─── Rigenerazione piano di ammortamento ──────────────────────────────
+  // Trigger: nuovo finanziamento, oppure cambi a parametri di calcolo
+  const keyFields = ['capitale', 'tasso', 'durata_rate', 'frequenza', 'data_prima_rata', 'tipo_tasso'];
+  let needsRegen = !id; // nuovo finanziamento → sempre genera
+  if (id && oldF) {
+    needsRegen = keyFields.some(k => String(oldF[k] ?? '') !== String(payload[k] ?? ''));
+  }
+
+  if (needsRegen && finId) {
+    const proceed = id
+      ? confirm('I parametri di calcolo sono cambiati.\n\nRigenero il piano di ammortamento?\n• ' + payload.durata_rate + ' rate ' + payload.frequenza + '\n• Capitale ' + payload.capitale + ' €\n• Tasso ' + (payload.tasso || 0) + '%\n\nLe rate verranno ricalcolate sui nuovi parametri.')
+      : true;
+    if (proceed) {
+      const ok = await _rigeneraPianoFinanziamento(finId, payload);
+      if (ok) {
+        toast('✓ ' + (id ? 'Aggiornato' : 'Creato') + ' + piano rigenerato (' + payload.durata_rate + ' rate)');
+      }
+    } else {
+      toast('✓ ' + (id ? 'Aggiornato' : 'Creato') + ' (piano NON rigenerato)');
+    }
+  } else {
+    toast('✓ ' + (id ? 'Finanziamento aggiornato' : 'Finanziamento creato'));
+  }
+
   chiudiModal();
   // Refresh dati
   const finRes = await sb.from('banche_finanziamenti').select('*');
   _bancheFinanziamenti = finRes.data || [];
-  delete _bancheRate[id]; // invalida cache rate
+  if (finId) delete _bancheRate[finId]; // invalida cache rate per modale piano
+  _bancheRateCache = null; // invalida cache globale (ricaricata alla prossima render)
   renderBancheFinanziamenti();
 }
 
