@@ -136,7 +136,7 @@ function renderBancheIstituti() {
           html += '</div>';
           html += '<div style="text-align:right;margin-right:10px">';
           html += '<div style="font-size:13px;font-weight:600;font-family:var(--font-mono);color:' + (Number(cc.saldo_attuale || 0) >= 0 ? '#639922' : '#A32D2D') + '">' + fmtE(Number(cc.saldo_attuale || 0)) + '</div>';
-          html += '<div style="font-size:10px;color:var(--text-hint)">' + (cc.saldo_aggiornato ? 'agg. ' + _fmtData(cc.saldo_aggiornato) : 'mai aggiornato') + '</div>';
+          html += '<div style="font-size:10px;color:var(--text-hint)">' + (cc.saldo_aggiornato ? 'agg. ' + fmtD(cc.saldo_aggiornato) : 'mai aggiornato') + '</div>';
           html += '</div>';
           if (_isAdminBanche()) {
             html += '<button onclick="apriModalConto(\'' + cc.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
@@ -418,12 +418,12 @@ async function renderBancheFinanziamenti() {
       html += '<td style="padding:8px">' + esc(f.descrizione || '—') + (f.numero_contratto ? '<div style="font-size:10px;color:var(--text-hint);font-family:var(--font-mono)">' + esc(f.numero_contratto) + '</div>' : '') + '</td>';
       html += '<td style="padding:8px">' + _badgeTipologia(f.tipologia) + '</td>';
       html += '<td style="padding:8px;font-size:11px">' + (f.categoria ? _badgeCategoria(f.categoria) : '<span style="color:var(--text-hint)">—</span>') + '</td>';
-      html += '<td style="padding:8px;font-size:11px">' + _fmtData(f.data_erogazione) + '</td>';
+      html += '<td style="padding:8px;font-size:11px">' + fmtD(f.data_erogazione) + '</td>';
       html += '<td style="padding:8px;font-family:var(--font-mono);font-weight:500;text-align:right">' + fmtE(Number(f.capitale)) + '</td>';
       html += '<td style="padding:8px;font-family:var(--font-mono);font-weight:500;text-align:right;color:' + (residuo > 0 ? '#A32D2D' : '#639922') + '">' + fmtE(residuo) + '</td>';
       html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right">' + rataFmt + '</td>';
       html += '<td style="padding:8px;font-size:11px">' + _badgeFrequenza(f.frequenza) + '</td>';
-      html += '<td style="padding:8px;font-size:11px">' + (dataFine ? _fmtData(dataFine) : '—') + '</td>';
+      html += '<td style="padding:8px;font-size:11px">' + (dataFine ? fmtD(dataFine) : '—') + '</td>';
       html += '<td style="padding:8px">' + _badgeStato(f.stato) + '</td>';
       html += '<td style="padding:8px;text-align:right;white-space:nowrap">';
       html += '<button onclick="apriPianoFinanziamento(\'' + f.id + '\')" title="Vedi piano di ammortamento" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">📋</button>';
@@ -584,7 +584,7 @@ async function apriPianoFinanziamento(id) {
       const styleRiga = pagata ? 'background:#FAFAF8;color:var(--text-hint)' : '';
       html += '<tr style="border-bottom:0.5px solid var(--border);' + styleRiga + '">';
       html += '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + r.numero + '</td>';
-      html += '<td style="padding:6px 8px;text-align:right">' + (pagata ? '✓ ' : '') + _fmtData(r.data_scadenza) + '</td>';
+      html += '<td style="padding:6px 8px;text-align:right">' + (pagata ? '✓ ' : '') + fmtD(r.data_scadenza) + '</td>';
       html += '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:500">' + fmtE(Number(r.rata)) + '</td>';
       html += '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#26215C">' + fmtE(Number(r.quota_capitale)) + '</td>';
       html += '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#633806">' + fmtE(Number(r.quota_interessi)) + '</td>';
