@@ -385,6 +385,11 @@ async function renderBancheFinanziamenti() {
   html += '<div class="kpi"><div class="kpi-label">Rata mensile equivalente</div><div class="kpi-value" style="color:#633806">' + fmtE(rataMensileEquiv) + '</div></div>';
   html += '</div>';
 
+  // ─── Grafici: donut esposizione per banca + barre pagato/residuo ───
+  if (attivi.length > 0) {
+    html += _renderGraficiFinanziamenti(attivi);
+  }
+
   // ─── Header con filtro + bottone nuovo ───
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
   html += '<div style="display:flex;gap:8px;align-items:center">';
@@ -470,6 +475,131 @@ function _aggiornaFiltroFinanziamenti(val) {
 }
 
 // ═══ HELPER FINANZIAMENTI ═════════════════════════════════════════════════
+// Donut esposizione per banca + barre pagato/residuo per ogni finanziamento
+function _renderGraficiFinanziamenti(finAttivi) {
+  if (!finAttivi.length) return '';
+
+  let html = '';
+
+  // ─── 1. DONUT PER BANCA ───
+  const perBanca = {};
+  finAttivi.forEach(f => {
+    const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
+    if (!perBanca[istNome]) perBanca[istNome] = { totale: 0, count: 0 };
+    perBanca[istNome].totale += Number(f.capitale || 0);
+    perBanca[istNome].count++;
+  });
+
+  const totaleAttivo = finAttivi.reduce((s, f) => s + Number(f.capitale || 0), 0);
+  const banche = Object.keys(perBanca).sort((a, b) => perBanca[b].totale - perBanca[a].totale);
+  const palette = ['#185FA5', '#1D9E75', '#BA7517', '#993556', '#534AB7', '#A32D2D', '#0F6E56'];
+  const coloriBanca = {};
+  banche.forEach((b, i) => coloriBanca[b] = palette[i % palette.length]);
+
+  // SVG donut
+  const r = 60;
+  const C = 2 * Math.PI * r;
+  let offset = 0;
+  const totaleCompact = totaleAttivo >= 1000000
+    ? '€ ' + (totaleAttivo / 1000000).toFixed(1).replace('.', ',') + 'M'
+    : '€ ' + Math.round(totaleAttivo / 1000) + 'k';
+
+  let svg = '<svg viewBox="0 0 200 200" width="180" height="180" style="display:block;margin:0 auto">';
+  svg += '<circle cx="100" cy="100" r="' + r + '" fill="none" stroke="var(--bg)" stroke-width="32"/>';
+  banche.forEach(b => {
+    const pct = perBanca[b].totale / totaleAttivo;
+    const len = C * pct;
+    svg += '<circle cx="100" cy="100" r="' + r + '" fill="none" stroke="' + coloriBanca[b] + '" stroke-width="32" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-offset).toFixed(2) + '" transform="rotate(-90 100 100)"/>';
+    offset += len;
+  });
+  svg += '<text x="100" y="93" text-anchor="middle" font-size="10" fill="var(--text-muted)">Capitale attivo</text>';
+  svg += '<text x="100" y="115" text-anchor="middle" font-size="18" font-weight="500" fill="var(--text)">' + totaleCompact + '</text>';
+  svg += '</svg>';
+
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px">';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)">📊 Esposizione per banca</div>';
+  html += '<div style="display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:center">';
+  html += svg;
+  html += '<div>';
+  banche.forEach((b, i) => {
+    const pct = (perBanca[b].totale / totaleAttivo * 100).toFixed(1);
+    const isLast = i === banche.length - 1;
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;' + (isLast ? '' : 'border-bottom:0.5px solid var(--border)') + '">';
+    html += '<div style="display:flex;align-items:center;gap:10px">';
+    html += '<div style="width:12px;height:12px;background:' + coloriBanca[b] + ';border-radius:3px"></div>';
+    html += '<div><div style="font-size:13px;font-weight:500">' + esc(b) + '</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted)">' + perBanca[b].count + ' finanziament' + (perBanca[b].count === 1 ? 'o' : 'i') + '</div></div>';
+    html += '</div>';
+    html += '<div style="text-align:right">';
+    html += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:500">' + fmtE(perBanca[b].totale) + '</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted)">' + pct + '%</div>';
+    html += '</div></div>';
+  });
+  html += '</div></div></div>';
+
+  // ─── 2. BARRE PAGATO/RESIDUO PER FINANZIAMENTO ───
+  // Sort dal più rimborsato al meno
+  const finOrdinati = finAttivi.slice().map(f => {
+    const cap = Number(f.capitale || 0);
+    const residuo = _calcResiduoOggi(f);
+    const pagato = Math.max(0, cap - residuo);
+    const pct = cap > 0 ? (pagato / cap * 100) : 0;
+    return { f, cap, residuo, pagato, pct };
+  }).sort((a, b) => b.pct - a.pct);
+
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
+  html += '<div style="font-size:13px;font-weight:600;color:var(--text)">📊 Capitale rimborsato per finanziamento</div>';
+  html += '<div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted)">';
+  html += '<span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#1D9E75;border-radius:2px"></span>Rimborsato</span>';
+  html += '<span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#F4C0D1;border-radius:2px"></span>Residuo</span>';
+  html += '</div></div>';
+
+  html += '<div style="display:grid;gap:14px">';
+  finOrdinati.forEach(({ f, cap, residuo, pagato, pct }) => {
+    const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
+    const dataFine = _calcDataFine(f);
+    const fineFmt = dataFine
+      ? new Date(dataFine + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })
+      : '—';
+    const pctTroncato = Math.max(0, Math.min(100, pct));
+
+    html += '<div>';
+    html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px">';
+    html += '<span style="font-size:12px;font-weight:500;color:var(--text)">' + esc(f.descrizione) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + fmtE(cap) + '</span>';
+    html += '</div>';
+
+    // Barra
+    html += '<div style="display:flex;height:22px;border-radius:5px;overflow:hidden;background:var(--bg)">';
+    if (pctTroncato >= 8) {
+      html += '<div style="width:' + pctTroncato + '%;background:#1D9E75;display:flex;align-items:center;padding-left:8px;color:#fff;font-size:11px;font-family:var(--font-mono)">' + fmtE(pagato) + ' · ' + pctTroncato.toFixed(0) + '%</div>';
+    } else if (pctTroncato > 0) {
+      html += '<div style="width:' + pctTroncato + '%;background:#1D9E75"></div>';
+    }
+    const pctRes = 100 - pctTroncato;
+    if (pctRes >= 8) {
+      html += '<div style="width:' + pctRes + '%;background:#F4C0D1;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#993556;font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</div>';
+    } else if (pctRes > 0) {
+      html += '<div style="width:' + pctRes + '%;background:#F4C0D1"></div>';
+    }
+    html += '</div>';
+
+    // Footer riga
+    html += '<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--text-hint)">';
+    html += '<span>' + esc(istNome) + ' · ' + (f.durata_rate || '—') + ' rate ' + (f.frequenza || '') + ' · fine ' + fineFmt + '</span>';
+    let extra = '';
+    if (pctTroncato < 8 && pagato > 0) extra += 'Pag. ' + fmtE(pagato) + ' · ' + pctTroncato.toFixed(0) + '%';
+    if (pctRes < 8 && residuo > 0) extra += (extra ? ' · ' : '') + 'Res. ' + fmtE(residuo);
+    html += '<span>' + extra + '</span>';
+    html += '</div>';
+    html += '</div>';
+  });
+  html += '</div></div>';
+
+  return html;
+}
+
 function _calcDataFine(f) {
   // Usa data prima rata + (durata-1) periodi
   if (!f.data_prima_rata || !f.durata_rate) return null;
