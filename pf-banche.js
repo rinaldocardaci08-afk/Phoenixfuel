@@ -52,6 +52,7 @@ function switchBancheTab(btn) {
   // Carica contenuto specifico al primo accesso
   if (tabId === 'banche-panel-finanziamenti') renderBancheFinanziamenti();
   if (tabId === 'banche-panel-affidamenti') renderBancheAffidamenti();
+  if (tabId === 'banche-panel-piano') renderBanchePianoAnnuale();
 }
 
 // ═══ TAB ISTITUTI ═════════════════════════════════════════════════════════
@@ -1053,4 +1054,265 @@ async function eliminaAffidamento(id) {
   const r = await sb.from('banche_affidamenti').select('*');
   _bancheAffidamenti = r.data || [];
   renderBancheAffidamenti();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB PIANO ANNUALE
+// Riproduce vista Excel "Spese Banche": matrice anni × finanziamenti.
+// 2 tabelle: Impegno annuo (rate per anno) + Residuo capitale al 31/12.
+// Calcolato dalle rate caricate (banche_finanziamenti_rate).
+// ═══════════════════════════════════════════════════════════════════════════
+var _bancheRateCache = null; // cache TUTTE le rate per evitare query ripetute
+var _piaAnnoMin = null;
+var _piaAnnoMax = null;
+var _piaSoloAttivi = true;
+
+async function renderBanchePianoAnnuale() {
+  const cont = document.getElementById('banche-panel-piano');
+  if (!cont) return;
+
+  // Carico TUTTE le rate (una sola volta, poi cache)
+  if (!_bancheRateCache) {
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Caricamento piano annuale...</div>';
+    const { data } = await sb.from('banche_finanziamenti_rate')
+      .select('finanziamento_id, numero, data_scadenza, rata, residuo_capitale')
+      .order('data_scadenza');
+    _bancheRateCache = data || [];
+  }
+
+  // Determino range anni: default = (annoCorrente - 2) → ultimo anno di qualsiasi rata
+  if (!_piaAnnoMin || !_piaAnnoMax) {
+    const oggi = new Date();
+    const annoCorrente = oggi.getFullYear();
+    _piaAnnoMin = annoCorrente - 2;
+    let maxRate = annoCorrente;
+    _bancheRateCache.forEach(r => {
+      const y = parseInt(r.data_scadenza.substring(0, 4));
+      if (y > maxRate) maxRate = y;
+    });
+    _piaAnnoMax = maxRate;
+  }
+
+  // Filtra finanziamenti in base a toggle attivi/estinti
+  const finFiltrati = _bancheFinanziamenti.filter(f => {
+    if (_piaSoloAttivi) return f.stato === 'attivo';
+    return true;
+  });
+
+  // Costruisco array anni
+  const anni = [];
+  for (let y = _piaAnnoMin; y <= _piaAnnoMax; y++) anni.push(y);
+
+  // ─── Calcolo matrice IMPEGNO ANNUO: somma rate per (finanziamento, anno) ───
+  const impegno = {}; // {finanziamento_id: {anno: somma_rate}}
+  _bancheRateCache.forEach(r => {
+    const finId = r.finanziamento_id;
+    const y = parseInt(r.data_scadenza.substring(0, 4));
+    if (!impegno[finId]) impegno[finId] = {};
+    if (!impegno[finId][y]) impegno[finId][y] = 0;
+    impegno[finId][y] += Number(r.rata);
+  });
+
+  // ─── Calcolo matrice RESIDUO al 31/12: prendo l'ultima rata dell'anno ───
+  const residui = {}; // {finanziamento_id: {anno: residuo_a_fine_anno}}
+  _bancheRateCache.forEach(r => {
+    const finId = r.finanziamento_id;
+    const y = parseInt(r.data_scadenza.substring(0, 4));
+    if (!residui[finId]) residui[finId] = {};
+    // Tengo il residuo dell'ultima rata di quell'anno (data più recente)
+    if (residui[finId][y] === undefined ||
+        r.data_scadenza > residui[finId][y]._data) {
+      residui[finId][y] = { val: Number(r.residuo_capitale), _data: r.data_scadenza };
+    }
+  });
+
+  // ─── HTML ───
+  let html = '';
+
+  // Header con controlli
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
+  html += '<div style="font-size:15px;font-weight:600">📉 Piano annuale finanziamenti</div>';
+  html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+  html += '<label style="font-size:11px;color:var(--text-muted)">Da</label>';
+  html += '<input type="number" value="' + _piaAnnoMin + '" min="2015" max="2050" onchange="_piaAggiornaAnnoMin(this.value)" style="width:70px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono)">';
+  html += '<label style="font-size:11px;color:var(--text-muted)">a</label>';
+  html += '<input type="number" value="' + _piaAnnoMax + '" min="2015" max="2050" onchange="_piaAggiornaAnnoMax(this.value)" style="width:70px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono)">';
+  html += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:10px">';
+  html += '<input type="checkbox" ' + (_piaSoloAttivi ? 'checked' : '') + ' onchange="_piaToggleAttivi(this.checked)"> Solo attivi';
+  html += '</label>';
+  html += '<button onclick="stampaPianoAnnuale()" class="btn-primary" style="font-size:12px;padding:6px 12px;margin-left:6px">🖨 PDF</button>';
+  html += '</div>';
+  html += '</div>';
+
+  if (!finFiltrati.length) {
+    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun finanziamento da mostrare</div>';
+    cont.innerHTML = html;
+    return;
+  }
+
+  // Sort finanziamenti per data erogazione (più vecchi prima)
+  const finSortati = finFiltrati.slice().sort((a, b) =>
+    (a.data_erogazione || '').localeCompare(b.data_erogazione || '')
+  );
+
+  // ─── TABELLA IMPEGNO ANNUO ───
+  html += _renderMatrice('💰 IMPEGNO ANNUO (uscite di cassa per finanziamenti)', finSortati, anni, impegno, false);
+
+  html += '<div style="height:18px"></div>';
+
+  // ─── TABELLA RESIDUO CAPITALE AL 31/12 ───
+  html += _renderMatrice('📊 RESIDUO CAPITALE AL 31/12 (debito residuo da pagare)', finSortati, anni, residui, true);
+
+  cont.innerHTML = html;
+}
+
+function _renderMatrice(titolo, finanziamenti, anni, dati, isResiduo) {
+  let html = '';
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;overflow:hidden">';
+  html += '<div style="padding:10px 14px;background:var(--bg);border-bottom:0.5px solid var(--border);font-size:13px;font-weight:600;color:var(--text)">' + titolo + '</div>';
+  html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+
+  // Header riga
+  html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
+  html += '<th style="text-align:left;padding:8px 10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;font-size:10px;letter-spacing:0.3px;position:sticky;left:0;background:var(--bg);z-index:1;min-width:160px">Finalità</th>';
+  anni.forEach(y => {
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;font-size:10px;letter-spacing:0.3px;min-width:80px">' + y + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  // Righe per ogni finanziamento
+  finanziamenti.forEach(f => {
+    const datoFin = isResiduo ? (dati[f.id] || {}) : (dati[f.id] || {});
+    html += '<tr style="border-bottom:0.5px solid var(--border);' + (f.stato === 'estinto' ? 'opacity:0.55' : '') + '">';
+    // Cella Finalità (sticky a sinistra)
+    html += '<td style="padding:8px 10px;font-weight:500;position:sticky;left:0;background:var(--bg-card);z-index:1">';
+    html += '<div>' + esc(f.descrizione || '—') + '</div>';
+    if (f.numero_contratto) html += '<div style="font-size:9px;color:var(--text-hint);font-family:var(--font-mono)">' + esc(f.numero_contratto) + '</div>';
+    html += '</td>';
+    // Celle anni
+    anni.forEach(y => {
+      let v;
+      if (isResiduo) {
+        v = (datoFin[y] && datoFin[y].val !== undefined) ? datoFin[y].val : null;
+      } else {
+        v = datoFin[y] !== undefined ? datoFin[y] : null;
+      }
+      const cella = (v === null || v === 0)
+        ? '<span style="color:var(--text-hint)">—</span>'
+        : fmtE(v);
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + cella + '</td>';
+    });
+    html += '</tr>';
+  });
+
+  // ─── Totali per anno ───
+  const totaliPerAnno = {};
+  anni.forEach(y => totaliPerAnno[y] = 0);
+  finanziamenti.forEach(f => {
+    const datoFin = dati[f.id] || {};
+    anni.forEach(y => {
+      let v;
+      if (isResiduo) {
+        v = (datoFin[y] && datoFin[y].val !== undefined) ? datoFin[y].val : 0;
+      } else {
+        v = datoFin[y] !== undefined ? datoFin[y] : 0;
+      }
+      totaliPerAnno[y] += v;
+    });
+  });
+
+  // Riga totale
+  html += '<tr style="background:var(--bg);font-weight:600;border-top:2px solid var(--border)">';
+  html += '<td style="padding:10px;position:sticky;left:0;background:var(--bg);z-index:1;text-transform:uppercase;font-size:10px;letter-spacing:0.3px">TOTALE ' + (isResiduo ? 'RESIDUO' : 'IMPEGNO') + '</td>';
+  anni.forEach(y => {
+    const t = totaliPerAnno[y];
+    html += '<td style="padding:10px;text-align:right;font-family:var(--font-mono);color:' + (isResiduo ? '#A32D2D' : '#26215C') + '">' + (t > 0 ? fmtE(t) : '<span style="color:var(--text-hint)">—</span>') + '</td>';
+  });
+  html += '</tr>';
+
+  // Riga delta % vs anno precedente
+  html += '<tr style="background:var(--bg);font-size:10px;color:var(--text-muted)">';
+  html += '<td style="padding:6px 10px;position:sticky;left:0;background:var(--bg);z-index:1;text-transform:uppercase;letter-spacing:0.3px">Δ vs anno precedente</td>';
+  anni.forEach((y, idx) => {
+    if (idx === 0) {
+      html += '<td style="padding:6px 10px;text-align:right">—</td>';
+    } else {
+      const cur = totaliPerAnno[y];
+      const prev = totaliPerAnno[anni[idx - 1]];
+      if (!prev || prev === 0) {
+        html += '<td style="padding:6px 10px;text-align:right">—</td>';
+      } else {
+        const pct = ((cur - prev) / prev) * 100;
+        const segno = pct >= 0 ? '+' : '';
+        const col = pct < 0 ? '#27500A' : (pct > 0 ? (isResiduo ? '#A32D2D' : '#633806') : 'var(--text-hint)');
+        html += '<td style="padding:6px 10px;text-align:right;color:' + col + ';font-weight:500">' + segno + pct.toFixed(0) + '%</td>';
+      }
+    }
+  });
+  html += '</tr>';
+
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function _piaAggiornaAnnoMin(v) {
+  const n = parseInt(v);
+  if (!n || n < 2015 || n > 2050) return;
+  _piaAnnoMin = n;
+  if (_piaAnnoMin > _piaAnnoMax) _piaAnnoMax = _piaAnnoMin;
+  renderBanchePianoAnnuale();
+}
+
+function _piaAggiornaAnnoMax(v) {
+  const n = parseInt(v);
+  if (!n || n < 2015 || n > 2050) return;
+  _piaAnnoMax = n;
+  if (_piaAnnoMax < _piaAnnoMin) _piaAnnoMin = _piaAnnoMax;
+  renderBanchePianoAnnuale();
+}
+
+function _piaToggleAttivi(checked) {
+  _piaSoloAttivi = !!checked;
+  renderBanchePianoAnnuale();
+}
+
+// ═══ STAMPA PDF PIANO ANNUALE ═════════════════════════════════════════════
+function stampaPianoAnnuale() {
+  // Approccio semplice: crea un nuovo iframe con il contenuto formattato per stampa
+  // L'utente userà la stampa del browser → PDF
+  const cont = document.getElementById('banche-panel-piano');
+  if (!cont) return;
+
+  // Apre finestra di stampa con stessa logica visualizzata
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+
+  const dataFmt = new Date().toLocaleDateString('it-IT');
+  w.document.write('<!DOCTYPE html><html><head><title>Piano annuale finanziamenti — Phoenix Fuel</title>');
+  w.document.write('<style>');
+  w.document.write('body{font-family:Arial,sans-serif;padding:20px;font-size:11px;color:#333}');
+  w.document.write('h1{font-size:16px;color:#26215C;margin-bottom:4px}');
+  w.document.write('h2{font-size:13px;color:#26215C;margin:18px 0 8px;padding:6px 10px;background:#f0f0f0;border-left:3px solid #26215C}');
+  w.document.write('table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px}');
+  w.document.write('th{background:#f0f0f0;padding:6px 8px;text-align:right;border-bottom:1px solid #ccc;font-size:9px;text-transform:uppercase}');
+  w.document.write('th:first-child{text-align:left}');
+  w.document.write('td{padding:5px 8px;text-align:right;border-bottom:0.5px solid #eee;font-family:monospace}');
+  w.document.write('td:first-child{text-align:left;font-family:Arial,sans-serif;font-weight:500}');
+  w.document.write('tr.tot td{font-weight:bold;background:#fafafa;border-top:2px solid #999}');
+  w.document.write('tr.delta td{font-size:9px;color:#999;background:#fafafa}');
+  w.document.write('@page{size:A4 landscape;margin:1cm}');
+  w.document.write('</style></head><body>');
+  w.document.write('<h1>📉 Piano annuale finanziamenti — Phoenix Fuel S.r.l.</h1>');
+  w.document.write('<div style="font-size:10px;color:#666">Generato il ' + dataFmt + ' · ' + (_piaSoloAttivi ? 'Solo attivi' : 'Attivi + estinti') + ' · ' + _piaAnnoMin + '–' + _piaAnnoMax + '</div>');
+  // Estraggo le 2 tabelle dal DOM corrente e le incollo
+  const tabelle = cont.querySelectorAll('table');
+  const titoli = cont.querySelectorAll('div[style*="font-size:13px;font-weight:600"]');
+  tabelle.forEach((t, i) => {
+    if (titoli[i]) w.document.write('<h2>' + titoli[i].textContent + '</h2>');
+    w.document.write(t.outerHTML);
+  });
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(() => w.print(), 300);
 }
