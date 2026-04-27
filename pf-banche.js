@@ -814,6 +814,7 @@ function renderBancheAffidamenti() {
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
   html += '<div style="font-size:15px;font-weight:600;color:var(--text)">Affidamenti attivi</div>';
   html += '<div style="display:flex;gap:8px">';
+  html += '<button onclick="stampaElencoAffidamenti()" style="background:#1a1a18;color:#FAC775;border:0;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer">🖨 PDF Elenco fidi (per banche)</button>';
   if (_isAdminBanche()) {
     html += '<button class="btn-primary" onclick="apriModalAffidamento()" style="font-size:12px;padding:7px 14px">+ Nuovo affidamento</button>';
   }
@@ -1164,6 +1165,31 @@ async function renderBanchePianoAnnuale() {
   // ─── TABELLA RESIDUO CAPITALE AL 31/12 ───
   html += _renderMatrice('📊 RESIDUO CAPITALE AL 31/12 (debito residuo da pagare)', finSortati, anni, residui, true);
 
+  // ─── RIGA RIEPILOGO % RIMBORSATA ───
+  // Calcolo: totale accordato (capitale originario di tutti i finanziamenti mostrati)
+  //          vs residuo all'ultimo anno selezionato
+  const totaleAccordato = finSortati.reduce((s, f) => s + Number(f.capitale || 0), 0);
+  const annoUlt = anni[anni.length - 1];
+  const residuoFinale = finSortati.reduce((s, f) => {
+    const dato = (residui[f.id] || {})[annoUlt];
+    return s + (dato && dato.val !== undefined ? dato.val : 0);
+  }, 0);
+  const rimborsato = totaleAccordato - residuoFinale;
+  const pctRimborsato = totaleAccordato > 0 ? (rimborsato / totaleAccordato * 100) : 0;
+
+  html += '<div style="margin-top:14px;padding:14px 18px;background:linear-gradient(135deg,#26215C 0%,#3a3478 100%);color:#fff;border-radius:10px">';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;align-items:center">';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Totale accordato originario</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px">' + fmtE(totaleAccordato) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Residuo al 31/12/' + annoUlt + '</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#FAEEDA">' + fmtE(residuoFinale) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Rimborsato</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#EAF3DE">' + fmtE(rimborsato) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">% Rimborsata</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:1px;color:#EAF3DE">' + pctRimborsato.toFixed(1) + '%</div></div>';
+  html += '</div>';
+  // Barra di progresso
+  html += '<div style="margin-top:12px;background:rgba(255,255,255,0.15);border-radius:10px;height:8px;overflow:hidden">';
+  html += '<div style="width:' + Math.min(pctRimborsato, 100) + '%;height:100%;background:#EAF3DE;transition:width 0.4s"></div>';
+  html += '</div>';
+  html += '</div>';
+
   cont.innerHTML = html;
 }
 
@@ -1312,6 +1338,158 @@ function stampaPianoAnnuale() {
     if (titoli[i]) w.document.write('<h2>' + titoli[i].textContent + '</h2>');
     w.document.write(t.outerHTML);
   });
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(() => w.print(), 300);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STAMPA PDF ELENCO AFFIDAMENTI (per richieste banche)
+// Documento periodico richiesto dalle banche.
+// Mostra istituti attivi + tipi affidamento + importi accordato/utilizzato.
+// NESSUN tasso o interesse (è un documento di esposizione totale).
+// ═══════════════════════════════════════════════════════════════════════════
+function stampaElencoAffidamenti() {
+  const attivi = _bancheAffidamenti.filter(a => a.stato === 'attivo');
+  if (!attivi.length) { toast('⚠ Nessun affidamento attivo da stampare'); return; }
+
+  // Raggruppo per istituto
+  const perIstituto = {};
+  attivi.forEach(a => {
+    if (!perIstituto[a.istituto_id]) perIstituto[a.istituto_id] = [];
+    perIstituto[a.istituto_id].push(a);
+  });
+
+  // Sort per nome istituto
+  const istitutiSorted = Object.keys(perIstituto).sort((a, b) => {
+    const nomeA = (_bancheIstituti.find(i => i.id === a) || {}).nome || '';
+    const nomeB = (_bancheIstituti.find(i => i.id === b) || {}).nome || '';
+    return nomeA.localeCompare(nomeB);
+  });
+
+  // Totali generali
+  const totAccordato = attivi.reduce((s, a) => s + Number(a.importo_accordato || 0), 0);
+  const totUtilizzato = attivi.reduce((s, a) => s + Number(a.importo_utilizzato || 0), 0);
+  const totResiduo = totAccordato - totUtilizzato;
+
+  // Data generazione
+  const dataFmt = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dataFmtBreve = new Date().toLocaleDateString('it-IT');
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+
+  // Mappa label tipo → testo
+  const tipoLabel = {
+    cassa: 'Fido di cassa',
+    anticipo_fatture: 'Anticipo fatture',
+    sbf: 'Salvo Buon Fine (SBF)',
+    castelletto: 'Castelletto',
+    autoliquidante: 'Autoliquidante',
+    fideiussione: 'Fideiussione'
+  };
+
+  let body = '';
+
+  // Header documento
+  body += '<div class="header">';
+  body += '<div class="azienda">PHOENIX FUEL S.R.L.</div>';
+  body += '<div class="meta">P.IVA 02744150802 · Zona Industriale snc · 89900 Vibo Valentia (VV)</div>';
+  body += '</div>';
+
+  body += '<h1>ELENCO AFFIDAMENTI BANCARI</h1>';
+  body += '<div class="data-doc">Situazione al ' + dataFmt + '</div>';
+
+  // Per ogni banca un blocco
+  istitutiSorted.forEach(istId => {
+    const ist = _bancheIstituti.find(i => i.id === istId) || {};
+    const fidi = perIstituto[istId];
+    const subTotAcc = fidi.reduce((s, f) => s + Number(f.importo_accordato || 0), 0);
+    const subTotUti = fidi.reduce((s, f) => s + Number(f.importo_utilizzato || 0), 0);
+
+    body += '<h2>' + esc(ist.nome || '—') + '</h2>';
+    if (ist.filiale) body += '<div class="filiale">Filiale: ' + esc(ist.filiale) + '</div>';
+
+    body += '<table>';
+    body += '<thead><tr>';
+    body += '<th>Tipo affidamento</th>';
+    body += '<th>Conto corrente</th>';
+    body += '<th class="r">Accordato</th>';
+    body += '<th class="r">Utilizzato</th>';
+    body += '<th class="r">Disponibile</th>';
+    body += '</tr></thead><tbody>';
+
+    fidi.forEach(f => {
+      const cc = _bancheConti.find(c => c.id === f.conto_id);
+      const accordato = Number(f.importo_accordato || 0);
+      const utilizzato = Number(f.importo_utilizzato || 0);
+      const disp = accordato - utilizzato;
+      body += '<tr>';
+      body += '<td>' + esc(tipoLabel[f.tipo] || f.tipo) + '</td>';
+      body += '<td class="iban">' + (cc ? _mascheraIban(cc.iban) : '—') + '</td>';
+      body += '<td class="r mono">' + fmtE(accordato) + '</td>';
+      body += '<td class="r mono">' + fmtE(utilizzato) + '</td>';
+      body += '<td class="r mono">' + fmtE(disp) + '</td>';
+      body += '</tr>';
+    });
+
+    // Subtotale banca
+    body += '<tr class="sub">';
+    body += '<td colspan="2"><strong>Subtotale ' + esc(ist.nome) + '</strong></td>';
+    body += '<td class="r mono"><strong>' + fmtE(subTotAcc) + '</strong></td>';
+    body += '<td class="r mono"><strong>' + fmtE(subTotUti) + '</strong></td>';
+    body += '<td class="r mono"><strong>' + fmtE(subTotAcc - subTotUti) + '</strong></td>';
+    body += '</tr>';
+
+    body += '</tbody></table>';
+  });
+
+  // Totali generali
+  body += '<div class="totale-box">';
+  body += '<table class="totale">';
+  body += '<tr><td>TOTALE COMPLESSIVO ACCORDATO</td><td class="r mono">' + fmtE(totAccordato) + '</td></tr>';
+  body += '<tr><td>TOTALE UTILIZZATO</td><td class="r mono">' + fmtE(totUtilizzato) + '</td></tr>';
+  body += '<tr class="netto"><td>DISPONIBILITÀ RESIDUA</td><td class="r mono">' + fmtE(totResiduo) + '</td></tr>';
+  body += '</table>';
+  body += '</div>';
+
+  // Footer
+  body += '<div class="footer">';
+  body += 'Documento generato il ' + dataFmtBreve + ' dal sistema gestionale Phoenix Fuel.';
+  body += '<br>Per dettagli su tassi, commissioni e condizioni contrattuali si rimanda alla documentazione bancaria originale.';
+  body += '</div>';
+
+  // CSS
+  w.document.write('<!DOCTYPE html><html><head><title>Elenco Affidamenti — Phoenix Fuel</title>');
+  w.document.write('<style>');
+  w.document.write('body{font-family:Arial,sans-serif;padding:25px;font-size:11px;color:#222;max-width:800px;margin:0 auto}');
+  w.document.write('.header{border-bottom:3px solid #26215C;padding-bottom:10px;margin-bottom:18px}');
+  w.document.write('.azienda{font-size:18px;font-weight:bold;color:#26215C;letter-spacing:0.3px}');
+  w.document.write('.meta{font-size:10px;color:#666;margin-top:3px}');
+  w.document.write('h1{font-size:16px;color:#26215C;text-align:center;margin:10px 0;letter-spacing:1px}');
+  w.document.write('.data-doc{text-align:center;font-size:11px;color:#666;margin-bottom:24px;font-style:italic}');
+  w.document.write('h2{font-size:13px;color:#26215C;background:#f0eff8;padding:8px 12px;margin:18px 0 4px;border-left:4px solid #26215C}');
+  w.document.write('.filiale{font-size:10px;color:#666;margin:2px 0 8px 4px;font-style:italic}');
+  w.document.write('table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px}');
+  w.document.write('th{background:#fafaf8;padding:7px 8px;text-align:left;border-bottom:1px solid #999;font-size:9px;text-transform:uppercase;letter-spacing:0.4px;color:#444}');
+  w.document.write('th.r{text-align:right}');
+  w.document.write('td{padding:6px 8px;border-bottom:0.5px solid #eee}');
+  w.document.write('td.r{text-align:right}');
+  w.document.write('td.mono{font-family:Courier New,monospace;font-weight:500}');
+  w.document.write('td.iban{font-family:Courier New,monospace;font-size:9px;color:#666}');
+  w.document.write('tr.sub td{background:#fafaf8;border-top:1px solid #999;border-bottom:1px solid #999;padding:7px 8px}');
+  w.document.write('.totale-box{margin-top:25px;border:2px solid #26215C;border-radius:6px;overflow:hidden}');
+  w.document.write('table.totale{margin:0;font-size:11px}');
+  w.document.write('table.totale td{padding:9px 14px;border-bottom:1px solid #ddd;font-weight:500}');
+  w.document.write('table.totale td:first-child{background:#26215C;color:#fff;text-transform:uppercase;letter-spacing:0.4px;font-size:10px}');
+  w.document.write('table.totale tr.netto td{font-size:13px;font-weight:bold}');
+  w.document.write('table.totale tr.netto td:first-child{background:#3a3478}');
+  w.document.write('.footer{margin-top:30px;font-size:9px;color:#888;text-align:center;border-top:0.5px solid #ccc;padding-top:10px;line-height:1.5}');
+  w.document.write('@page{size:A4;margin:1.5cm}');
+  w.document.write('@media print { body { padding: 0 } }');
+  w.document.write('</style></head><body>');
+  w.document.write(body);
   w.document.write('</body></html>');
   w.document.close();
   setTimeout(() => w.print(), 300);
