@@ -313,11 +313,18 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
               </div>
             </div>
             ${nOrdSenzaFatt>0 ? `
-              <button onclick="event.stopPropagation(); avviaRicalcoloNa1DaDashboard('${dataMin}','${dataMax}')"
-                      title="Rilancia il matcher: cerca fatture con 1 riga che copre più ordini (N:1). Utile quando vedi 'ordini senza fattura' che in realtà sono già stati fatturati insieme ad altri."
-                      style="background:#D4A017;color:white;border:0;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">
-                🔁 Ricalcola match N:1
-              </button>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button onclick="event.stopPropagation(); matchingOrdiniFattureDaDashboard(${annoInt})"
+                        title="Aggancia automaticamente ordini ↔ fatture per cliente+prodotto+litri+imponibile+data±2gg. Sicuro e ripetibile."
+                        style="background:#639922;color:white;border:0;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">
+                  🔄 Aggancia automatico
+                </button>
+                <button onclick="event.stopPropagation(); avviaRicalcoloNa1DaDashboard('${dataMin}','${dataMax}')"
+                        title="Rilancia il matcher: cerca fatture con 1 riga che copre più ordini (N:1). Utile quando vedi 'ordini senza fattura' che in realtà sono già stati fatturati insieme ad altri."
+                        style="background:#D4A017;color:white;border:0;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">
+                  🔁 Ricalcola match N:1
+                </button>
+              </div>
             ` : ''}
           </div>
           <div id="dashboard-ricalcolo-output" style="margin-top:10px"></div>
@@ -391,6 +398,34 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     wrap.innerHTML = '<div style="background:#FDECEC;border-left:3px solid #A32D2D;padding:10px;border-radius:4px;color:#791F1F;font-size:12px">Errore caricamento dashboard: ' + _esc(e.message) + '</div>';
   }
 }
+
+// Wrapper chiamato dal bottone "🔄 Aggancia automatico" nella card gialla.
+// Lancia la RPC Postgres matching_ordini_fatture(anno) che aggancia ordini ↔ righe fattura
+// per cliente+prodotto+litri+imponibile+data±2gg. Idempotente: rilanciabile senza rischi.
+async function matchingOrdiniFattureDaDashboard(anno) {
+  const out = document.getElementById('dashboard-ricalcolo-output');
+  if (!out) return;
+  if (!confirm('Aggancia automaticamente ordini ↔ fatture per anno ' + anno + '?\n\nRegole match: cliente (PIVA) + prodotto + litri + imponibile (∆<€1) + data (±2gg).\nSicuro: non tocca ordini già collegati. Rilanciabile.')) return;
+
+  out.innerHTML = '<div style="padding:8px;background:#FAEEDA;color:#633806;border-radius:4px;font-size:12px">⏳ Matching in corso...</div>';
+
+  try {
+    const { data, error } = await sb.rpc('matching_ordini_fatture', { p_anno: anno });
+    if (error) throw error;
+    const r = (data && data[0]) || { ordini_collegati: 0, totale_processati: 0 };
+    out.innerHTML =
+      '<div style="padding:10px;background:#EAF3DE;color:#27500A;border-radius:6px;font-size:12px;line-height:1.5">' +
+        '<strong>✓ Matching completato</strong><br>' +
+        'Ordini collegati: <strong>' + r.ordini_collegati + '</strong><br>' +
+        'Ordini ancora senza fattura: <strong>' + (r.totale_processati - r.ordini_collegati) + '</strong><br>' +
+        '<span style="font-size:11px;color:#666">Ricarica la dashboard per vedere il riepilogo aggiornato.</span>' +
+      '</div>';
+    setTimeout(() => caricaDati(), 1500);
+  } catch (e) {
+    out.innerHTML = '<div style="padding:8px;background:#FCEBEB;color:#791F1F;border-radius:4px;font-size:12px">❌ Errore: ' + (e.message || e) + '</div>';
+  }
+}
+
 
 // Wrapper chiamato dal bottone "🔁 Ricalcola match N:1" nella card gialla della dashboard.
 // Riusa la funzione _avviaRicalcoloNa1 del modulo pfFattureImport (che conosce il matcher),
