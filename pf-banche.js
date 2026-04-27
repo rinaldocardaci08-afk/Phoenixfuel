@@ -1166,34 +1166,40 @@ async function renderBanchePianoAnnuale() {
   // ─── TABELLA RESIDUO CAPITALE AL 31/12 ───
   html += _renderMatrice('📊 RESIDUO CAPITALE AL 31/12 (debito residuo da pagare)', finSortati, anni, residui, true);
 
-  // ─── RIGA RIEPILOGO % RIMBORSATA ───
-  // Calcolo: totale accordato (capitale originario) vs residuo capitale A OGGI
-  // (somma dei residui_capitale dell'ultima rata pagata di ogni finanziamento)
+  // ─── RIGA RIEPILOGO % PAGATA (rata totale = capitale + interessi) ───
+  // Coerente con Timeline: somma di tutte le rate del piano (capitale + interessi)
   const oggiStr = new Date().toISOString().split('T')[0];
   const oggiFmt = new Date().toLocaleDateString('it-IT');
-  const totaleAccordato = finSortati.reduce((s, f) => s + Number(f.capitale || 0), 0);
-  const residuoOggi = finSortati.reduce((s, f) => {
-    if (f.stato === 'estinto') return s;
+  let totImpegno = 0, totPagato = 0;
+  finSortati.forEach(f => {
     const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
-    if (!rateFin.length) return s + Number(f.capitale || 0); // nessuna rata = ancora tutto da pagare
-    const pagate = rateFin.filter(r => r.data_scadenza <= oggiStr);
-    if (!pagate.length) return s + Number(f.capitale || 0); // nessuna scaduta = capitale pieno
-    // Residuo dell'ultima rata pagata
-    return s + Number(pagate[pagate.length - 1].residuo_capitale || 0);
-  }, 0);
-  const rimborsato = totaleAccordato - residuoOggi;
-  const pctRimborsato = totaleAccordato > 0 ? (rimborsato / totaleAccordato * 100) : 0;
+    if (!rateFin.length) {
+      // Nessun piano: per estinti consideriamo tutto pagato sul capitale, per attivi tutto da pagare
+      const cap = Number(f.capitale || 0);
+      totImpegno += cap;
+      if (f.stato === 'estinto') totPagato += cap;
+      return;
+    }
+    const accordato = rateFin.reduce((s, r) => s + Number(r.rata || 0), 0);
+    let pagato = rateFin.filter(r => r.data_scadenza <= oggiStr)
+                        .reduce((s, r) => s + Number(r.rata || 0), 0);
+    if (f.stato === 'estinto') pagato = accordato; // estinto = 100% pagato
+    totImpegno += accordato;
+    totPagato += pagato;
+  });
+  const totResiduo = totImpegno - totPagato;
+  const pctPagato = totImpegno > 0 ? (totPagato / totImpegno * 100) : 0;
 
   html += '<div style="margin-top:14px;padding:14px 18px;background:linear-gradient(135deg,#26215C 0%,#3a3478 100%);color:#fff;border-radius:10px">';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;align-items:center">';
-  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Totale accordato originario</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px">' + fmtE(totaleAccordato) + '</div></div>';
-  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Residuo capitale al ' + oggiFmt + '</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#FAEEDA">' + fmtE(residuoOggi) + '</div></div>';
-  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Capitale rimborsato</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#EAF3DE">' + fmtE(rimborsato) + '</div></div>';
-  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">% Rimborsata</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:1px;color:#EAF3DE">' + pctRimborsato.toFixed(1) + '%</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Totale impegno (cap. + interessi)</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px">' + fmtE(totImpegno) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Già pagato al ' + oggiFmt + '</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#EAF3DE">' + fmtE(totPagato) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Residuo da pagare</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#FAEEDA">' + fmtE(totResiduo) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">% Pagata</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:1px;color:#EAF3DE">' + pctPagato.toFixed(1) + '%</div></div>';
   html += '</div>';
   // Barra di progresso
   html += '<div style="margin-top:12px;background:rgba(255,255,255,0.15);border-radius:10px;height:8px;overflow:hidden">';
-  html += '<div style="width:' + Math.min(pctRimborsato, 100) + '%;height:100%;background:#EAF3DE;transition:width 0.4s"></div>';
+  html += '<div style="width:' + Math.min(pctPagato, 100) + '%;height:100%;background:#EAF3DE;transition:width 0.4s"></div>';
   html += '</div>';
   html += '</div>';
 
@@ -1627,32 +1633,73 @@ async function renderBancheTimeline() {
 }
 
 // ═══ PANNELLO STATO FINANZIAMENTI % RIMBORSATA ═════════════════════════════
-// Per ogni finanziamento attivo: barra di progresso + accordato/pagato/residuo
-// (totali includono interessi: somma di tutte le rate del piano)
+// KPI globale "onorati nel tempo" (sempre su TUTTI i finanziamenti) +
+// barre di progresso per i finanziamenti visualizzati (rispetta toggle Solo attivi)
+// Totali rate = capitale + interessi
 function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
-  // Filtra solo attivi
-  const attivi = finanziamenti.filter(f => f.stato === 'attivo');
-  if (!attivi.length) return '';
+  if (!finanziamenti.length) return '';
 
   let html = '';
   html += '<div style="margin-top:18px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:16px">';
+
+  // ─── KPI GLOBALE ONORATI (sempre su TUTTI i finanziamenti, indipendente dal toggle) ───
+  const tutti = _bancheFinanziamenti || [];
+  const estintiAll = tutti.filter(f => f.stato === 'estinto');
+  const nTot = tutti.length;
+  const nEst = estintiAll.length;
+  const pctNum = nTot > 0 ? (nEst / nTot * 100) : 0;
+  const valTot = tutti.reduce((s, f) => s + Number(f.capitale || 0), 0);
+  const valEst = estintiAll.reduce((s, f) => s + Number(f.capitale || 0), 0);
+  const pctVal = valTot > 0 ? (valEst / valTot * 100) : 0;
+
+  if (nTot > 0) {
+    html += '<div style="margin-bottom:18px;padding:14px 16px;background:linear-gradient(135deg,#27500A 0%,#3B6D11 100%);color:#fff;border-radius:10px">';
+    html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.85;margin-bottom:10px">📊 Finanziamenti onorati nel tempo</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:center">';
+    // Per numero
+    html += '<div>';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Per numero</div>';
+    html += '<div style="font-size:18px;font-weight:600;font-family:var(--font-mono)">' + nEst + ' / ' + nTot + ' <span style="font-size:13px;opacity:0.85;font-weight:500">(' + pctNum.toFixed(0) + '%)</span></div>';
+    html += '<div style="margin-top:6px;background:rgba(255,255,255,0.2);border-radius:5px;height:6px;overflow:hidden"><div style="width:' + pctNum + '%;height:100%;background:#EAF3DE"></div></div>';
+    html += '</div>';
+    // Per valore
+    html += '<div>';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Per valore (importo finanziato originale)</div>';
+    html += '<div style="font-size:16px;font-weight:600;font-family:var(--font-mono)">' + fmtE(valEst) + ' <span style="font-size:11px;opacity:0.85;font-weight:500">su ' + fmtE(valTot) + '</span> <span style="font-size:13px;opacity:0.85;font-weight:500;margin-left:4px">(' + pctVal.toFixed(0) + '%)</span></div>';
+    html += '<div style="margin-top:6px;background:rgba(255,255,255,0.2);border-radius:5px;height:6px;overflow:hidden"><div style="width:' + pctVal + '%;height:100%;background:#EAF3DE"></div></div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+  }
+
+  // ─── DETTAGLIO PER FINANZIAMENTO (rispetta filtro toggle) ───
   html += '<div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)">Stato finanziamenti — % rimborsata su accordato (capitale + interessi)</div>';
   html += '<div style="display:grid;gap:14px">';
 
-  // Calcoli totali
+  // Calcoli totali (sui visualizzati)
   let totAccordato = 0, totPagato = 0;
 
-  attivi.forEach(f => {
+  finanziamenti.forEach(f => {
     // Tutte le rate del finanziamento
     const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
-    if (!rateFin.length) return;
 
-    // Accordato totale = somma di tutte le rate (capitale + interessi)
-    const accordato = rateFin.reduce((s, r) => s + Number(r.rata || 0), 0);
-    // Pagato = somma rate con scadenza <= oggi
-    const pagato = rateFin
-      .filter(r => r.data_scadenza <= oggiStr)
-      .reduce((s, r) => s + Number(r.rata || 0), 0);
+    let accordato = 0, pagato = 0;
+    if (!rateFin.length) {
+      // Nessun piano: per estinti consideriamo capitale pagato; per attivi salta
+      if (f.stato === 'estinto') {
+        accordato = Number(f.capitale || 0);
+        pagato = accordato;
+      } else {
+        return;
+      }
+    } else {
+      accordato = rateFin.reduce((s, r) => s + Number(r.rata || 0), 0);
+      pagato = rateFin
+        .filter(r => r.data_scadenza <= oggiStr)
+        .reduce((s, r) => s + Number(r.rata || 0), 0);
+      if (f.stato === 'estinto') pagato = accordato; // forza 100% per estinti
+    }
+
     const residuo = accordato - pagato;
     const pct = accordato > 0 ? (pagato / accordato * 100) : 0;
     const colore = _coloreFinanziamento(f);
@@ -1661,15 +1708,17 @@ function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
     const fineFmt = dataFine
       ? new Date(dataFine + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })
       : '—';
+    const isEstinto = f.stato === 'estinto';
 
     totAccordato += accordato;
     totPagato += pagato;
 
-    html += '<div>';
-    // Riga superiore: descrizione + % rimborsata
+    html += '<div' + (isEstinto ? ' style="opacity:0.75"' : '') + '>';
+    // Riga superiore: descrizione + badge estinto + % rimborsata
     html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
     html += '<div>';
     html += '<span style="font-size:13px;font-weight:500;color:var(--text)">' + esc(f.descrizione) + '</span>';
+    if (isEstinto) html += '<span style="font-size:9px;background:#27500A;color:#fff;padding:1px 6px;border-radius:3px;margin-left:6px;text-transform:uppercase;letter-spacing:0.3px;font-weight:600">Estinto</span>';
     html += '<span style="font-size:11px;color:var(--text-muted);margin-left:8px">' + esc(istNome) + ' · fine ' + fineFmt + '</span>';
     html += '</div>';
     html += '<span style="font-size:13px;font-weight:600;color:' + colore + ';font-family:var(--font-mono)">' + pct.toFixed(0) + '%</span>';
@@ -1689,11 +1738,11 @@ function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
 
   html += '</div>'; // fine grid
 
-  // Riga TOTALE in fondo
+  // Riga TOTALE in fondo (sui finanziamenti visualizzati)
   const pctTot = totAccordato > 0 ? (totPagato / totAccordato * 100) : 0;
   html += '<div style="margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border)">';
   html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
-  html += '<span style="font-size:13px;font-weight:600;color:var(--text)">TOTALE</span>';
+  html += '<span style="font-size:13px;font-weight:600;color:var(--text)">TOTALE ' + (_gantSoloAttivi ? '(solo attivi)' : '(tutti)') + '</span>';
   html += '<span style="font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-mono)">' + pctTot.toFixed(0) + '%</span>';
   html += '</div>';
   html += '<div style="background:var(--bg);border-radius:6px;height:22px;overflow:hidden">';
