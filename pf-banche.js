@@ -12,6 +12,42 @@ var _bancheConti = [];
 var _bancheAffidamenti = []; // pre-caricati per KPI
 var _bancheFinanziamenti = []; // pre-caricati per KPI
 
+// ─── CACHE: ultimi saldi per conto (popolata on-demand, condivisa tra tab) ──
+// Usata da Istituti, Affidamenti, stampaElencoAffidamenti, Situazione.
+// Riduce query duplicate alla tabella banche_saldi_giornalieri.
+// Invalidata da _situazioneSalvaCella dopo INSERT/UPDATE.
+var _ultimiSaldiPerConto = null; // null = non caricato; {} = caricato (anche se vuoto)
+
+async function _ensureUltimiSaldi() {
+  if (_ultimiSaldiPerConto !== null) return _ultimiSaldiPerConto;
+  _ultimiSaldiPerConto = {};
+  try {
+    // Limito a 90 giorni indietro per ridurre payload
+    const dataLim = new Date();
+    dataLim.setDate(dataLim.getDate() - 90);
+    const dataLimStr = dataLim.toISOString().split('T')[0];
+    const { data, error } = await sb.from('banche_saldi_giornalieri')
+      .select('conto_id, saldo_contabile, saldo_disponibile, data')
+      .gte('data', dataLimStr)
+      .order('data', { ascending: false });
+    if (error) {
+      console.warn('_ensureUltimiSaldi error:', error);
+      return _ultimiSaldiPerConto;
+    }
+    (data || []).forEach(s => {
+      // .order desc → primo record per conto_id è il più recente
+      if (!_ultimiSaldiPerConto[s.conto_id]) _ultimiSaldiPerConto[s.conto_id] = s;
+    });
+  } catch (e) {
+    console.warn('_ensureUltimiSaldi exception:', e);
+  }
+  return _ultimiSaldiPerConto;
+}
+
+function _invalidaUltimiSaldi() {
+  _ultimiSaldiPerConto = null;
+}
+
 // ═══ ENTRY POINT ══════════════════════════════════════════════════════════
 async function caricaBanche() {
   // Carica tutti i dati in parallelo per popolare KPI + tabelle
@@ -62,18 +98,8 @@ async function renderBancheIstituti() {
   const cont = document.getElementById('content-banche-istituti');
   if (!cont) return;
 
-  // Carica ultimi saldi giornalieri per ogni conto (per visualizzazione live)
-  let saldiByConto = {};
-  try {
-    const { data: ultimiSaldi } = await sb.from('banche_saldi_giornalieri')
-      .select('conto_id, saldo_contabile, saldo_disponibile, data')
-      .order('data', { ascending: false });
-    (ultimiSaldi || []).forEach(s => {
-      if (!saldiByConto[s.conto_id]) saldiByConto[s.conto_id] = s;
-    });
-  } catch (e) {
-    console.warn('renderBancheIstituti: errore caricamento saldi giornalieri', e);
-  }
+  // Cache condivisa: ultimi saldi giornalieri per conto (caricato una sola volta)
+  const saldiByConto = await _ensureUltimiSaldi();
 
   // Helper per ottenere il saldo live (contabile) di un conto, con fallback a saldo_attuale
   function _saldoLive(cc) {
@@ -472,8 +498,15 @@ async function renderBancheFinanziamenti() {
     });
     tabellaHtml += '</tr></thead><tbody>';
 
+    // Sort: stato (attivi prima) → priorità banca (Intesa→MPS→BNL→BCC) → data erogazione desc
     const sortati = filtrati.slice().sort((a, b) => {
       if (a.stato !== b.stato) return a.stato === 'attivo' ? -1 : 1;
+      const nomeA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
+      const nomeB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
+      const pA = _priorityBancaIstituto(nomeA);
+      const pB = _priorityBancaIstituto(nomeB);
+      if (pA !== pB) return pA - pB;
+      if (nomeA !== nomeB) return nomeA.localeCompare(nomeB);
       return (b.data_erogazione || '').localeCompare(a.data_erogazione || '');
     });
 
@@ -1477,19 +1510,8 @@ async function renderBancheAffidamenti() {
   const cont = document.getElementById('banche-panel-affidamenti');
   if (!cont) return;
 
-  // Carica ultimi saldi giornalieri per ogni conto (per calcolare utilizzato live dei fidi cassa)
-  let saldiByConto = {};
-  try {
-    const { data: ultimiSaldi } = await sb.from('banche_saldi_giornalieri')
-      .select('conto_id, saldo_contabile, saldo_disponibile, data')
-      .order('data', { ascending: false });
-    (ultimiSaldi || []).forEach(s => {
-      if (!saldiByConto[s.conto_id]) saldiByConto[s.conto_id] = s;
-    });
-  } catch (e) {
-    // Se la tabella non esiste o errore: continua senza saldi live (fallback al campo statico)
-    console.warn('renderBancheAffidamenti: errore caricamento saldi giornalieri', e);
-  }
+  // Cache condivisa: ultimi saldi giornalieri per conto
+  const saldiByConto = await _ensureUltimiSaldi();
 
   // Override utilizzato per fidi tipo='cassa': usa il saldo contabile negativo dell'ultimo giorno
   // NB: non modifico il record originale, calcolo un valore live per la visualizzazione
@@ -1537,10 +1559,13 @@ async function renderBancheAffidamenti() {
   if (!attivi.length) {
     html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun affidamento attivo</div>';
   } else {
-    // Sort: per banca, poi per tipo
+    // Sort: priorità banca (Intesa→MPS→BNL→BCC→altri), poi alfabetico, poi per tipo
     const sortati = attivi.slice().sort((a, b) => {
       const nomeA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
       const nomeB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
+      const pA = _priorityBancaIstituto(nomeA);
+      const pB = _priorityBancaIstituto(nomeB);
+      if (pA !== pB) return pA - pB;
       if (nomeA !== nomeB) return nomeA.localeCompare(nomeB);
       return (a.tipo || '').localeCompare(b.tipo || '');
     });
@@ -1872,10 +1897,16 @@ async function renderBanchePianoAnnuale() {
     return;
   }
 
-  // Sort finanziamenti per data erogazione (più vecchi prima)
-  const finSortati = finFiltrati.slice().sort((a, b) =>
-    (a.data_erogazione || '').localeCompare(b.data_erogazione || '')
-  );
+  // Sort finanziamenti: priorità banca (Intesa→MPS→BNL→BCC) → data erogazione asc
+  const finSortati = finFiltrati.slice().sort((a, b) => {
+    const nomeA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
+    const nomeB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
+    const pA = _priorityBancaIstituto(nomeA);
+    const pB = _priorityBancaIstituto(nomeB);
+    if (pA !== pB) return pA - pB;
+    if (nomeA !== nomeB) return nomeA.localeCompare(nomeB);
+    return (a.data_erogazione || '').localeCompare(b.data_erogazione || '');
+  });
 
   // ─── TABELLA IMPEGNO ANNUO ───
   html += _renderMatrice('💰 IMPEGNO ANNUO (uscite di cassa per finanziamenti)', finSortati, anni, impegno, false);
@@ -2090,18 +2121,8 @@ async function _stampaElencoAffidamentiAsync() {
   const attivi = _bancheAffidamenti.filter(a => a.stato === 'attivo');
   if (!attivi.length) { toast('⚠ Nessun affidamento attivo da stampare'); return; }
 
-  // Carica ultimi saldi giornalieri per fidi cassa live
-  let saldiByConto = {};
-  try {
-    const { data: ultimiSaldi } = await sb.from('banche_saldi_giornalieri')
-      .select('conto_id, saldo_contabile, data')
-      .order('data', { ascending: false });
-    (ultimiSaldi || []).forEach(s => {
-      if (!saldiByConto[s.conto_id]) saldiByConto[s.conto_id] = s;
-    });
-  } catch (e) {
-    console.warn('stampaElencoAffidamenti: errore caricamento saldi', e);
-  }
+  // Cache condivisa: ultimi saldi giornalieri per fidi cassa live
+  const saldiByConto = await _ensureUltimiSaldi();
 
   function _utilizzatoLive(a) {
     if (a.tipo === 'cassa' && a.conto_id && saldiByConto[a.conto_id]) {
@@ -2118,10 +2139,13 @@ async function _stampaElencoAffidamentiAsync() {
     perIstituto[a.istituto_id].push(a);
   });
 
-  // Sort per nome istituto
+  // Sort per priorità banca: Intesa→MPS→BNL→BCC→altri (regola costituzionale 27/04)
   const istitutiSorted = Object.keys(perIstituto).sort((a, b) => {
     const nomeA = (_bancheIstituti.find(i => i.id === a) || {}).nome || '';
     const nomeB = (_bancheIstituti.find(i => i.id === b) || {}).nome || '';
+    const pA = _priorityBancaIstituto(nomeA);
+    const pB = _priorityBancaIstituto(nomeB);
+    if (pA !== pB) return pA - pB;
     return nomeA.localeCompare(nomeB);
   });
 
@@ -2290,8 +2314,16 @@ async function renderBancheTimeline() {
     return;
   }
 
-  // Sort per data erogazione
-  finanziamenti.sort((a, b) => (a.data_erogazione || '').localeCompare(b.data_erogazione || ''));
+  // Sort: priorità banca (Intesa→MPS→BNL→BCC) → data erogazione asc
+  finanziamenti.sort((a, b) => {
+    const nomeA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
+    const nomeB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
+    const pA = _priorityBancaIstituto(nomeA);
+    const pB = _priorityBancaIstituto(nomeB);
+    if (pA !== pB) return pA - pB;
+    if (nomeA !== nomeB) return nomeA.localeCompare(nomeB);
+    return (a.data_erogazione || '').localeCompare(b.data_erogazione || '');
+  });
 
   // Calcolo range temporale globale (anno_min → anno_max)
   let annoMin = 9999, annoMax = 0;
@@ -2729,33 +2761,43 @@ async function renderBancheSituazione() {
     _bancheAffidamenti = affRes.data || [];
   }
 
-  // Carica saldi del giorno corrente
-  const { data: saldiData, error } = await sb.from('banche_saldi_giornalieri')
-    .select('*')
-    .eq('data', _situazioneDataCorrente);
+  // Carica storico 90 giorni in UNA SOLA query (include il giorno corrente).
+  // I saldi del giorno corrente vengono filtrati dallo storico — niente seconda query.
+  // Popola anche la cache _ultimiSaldiPerConto per Istituti/Affidamenti.
+  const dataLimite = new Date();
+  dataLimite.setDate(dataLimite.getDate() - 90);
+  const dataLimiteStr = dataLimite.toISOString().split('T')[0];
 
-  if (error) {
-    cont.innerHTML = '<div style="padding:30px;text-align:center;color:#A32D2D">❌ Errore: ' + esc(error.message) + '</div>';
+  let storicoData = [];
+  try {
+    const { data, error } = await sb.from('banche_saldi_giornalieri')
+      .select('*')
+      .gte('data', dataLimiteStr)
+      .order('data', { ascending: false });
+    if (error) {
+      cont.innerHTML = '<div style="padding:30px;text-align:center;color:#A32D2D">❌ Errore: ' + esc(error.message) + '</div>';
+      return;
+    }
+    storicoData = data || [];
+  } catch (e) {
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:#A32D2D">❌ Errore: ' + esc(e.message || e) + '</div>';
     return;
   }
 
-  // Indicizza per conto_id
-  _situazioneSaldi = {};
-  (saldiData || []).forEach(s => { _situazioneSaldi[s.conto_id] = s; });
+  // Storico globale (ultimi 90 giorni)
+  _situazioneStorico = storicoData;
 
-  // Carica storico ultimi 60 giorni (per pannello storico)
-  const dataLimite = new Date();
-  dataLimite.setDate(dataLimite.getDate() - 60);
-  const dataLimiteStr = dataLimite.toISOString().split('T')[0];
-  try {
-    const { data: storicoData } = await sb.from('banche_saldi_giornalieri')
-      .select('conto_id, data, saldo_contabile, saldo_disponibile')
-      .gte('data', dataLimiteStr)
-      .order('data', { ascending: false });
-    _situazioneStorico = storicoData || [];
-  } catch (e) {
-    _situazioneStorico = [];
-  }
+  // Saldi del giorno corrente: filtra dallo storico (no nuova query)
+  _situazioneSaldi = {};
+  storicoData
+    .filter(s => s.data === _situazioneDataCorrente)
+    .forEach(s => { _situazioneSaldi[s.conto_id] = s; });
+
+  // Popola cache globale ultimi saldi per conto (per Istituti/Affidamenti senza nuova query)
+  _ultimiSaldiPerConto = {};
+  storicoData.forEach(s => {
+    if (!_ultimiSaldiPerConto[s.conto_id]) _ultimiSaldiPerConto[s.conto_id] = s;
+  });
 
   // Registra pannelli (regola spostabili, 27/04)
   _registerPanels('situazione', ['saldi', 'riepilogo', 'storico'], renderBancheSituazione);
@@ -3231,6 +3273,9 @@ async function _situazioneSalvaCella(input) {
   // Visual feedback successo (verde breve)
   input.style.border = '0.5px solid #27500A';
   setTimeout(() => { input.style.border = oldBorder; }, 600);
+
+  // Invalida cache globale (Istituti/Affidamenti devono rileggere alla prossima apertura)
+  _invalidaUltimiSaldi();
 
   // Rerender per aggiornare colonne calcolate (utilizzo, totali)
   renderBancheSituazione();
