@@ -53,6 +53,7 @@ function switchBancheTab(btn) {
   if (tabId === 'banche-panel-finanziamenti') renderBancheFinanziamenti();
   if (tabId === 'banche-panel-affidamenti') renderBancheAffidamenti();
   if (tabId === 'banche-panel-piano') renderBanchePianoAnnuale();
+  if (tabId === 'banche-panel-timeline') renderBancheTimeline();
 }
 
 // ═══ TAB ISTITUTI ═════════════════════════════════════════════════════════
@@ -1493,4 +1494,294 @@ function stampaElencoAffidamenti() {
   w.document.write('</body></html>');
   w.document.close();
   setTimeout(() => w.print(), 300);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB TIMELINE GANTT
+// Mostra finanziamenti come barre temporali (data erogazione → scadenza).
+// 2 viste: Anni (default, panoramica) e Mesi (dettaglio).
+// Linea "OGGI" verticale + barra opaca pagato / piena residuo.
+// 4 KPI: rata mensile equivalente, chiusura più vicina, più lontana, interessi residui.
+// ═══════════════════════════════════════════════════════════════════════════
+var _gantVistaMesi = false;     // false=anni, true=mesi
+var _gantSoloAttivi = true;
+
+async function renderBancheTimeline() {
+  const cont = document.getElementById('banche-panel-timeline');
+  if (!cont) return;
+
+  // Carico le rate (riuso cache se disponibile)
+  if (!_bancheRateCache) {
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Caricamento timeline...</div>';
+    const { data } = await sb.from('banche_finanziamenti_rate')
+      .select('finanziamento_id, numero, data_scadenza, rata, quota_capitale, quota_interessi, residuo_capitale')
+      .order('data_scadenza');
+    _bancheRateCache = data || [];
+  }
+
+  const oggi = new Date();
+  const oggiStr = oggi.toISOString().split('T')[0];
+
+  // Filtro finanziamenti
+  const finanziamenti = _bancheFinanziamenti.filter(f => {
+    if (_gantSoloAttivi) return f.stato === 'attivo';
+    return true;
+  });
+
+  if (!finanziamenti.length) {
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun finanziamento da mostrare</div>';
+    return;
+  }
+
+  // Sort per data erogazione
+  finanziamenti.sort((a, b) => (a.data_erogazione || '').localeCompare(b.data_erogazione || ''));
+
+  // Calcolo range temporale globale (anno_min → anno_max)
+  let annoMin = 9999, annoMax = 0;
+  finanziamenti.forEach(f => {
+    if (f.data_erogazione) {
+      const y = parseInt(f.data_erogazione.substring(0, 4));
+      if (y < annoMin) annoMin = y;
+    }
+    const dataFine = _calcDataFine(f);
+    if (dataFine) {
+      const y = parseInt(dataFine.substring(0, 4));
+      if (y > annoMax) annoMax = y;
+    }
+  });
+  if (annoMin > annoMax) { annoMin = oggi.getFullYear() - 1; annoMax = oggi.getFullYear() + 5; }
+
+  // ─── Calcolo KPI ───
+  // Rata mensile equivalente = somma di tutte rate normalizzate a mensile (solo attivi)
+  const rataMensTot = finanziamenti
+    .filter(f => f.stato === 'attivo')
+    .reduce((s, f) => s + _calcRataMensileEquivalente(f), 0);
+
+  // Chiusura più vicina/più lontana (solo attivi)
+  const attiviConFine = finanziamenti
+    .filter(f => f.stato === 'attivo')
+    .map(f => ({ f, fine: _calcDataFine(f) }))
+    .filter(x => x.fine && x.fine > oggiStr)
+    .sort((a, b) => a.fine.localeCompare(b.fine));
+  const chiusVicina = attiviConFine[0];
+  const chiusLontana = attiviConFine[attiviConFine.length - 1];
+
+  // Interessi residui = somma quote_interessi di tutte le rate FUTURE
+  const intResidui = _bancheRateCache
+    .filter(r => r.data_scadenza > oggiStr)
+    .filter(r => {
+      const fin = finanziamenti.find(x => x.id === r.finanziamento_id);
+      return fin && fin.stato === 'attivo';
+    })
+    .reduce((s, r) => s + Number(r.quota_interessi || 0), 0);
+
+  // ─── HTML ───
+  let html = '';
+
+  // KPI grid
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">';
+  html += '<div class="kpi"><div class="kpi-label">Rata mensile equivalente</div><div class="kpi-value" style="color:#26215C;font-size:18px">' + fmtE(rataMensTot) + '</div></div>';
+  if (chiusVicina) {
+    const istNome = (_bancheIstituti.find(i => i.id === chiusVicina.f.istituto_id) || {}).nome || '';
+    const meseAnno = new Date(chiusVicina.fine + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' });
+    html += '<div class="kpi"><div class="kpi-label">Chiusura più vicina</div><div class="kpi-value" style="font-size:14px;color:#27500A">' + esc(istNome) + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + esc(chiusVicina.f.descrizione) + ' · ' + meseAnno + '</div></div>';
+  } else {
+    html += '<div class="kpi"><div class="kpi-label">Chiusura più vicina</div><div class="kpi-value" style="color:var(--text-hint)">—</div></div>';
+  }
+  if (chiusLontana && chiusLontana !== chiusVicina) {
+    const istNome = (_bancheIstituti.find(i => i.id === chiusLontana.f.istituto_id) || {}).nome || '';
+    const meseAnno = new Date(chiusLontana.fine + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' });
+    html += '<div class="kpi"><div class="kpi-label">Chiusura più lontana</div><div class="kpi-value" style="font-size:14px;color:#A32D2D">' + esc(istNome) + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + esc(chiusLontana.f.descrizione) + ' · ' + meseAnno + '</div></div>';
+  } else {
+    html += '<div class="kpi"><div class="kpi-label">Chiusura più lontana</div><div class="kpi-value" style="color:var(--text-hint)">—</div></div>';
+  }
+  html += '<div class="kpi"><div class="kpi-label">Interessi residui da pagare</div><div class="kpi-value" style="color:#633806;font-size:18px">' + fmtE(intResidui) + '</div></div>';
+  html += '</div>';
+
+  // Toolbar (toggle vista + filtro + PDF)
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
+  html += '<div style="display:flex;gap:6px;align-items:center">';
+  html += '<button onclick="_gantSwitchVista(false)" class="' + (!_gantVistaMesi ? 'btn-primary' : '') + '" style="font-size:12px;padding:7px 12px;' + (!_gantVistaMesi ? '' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;cursor:pointer') + '">📅 Anni</button>';
+  html += '<button onclick="_gantSwitchVista(true)" class="' + (_gantVistaMesi ? 'btn-primary' : '') + '" style="font-size:12px;padding:7px 12px;' + (_gantVistaMesi ? '' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;cursor:pointer') + '">🗓 Mesi</button>';
+  html += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:14px">';
+  html += '<input type="checkbox" ' + (_gantSoloAttivi ? 'checked' : '') + ' onchange="_gantToggleAttivi(this.checked)"> Solo attivi';
+  html += '</label>';
+  html += '</div>';
+  html += '<button onclick="stampaTimeline()" style="background:#1a1a18;color:#FAC775;border:0;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer">📄 PDF Timeline</button>';
+  html += '</div>';
+
+  // Gantt
+  html += _renderGanttBars(finanziamenti, annoMin, annoMax, oggi);
+
+  cont.innerHTML = html;
+}
+
+function _renderGanttBars(finanziamenti, annoMin, annoMax, oggi) {
+  const oggiStr = oggi.toISOString().split('T')[0];
+  const totUnita = _gantVistaMesi ? (annoMax - annoMin + 1) * 12 : (annoMax - annoMin + 1);
+  const labelLeftWidth = 220; // colonna sinistra finalità
+  const unitWidth = _gantVistaMesi ? 32 : 80; // larghezza per mese / per anno
+  const ganttWidth = totUnita * unitWidth;
+
+  // Posizione "OGGI" in pixel
+  let oggiX = 0;
+  if (_gantVistaMesi) {
+    const monthsFromStart = (oggi.getFullYear() - annoMin) * 12 + oggi.getMonth() + (oggi.getDate() / 30);
+    oggiX = monthsFromStart * unitWidth;
+  } else {
+    const yearsFromStart = (oggi.getFullYear() - annoMin) + (oggi.getMonth() / 12);
+    oggiX = yearsFromStart * unitWidth;
+  }
+
+  let html = '';
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;overflow:hidden">';
+  html += '<div style="overflow-x:auto;position:relative">';
+
+  // Header asse temporale
+  html += '<div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:2">';
+  html += '<div style="min-width:' + labelLeftWidth + 'px;width:' + labelLeftWidth + 'px;padding:8px 10px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;border-right:1px solid var(--border);background:var(--bg);position:sticky;left:0;z-index:1">Finanziamento</div>';
+  html += '<div style="display:flex;flex:1;min-width:' + ganttWidth + 'px">';
+  for (let y = annoMin; y <= annoMax; y++) {
+    if (_gantVistaMesi) {
+      // 12 slot mensili sotto un'etichetta anno
+      html += '<div style="width:' + (12 * unitWidth) + 'px;border-right:1px solid var(--border)">';
+      html += '<div style="text-align:center;font-size:11px;font-weight:600;padding:4px 0;border-bottom:0.5px solid var(--border);background:var(--bg)">' + y + '</div>';
+      html += '<div style="display:flex">';
+      ['G','F','M','A','M','G','L','A','S','O','N','D'].forEach(m => {
+        html += '<div style="width:' + unitWidth + 'px;text-align:center;font-size:9px;color:var(--text-hint);padding:2px 0;border-right:0.5px solid #f0f0ee">' + m + '</div>';
+      });
+      html += '</div>';
+      html += '</div>';
+    } else {
+      html += '<div style="width:' + unitWidth + 'px;text-align:center;font-size:11px;font-weight:600;padding:6px 0;border-right:1px solid var(--border)">' + y + '</div>';
+    }
+  }
+  html += '</div>';
+  html += '</div>';
+
+  // Body righe finanziamenti
+  html += '<div style="position:relative">';
+
+  // Linea OGGI
+  html += '<div style="position:absolute;left:' + (labelLeftWidth + oggiX) + 'px;top:0;bottom:0;width:2px;background:#D85A30;z-index:1;pointer-events:none">';
+  html += '<div style="position:absolute;top:-1px;left:-22px;background:#D85A30;color:#fff;font-size:9px;padding:2px 6px;border-radius:3px;font-weight:600;white-space:nowrap">OGGI</div>';
+  html += '</div>';
+
+  finanziamenti.forEach(f => {
+    const dataInizio = f.data_erogazione;
+    const dataFine = _calcDataFine(f);
+    if (!dataInizio || !dataFine) return;
+
+    // Posizioni in pixel
+    const startX = _calcXFromDate(dataInizio, annoMin);
+    const endX = _calcXFromDate(dataFine, annoMin);
+    const oggiClampX = Math.max(startX, Math.min(endX, oggiX));
+    const widthPagato = oggiClampX - startX;
+    const widthResiduo = endX - oggiClampX;
+
+    const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
+    const isEstinto = f.stato === 'estinto';
+    const colorePieno = isEstinto ? '#999' : _coloreFinanziamento(f);
+    const coloreOpaco = isEstinto ? '#ccc' : _coloreFinanziamento(f) + '50'; // 50 = alpha
+
+    html += '<div style="display:flex;border-bottom:0.5px solid var(--border);min-height:42px;align-items:center;' + (isEstinto ? 'opacity:0.55' : '') + '">';
+    // Label sinistra
+    html += '<div style="min-width:' + labelLeftWidth + 'px;width:' + labelLeftWidth + 'px;padding:8px 10px;border-right:1px solid var(--border);background:var(--bg-card);position:sticky;left:0;z-index:1">';
+    html += '<div style="font-size:11px;font-weight:600">' + esc(f.descrizione) + '</div>';
+    html += '<div style="font-size:9px;color:var(--text-muted)">' + esc(istNome) + '</div>';
+    html += '</div>';
+    // Area gantt
+    html += '<div style="flex:1;min-width:' + ganttWidth + 'px;height:42px;position:relative">';
+    // Barra pagato (opaca)
+    if (widthPagato > 0) {
+      html += '<div title="Pagato: dal ' + fmtD(dataInizio) + '" style="position:absolute;left:' + startX + 'px;top:11px;width:' + widthPagato + 'px;height:20px;background:' + coloreOpaco + ';border-radius:3px"></div>';
+    }
+    // Barra residuo (piena)
+    if (widthResiduo > 0) {
+      html += '<div title="Residuo: fino al ' + fmtD(dataFine) + '" style="position:absolute;left:' + oggiClampX + 'px;top:11px;width:' + widthResiduo + 'px;height:20px;background:' + colorePieno + ';border-radius:3px;display:flex;align-items:center;padding:0 6px;color:#fff;font-size:10px;font-weight:600;overflow:hidden;white-space:nowrap">';
+      // Mostra rata se c'è spazio
+      if (widthResiduo > 80) {
+        html += fmtE(Number(f.rata || 0)) + ' / ' + (f.frequenza || '').substring(0, 3);
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    html += '</div>';
+  });
+
+  html += '</div>'; // fine relative wrapper
+  html += '</div>'; // fine overflow-x
+  html += '</div>'; // fine card
+
+  // Legenda
+  html += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint);display:flex;gap:14px;flex-wrap:wrap">';
+  html += '<div><span style="display:inline-block;width:14px;height:8px;background:#26215C50;vertical-align:middle;border-radius:2px"></span> Pagato</div>';
+  html += '<div><span style="display:inline-block;width:14px;height:8px;background:#26215C;vertical-align:middle;border-radius:2px"></span> Residuo da pagare</div>';
+  html += '<div><span style="display:inline-block;width:2px;height:10px;background:#D85A30;vertical-align:middle"></span> Oggi</div>';
+  html += '</div>';
+
+  return html;
+}
+
+function _calcXFromDate(dateStr, annoMin) {
+  const unitWidth = _gantVistaMesi ? 32 : 80;
+  const d = new Date(dateStr + 'T12:00:00');
+  if (_gantVistaMesi) {
+    const monthsFromStart = (d.getFullYear() - annoMin) * 12 + d.getMonth() + (d.getDate() / 30);
+    return monthsFromStart * unitWidth;
+  } else {
+    const yearsFromStart = (d.getFullYear() - annoMin) + (d.getMonth() / 12);
+    return yearsFromStart * unitWidth;
+  }
+}
+
+function _coloreFinanziamento(f) {
+  // Colore deterministico basato su id (così le barre sono sempre uguali)
+  const colori = ['#26215C', '#27500A', '#0C447C', '#791F1F', '#633806', '#A32D2D'];
+  if (!f.id) return colori[0];
+  let h = 0;
+  for (let i = 0; i < f.id.length; i++) h = (h * 31 + f.id.charCodeAt(i)) | 0;
+  return colori[Math.abs(h) % colori.length];
+}
+
+function _gantSwitchVista(mesi) {
+  _gantVistaMesi = !!mesi;
+  renderBancheTimeline();
+}
+
+function _gantToggleAttivi(checked) {
+  _gantSoloAttivi = !!checked;
+  renderBancheTimeline();
+}
+
+function stampaTimeline() {
+  const cont = document.getElementById('banche-panel-timeline');
+  if (!cont) return;
+  const dataFmt = new Date().toLocaleDateString('it-IT');
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+  w.document.write('<!DOCTYPE html><html><head><title>Timeline finanziamenti — Phoenix Fuel</title>');
+  w.document.write('<style>');
+  w.document.write('body{font-family:Arial,sans-serif;padding:15px;color:#222}');
+  w.document.write('h1{font-size:16px;color:#26215C;margin:0 0 6px}');
+  w.document.write('.meta{font-size:10px;color:#666;margin-bottom:14px}');
+  w.document.write('.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}');
+  w.document.write('.kpi-row > div{padding:8px 12px;border:1px solid #ccc;border-radius:6px;background:#fafafa}');
+  w.document.write('.kpi-row .kpi-label{font-size:9px;color:#666;text-transform:uppercase}');
+  w.document.write('.kpi-row .kpi-value{font-size:13px;font-weight:bold;margin-top:2px}');
+  w.document.write('@page{size:A3 landscape;margin:8mm}');
+  w.document.write('@media print { body { padding:0 } }');
+  w.document.write('</style></head><body>');
+  w.document.write('<h1>📊 Timeline finanziamenti — Phoenix Fuel S.r.l.</h1>');
+  w.document.write('<div class="meta">Generato il ' + dataFmt + ' · Vista ' + (_gantVistaMesi ? 'mensile' : 'annuale') + '</div>');
+  // Estraggo KPI e gantt dal DOM corrente
+  const kpiHtml = cont.querySelector('div[style*="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"]');
+  if (kpiHtml) w.document.write(kpiHtml.outerHTML);
+  // Gantt
+  const ganttContainers = cont.querySelectorAll('div[style*="background:var(--bg-card)"]');
+  ganttContainers.forEach(g => w.document.write(g.outerHTML));
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(() => w.print(), 400);
 }
