@@ -1614,7 +1614,94 @@ async function renderBancheTimeline() {
   // Gantt
   html += _renderGanttBars(finanziamenti, annoMin, annoMax, oggi);
 
+  // Pannello stato finanziamenti (% rimborsata) sotto il Gantt
+  html += _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr);
+
   cont.innerHTML = html;
+}
+
+// ═══ PANNELLO STATO FINANZIAMENTI % RIMBORSATA ═════════════════════════════
+// Per ogni finanziamento attivo: barra di progresso + accordato/pagato/residuo
+// (totali includono interessi: somma di tutte le rate del piano)
+function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
+  // Filtra solo attivi
+  const attivi = finanziamenti.filter(f => f.stato === 'attivo');
+  if (!attivi.length) return '';
+
+  let html = '';
+  html += '<div style="margin-top:18px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:16px">';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)">Stato finanziamenti — % rimborsata su accordato (capitale + interessi)</div>';
+  html += '<div style="display:grid;gap:14px">';
+
+  // Calcoli totali
+  let totAccordato = 0, totPagato = 0;
+
+  attivi.forEach(f => {
+    // Tutte le rate del finanziamento
+    const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
+    if (!rateFin.length) return;
+
+    // Accordato totale = somma di tutte le rate (capitale + interessi)
+    const accordato = rateFin.reduce((s, r) => s + Number(r.rata || 0), 0);
+    // Pagato = somma rate con scadenza <= oggi
+    const pagato = rateFin
+      .filter(r => r.data_scadenza <= oggiStr)
+      .reduce((s, r) => s + Number(r.rata || 0), 0);
+    const residuo = accordato - pagato;
+    const pct = accordato > 0 ? (pagato / accordato * 100) : 0;
+    const colore = _coloreFinanziamento(f);
+    const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
+    const dataFine = _calcDataFine(f);
+    const fineFmt = dataFine
+      ? new Date(dataFine + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })
+      : '—';
+
+    totAccordato += accordato;
+    totPagato += pagato;
+
+    html += '<div>';
+    // Riga superiore: descrizione + % rimborsata
+    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
+    html += '<div>';
+    html += '<span style="font-size:13px;font-weight:500;color:var(--text)">' + esc(f.descrizione) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text-muted);margin-left:8px">' + esc(istNome) + ' · fine ' + fineFmt + '</span>';
+    html += '</div>';
+    html += '<span style="font-size:13px;font-weight:600;color:' + colore + ';font-family:var(--font-mono)">' + pct.toFixed(0) + '%</span>';
+    html += '</div>';
+    // Barra progresso
+    html += '<div style="background:var(--bg);border-radius:6px;height:18px;overflow:hidden">';
+    html += '<div style="width:' + Math.min(pct, 100) + '%;height:100%;background:' + colore + ';transition:width 0.4s"></div>';
+    html += '</div>';
+    // Riga inferiore: 3 cifre
+    html += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:5px;font-family:var(--font-mono)">';
+    html += '<span>Accordato ' + fmtE(accordato) + '</span>';
+    html += '<span>Pagato ' + fmtE(pagato) + '</span>';
+    html += '<span>Residuo ' + fmtE(residuo) + '</span>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  html += '</div>'; // fine grid
+
+  // Riga TOTALE in fondo
+  const pctTot = totAccordato > 0 ? (totPagato / totAccordato * 100) : 0;
+  html += '<div style="margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border)">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
+  html += '<span style="font-size:13px;font-weight:600;color:var(--text)">TOTALE</span>';
+  html += '<span style="font-size:14px;font-weight:600;color:var(--text);font-family:var(--font-mono)">' + pctTot.toFixed(0) + '%</span>';
+  html += '</div>';
+  html += '<div style="background:var(--bg);border-radius:6px;height:22px;overflow:hidden">';
+  html += '<div style="width:' + Math.min(pctTot, 100) + '%;height:100%;background:#1a1a18;transition:width 0.4s"></div>';
+  html += '</div>';
+  html += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:5px;font-family:var(--font-mono)">';
+  html += '<span>Accordato ' + fmtE(totAccordato) + '</span>';
+  html += '<span>Pagato ' + fmtE(totPagato) + '</span>';
+  html += '<span>Residuo ' + fmtE(totAccordato - totPagato) + '</span>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '</div>'; // fine card
+  return html;
 }
 
 function _renderGanttBars(finanziamenti, annoMin, annoMax, oggi) {
@@ -1685,6 +1772,19 @@ function _renderGanttBars(finanziamenti, annoMin, annoMax, oggi) {
     const colorePieno = isEstinto ? '#999' : _coloreFinanziamento(f);
     const coloreOpaco = isEstinto ? '#ccc' : _coloreFinanziamento(f) + '50'; // 50 = alpha
 
+    // Calcolo residuo capitale "oggi" dalle rate
+    const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
+    let residuoOggi = Number(f.capitale || 0);
+    if (rateFin.length) {
+      // Prendo la rata più recente già scaduta (pagata) → suo residuo_capitale è il debito a oggi
+      const pagate = rateFin.filter(r => r.data_scadenza <= oggiStr);
+      if (pagate.length) {
+        residuoOggi = Number(pagate[pagate.length - 1].residuo_capitale || 0);
+      }
+      // Se nessuna pagata ancora (futuro), residuo = capitale iniziale
+    }
+    if (isEstinto) residuoOggi = 0;
+
     html += '<div style="display:flex;border-bottom:0.5px solid var(--border);min-height:42px;align-items:center;' + (isEstinto ? 'opacity:0.55' : '') + '">';
     // Label sinistra
     html += '<div style="min-width:' + labelLeftWidth + 'px;width:' + labelLeftWidth + 'px;padding:8px 10px;border-right:1px solid var(--border);background:var(--bg-card);position:sticky;left:0;z-index:1">';
@@ -1700,9 +1800,9 @@ function _renderGanttBars(finanziamenti, annoMin, annoMax, oggi) {
     // Barra residuo (piena)
     if (widthResiduo > 0) {
       html += '<div title="Residuo: fino al ' + fmtD(dataFine) + '" style="position:absolute;left:' + oggiClampX + 'px;top:11px;width:' + widthResiduo + 'px;height:20px;background:' + colorePieno + ';border-radius:3px;display:flex;align-items:center;padding:0 6px;color:#fff;font-size:10px;font-weight:600;overflow:hidden;white-space:nowrap">';
-      // Mostra rata se c'è spazio
+      // Mostra residuo se c'è spazio
       if (widthResiduo > 80) {
-        html += fmtE(Number(f.rata || 0)) + ' / ' + (f.frequenza || '').substring(0, 3);
+        html += 'Residuo ' + fmtE(residuoOggi);
       }
       html += '</div>';
     }
