@@ -1167,22 +1167,28 @@ async function renderBanchePianoAnnuale() {
   html += _renderMatrice('📊 RESIDUO CAPITALE AL 31/12 (debito residuo da pagare)', finSortati, anni, residui, true);
 
   // ─── RIGA RIEPILOGO % RIMBORSATA ───
-  // Calcolo: totale accordato (capitale originario di tutti i finanziamenti mostrati)
-  //          vs residuo all'ultimo anno selezionato
+  // Calcolo: totale accordato (capitale originario) vs residuo capitale A OGGI
+  // (somma dei residui_capitale dell'ultima rata pagata di ogni finanziamento)
+  const oggiStr = new Date().toISOString().split('T')[0];
+  const oggiFmt = new Date().toLocaleDateString('it-IT');
   const totaleAccordato = finSortati.reduce((s, f) => s + Number(f.capitale || 0), 0);
-  const annoUlt = anni[anni.length - 1];
-  const residuoFinale = finSortati.reduce((s, f) => {
-    const dato = (residui[f.id] || {})[annoUlt];
-    return s + (dato && dato.val !== undefined ? dato.val : 0);
+  const residuoOggi = finSortati.reduce((s, f) => {
+    if (f.stato === 'estinto') return s;
+    const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
+    if (!rateFin.length) return s + Number(f.capitale || 0); // nessuna rata = ancora tutto da pagare
+    const pagate = rateFin.filter(r => r.data_scadenza <= oggiStr);
+    if (!pagate.length) return s + Number(f.capitale || 0); // nessuna scaduta = capitale pieno
+    // Residuo dell'ultima rata pagata
+    return s + Number(pagate[pagate.length - 1].residuo_capitale || 0);
   }, 0);
-  const rimborsato = totaleAccordato - residuoFinale;
+  const rimborsato = totaleAccordato - residuoOggi;
   const pctRimborsato = totaleAccordato > 0 ? (rimborsato / totaleAccordato * 100) : 0;
 
   html += '<div style="margin-top:14px;padding:14px 18px;background:linear-gradient(135deg,#26215C 0%,#3a3478 100%);color:#fff;border-radius:10px">';
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;align-items:center">';
   html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Totale accordato originario</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px">' + fmtE(totaleAccordato) + '</div></div>';
-  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Residuo al 31/12/' + annoUlt + '</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#FAEEDA">' + fmtE(residuoFinale) + '</div></div>';
-  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Rimborsato</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#EAF3DE">' + fmtE(rimborsato) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Residuo capitale al ' + oggiFmt + '</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#FAEEDA">' + fmtE(residuoOggi) + '</div></div>';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">Capitale rimborsato</div><div style="font-size:16px;font-weight:600;font-family:var(--font-mono);margin-top:3px;color:#EAF3DE">' + fmtE(rimborsato) + '</div></div>';
   html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75">% Rimborsata</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:1px;color:#EAF3DE">' + pctRimborsato.toFixed(1) + '%</div></div>';
   html += '</div>';
   // Barra di progresso
