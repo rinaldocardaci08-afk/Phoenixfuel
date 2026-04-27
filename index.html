@@ -1200,6 +1200,74 @@
 
       </div>
 
+      <!-- ═══════════════ BANCHE & MUTUI ═══════════════ -->
+      <div class="section" id="s-banche">
+
+        <!-- Tab header -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="btn-primary banche-tab active" data-tab="banche-panel-istituti"
+            onclick="switchBancheTab(this)" style="font-size:12px;padding:8px 14px">
+            🏦 Istituti
+          </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-affidamenti"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            💰 Affidamenti
+          </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-finanziamenti"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            🏛 Finanziamenti
+          </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-anticipi"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            📄 Anticipo Fatture
+          </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-piano"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            📉 Piano annuale
+          </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-timeline"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            📊 Timeline
+          </button>
+        </div>
+
+        <!-- Pannello: Istituti -->
+        <div id="banche-panel-istituti" class="banche-panel" style="display:block">
+          <div id="content-banche-istituti"></div>
+        </div>
+
+        <!-- Pannello: Affidamenti (placeholder) -->
+        <div id="banche-panel-affidamenti" class="banche-panel" style="display:none">
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+        <!-- Pannello: Finanziamenti (placeholder) -->
+        <div id="banche-panel-finanziamenti" class="banche-panel" style="display:none">
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+        <!-- Pannello: Anticipo Fatture (placeholder) -->
+        <div id="banche-panel-anticipi" class="banche-panel" style="display:none">
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+        <!-- Pannello: Piano annuale (placeholder) -->
+        <div id="banche-panel-piano" class="banche-panel" style="display:none">
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+        <!-- Pannello: Timeline (placeholder) -->
+        <div id="banche-panel-timeline" class="banche-panel" style="display:none">
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+      </div>
+
       <!-- BENCHMARK MERCATO -->
       <div class="section" id="s-benchmark">
 
@@ -2587,6 +2655,18 @@
           <div id="snapshot-lista" style="margin-top:14px"></div>
         </div>
 
+        <!-- SANATORIA ORDINI (solo admin) -->
+        <div class="card" style="margin-top:16px;border-left:3px solid #6B5FCC">
+          <div class="card-title">🔗 Sanatoria ordini — associa cliente_id mancanti</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+            Trova ordini con <code>cliente_id=NULL</code> (tipicamente import storici da Access) e li
+            collega al cliente corretto in anagrafica con match per nome (prefisso). Lanciare ogni volta
+            dopo un import massivo, o quando le fatture compaiono come <em>uncertain</em> con score "X PIVA".
+          </div>
+          <button class="btn-primary" style="background:#6B5FCC" onclick="associaClienteIdMancanti()">🔗 Associa cliente_id mancanti</button>
+          <div id="sanatoria-cliente-output" style="margin-top:12px;font-size:12px"></div>
+        </div>
+
       </div>
 
       <!-- BACHECA AVVISI -->
@@ -2750,8 +2830,9 @@
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-allegati.js?v=20260416d"></script>
-<script src="pf-fatture.js?v=20260427a"></script>
-<script src="pf-fatture-import.js?v=20260426i"></script>
+<script src="pf-fatture.js?v=20260423j"></script>
+<script src="pf-fatture-import.js?v=20260422c"></script>
+<script src="pf-banche.js?v=20260427a"></script>
 <script src="pf-dep-giacenze.js?v=20260419i"></script>
 <script src="pf-dep-giac-week.js?v=20260420a"></script>
 <script src="pf-system.js?v=20260417a"></script>
