@@ -1214,6 +1214,11 @@
             style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
             💰 Affidamenti
           </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-situazione"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            📅 Situazione
+          </button>
           <button class="btn-primary banche-tab" data-tab="banche-panel-anticipi"
             onclick="switchBancheTab(this)"
             style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
@@ -1244,6 +1249,11 @@
         <!-- Pannello: Affidamenti (placeholder) -->
         <div id="banche-panel-affidamenti" class="banche-panel" style="display:none">
           <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+        <!-- Pannello: Situazione (saldi giornalieri editabili + navigazione date) -->
+        <div id="banche-panel-situazione" class="banche-panel" style="display:none">
+          <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ Caricamento situazione...</div>
         </div>
 
         <!-- Pannello: Anticipo Fatture (placeholder) -->
