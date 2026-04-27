@@ -368,57 +368,57 @@ async function renderBancheFinanziamenti() {
     return f.stato === _finFiltroStato;
   });
 
-  // ─── KPI (calcolati su attivi, indipendenti dal filtro) ───
+  // Calcoli su attivi (per KPI e grafici)
   const attivi = _bancheFinanziamenti.filter(f => f.stato === 'attivo');
   const nAttivi = attivi.length;
   const capitaleOrig = attivi.reduce((s, f) => s + Number(f.capitale || 0), 0);
   const residuoTot = attivi.reduce((s, f) => s + _calcResiduoOggi(f), 0);
   const rataMensileEquiv = attivi.reduce((s, f) => s + _calcRataMensileEquivalente(f), 0);
 
-  let html = '';
+  // Registro pannelli (default order: KPI → Tabella → Donut → Bars)
+  _registerPanels('finanziamenti', ['kpi', 'tabella', 'donut', 'bars'], renderBancheFinanziamenti);
 
-  // KPI grid
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px">';
-  html += '<div class="kpi"><div class="kpi-label">Attivi</div><div class="kpi-value">' + nAttivi + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Capitale originario</div><div class="kpi-value" style="color:#26215C">' + fmtE(capitaleOrig) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Residuo da pagare</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(residuoTot) + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Rata mensile equivalente</div><div class="kpi-value" style="color:#633806">' + fmtE(rataMensileEquiv) + '</div></div>';
-  html += '</div>';
+  // ─── BUILD PANEL HTMLs ─────────────────────────────────────────────────
 
-  // ─── Grafici: donut esposizione per banca + barre pagato/residuo ───
-  if (attivi.length > 0) {
-    html += _renderGraficiFinanziamenti(attivi);
-  }
+  // PANEL KPI
+  let kpiHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;padding-right:60px">';
+  kpiHtml += '<div class="kpi"><div class="kpi-label">Attivi</div><div class="kpi-value">' + nAttivi + '</div></div>';
+  kpiHtml += '<div class="kpi"><div class="kpi-label">Capitale originario</div><div class="kpi-value" style="color:#26215C">' + fmtE(capitaleOrig) + '</div></div>';
+  kpiHtml += '<div class="kpi"><div class="kpi-label">Residuo da pagare</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(residuoTot) + '</div></div>';
+  kpiHtml += '<div class="kpi"><div class="kpi-label">Rata mensile equivalente</div><div class="kpi-value" style="color:#633806">' + fmtE(rataMensileEquiv) + '</div></div>';
+  kpiHtml += '</div>';
 
-  // ─── Header con filtro + bottone nuovo ───
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
-  html += '<div style="display:flex;gap:8px;align-items:center">';
-  html += '<label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
-  html += '<select id="fin-filtro-stato" onchange="_aggiornaFiltroFinanziamenti(this.value)" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">';
-  html += '<option value="attivo" ' + (_finFiltroStato === 'attivo' ? 'selected' : '') + '>Attivi</option>';
-  html += '<option value="estinto" ' + (_finFiltroStato === 'estinto' ? 'selected' : '') + '>Estinti</option>';
-  html += '<option value="tutti" ' + (_finFiltroStato === 'tutti' ? 'selected' : '') + '>Tutti</option>';
-  html += '</select>';
-  html += '<span style="font-size:11px;color:var(--text-muted)">' + filtrati.length + ' finanziamento/i</span>';
-  html += '</div>';
+  // PANEL TABELLA (filter header + table + bottone PDF)
+  let tabellaHtml = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
+  tabellaHtml += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
+  tabellaHtml += '<div style="display:flex;gap:8px;align-items:center">';
+  tabellaHtml += '<label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
+  tabellaHtml += '<select id="fin-filtro-stato" onchange="_aggiornaFiltroFinanziamenti(this.value)" onwheel="this.blur()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">';
+  tabellaHtml += '<option value="attivo" ' + (_finFiltroStato === 'attivo' ? 'selected' : '') + '>Attivi</option>';
+  tabellaHtml += '<option value="estinto" ' + (_finFiltroStato === 'estinto' ? 'selected' : '') + '>Estinti</option>';
+  tabellaHtml += '<option value="tutti" ' + (_finFiltroStato === 'tutti' ? 'selected' : '') + '>Tutti</option>';
+  tabellaHtml += '</select>';
+  tabellaHtml += '<span style="font-size:11px;color:var(--text-muted)">' + filtrati.length + ' finanziamento/i</span>';
+  tabellaHtml += '</div>';
+  tabellaHtml += '<div style="display:flex;gap:6px">';
+  tabellaHtml += '<button onclick="stampaFinanziamentiPDF()" style="background:#1a1a18;color:#FAC775;border:0;border-radius:6px;padding:7px 12px;font-size:12px;cursor:pointer">📄 PDF</button>';
   if (_isAdminBanche()) {
-    html += '<button class="btn-primary" onclick="apriModalFinanziamento()" style="font-size:12px;padding:7px 14px">+ Nuovo finanziamento</button>';
+    tabellaHtml += '<button class="btn-primary" onclick="apriModalFinanziamento()" style="font-size:12px;padding:7px 14px">+ Nuovo finanziamento</button>';
   }
-  html += '</div>';
+  tabellaHtml += '</div>';
+  tabellaHtml += '</div>';
 
-  // ─── Tabella ───
   if (!filtrati.length) {
-    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun finanziamento da mostrare</div>';
+    tabellaHtml += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun finanziamento da mostrare</div>';
   } else {
-    html += '<div style="overflow-x:auto;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px">';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-    html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
+    tabellaHtml += '<div style="overflow-x:auto;background:var(--bg);border:0.5px solid var(--border);border-radius:10px">';
+    tabellaHtml += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    tabellaHtml += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
     ['Banca','Finalità','Tipo','Categoria','Erogazione','Capitale','Residuo','Rata','Frequenza','Fine','Stato',''].forEach(h => {
-      html += '<th style="text-align:left;padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">' + h + '</th>';
+      tabellaHtml += '<th style="text-align:left;padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">' + h + '</th>';
     });
-    html += '</tr></thead><tbody>';
+    tabellaHtml += '</tr></thead><tbody>';
 
-    // Sort: attivi prima, poi data erogazione recente prima
     const sortati = filtrati.slice().sort((a, b) => {
       if (a.stato !== b.stato) return a.stato === 'attivo' ? -1 : 1;
       return (b.data_erogazione || '').localeCompare(a.data_erogazione || '');
@@ -428,43 +428,64 @@ async function renderBancheFinanziamenti() {
       const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
       const dataFine = _calcDataFine(f);
       const residuo = _calcResiduoOggi(f);
-      // Rata: usa f.rata se presente, altrimenti calcola dal piano (rata mensile equivalente)
       let rataVal = f.rata ? Number(f.rata) : 0;
       if (!rataVal) {
         const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
         if (rateFin.length) {
-          // Prendo la rata media del piano (escluso eventuale preammortamento se diverso)
           const rate = rateFin.map(r => Number(r.rata || 0)).filter(r => r > 0);
           if (rate.length) rataVal = rate.reduce((s, r) => s + r, 0) / rate.length;
         }
-        if (!rataVal) rataVal = _stimaRataMensile(f); // fallback formula francese
+        if (!rataVal) rataVal = _stimaRataMensile(f);
       }
       const rataFmt = rataVal > 0 ? fmtE(rataVal) : '—';
 
-      html += '<tr style="border-bottom:0.5px solid var(--border);' + (f.stato === 'estinto' ? 'opacity:0.55' : '') + '">';
-      html += '<td style="padding:8px;font-weight:500">' + esc(istNome) + '</td>';
-      html += '<td style="padding:8px">' + esc(f.descrizione || '—') + (f.numero_contratto ? '<div style="font-size:10px;color:var(--text-hint);font-family:var(--font-mono)">' + esc(f.numero_contratto) + '</div>' : '') + '</td>';
-      html += '<td style="padding:8px">' + _badgeTipologia(f.tipologia) + '</td>';
-      html += '<td style="padding:8px;font-size:11px">' + (f.categoria ? _badgeCategoria(f.categoria) : '<span style="color:var(--text-hint)">—</span>') + '</td>';
-      html += '<td style="padding:8px;font-size:11px">' + fmtD(f.data_erogazione) + '</td>';
-      html += '<td style="padding:8px;font-family:var(--font-mono);font-weight:500;text-align:right">' + fmtE(Number(f.capitale)) + '</td>';
-      html += '<td style="padding:8px;font-family:var(--font-mono);font-weight:500;text-align:right;color:' + (residuo > 0 ? '#A32D2D' : '#639922') + '">' + fmtE(residuo) + '</td>';
-      html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right">' + rataFmt + '</td>';
-      html += '<td style="padding:8px;font-size:11px">' + _badgeFrequenza(f.frequenza) + '</td>';
-      html += '<td style="padding:8px;font-size:11px">' + (dataFine ? fmtD(dataFine) : '—') + '</td>';
-      html += '<td style="padding:8px">' + _badgeStato(f.stato) + '</td>';
-      html += '<td style="padding:8px;text-align:right;white-space:nowrap">';
-      html += '<button onclick="apriPianoFinanziamento(\'' + f.id + '\')" title="Vedi piano di ammortamento" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">📋</button>';
+      tabellaHtml += '<tr style="border-bottom:0.5px solid var(--border);' + (f.stato === 'estinto' ? 'opacity:0.55' : '') + '">';
+      tabellaHtml += '<td style="padding:8px;font-weight:500">' + esc(istNome) + '</td>';
+      tabellaHtml += '<td style="padding:8px">' + esc(f.descrizione || '—') + (f.numero_contratto ? '<div style="font-size:10px;color:var(--text-hint);font-family:var(--font-mono)">' + esc(f.numero_contratto) + '</div>' : '') + '</td>';
+      tabellaHtml += '<td style="padding:8px">' + _badgeTipologia(f.tipologia) + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-size:11px">' + (f.categoria ? _badgeCategoria(f.categoria) : '<span style="color:var(--text-hint)">—</span>') + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-size:11px">' + fmtD(f.data_erogazione) + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-family:var(--font-mono);font-weight:500;text-align:right">' + fmtE(Number(f.capitale)) + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-family:var(--font-mono);font-weight:500;text-align:right;color:' + (residuo > 0 ? '#A32D2D' : '#639922') + '">' + fmtE(residuo) + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-family:var(--font-mono);text-align:right">' + rataFmt + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-size:11px">' + _badgeFrequenza(f.frequenza) + '</td>';
+      tabellaHtml += '<td style="padding:8px;font-size:11px">' + (dataFine ? fmtD(dataFine) : '—') + '</td>';
+      tabellaHtml += '<td style="padding:8px">' + _badgeStato(f.stato) + '</td>';
+      tabellaHtml += '<td style="padding:8px;text-align:right;white-space:nowrap">';
+      tabellaHtml += '<button onclick="apriPianoFinanziamento(\'' + f.id + '\')" title="Vedi piano di ammortamento" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">📋</button>';
       if (_isAdminBanche()) {
-        html += ' <button onclick="apriModalFinanziamento(\'' + f.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
+        tabellaHtml += ' <button onclick="apriModalFinanziamento(\'' + f.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
       }
-      html += '</td>';
-      html += '</tr>';
+      tabellaHtml += '</td>';
+      tabellaHtml += '</tr>';
     });
 
-    html += '</tbody></table>';
-    html += '</div>';
+    tabellaHtml += '</tbody></table>';
+    tabellaHtml += '</div>';
   }
+  tabellaHtml += '</div>';
+
+  // PANEL DONUT (solo se ci sono attivi)
+  const donutHtml = nAttivi > 0 ? _renderPanelDonutBanche(attivi) : '';
+
+  // PANEL BARS (solo se ci sono attivi)
+  const barsHtml = nAttivi > 0 ? _renderPanelBarsFinanziamenti(attivi) : '';
+
+  // ─── ASSEMBLY: render in panel order ───
+  const panels = {
+    'kpi': kpiHtml,
+    'tabella': tabellaHtml,
+    'donut': donutHtml,
+    'bars': barsHtml
+  };
+  const order = _getPanelOrder('finanziamenti');
+
+  let html = '';
+  order.forEach(id => {
+    if (panels[id]) {
+      html += _wrapPanel('finanziamenti', id, panels[id]);
+    }
+  });
 
   cont.innerHTML = html;
 }
@@ -474,14 +495,322 @@ function _aggiornaFiltroFinanziamenti(val) {
   renderBancheFinanziamenti();
 }
 
-// ═══ HELPER FINANZIAMENTI ═════════════════════════════════════════════════
-// Donut esposizione per banca + barre pagato/residuo per ogni finanziamento
-function _renderGraficiFinanziamenti(finAttivi) {
+// ═══ STAMPA PDF FINANZIAMENTI (2 pagine: Capitale + Interessi) ═══════════
+async function stampaFinanziamentiPDF() {
+  const attivi = _bancheFinanziamenti.filter(f => f.stato === 'attivo');
+  if (!attivi.length) { toast('⚠ Nessun finanziamento attivo da stampare'); return; }
+
+  toast('⏳ Generazione PDF...');
+
+  // Carica rate complete (incluse quota_capitale e quota_interessi)
+  const { data: rateData } = await sb.from('banche_finanziamenti_rate')
+    .select('finanziamento_id, data_scadenza, rata, quota_capitale, quota_interessi, residuo_capitale')
+    .order('data_scadenza');
+  const rateAll = rateData || [];
+
+  const oggi = new Date().toISOString().split('T')[0];
+
+  // Aggregati per finanziamento
+  const dati = attivi.map(f => {
+    const rateFin = rateAll.filter(r => r.finanziamento_id === f.id);
+    const cap = Number(f.capitale || 0);
+    const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
+    let totRata = 0, totCap = 0, totInt = 0;
+    let pagRata = 0, pagCap = 0, pagInt = 0;
+    rateFin.forEach(r => {
+      const rt = Number(r.rata || 0);
+      const qc = Number(r.quota_capitale || 0);
+      const qi = Number(r.quota_interessi || 0);
+      totRata += rt; totCap += qc; totInt += qi;
+      if (r.data_scadenza <= oggi) {
+        pagRata += rt; pagCap += qc; pagInt += qi;
+      }
+    });
+    const resCap = Math.max(0, cap - pagCap);
+    const resInt = Math.max(0, totInt - pagInt);
+    const pctCap = cap > 0 ? (pagCap / cap * 100) : 0;
+    const pctInt = totInt > 0 ? (pagInt / totInt * 100) : 0;
+    const rataMedia = rateFin.length ? (totRata / rateFin.length) : 0;
+    return {
+      banca: istNome,
+      descrizione: f.descrizione || '—',
+      data_erogazione: f.data_erogazione,
+      tasso: Number(f.tasso || 0),
+      cap, pagCap, resCap, pctCap,
+      totInt, pagInt, resInt, pctInt,
+      rataMedia
+    };
+  });
+
+  // Sort per pct rimborsato decrescente (per le tabelle e barre)
+  const datiCap = dati.slice().sort((a, b) => b.pctCap - a.pctCap);
+  const datiInt = dati.slice().sort((a, b) => b.pctInt - a.pctInt);
+
+  // Totali
+  const tot = dati.reduce((s, d) => ({
+    cap: s.cap + d.cap,
+    pagCap: s.pagCap + d.pagCap,
+    resCap: s.resCap + d.resCap,
+    totInt: s.totInt + d.totInt,
+    pagInt: s.pagInt + d.pagInt,
+    resInt: s.resInt + d.resInt,
+    rataMediaSum: s.rataMediaSum + d.rataMedia
+  }), { cap: 0, pagCap: 0, resCap: 0, totInt: 0, pagInt: 0, resInt: 0, rataMediaSum: 0 });
+  const pctCapTot = tot.cap > 0 ? (tot.pagCap / tot.cap * 100) : 0;
+  const rataMediaPort = dati.length > 0 ? (tot.rataMediaSum / dati.length) : 0;
+
+  // Helpers PDF
+  const fmtEPdf = n => '€ ' + Math.round(n).toLocaleString('it-IT');
+  const escPdf = s => String(s || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  const fmtErog = ds => ds ? new Date(ds + 'T12:00:00').toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—';
+
+  // Apri finestra di stampa
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+  const dataFmt = new Date().toLocaleDateString('it-IT');
+
+  let h = '<!DOCTYPE html><html><head><title>Report Finanziamenti — Phoenix Fuel</title>';
+  h += '<style>';
+  h += '*{box-sizing:border-box}';
+  h += 'body{font-family:Arial,sans-serif;padding:0;margin:0;color:#1a1a18;font-size:10px}';
+  h += '.page{padding:18mm 14mm;page-break-after:always;min-height:265mm;position:relative}';
+  h += '.page:last-child{page-break-after:auto}';
+  h += '.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:1.5px solid #1a1a18;margin-bottom:14px}';
+  h += '.azienda{font-size:10px;color:#888}';
+  h += '.azienda small{font-size:8px;display:block;margin-top:2px}';
+  h += '.titolo{text-align:right;font-size:16px;font-weight:600}';
+  h += '.titolo small{display:block;font-size:10px;color:#888;font-weight:400;margin-top:2px}';
+  h += '.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}';
+  h += '.kpi{padding:8px 10px;border-radius:5px}';
+  h += '.kpi-label{font-size:7px;text-transform:uppercase;letter-spacing:0.4px}';
+  h += '.kpi-val{font-size:13px;font-weight:600;margin-top:2px;font-family:monospace}';
+  h += '.tag{display:inline-block;color:#fff;font-size:10px;font-weight:600;padding:3px 10px;border-radius:4px 4px 0 0;letter-spacing:0.4px}';
+  h += 'table{width:100%;border-collapse:collapse;font-size:9px;border:0.5px solid #ccc;margin-bottom:18px}';
+  h += 'th{background:#F1EFE8;padding:5px 6px;text-align:left;border-bottom:1px solid #888;font-size:8px;text-transform:uppercase;color:#5F5E5A;font-weight:600;letter-spacing:0.3px}';
+  h += 'th.r{text-align:right}';
+  h += 'td{padding:4px 6px;border-bottom:0.5px solid #e0e0e0;font-size:9px}';
+  h += 'td.r{text-align:right;font-family:monospace}';
+  h += 'tr.tot{background:#1a1a18;color:#fff;font-weight:600}';
+  h += 'tr.tot td{padding:6px}';
+  h += '.bar-row{margin-bottom:6px;page-break-inside:avoid}';
+  h += '.bar-label{display:flex;justify-content:space-between;font-size:9px;margin-bottom:2px}';
+  h += '.bar-label .v{font-family:monospace;color:#888}';
+  h += '.bar{display:flex;height:14px;border-radius:3px;overflow:hidden}';
+  h += '.bar-pag{display:flex;align-items:center;padding-left:5px;color:#fff;font-size:8px;font-family:monospace;white-space:nowrap}';
+  h += '.bar-res{display:flex;align-items:center;justify-content:flex-end;padding-right:5px;font-size:8px;font-family:monospace;white-space:nowrap}';
+  h += '.legend{display:flex;gap:10px;font-size:8px;color:#888}';
+  h += '.legend span{display:inline-flex;align-items:center;gap:4px}';
+  h += '.legend i{display:inline-block;width:8px;height:8px;border-radius:2px}';
+  h += '.bars-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}';
+  h += '.bars-title h3{font-size:11px;font-weight:600;margin:0}';
+  h += '.footer{position:absolute;bottom:12mm;left:14mm;right:14mm;padding-top:8px;border-top:0.5px solid #ccc;display:flex;justify-content:space-between;font-size:8px;color:#888}';
+  h += '@page{size:A4 portrait;margin:0}';
+  h += '@media print{body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}}';
+  h += '</style></head><body>';
+
+  // ─── PAGINA 1 — CAPITALE ───
+  h += '<div class="page">';
+  h += '<div class="header">';
+  h += '<div class="azienda">PHOENIX FUEL S.R.L.<small>Vibo Valentia · P.IVA 03371240793</small></div>';
+  h += '<div class="titolo">Report Finanziamenti — Capitale<small>Aggiornato al ' + dataFmt + '</small></div>';
+  h += '</div>';
+
+  h += '<div class="kpi-grid">';
+  h += '<div class="kpi" style="background:#F1EFE8"><div class="kpi-label" style="color:#5F5E5A">Attivi</div><div class="kpi-val">' + dati.length + '</div></div>';
+  h += '<div class="kpi" style="background:#EEEDFE"><div class="kpi-label" style="color:#26215C">Capitale orig.</div><div class="kpi-val" style="color:#26215C">' + fmtEPdf(tot.cap) + '</div></div>';
+  h += '<div class="kpi" style="background:#EAF3DE"><div class="kpi-label" style="color:#27500A">Pagato</div><div class="kpi-val" style="color:#27500A">' + fmtEPdf(tot.pagCap) + '</div></div>';
+  h += '<div class="kpi" style="background:#FCEBEB"><div class="kpi-label" style="color:#791F1F">Residuo</div><div class="kpi-val" style="color:#791F1F">' + fmtEPdf(tot.resCap) + '</div></div>';
+  h += '</div>';
+
+  h += '<div class="tag" style="background:#26215C">TABELLA · CAPITALE</div>';
+  h += '<table>';
+  h += '<thead><tr><th>Banca</th><th>Descrizione</th><th>Erog.</th><th class="r">Capitale</th><th class="r">Pagato</th><th class="r">Residuo</th><th class="r">% Pag.</th></tr></thead><tbody>';
+  datiCap.forEach(d => {
+    h += '<tr>';
+    h += '<td>' + escPdf(d.banca) + '</td>';
+    h += '<td>' + escPdf(d.descrizione) + '</td>';
+    h += '<td>' + fmtErog(d.data_erogazione) + '</td>';
+    h += '<td class="r">' + fmtEPdf(d.cap) + '</td>';
+    h += '<td class="r" style="color:#27500A">' + fmtEPdf(d.pagCap) + '</td>';
+    h += '<td class="r" style="color:#791F1F">' + fmtEPdf(d.resCap) + '</td>';
+    h += '<td class="r">' + d.pctCap.toFixed(0) + '%</td>';
+    h += '</tr>';
+  });
+  h += '<tr class="tot"><td colspan="3">TOTALI</td>';
+  h += '<td class="r">' + fmtEPdf(tot.cap) + '</td>';
+  h += '<td class="r" style="color:#C0DD97">' + fmtEPdf(tot.pagCap) + '</td>';
+  h += '<td class="r" style="color:#F09595">' + fmtEPdf(tot.resCap) + '</td>';
+  h += '<td class="r">' + pctCapTot.toFixed(0) + '%</td>';
+  h += '</tr></tbody></table>';
+
+  h += '<div class="bars-title">';
+  h += '<h3>Capitale rimborsato per finanziamento</h3>';
+  h += '<div class="legend"><span><i style="background:#1D9E75"></i>Pagato</span><span><i style="background:#F4C0D1"></i>Residuo</span></div>';
+  h += '</div>';
+  datiCap.forEach(d => {
+    const pct = Math.max(0, Math.min(100, d.pctCap));
+    const pctRes = 100 - pct;
+    h += '<div class="bar-row">';
+    h += '<div class="bar-label"><span>' + escPdf(d.descrizione) + '</span><span class="v">' + fmtEPdf(d.cap) + '</span></div>';
+    h += '<div class="bar">';
+    if (pct >= 8) {
+      h += '<div class="bar-pag" style="width:' + pct + '%;background:#1D9E75">' + fmtEPdf(d.pagCap) + ' · ' + pct.toFixed(0) + '%</div>';
+    } else if (pct > 0) {
+      h += '<div style="width:' + pct + '%;background:#1D9E75"></div>';
+    }
+    if (pctRes >= 8) {
+      h += '<div class="bar-res" style="width:' + pctRes + '%;background:#F4C0D1;color:#993556">' + fmtEPdf(d.resCap) + '</div>';
+    } else if (pctRes > 0) {
+      h += '<div style="width:' + pctRes + '%;background:#F4C0D1"></div>';
+    }
+    h += '</div></div>';
+  });
+
+  h += '<div class="footer"><span>Phoenix Fuel S.r.l. · PhoenixFuel Gestionale</span><span>Pagina 1 di 2</span></div>';
+  h += '</div>';
+
+  // ─── PAGINA 2 — INTERESSI ───
+  h += '<div class="page">';
+  h += '<div class="header">';
+  h += '<div class="azienda">PHOENIX FUEL S.R.L.<small>Vibo Valentia · P.IVA 03371240793</small></div>';
+  h += '<div class="titolo">Report Finanziamenti — Interessi<small>Aggiornato al ' + dataFmt + '</small></div>';
+  h += '</div>';
+
+  h += '<div class="kpi-grid">';
+  h += '<div class="kpi" style="background:#F1EFE8"><div class="kpi-label" style="color:#5F5E5A">Attivi</div><div class="kpi-val">' + dati.length + '</div></div>';
+  h += '<div class="kpi" style="background:#FAEEDA"><div class="kpi-label" style="color:#633806">Tot. interessi</div><div class="kpi-val" style="color:#633806">' + fmtEPdf(tot.totInt) + '</div></div>';
+  h += '<div class="kpi" style="background:#EAF3DE"><div class="kpi-label" style="color:#27500A">Pagati</div><div class="kpi-val" style="color:#27500A">' + fmtEPdf(tot.pagInt) + '</div></div>';
+  h += '<div class="kpi" style="background:#FCEBEB"><div class="kpi-label" style="color:#791F1F">Residui</div><div class="kpi-val" style="color:#791F1F">' + fmtEPdf(tot.resInt) + '</div></div>';
+  h += '</div>';
+
+  h += '<div class="tag" style="background:#633806">TABELLA · INTERESSI</div>';
+  h += '<table>';
+  h += '<thead><tr><th>Banca</th><th>Descrizione</th><th class="r">Tasso</th><th class="r">Tot. inter.</th><th class="r">Pagati</th><th class="r">Residui</th><th class="r">Rata media</th></tr></thead><tbody>';
+  datiInt.forEach(d => {
+    h += '<tr>';
+    h += '<td>' + escPdf(d.banca) + '</td>';
+    h += '<td>' + escPdf(d.descrizione) + '</td>';
+    h += '<td class="r">' + d.tasso.toFixed(2).replace('.', ',') + '%</td>';
+    h += '<td class="r">' + fmtEPdf(d.totInt) + '</td>';
+    h += '<td class="r" style="color:#27500A">' + fmtEPdf(d.pagInt) + '</td>';
+    h += '<td class="r" style="color:#791F1F">' + fmtEPdf(d.resInt) + '</td>';
+    h += '<td class="r">' + fmtEPdf(d.rataMedia) + '</td>';
+    h += '</tr>';
+  });
+  h += '<tr class="tot"><td colspan="3">TOTALI</td>';
+  h += '<td class="r">' + fmtEPdf(tot.totInt) + '</td>';
+  h += '<td class="r" style="color:#C0DD97">' + fmtEPdf(tot.pagInt) + '</td>';
+  h += '<td class="r" style="color:#F09595">' + fmtEPdf(tot.resInt) + '</td>';
+  h += '<td class="r">' + fmtEPdf(rataMediaPort) + '</td>';
+  h += '</tr></tbody></table>';
+
+  h += '<div class="bars-title">';
+  h += '<h3>Interessi pagati per finanziamento</h3>';
+  h += '<div class="legend"><span><i style="background:#BA7517"></i>Pagati</span><span><i style="background:#FAC775"></i>Residui</span></div>';
+  h += '</div>';
+  datiInt.forEach(d => {
+    const pct = Math.max(0, Math.min(100, d.pctInt));
+    const pctRes = 100 - pct;
+    h += '<div class="bar-row">';
+    h += '<div class="bar-label"><span>' + escPdf(d.descrizione) + '</span><span class="v">' + fmtEPdf(d.totInt) + '</span></div>';
+    h += '<div class="bar">';
+    if (pct >= 8) {
+      h += '<div class="bar-pag" style="width:' + pct + '%;background:#BA7517">' + fmtEPdf(d.pagInt) + ' · ' + pct.toFixed(0) + '%</div>';
+    } else if (pct > 0) {
+      h += '<div style="width:' + pct + '%;background:#BA7517"></div>';
+    }
+    if (pctRes >= 8) {
+      h += '<div class="bar-res" style="width:' + pctRes + '%;background:#FAC775;color:#633806">' + fmtEPdf(d.resInt) + '</div>';
+    } else if (pctRes > 0) {
+      h += '<div style="width:' + pctRes + '%;background:#FAC775"></div>';
+    }
+    h += '</div></div>';
+  });
+
+  h += '<div class="footer"><span>Phoenix Fuel S.r.l. · PhoenixFuel Gestionale</span><span>Pagina 2 di 2</span></div>';
+  h += '</div>';
+
+  h += '</body></html>';
+
+  w.document.write(h);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+}
+
+// ═══ HELPER PANNELLI SPOSTABILI ════════════════════════════════════════════
+// Sistema riutilizzabile: ogni sezione registra i suoi pannelli con ordine
+// di default; l'utente può spostarli su/giù con frecce ▲▼ e l'ordine viene
+// salvato in localStorage. Vale per tutte le sezioni del gestionale.
+var _PANEL_ORDERS_DEFAULT = {};
+var _PANEL_REFRESH_FN = {};
+
+function _registerPanels(sezione, defaultOrder, refreshFn) {
+  _PANEL_ORDERS_DEFAULT[sezione] = defaultOrder;
+  _PANEL_REFRESH_FN[sezione] = refreshFn;
+}
+
+function _getPanelOrder(sezione) {
+  const defaultOrder = _PANEL_ORDERS_DEFAULT[sezione] || [];
+  try {
+    const saved = localStorage.getItem('pf-panel-order-' + sezione);
+    if (saved) {
+      const order = JSON.parse(saved);
+      // Mantieni solo quelli ancora validi + aggiungi nuovi default in coda
+      const validi = order.filter(id => defaultOrder.includes(id));
+      const nuovi = defaultOrder.filter(id => !validi.includes(id));
+      return validi.concat(nuovi);
+    }
+  } catch(e) {}
+  return defaultOrder.slice();
+}
+
+function _savePanelOrder(sezione, order) {
+  try { localStorage.setItem('pf-panel-order-' + sezione, JSON.stringify(order)); } catch(e) {}
+}
+
+function _movePanelUp(sezione, panelId) {
+  const order = _getPanelOrder(sezione);
+  const idx = order.indexOf(panelId);
+  if (idx <= 0) return;
+  [order[idx-1], order[idx]] = [order[idx], order[idx-1]];
+  _savePanelOrder(sezione, order);
+  const fn = _PANEL_REFRESH_FN[sezione];
+  if (fn) fn();
+}
+
+function _movePanelDown(sezione, panelId) {
+  const order = _getPanelOrder(sezione);
+  const idx = order.indexOf(panelId);
+  if (idx < 0 || idx >= order.length - 1) return;
+  [order[idx], order[idx+1]] = [order[idx+1], order[idx]];
+  _savePanelOrder(sezione, order);
+  const fn = _PANEL_REFRESH_FN[sezione];
+  if (fn) fn();
+}
+
+function _wrapPanel(sezione, panelId, contenuto) {
+  const order = _getPanelOrder(sezione);
+  const idx = order.indexOf(panelId);
+  const isFirst = idx <= 0;
+  const isLast = idx >= order.length - 1;
+  const opacityUp = isFirst ? '0.25' : '0.7';
+  const opacityDown = isLast ? '0.25' : '0.7';
+  const cursorUp = isFirst ? 'not-allowed' : 'pointer';
+  const cursorDown = isLast ? 'not-allowed' : 'pointer';
+
+  let h = '<div style="position:relative;margin-bottom:14px">';
+  h += '<div style="position:absolute;top:6px;right:8px;z-index:10;display:flex;gap:3px">';
+  h += '<button onclick="_movePanelUp(\'' + sezione + '\',\'' + panelId + '\')" ' + (isFirst ? 'disabled' : '') + ' title="Sposta sopra" style="background:rgba(255,255,255,0.95);border:0.5px solid var(--border);border-radius:4px;width:24px;height:22px;cursor:' + cursorUp + ';font-size:10px;color:var(--text);opacity:' + opacityUp + '">▲</button>';
+  h += '<button onclick="_movePanelDown(\'' + sezione + '\',\'' + panelId + '\')" ' + (isLast ? 'disabled' : '') + ' title="Sposta sotto" style="background:rgba(255,255,255,0.95);border:0.5px solid var(--border);border-radius:4px;width:24px;height:22px;cursor:' + cursorDown + ';font-size:10px;color:var(--text);opacity:' + opacityDown + '">▼</button>';
+  h += '</div>';
+  h += contenuto;
+  h += '</div>';
+  return h;
+}
+
+// Donut esposizione per banca (panel separato)
+function _renderPanelDonutBanche(finAttivi) {
   if (!finAttivi.length) return '';
-
-  let html = '';
-
-  // ─── 1. DONUT PER BANCA ───
   const perBanca = {};
   finAttivi.forEach(f => {
     const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
@@ -489,14 +818,12 @@ function _renderGraficiFinanziamenti(finAttivi) {
     perBanca[istNome].totale += Number(f.capitale || 0);
     perBanca[istNome].count++;
   });
-
   const totaleAttivo = finAttivi.reduce((s, f) => s + Number(f.capitale || 0), 0);
   const banche = Object.keys(perBanca).sort((a, b) => perBanca[b].totale - perBanca[a].totale);
   const palette = ['#185FA5', '#1D9E75', '#BA7517', '#993556', '#534AB7', '#A32D2D', '#0F6E56'];
   const coloriBanca = {};
   banche.forEach((b, i) => coloriBanca[b] = palette[i % palette.length]);
 
-  // SVG donut
   const r = 60;
   const C = 2 * Math.PI * r;
   let offset = 0;
@@ -516,7 +843,7 @@ function _renderGraficiFinanziamenti(finAttivi) {
   svg += '<text x="100" y="115" text-anchor="middle" font-size="18" font-weight="500" fill="var(--text)">' + totaleCompact + '</text>';
   svg += '</svg>';
 
-  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px">';
+  let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
   html += '<div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)">📊 Esposizione per banca</div>';
   html += '<div style="display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:center">';
   html += svg;
@@ -536,9 +863,12 @@ function _renderGraficiFinanziamenti(finAttivi) {
     html += '</div></div>';
   });
   html += '</div></div></div>';
+  return html;
+}
 
-  // ─── 2. BARRE PAGATO/RESIDUO PER FINANZIAMENTO ───
-  // Sort dal più rimborsato al meno
+// Barre pagato/residuo per finanziamento (panel separato)
+function _renderPanelBarsFinanziamenti(finAttivi) {
+  if (!finAttivi.length) return '';
   const finOrdinati = finAttivi.slice().map(f => {
     const cap = Number(f.capitale || 0);
     const residuo = _calcResiduoOggi(f);
@@ -547,14 +877,13 @@ function _renderGraficiFinanziamenti(finAttivi) {
     return { f, cap, residuo, pagato, pct };
   }).sort((a, b) => b.pct - a.pct);
 
-  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px">';
+  let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
   html += '<div style="font-size:13px;font-weight:600;color:var(--text)">📊 Capitale rimborsato per finanziamento</div>';
   html += '<div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted)">';
   html += '<span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#1D9E75;border-radius:2px"></span>Rimborsato</span>';
   html += '<span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:#F4C0D1;border-radius:2px"></span>Residuo</span>';
   html += '</div></div>';
-
   html += '<div style="display:grid;gap:14px">';
   finOrdinati.forEach(({ f, cap, residuo, pagato, pct }) => {
     const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
@@ -563,14 +892,11 @@ function _renderGraficiFinanziamenti(finAttivi) {
       ? new Date(dataFine + 'T12:00:00').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' })
       : '—';
     const pctTroncato = Math.max(0, Math.min(100, pct));
-
     html += '<div>';
     html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px">';
     html += '<span style="font-size:12px;font-weight:500;color:var(--text)">' + esc(f.descrizione) + '</span>';
     html += '<span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + fmtE(cap) + '</span>';
     html += '</div>';
-
-    // Barra
     html += '<div style="display:flex;height:22px;border-radius:5px;overflow:hidden;background:var(--bg)">';
     if (pctTroncato >= 8) {
       html += '<div style="width:' + pctTroncato + '%;background:#1D9E75;display:flex;align-items:center;padding-left:8px;color:#fff;font-size:11px;font-family:var(--font-mono)">' + fmtE(pagato) + ' · ' + pctTroncato.toFixed(0) + '%</div>';
@@ -584,8 +910,6 @@ function _renderGraficiFinanziamenti(finAttivi) {
       html += '<div style="width:' + pctRes + '%;background:#F4C0D1"></div>';
     }
     html += '</div>';
-
-    // Footer riga
     html += '<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--text-hint)">';
     html += '<span>' + esc(istNome) + ' · ' + (f.durata_rate || '—') + ' rate ' + (f.frequenza || '') + ' · fine ' + fineFmt + '</span>';
     let extra = '';
@@ -596,8 +920,12 @@ function _renderGraficiFinanziamenti(finAttivi) {
     html += '</div>';
   });
   html += '</div></div>';
-
   return html;
+}
+
+// (Funzione legacy mantenuta per compat: chiama i due nuovi panel)
+function _renderGraficiFinanziamenti(finAttivi) {
+  return _renderPanelDonutBanche(finAttivi) + _renderPanelBarsFinanziamenti(finAttivi);
 }
 
 function _calcDataFine(f) {
