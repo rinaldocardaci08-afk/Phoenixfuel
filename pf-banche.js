@@ -1421,15 +1421,40 @@ async function eliminaFinanziamento(id) {
 // TAB AFFIDAMENTI
 // 7 fidi attivi (cassa, anticipo fatture, ecc.), KPI utilizzo, barre colorate.
 // ═══════════════════════════════════════════════════════════════════════════
-function renderBancheAffidamenti() {
+async function renderBancheAffidamenti() {
   const cont = document.getElementById('banche-panel-affidamenti');
   if (!cont) return;
+
+  // Carica ultimi saldi giornalieri per ogni conto (per calcolare utilizzato live dei fidi cassa)
+  let saldiByConto = {};
+  try {
+    const { data: ultimiSaldi } = await sb.from('banche_saldi_giornalieri')
+      .select('conto_id, saldo_contabile, saldo_disponibile, data')
+      .order('data', { ascending: false });
+    (ultimiSaldi || []).forEach(s => {
+      if (!saldiByConto[s.conto_id]) saldiByConto[s.conto_id] = s;
+    });
+  } catch (e) {
+    // Se la tabella non esiste o errore: continua senza saldi live (fallback al campo statico)
+    console.warn('renderBancheAffidamenti: errore caricamento saldi giornalieri', e);
+  }
+
+  // Override utilizzato per fidi tipo='cassa': usa il saldo contabile negativo dell'ultimo giorno
+  // NB: non modifico il record originale, calcolo un valore live per la visualizzazione
+  function _utilizzatoLive(a) {
+    if (a.tipo === 'cassa' && a.conto_id && saldiByConto[a.conto_id]) {
+      const s = saldiByConto[a.conto_id];
+      const sCont = (s.saldo_contabile !== null && s.saldo_contabile !== undefined) ? Number(s.saldo_contabile) : null;
+      if (sCont !== null) return Math.max(0, -sCont);
+    }
+    return Number(a.importo_utilizzato || 0);
+  }
 
   const attivi = _bancheAffidamenti.filter(a => a.stato === 'attivo');
 
   // ─── KPI ───
   const totAccordato = attivi.reduce((s, a) => s + Number(a.importo_accordato || 0), 0);
-  const totUtilizzato = attivi.reduce((s, a) => s + Number(a.importo_utilizzato || 0), 0);
+  const totUtilizzato = attivi.reduce((s, a) => s + _utilizzatoLive(a), 0);
   const totResiduo = totAccordato - totUtilizzato;
   const oggi = new Date();
   const in30gg = new Date(oggi.getTime() + 30 * 86400000).toISOString().split('T')[0];
@@ -1479,7 +1504,8 @@ function renderBancheAffidamenti() {
     sortati.forEach(a => {
       const ist = _bancheIstituti.find(i => i.id === a.istituto_id) || {};
       const accordato = Number(a.importo_accordato || 0);
-      const utilizzato = Number(a.importo_utilizzato || 0);
+      const utilizzato = _utilizzatoLive(a);
+      const isLive = (a.tipo === 'cassa' && a.conto_id && saldiByConto[a.conto_id]);
       const pct = accordato > 0 ? (utilizzato / accordato * 100) : 0;
       const utilizzoColore = pct < 70 ? '#639922' : (pct < 85 ? '#D4A017' : '#A32D2D');
       const altoUtilizzo = pct > 90;
@@ -1489,10 +1515,17 @@ function renderBancheAffidamenti() {
       html += '<td style="padding:8px;font-weight:500">' + esc(ist.nome || '—') + '</td>';
       html += '<td style="padding:8px">' + _badgeTipoFido(a.tipo) + '</td>';
       html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right">' + fmtE(accordato) + '</td>';
-      // Utilizzato editabile inline
-      html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right;cursor:' + (_isAdminBanche() ? 'pointer' : 'default') + '" ' + (_isAdminBanche() ? 'onclick="modificaUtilizzato(\'' + a.id + '\')" title="Click per modificare"' : '') + '>';
+      // Utilizzato: live (per fidi cassa con saldi) o editabile (altri tipi)
+      const cursorStyle = (isLive ? 'default' : (_isAdminBanche() ? 'pointer' : 'default'));
+      const onclickAttr = (!isLive && _isAdminBanche()) ? 'onclick="modificaUtilizzato(\'' + a.id + '\')" title="Click per modificare"' : (isLive ? 'title="Calcolato dai saldi giornalieri (tab Situazione)"' : '');
+      html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right;cursor:' + cursorStyle + '" ' + onclickAttr + '>';
       html += fmtE(utilizzato);
-      if (a.utilizzato_aggiornato) html += '<div style="font-size:9px;color:var(--text-hint);font-family:inherit;margin-top:2px">' + fmtD(a.utilizzato_aggiornato) + '</div>';
+      if (isLive) {
+        const dataSaldo = saldiByConto[a.conto_id].data;
+        html += '<div style="font-size:9px;color:#27500A;font-weight:500;font-family:inherit;margin-top:2px">⬤ live ' + fmtD(dataSaldo) + '</div>';
+      } else if (a.utilizzato_aggiornato) {
+        html += '<div style="font-size:9px;color:var(--text-hint);font-family:inherit;margin-top:2px">' + fmtD(a.utilizzato_aggiornato) + '</div>';
+      }
       html += '</td>';
       // Barra utilizzo
       html += '<td style="padding:8px;min-width:140px">';
@@ -1516,7 +1549,7 @@ function renderBancheAffidamenti() {
 
     html += '</tbody></table>';
     html += '</div>';
-    html += '<div style="font-size:11px;color:var(--text-hint);margin-top:8px">Click sulla colonna "Utilizzato" per aggiornare l\'importo. CDF = Commissione Disponibilità Fondi sulla quota non utilizzata.</div>';
+    html += '<div style="font-size:11px;color:var(--text-hint);margin-top:8px">⬤ live = utilizzato calcolato dai saldi giornalieri (tab Situazione). Per gli altri fidi, click sulla colonna "Utilizzato" per aggiornare manualmente. CDF = Commissione Disponibilità Fondi sulla quota non utilizzata.</div>';
   }
 
   cont.innerHTML = html;
@@ -1998,8 +2031,33 @@ function stampaPianoAnnuale() {
 // NESSUN tasso o interesse (è un documento di esposizione totale).
 // ═══════════════════════════════════════════════════════════════════════════
 function stampaElencoAffidamenti() {
+  _stampaElencoAffidamentiAsync();
+}
+
+async function _stampaElencoAffidamentiAsync() {
   const attivi = _bancheAffidamenti.filter(a => a.stato === 'attivo');
   if (!attivi.length) { toast('⚠ Nessun affidamento attivo da stampare'); return; }
+
+  // Carica ultimi saldi giornalieri per fidi cassa live
+  let saldiByConto = {};
+  try {
+    const { data: ultimiSaldi } = await sb.from('banche_saldi_giornalieri')
+      .select('conto_id, saldo_contabile, data')
+      .order('data', { ascending: false });
+    (ultimiSaldi || []).forEach(s => {
+      if (!saldiByConto[s.conto_id]) saldiByConto[s.conto_id] = s;
+    });
+  } catch (e) {
+    console.warn('stampaElencoAffidamenti: errore caricamento saldi', e);
+  }
+
+  function _utilizzatoLive(a) {
+    if (a.tipo === 'cassa' && a.conto_id && saldiByConto[a.conto_id]) {
+      const sCont = saldiByConto[a.conto_id].saldo_contabile;
+      if (sCont !== null && sCont !== undefined) return Math.max(0, -Number(sCont));
+    }
+    return Number(a.importo_utilizzato || 0);
+  }
 
   // Raggruppo per istituto
   const perIstituto = {};
@@ -2017,7 +2075,7 @@ function stampaElencoAffidamenti() {
 
   // Totali generali
   const totAccordato = attivi.reduce((s, a) => s + Number(a.importo_accordato || 0), 0);
-  const totUtilizzato = attivi.reduce((s, a) => s + Number(a.importo_utilizzato || 0), 0);
+  const totUtilizzato = attivi.reduce((s, a) => s + _utilizzatoLive(a), 0);
   const totResiduo = totAccordato - totUtilizzato;
 
   // Data generazione
@@ -2053,7 +2111,7 @@ function stampaElencoAffidamenti() {
     const ist = _bancheIstituti.find(i => i.id === istId) || {};
     const fidi = perIstituto[istId];
     const subTotAcc = fidi.reduce((s, f) => s + Number(f.importo_accordato || 0), 0);
-    const subTotUti = fidi.reduce((s, f) => s + Number(f.importo_utilizzato || 0), 0);
+    const subTotUti = fidi.reduce((s, f) => s + _utilizzatoLive(f), 0);
 
     body += '<h2>' + esc(ist.nome || '—') + '</h2>';
     if (ist.filiale) body += '<div class="filiale">Filiale: ' + esc(ist.filiale) + '</div>';
@@ -2070,7 +2128,7 @@ function stampaElencoAffidamenti() {
     fidi.forEach(f => {
       const cc = _bancheConti.find(c => c.id === f.conto_id);
       const accordato = Number(f.importo_accordato || 0);
-      const utilizzato = Number(f.importo_utilizzato || 0);
+      const utilizzato = _utilizzatoLive(f);
       const disp = accordato - utilizzato;
       body += '<tr>';
       body += '<td>' + esc(tipoLabel[f.tipo] || f.tipo) + '</td>';
@@ -2633,7 +2691,7 @@ async function renderBancheSituazione() {
   (saldiData || []).forEach(s => { _situazioneSaldi[s.conto_id] = s; });
 
   // Registra pannelli (regola spostabili, 27/04)
-  _registerPanels('situazione', ['saldi'], renderBancheSituazione);
+  _registerPanels('situazione', ['saldi', 'riepilogo'], renderBancheSituazione);
 
   // ─── HEADER (date picker + frecce + bottoni) ───
   const dataObj = new Date(_situazioneDataCorrente + 'T12:00:00');
@@ -2653,10 +2711,11 @@ async function renderBancheSituazione() {
   html += '</div>';
   html += '</div>';
 
-  // ─── PANNELLO SALDI ───
+  // ─── PANNELLI ───
   const saldiPanel = _renderPanelSituazioneSaldi();
+  const riepilogoPanel = _renderPanelSituazioneRiepilogo();
 
-  const panels = { 'saldi': saldiPanel };
+  const panels = { 'saldi': saldiPanel, 'riepilogo': riepilogoPanel };
   const order = _getPanelOrder('situazione');
 
   order.forEach(id => {
@@ -2666,31 +2725,57 @@ async function renderBancheSituazione() {
   cont.innerHTML = html;
 }
 
-function _renderPanelSituazioneSaldi() {
-  const fidiCassa = {}; // conto_id → {accordato, fid}
+// ─── HELPER: priorità ordinamento banche (Intesa, MPS, BNL, BCC, altro) ────
+function _priorityBancaIstituto(nome) {
+  const s = (nome || '').toUpperCase();
+  if (s.includes('INTESA')) return 1;
+  if (s.includes('MPS') || s.includes('MONTE')) return 2;
+  if (s.includes('BNL') || s.includes('BNP')) return 3;
+  if (s.includes('BCC') || s.includes('CREDITO COOPERATIVO')) return 4;
+  return 99;
+}
+
+// ─── HELPER: calcola fidi cassa indicizzati per conto_id ────────────────────
+function _getFidiCassaPerConto() {
+  const fidi = {};
   _bancheAffidamenti.forEach(a => {
     if (a.tipo === 'cassa' && a.stato === 'attivo' && a.conto_id) {
-      if (!fidiCassa[a.conto_id] || Number(a.importo_accordato) > Number(fidiCassa[a.conto_id].accordato)) {
-        fidiCassa[a.conto_id] = { accordato: Number(a.importo_accordato || 0) };
+      if (!fidi[a.conto_id] || Number(a.importo_accordato) > Number(fidi[a.conto_id].accordato)) {
+        fidi[a.conto_id] = { accordato: Number(a.importo_accordato || 0) };
       }
     }
   });
+  return fidi;
+}
 
-  // Ordino conti: prima quelli con saldo, poi gli altri; alfabeticamente per istituto
-  const contiSorted = _bancheConti.slice().sort((a, b) => {
+// ─── HELPER: ordina conti con priorità custom ───────────────────────────────
+function _sortContiPriorita() {
+  return _bancheConti.slice().sort((a, b) => {
     const istA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
     const istB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
-    return istA.localeCompare(istB);
+    const pA = _priorityBancaIstituto(istA);
+    const pB = _priorityBancaIstituto(istB);
+    if (pA !== pB) return pA - pB;
+    if (istA !== istB) return istA.localeCompare(istB);
+    return (a.numero_conto || '').localeCompare(b.numero_conto || '');
   });
+}
 
-  // Totali
-  let totContabile = 0, totDisponibile = 0, totFido = 0, totFidoUtilizzato = 0;
+// ═══ PANNELLO SALDI ═════════════════════════════════════════════════════════
+// Colonne: Banca | Fido cassa | Saldo contabile | Saldo disponibile | Residuo
+// Valori grandi (14px), grassetto, rossi se negativi, verdi se positivi.
+function _renderPanelSituazioneSaldi() {
+  const fidiCassa = _getFidiCassaPerConto();
+  const contiSorted = _sortContiPriorita();
+
+  // Totali aggregati
+  let totContabile = 0, totDisponibile = 0, totFido = 0, totUtilizzato = 0, totResiduo = 0;
 
   let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
   html += '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">💰 Saldi conti correnti</div>';
-  html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">';
   html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
-  ['Banca / Conto', 'Saldo contabile', 'Saldo disponibile', 'Fido cassa', 'Utilizzo'].forEach((h, i) => {
+  ['Banca / Conto', 'Fido cassa', 'Saldo contabile', 'Saldo disponibile', 'Residuo fido'].forEach((h, i) => {
     const align = i === 0 ? 'left' : 'right';
     html += '<th style="text-align:' + align + ';padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">' + h + '</th>';
   });
@@ -2699,49 +2784,53 @@ function _renderPanelSituazioneSaldi() {
   contiSorted.forEach(c => {
     const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '—';
     const saldo = _situazioneSaldi[c.id] || { saldo_contabile: null, saldo_disponibile: null };
-    const sCont = saldo.saldo_contabile !== null ? Number(saldo.saldo_contabile) : null;
-    const sDisp = saldo.saldo_disponibile !== null ? Number(saldo.saldo_disponibile) : null;
+    const sCont = (saldo.saldo_contabile !== null && saldo.saldo_contabile !== undefined) ? Number(saldo.saldo_contabile) : null;
+    const sDisp = (saldo.saldo_disponibile !== null && saldo.saldo_disponibile !== undefined) ? Number(saldo.saldo_disponibile) : null;
     const fido = fidiCassa[c.id] ? Number(fidiCassa[c.id].accordato) : 0;
 
-    // Calcolo utilizzo: se contabile < 0, l'utilizzo del fido è il valore assoluto
-    const utilizzato = sCont !== null && sCont < 0 ? Math.abs(sCont) : 0;
-    const pctUtilizzo = fido > 0 ? (utilizzato / fido * 100) : 0;
-    const colorePct = pctUtilizzo >= 80 ? '#A32D2D' : (pctUtilizzo >= 50 ? '#BA7517' : '#27500A');
+    // Calcoli derivati
+    const utilizzato = (sCont !== null && sCont < 0) ? Math.abs(sCont) : 0;
+    const residuo = fido > 0 ? Math.max(0, fido - utilizzato) : 0;
+    const pctResiduo = fido > 0 ? (residuo / fido * 100) : 0;
 
     if (sCont !== null) totContabile += sCont;
     if (sDisp !== null) totDisponibile += sDisp;
     totFido += fido;
-    totFidoUtilizzato += utilizzato;
+    totUtilizzato += utilizzato;
+    totResiduo += residuo;
 
     html += '<tr style="border-bottom:0.5px solid var(--border)">';
-    html += '<td style="padding:10px 8px;font-weight:500">' + esc(istNome);
+
+    // Col 1: Banca / Conto
+    html += '<td style="padding:10px 8px;font-weight:500;font-size:13px">' + esc(istNome);
     if (c.numero_conto) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(c.numero_conto) + '</span>';
     html += '</td>';
 
-    // Cella saldo contabile (editabile)
+    // Col 2: Fido cassa (read-only, allineato a destra, mono)
+    html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--text)">';
+    html += fido > 0 ? fmtE(fido) : '<span style="color:var(--text-hint);font-weight:400">—</span>';
+    html += '</td>';
+
+    // Col 3: Saldo contabile (editable, BIG, BOLD, RED if neg, GREEN if pos)
     const valCont = sCont !== null ? sCont.toFixed(2).replace('.', ',') : '';
-    const colorCont = sCont !== null && sCont < 0 ? '#A32D2D' : 'var(--text)';
+    const colorCont = sCont === null ? 'var(--text)' : (sCont < 0 ? '#A32D2D' : (sCont > 0 ? '#27500A' : 'var(--text)'));
     html += '<td style="padding:5px 4px;text-align:right">';
-    html += '<input type="text" value="' + valCont + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_contabile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:6px 8px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:12px;background:#FFFCEB;color:' + colorCont + '">';
+    html += '<input type="text" value="' + valCont + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_contabile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:14px;font-weight:700;background:#FFFCEB;color:' + colorCont + '">';
     html += '</td>';
 
-    // Cella saldo disponibile (editabile)
+    // Col 4: Saldo disponibile (editable, BIG, BOLD, RED if neg, GREEN if pos)
     const valDisp = sDisp !== null ? sDisp.toFixed(2).replace('.', ',') : '';
-    const colorDisp = sDisp !== null && sDisp < 0 ? '#A32D2D' : 'var(--text)';
+    const colorDisp = sDisp === null ? 'var(--text)' : (sDisp < 0 ? '#A32D2D' : (sDisp > 0 ? '#27500A' : 'var(--text)'));
     html += '<td style="padding:5px 4px;text-align:right">';
-    html += '<input type="text" value="' + valDisp + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_disponibile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:6px 8px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:12px;background:#FFFCEB;color:' + colorDisp + '">';
+    html += '<input type="text" value="' + valDisp + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_disponibile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:14px;font-weight:700;background:#FFFCEB;color:' + colorDisp + '">';
     html += '</td>';
 
-    // Cella fido cassa (read-only)
-    html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">';
-    html += fido > 0 ? fmtE(fido) : '—';
-    html += '</td>';
-
-    // Cella utilizzo (read-only, calcolato)
-    html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);color:' + colorePct + ';font-weight:500">';
-    if (fido > 0 && sCont !== null) {
-      html += pctUtilizzo.toFixed(0) + '%';
-      if (utilizzato > 0) html += '<div style="font-size:9px;color:var(--text-hint);font-weight:400;margin-top:1px">' + fmtE(utilizzato) + '</div>';
+    // Col 5: Residuo fido (calc, BIG, BOLD, color by % residuo)
+    html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono)">';
+    if (fido > 0) {
+      const colorResid = pctResiduo >= 50 ? '#27500A' : (pctResiduo >= 20 ? '#BA7517' : '#A32D2D');
+      html += '<div style="font-size:14px;font-weight:700;color:' + colorResid + '">' + fmtE(residuo) + '</div>';
+      html += '<div style="font-size:10px;font-weight:500;color:' + colorResid + ';opacity:0.85;margin-top:2px">' + pctResiduo.toFixed(0) + '%</div>';
     } else {
       html += '<span style="color:var(--text-hint)">—</span>';
     }
@@ -2751,19 +2840,124 @@ function _renderPanelSituazioneSaldi() {
   });
 
   // Riga TOTALE
-  const pctTotUtilizzo = totFido > 0 ? (totFidoUtilizzato / totFido * 100) : 0;
-  html += '<tr style="background:var(--bg);font-weight:600;border-top:2px solid var(--border)">';
-  html += '<td style="padding:11px 8px;text-transform:uppercase;font-size:11px;letter-spacing:0.3px">TOTALE</td>';
-  html += '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:' + (totContabile < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(totContabile) + '</td>';
-  html += '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totDisponibile) + '</td>';
-  html += '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(totFido) + '</td>';
-  html += '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono)">' + pctTotUtilizzo.toFixed(0) + '%</td>';
+  const pctTotResiduo = totFido > 0 ? (totResiduo / totFido * 100) : 0;
+  html += '<tr style="background:var(--bg);font-weight:700;border-top:2px solid var(--border)">';
+  html += '<td style="padding:12px 8px;text-transform:uppercase;font-size:11px;letter-spacing:0.4px">TOTALE</td>';
+  html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--text)">' + fmtE(totFido) + '</td>';
+  html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (totContabile < 0 ? '#A32D2D' : (totContabile > 0 ? '#27500A' : 'var(--text)')) + '">' + fmtE(totContabile) + '</td>';
+  html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (totDisponibile < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(totDisponibile) + '</td>';
+  html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (pctTotResiduo >= 50 ? '#27500A' : (pctTotResiduo >= 20 ? '#BA7517' : '#A32D2D')) + '">' + fmtE(totResiduo) + '<div style="font-size:10px;font-weight:500;opacity:0.85;margin-top:2px">' + pctTotResiduo.toFixed(0) + '%</div></td>';
   html += '</tr>';
 
   html += '</tbody></table></div>';
-  html += '<div style="font-size:11px;color:var(--text-hint);margin-top:10px">Le celle gialle sono editabili. Salva automatico al cambio focus o premendo Invio. Il fido cassa proviene dalla tab Affidamenti (tipo "cassa"). L\'utilizzo è calcolato dal saldo contabile negativo.</div>';
+  html += '<div style="font-size:11px;color:var(--text-hint);margin-top:10px">Le celle gialle sono editabili. Salva automatico al cambio focus o premendo Invio. Il fido cassa proviene dalla tab Affidamenti (tipo "cassa"). Il residuo del fido = accordato − utilizzato (utilizzato derivato dal saldo contabile negativo).</div>';
   html += '</div>';
 
+  return html;
+}
+
+// ═══ PANNELLO RIEPILOGO ═════════════════════════════════════════════════════
+// KPI totali + barre stacked per banca (utilizzato | residuo)
+function _renderPanelSituazioneRiepilogo() {
+  const fidiCassa = _getFidiCassaPerConto();
+  const contiSorted = _sortContiPriorita();
+
+  // Calcolo totali
+  let totFido = 0, totUtilizzato = 0, totResiduo = 0;
+  const datiPerConto = []; // {nome, numero, fido, utilizzato, residuo, pctUtil, pctResid}
+
+  contiSorted.forEach(c => {
+    const fido = fidiCassa[c.id] ? Number(fidiCassa[c.id].accordato) : 0;
+    if (fido <= 0) return; // skip conti senza fido cassa
+    const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '—';
+    const saldo = _situazioneSaldi[c.id] || {};
+    const sCont = (saldo.saldo_contabile !== null && saldo.saldo_contabile !== undefined) ? Number(saldo.saldo_contabile) : null;
+    const utilizzato = (sCont !== null && sCont < 0) ? Math.abs(sCont) : 0;
+    const residuo = Math.max(0, fido - utilizzato);
+    const pctUtil = (utilizzato / fido) * 100;
+    const pctResid = (residuo / fido) * 100;
+    totFido += fido;
+    totUtilizzato += utilizzato;
+    totResiduo += residuo;
+    datiPerConto.push({ nome: istNome, numero: c.numero_conto, fido, utilizzato, residuo, pctUtil, pctResid });
+  });
+
+  const pctUtilTot = totFido > 0 ? (totUtilizzato / totFido * 100) : 0;
+  const pctResidTot = 100 - pctUtilTot;
+
+  let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
+  html += '<div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)">📊 Riepilogo affidamenti cassa</div>';
+
+  // ─── KPI ROW (4 cards) ───
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">';
+  html += '<div style="background:var(--bg);padding:12px 14px;border-radius:8px;border:0.5px solid var(--border)">';
+  html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Totale accordato</div>';
+  html += '<div style="font-size:18px;font-weight:700;color:#26215C;font-family:var(--font-mono);margin-top:4px">' + fmtE(totFido) + '</div>';
+  html += '</div>';
+  html += '<div style="background:#FCEBEB;padding:12px 14px;border-radius:8px;border:0.5px solid #F09595">';
+  html += '<div style="font-size:10px;color:#791F1F;text-transform:uppercase;letter-spacing:0.4px">Utilizzato</div>';
+  html += '<div style="font-size:18px;font-weight:700;color:#A32D2D;font-family:var(--font-mono);margin-top:4px">' + fmtE(totUtilizzato) + '</div>';
+  html += '<div style="font-size:10px;color:#791F1F;margin-top:2px;font-weight:500">' + pctUtilTot.toFixed(1) + '%</div>';
+  html += '</div>';
+  html += '<div style="background:#EAF3DE;padding:12px 14px;border-radius:8px;border:0.5px solid #C0DD97">';
+  html += '<div style="font-size:10px;color:#27500A;text-transform:uppercase;letter-spacing:0.4px">Residuo</div>';
+  html += '<div style="font-size:18px;font-weight:700;color:#27500A;font-family:var(--font-mono);margin-top:4px">' + fmtE(totResiduo) + '</div>';
+  html += '<div style="font-size:10px;color:#27500A;margin-top:2px;font-weight:500">' + pctResidTot.toFixed(1) + '%</div>';
+  html += '</div>';
+  html += '<div style="background:var(--bg);padding:12px 14px;border-radius:8px;border:0.5px solid var(--border);text-align:center">';
+  html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">% utilizzato</div>';
+  // Donut piccolo
+  const radius = 26, circumference = 2 * Math.PI * radius;
+  const dashUtil = (pctUtilTot / 100) * circumference;
+  html += '<svg width="68" height="68" viewBox="0 0 68 68" style="display:block;margin:0 auto">';
+  html += '<circle cx="34" cy="34" r="' + radius + '" fill="none" stroke="#EAF3DE" stroke-width="9"/>';
+  html += '<circle cx="34" cy="34" r="' + radius + '" fill="none" stroke="#A32D2D" stroke-width="9" stroke-dasharray="' + dashUtil + ' ' + circumference + '" transform="rotate(-90 34 34)" stroke-linecap="round"/>';
+  html += '<text x="34" y="38" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)" font-family="var(--font-mono)">' + pctUtilTot.toFixed(0) + '%</text>';
+  html += '</svg>';
+  html += '</div>';
+  html += '</div>';
+
+  // ─── BARRE STACKED PER BANCA ───
+  if (datiPerConto.length === 0) {
+    html += '<div style="padding:20px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px;font-size:12px">Nessun fido cassa configurato. Aggiungi fidi nella tab Affidamenti per vedere il dettaglio per banca.</div>';
+  } else {
+    html += '<div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.3px">Dettaglio per banca</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:10px">';
+
+    datiPerConto.forEach(d => {
+      // Etichetta banca
+      html += '<div>';
+      html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
+      html += '<div style="font-size:12px;font-weight:600;color:var(--text)">' + esc(d.nome);
+      if (d.numero) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(d.numero) + '</span>';
+      html += '</div>';
+      html += '<div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + fmtE(d.fido) + '</div>';
+      html += '</div>';
+      // Barra stacked
+      html += '<div style="display:flex;height:24px;border-radius:5px;overflow:hidden;background:var(--bg);border:0.5px solid var(--border)">';
+      if (d.pctUtil > 0) {
+        html += '<div style="width:' + d.pctUtil + '%;background:#A32D2D;display:flex;align-items:center;justify-content:flex-start;padding-left:8px;color:#fff;font-size:11px;font-weight:600;font-family:var(--font-mono);overflow:hidden;white-space:nowrap" title="Utilizzato ' + fmtE(d.utilizzato) + '">';
+        if (d.pctUtil >= 18) html += fmtE(d.utilizzato);
+        html += '</div>';
+      }
+      if (d.pctResid > 0) {
+        html += '<div style="width:' + d.pctResid + '%;background:#27500A;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:11px;font-weight:600;font-family:var(--font-mono);overflow:hidden;white-space:nowrap" title="Residuo ' + fmtE(d.residuo) + '">';
+        if (d.pctResid >= 18) html += fmtE(d.residuo);
+        html += '</div>';
+      }
+      html += '</div>';
+      // Sotto-etichette
+      html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-top:3px">';
+      html += '<span style="color:#A32D2D;font-weight:500">⬤ Utilizzato ' + d.pctUtil.toFixed(1) + '%</span>';
+      html += '<span style="color:#27500A;font-weight:500">⬤ Residuo ' + d.pctResid.toFixed(1) + '%</span>';
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+  }
+
+  html += '</div>';
   return html;
 }
 
