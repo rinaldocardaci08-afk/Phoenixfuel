@@ -353,6 +353,15 @@ async function renderBancheFinanziamenti() {
     _bancheFinanziamenti = finRes.data || [];
   }
 
+  // Carico il piano rate (servono per calcolare Residuo + Rata reali in tabella)
+  if (!_bancheRateCache) {
+    cont.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Caricamento finanziamenti...</div>';
+    const { data } = await sb.from('banche_finanziamenti_rate')
+      .select('finanziamento_id, numero, data_scadenza, rata, residuo_capitale')
+      .order('data_scadenza');
+    _bancheRateCache = data || [];
+  }
+
   // Filtra in base allo stato
   const filtrati = _bancheFinanziamenti.filter(f => {
     if (_finFiltroStato === 'tutti') return true;
@@ -414,7 +423,18 @@ async function renderBancheFinanziamenti() {
       const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
       const dataFine = _calcDataFine(f);
       const residuo = _calcResiduoOggi(f);
-      const rataFmt = f.rata ? fmtE(Number(f.rata)) : '—';
+      // Rata: usa f.rata se presente, altrimenti calcola dal piano (rata mensile equivalente)
+      let rataVal = f.rata ? Number(f.rata) : 0;
+      if (!rataVal) {
+        const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
+        if (rateFin.length) {
+          // Prendo la rata media del piano (escluso eventuale preammortamento se diverso)
+          const rate = rateFin.map(r => Number(r.rata || 0)).filter(r => r > 0);
+          if (rate.length) rataVal = rate.reduce((s, r) => s + r, 0) / rate.length;
+        }
+        if (!rataVal) rataVal = _stimaRataMensile(f); // fallback formula francese
+      }
+      const rataFmt = rataVal > 0 ? fmtE(rataVal) : '—';
 
       html += '<tr style="border-bottom:0.5px solid var(--border);' + (f.stato === 'estinto' ? 'opacity:0.55' : '') + '">';
       html += '<td style="padding:8px;font-weight:500">' + esc(istNome) + '</td>';
@@ -462,10 +482,19 @@ function _calcDataFine(f) {
 function _calcResiduoOggi(f) {
   // Per estinti residuo = 0
   if (f.stato === 'estinto') return 0;
-  // Per attivi: usa rate caricate se ci sono, altrimenti fallback su capitale-quote_pagate
-  // Nessuna rata caricata? Approssimazione: residuo = capitale (tutto da pagare)
-  // Con rate: prendi residuo della prima rata futura
-  return Number(f.capitale || 0); // fallback semplice; in modale piano vedremo dettaglio
+  // Se ho il piano rate caricato, prendo il residuo dell'ultima rata scaduta
+  const rateFin = (_bancheRateCache || []).filter(r => r.finanziamento_id === f.id);
+  if (rateFin.length) {
+    const oggi = new Date().toISOString().split('T')[0];
+    // Ordino per scadenza crescente (di solito già ordinate, ma per sicurezza)
+    const sortate = rateFin.slice().sort((a, b) => a.data_scadenza.localeCompare(b.data_scadenza));
+    const pagate = sortate.filter(r => r.data_scadenza <= oggi);
+    if (!pagate.length) return Number(f.capitale || 0); // nessuna scaduta = ancora tutto da pagare
+    // Residuo dell'ultima rata pagata
+    return Number(pagate[pagate.length - 1].residuo_capitale || 0);
+  }
+  // Nessun piano caricato: fallback al capitale pieno
+  return Number(f.capitale || 0);
 }
 
 function _calcRataMensileEquivalente(f) {
@@ -1633,44 +1662,14 @@ async function renderBancheTimeline() {
 }
 
 // ═══ PANNELLO STATO FINANZIAMENTI % RIMBORSATA ═════════════════════════════
-// KPI globale "onorati nel tempo" (sempre su TUTTI i finanziamenti) +
-// barre di progresso per i finanziamenti visualizzati (rispetta toggle Solo attivi)
+// Barre di progresso per i finanziamenti visualizzati (rispetta toggle Solo attivi)
+// + KPI globale "onorati nel tempo" in fondo (sempre su TUTTI i finanziamenti)
 // Totali rate = capitale + interessi
 function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
   if (!finanziamenti.length) return '';
 
   let html = '';
   html += '<div style="margin-top:18px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:16px">';
-
-  // ─── KPI GLOBALE ONORATI (sempre su TUTTI i finanziamenti, indipendente dal toggle) ───
-  const tutti = _bancheFinanziamenti || [];
-  const estintiAll = tutti.filter(f => f.stato === 'estinto');
-  const nTot = tutti.length;
-  const nEst = estintiAll.length;
-  const pctNum = nTot > 0 ? (nEst / nTot * 100) : 0;
-  const valTot = tutti.reduce((s, f) => s + Number(f.capitale || 0), 0);
-  const valEst = estintiAll.reduce((s, f) => s + Number(f.capitale || 0), 0);
-  const pctVal = valTot > 0 ? (valEst / valTot * 100) : 0;
-
-  if (nTot > 0) {
-    html += '<div style="margin-bottom:18px;padding:14px 16px;background:linear-gradient(135deg,#27500A 0%,#3B6D11 100%);color:#fff;border-radius:10px">';
-    html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.85;margin-bottom:10px">📊 Finanziamenti onorati nel tempo</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;align-items:center">';
-    // Per numero
-    html += '<div>';
-    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Per numero</div>';
-    html += '<div style="font-size:18px;font-weight:600;font-family:var(--font-mono)">' + nEst + ' / ' + nTot + ' <span style="font-size:13px;opacity:0.85;font-weight:500">(' + pctNum.toFixed(0) + '%)</span></div>';
-    html += '<div style="margin-top:6px;background:rgba(255,255,255,0.2);border-radius:5px;height:6px;overflow:hidden"><div style="width:' + pctNum + '%;height:100%;background:#EAF3DE"></div></div>';
-    html += '</div>';
-    // Per valore
-    html += '<div>';
-    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Per valore (importo finanziato originale)</div>';
-    html += '<div style="font-size:16px;font-weight:600;font-family:var(--font-mono)">' + fmtE(valEst) + ' <span style="font-size:11px;opacity:0.85;font-weight:500">su ' + fmtE(valTot) + '</span> <span style="font-size:13px;opacity:0.85;font-weight:500;margin-left:4px">(' + pctVal.toFixed(0) + '%)</span></div>';
-    html += '<div style="margin-top:6px;background:rgba(255,255,255,0.2);border-radius:5px;height:6px;overflow:hidden"><div style="width:' + pctVal + '%;height:100%;background:#EAF3DE"></div></div>';
-    html += '</div>';
-    html += '</div>';
-    html += '</div>';
-  }
 
   // ─── DETTAGLIO PER FINANZIAMENTO (rispetta filtro toggle) ───
   html += '<div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text)">Stato finanziamenti — % rimborsata su accordato (capitale + interessi)</div>';
@@ -1738,7 +1737,7 @@ function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
 
   html += '</div>'; // fine grid
 
-  // Riga TOTALE in fondo (sui finanziamenti visualizzati)
+  // Riga TOTALE (sui finanziamenti visualizzati)
   const pctTot = totAccordato > 0 ? (totPagato / totAccordato * 100) : 0;
   html += '<div style="margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border)">';
   html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
@@ -1754,6 +1753,48 @@ function _renderPannelloProgressoFinanziamenti(finanziamenti, oggiStr) {
   html += '<span>Residuo ' + fmtE(totAccordato - totPagato) + '</span>';
   html += '</div>';
   html += '</div>';
+
+  // ─── KPI GLOBALE PORTAFOGLIO STORICO (sempre su TUTTI i finanziamenti) ───
+  // Mostra: totali accesi nel tempo + onorati (chiusi) con valore e percentuali
+  const tutti = _bancheFinanziamenti || [];
+  if (tutti.length > 0) {
+    const estintiAll = tutti.filter(f => f.stato === 'estinto');
+    const nTot = tutti.length;
+    const nEst = estintiAll.length;
+    const pctNum = nTot > 0 ? (nEst / nTot * 100) : 0;
+    const valTot = tutti.reduce((s, f) => s + Number(f.capitale || 0), 0);
+    const valEst = estintiAll.reduce((s, f) => s + Number(f.capitale || 0), 0);
+    const pctVal = valTot > 0 ? (valEst / valTot * 100) : 0;
+
+    html += '<div style="margin-top:18px;padding:14px 16px;background:linear-gradient(135deg,#27500A 0%,#3B6D11 100%);color:#fff;border-radius:10px">';
+    html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.85;margin-bottom:12px">📊 Portafoglio finanziamenti — storico complessivo</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px 18px">';
+    // Numero
+    html += '<div>';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Accesi nel tempo</div>';
+    html += '<div style="font-size:22px;font-weight:600;font-family:var(--font-mono);line-height:1.1">' + nTot + '</div>';
+    html += '</div>';
+    html += '<div>';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Di cui chiusi</div>';
+    html += '<div style="font-size:22px;font-weight:600;font-family:var(--font-mono);line-height:1.1">' + nEst + ' <span style="font-size:13px;opacity:0.85;font-weight:500">(' + pctNum.toFixed(0) + '%)</span></div>';
+    html += '</div>';
+    // Valore
+    html += '<div>';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Valore totale finanziato</div>';
+    html += '<div style="font-size:18px;font-weight:600;font-family:var(--font-mono);line-height:1.1">' + fmtE(valTot) + '</div>';
+    html += '</div>';
+    html += '<div>';
+    html += '<div style="font-size:10px;opacity:0.85;margin-bottom:3px">Valore onorato</div>';
+    html += '<div style="font-size:18px;font-weight:600;font-family:var(--font-mono);line-height:1.1">' + fmtE(valEst) + ' <span style="font-size:12px;opacity:0.85;font-weight:500">(' + pctVal.toFixed(0) + '%)</span></div>';
+    html += '</div>';
+    html += '</div>';
+    // Doppia barra
+    html += '<div style="margin-top:12px;display:flex;gap:10px">';
+    html += '<div style="flex:1"><div style="font-size:9px;opacity:0.85;margin-bottom:3px">Per numero (' + nEst + '/' + nTot + ')</div><div style="background:rgba(255,255,255,0.2);border-radius:5px;height:6px;overflow:hidden"><div style="width:' + pctNum + '%;height:100%;background:#EAF3DE"></div></div></div>';
+    html += '<div style="flex:1"><div style="font-size:9px;opacity:0.85;margin-bottom:3px">Per valore (' + pctVal.toFixed(0) + '% onorato)</div><div style="background:rgba(255,255,255,0.2);border-radius:5px;height:6px;overflow:hidden"><div style="width:' + pctVal + '%;height:100%;background:#EAF3DE"></div></div></div>';
+    html += '</div>';
+    html += '</div>';
+  }
 
   html += '</div>'; // fine card
   return html;
