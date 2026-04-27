@@ -2836,11 +2836,47 @@ function _renderPanelSituazioneSaldi() {
   const fidiCassa = _getFidiCassaPerConto();
   const contiSorted = _sortContiPriorita();
 
+  // Diagnostica caricamento: confronta N record caricati vs N conti
+  const nSaldiCaricati = Object.keys(_situazioneSaldi).length;
+  const nConti = contiSorted.length;
+  // Verifica match conto_id: quanti dei saldi caricati hanno un conto_id che esiste in _bancheConti
+  const contiIds = new Set(contiSorted.map(c => c.id));
+  const nSaldiAbbianciati = Object.keys(_situazioneSaldi).filter(id => contiIds.has(id)).length;
+  const nSaldiOrfani = nSaldiCaricati - nSaldiAbbianciati;
+
+  // Log in console per diagnostica
+  console.log('[Situazione Saldi]', {
+    data: _situazioneDataCorrente,
+    nConti,
+    nSaldiCaricati,
+    nSaldiAbbianciati,
+    nSaldiOrfani,
+    contiIds: Array.from(contiIds),
+    saldiContiIds: Object.keys(_situazioneSaldi),
+    saldi: _situazioneSaldi
+  });
+
   // Totali aggregati
   let totContabile = 0, totDisponibile = 0, totFido = 0, totUtilizzato = 0, totResiduo = 0;
 
   let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
-  html += '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--text)">💰 Saldi conti correnti</div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
+  html += '<div style="font-size:13px;font-weight:600;color:var(--text)">💰 Saldi conti correnti</div>';
+  // Indicatore di caricamento (solo se non è il giorno corrente vuoto, per non disturbare)
+  if (nSaldiCaricati > 0) {
+    html += '<div style="font-size:10px;color:#27500A;background:#EAF3DE;padding:3px 9px;border-radius:5px;font-weight:600">✓ ' + nSaldiCaricati + ' saldi caricati</div>';
+  } else {
+    html += '<div style="font-size:10px;color:var(--text-hint);font-weight:400">Nessun saldo per questo giorno</div>';
+  }
+  html += '</div>';
+
+  // Banner di warning se ci sono record orfani (conto_id non corrisponde)
+  if (nSaldiOrfani > 0) {
+    html += '<div style="background:#FAEEDA;border:0.5px solid #BA7517;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#633806">';
+    html += '⚠ <b>' + nSaldiOrfani + ' saldi caricati ma non visualizzabili</b>: i loro <code>conto_id</code> non corrispondono a nessun conto attualmente in anagrafica. Probabilmente i conti sono stati eliminati/ricreati. Vedi console (F12) per dettagli.';
+    html += '</div>';
+  }
+
   html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">';
   html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
   ['Banca / Conto', 'Fido cassa', 'Saldo contabile', 'Saldo disponibile', 'Residuo fido'].forEach((h, i) => {
