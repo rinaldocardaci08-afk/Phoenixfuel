@@ -58,16 +58,44 @@ function switchBancheTab(btn) {
 }
 
 // ═══ TAB ISTITUTI ═════════════════════════════════════════════════════════
-function renderBancheIstituti() {
+async function renderBancheIstituti() {
   const cont = document.getElementById('content-banche-istituti');
   if (!cont) return;
+
+  // Carica ultimi saldi giornalieri per ogni conto (per visualizzazione live)
+  let saldiByConto = {};
+  try {
+    const { data: ultimiSaldi } = await sb.from('banche_saldi_giornalieri')
+      .select('conto_id, saldo_contabile, saldo_disponibile, data')
+      .order('data', { ascending: false });
+    (ultimiSaldi || []).forEach(s => {
+      if (!saldiByConto[s.conto_id]) saldiByConto[s.conto_id] = s;
+    });
+  } catch (e) {
+    console.warn('renderBancheIstituti: errore caricamento saldi giornalieri', e);
+  }
+
+  // Helper per ottenere il saldo live (contabile) di un conto, con fallback a saldo_attuale
+  function _saldoLive(cc) {
+    const live = saldiByConto[cc.id];
+    if (live && live.saldo_contabile !== null && live.saldo_contabile !== undefined) {
+      return { contabile: Number(live.saldo_contabile), disponibile: live.saldo_disponibile !== null ? Number(live.saldo_disponibile) : null, data: live.data, fonte: 'live' };
+    }
+    return { contabile: Number(cc.saldo_attuale || 0), disponibile: null, data: cc.saldo_aggiornato, fonte: 'manuale' };
+  }
 
   // KPI calcolati
   const nBanche = _bancheIstituti.filter(i => i.attivo).length;
   const nConti = _bancheConti.filter(c => c.attivo).length;
   const saldoTotale = _bancheConti
     .filter(c => c.attivo)
-    .reduce((s, c) => s + Number(c.saldo_attuale || 0), 0);
+    .reduce((s, c) => s + _saldoLive(c).contabile, 0);
+  const dispTotale = _bancheConti
+    .filter(c => c.attivo)
+    .reduce((s, c) => {
+      const sl = _saldoLive(c);
+      return s + (sl.disponibile !== null ? sl.disponibile : sl.contabile);
+    }, 0);
   const nMutuiAttivi = _bancheFinanziamenti.filter(f => f.stato === 'attivo').length;
 
   let html = '';
@@ -76,7 +104,8 @@ function renderBancheIstituti() {
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px">';
   html += '<div class="kpi"><div class="kpi-label">Banche attive</div><div class="kpi-value">' + nBanche + '</div></div>';
   html += '<div class="kpi"><div class="kpi-label">Conti correnti</div><div class="kpi-value">' + nConti + '</div></div>';
-  html += '<div class="kpi"><div class="kpi-label">Saldo totale CC</div><div class="kpi-value" style="color:#639922">' + fmtE(saldoTotale) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Saldo contabile totale</div><div class="kpi-value" style="color:' + (saldoTotale < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(saldoTotale) + '</div></div>';
+  html += '<div class="kpi"><div class="kpi-label">Disponibilità totale</div><div class="kpi-value" style="color:' + (dispTotale < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(dispTotale) + '</div></div>';
   html += '<div class="kpi"><div class="kpi-label">Finanziamenti attivi</div><div class="kpi-value">' + nMutuiAttivi + '</div></div>';
   html += '</div>';
 
@@ -88,12 +117,20 @@ function renderBancheIstituti() {
   }
   html += '</div>';
 
-  // ─── ELENCO ISTITUTI ───
+  // ─── ELENCO ISTITUTI (ordinato Intesa → MPS → BNL → BCC → altri) ───
   if (!_bancheIstituti.length) {
     html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Nessun istituto registrato</div>';
   } else {
-    _bancheIstituti.forEach(ist => {
-      const contiBanca = _bancheConti.filter(c => c.istituto_id === ist.id);
+    const istitutiSorted = _bancheIstituti.slice().sort((a, b) => {
+      const pA = _priorityBancaIstituto(a.nome);
+      const pB = _priorityBancaIstituto(b.nome);
+      if (pA !== pB) return pA - pB;
+      return (a.nome || '').localeCompare(b.nome || '');
+    });
+
+    istitutiSorted.forEach(ist => {
+      const contiBanca = _bancheConti.filter(c => c.istituto_id === ist.id)
+        .sort((a, b) => (a.numero_conto || '').localeCompare(b.numero_conto || ''));
       const fidiBanca = _bancheAffidamenti.filter(a => a.istituto_id === ist.id && a.stato === 'attivo');
       const finBanca = _bancheFinanziamenti.filter(f => f.istituto_id === ist.id && f.stato === 'attivo');
 
@@ -133,14 +170,29 @@ function renderBancheIstituti() {
         html += '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;font-weight:600;letter-spacing:0.4px;margin-bottom:6px">Conti correnti</div>';
         contiBanca.forEach(cc => {
           const ibanMasc = _mascheraIban(cc.iban);
+          const sl = _saldoLive(cc);
+          const colorCont = sl.contabile < 0 ? '#A32D2D' : (sl.contabile > 0 ? '#27500A' : 'var(--text)');
+          const colorDisp = sl.disponibile !== null ? (sl.disponibile < 0 ? '#A32D2D' : '#27500A') : null;
+
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--bg);border-left:3px solid #378ADD;border-radius:0 6px 6px 0;margin-bottom:4px;' + (cc.attivo ? '' : 'opacity:0.5') + '">';
           html += '<div style="flex:1">';
-          html += '<div style="font-size:12px;font-weight:500">' + esc(cc.descrizione) + '</div>';
+          html += '<div style="font-size:12px;font-weight:500">' + esc(cc.descrizione || '');
+          if (cc.numero_conto) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(cc.numero_conto) + '</span>';
+          html += '</div>';
           html += '<div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + esc(ibanMasc) + '</div>';
           html += '</div>';
+          // Blocco saldi (contabile grande + disponibile piccolo)
           html += '<div style="text-align:right;margin-right:10px">';
-          html += '<div style="font-size:13px;font-weight:600;font-family:var(--font-mono);color:' + (Number(cc.saldo_attuale || 0) >= 0 ? '#639922' : '#A32D2D') + '">' + fmtE(Number(cc.saldo_attuale || 0)) + '</div>';
-          html += '<div style="font-size:10px;color:var(--text-hint)">' + (cc.saldo_aggiornato ? 'agg. ' + fmtD(cc.saldo_aggiornato) : 'mai aggiornato') + '</div>';
+          html += '<div style="font-size:14px;font-weight:700;font-family:var(--font-mono);color:' + colorCont + '">' + fmtE(sl.contabile) + '</div>';
+          if (sl.disponibile !== null) {
+            html += '<div style="font-size:10px;color:' + colorDisp + ';font-family:var(--font-mono);font-weight:500;margin-top:1px">disp ' + fmtE(sl.disponibile) + '</div>';
+          }
+          // Footer info: data + fonte
+          if (sl.fonte === 'live') {
+            html += '<div style="font-size:9px;color:#27500A;font-weight:500;margin-top:2px">⬤ live ' + (sl.data ? fmtD(sl.data) : '') + '</div>';
+          } else {
+            html += '<div style="font-size:9px;color:var(--text-hint);margin-top:2px">' + (sl.data ? 'agg. ' + fmtD(sl.data) : 'mai aggiornato') + '</div>';
+          }
           html += '</div>';
           if (_isAdminBanche()) {
             html += '<button onclick="apriModalConto(\'' + cc.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
