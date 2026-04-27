@@ -2704,6 +2704,7 @@ function stampaTimeline() {
 // ═══════════════════════════════════════════════════════════════════════════
 var _situazioneDataCorrente = null; // 'YYYY-MM-DD' del giorno mostrato
 var _situazioneSaldi = {};          // {conto_id: {saldo_contabile, saldo_disponibile, id, note}}
+var _situazioneStorico = [];        // Array degli ultimi 60 giorni di saldi (tutti i conti)
 
 async function renderBancheSituazione() {
   const cont = document.getElementById('banche-panel-situazione');
@@ -2742,8 +2743,22 @@ async function renderBancheSituazione() {
   _situazioneSaldi = {};
   (saldiData || []).forEach(s => { _situazioneSaldi[s.conto_id] = s; });
 
+  // Carica storico ultimi 60 giorni (per pannello storico)
+  const dataLimite = new Date();
+  dataLimite.setDate(dataLimite.getDate() - 60);
+  const dataLimiteStr = dataLimite.toISOString().split('T')[0];
+  try {
+    const { data: storicoData } = await sb.from('banche_saldi_giornalieri')
+      .select('conto_id, data, saldo_contabile, saldo_disponibile')
+      .gte('data', dataLimiteStr)
+      .order('data', { ascending: false });
+    _situazioneStorico = storicoData || [];
+  } catch (e) {
+    _situazioneStorico = [];
+  }
+
   // Registra pannelli (regola spostabili, 27/04)
-  _registerPanels('situazione', ['saldi', 'riepilogo'], renderBancheSituazione);
+  _registerPanels('situazione', ['saldi', 'riepilogo', 'storico'], renderBancheSituazione);
 
   // ─── HEADER (date picker + frecce + bottoni) ───
   const dataObj = new Date(_situazioneDataCorrente + 'T12:00:00');
@@ -2766,8 +2781,9 @@ async function renderBancheSituazione() {
   // ─── PANNELLI ───
   const saldiPanel = _renderPanelSituazioneSaldi();
   const riepilogoPanel = _renderPanelSituazioneRiepilogo();
+  const storicoPanel = _renderPanelSituazioneStorico();
 
-  const panels = { 'saldi': saldiPanel, 'riepilogo': riepilogoPanel };
+  const panels = { 'saldi': saldiPanel, 'riepilogo': riepilogoPanel, 'storico': storicoPanel };
   const order = _getPanelOrder('situazione');
 
   order.forEach(id => {
@@ -3009,6 +3025,95 @@ function _renderPanelSituazioneRiepilogo() {
     html += '</div>';
   }
 
+  html += '</div>';
+  return html;
+}
+
+// ═══ PANNELLO STORICO ═══════════════════════════════════════════════════════
+// Tabella ultimi 60 giorni di saldi: righe = data, colonne = conti.
+// Click su una riga → naviga al giorno corrispondente nella tab Saldi.
+function _renderPanelSituazioneStorico() {
+  const contiSorted = _sortContiPriorita();
+
+  // Raggruppa per data → {conto_id: {contabile, disponibile}}
+  const perData = {};
+  _situazioneStorico.forEach(s => {
+    if (!perData[s.data]) perData[s.data] = {};
+    perData[s.data][s.conto_id] = s;
+  });
+  const dateOrdinate = Object.keys(perData).sort().reverse(); // più recenti prima
+
+  let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
+  html += '<div style="font-size:13px;font-weight:600;color:var(--text)">📈 Storico saldi <span style="color:var(--text-muted);font-weight:400;font-size:11px">(ultimi 60 giorni)</span></div>';
+  html += '<div style="font-size:11px;color:var(--text-muted)">' + dateOrdinate.length + ' giornata' + (dateOrdinate.length === 1 ? '' : 'e') + ' registrata' + (dateOrdinate.length === 1 ? '' : 'e') + '</div>';
+  html += '</div>';
+
+  if (!dateOrdinate.length) {
+    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px;font-size:12px">Nessuna giornata registrata. Inizia inserendo i saldi nel pannello qui sopra.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+  html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
+  html += '<th style="text-align:left;padding:8px;font-weight:600;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.3px;position:sticky;left:0;background:var(--bg)">Data</th>';
+  contiSorted.forEach(c => {
+    const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '—';
+    // Versione compatta del nome (max 12 char) + numero conto
+    const istBreve = istNome.length > 12 ? istNome.substring(0, 12) + '…' : istNome;
+    html += '<th style="text-align:right;padding:8px;font-weight:600;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap">' + esc(istBreve);
+    if (c.numero_conto) html += '<div style="font-family:var(--font-mono);font-size:9px;font-weight:400;text-transform:none;letter-spacing:0">N. ' + esc(c.numero_conto) + '</div>';
+    html += '</th>';
+  });
+  html += '<th style="text-align:right;padding:8px;font-weight:600;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.3px;background:var(--bg)">Totale</th>';
+  html += '</tr></thead><tbody>';
+
+  dateOrdinate.forEach(d => {
+    const isCurrent = d === _situazioneDataCorrente;
+    const dayObj = new Date(d + 'T12:00:00');
+    const giorno = dayObj.toLocaleDateString('it-IT', { weekday: 'short' });
+    let totaleData = 0;
+    let nValori = 0;
+
+    html += '<tr onclick="_situazioneCambiaData(\'' + d + '\')" style="border-bottom:0.5px solid var(--border);cursor:pointer;' + (isCurrent ? 'background:#FAEEDA' : '') + '" onmouseover="if(!this.style.background.includes(\'FAEEDA\'))this.style.background=\'var(--bg)\'" onmouseout="if(!this.style.background.includes(\'FAEEDA\'))this.style.background=\'\'">';
+    html += '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:' + (isCurrent ? '700' : '500') + ';font-size:11px;position:sticky;left:0;background:inherit">';
+    html += fmtD(d);
+    html += '<div style="font-size:9px;color:var(--text-muted);font-weight:400;text-transform:capitalize">' + giorno;
+    if (isCurrent) html += ' · <span style="color:#BA7517;font-weight:600">attuale</span>';
+    html += '</div>';
+    html += '</td>';
+
+    contiSorted.forEach(c => {
+      const rec = perData[d][c.id];
+      if (rec && rec.saldo_contabile !== null && rec.saldo_contabile !== undefined) {
+        const val = Number(rec.saldo_contabile);
+        totaleData += val;
+        nValori++;
+        const colorCont = val < 0 ? '#A32D2D' : (val > 0 ? '#27500A' : 'var(--text)');
+        html += '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:600;color:' + colorCont + ';white-space:nowrap">';
+        html += fmtE(val);
+        html += '</td>';
+      } else {
+        html += '<td style="padding:7px 8px;text-align:right;color:var(--text-hint);font-size:11px">—</td>';
+      }
+    });
+
+    // Totale del giorno
+    if (nValori > 0) {
+      const colorTot = totaleData < 0 ? '#A32D2D' : (totaleData > 0 ? '#27500A' : 'var(--text)');
+      html += '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:700;color:' + colorTot + ';background:var(--bg);white-space:nowrap">';
+      html += fmtE(totaleData);
+      html += '</td>';
+    } else {
+      html += '<td style="padding:7px 8px;text-align:right;color:var(--text-hint);background:var(--bg)">—</td>';
+    }
+
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  html += '<div style="font-size:11px;color:var(--text-hint);margin-top:10px">Click su una riga per navigare a quel giorno e modificarne i saldi. La riga gialla evidenzia il giorno attualmente visualizzato. I dati sono persistenti: ogni inserimento è salvato in DB e resta accessibile in qualsiasi momento.</div>';
   html += '</div>';
   return html;
 }
