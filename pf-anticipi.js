@@ -739,16 +739,13 @@ async function _antRenderModalePresenta(affidamentoId) {
   var resBusy = await sb.from('anticipi_sbf_fatture').select('fattura_id').not('fattura_id', 'is', null).neq('stato', 'esclusa');
   var fattureBusy = new Set((resBusy.data || []).map(function(r) { return r.fattura_id; }));
 
-  // Fatture emesse: prendiamo TD01 con imponibile > 0, ultimi 18 mesi (paginato)
-  var dataMin = new Date();
-  dataMin.setMonth(dataMin.getMonth() - 18);
-  var dataMinISO = dataMin.toISOString().split('T')[0];
-
+  // Fatture emesse: query molto larga, filtraggio fine in JS dopo.
+  // - Includiamo tutti i tipi vendita (TD01/TD06/TD24/TD25) — note credito TD04 escluse perché negative
+  // - Niente filtro temporale duro: prendiamo le 1500 più recenti
+  // - importo_totale > 0 per evitare note credito (TD04) e fatture acconto azzerate
   var resF = await sb.from('fatture_emesse')
     .select('id, numero, data, cliente_id, cessionario_denominazione, importo_totale, imponibile_totale, tipo_documento')
-    .eq('tipo_documento', 'TD01')
-    .gte('data', dataMinISO)
-    .gt('imponibile_totale', 0)
+    .gt('importo_totale', 0)
     .order('data', { ascending: false })
     .limit(1500);
 
@@ -757,11 +754,33 @@ async function _antRenderModalePresenta(affidamentoId) {
     return;
   }
 
-  var fattureCandidate = (resF.data || []).filter(function(f) {
-    if (fattureBusy.has(f.id)) return false;            // già su altro modulo attivo
-    if (blacklistSet.has(f.cliente_id)) return false;   // cliente in blacklist
+  // Diagnostica: conta cosa è caricato e cosa viene scartato
+  var raw = resF.data || [];
+  var diag = {
+    totaliDB: raw.length,
+    scartateTipoCredito: 0,
+    scartateBusy: 0,
+    scartateBlacklist: 0,
+    scartateSenzaImponibile: 0
+  };
+  var fattureCandidate = raw.filter(function(f) {
+    // Escludi solo le note credito esplicite (TD04 e simili che invertono il segno)
+    if (f.tipo_documento === 'TD04' || f.tipo_documento === 'TD05' || f.tipo_documento === 'TD08') {
+      diag.scartateTipoCredito++;
+      return false;
+    }
+    if (fattureBusy.has(f.id)) { diag.scartateBusy++; return false; }
+    if (blacklistSet.has(f.cliente_id)) { diag.scartateBlacklist++; return false; }
+    if (!f.imponibile_totale || Number(f.imponibile_totale) <= 0) { diag.scartateSenzaImponibile++; return false; }
     return true;
   });
+  diag.candidate = fattureCandidate.length;
+
+  // Logging diagnostico per debug
+  console.log('[anticipi/Presenta] Filtraggio fatture:', diag);
+  if (raw.length === 0) {
+    console.warn('[anticipi/Presenta] Nessuna fattura trovata in fatture_emesse — verifica che siano state importate da Danea.');
+  }
 
   // Carica scadenze (fatture_pagamenti) per le fatture candidate
   var fIds = fattureCandidate.map(function(f) { return f.id; });
@@ -810,7 +829,8 @@ async function _antRenderModalePresenta(affidamentoId) {
     selezionate: new Set(),
     sortBy: 'data_desc',
     filterCliente: '',
-    filterSearch: ''
+    filterSearch: '',
+    diag: diag
   };
 
   _antPresentaRender();
@@ -874,6 +894,24 @@ function _antPresentaRender() {
   html += '<button onclick="_antPresentaDeselezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">⨯ Nessuna</button>';
   html += '</div>';
 
+  // Mini-banner diagnostico (sempre visibile per chi è admin)
+  if (st.diag && st.fatture.length > 0) {
+    var totScartate = (st.diag.scartateTipoCredito || 0) + (st.diag.scartateBusy || 0) + (st.diag.scartateBlacklist || 0) + (st.diag.scartateSenzaImponibile || 0);
+    if (totScartate > 0) {
+      html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">';
+      html += 'DB: ' + st.diag.totaliDB + ' fatture · ';
+      html += '<strong style="color:var(--text)">' + st.diag.candidate + ' presentabili</strong>';
+      html += ' · scartate: ';
+      var parts = [];
+      if (st.diag.scartateTipoCredito) parts.push(st.diag.scartateTipoCredito + ' credito');
+      if (st.diag.scartateBusy) parts.push(st.diag.scartateBusy + ' altro modulo');
+      if (st.diag.scartateBlacklist) parts.push(st.diag.scartateBlacklist + ' blacklist');
+      if (st.diag.scartateSenzaImponibile) parts.push(st.diag.scartateSenzaImponibile + ' s/imp');
+      html += parts.join(' · ');
+      html += '</div>';
+    }
+  }
+
   // Filtra + ordina lista
   var visible = st.fatture.slice();
   if (st.filterCliente) {
@@ -902,8 +940,22 @@ function _antPresentaRender() {
   if (!visible.length) {
     html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg-card);border:1px dashed var(--border);border-radius:8px;font-size:12px">';
     if (!st.fatture.length) {
-      html += '📭 Nessuna fattura presentabile su questa banca.<br>';
-      html += '<span style="font-size:11px">Tutte le fatture aperte sono già su altri moduli, oppure i clienti sono in blacklist.</span>';
+      html += '📭 <strong>Nessuna fattura presentabile su questa banca.</strong><br>';
+      // Diagnostica visibile per capire dove finiscono le fatture
+      if (st.diag) {
+        html += '<div style="margin-top:14px;text-align:left;display:inline-block;font-size:11px;color:var(--text);background:var(--bg);padding:10px 14px;border-radius:6px;font-family:var(--font-mono)">';
+        html += 'Fatture lette da DB: <strong>' + st.diag.totaliDB + '</strong><br>';
+        if (st.diag.totaliDB === 0) {
+          html += '<span style="color:#A32D2D">⚠ Tabella fatture_emesse vuota.</span><br>';
+          html += '<span style="font-family:inherit;font-size:11px">→ Importa le fatture da Danea (sezione Fatture → Import XML)</span>';
+        } else {
+          if (st.diag.scartateTipoCredito > 0) html += '· Note credito (TD04/05/08): <strong>' + st.diag.scartateTipoCredito + '</strong><br>';
+          if (st.diag.scartateSenzaImponibile > 0) html += '· Senza imponibile: <strong>' + st.diag.scartateSenzaImponibile + '</strong><br>';
+          if (st.diag.scartateBusy > 0) html += '· Già impegnate in altro modulo: <strong>' + st.diag.scartateBusy + '</strong><br>';
+          if (st.diag.scartateBlacklist > 0) html += '· Cliente in blacklist banca: <strong>' + st.diag.scartateBlacklist + '</strong><br>';
+        }
+        html += '</div>';
+      }
     } else {
       html += 'Nessuna fattura corrisponde ai filtri.';
     }
