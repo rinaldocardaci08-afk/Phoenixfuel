@@ -1718,7 +1718,7 @@ function apriModalAffidamento(id) {
   });
   html += '</select></div>';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Tipo fido *</label>';
-  html += '<select id="mod-aff-tipo" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-aff-tipo" onchange="_aggiornaBloccoAnticipo(this.value)" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['cassa','anticipo_fatture','sbf','castelletto','autoliquidante','fideiussione'].forEach(t => {
     const lab = { cassa:'Cassa', anticipo_fatture:'Anticipo fatture', sbf:'SBF', castelletto:'Castelletto', autoliquidante:'Autoliquidante', fideiussione:'Fideiussione' }[t];
     html += '<option value="' + t + '" ' + ((a?.tipo || 'cassa') === t ? 'selected' : '') + '>' + lab + '</option>';
@@ -1746,6 +1746,29 @@ function apriModalAffidamento(id) {
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += _campo('Tasso annuo %', 'mod-aff-tasso', a?.tasso ?? '', 'number', '0.00');
   html += _campo('CDF (% disponibilità non utiliz.)', 'mod-aff-cdf', a?.tasso_cdf ?? '', 'number', '0.00');
+  html += '</div>';
+
+  // ─── PARAMETRI ANTICIPO (visibili solo per tipi anticipo) ─────────────
+  // Si mostrano dinamicamente in base alla select tipo (vedi onchange sotto).
+  var tipiAnticipo = ['anticipo_fatture','sbf','castelletto','autoliquidante'];
+  var tipoCorrente = a?.tipo || 'cassa';
+  var mostraAnt = tipiAnticipo.indexOf(tipoCorrente) >= 0;
+  html += '<div id="mod-aff-blocco-anticipo" style="' + (mostraAnt ? '' : 'display:none;') + 'background:#EEEDFE;border-left:4px solid #6B5FCC;border-radius:6px;padding:12px 14px;margin-top:6px">';
+  html += '<div style="font-size:12px;font-weight:600;color:#26215C;margin-bottom:10px">📄 Parametri anticipo fatture</div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">% Anticipo</label>';
+  html += '<input id="mod-aff-perc-ant" type="number" min="0" max="100" step="1" value="' + (a?.percentuale_anticipo_default ?? '') + '" placeholder="Es. 80" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Base calcolo</label>';
+  html += '<select id="mod-aff-base-ant" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+  var bcA = a?.base_calcolo_default || '';
+  html += '<option value=""' + (!bcA ? ' selected' : '') + '>—</option>';
+  html += '<option value="imponibile"' + (bcA === 'imponibile' ? ' selected' : '') + '>Imponibile</option>';
+  html += '<option value="totale"' + (bcA === 'totale' ? ' selected' : '') + '>Totale fattura</option>';
+  html += '</select></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Massimale cliente (%)</label>';
+  html += '<input id="mod-aff-mass-pct" type="number" min="0" max="100" step="1" value="' + (a?.massimale_cliente_pct ?? '') + '" placeholder="Es. 20" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)"></div>';
+  html += '</div>';
+  html += '<div style="font-size:10px;color:#26215C;margin-top:8px;line-height:1.5">💡 Esempio: fido 600k, % anticipo 80%, massimale cliente 20% → ogni cliente max <strong>120.000 €</strong> di anticipo aperto su questa banca. Una fattura da 122k (100k+IVA22) imponibile → anticipa <strong>80.000 €</strong>, totale → anticipa <strong>97.600 €</strong>.</div>';
   html += '</div>';
 
   // Date
@@ -1778,6 +1801,15 @@ function apriModalAffidamento(id) {
   apriModal(html);
 }
 
+// Helper: mostra/nasconde il blocco "Parametri anticipo fatture" in base
+// al tipo di fido selezionato. Chiamato dall'onchange della select tipo.
+function _aggiornaBloccoAnticipo(tipo) {
+  var blocco = document.getElementById('mod-aff-blocco-anticipo');
+  if (!blocco) return;
+  var tipiAnticipo = ['anticipo_fatture','sbf','castelletto','autoliquidante'];
+  blocco.style.display = (tipiAnticipo.indexOf(tipo) >= 0) ? '' : 'none';
+}
+
 async function salvaAffidamento(id) {
   const accordato = Number(document.getElementById('mod-aff-accordato').value);
   if (!accordato || accordato <= 0) { toast('⚠ Importo accordato obbligatorio (>0)'); return; }
@@ -1785,10 +1817,28 @@ async function salvaAffidamento(id) {
   const utilizzato = Number(document.getElementById('mod-aff-utilizzato').value) || 0;
   const today = new Date().toISOString().split('T')[0];
 
+  // Parametri anticipo (solo se il blocco è visibile in base al tipo)
+  const tipoFido = document.getElementById('mod-aff-tipo').value;
+  const tipiAnt = ['anticipo_fatture','sbf','castelletto','autoliquidante'];
+  let percAnt = null, baseAnt = null, massPct = null;
+  if (tipiAnt.indexOf(tipoFido) >= 0) {
+    const pRaw = document.getElementById('mod-aff-perc-ant')?.value;
+    if (pRaw !== '' && pRaw != null) {
+      percAnt = Number(pRaw);
+      if (!isFinite(percAnt) || percAnt < 0 || percAnt > 100) { toast('% Anticipo: 0-100'); return; }
+    }
+    baseAnt = document.getElementById('mod-aff-base-ant')?.value || null;
+    const mRaw = document.getElementById('mod-aff-mass-pct')?.value;
+    if (mRaw !== '' && mRaw != null) {
+      massPct = Number(mRaw);
+      if (!isFinite(massPct) || massPct < 0 || massPct > 100) { toast('Massimale cliente: 0-100%'); return; }
+    }
+  }
+
   const payload = {
     istituto_id: document.getElementById('mod-aff-istituto').value,
     conto_id: document.getElementById('mod-aff-conto').value || null,
-    tipo: document.getElementById('mod-aff-tipo').value,
+    tipo: tipoFido,
     importo_accordato: accordato,
     importo_utilizzato: utilizzato,
     utilizzato_aggiornato: today,
@@ -1798,6 +1848,9 @@ async function salvaAffidamento(id) {
     data_scadenza: document.getElementById('mod-aff-scadenza').value || null,
     stato: document.getElementById('mod-aff-stato').value,
     note: document.getElementById('mod-aff-note').value.trim() || null,
+    percentuale_anticipo_default: percAnt,
+    base_calcolo_default: baseAnt,
+    massimale_cliente_pct: massPct,
     updated_at: new Date().toISOString()
   };
 

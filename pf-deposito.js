@@ -2358,20 +2358,28 @@ async function confermaSmistamento() {
     trasportatoreId: trasportatoreId, dataConsegna: dataConsegna
   };
   var ordiniMockPopup = righe.map(function(r) { return { prodotto: ordine.prodotto, litri: r.litri }; });
-  if (typeof pfApriPopupDensita === 'function') {
-    pfApriPopupDensita(
-      ordiniMockPopup,
-      function(densitaByProdotto) {
-        argsSmist.densitaByProdotto = densitaByProdotto;
-        _eseguiSmistamentoDB(argsSmist);
-      },
-      function() { toast('Smistamento annullato'); }
-    );
+
+  // Guardia: il popup densità DEVE essere disponibile (regola costituzionale 20/04).
+  // Se manca (es. cache/Service Worker stale), blocco e istruisco l'operatore.
+  if (typeof pfApriPopupDensita !== 'function') {
+    alert('⚠ ATTENZIONE — Popup densità non disponibile\n\n' +
+          'Il programma non riesce a caricare la finestra delle densità DAS.\n' +
+          'Causa probabile: cache del browser obsoleta.\n\n' +
+          'COSA FARE:\n' +
+          '1. Premi il bottone 🔄 Aggiorna in alto a destra (svuota cache)\n' +
+          '2. Aspetta che la pagina ricarichi\n' +
+          '3. Riprova a confermare lo smistamento\n\n' +
+          'Lo smistamento NON è stato creato. Riprova dopo l\'aggiornamento.');
     return;
   }
-  // Fallback (popup non disponibile): vecchio comportamento, densità default
-  argsSmist.densitaByProdotto = null;
-  _eseguiSmistamentoDB(argsSmist);
+  pfApriPopupDensita(
+    ordiniMockPopup,
+    function(densitaByProdotto) {
+      argsSmist.densitaByProdotto = densitaByProdotto;
+      _eseguiSmistamentoDB(argsSmist);
+    },
+    function() { toast('Smistamento annullato'); }
+  );
 }
 
 // Fase 2 dello smistamento: dopo il popup densità, esegue tutte le insert in DB

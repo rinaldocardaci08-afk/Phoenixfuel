@@ -154,7 +154,7 @@ async function renderBancheAnticipi() {
     html += '<button onclick="_antSwitchTab(\'regole\')" '
       + 'style="background:' + (regoleActive ? '#534AB7' : '#EEEDFE') + ';color:' + (regoleActive ? '#fff' : '#26215C')
       + ';border:1px dashed #6B5FCC;border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:600' + (_antPuoVedereStorico() ? '' : ';margin-left:auto') + '">'
-      + '⚙ Regole'
+      + '🚫 Blacklist'
       + '</button>';
   }
   html += '</div>';
@@ -529,18 +529,23 @@ async function _antRenderTabStorico() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TAB REGOLE — CRUD regole anticipo per banca/cliente
+// TAB BLACKLIST — clienti esclusi dall'anticipo per banca
 // ═══════════════════════════════════════════════════════════════════════════
+// Mostra solo i clienti in blacklist (anticipi_sbf_regole.stato='esclusa')
+// per la banca selezionata. Le percentuali e massimali ora sono SUL FIDO,
+// non più qui (decisione utente 28/04: tutto sul fido + tab solo blacklist).
+// ─────────────────────────────────────────────────────────────────────────────
 var _antRegoleBancaSelected = null;
 
 async function _antRenderTabRegole() {
   const cont = document.getElementById('ant-content');
   if (!cont) return;
-  cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">⏳ Caricamento regole...</div>';
+  cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">⏳ Caricamento blacklist...</div>';
 
-  // Lista fidi anticipi
+  // Solo fidi attivi tipo anticipo (dove ha senso una blacklist)
+  const tipiAnticipo = ['anticipo_fatture','sbf','castelletto','autoliquidante'];
   const fidi = _bancheAffidamenti
-    .filter(a => a.stato === 'attivo' && (a.tipo === 'sbf' || a.tipo === 'anticipo_fatture'))
+    .filter(a => a.stato === 'attivo' && tipiAnticipo.indexOf(a.tipo) >= 0)
     .sort((a, b) => {
       const istA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
       const istB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
@@ -552,7 +557,7 @@ async function _antRenderTabRegole() {
 
   if (!_antRegoleBancaSelected && fidi.length) _antRegoleBancaSelected = fidi[0].id;
 
-  // Carica clienti per dropdown se non in cache
+  // Cache clienti
   if (!_antClientiCache) {
     try {
       const { data } = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome').limit(2000);
@@ -560,24 +565,26 @@ async function _antRenderTabRegole() {
         id: c.id,
         nome: c.ragione_sociale || c.denominazione || c.nome || '—'
       })).sort((a, b) => a.nome.localeCompare(b.nome));
-    } catch (e) {
-      _antClientiCache = [];
-    }
+    } catch (e) { _antClientiCache = []; }
   }
 
-  // Carica regole della banca selezionata
-  let regole = [];
+  // Carica SOLO regole blacklist (stato='esclusa') della banca selezionata
+  let blacklist = [];
   if (_antRegoleBancaSelected) {
     const { data } = await sb.from('anticipi_sbf_regole')
       .select('*')
-      .eq('affidamento_id', _antRegoleBancaSelected);
-    regole = data || [];
+      .eq('affidamento_id', _antRegoleBancaSelected)
+      .eq('stato', 'esclusa');
+    blacklist = data || [];
   }
 
+  // Info fido selezionato
+  const fidoSel = fidi.find(f => f.id === _antRegoleBancaSelected) || null;
+
   let html = '';
-  html += '<div style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:14px 18px;border-radius:6px;margin-bottom:14px">';
-  html += '<div style="font-size:14px;font-weight:700;color:#26215C">⚙ Regole anticipo per banca/cliente</div>';
-  html += '<div style="font-size:11px;color:#666;margin-top:3px">Configura percentuali, massimali e blacklist. La regola DEFAULT (cliente=Ø) si applica a tutti i clienti senza regola specifica.</div>';
+  html += '<div style="background:#FCEBEB;border-left:4px solid #791F1F;padding:14px 18px;border-radius:6px;margin-bottom:14px">';
+  html += '<div style="font-size:14px;font-weight:700;color:#791F1F">🚫 Blacklist clienti per banca</div>';
+  html += '<div style="font-size:11px;color:#666;margin-top:3px">Le fatture dei clienti in questa lista <strong>non saranno proposte</strong> quando crei un nuovo modulo Presenta su questa banca. Percentuali e massimali ora sono nel fido (Affidamenti).</div>';
   html += '</div>';
 
   // Selettore banca
@@ -594,76 +601,78 @@ async function _antRenderTabRegole() {
   html += '</select>';
   html += '</div>';
   if (_antPuoGestireRegole() && _antRegoleBancaSelected) {
-    html += '<button onclick="_antApriModaleRegola(null,\'' + _antRegoleBancaSelected + '\')" style="background:#26215C;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600">+ Aggiungi regola cliente</button>';
+    html += '<button onclick="_antApriModaleRegola(null,\'' + _antRegoleBancaSelected + '\')" style="background:#791F1F;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600">+ Aggiungi cliente alla blacklist</button>';
   }
   html += '</div>';
 
-  // Tabella regole
-  html += '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;overflow:hidden">';
-  html += '<thead><tr style="background:var(--bg)">';
-  ['Cliente', '% Anticipo', 'Base calcolo', 'Massimale', 'Stato', 'Note', ''].forEach(h => {
-    html += '<th style="text-align:left;padding:9px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-weight:600;border-bottom:0.5px solid var(--border)">' + h + '</th>';
-  });
-  html += '</tr></thead><tbody>';
+  // Box parametri anticipo del fido (read-only, info)
+  if (fidoSel) {
+    const massimaleEuro = (fidoSel.massimale_cliente_pct && fidoSel.importo_accordato)
+      ? (Number(fidoSel.massimale_cliente_pct) / 100) * Number(fidoSel.importo_accordato)
+      : null;
+    html += '<div style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:11px;color:#26215C">';
+    html += '<strong style="font-size:12px">📄 Parametri anticipo di questa banca</strong> ';
+    html += '<span style="font-size:10px;color:#666">(modificabili in Affidamenti → ✏️)</span><br>';
+    html += '<span style="font-family:var(--font-mono)">';
+    html += '% Anticipo: <strong>' + (fidoSel.percentuale_anticipo_default ? Number(fidoSel.percentuale_anticipo_default).toFixed(0) + '%' : '—') + '</strong> · ';
+    html += 'Base: <strong>' + (fidoSel.base_calcolo_default === 'totale' ? 'Totale fattura' : fidoSel.base_calcolo_default === 'imponibile' ? 'Imponibile' : '—') + '</strong> · ';
+    html += 'Massimale cliente: <strong>' + (fidoSel.massimale_cliente_pct ? Number(fidoSel.massimale_cliente_pct).toFixed(0) + '%' : '—');
+    if (massimaleEuro) html += ' (= ' + fmtE(massimaleEuro) + ')';
+    html += '</strong>';
+    html += '</span>';
+    if (!fidoSel.percentuale_anticipo_default || !fidoSel.base_calcolo_default) {
+      html += '<div style="margin-top:6px;color:#A32D2D;font-weight:600">⚠ Compila % anticipo e base calcolo nel fido (Affidamenti) prima di creare moduli su questa banca.</div>';
+    }
+    html += '</div>';
+  }
 
-  // Regola DEFAULT prima
-  const def = regole.find(r => !r.cliente_id);
-  if (def) html += _antRenderRigaRegola(def, true);
-
-  // Altre regole ordinate per nome cliente
-  const altre = regole.filter(r => r.cliente_id);
-  altre.sort((a, b) => {
-    const cA = _antClientiCache.find(c => c.id === a.cliente_id);
-    const cB = _antClientiCache.find(c => c.id === b.cliente_id);
-    return ((cA || {}).nome || '').localeCompare(((cB || {}).nome || ''));
-  });
-  altre.forEach(r => html += _antRenderRigaRegola(r, false));
-
-  html += '</tbody></table>';
-
-  if (regole.length === 0) {
-    html += '<div style="margin-top:10px;padding:14px;background:#FAEEDA;border-left:4px solid #BA7517;color:#633806;font-size:11px;border-radius:6px">⚠ Nessuna regola configurata. Vai in Affidamenti e compila i campi <strong>% default</strong> e <strong>base calcolo</strong> sul fido per generare automaticamente la regola DEFAULT.</div>';
+  // Tabella blacklist
+  if (blacklist.length === 0) {
+    html += '<div style="padding:24px;text-align:center;background:var(--bg-card);border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-size:12px">Nessun cliente in blacklist per questa banca.<br><span style="font-size:11px">Tutti i clienti sono anticipabili.</span></div>';
   } else {
-    html += '<div style="margin-top:10px;padding:10px 14px;background:#EEEDFE;border-left:4px solid #6B5FCC;color:#26215C;font-size:11px;border-radius:6px">💡 I clienti non in lista ereditano la regola DEFAULT della banca. Per escludere un cliente specifico aggiungi una regola con stato <strong>esclusa</strong>.</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;overflow:hidden">';
+    html += '<thead><tr style="background:var(--bg)">';
+    ['Cliente', 'Note', ''].forEach(h => {
+      html += '<th style="text-align:left;padding:9px 10px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-weight:600;border-bottom:0.5px solid var(--border)">' + h + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    blacklist.sort((a, b) => {
+      const cA = _antClientiCache.find(c => c.id === a.cliente_id);
+      const cB = _antClientiCache.find(c => c.id === b.cliente_id);
+      return ((cA || {}).nome || '').localeCompare(((cB || {}).nome || ''));
+    });
+
+    blacklist.forEach(r => {
+      const cliente = (_antClientiCache || []).find(c => c.id === r.cliente_id);
+      const nomeCl = (cliente || {}).nome || '(cliente eliminato)';
+      html += '<tr style="border-bottom:0.5px solid var(--border)">';
+      html += '<td style="padding:9px 10px;font-weight:500">🚫 ' + esc(nomeCl) + '</td>';
+      html += '<td style="padding:9px 10px;font-size:11px;color:var(--text-muted);max-width:380px">' + esc(r.note || '') + '</td>';
+      html += '<td style="padding:5px 10px;text-align:right;white-space:nowrap">';
+      if (_antPuoGestireRegole()) {
+        html += '<button onclick="_antApriModaleRegola(\'' + r.id + '\')" style="background:none;border:0.5px solid var(--border);color:var(--text-muted);padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px" title="Modifica note">✏️</button>';
+        html += ' <button onclick="_antEliminaRegola(\'' + r.id + '\')" style="background:none;border:0.5px solid #27500A;color:#27500A;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:4px" title="Rimuovi dalla blacklist">↺ Riabilita</button>';
+      }
+      html += '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table>';
   }
 
   cont.innerHTML = html;
 }
 
-function _antRenderRigaRegola(r, isDefault) {
-  const cliente = isDefault ? null : (_antClientiCache || []).find(c => c.id === r.cliente_id);
-  const stColor = r.stato === 'esclusa'
-    ? { bg: '#FCEBEB', fg: '#791F1F', label: 'Escluso' }
-    : { bg: '#EAF3DE', fg: '#27500A', label: 'Attiva' };
-  const baseColor = r.base_calcolo === 'totale' ? { bg: '#FAEEDA', fg: '#633806' } : { bg: '#EEEDFE', fg: '#26215C' };
+// Stub per backward compat: la vecchia logica multi-campo è stata sostituita dalla blacklist
+function _antRenderRigaRegola(r, isDefault) { return ''; }
 
-  let html = '<tr style="' + (isDefault ? 'background:#EEEDFE;' : '') + 'border-bottom:0.5px solid var(--border)">';
-  html += '<td style="padding:9px 10px;font-weight:' + (isDefault ? '700' : '500') + '">';
-  html += isDefault ? '— Regola DEFAULT banca' : esc((cliente || {}).nome || '(cliente eliminato)');
-  html += '</td>';
-  html += '<td style="padding:9px 10px;font-family:var(--font-mono);font-weight:600">' + (r.percentuale_anticipo !== null ? Number(r.percentuale_anticipo).toFixed(0) + '%' : '—') + '</td>';
-  html += '<td style="padding:9px 10px">';
-  if (r.base_calcolo) html += '<span style="background:' + baseColor.bg + ';color:' + baseColor.fg + ';padding:2px 8px;border-radius:9px;font-size:10px;font-weight:600">' + (r.base_calcolo === 'totale' ? 'Totale ft' : 'Imponibile') + '</span>';
-  else html += '—';
-  html += '</td>';
-  html += '<td style="padding:9px 10px;font-family:var(--font-mono);text-align:right">' + (r.massimale_cliente ? fmtE(r.massimale_cliente) : 'Nessun limite') + '</td>';
-  html += '<td style="padding:9px 10px"><span style="background:' + stColor.bg + ';color:' + stColor.fg + ';padding:2px 8px;border-radius:9px;font-size:10px;font-weight:700">' + stColor.label + '</span></td>';
-  html += '<td style="padding:9px 10px;font-size:10px;color:var(--text-muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.note || '') + '</td>';
-  html += '<td style="padding:5px 10px;text-align:right">';
-  if (_antPuoGestireRegole()) {
-    html += '<button onclick="_antApriModaleRegola(\'' + r.id + '\')" style="background:none;border:0.5px solid var(--border);color:var(--text-muted);padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
-    if (!isDefault) html += ' <button onclick="_antEliminaRegola(\'' + r.id + '\')" style="background:none;border:0.5px solid #E24B4A;color:#E24B4A;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:4px">🗑</button>';
-  }
-  html += '</td>';
-  html += '</tr>';
-  return html;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PLACEHOLDER MODALI — implementati al prossimo step
+// PLACEHOLDER MODALI — implementati progressivamente (Step 3)
 // ═══════════════════════════════════════════════════════════════════════════
 function _antApriModalePresenta(affidamentoId) {
-  toast('🚧 Modale Presenta Fatture — al prossimo step (Step 3)');
+  toast('🚧 Modale Presenta Fatture — al prossimo step');
 }
 function _antApriModaleAccredito(presentazioneId) {
   toast('🚧 Modale Registra Accredito — al prossimo step');
@@ -677,15 +686,171 @@ function _antApriModaleFattura(fatturaAntId) {
 function _antRegistraIncasso(fatturaAntId) {
   toast('🚧 Registra incasso — al prossimo step');
 }
-function _antApriModaleRegola(regolaId, affidamentoId) {
-  toast('🚧 Modifica regola — al prossimo step');
-}
-function _antEliminaRegola(regolaId) {
-  toast('🚧 Elimina regola — al prossimo step');
-}
 function _antApriDettaglioModulo(presentazioneId) {
   toast('🚧 Dettaglio modulo storico — al prossimo step');
 }
 function _antStampaPDFBanca(affidamentoId) {
   toast('🚧 Stampa PDF banca — al prossimo step');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE BLACKLIST (aggiungi/modifica/rimuovi cliente escluso)
+// ═══════════════════════════════════════════════════════════════════════════
+// Modello semplificato: una "regola" qui è solo un'esclusione.
+// La tabella anticipi_sbf_regole conserva i campi % e massimale per
+// backward compatibility e per eventuali eccezioni future, ma da questa UI
+// si scrive solo stato='esclusa' (decisione utente 28/04).
+// ─────────────────────────────────────────────────────────────────────────────
+async function _antApriModaleRegola(regolaId, affidamentoId) {
+  if (!_antPuoGestireRegole()) { toast('Operazione riservata all\'amministratore'); return; }
+
+  // Carica regola esistente se in modifica
+  var regola = null;
+  if (regolaId) {
+    var resR = await sb.from('anticipi_sbf_regole').select('*').eq('id', regolaId).single();
+    if (resR.error || !resR.data) { toast('Regola non trovata'); return; }
+    regola = resR.data;
+    affidamentoId = regola.affidamento_id;
+  }
+  if (!affidamentoId) { toast('Affidamento mancante'); return; }
+
+  // Info banca per header
+  var fido = (_bancheAffidamenti || []).find(function(f) { return f.id === affidamentoId; }) || {};
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === fido.istituto_id; }) || {};
+  var cc  = (_bancheConti || []).find(function(c) { return c.id === fido.conto_id; });
+  var bancaLabel = (ist.nome || '—') + (cc && cc.numero_conto ? ' /' + cc.numero_conto.slice(-4) : '');
+
+  // Cache clienti
+  if (!_antClientiCache) {
+    try {
+      var resC = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome').limit(2000);
+      _antClientiCache = (resC.data || []).map(function(c) {
+        return { id: c.id, nome: c.ragione_sociale || c.denominazione || c.nome || '—' };
+      }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+    } catch (e) { _antClientiCache = []; }
+  }
+
+  // Clienti già in blacklist su questa banca (per nasconderli in creazione)
+  var resG = await sb.from('anticipi_sbf_regole').select('cliente_id').eq('affidamento_id', affidamentoId).eq('stato', 'esclusa');
+  var clientiBlacklist = new Set((resG.data || []).filter(function(r) {
+    return r.cliente_id && (!regola || r.cliente_id !== regola.cliente_id);
+  }).map(function(r) { return r.cliente_id; }));
+
+  var titolo = !regola ? '🚫 Aggiungi cliente alla blacklist' : '✏️ Modifica esclusione cliente';
+
+  var html = '<div style="max-width:520px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#791F1F">' + titolo + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">🏛 ' + esc(bancaLabel) + '</div>';
+
+  html += '<div style="display:grid;gap:10px">';
+
+  // Cliente
+  if (regola) {
+    html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Cliente escluso</label>';
+    html += '<div style="padding:8px;background:#FCEBEB;border-radius:6px;font-size:13px;font-weight:500;color:#791F1F">';
+    var cl = _antClientiCache.find(function(c) { return c.id === regola.cliente_id; });
+    html += '🚫 ' + esc((cl || {}).nome || '(cliente eliminato)');
+    html += '</div></div>';
+    html += '<input type="hidden" id="mod-reg-cliente" value="' + (regola.cliente_id || '') + '">';
+  } else {
+    html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Cliente da escludere *</label>';
+    html += '<select id="mod-reg-cliente" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+    html += '<option value="">— seleziona cliente —</option>';
+    _antClientiCache.forEach(function(c) {
+      if (clientiBlacklist.has(c.id)) return; // nasconde clienti già in blacklist
+      html += '<option value="' + c.id + '">' + esc(c.nome) + '</option>';
+    });
+    html += '</select>';
+    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">I clienti già in blacklist su questa banca non compaiono</div>';
+    html += '</div>';
+  }
+
+  // Note
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Motivo / note (opzionale)</label>';
+  html += '<textarea id="mod-reg-note" placeholder="Es. cliente protestato, banca rifiuta, sospeso causa contenzioso..." style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;min-height:54px;resize:vertical">' + esc((regola && regola.note) || '') + '</textarea></div>';
+
+  html += '</div>'; // /grid
+
+  // Pulsanti
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  if (regola) {
+    html += '<button onclick="_antEliminaRegola(\'' + regola.id + '\')" style="background:#27500A;color:white;border:0;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-right:auto">↺ Riabilita cliente</button>';
+  }
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  var arg = regola ? "'" + regola.id + "'" : 'null';
+  html += '<button onclick="_antSalvaRegola(' + arg + ',\'' + affidamentoId + '\')" class="btn-primary" style="font-size:12px;padding:8px 14px;background:#791F1F">💾 Salva</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function _antSalvaRegola(regolaId, affidamentoId) {
+  if (!_antPuoGestireRegole()) { toast('Operazione riservata all\'amministratore'); return; }
+
+  var clienteIdRaw = (document.getElementById('mod-reg-cliente').value || '').trim();
+  var clienteId = clienteIdRaw || null;
+  var note = document.getElementById('mod-reg-note').value.trim() || null;
+
+  if (!regolaId && !clienteId) { toast('Seleziona un cliente'); return; }
+
+  var payload = {
+    affidamento_id: affidamentoId,
+    cliente_id: clienteId,
+    stato: 'esclusa',
+    // Per blacklist queste colonne non hanno significato → null
+    percentuale_anticipo: null,
+    base_calcolo: null,
+    massimale_cliente: null,
+    note: note,
+    modificato_at: new Date().toISOString()
+  };
+
+  try {
+    var res;
+    if (regolaId) {
+      // In modifica aggiorniamo solo le note (cliente e affidamento sono fissi)
+      res = await sb.from('anticipi_sbf_regole').update({
+        note: note,
+        modificato_at: new Date().toISOString()
+      }).eq('id', regolaId);
+    } else {
+      res = await sb.from('anticipi_sbf_regole').insert([payload]);
+    }
+    if (res.error) {
+      var msg = res.error.message || '';
+      if (msg.indexOf('duplicate') >= 0 || msg.indexOf('unique') >= 0) {
+        toast('Cliente già in blacklist su questa banca');
+      } else {
+        toast('Errore salvataggio: ' + msg);
+      }
+      return;
+    }
+    chiudiModal();
+    toast(regolaId ? '✓ Note aggiornate' : '✓ Cliente escluso dalla banca');
+    if (typeof _antRenderTabRegole === 'function') await _antRenderTabRegole();
+  } catch (err) {
+    console.error('[anticipi] _antSalvaRegola:', err);
+    toast('Errore: ' + (err.message || err));
+  }
+}
+
+async function _antEliminaRegola(regolaId) {
+  if (!_antPuoGestireRegole()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!regolaId) return;
+
+  // Recupera info regola per messaggio confirm
+  var resR = await sb.from('anticipi_sbf_regole').select('*').eq('id', regolaId).single();
+  if (resR.error || !resR.data) { toast('Regola non trovata'); return; }
+  var regola = resR.data;
+  var cl = (_antClientiCache || []).find(function(c) { return c.id === regola.cliente_id; });
+  var nomeCl = (cl || {}).nome || '(cliente sconosciuto)';
+
+  if (!confirm('Riabilitare il cliente «' + nomeCl + '» per questa banca?\n\nLe sue fatture torneranno disponibili per anticipo.')) return;
+
+  var resD = await sb.from('anticipi_sbf_regole').delete().eq('id', regolaId);
+  if (resD.error) { toast('Errore: ' + resD.error.message); return; }
+  chiudiModal();
+  toast('✓ Cliente riabilitato');
+  if (typeof _antRenderTabRegole === 'function') await _antRenderTabRegole();
 }

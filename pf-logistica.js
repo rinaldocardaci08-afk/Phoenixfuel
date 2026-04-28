@@ -752,31 +752,34 @@ async function creaNuovoCarico() {
   // Prima di creare il carico in DB, chiedo all'operatore le densità
   // da usare sui DAS. Se annulla, NIENTE viene inserito in DB.
   const { data: ordiniCaricoPre } = await sb.from('ordini').select('*').in('id', ordiniSel);
-  if (typeof pfApriPopupDensita === 'function') {
-    pfApriPopupDensita(
-      ordiniCaricoPre || [],
-      function(densitaByProdotto) {
-        _creaCaricoConDensita({
-          data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
-          ordiniSel: ordiniSel, mezzoId: mezzoId,
-          ordiniCarico: ordiniCaricoPre || [],
-          densitaByProdotto: densitaByProdotto
-        });
-      },
-      function() {
-        toast('Creazione carico annullata');
-      }
-    );
+
+  // Guardia: il popup densità DEVE essere disponibile (regola costituzionale 20/04).
+  // Se manca (es. cache/Service Worker stale), blocco e istruisco l'operatore.
+  if (typeof pfApriPopupDensita !== 'function') {
+    alert('⚠ ATTENZIONE — Popup densità non disponibile\n\n' +
+          'Il programma non riesce a caricare la finestra delle densità DAS.\n' +
+          'Causa probabile: cache del browser obsoleta.\n\n' +
+          'COSA FARE:\n' +
+          '1. Premi il bottone 🔄 Aggiorna in alto a destra (svuota cache)\n' +
+          '2. Aspetta che la pagina ricarichi\n' +
+          '3. Riprova a creare il carico\n\n' +
+          'Il carico NON è stato creato. Riprova dopo l\'aggiornamento.');
     return;
   }
-
-  // Fallback (popup non disponibile): vecchio comportamento senza densità custom
-  _creaCaricoConDensita({
-    data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
-    ordiniSel: ordiniSel, mezzoId: mezzoId,
-    ordiniCarico: ordiniCaricoPre || [],
-    densitaByProdotto: null
-  });
+  pfApriPopupDensita(
+    ordiniCaricoPre || [],
+    function(densitaByProdotto) {
+      _creaCaricoConDensita({
+        data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
+        ordiniSel: ordiniSel, mezzoId: mezzoId,
+        ordiniCarico: ordiniCaricoPre || [],
+        densitaByProdotto: densitaByProdotto
+      });
+    },
+    function() {
+      toast('Creazione carico annullata');
+    }
+  );
 }
 
 // Fase 2 della creazione carico: dopo che l'operatore ha confermato
