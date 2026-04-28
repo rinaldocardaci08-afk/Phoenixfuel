@@ -2348,6 +2348,45 @@ async function confermaSmistamento() {
   var det = righe.map(function(r) { return r.seq + '. ' + r.clienteNome + ' ' + fmtL(r.litri) + 'L'; }).join('\n');
   if (!confirm('Confermi smistamento?\n\n' + det + (residuo > 0 ? '\nResiduo in deposito: ' + fmtL(residuo) + ' L' : '') + '\n\nMezzo: ' + mezzoTarga + ' — Autista: ' + autista + '\n\nVerranno creati: ' + righe.length + ' ordini + DAS + carico.')) return;
 
+  // ═══ POPUP DENSITÀ (regola costituzionale 20/04) ═══
+  // Prima di toccare il DB chiediamo le densità: se l'operatore annulla,
+  // NIENTE viene inserito (carico, ordini, movimenti, DAS). Il prodotto è
+  // unico (quello dell'ordine fornitore), una sola card nel popup.
+  var argsSmist = {
+    ordine: ordine, totLitri: totLitri, righe: righe, residuo: residuo,
+    mezzoId: mezzoId, mezzoTarga: mezzoTarga, autista: autista,
+    trasportatoreId: trasportatoreId, dataConsegna: dataConsegna
+  };
+  var ordiniMockPopup = righe.map(function(r) { return { prodotto: ordine.prodotto, litri: r.litri }; });
+  if (typeof pfApriPopupDensita === 'function') {
+    pfApriPopupDensita(
+      ordiniMockPopup,
+      function(densitaByProdotto) {
+        argsSmist.densitaByProdotto = densitaByProdotto;
+        _eseguiSmistamentoDB(argsSmist);
+      },
+      function() { toast('Smistamento annullato'); }
+    );
+    return;
+  }
+  // Fallback (popup non disponibile): vecchio comportamento, densità default
+  argsSmist.densitaByProdotto = null;
+  _eseguiSmistamentoDB(argsSmist);
+}
+
+// Fase 2 dello smistamento: dopo il popup densità, esegue tutte le insert in DB
+async function _eseguiSmistamentoDB(args) {
+  var ordine = args.ordine;
+  var totLitri = args.totLitri;
+  var righe = args.righe;
+  var residuo = args.residuo;
+  var mezzoId = args.mezzoId;
+  var mezzoTarga = args.mezzoTarga;
+  var autista = args.autista;
+  var trasportatoreId = args.trasportatoreId;
+  var dataConsegna = args.dataConsegna;
+  var densitaByProdotto = args.densitaByProdotto;
+
   toast('Smistamento in corso...');
 
   // 1. Trova cisterna
@@ -2402,9 +2441,9 @@ async function confermaSmistamento() {
     await sb.from('cisterne').update({ livello_attuale: livelloAtt + residuo }).eq('id', cisterna.id);
   }
 
-  // 6. Genera DAS per tutte le consegne
+  // 6. Genera DAS per tutte le consegne (con densità raccolte dal popup)
   if (carico && ordiniCreati.length && typeof _generaDasPerCarico === 'function') {
-    await _generaDasPerCarico(carico.id, ordiniCreati, mezzoTarga, autista, dataConsegna);
+    await _generaDasPerCarico(carico.id, ordiniCreati, mezzoTarga, autista, dataConsegna, densitaByProdotto);
   }
 
   // 7. Marca ordine fornitore come smistato
