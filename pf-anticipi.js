@@ -1,6 +1,13 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
-// Phoenix Fuel — 28/04/2026
+// Phoenix Fuel — 29/04/2026 (v20260429a)
+//
+// Patch 29/04:
+//   - Caricamento clienti.cliente_rete in cache (si distingue rete vs consumo)
+//   - Modale Presenta: righe rete in arancione + badge "RETE" + warning
+//   - Filtro "solo consumo" / "tutti" per nascondere/vedere fatture rete
+//   - Propagazione stato modulo→fatture: gestita lato DB dal nuovo trigger
+//     trg_propaga_stato_pres_a_fatture (vedi fix_propagazione_anticipi.sql)
 //
 // Architettura:
 //   - Tab "Anticipo Fatture" dentro Banche & Mutui (id: banche-panel-anticipi)
@@ -574,10 +581,11 @@ async function _antRenderTabRegole() {
   // Cache clienti
   if (!_antClientiCache) {
     try {
-      const { data } = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome').limit(2000);
+      const { data } = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome, cliente_rete').limit(2000);
       _antClientiCache = (data || []).map(c => ({
         id: c.id,
-        nome: c.ragione_sociale || c.denominazione || c.nome || '—'
+        nome: c.ragione_sociale || c.denominazione || c.nome || '—',
+        cliente_rete: c.cliente_rete === true
       })).sort((a, b) => a.nome.localeCompare(b.nome));
     } catch (e) { _antClientiCache = []; }
   }
@@ -830,6 +838,20 @@ async function _antRenderModalePresenta(affidamentoId) {
     ? (Number(fido.massimale_cliente_pct) / 100) * Number(fido.importo_accordato)
     : null;
 
+  // Cache clienti per flag cliente_rete (se non già caricata)
+  if (!_antClientiCache) {
+    try {
+      var resCli = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome, cliente_rete').limit(2000);
+      _antClientiCache = (resCli.data || []).map(function(c) {
+        return { id: c.id, nome: c.ragione_sociale || c.denominazione || c.nome || '—', cliente_rete: c.cliente_rete === true };
+      }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+    } catch (e) { _antClientiCache = []; }
+  }
+  var clientiReteSet = new Set((_antClientiCache || []).filter(function(c){ return c.cliente_rete; }).map(function(c){ return c.id; }));
+  fattureCandidate.forEach(function(f) {
+    f._is_rete = !!(f.cliente_id && clientiReteSet.has(f.cliente_id));
+  });
+
   // State globale modale
   _antPresentaState = {
     affidamentoId: affidamentoId,
@@ -843,6 +865,7 @@ async function _antRenderModalePresenta(affidamentoId) {
     sortBy: 'data_desc',
     filterCliente: '',
     filterSearch: '',
+    filterRete: 'tutti',     // 'tutti' | 'solo_consumo' | 'solo_rete'
     diag: diag
   };
 
@@ -903,6 +926,13 @@ function _antPresentaRender() {
     html += '<option value="' + s[0] + '"' + (st.sortBy === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
   });
   html += '</select>';
+  // Filtro Rete/Consumo (regola Phoenix Fuel: consumo = OK anticipare; rete = NO marginalità bassa)
+  var nReteCand = st.fatture.filter(function(f){ return f._is_rete; }).length;
+  html += '<select onchange="_antPresentaSetFilter(\'rete\',this.value)" title="Filtra fatture per tipologia cliente" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
+  html += '<option value="tutti"' + (st.filterRete === 'tutti' ? ' selected' : '') + '>Tutti i clienti' + (nReteCand ? ' (' + nReteCand + ' rete)' : '') + '</option>';
+  html += '<option value="solo_consumo"' + (st.filterRete === 'solo_consumo' ? ' selected' : '') + '>🟢 Solo consumo</option>';
+  html += '<option value="solo_rete"' + (st.filterRete === 'solo_rete' ? ' selected' : '') + '>🟠 Solo rete</option>';
+  html += '</select>';
   html += '<button onclick="_antPresentaSelezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">✓ Tutte filtrate</button>';
   html += '<button onclick="_antPresentaDeselezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">⨯ Nessuna</button>';
   html += '</div>';
@@ -932,6 +962,11 @@ function _antPresentaRender() {
       var k = f.cliente_id || f.cessionario_denominazione || '?';
       return k === st.filterCliente;
     });
+  }
+  if (st.filterRete === 'solo_consumo') {
+    visible = visible.filter(function(f) { return !f._is_rete; });
+  } else if (st.filterRete === 'solo_rete') {
+    visible = visible.filter(function(f) { return f._is_rete; });
   }
   if (st.filterSearch) {
     var q = st.filterSearch.toLowerCase();
@@ -996,12 +1031,23 @@ function _antPresentaRender() {
       var k = f.cliente_id || ('_' + f.cessionario_denominazione);
       var anticipoSelezPerCl = anticipoPerClSelez[k] || 0;
       var sopraMassimale = (st.massEuro && checked && anticipoSelezPerCl > st.massEuro);
+      var isRete = !!f._is_rete;
 
-      html += '<tr style="border-bottom:0.5px solid var(--border)' + (checked ? ';background:rgba(107,95,204,0.08)' : '') + (sopraMassimale ? ';background:#FCEBEB' : '') + '">';
+      // Sfondi cumulabili: rete (arancione tenue) ha priorità su massimale solo se non selezionata; se selezionata vince selezionato
+      var bgRow = '';
+      if (sopraMassimale) bgRow = ';background:#FCEBEB';
+      else if (checked) bgRow = ';background:rgba(107,95,204,0.08)';
+      else if (isRete) bgRow = ';background:#FFF3E0'; // arancione tenue per rete non selezionate
+
+      html += '<tr style="border-bottom:0.5px solid var(--border)' + bgRow + '">';
       html += '<td style="padding:5px 8px;text-align:center"><input type="checkbox" data-fid="' + f.id + '" onchange="_antPresentaToggleFatt(\'' + f.id + '\',this.checked)"' + (checked ? ' checked' : '') + '></td>';
       html += '<td style="padding:5px 8px;font-family:var(--font-mono);font-weight:600">' + esc(f.numero || '—') + '</td>';
       html += '<td style="padding:5px 8px">' + (f.data ? fmtD(f.data) : '—') + '</td>';
-      html += '<td style="padding:5px 8px">' + esc(f.cessionario_denominazione || '—') + '</td>';
+      html += '<td style="padding:5px 8px">' + esc(f.cessionario_denominazione || '—');
+      if (isRete) {
+        html += ' <span title="Cliente Rete: pagamento stretto, marginalità bassa — sconsigliato anticipare" style="display:inline-block;background:#F4A26A;color:#5C2C0C;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:0.3px">RETE</span>';
+      }
+      html += '</td>';
       html += '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(f.imponibile_totale) + '</td>';
       html += '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(f.importo_totale) + '</td>';
       html += '<td style="padding:5px 8px;font-size:10px">' + (f._scadenza_cliente ? fmtD(f._scadenza_cliente) : '—');
@@ -1018,6 +1064,18 @@ function _antPresentaRender() {
       if (clientiOver.length) {
         html += '<div style="background:#FCEBEB;border-left:4px solid #791F1F;color:#791F1F;padding:8px 14px;border-radius:6px;font-size:11px;margin-bottom:10px;font-weight:600">⚠ Massimale cliente superato (' + fmtE(st.massEuro) + ') per ' + clientiOver.length + ' cliente/i. Riduci la selezione.</div>';
       }
+    }
+    // Warning fatture cliente RETE selezionate (regola Phoenix Fuel)
+    var nReteSelez = 0, totReteSelez = 0;
+    st.selezionate.forEach(function(fid) {
+      var f = st.fatture.find(function(x){ return x.id === fid; });
+      if (f && f._is_rete) { nReteSelez++; totReteSelez += Number(f._anticipo_calc || 0); }
+    });
+    if (nReteSelez > 0) {
+      html += '<div style="background:#FFF3E0;border-left:4px solid #D85A30;color:#5C2C0C;padding:8px 14px;border-radius:6px;font-size:11px;margin-bottom:10px;font-weight:600">';
+      html += '🟠 Hai selezionato <strong>' + nReteSelez + '</strong> fattur' + (nReteSelez === 1 ? 'a' : 'e') + ' di clienti <strong>RETE</strong> (anticipo ' + fmtE(totReteSelez) + ').';
+      html += '<div style="font-weight:400;font-size:10px;margin-top:3px">Sconsigliato: pagamento stretto + marginalità bassa azzerata dal costo banca. Verifica prima di proseguire.</div>';
+      html += '</div>';
     }
   }
 
@@ -1058,6 +1116,7 @@ function _antPresentaSetFilter(campo, val) {
   if (campo === 'search') _antPresentaState.filterSearch = val;
   else if (campo === 'cliente') _antPresentaState.filterCliente = val;
   else if (campo === 'sortBy') _antPresentaState.sortBy = val;
+  else if (campo === 'rete') _antPresentaState.filterRete = val;
   // Salva data/protocollo/scadenza/note prima di rerender
   _antPresentaSalvaForm();
   _antPresentaRender();
@@ -1493,9 +1552,9 @@ async function _antApriModaleRegola(regolaId, affidamentoId) {
   // Cache clienti
   if (!_antClientiCache) {
     try {
-      var resC = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome').limit(2000);
+      var resC = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome, cliente_rete').limit(2000);
       _antClientiCache = (resC.data || []).map(function(c) {
-        return { id: c.id, nome: c.ragione_sociale || c.denominazione || c.nome || '—' };
+        return { id: c.id, nome: c.ragione_sociale || c.denominazione || c.nome || '—', cliente_rete: c.cliente_rete === true };
       }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
     } catch (e) { _antClientiCache = []; }
   }

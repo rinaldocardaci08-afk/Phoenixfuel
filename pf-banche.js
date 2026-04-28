@@ -1,7 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Sezione Banche & Mutui
-// Versione 1.0 — 27/04/2026
-// 
+// Versione 29/04/2026 (v20260429a)
+//
+// Patch 29/04:
+//   - Tabella Affidamenti: aggiunta riga "Saldo: X €" sotto Utilizzato per
+//     ogni fido, così a colpo d'occhio si vede accordato → utilizzato → saldo.
+//
 // Tab implementati: Istituti (anagrafica banche + conti correnti)
 // Tab in costruzione: Affidamenti, Finanziamenti, Anticipi, Piano, Timeline
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1630,13 +1634,16 @@ async function renderBancheAffidamenti() {
       else if (isAutoAnticipo) onclickAttr = 'title="Calcolato automaticamente dal modulo Anticipo Fatture"';
       html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right;cursor:' + cursorStyle + '" ' + onclickAttr + '>';
       html += fmtE(utilizzato);
+      // Saldo disponibile (regola 29/04: visibile per ogni fido — sempre)
+      const saldoDisp = accordato - utilizzato;
+      html += '<div style="font-size:9px;color:#27500A;font-weight:600;font-family:inherit;margin-top:2px">Saldo: ' + fmtE(saldoDisp) + '</div>';
       if (isLive) {
         const dataSaldo = saldiByConto[a.conto_id].data;
-        html += '<div style="font-size:9px;color:#27500A;font-weight:500;font-family:inherit;margin-top:2px">⬤ live ' + fmtD(dataSaldo) + '</div>';
+        html += '<div style="font-size:9px;color:#27500A;font-weight:500;font-family:inherit;margin-top:1px">⬤ live ' + fmtD(dataSaldo) + '</div>';
       } else if (isAutoAnticipo) {
-        html += '<div style="font-size:9px;color:#26215C;font-weight:500;font-family:inherit;margin-top:2px">⚙ auto da Anticipi' + (a.utilizzato_aggiornato ? ' · ' + fmtD(a.utilizzato_aggiornato) : '') + '</div>';
+        html += '<div style="font-size:9px;color:#26215C;font-weight:500;font-family:inherit;margin-top:1px">⚙ auto da Anticipi' + (a.utilizzato_aggiornato ? ' · ' + fmtD(a.utilizzato_aggiornato) : '') + '</div>';
       } else if (a.utilizzato_aggiornato) {
-        html += '<div style="font-size:9px;color:var(--text-hint);font-family:inherit;margin-top:2px">' + fmtD(a.utilizzato_aggiornato) + '</div>';
+        html += '<div style="font-size:9px;color:var(--text-hint);font-family:inherit;margin-top:1px">' + fmtD(a.utilizzato_aggiornato) + '</div>';
       }
       html += '</td>';
       // Barra utilizzo
