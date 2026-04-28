@@ -13,9 +13,41 @@
 //   anticipi_sbf_regole, anticipi_sbf_presentazioni,
 //   anticipi_sbf_fatture, anticipi_sbf_accrediti, anticipi_sbf_costi
 //
-// Helpers globali usati: fmtE, fmtD, esc, toast, sb, _isAdminBanche,
-//   _bancheAffidamenti, _bancheIstituti, _bancheConti, _priorityBancaIstituto
+// Helpers globali usati: fmtE, fmtD, esc, toast, sb, utenteCorrente,
+//   _bancheAffidamenti, _bancheIstituti, _bancheConti, _priorityBancaIstituto,
+//   _haPermesso (definito in pf-admin.js)
+//
+// Permessi (regola costituzionale #30, allineati al sistema permessi reale del
+// programma — tabella `permessi` + cache `_permessiUtente`):
+//   - Sezione 'anticipi' (lettura libera): chi ha la sezione attiva vede il
+//     modulo; senza la sezione, la tab "Anticipo Fatture" è nascosta
+//     (gating in pf-banche.js _applicaPermessiTabBanche).
+//   - Tutti i write riservati a ruolo === 'admin' (decisione utente 28/04).
 // ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SISTEMA PERMESSI MODULO ANTICIPI
+// ═════════════════════════════════════════════════════════════════════════════
+// Lettura: chi ha la sezione 'anticipi' attiva nei permessi può vedere modulo
+//          e storico (anche operatori non-admin).
+// Write: tutti i bottoni di scrittura (presenta, accredito, incasso, modifica,
+//        regole) sono riservati a ruolo 'admin'.
+// ─────────────────────────────────────────────────────────────────────────────
+function _antIsAdmin() {
+  return typeof utenteCorrente !== 'undefined' && utenteCorrente && utenteCorrente.ruolo === 'admin';
+}
+function _antPuoVedere() {
+  if (typeof utenteCorrente === 'undefined' || !utenteCorrente) return false;
+  if (utenteCorrente.ruolo === 'admin') return true;
+  return (typeof _haPermesso === 'function') && _haPermesso('anticipi');
+}
+// Tutti i write = solo admin (decisione utente 28/04)
+function _antPuoPresentare()    { return _antIsAdmin(); }
+function _antPuoAccredito()     { return _antIsAdmin(); }
+function _antPuoIncasso()       { return _antIsAdmin(); }
+function _antPuoModificare()    { return _antIsAdmin(); }
+function _antPuoGestireRegole() { return _antIsAdmin(); }
+function _antPuoVedereStorico() { return _antPuoVedere(); }
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
 var _antSubTabAttiva = null;       // id tab attiva: 'banca:<affidamento_id>' | 'storico' | 'regole'
@@ -66,42 +98,65 @@ async function renderBancheAnticipi() {
     return;
   }
 
-  // Inizializza tab attiva al primo fido
+  // Check permesso lettura globale modulo
+  if (!_antPuoVedere() && !_antPuoVedereStorico() && !_antPuoGestireRegole()) {
+    cont.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);background:var(--bg-card);border-radius:10px;border:0.5px solid var(--border)">'
+      + '<div style="font-size:36px;margin-bottom:10px;opacity:0.4">🔒</div>'
+      + '<div style="font-size:14px;font-weight:600;margin-bottom:6px">Accesso non autorizzato</div>'
+      + '<div style="font-size:12px">Non hai i permessi per visualizzare il modulo Anticipo Fatture. Contatta l\'amministratore.</div>'
+      + '</div>';
+    return;
+  }
+
+  // Inizializza tab attiva: se non vede banche ma vede storico/regole, parti da una tab disponibile
   if (!_antSubTabAttiva || (
     _antSubTabAttiva.startsWith('banca:') &&
     !fidiAnticipi.find(f => 'banca:' + f.id === _antSubTabAttiva)
   )) {
-    _antSubTabAttiva = 'banca:' + fidiAnticipi[0].id;
+    if (_antPuoVedere() && fidiAnticipi.length) {
+      _antSubTabAttiva = 'banca:' + fidiAnticipi[0].id;
+    } else if (_antPuoVedereStorico()) {
+      _antSubTabAttiva = 'storico';
+    } else {
+      _antSubTabAttiva = 'regole';
+    }
   }
 
   // ─── HEADER + SUB-TAB ─────────────────────────────────────────────────
   let html = '';
   html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:10px;border-bottom:0.5px solid var(--border)">';
-  fidiAnticipi.forEach(f => {
-    const ist = _bancheIstituti.find(i => i.id === f.istituto_id) || {};
-    const cc = _bancheConti.find(c => c.id === f.conto_id);
-    const isAttiva = _antSubTabAttiva === 'banca:' + f.id;
-    const numero = cc && cc.numero_conto ? ' /' + esc(cc.numero_conto.slice(-4)) : '';
-    html += '<button onclick="_antSwitchTab(\'banca:' + f.id + '\')" '
-      + 'style="background:' + (isAttiva ? '#1a1a18' : 'var(--bg)') + ';color:' + (isAttiva ? '#FAC775' : 'var(--text)')
-      + ';border:0.5px solid var(--border);border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:' + (isAttiva ? '600' : '500') + '">'
-      + '🏦 ' + esc(ist.nome || '—') + numero
+  // Sub-tab banche solo se ha permesso lettura
+  if (_antPuoVedere()) {
+    fidiAnticipi.forEach(f => {
+      const ist = _bancheIstituti.find(i => i.id === f.istituto_id) || {};
+      const cc = _bancheConti.find(c => c.id === f.conto_id);
+      const isAttiva = _antSubTabAttiva === 'banca:' + f.id;
+      const numero = cc && cc.numero_conto ? ' /' + esc(cc.numero_conto.slice(-4)) : '';
+      html += '<button onclick="_antSwitchTab(\'banca:' + f.id + '\')" '
+        + 'style="background:' + (isAttiva ? '#1a1a18' : 'var(--bg)') + ';color:' + (isAttiva ? '#FAC775' : 'var(--text)')
+        + ';border:0.5px solid var(--border);border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:' + (isAttiva ? '600' : '500') + '">'
+        + '🏦 ' + esc(ist.nome || '—') + numero
+        + '</button>';
+    });
+  }
+  // Tab Storico (solo se ha permesso)
+  if (_antPuoVedereStorico()) {
+    const storicoActive = _antSubTabAttiva === 'storico';
+    html += '<button onclick="_antSwitchTab(\'storico\')" '
+      + 'style="background:' + (storicoActive ? '#1a1a18' : 'var(--bg)') + ';color:' + (storicoActive ? '#FAC775' : 'var(--text-muted)')
+      + ';border:0.5px solid var(--border);border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;margin-left:auto">'
+      + '🗄 Storico'
       + '</button>';
-  });
-  // Tab Storico
-  const storicoActive = _antSubTabAttiva === 'storico';
-  html += '<button onclick="_antSwitchTab(\'storico\')" '
-    + 'style="background:' + (storicoActive ? '#1a1a18' : 'var(--bg)') + ';color:' + (storicoActive ? '#FAC775' : 'var(--text-muted)')
-    + ';border:0.5px solid var(--border);border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;margin-left:auto">'
-    + '🗄 Storico'
-    + '</button>';
-  // Tab Regole
-  const regoleActive = _antSubTabAttiva === 'regole';
-  html += '<button onclick="_antSwitchTab(\'regole\')" '
-    + 'style="background:' + (regoleActive ? '#534AB7' : '#EEEDFE') + ';color:' + (regoleActive ? '#fff' : '#26215C')
-    + ';border:1px dashed #6B5FCC;border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:600">'
-    + '⚙ Regole'
-    + '</button>';
+  }
+  // Tab Regole (solo se ha permesso CRUD)
+  if (_antPuoGestireRegole()) {
+    const regoleActive = _antSubTabAttiva === 'regole';
+    html += '<button onclick="_antSwitchTab(\'regole\')" '
+      + 'style="background:' + (regoleActive ? '#534AB7' : '#EEEDFE') + ';color:' + (regoleActive ? '#fff' : '#26215C')
+      + ';border:1px dashed #6B5FCC;border-radius:6px;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:600' + (_antPuoVedereStorico() ? '' : ';margin-left:auto') + '">'
+      + '⚙ Regole'
+      + '</button>';
+  }
   html += '</div>';
 
   // ─── PANNELLO ATTIVO ──────────────────────────────────────────────────
@@ -245,7 +300,7 @@ async function _antRenderTabBanca(affidamentoId) {
   html += '<input type="text" placeholder="🔍 Cliente o n. fattura..." value="' + esc(_antFiltri.search) + '" oninput="_antSetFiltro(\'search\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);min-width:200px;color:var(--text)">';
   html += '</div>';
   html += '<div style="display:flex;gap:6px">';
-  if (_isAdminBanche()) {
+  if (_antPuoPresentare()) {
     html += '<button onclick="_antApriModalePresenta(\'' + affidamentoId + '\')" style="background:#26215C;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600">+ Presenta nuove fatture</button>';
   }
   html += '<button onclick="_antStampaPDFBanca(\'' + affidamentoId + '\')" style="background:#1a1a18;color:#FAC775;border:0;border-radius:6px;padding:7px 12px;font-size:12px;cursor:pointer">📄 PDF</button>';
@@ -309,10 +364,10 @@ function _antRenderModuloCard(p, aff) {
   if (importoEstinto > 0) html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Estinto</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#27500A">' + fmtE(importoEstinto) + '</span></div>';
   html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Aperto</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + (importoAttivo > 0 ? '#BA7517' : '#888') + '">' + fmtE(importoAttivo) + '</span></div>';
   html += '<div style="margin-left:auto;display:flex;gap:5px">';
-  if (_isAdminBanche()) {
-    if (p.stato === 'in_delibera' || p.stato === 'anticipata_parziale') {
-      html += '<button onclick="_antApriModaleAccredito(\'' + p.id + '\')" title="Registra accredito banca" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">💰 Accredito</button>';
-    }
+  if (_antPuoAccredito() && (p.stato === 'in_delibera' || p.stato === 'anticipata_parziale')) {
+    html += '<button onclick="_antApriModaleAccredito(\'' + p.id + '\')" title="Registra accredito banca" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">💰 Accredito</button>';
+  }
+  if (_antPuoModificare()) {
     html += '<button onclick="_antApriModaleModulo(\'' + p.id + '\')" title="Modifica modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
   }
   html += '</div>';
@@ -359,12 +414,10 @@ function _antRenderModuloCard(p, aff) {
     html += '</td>';
     html += '<td style="padding:5px 8px"><span style="background:' + stColors.bg + ';color:' + stColors.fg + ';padding:2px 8px;border-radius:9px;font-size:9px;font-weight:700;letter-spacing:0.3px">' + stColors.label + '</span></td>';
     html += '<td style="padding:5px 8px;text-align:right">';
-    if (_isAdminBanche()) {
-      if (f.stato === 'anticipata') {
-        html += '<button onclick="_antRegistraIncasso(\'' + f.id + '\')" title="Registra incasso cliente" style="background:none;border:0.5px solid #27500A;color:#27500A;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">✓ Incasso</button>';
-      } else {
-        html += '<button onclick="_antApriModaleFattura(\'' + f.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px">✏️</button>';
-      }
+    if (f.stato === 'anticipata' && _antPuoIncasso()) {
+      html += '<button onclick="_antRegistraIncasso(\'' + f.id + '\')" title="Registra incasso cliente" style="background:none;border:0.5px solid #27500A;color:#27500A;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">✓ Incasso</button>';
+    } else if (f.stato !== 'anticipata' && _antPuoModificare()) {
+      html += '<button onclick="_antApriModaleFattura(\'' + f.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text-muted);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px">✏️</button>';
     }
     html += '</td>';
     html += '</tr>';
@@ -540,7 +593,7 @@ async function _antRenderTabRegole() {
   });
   html += '</select>';
   html += '</div>';
-  if (_isAdminBanche() && _antRegoleBancaSelected) {
+  if (_antPuoGestireRegole() && _antRegoleBancaSelected) {
     html += '<button onclick="_antApriModaleRegola(null,\'' + _antRegoleBancaSelected + '\')" style="background:#26215C;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600">+ Aggiungi regola cliente</button>';
   }
   html += '</div>';
@@ -597,7 +650,7 @@ function _antRenderRigaRegola(r, isDefault) {
   html += '<td style="padding:9px 10px"><span style="background:' + stColor.bg + ';color:' + stColor.fg + ';padding:2px 8px;border-radius:9px;font-size:10px;font-weight:700">' + stColor.label + '</span></td>';
   html += '<td style="padding:9px 10px;font-size:10px;color:var(--text-muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.note || '') + '</td>';
   html += '<td style="padding:5px 10px;text-align:right">';
-  if (_isAdminBanche()) {
+  if (_antPuoGestireRegole()) {
     html += '<button onclick="_antApriModaleRegola(\'' + r.id + '\')" style="background:none;border:0.5px solid var(--border);color:var(--text-muted);padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
     if (!isDefault) html += ' <button onclick="_antEliminaRegola(\'' + r.id + '\')" style="background:none;border:0.5px solid #E24B4A;color:#E24B4A;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:4px">🗑</button>';
   }

@@ -63,6 +63,32 @@ async function caricaBanche() {
   _bancheFinanziamenti = finRes.data || [];
 
   renderBancheIstituti();
+  // Gating sub-tab in base ai permessi (regola costituzionale 28/04)
+  _applicaPermessiTabBanche();
+}
+
+// ═══ GATING TAB INTERNE BANCHE (regola costituzionale 28/04) ══════════════
+// Sezione 'banche' = lettura libera del modulo (lo controlla costruisciMenu).
+// Sezione 'anticipi' = lettura tab "Anticipo Fatture": serve permesso esplicito.
+// Tutti i write nel modulo sono comunque riservati a ruolo 'admin' (decisione
+// utente 28/04). Helpers usati: utenteCorrente + _haPermesso (pf-admin.js).
+function _applicaPermessiTabBanche() {
+  if (typeof utenteCorrente === 'undefined' || !utenteCorrente) return;
+  if (utenteCorrente.ruolo === 'admin') return; // admin vede tutto
+  // Tab Anticipi: serve permesso 'anticipi' esplicito
+  var puoAnticipi = (typeof _haPermesso === 'function') && _haPermesso('anticipi');
+  if (!puoAnticipi) {
+    var btnAnt = document.querySelector('.banche-tab[data-tab="banche-panel-anticipi"]');
+    if (btnAnt) btnAnt.style.display = 'none';
+    var panAnt = document.getElementById('banche-panel-anticipi');
+    if (panAnt) panAnt.style.display = 'none';
+    // Se la tab attiva era Anticipi, fallback su Istituti
+    var attiva = document.querySelector('.banche-tab.active');
+    if (attiva && attiva.dataset.tab === 'banche-panel-anticipi') {
+      var fallback = document.querySelector('.banche-tab[data-tab="banche-panel-istituti"]');
+      if (fallback) fallback.click();
+    }
+  }
 }
 
 // ═══ TAB SWITCHING ════════════════════════════════════════════════════════

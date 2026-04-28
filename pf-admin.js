@@ -16,6 +16,8 @@ const SEZIONI_SISTEMA = [
   ]},
   {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
   {id:'finanze',label:'Finanze',icon:'🏦'},
+  {id:'banche',label:'Banche & Mutui',icon:'🏛'},
+  {id:'anticipi',label:'Anticipo Fatture',icon:'📄'},
   {id:'clienti',label:'Clienti',icon:'👤'},
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
   {id:'basi',label:'Basi di carico',icon:'📍'},
