@@ -673,7 +673,7 @@ function _antRenderRigaRegola(r, isDefault) { return ''; }
 // PLACEHOLDER MODALI — implementati progressivamente (Step 3)
 // ═══════════════════════════════════════════════════════════════════════════
 function _antApriModalePresenta(affidamentoId) {
-  toast('🚧 Modale Presenta Fatture — al prossimo step');
+  return _antRenderModalePresenta(affidamentoId);
 }
 function _antApriModaleAccredito(presentazioneId) {
   toast('🚧 Modale Registra Accredito — al prossimo step');
@@ -686,6 +686,481 @@ function _antApriModaleFattura(fatturaAntId) {
 }
 function _antApriDettaglioModulo(presentazioneId) {
   return _antRenderDettaglioModulo(presentazioneId);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE PRESENTA — wizard single-page (cuore del modulo)
+// ═══════════════════════════════════════════════════════════════════════════
+// Flusso:
+//   1. Verifica fido (% anticipo + base + massimale_pct compilati)
+//   2. Carica fatture aperte presentabili:
+//      - tipo TD01 (vendita) con imponibile > 0
+//      - NON già in altro modulo attivo
+//      - cliente NON in blacklist banca
+//      - JOIN fatture_pagamenti per leggere scadenza_cliente
+//   3. UI: form metadati (data_presentazione, protocollo, scadenza_banca_default,
+//      note) + tabella fatture con checkbox + KPI live (totale anticipo selezionato)
+//   4. Validazione massimale per cliente (somma anticipi nello stesso modulo)
+//   5. Submit: insert presentazione + N fatture in transazione applicativa
+// ─────────────────────────────────────────────────────────────────────────────
+
+// State per la modale corrente — non persistente tra sessioni
+var _antPresentaState = null;
+
+async function _antRenderModalePresenta(affidamentoId) {
+  if (!_antPuoPresentare()) { toast('Operazione riservata all\'amministratore'); return; }
+
+  apriModal('<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Carico fatture presentabili...</div>');
+
+  // 1. Verifica fido
+  var fido = (_bancheAffidamenti || []).find(function(a) { return a.id === affidamentoId; });
+  if (!fido) { toast('Affidamento non trovato'); chiudiModal(); return; }
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === fido.istituto_id; }) || {};
+  var cc  = (_bancheConti || []).find(function(c) { return c.id === fido.conto_id; });
+  var bancaLabel = (ist.nome || '—') + (cc && cc.numero_conto ? ' /' + cc.numero_conto.slice(-4) : '');
+
+  if (!fido.percentuale_anticipo_default || !fido.base_calcolo_default) {
+    apriModal('<div style="max-width:520px;padding:20px">'
+      + '<div style="font-size:15px;font-weight:600;color:#A32D2D;margin-bottom:8px">⚠ Parametri anticipo mancanti</div>'
+      + '<div style="font-size:12px;color:var(--text);margin-bottom:14px">Il fido <strong>' + esc(bancaLabel) + '</strong> non ha ancora i parametri anticipo configurati.<br><br>Vai in <strong>Banche → Affidamenti → ✏️</strong> sul fido e compila almeno <strong>% Anticipo</strong> e <strong>Base calcolo</strong>.</div>'
+      + '<div style="text-align:right"><button onclick="chiudiModal()" class="btn-primary" style="font-size:12px;padding:8px 14px">OK</button></div>'
+      + '</div>');
+    return;
+  }
+
+  // 2. Carica blacklist banca + fatture già impegnate + fatture candidate
+  var resBL = await sb.from('anticipi_sbf_regole').select('cliente_id').eq('affidamento_id', affidamentoId).eq('stato', 'esclusa');
+  var blacklistSet = new Set((resBL.data || []).map(function(r) { return r.cliente_id; }).filter(Boolean));
+
+  var resBusy = await sb.from('anticipi_sbf_fatture').select('fattura_id').not('fattura_id', 'is', null).neq('stato', 'esclusa');
+  var fattureBusy = new Set((resBusy.data || []).map(function(r) { return r.fattura_id; }));
+
+  // Fatture emesse: prendiamo TD01 con imponibile > 0, ultimi 18 mesi (paginato)
+  var dataMin = new Date();
+  dataMin.setMonth(dataMin.getMonth() - 18);
+  var dataMinISO = dataMin.toISOString().split('T')[0];
+
+  var resF = await sb.from('fatture_emesse')
+    .select('id, numero, data, cliente_id, cessionario_denominazione, importo_totale, imponibile_totale, tipo_documento')
+    .eq('tipo_documento', 'TD01')
+    .gte('data', dataMinISO)
+    .gt('imponibile_totale', 0)
+    .order('data', { ascending: false })
+    .limit(1500);
+
+  if (resF.error) {
+    apriModal('<div style="max-width:520px;padding:20px"><div style="color:#A32D2D;font-weight:600">❌ Errore caricamento fatture: ' + esc(resF.error.message) + '</div><div style="margin-top:12px;text-align:right"><button onclick="chiudiModal()" style="padding:8px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div></div>');
+    return;
+  }
+
+  var fattureCandidate = (resF.data || []).filter(function(f) {
+    if (fattureBusy.has(f.id)) return false;            // già su altro modulo attivo
+    if (blacklistSet.has(f.cliente_id)) return false;   // cliente in blacklist
+    return true;
+  });
+
+  // Carica scadenze (fatture_pagamenti) per le fatture candidate
+  var fIds = fattureCandidate.map(function(f) { return f.id; });
+  var pagPerFatt = {};
+  if (fIds.length) {
+    // Chunk a 200 per non superare limiti URL
+    for (var i = 0; i < fIds.length; i += 200) {
+      var chunk = fIds.slice(i, i + 200);
+      var resP = await sb.from('fatture_pagamenti').select('fattura_id, data_scadenza, importo_pagamento').in('fattura_id', chunk).order('data_scadenza');
+      (resP.data || []).forEach(function(p) {
+        if (!pagPerFatt[p.fattura_id]) pagPerFatt[p.fattura_id] = [];
+        pagPerFatt[p.fattura_id].push(p);
+      });
+    }
+  }
+
+  // Inietta scadenza_cliente più lontana (tipicamente l'ultima rata) su ogni fattura
+  fattureCandidate.forEach(function(f) {
+    var pp = pagPerFatt[f.id] || [];
+    f._scadenza_cliente = pp.length ? pp[pp.length - 1].data_scadenza : null;
+    f._n_rate = pp.length;
+  });
+
+  // Calcolo anticipo per fattura in base ai parametri fido
+  var perc = Number(fido.percentuale_anticipo_default);
+  var base = fido.base_calcolo_default;
+  fattureCandidate.forEach(function(f) {
+    var b = base === 'totale' ? Number(f.importo_totale || 0) : Number(f.imponibile_totale || 0);
+    f._anticipo_calc = Math.round(b * perc) / 100;
+  });
+
+  // Massimale per cliente in € (se configurato)
+  var massEuro = (fido.massimale_cliente_pct && fido.importo_accordato)
+    ? (Number(fido.massimale_cliente_pct) / 100) * Number(fido.importo_accordato)
+    : null;
+
+  // State globale modale
+  _antPresentaState = {
+    affidamentoId: affidamentoId,
+    fido: fido,
+    bancaLabel: bancaLabel,
+    perc: perc,
+    base: base,
+    massEuro: massEuro,
+    fatture: fattureCandidate,
+    selezionate: new Set(),
+    sortBy: 'data_desc',
+    filterCliente: '',
+    filterSearch: ''
+  };
+
+  _antPresentaRender();
+}
+
+// Render della modale Presenta usando lo state corrente
+function _antPresentaRender() {
+  var st = _antPresentaState;
+  if (!st) return;
+
+  var oggiISO = new Date().toISOString().split('T')[0];
+
+  var html = '<div style="max-width:1080px;width:100%">';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">';
+  html += '<div>';
+  html += '<div style="font-size:17px;font-weight:700">📋 Presenta nuove fatture</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">🏛 ' + esc(st.bancaLabel);
+  html += ' · ' + Number(st.perc).toFixed(0) + '% su <strong>' + (st.base === 'totale' ? 'Totale fattura' : 'Imponibile') + '</strong>';
+  if (st.massEuro) html += ' · Max cliente <strong>' + fmtE(st.massEuro) + '</strong>';
+  html += '</div></div></div>';
+
+  // Form metadati
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data presentazione *</label>';
+  html += '<input id="ant-pres-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">N. protocollo (opzionale)</label>';
+  html += '<input id="ant-pres-prot" type="text" placeholder="Es. PRES/2026/12" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px;font-family:var(--font-mono)"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza banca default</label>';
+  html += '<input id="ant-pres-scad" type="date" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px" title="Se compilato, applicato a tutte le fatture senza scadenza propria"></div>';
+  html += '</div>';
+  html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
+  html += '<input id="ant-pres-note" type="text" placeholder="Note operative (opzionali)" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+  html += '</div>';
+
+  // Filtri tabella
+  // Lista clienti unici per filtro
+  var clientiSet = {};
+  st.fatture.forEach(function(f) {
+    var k = f.cliente_id || f.cessionario_denominazione || '?';
+    if (!clientiSet[k]) clientiSet[k] = { id: k, nome: f.cessionario_denominazione || '?' };
+  });
+  var clientiOrdinati = Object.keys(clientiSet).map(function(k) { return clientiSet[k]; }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+
+  html += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">';
+  html += '<input id="ant-pres-search" type="text" placeholder="🔍 Cerca per numero/cliente..." value="' + esc(st.filterSearch) + '" oninput="_antPresentaSetFilter(\'search\',this.value)" style="flex:1;min-width:220px;padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px">';
+  html += '<select onchange="_antPresentaSetFilter(\'cliente\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text);max-width:280px">';
+  html += '<option value="">Cliente: tutti</option>';
+  clientiOrdinati.forEach(function(c) {
+    html += '<option value="' + esc(c.id) + '"' + (st.filterCliente === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
+  });
+  html += '</select>';
+  html += '<select onchange="_antPresentaSetFilter(\'sortBy\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
+  [['data_desc','📅 Data ↓'],['data_asc','📅 Data ↑'],['cliente','👤 Cliente'],['scad_banca','🏦 Scad. cliente'],['totale_desc','💰 Totale ↓']].forEach(function(s) {
+    html += '<option value="' + s[0] + '"' + (st.sortBy === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
+  });
+  html += '</select>';
+  html += '<button onclick="_antPresentaSelezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">✓ Tutte filtrate</button>';
+  html += '<button onclick="_antPresentaDeselezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">⨯ Nessuna</button>';
+  html += '</div>';
+
+  // Filtra + ordina lista
+  var visible = st.fatture.slice();
+  if (st.filterCliente) {
+    visible = visible.filter(function(f) {
+      var k = f.cliente_id || f.cessionario_denominazione || '?';
+      return k === st.filterCliente;
+    });
+  }
+  if (st.filterSearch) {
+    var q = st.filterSearch.toLowerCase();
+    visible = visible.filter(function(f) {
+      return (f.numero || '').toLowerCase().indexOf(q) >= 0
+          || (f.cessionario_denominazione || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  visible.sort(function(a, b) {
+    if (st.sortBy === 'data_asc') return (a.data || '').localeCompare(b.data || '');
+    if (st.sortBy === 'data_desc') return (b.data || '').localeCompare(a.data || '');
+    if (st.sortBy === 'cliente') return (a.cessionario_denominazione || '').localeCompare(b.cessionario_denominazione || '');
+    if (st.sortBy === 'scad_banca') return (a._scadenza_cliente || '9999').localeCompare(b._scadenza_cliente || '9999');
+    if (st.sortBy === 'totale_desc') return Number(b.importo_totale || 0) - Number(a.importo_totale || 0);
+    return 0;
+  });
+
+  // Tabella
+  if (!visible.length) {
+    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg-card);border:1px dashed var(--border);border-radius:8px;font-size:12px">';
+    if (!st.fatture.length) {
+      html += '📭 Nessuna fattura presentabile su questa banca.<br>';
+      html += '<span style="font-size:11px">Tutte le fatture aperte sono già su altri moduli, oppure i clienti sono in blacklist.</span>';
+    } else {
+      html += 'Nessuna fattura corrisponde ai filtri.';
+    }
+    html += '</div>';
+  } else {
+    // Calcolo aggregati per cliente per warning massimale
+    var anticipoPerClSelez = {};
+    st.selezionate.forEach(function(fid) {
+      var f = st.fatture.find(function(x) { return x.id === fid; });
+      if (!f) return;
+      var k = f.cliente_id || ('_' + f.cessionario_denominazione);
+      anticipoPerClSelez[k] = (anticipoPerClSelez[k] || 0) + (f._anticipo_calc || 0);
+    });
+
+    html += '<div style="overflow-x:auto;max-height:400px;overflow-y:auto;border:0.5px solid var(--border);border-radius:6px;margin-bottom:10px"><table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--bg-card)">';
+    html += '<thead style="position:sticky;top:0;background:var(--bg);z-index:5"><tr>';
+    html += '<th style="padding:7px 8px;text-align:center;border-bottom:0.5px solid var(--border);width:34px"><input type="checkbox" id="ant-pres-checkall" onchange="_antPresentaToggleAll(this.checked)"></th>';
+    ['Nr Ft','Data','Cliente','Imponibile','Totale','Scad. cliente','Anticipo'].forEach(function(h) {
+      html += '<th style="text-align:left;padding:7px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-weight:600;border-bottom:0.5px solid var(--border)">' + h + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    visible.forEach(function(f) {
+      var checked = st.selezionate.has(f.id);
+      var k = f.cliente_id || ('_' + f.cessionario_denominazione);
+      var anticipoSelezPerCl = anticipoPerClSelez[k] || 0;
+      var sopraMassimale = (st.massEuro && checked && anticipoSelezPerCl > st.massEuro);
+
+      html += '<tr style="border-bottom:0.5px solid var(--border)' + (checked ? ';background:rgba(107,95,204,0.08)' : '') + (sopraMassimale ? ';background:#FCEBEB' : '') + '">';
+      html += '<td style="padding:5px 8px;text-align:center"><input type="checkbox" data-fid="' + f.id + '" onchange="_antPresentaToggleFatt(\'' + f.id + '\',this.checked)"' + (checked ? ' checked' : '') + '></td>';
+      html += '<td style="padding:5px 8px;font-family:var(--font-mono);font-weight:600">' + esc(f.numero || '—') + '</td>';
+      html += '<td style="padding:5px 8px">' + (f.data ? fmtD(f.data) : '—') + '</td>';
+      html += '<td style="padding:5px 8px">' + esc(f.cessionario_denominazione || '—') + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(f.imponibile_totale) + '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(f.importo_totale) + '</td>';
+      html += '<td style="padding:5px 8px;font-size:10px">' + (f._scadenza_cliente ? fmtD(f._scadenza_cliente) : '—');
+      if (f._n_rate > 1) html += ' <span style="color:var(--text-muted)">(' + f._n_rate + ' rate)</span>';
+      html += '</td>';
+      html += '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);color:#26215C;font-weight:600">' + fmtE(f._anticipo_calc) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // Warning massimali
+    if (st.massEuro) {
+      var clientiOver = Object.keys(anticipoPerClSelez).filter(function(k) { return anticipoPerClSelez[k] > st.massEuro; });
+      if (clientiOver.length) {
+        html += '<div style="background:#FCEBEB;border-left:4px solid #791F1F;color:#791F1F;padding:8px 14px;border-radius:6px;font-size:11px;margin-bottom:10px;font-weight:600">⚠ Massimale cliente superato (' + fmtE(st.massEuro) + ') per ' + clientiOver.length + ' cliente/i. Riduci la selezione.</div>';
+      }
+    }
+  }
+
+  // Riepilogo + bottoni
+  var nSel = st.selezionate.size;
+  var totImp = 0, totTot = 0, totAnt = 0;
+  st.selezionate.forEach(function(fid) {
+    var f = st.fatture.find(function(x) { return x.id === fid; });
+    if (!f) return;
+    totImp += Number(f.imponibile_totale || 0);
+    totTot += Number(f.importo_totale || 0);
+    totAnt += Number(f._anticipo_calc || 0);
+  });
+
+  html += '<div style="background:#EEEDFE;border:0.5px solid #6B5FCC;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;gap:18px;align-items:center;flex-wrap:wrap">';
+  html += '<div style="font-size:12px;font-weight:600;color:#26215C">📊 Riepilogo selezione</div>';
+  html += '<div style="font-size:11px;color:#26215C"><strong style="font-size:14px">' + nSel + '</strong> fatture</div>';
+  html += '<div style="font-size:11px;color:#26215C">Imponibile: <strong style="font-family:var(--font-mono)">' + fmtE(totImp) + '</strong></div>';
+  html += '<div style="font-size:11px;color:#26215C">Totale: <strong style="font-family:var(--font-mono)">' + fmtE(totTot) + '</strong></div>';
+  html += '<div style="font-size:13px;color:#26215C;margin-left:auto">Anticipo richiesto: <strong style="font-family:var(--font-mono);font-size:16px">' + fmtE(totAnt) + '</strong></div>';
+  html += '</div>';
+
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end">';
+  html += '<button onclick="chiudiModal();_antPresentaState=null" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  var btnDisabled = (nSel === 0);
+  html += '<button onclick="_antPresentaConferma()" ' + (btnDisabled ? 'disabled' : '') + ' class="btn-primary" style="font-size:12px;padding:8px 14px;background:#26215C' + (btnDisabled ? ';opacity:0.4;cursor:not-allowed' : '') + '">▶ Crea modulo (' + nSel + ' fatt., ' + fmtE(totAnt) + ')</button>';
+  html += '</div>';
+
+  html += '</div>';
+  apriModal(html);
+
+  // Restore valori form (se rerender)
+  // (data/protocollo/scadenza/note non si conservano: l'utente li (re)inserisce solo a fine selezione)
+}
+
+function _antPresentaSetFilter(campo, val) {
+  if (!_antPresentaState) return;
+  if (campo === 'search') _antPresentaState.filterSearch = val;
+  else if (campo === 'cliente') _antPresentaState.filterCliente = val;
+  else if (campo === 'sortBy') _antPresentaState.sortBy = val;
+  // Salva data/protocollo/scadenza/note prima di rerender
+  _antPresentaSalvaForm();
+  _antPresentaRender();
+  _antPresentaRipristinaForm();
+}
+
+function _antPresentaToggleFatt(fid, checked) {
+  if (!_antPresentaState) return;
+  if (checked) _antPresentaState.selezionate.add(fid);
+  else _antPresentaState.selezionate.delete(fid);
+  _antPresentaSalvaForm();
+  _antPresentaRender();
+  _antPresentaRipristinaForm();
+}
+
+function _antPresentaToggleAll(checked) {
+  if (!_antPresentaState) return;
+  // Toggle solo le visibili dopo i filtri correnti
+  var st = _antPresentaState;
+  var visible = st.fatture.slice();
+  if (st.filterCliente) {
+    visible = visible.filter(function(f) {
+      var k = f.cliente_id || f.cessionario_denominazione || '?';
+      return k === st.filterCliente;
+    });
+  }
+  if (st.filterSearch) {
+    var q = st.filterSearch.toLowerCase();
+    visible = visible.filter(function(f) {
+      return (f.numero || '').toLowerCase().indexOf(q) >= 0
+          || (f.cessionario_denominazione || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  visible.forEach(function(f) {
+    if (checked) st.selezionate.add(f.id);
+    else st.selezionate.delete(f.id);
+  });
+  _antPresentaSalvaForm();
+  _antPresentaRender();
+  _antPresentaRipristinaForm();
+}
+
+function _antPresentaSelezionaTutte() { _antPresentaToggleAll(true); }
+function _antPresentaDeselezionaTutte() { _antPresentaToggleAll(false); }
+
+// Salva i 4 campi form prima di un rerender (filter/toggle)
+function _antPresentaSalvaForm() {
+  if (!_antPresentaState) return;
+  _antPresentaState._formCache = {
+    data: (document.getElementById('ant-pres-data') || {}).value || null,
+    prot: (document.getElementById('ant-pres-prot') || {}).value || null,
+    scad: (document.getElementById('ant-pres-scad') || {}).value || null,
+    note: (document.getElementById('ant-pres-note') || {}).value || null
+  };
+}
+function _antPresentaRipristinaForm() {
+  if (!_antPresentaState || !_antPresentaState._formCache) return;
+  var fc = _antPresentaState._formCache;
+  if (fc.data && document.getElementById('ant-pres-data')) document.getElementById('ant-pres-data').value = fc.data;
+  if (fc.prot && document.getElementById('ant-pres-prot')) document.getElementById('ant-pres-prot').value = fc.prot;
+  if (fc.scad && document.getElementById('ant-pres-scad')) document.getElementById('ant-pres-scad').value = fc.scad;
+  if (fc.note && document.getElementById('ant-pres-note')) document.getElementById('ant-pres-note').value = fc.note;
+}
+
+async function _antPresentaConferma() {
+  var st = _antPresentaState;
+  if (!st || st.selezionate.size === 0) { toast('Seleziona almeno una fattura'); return; }
+
+  // Leggo metadati form
+  var dataPres = document.getElementById('ant-pres-data').value;
+  if (!dataPres) { toast('Indica la data di presentazione'); return; }
+  var prot = (document.getElementById('ant-pres-prot').value || '').trim() || null;
+  var scadDefault = document.getElementById('ant-pres-scad').value || null;
+  var note = (document.getElementById('ant-pres-note').value || '').trim() || null;
+
+  // Compongo le righe da inserire
+  var righe = [];
+  var totAnticipo = 0;
+  var anticipoPerCl = {};
+  st.selezionate.forEach(function(fid) {
+    var f = st.fatture.find(function(x) { return x.id === fid; });
+    if (!f) return;
+    var anticipo = Number(f._anticipo_calc || 0);
+    totAnticipo += anticipo;
+    var k = f.cliente_id || ('_' + f.cessionario_denominazione);
+    anticipoPerCl[k] = (anticipoPerCl[k] || 0) + anticipo;
+    righe.push({
+      _src_id: f.id,
+      _src_cliente_id: f.cliente_id,
+      _src_cliente_nome: f.cessionario_denominazione,
+      numero_fattura: f.numero,
+      data_emissione: f.data,
+      totale_fattura: Number(f.importo_totale || 0),
+      imponibile: Number(f.imponibile_totale || 0),
+      scadenza_cliente: f._scadenza_cliente || null,
+      scadenza_banca: scadDefault || f._scadenza_cliente || dataPres, // fallback sicuro: data presentazione
+      percentuale_applicata: st.perc,
+      base_calcolo_applicata: st.base,
+      importo_anticipato_calcolato: anticipo,
+      stato: 'presentata'
+    });
+  });
+
+  // Validazione massimale per cliente
+  if (st.massEuro) {
+    var over = Object.keys(anticipoPerCl).filter(function(k) { return anticipoPerCl[k] > st.massEuro; });
+    if (over.length) {
+      toast('Massimale superato per ' + over.length + ' cliente/i. Riduci la selezione.');
+      return;
+    }
+  }
+
+  // Conferma finale
+  if (!confirm('Creare il modulo con ' + righe.length + ' fatture e anticipo richiesto ' + fmtE(totAnticipo) + ' su ' + st.bancaLabel + '?')) return;
+
+  // 1. INSERT presentazione
+  var resPres = await sb.from('anticipi_sbf_presentazioni').insert([{
+    affidamento_id: st.affidamentoId,
+    data_presentazione: dataPres,
+    numero_protocollo: prot,
+    stato: 'in_delibera',
+    importo_richiesto: totAnticipo,
+    importo_anticipato_totale: 0,
+    note: note
+  }]).select('id').single();
+
+  if (resPres.error || !resPres.data) {
+    toast('❌ Errore creazione modulo: ' + (resPres.error ? resPres.error.message : 'sconosciuto'));
+    return;
+  }
+  var presId = resPres.data.id;
+
+  // 2. INSERT fatture (chunk a 100)
+  var payload = righe.map(function(r) {
+    return {
+      presentazione_id: presId,
+      fattura_id: r._src_id,
+      numero_fattura: r.numero_fattura,
+      data_emissione: r.data_emissione,
+      cliente_id: r._src_cliente_id,
+      cliente_nome: r._src_cliente_nome,
+      totale_fattura: r.totale_fattura,
+      imponibile: r.imponibile,
+      scadenza_cliente: r.scadenza_cliente,
+      scadenza_banca: r.scadenza_banca,
+      percentuale_applicata: r.percentuale_applicata,
+      base_calcolo_applicata: r.base_calcolo_applicata,
+      importo_anticipato_calcolato: r.importo_anticipato_calcolato,
+      stato: r.stato
+    };
+  });
+
+  var insErr = null;
+  for (var i = 0; i < payload.length; i += 100) {
+    var chunk = payload.slice(i, i + 100);
+    var resI = await sb.from('anticipi_sbf_fatture').insert(chunk);
+    if (resI.error) { insErr = resI.error; break; }
+  }
+
+  if (insErr) {
+    // Rollback presentazione (se nessuna fattura inserita)
+    await sb.from('anticipi_sbf_presentazioni').delete().eq('id', presId);
+    toast('❌ Errore inserimento fatture: ' + insErr.message + ' (modulo annullato)');
+    return;
+  }
+
+  chiudiModal();
+  _antPresentaState = null;
+  toast('✓ Modulo creato: ' + righe.length + ' fatture, anticipo ' + fmtE(totAnticipo));
+  // Refresh tab banca
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
