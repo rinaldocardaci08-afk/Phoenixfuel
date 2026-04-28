@@ -370,6 +370,7 @@ function _antRenderModuloCard(p, aff) {
   if (_antPuoModificare()) {
     html += '<button onclick="_antApriModaleModulo(\'' + p.id + '\')" title="Modifica modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
   }
+  html += '<button onclick="_antApriDettaglioModulo(\'' + p.id + '\')" title="Dettaglio completo modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">🔍</button>';
   html += '</div>';
   html += '</div>';
   html += '</div>';
@@ -683,12 +684,238 @@ function _antApriModaleModulo(presentazioneId) {
 function _antApriModaleFattura(fatturaAntId) {
   toast('🚧 Modifica fattura — al prossimo step');
 }
-function _antRegistraIncasso(fatturaAntId) {
-  toast('🚧 Registra incasso — al prossimo step');
-}
 function _antApriDettaglioModulo(presentazioneId) {
-  toast('🚧 Dettaglio modulo storico — al prossimo step');
+  return _antRenderDettaglioModulo(presentazioneId);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETTAGLIO MODULO (vista read-only completa)
+// ═══════════════════════════════════════════════════════════════════════════
+// Apre una modale con la fotografia di una presentazione: header con dati
+// banca/protocollo/stato + KPI (richiesto/anticipato/estinto/aperto/netto),
+// tabella fatture (con scadenze e stati), elenco accrediti banca, eventuali
+// costi banca (commissioni/interessi). Usata per moduli storici da Storico
+// e per audit dei moduli attivi.
+async function _antRenderDettaglioModulo(presentazioneId) {
+  if (!presentazioneId) return;
+
+  // Carica tutto il necessario in parallelo
+  apriModal('<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Caricamento dettaglio modulo...</div>');
+
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
+  if (resP.error || !resP.data) {
+    apriModal('<div style="padding:24px"><div style="color:#A32D2D;font-weight:600">❌ Modulo non trovato</div>'
+      + '<div style="margin-top:12px;text-align:right"><button onclick="chiudiModal()" style="padding:8px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div></div>');
+    return;
+  }
+  var p = resP.data;
+
+  var resF = await sb.from('anticipi_sbf_fatture').select('*').eq('presentazione_id', presentazioneId).order('numero_fattura');
+  var resA = await sb.from('anticipi_sbf_accrediti').select('*').eq('presentazione_id', presentazioneId).order('data_accredito');
+  var resC = await sb.from('anticipi_sbf_costi').select('*').eq('presentazione_id', presentazioneId).order('data_competenza');
+
+  var fatture = resF.data || [];
+  var accrediti = resA.data || [];
+  var costi = resC.data || [];
+
+  // Info banca
+  var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
+  var cc  = (_bancheConti || []).find(function(c) { return c.id === aff.conto_id; });
+  var bancaLabel = (ist.nome || '—') + (cc && cc.numero_conto ? ' /' + cc.numero_conto.slice(-4) : '');
+
+  // Calcoli aggregati
+  var totaleEstinto = fatture.reduce(function(s, f) { return s + Number(f.importo_estinto || 0); }, 0);
+  var importoAperto = Number(p.importo_anticipato_totale || 0) - totaleEstinto;
+  var nFt = fatture.length;
+  var nFtPresentate = fatture.filter(function(f) { return f.stato === 'presentata'; }).length;
+  var nFtAnticipate = fatture.filter(function(f) { return f.stato === 'anticipata'; }).length;
+  var nFtEstinte = fatture.filter(function(f) { return f.stato === 'estinta'; }).length;
+  var nFtInsolute = fatture.filter(function(f) { return f.stato === 'insoluta'; }).length;
+
+  var costoReale = costi.reduce(function(s, c) { return s + Number(c.importo_reale || 0); }, 0);
+  var costoPreventivato = costi.reduce(function(s, c) { return s + Number(c.importo_preventivato || 0); }, 0);
+  var nettoIncassato = Number(p.importo_anticipato_totale || 0) - costoReale;
+
+  var statoColor = {
+    'in_delibera':         { bg: '#EEEDFE', fg: '#26215C', label: 'In delibera' },
+    'anticipata_parziale': { bg: '#FAEEDA', fg: '#633806', label: 'Anticipata parziale' },
+    'anticipata':          { bg: '#E6F1FB', fg: '#0C447C', label: 'Anticipata' },
+    'estinta':             { bg: '#EAF3DE', fg: '#27500A', label: 'Estinta' },
+    'rifiutata':           { bg: '#FCEBEB', fg: '#791F1F', label: 'Rifiutata' }
+  }[p.stato] || { bg: '#f0f0f0', fg: '#666', label: p.stato };
+
+  // Build modale (stile largo: 920px)
+  var html = '<div style="max-width:920px;width:100%">';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">';
+  html += '<div>';
+  html += '<div style="font-size:17px;font-weight:700;color:var(--text)">📋 Modulo del ' + fmtD(p.data_presentazione) + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">';
+  html += '🏛 ' + esc(bancaLabel);
+  if (p.numero_protocollo) html += ' · prot. <span style="font-family:var(--font-mono)">' + esc(p.numero_protocollo) + '</span>';
+  html += '</div>';
+  html += '</div>';
+  html += '<span style="background:' + statoColor.bg + ';color:' + statoColor.fg + ';padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:0.3px">' + statoColor.label + '</span>';
+  html += '</div>';
+
+  // KPI cockpit
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px">';
+  html += _antKpiCard('Richiesto', fmtE(p.importo_richiesto), '');
+  html += _antKpiCard('Anticipato', fmtE(p.importo_anticipato_totale), '#26215C');
+  if (totaleEstinto > 0) html += _antKpiCard('Estinto', fmtE(totaleEstinto), '#27500A');
+  if (importoAperto > 0) html += _antKpiCard('Aperto', fmtE(importoAperto), '#BA7517');
+  if (costoReale > 0) html += _antKpiCard('Costi banca', fmtE(costoReale), '#A32D2D');
+  if (costoReale > 0 || costoPreventivato > 0) html += _antKpiCard('Netto incassato', fmtE(nettoIncassato), '#27500A');
+  html += '</div>';
+
+  // Riepilogo fatture per stato
+  html += '<div style="background:var(--bg);border-radius:6px;padding:8px 14px;margin-bottom:14px;font-size:11px;color:var(--text-muted);display:flex;gap:14px;flex-wrap:wrap">';
+  html += '<span><strong>' + nFt + '</strong> fatture totali</span>';
+  if (nFtPresentate) html += '<span>· <strong>' + nFtPresentate + '</strong> presentate</span>';
+  if (nFtAnticipate) html += '<span>· <strong style="color:#0C447C">' + nFtAnticipate + '</strong> anticipate</span>';
+  if (nFtEstinte) html += '<span>· <strong style="color:#27500A">' + nFtEstinte + '</strong> estinte</span>';
+  if (nFtInsolute) html += '<span>· <strong style="color:#791F1F">' + nFtInsolute + '</strong> insolute</span>';
+  html += '</div>';
+
+  // Note presentazione
+  if (p.note) {
+    html += '<div style="background:#FAEEDA;border-left:4px solid #BA7517;padding:8px 14px;margin-bottom:14px;font-size:12px;color:#633806;border-radius:4px"><strong>Note:</strong> ' + esc(p.note) + '</div>';
+  }
+
+  // ─── TABELLA FATTURE ─────────────────────────────────────────────────────
+  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text)">📄 Fatture nel modulo</div>';
+  if (!fatture.length) {
+    html += '<div style="padding:14px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:6px;font-size:11px">Nessuna fattura nel modulo</div>';
+  } else {
+    html += '<div style="overflow-x:auto;margin-bottom:14px"><table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;overflow:hidden">';
+    html += '<thead><tr style="background:var(--bg)">';
+    ['Nr Ft', 'Data', 'Cliente', 'Imponibile', 'Totale', '% Ant', 'Anticipato', 'Estinto', 'Scad. cli', 'Scad. banca', 'Stato'].forEach(function(h) {
+      html += '<th style="text-align:left;padding:7px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-weight:600;border-bottom:0.5px solid var(--border)">' + h + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+
+    var totImp = 0, totTot = 0, totAnt = 0, totEst = 0;
+    fatture.forEach(function(f) {
+      totImp += Number(f.imponibile || 0);
+      totTot += Number(f.totale_fattura || 0);
+      totAnt += Number(f.importo_anticipato_calcolato || 0);
+      totEst += Number(f.importo_estinto || 0);
+
+      var stColors = {
+        'presentata': { bg: '#EEEDFE', fg: '#26215C', label: 'Presentata' },
+        'anticipata': { bg: '#E6F1FB', fg: '#0C447C', label: 'Anticipata' },
+        'estinta':    { bg: '#EAF3DE', fg: '#27500A', label: 'Estinta' },
+        'insoluta':   { bg: '#FCEBEB', fg: '#791F1F', label: 'Insoluta' },
+        'esclusa':    { bg: '#f0f0f0', fg: '#888', label: 'Esclusa' }
+      }[f.stato] || { bg: '#f0f0f0', fg: '#666', label: f.stato };
+
+      html += '<tr style="border-bottom:0.5px solid var(--border)' + (f.stato === 'estinta' ? ';opacity:0.7' : '') + '">';
+      html += '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:600">' + esc(f.numero_fattura || '—') + '</td>';
+      html += '<td style="padding:7px 8px">' + (f.data_emissione ? fmtD(f.data_emissione) : '—') + '</td>';
+      html += '<td style="padding:7px 8px">' + esc(f.cliente_nome || '—') + '</td>';
+      html += '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(f.imponibile) + '</td>';
+      html += '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(f.totale_fattura) + '</td>';
+      html += '<td style="padding:7px 8px;text-align:center;font-family:var(--font-mono);font-size:10px">' + (f.percentuale_applicata !== null ? Number(f.percentuale_applicata).toFixed(0) + '%' : '—') + '</td>';
+      html += '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:#26215C;font-weight:600">' + fmtE(f.importo_anticipato_calcolato) + '</td>';
+      html += '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);color:' + (Number(f.importo_estinto) > 0 ? '#27500A' : 'var(--text-hint)') + ';font-weight:' + (Number(f.importo_estinto) > 0 ? '600' : '400') + '">' + fmtE(f.importo_estinto) + '</td>';
+      html += '<td style="padding:7px 8px;font-size:10px">' + (f.scadenza_cliente ? fmtD(f.scadenza_cliente) : '—') + '</td>';
+      html += '<td style="padding:7px 8px;font-size:10px;font-weight:500">' + (f.scadenza_banca ? fmtD(f.scadenza_banca) : '—') + '</td>';
+      html += '<td style="padding:5px 8px"><span style="background:' + stColors.bg + ';color:' + stColors.fg + ';padding:2px 7px;border-radius:9px;font-size:9px;font-weight:700">' + stColors.label + '</span></td>';
+      html += '</tr>';
+    });
+
+    // Riga totali
+    html += '<tr style="background:var(--bg);font-weight:700">';
+    html += '<td colspan="3" style="padding:8px;font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:0.3px">Totali</td>';
+    html += '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + fmtE(totImp) + '</td>';
+    html += '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + fmtE(totTot) + '</td>';
+    html += '<td></td>';
+    html += '<td style="padding:8px;text-align:right;font-family:var(--font-mono);color:#26215C">' + fmtE(totAnt) + '</td>';
+    html += '<td style="padding:8px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totEst) + '</td>';
+    html += '<td colspan="3"></td>';
+    html += '</tr>';
+    html += '</tbody></table></div>';
+  }
+
+  // ─── ACCREDITI BANCA ──────────────────────────────────────────────────────
+  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text);margin-top:14px">💰 Accrediti banca</div>';
+  if (!accrediti.length) {
+    html += '<div style="padding:14px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:6px;font-size:11px;margin-bottom:14px">Nessun accredito registrato</div>';
+  } else {
+    html += '<div style="background:#EAF3DE;border:0.5px solid #97C459;border-radius:6px;padding:8px 14px;margin-bottom:14px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+    html += '<thead><tr><th style="text-align:left;padding:5px 0;font-size:10px;color:#27500A;text-transform:uppercase;letter-spacing:0.3px;font-weight:600">Data</th><th style="text-align:right;padding:5px 0;font-size:10px;color:#27500A;text-transform:uppercase;letter-spacing:0.3px;font-weight:600">Importo</th><th style="text-align:left;padding:5px 8px;font-size:10px;color:#27500A;text-transform:uppercase;letter-spacing:0.3px;font-weight:600">Note</th></tr></thead>';
+    html += '<tbody>';
+    var totAccr = 0;
+    accrediti.forEach(function(a) {
+      totAccr += Number(a.importo || 0);
+      html += '<tr style="border-top:0.5px dashed #97C459">';
+      html += '<td style="padding:5px 0;font-family:var(--font-mono);font-size:11px">' + fmtD(a.data_accredito) + '</td>';
+      html += '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + fmtE(a.importo) + '</td>';
+      html += '<td style="padding:5px 8px;font-size:10px;color:#27500A">' + esc(a.note || '') + '</td>';
+      html += '</tr>';
+    });
+    html += '<tr style="border-top:1px solid #97C459;font-weight:700"><td style="padding:5px 0;font-size:10px;color:#27500A;text-transform:uppercase;letter-spacing:0.3px">Totale accrediti</td><td style="padding:5px 0;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totAccr) + '</td><td></td></tr>';
+    html += '</tbody></table></div>';
+  }
+
+  // ─── COSTI BANCA ──────────────────────────────────────────────────────────
+  if (costi.length) {
+    html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text);margin-top:14px">💸 Costi banca</div>';
+    html += '<div style="background:#FCEBEB;border:0.5px solid #E2A4A4;border-radius:6px;padding:8px 14px;margin-bottom:14px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+    html += '<thead><tr>';
+    ['Data', 'Tipo', 'Preventivato', 'Reale', 'Riferimento'].forEach(function(h) {
+      html += '<th style="text-align:left;padding:5px 0;font-size:10px;color:#791F1F;text-transform:uppercase;letter-spacing:0.3px;font-weight:600">' + h + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    var totPrev = 0, totReal = 0;
+    var tipoLabels = {
+      'interessi': 'Interessi',
+      'commissioni': 'Commissioni',
+      'spese_incasso': 'Spese incasso',
+      'imposta_bollo': 'Imposta bollo',
+      'altro': 'Altro'
+    };
+    costi.forEach(function(c) {
+      totPrev += Number(c.importo_preventivato || 0);
+      totReal += Number(c.importo_reale || 0);
+      html += '<tr style="border-top:0.5px dashed #E2A4A4">';
+      html += '<td style="padding:5px 0;font-family:var(--font-mono);font-size:11px">' + fmtD(c.data_competenza) + '</td>';
+      html += '<td style="padding:5px 0;font-size:11px">' + (tipoLabels[c.tipo_costo] || c.tipo_costo) + '</td>';
+      html += '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + (c.importo_preventivato ? fmtE(c.importo_preventivato) : '—') + '</td>';
+      html += '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);font-weight:600;color:#791F1F">' + (c.importo_reale !== null && c.importo_reale !== undefined ? fmtE(c.importo_reale) : '<span style="color:var(--text-hint);font-weight:400">in attesa</span>') + '</td>';
+      html += '<td style="padding:5px 0;font-size:10px;color:var(--text-muted)">' + esc(c.riferimento || '') + '</td>';
+      html += '</tr>';
+    });
+    html += '<tr style="border-top:1px solid #E2A4A4;font-weight:700">';
+    html += '<td colspan="2" style="padding:5px 0;font-size:10px;color:#791F1F;text-transform:uppercase;letter-spacing:0.3px">Totale costi</td>';
+    html += '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(totPrev) + '</td>';
+    html += '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);color:#791F1F">' + fmtE(totReal) + '</td>';
+    html += '<td></td></tr>';
+    html += '</tbody></table></div>';
+  }
+
+  // Pulsanti footer
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border)">';
+  html += '<button onclick="chiudiModal()" class="btn-primary" style="font-size:12px;padding:8px 14px">Chiudi</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+// Helper: card KPI riutilizzata da _antRenderDettaglioModulo
+function _antKpiCard(label, value, color) {
+  var c = color || 'var(--text)';
+  return '<div style="background:var(--bg-kpi);border-radius:8px;padding:10px 12px">'
+    + '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-bottom:3px">' + label + '</div>'
+    + '<div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + c + '">' + value + '</div>'
+    + '</div>';
+}
+
 function _antStampaPDFBanca(affidamentoId) {
   toast('🚧 Stampa PDF banca — al prossimo step');
 }
