@@ -256,9 +256,13 @@ async function _antRenderTabBanca(affidamentoId) {
   const disponibile = Math.max(0, monteAcc - utilizzo);
   const pctUtilizzo = monteAcc > 0 ? (utilizzo / monteAcc * 100) : 0;
   const colorePct = pctUtilizzo >= 80 ? '#A32D2D' : (pctUtilizzo >= 50 ? '#BA7517' : '#27500A');
-  const pctDefault = aff.pct_anticipo_default !== null && aff.pct_anticipo_default !== undefined ? Number(aff.pct_anticipo_default) : 100;
-  const baseDefault = aff.base_calcolo_default || 'imponibile';
-  const giorniEst = aff.giorni_estinzione_anticipo || 30;
+
+  // Parametri anticipo dal fido (nuovo schema 28/04)
+  const pctDefault = aff.percentuale_anticipo_default;
+  const baseDefault = aff.base_calcolo_default;
+  const massimalePctRaw = aff.massimale_cliente_pct;
+  const massimaleEuro = (massimalePctRaw && monteAcc) ? (Number(massimalePctRaw) / 100) * monteAcc : null;
+  const parametriCompleti = pctDefault && baseDefault;
 
   let html = '';
 
@@ -267,9 +271,18 @@ async function _antRenderTabBanca(affidamentoId) {
   html += '<div>';
   html += '<div style="font-size:14px;font-weight:700;color:#26215C">🏦 ' + esc(ist.nome || '—') + (cc.numero_conto ? ' <span style="font-family:var(--font-mono);font-size:11px;font-weight:500;color:#666">N. ' + esc(cc.numero_conto) + '</span>' : '') + '</div>';
   html += '<div style="font-size:11px;color:#666;margin-top:3px">';
-  html += 'Tipo: <strong>' + (aff.tipo === 'sbf' ? 'SBF' : 'Anticipo fatture') + '</strong>';
-  html += ' · % default: <strong style="color:#26215C">' + pctDefault + '% su ' + baseDefault + '</strong>';
-  html += ' · Estinzione default: <strong>+' + giorniEst + ' gg</strong>';
+  const tipoLab = { sbf:'SBF', anticipo_fatture:'Anticipo fatture', castelletto:'Castelletto', autoliquidante:'Autoliquidante' }[aff.tipo] || (aff.tipo || 'Anticipo fatture');
+  html += 'Tipo: <strong>' + tipoLab + '</strong>';
+  if (parametriCompleti) {
+    html += ' · % anticipo: <strong style="color:#26215C">' + Number(pctDefault).toFixed(0) + '% su ' + (baseDefault === 'totale' ? 'totale fattura' : 'imponibile') + '</strong>';
+    if (massimalePctRaw) {
+      html += ' · Max cliente: <strong>' + Number(massimalePctRaw).toFixed(0) + '%';
+      if (massimaleEuro) html += ' (' + fmtE(massimaleEuro) + ')';
+      html += '</strong>';
+    }
+  } else {
+    html += ' · <span style="color:#A32D2D;font-weight:600">⚠ Parametri anticipo mancanti — compila il fido in Affidamenti</span>';
+  }
   if (aff.tasso) html += ' · Tasso: <strong>' + Number(aff.tasso).toFixed(3) + '%</strong>';
   html += '</div>';
   html += '</div>';
