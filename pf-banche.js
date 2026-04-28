@@ -3282,6 +3282,133 @@ async function _situazioneSalvaCella(input) {
 }
 
 // ─── STAMPA PDF SITUAZIONE ─────────────────────────────────────────────────
+// Replica dell'Excel "Situazione Banche al GG/MM/AAAA" del giorno selezionato.
+// Layout A4 portrait. Stile coerente con stampaPianoAnnuale/stampaTimeline.
 function stampaSituazionePDF() {
-  toast('📄 Stampa Situazione — in sviluppo (replica Excel)');
+  if (!_situazioneDataCorrente) { toast('⚠ Nessuna data selezionata'); return; }
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+
+  const fidiCassa = _getFidiCassaPerConto();
+  const contiSorted = _sortContiPriorita();
+  const dataObj = new Date(_situazioneDataCorrente + 'T12:00:00');
+  const dataLabel = dataObj.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const giornoLabel = dataObj.toLocaleDateString('it-IT', { weekday: 'long' });
+  const oraStampa = new Date().toLocaleString('it-IT');
+
+  // Calcolo totali
+  let totFido = 0, totContabile = 0, totDisponibile = 0, totUtilizzato = 0, totResiduo = 0;
+  const righe = contiSorted.map(c => {
+    const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '—';
+    const saldo = _situazioneSaldi[c.id] || {};
+    const sCont = (saldo.saldo_contabile !== null && saldo.saldo_contabile !== undefined) ? Number(saldo.saldo_contabile) : null;
+    const sDisp = (saldo.saldo_disponibile !== null && saldo.saldo_disponibile !== undefined) ? Number(saldo.saldo_disponibile) : null;
+    const fido = fidiCassa[c.id] ? Number(fidiCassa[c.id].accordato) : 0;
+    const utilizzato = (sCont !== null && sCont < 0) ? Math.abs(sCont) : 0;
+    const residuo = fido > 0 ? Math.max(0, fido - utilizzato) : 0;
+    if (sCont !== null) totContabile += sCont;
+    if (sDisp !== null) totDisponibile += sDisp;
+    totFido += fido;
+    totUtilizzato += utilizzato;
+    totResiduo += residuo;
+    return { istNome, numero: c.numero_conto, sCont, sDisp, fido, utilizzato, residuo };
+  });
+  const pctTotResid = totFido > 0 ? (totResiduo / totFido * 100) : 0;
+
+  // ─── HTML del PDF ───
+  let html = '<!DOCTYPE html><html><head><title>Situazione banche al ' + dataLabel + ' — Phoenix Fuel</title>';
+  html += '<style>';
+  html += 'body{font-family:Arial,sans-serif;padding:20px;font-size:11px;color:#333}';
+  html += '.header-yellow{background:#FAEEDA;border:1px solid #BA7517;padding:10px 14px;margin-bottom:14px;text-align:center}';
+  html += '.header-yellow h1{font-size:16px;color:#633806;margin:0;font-weight:700}';
+  html += '.header-yellow .sub{font-size:10px;color:#633806;margin-top:3px}';
+  html += 'table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:0}';
+  html += 'th{background:#f0f0f0;padding:7px 8px;text-align:right;border-bottom:1.5px solid #999;font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#555}';
+  html += 'th:first-child{text-align:left}';
+  html += 'td{padding:7px 8px;text-align:right;border-bottom:0.5px solid #ddd;font-family:monospace;font-size:11px;font-weight:600}';
+  html += 'td:first-child{text-align:left;font-family:Arial,sans-serif;font-weight:500;color:#333}';
+  html += 'td.neg{color:#A32D2D}';
+  html += 'td.pos{color:#27500A}';
+  html += 'tr.totale td{font-weight:700;background:#f8f8f8;border-top:2px solid #333;font-size:12px}';
+  html += '.numero{color:#888;font-family:monospace;font-size:9px;font-weight:400;margin-left:4px}';
+  html += '.kpi-row{display:flex;gap:10px;margin:18px 0 8px}';
+  html += '.kpi-card{flex:1;border:0.5px solid #ccc;padding:10px 12px;border-radius:4px;background:#fafafa}';
+  html += '.kpi-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:0.4px;font-weight:600}';
+  html += '.kpi-value{font-size:14px;font-weight:700;font-family:monospace;margin-top:3px}';
+  html += '.footer{margin-top:24px;padding-top:8px;border-top:0.5px solid #ccc;font-size:9px;color:#888;display:flex;justify-content:space-between}';
+  html += '@page{size:A4 portrait;margin:1.2cm}';
+  html += '@media print{.no-print{display:none}}';
+  html += '</style></head><body>';
+
+  // Header giallo (replica Excel)
+  html += '<div class="header-yellow">';
+  html += '<h1>SITUAZIONE BANCHE AL ' + dataLabel + '</h1>';
+  html += '<div class="sub">' + giornoLabel.charAt(0).toUpperCase() + giornoLabel.slice(1) + ' · Phoenix Fuel S.r.l.</div>';
+  html += '</div>';
+
+  // Tabella saldi
+  html += '<table>';
+  html += '<thead><tr>';
+  html += '<th style="width:25%">Banca / Conto</th>';
+  html += '<th style="width:15%">Fido cassa</th>';
+  html += '<th style="width:15%">Saldo contabile</th>';
+  html += '<th style="width:15%">Saldo disponibile</th>';
+  html += '<th style="width:15%">Utilizzato</th>';
+  html += '<th style="width:15%">Residuo fido</th>';
+  html += '</tr></thead><tbody>';
+  righe.forEach(r => {
+    html += '<tr>';
+    html += '<td>' + r.istNome + (r.numero ? '<span class="numero">N. ' + r.numero + '</span>' : '') + '</td>';
+    html += '<td>' + (r.fido > 0 ? fmtE(r.fido) : '—') + '</td>';
+    if (r.sCont === null) html += '<td style="color:#bbb">—</td>';
+    else html += '<td class="' + (r.sCont < 0 ? 'neg' : (r.sCont > 0 ? 'pos' : '')) + '">' + fmtE(r.sCont) + '</td>';
+    if (r.sDisp === null) html += '<td style="color:#bbb">—</td>';
+    else html += '<td class="' + (r.sDisp < 0 ? 'neg' : 'pos') + '">' + fmtE(r.sDisp) + '</td>';
+    html += '<td' + (r.utilizzato > 0 ? ' class="neg"' : '') + '>' + (r.fido > 0 ? fmtE(r.utilizzato) : '—') + '</td>';
+    if (r.fido > 0) {
+      const pct = (r.residuo / r.fido * 100).toFixed(0);
+      html += '<td class="pos">' + fmtE(r.residuo) + ' <span style="color:#888;font-weight:400;font-size:9px">(' + pct + '%)</span></td>';
+    } else {
+      html += '<td style="color:#bbb">—</td>';
+    }
+    html += '</tr>';
+  });
+  // Riga totale
+  html += '<tr class="totale">';
+  html += '<td>TOTALE</td>';
+  html += '<td>' + fmtE(totFido) + '</td>';
+  html += '<td class="' + (totContabile < 0 ? 'neg' : (totContabile > 0 ? 'pos' : '')) + '">' + fmtE(totContabile) + '</td>';
+  html += '<td class="' + (totDisponibile < 0 ? 'neg' : 'pos') + '">' + fmtE(totDisponibile) + '</td>';
+  html += '<td' + (totUtilizzato > 0 ? ' class="neg"' : '') + '>' + fmtE(totUtilizzato) + '</td>';
+  html += '<td class="pos">' + fmtE(totResiduo) + ' <span style="color:#888;font-weight:400;font-size:9px">(' + pctTotResid.toFixed(0) + '%)</span></td>';
+  html += '</tr>';
+  html += '</tbody></table>';
+
+  // ─── KPI di sintesi (sotto la tabella) ───
+  const pctUtilTot = totFido > 0 ? (totUtilizzato / totFido * 100).toFixed(0) : '0';
+  html += '<div class="kpi-row">';
+  html += '<div class="kpi-card"><div class="kpi-label">Totale accordato</div><div class="kpi-value" style="color:#26215C">' + fmtE(totFido) + '</div></div>';
+  html += '<div class="kpi-card" style="background:#FCEBEB"><div class="kpi-label" style="color:#791F1F">Utilizzato</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(totUtilizzato) + ' <span style="font-size:10px;font-weight:500">(' + pctUtilTot + '%)</span></div></div>';
+  html += '<div class="kpi-card" style="background:#EAF3DE"><div class="kpi-label" style="color:#27500A">Residuo</div><div class="kpi-value" style="color:#27500A">' + fmtE(totResiduo) + ' <span style="font-size:10px;font-weight:500">(' + pctTotResid.toFixed(0) + '%)</span></div></div>';
+  html += '<div class="kpi-card"><div class="kpi-label">Disponibilità totale</div><div class="kpi-value" style="color:' + (totDisponibile < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(totDisponibile) + '</div></div>';
+  html += '</div>';
+
+  // Footer
+  html += '<div class="footer">';
+  html += '<span>Phoenix Fuel S.r.l. · Vibo Valentia (VV)</span>';
+  html += '<span>Stampato il ' + oraStampa + '</span>';
+  html += '</div>';
+
+  // Bottone stampa (visibile solo a video, nascosto in stampa)
+  html += '<div class="no-print" style="margin-top:20px;text-align:center">';
+  html += '<button onclick="window.print()" style="padding:10px 20px;background:#26215C;color:#fff;border:0;border-radius:6px;font-size:13px;cursor:pointer">🖨 Stampa / Salva PDF</button>';
+  html += ' <button onclick="window.close()" style="padding:10px 20px;background:#fff;color:#333;border:1px solid #ccc;border-radius:6px;font-size:13px;cursor:pointer;margin-left:8px">Chiudi</button>';
+  html += '</div>';
+
+  html += '</body></html>';
+
+  w.document.write(html);
+  w.document.close();
+  // Non lancio auto-print: l'utente vede l'anteprima e clicca lui Stampa
 }
