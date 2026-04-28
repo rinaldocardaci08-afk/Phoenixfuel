@@ -1610,6 +1610,8 @@ async function renderBancheAffidamenti() {
       const accordato = Number(a.importo_accordato || 0);
       const utilizzato = _utilizzatoLive(a);
       const isLive = (a.tipo === 'cassa' && a.conto_id && saldiByConto[a.conto_id]);
+      // Fidi tipo anticipo: utilizzato auto-calcolato dai trigger DB del modulo Anticipi
+      const isAutoAnticipo = ['sbf','anticipo_fatture','castelletto','autoliquidante'].indexOf(a.tipo) >= 0;
       const pct = accordato > 0 ? (utilizzato / accordato * 100) : 0;
       const utilizzoColore = pct < 70 ? '#639922' : (pct < 85 ? '#D4A017' : '#A32D2D');
       const altoUtilizzo = pct > 90;
@@ -1619,14 +1621,20 @@ async function renderBancheAffidamenti() {
       html += '<td style="padding:8px;font-weight:500">' + esc(ist.nome || '—') + '</td>';
       html += '<td style="padding:8px">' + _badgeTipoFido(a.tipo) + '</td>';
       html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right">' + fmtE(accordato) + '</td>';
-      // Utilizzato: live (per fidi cassa con saldi) o editabile (altri tipi)
-      const cursorStyle = (isLive ? 'default' : (_isAdminBanche() ? 'pointer' : 'default'));
-      const onclickAttr = (!isLive && _isAdminBanche()) ? 'onclick="modificaUtilizzato(\'' + a.id + '\')" title="Click per modificare"' : (isLive ? 'title="Calcolato dai saldi giornalieri (tab Situazione)"' : '');
+      // Utilizzato: live (cassa+saldi), auto (anticipo), o editabile manualmente (altri)
+      const editabile = !isLive && !isAutoAnticipo && _isAdminBanche();
+      const cursorStyle = editabile ? 'pointer' : 'default';
+      var onclickAttr = '';
+      if (editabile) onclickAttr = 'onclick="modificaUtilizzato(\'' + a.id + '\')" title="Click per modificare"';
+      else if (isLive) onclickAttr = 'title="Calcolato dai saldi giornalieri (tab Situazione)"';
+      else if (isAutoAnticipo) onclickAttr = 'title="Calcolato automaticamente dal modulo Anticipo Fatture"';
       html += '<td style="padding:8px;font-family:var(--font-mono);text-align:right;cursor:' + cursorStyle + '" ' + onclickAttr + '>';
       html += fmtE(utilizzato);
       if (isLive) {
         const dataSaldo = saldiByConto[a.conto_id].data;
         html += '<div style="font-size:9px;color:#27500A;font-weight:500;font-family:inherit;margin-top:2px">⬤ live ' + fmtD(dataSaldo) + '</div>';
+      } else if (isAutoAnticipo) {
+        html += '<div style="font-size:9px;color:#26215C;font-weight:500;font-family:inherit;margin-top:2px">⚙ auto da Anticipi' + (a.utilizzato_aggiornato ? ' · ' + fmtD(a.utilizzato_aggiornato) : '') + '</div>';
       } else if (a.utilizzato_aggiornato) {
         html += '<div style="font-size:9px;color:var(--text-hint);font-family:inherit;margin-top:2px">' + fmtD(a.utilizzato_aggiornato) + '</div>';
       }
@@ -1676,6 +1684,12 @@ function _badgeTipoFido(t) {
 async function modificaUtilizzato(id) {
   const a = _bancheAffidamenti.find(x => x.id === id);
   if (!a) return;
+  // Fidi anticipo: utilizzato auto-calcolato, blocca edit manuale
+  const tipiAnt = ['anticipo_fatture','sbf','castelletto','autoliquidante'];
+  if (tipiAnt.indexOf(a.tipo) >= 0) {
+    toast('⚙ Utilizzato auto-calcolato dal modulo Anticipi. Non modificabile manualmente.');
+    return;
+  }
   const nuovo = prompt('Importo utilizzato (€):\n\nFido: ' + (_bancheIstituti.find(i => i.id === a.istituto_id)?.nome || '') + ' — ' + a.tipo + '\nAccordato: ' + fmtE(a.importo_accordato), Number(a.importo_utilizzato || 0));
   if (nuovo === null) return;
   const v = Number(nuovo);
@@ -1739,7 +1753,16 @@ function apriModalAffidamento(id) {
   // Importi
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += _campo('Importo accordato (€) *', 'mod-aff-accordato', a?.importo_accordato ?? '', 'number', '0');
-  html += _campo('Importo utilizzato (€)', 'mod-aff-utilizzato', a?.importo_utilizzato ?? 0, 'number', '0');
+  // Importo utilizzato: read-only per fidi anticipo (calcolato auto dai trigger)
+  var tipoCorrenteAff = a?.tipo || 'cassa';
+  var isAutoAnticipo = ['sbf','anticipo_fatture','castelletto','autoliquidante'].indexOf(tipoCorrenteAff) >= 0;
+  if (isAutoAnticipo) {
+    html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Importo utilizzato (€)</label>';
+    html += '<input id="mod-aff-utilizzato" type="number" value="' + (a?.importo_utilizzato ?? 0) + '" readonly style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-kpi);color:var(--text-muted);font-size:13px;cursor:not-allowed">';
+    html += '<div style="font-size:10px;color:#26215C;margin-top:3px">⚙ Calcolato automaticamente dal modulo Anticipo Fatture</div></div>';
+  } else {
+    html += _campo('Importo utilizzato (€)', 'mod-aff-utilizzato', a?.importo_utilizzato ?? 0, 'number', '0');
+  }
   html += '</div>';
 
   // Tassi
@@ -1840,8 +1863,6 @@ async function salvaAffidamento(id) {
     conto_id: document.getElementById('mod-aff-conto').value || null,
     tipo: tipoFido,
     importo_accordato: accordato,
-    importo_utilizzato: utilizzato,
-    utilizzato_aggiornato: today,
     tasso: Number(document.getElementById('mod-aff-tasso').value) || null,
     tasso_cdf: Number(document.getElementById('mod-aff-cdf').value) || null,
     data_delibera: document.getElementById('mod-aff-delibera').value || null,
@@ -1853,6 +1874,13 @@ async function salvaAffidamento(id) {
     massimale_cliente_pct: massPct,
     updated_at: new Date().toISOString()
   };
+
+  // importo_utilizzato: scrivibile da form solo per tipi non-anticipo
+  // (per i fidi anticipo il valore è ricalcolato dai trigger DB del modulo Anticipi).
+  if (tipiAnt.indexOf(tipoFido) < 0) {
+    payload.importo_utilizzato = utilizzato;
+    payload.utilizzato_aggiornato = today;
+  }
 
   let res;
   if (id) {
