@@ -670,19 +670,22 @@ function _antRenderRigaRegola(r, isDefault) { return ''; }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PLACEHOLDER MODALI — implementati progressivamente (Step 3)
+// DISPATCH MODALI — wrapper compatibilità (delegano alle funzioni vere)
 // ═══════════════════════════════════════════════════════════════════════════
 function _antApriModalePresenta(affidamentoId) {
   return _antRenderModalePresenta(affidamentoId);
 }
 function _antApriModaleAccredito(presentazioneId) {
-  toast('🚧 Modale Registra Accredito — al prossimo step');
+  return _antRenderModaleAccredito(presentazioneId);
 }
 function _antApriModaleModulo(presentazioneId) {
-  toast('🚧 Modifica modulo — al prossimo step');
+  return _antRenderModaleModulo(presentazioneId);
 }
 function _antApriModaleFattura(fatturaAntId) {
-  toast('🚧 Modifica fattura — al prossimo step');
+  return _antRenderModaleFattura(fatturaAntId);
+}
+function _antRegistraIncasso(fatturaAntId) {
+  return _antRenderModaleIncasso(fatturaAntId);
 }
 function _antApriDettaglioModulo(presentazioneId) {
   return _antRenderDettaglioModulo(presentazioneId);
@@ -1555,4 +1558,398 @@ async function _antEliminaRegola(regolaId) {
   chiudiModal();
   toast('✓ Cliente riabilitato');
   if (typeof _antRenderTabRegole === 'function') await _antRenderTabRegole();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE REGISTRA ACCREDITO — banca accredita N euro su modulo X
+// ═══════════════════════════════════════════════════════════════════════════
+// Inserisce un record in anticipi_sbf_accrediti. Il trigger DB ricalcola
+// automaticamente importo_anticipato_totale e stato della presentazione.
+// Più accrediti per stesso modulo sono ammessi (caso reale: 49.759 il 23/04
+// + 14.448 il 24/04). UI: data, importo, note + lista accrediti già fatti.
+async function _antRenderModaleAccredito(presentazioneId) {
+  if (!_antPuoAccredito()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!presentazioneId) return;
+
+  apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
+
+  // Carica presentazione + accrediti esistenti
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
+  if (resP.error || !resP.data) { toast('Modulo non trovato'); chiudiModal(); return; }
+  var p = resP.data;
+  var resA = await sb.from('anticipi_sbf_accrediti').select('*').eq('presentazione_id', presentazioneId).order('data_accredito');
+  var accrediti = resA.data || [];
+
+  // Info banca
+  var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
+  var bancaLabel = ist.nome || '—';
+
+  var richiesto = Number(p.importo_richiesto || 0);
+  var giaAnticipato = Number(p.importo_anticipato_totale || 0);
+  var residuo = richiesto - giaAnticipato;
+  var oggiISO = new Date().toISOString().split('T')[0];
+
+  var html = '<div style="max-width:560px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#27500A">💰 Registra accredito banca</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">📋 Modulo del ' + fmtD(p.data_presentazione) + ' · 🏛 ' + esc(bancaLabel) + '</div>';
+
+  // Box situazione corrente
+  html += '<div style="background:var(--bg);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:flex;gap:18px;flex-wrap:wrap">';
+  html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Richiesto</span> <span style="font-family:var(--font-mono);font-weight:600;font-size:13px">' + fmtE(richiesto) + '</span></div>';
+  html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Già anticipato</span> <span style="font-family:var(--font-mono);font-weight:600;font-size:13px;color:#26215C">' + fmtE(giaAnticipato) + '</span></div>';
+  html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Residuo richiesto</span> <span style="font-family:var(--font-mono);font-weight:600;font-size:13px;color:' + (residuo > 0 ? '#BA7517' : '#27500A') + '">' + fmtE(residuo) + '</span></div>';
+  html += '</div>';
+
+  // Form nuovo accredito
+  html += '<div style="background:#EAF3DE;border:0.5px solid #97C459;border-radius:8px;padding:12px 14px;margin-bottom:14px">';
+  html += '<div style="font-size:12px;font-weight:600;color:#27500A;margin-bottom:10px">+ Nuovo accredito</div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data accredito *</label>';
+  html += '<input id="ant-acc-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Importo (€) *</label>';
+  html += '<input id="ant-acc-importo" type="number" step="0.01" min="0" value="' + (residuo > 0 ? residuo.toFixed(2) : '') + '" placeholder="0.00" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px;font-family:var(--font-mono);font-weight:600"></div>';
+  html += '</div>';
+  html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note (opzionali)</label>';
+  html += '<input id="ant-acc-note" type="text" placeholder="Es. valuta 24/04 — accredito parziale" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+  html += '</div>';
+
+  // Lista accrediti esistenti
+  if (accrediti.length) {
+    html += '<div style="margin-bottom:14px">';
+    html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px">Accrediti già registrati (' + accrediti.length + ')</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;overflow:hidden">';
+    accrediti.forEach(function(a) {
+      html += '<tr style="border-bottom:0.5px solid var(--border)">';
+      html += '<td style="padding:6px 10px;font-family:var(--font-mono)">' + fmtD(a.data_accredito) + '</td>';
+      html += '<td style="padding:6px 10px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + fmtE(a.importo) + '</td>';
+      html += '<td style="padding:6px 10px;font-size:10px;color:var(--text-muted)">' + esc(a.note || '') + '</td>';
+      html += '<td style="padding:4px 10px;text-align:right"><button onclick="_antEliminaAccredito(\'' + a.id + '\',\'' + presentazioneId + '\')" title="Elimina" style="background:none;border:0.5px solid #E24B4A;color:#E24B4A;padding:3px 7px;border-radius:4px;cursor:pointer;font-size:10px">🗑</button></td>';
+      html += '</tr>';
+    });
+    html += '</table></div>';
+  }
+
+  // Pulsanti
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end">';
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antSalvaAccredito(\'' + presentazioneId + '\')" class="btn-primary" style="font-size:12px;padding:8px 14px;background:#27500A">💰 Registra accredito</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function _antSalvaAccredito(presentazioneId) {
+  if (!_antPuoAccredito()) { toast('Operazione riservata all\'amministratore'); return; }
+  var data = document.getElementById('ant-acc-data').value;
+  var importoRaw = document.getElementById('ant-acc-importo').value;
+  var note = (document.getElementById('ant-acc-note').value || '').trim() || null;
+
+  if (!data) { toast('Inserisci la data accredito'); return; }
+  var importo = Number(importoRaw);
+  if (!isFinite(importo) || importo <= 0) { toast('Importo non valido'); return; }
+
+  var resI = await sb.from('anticipi_sbf_accrediti').insert([{
+    presentazione_id: presentazioneId,
+    data_accredito: data,
+    importo: importo,
+    note: note
+  }]);
+
+  if (resI.error) { toast('❌ Errore: ' + resI.error.message); return; }
+
+  chiudiModal();
+  toast('✓ Accredito di ' + fmtE(importo) + ' registrato');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+async function _antEliminaAccredito(accreditoId, presentazioneId) {
+  if (!_antPuoAccredito()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!confirm('Eliminare questo accredito?\n\nIl trigger DB ricalcolerà importo_anticipato_totale e stato del modulo.')) return;
+  var resD = await sb.from('anticipi_sbf_accrediti').delete().eq('id', accreditoId);
+  if (resD.error) { toast('❌ Errore: ' + resD.error.message); return; }
+  toast('✓ Accredito eliminato');
+  // Riapri la modale aggiornata
+  await _antRenderModaleAccredito(presentazioneId);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE REGISTRA INCASSO — fattura anticipata diventa estinta
+// ═══════════════════════════════════════════════════════════════════════════
+// Quando il cliente paga la fattura, la banca può:
+//  (a) trattenere l'anticipo dall'incasso → fattura estinta totalmente
+//  (b) addebitare differenza al cliente → fattura estinta totalmente comunque
+// Da PhoenixFuel registriamo: data_incasso, importo_estinto. Il default
+// dell'importo è importo_anticipato_calcolato (caso 95%). Se diverso, l'utente
+// modifica. Stato passa a 'estinta'.
+async function _antRenderModaleIncasso(fatturaAntId) {
+  if (!_antPuoIncasso()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!fatturaAntId) return;
+
+  apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
+
+  var resF = await sb.from('anticipi_sbf_fatture').select('*').eq('id', fatturaAntId).single();
+  if (resF.error || !resF.data) { toast('Fattura non trovata'); chiudiModal(); return; }
+  var f = resF.data;
+
+  if (f.stato === 'estinta') { toast('Fattura già estinta'); chiudiModal(); return; }
+
+  var defaultImporto = Number(f.importo_anticipato_calcolato || 0);
+  var oggiISO = new Date().toISOString().split('T')[0];
+
+  var html = '<div style="max-width:520px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#27500A">✓ Registra incasso cliente</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Fattura <strong style="font-family:var(--font-mono)">' + esc(f.numero_fattura || '?') + '</strong> · ' + esc(f.cliente_nome || '?') + '</div>';
+
+  // Box dati fattura
+  html += '<div style="background:var(--bg);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px">';
+  html += '<div><span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:9px;display:block">Imponibile</span><strong style="font-family:var(--font-mono)">' + fmtE(f.imponibile) + '</strong></div>';
+  html += '<div><span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:9px;display:block">Totale</span><strong style="font-family:var(--font-mono)">' + fmtE(f.totale_fattura) + '</strong></div>';
+  html += '<div><span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:9px;display:block">Anticipato</span><strong style="font-family:var(--font-mono);color:#26215C">' + fmtE(f.importo_anticipato_calcolato) + '</strong></div>';
+  if (f.scadenza_banca) html += '<div><span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:9px;display:block">Scad. banca</span><strong>' + fmtD(f.scadenza_banca) + '</strong></div>';
+  if (f.scadenza_cliente) html += '<div><span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:9px;display:block">Scad. cliente</span><strong>' + fmtD(f.scadenza_cliente) + '</strong></div>';
+  html += '</div>';
+
+  // Form
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data incasso *</label>';
+  html += '<input id="ant-inc-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Importo estinto (€) *</label>';
+  html += '<input id="ant-inc-importo" type="number" step="0.01" min="0" value="' + defaultImporto.toFixed(2) + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);font-weight:600"></div>';
+  html += '</div>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:6px">Default = importo anticipato. Modifica solo se la banca ha trattenuto un valore diverso.</div>';
+
+  // Opzione insoluta
+  html += '<div style="margin-top:14px;padding:10px 14px;background:#FCEBEB;border-left:4px solid #E24B4A;border-radius:6px">';
+  html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">';
+  html += '<input type="checkbox" id="ant-inc-insoluta"> ';
+  html += '<span><strong style="color:#791F1F">Cliente non ha pagato (insoluta)</strong> — segna la fattura come "insoluta". Il modulo resta aperto.</span>';
+  html += '</label>';
+  html += '</div>';
+
+  // Pulsanti
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antSalvaIncasso(\'' + fatturaAntId + '\')" class="btn-primary" style="font-size:12px;padding:8px 14px;background:#27500A">✓ Conferma</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function _antSalvaIncasso(fatturaAntId) {
+  if (!_antPuoIncasso()) { toast('Operazione riservata all\'amministratore'); return; }
+  var insoluta = document.getElementById('ant-inc-insoluta').checked;
+  var data = document.getElementById('ant-inc-data').value;
+  var importoRaw = document.getElementById('ant-inc-importo').value;
+
+  if (!data) { toast('Indica la data'); return; }
+
+  var payload = {
+    modificato_at: new Date().toISOString()
+  };
+  if (insoluta) {
+    payload.stato = 'insoluta';
+    payload.data_incasso = null;
+    payload.importo_estinto = 0;
+  } else {
+    var importo = Number(importoRaw);
+    if (!isFinite(importo) || importo <= 0) { toast('Importo non valido'); return; }
+    payload.stato = 'estinta';
+    payload.data_incasso = data;
+    payload.importo_estinto = importo;
+  }
+
+  var resU = await sb.from('anticipi_sbf_fatture').update(payload).eq('id', fatturaAntId);
+  if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+
+  chiudiModal();
+  toast(insoluta ? '⚠ Fattura segnata come insoluta' : '✓ Fattura estinta');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE MODIFICA MODULO — solo metadati (data, protocollo, note)
+// ═══════════════════════════════════════════════════════════════════════════
+// NON si modifica importo_richiesto né importo_anticipato_totale (sono
+// gestiti dal trigger DB sugli accrediti). NON si cambia affidamento_id
+// (per cambiare banca rifare il modulo). Pulsante distruttivo per moduli
+// con stato in_delibera: "Annulla modulo" → cancella presentazione (cascade
+// cancella fatture, che tornano disponibili).
+async function _antRenderModaleModulo(presentazioneId) {
+  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!presentazioneId) return;
+
+  apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
+
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
+  if (resP.error || !resP.data) { toast('Modulo non trovato'); chiudiModal(); return; }
+  var p = resP.data;
+
+  var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
+  var bancaLabel = ist.nome || '—';
+
+  var html = '<div style="max-width:520px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">✏️ Modifica modulo</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">🏛 ' + esc(bancaLabel) + ' · stato attuale: <strong>' + esc(p.stato) + '</strong></div>';
+
+  html += '<div style="display:grid;gap:10px">';
+
+  html += '<div style="display:grid;grid-template-columns:1fr 1.5fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data presentazione</label>';
+  html += '<input id="mod-mod-data" type="date" value="' + esc(p.data_presentazione || '') + '" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">N. protocollo</label>';
+  html += '<input id="mod-mod-prot" type="text" value="' + esc(p.numero_protocollo || '') + '" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)"></div>';
+  html += '</div>';
+
+  // Stato (cambio manuale solo per casi particolari, es. "rifiutata")
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
+  html += '<select id="mod-mod-stato" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+  ['in_delibera','anticipata_parziale','anticipata','rifiutata','estinta'].forEach(function(s) {
+    var lab = { in_delibera:'In delibera', anticipata_parziale:'Anticipata parziale', anticipata:'Anticipata', rifiutata:'Rifiutata', estinta:'Estinta' }[s];
+    html += '<option value="' + s + '"' + (p.stato === s ? ' selected' : '') + '>' + lab + '</option>';
+  });
+  html += '</select>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">⚠ Lo stato è gestito automaticamente dagli accrediti. Modifica solo per casi eccezionali (rifiuto banca, chiusura forzata).</div></div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
+  html += '<textarea id="mod-mod-note" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;min-height:60px;resize:vertical">' + esc(p.note || '') + '</textarea></div>';
+
+  html += '</div>';
+
+  // Pulsanti
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  // Pulsante Annulla modulo: solo se in_delibera (no accrediti registrati)
+  if (p.stato === 'in_delibera') {
+    html += '<button onclick="_antEliminaModulo(\'' + presentazioneId + '\')" style="background:#A32D2D;color:white;border:0;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;margin-right:auto">🗑 Annulla modulo</button>';
+  }
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antSalvaModulo(\'' + presentazioneId + '\')" class="btn-primary" style="font-size:12px;padding:8px 14px">💾 Salva</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function _antSalvaModulo(presentazioneId) {
+  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  var dataPres = document.getElementById('mod-mod-data').value;
+  var prot = (document.getElementById('mod-mod-prot').value || '').trim() || null;
+  var stato = document.getElementById('mod-mod-stato').value;
+  var note = (document.getElementById('mod-mod-note').value || '').trim() || null;
+
+  if (!dataPres) { toast('Data obbligatoria'); return; }
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update({
+    data_presentazione: dataPres,
+    numero_protocollo: prot,
+    stato: stato,
+    note: note,
+    modificato_at: new Date().toISOString()
+  }).eq('id', presentazioneId);
+
+  if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+  chiudiModal();
+  toast('✓ Modulo aggiornato');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+async function _antEliminaModulo(presentazioneId) {
+  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!confirm('Annullare definitivamente questo modulo?\n\nTutte le fatture associate torneranno disponibili per altri moduli. Operazione irreversibile.')) return;
+  // ON DELETE CASCADE su anticipi_sbf_fatture e _accrediti li rimuove insieme
+  var resD = await sb.from('anticipi_sbf_presentazioni').delete().eq('id', presentazioneId);
+  if (resD.error) { toast('❌ Errore: ' + resD.error.message); return; }
+  chiudiModal();
+  toast('✓ Modulo annullato');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE MODIFICA FATTURA (riga del modulo)
+// ═══════════════════════════════════════════════════════════════════════════
+// Modificabili: scadenza_banca (deciso da operatore), stato (es. esclusa).
+// Se stato='esclusa', la fattura non conta più nei totali (se importo_estinto
+// era stato registrato, viene azzerato). Una fattura esclusa torna disponibile
+// per essere presentata su un altro modulo.
+async function _antRenderModaleFattura(fatturaAntId) {
+  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!fatturaAntId) return;
+
+  apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
+
+  var resF = await sb.from('anticipi_sbf_fatture').select('*').eq('id', fatturaAntId).single();
+  if (resF.error || !resF.data) { toast('Fattura non trovata'); chiudiModal(); return; }
+  var f = resF.data;
+
+  var html = '<div style="max-width:520px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">✏️ Modifica fattura nel modulo</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Fattura <strong style="font-family:var(--font-mono)">' + esc(f.numero_fattura || '?') + '</strong> · ' + esc(f.cliente_nome || '?') + ' · ' + fmtE(f.totale_fattura) + '</div>';
+
+  html += '<div style="display:grid;gap:10px">';
+
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza cliente</label>';
+  html += '<div style="padding:8px;background:var(--bg-kpi);border-radius:6px;font-size:12px">' + (f.scadenza_cliente ? fmtD(f.scadenza_cliente) : '—') + '</div>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Da fatture_pagamenti, sola lettura</div></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza banca *</label>';
+  html += '<input id="mod-fat-scad" type="date" value="' + esc(f.scadenza_banca || '') + '" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
+  html += '</div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
+  html += '<select id="mod-fat-stato" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+  ['presentata','anticipata','estinta','insoluta','esclusa'].forEach(function(s) {
+    var lab = { presentata:'Presentata', anticipata:'Anticipata', estinta:'Estinta', insoluta:'Insoluta', esclusa:'Esclusa (riapri per altro modulo)' }[s];
+    html += '<option value="' + s + '"' + (f.stato === s ? ' selected' : '') + '>' + lab + '</option>';
+  });
+  html += '</select>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Stato "esclusa" = la fattura esce dal modulo e diventa di nuovo presentabile altrove.</div></div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
+  html += '<textarea id="mod-fat-note" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;min-height:54px;resize:vertical">' + esc(f.note || '') + '</textarea></div>';
+
+  html += '</div>';
+
+  // Pulsanti
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antSalvaFattura(\'' + fatturaAntId + '\')" class="btn-primary" style="font-size:12px;padding:8px 14px">💾 Salva</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+async function _antSalvaFattura(fatturaAntId) {
+  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  var scad = document.getElementById('mod-fat-scad').value;
+  var stato = document.getElementById('mod-fat-stato').value;
+  var note = (document.getElementById('mod-fat-note').value || '').trim() || null;
+
+  if (!scad) { toast('Scadenza banca obbligatoria'); return; }
+
+  var payload = {
+    scadenza_banca: scad,
+    stato: stato,
+    note: note,
+    modificato_at: new Date().toISOString()
+  };
+  // Se diventa esclusa, azzero importo_estinto e data_incasso (escludendo
+  // implicitamente la riga dai totali del modulo).
+  if (stato === 'esclusa') {
+    payload.importo_estinto = 0;
+    payload.data_incasso = null;
+  }
+
+  var resU = await sb.from('anticipi_sbf_fatture').update(payload).eq('id', fatturaAntId);
+  if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+  chiudiModal();
+  toast('✓ Fattura aggiornata');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
