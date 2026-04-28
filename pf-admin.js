@@ -39,8 +39,6 @@ const SEZIONI_SISTEMA = [
   {id:'autoconsumo',label:'Autoconsumo',icon:'🛢'},
   {id:'home',label:'Bacheca Home',icon:'🏠'},
   {id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},
-  {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
-  {id:'finanze',label:'Finanze',icon:'🏦'},
 ];
 
 // Cache permessi utente corrente (caricati al login)
@@ -162,8 +160,8 @@ async function caricaUtentiCompleto() {
   await caricaSelectClienti('ut-cliente');
   const grp = document.getElementById('grp-ut-permessi');
   if (grp) {
-    let html = '<div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;margin-top:12px">Sezioni accessibili</div>';
-    html += '<div style="display:grid;grid-template-columns:1fr;gap:6px">';
+    let html = '<div id="grp-ut-permessi-header" style="cursor:pointer;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;margin-top:12px;user-select:none" onclick="_toggleGrpPermessi()"><span id="grp-ut-permessi-arrow" style="display:inline-block;transition:transform 0.2s ease;font-size:10px">▶</span> Sezioni accessibili <span style="margin-left:auto;color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:normal;font-size:10px">click per espandere</span></div>';
+    html += '<div id="grp-ut-permessi-body" style="display:none;grid-template-columns:1fr;gap:6px">';
     SEZIONI_SISTEMA.forEach(s => {
       html += '<div style="background:var(--bg-kpi);border-radius:6px;padding:6px 10px">';
       html += '<label class="check-label"><input type="checkbox" value="' + s.id + '" checked /> ' + s.icon + ' ' + s.label + '</label>';
@@ -190,6 +188,16 @@ async function caricaUtentiCompleto() {
     return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td>' + postSelect + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>';
   }).join('');
   caricaAuditLog();
+}
+
+// Toggle a scomparsa del blocco "Sezioni accessibili" nel form Nuovo utente
+function _toggleGrpPermessi() {
+  var body = document.getElementById('grp-ut-permessi-body');
+  var arrow = document.getElementById('grp-ut-permessi-arrow');
+  if (!body || !arrow) return;
+  var aperto = body.style.display !== 'none';
+  body.style.display = aperto ? 'none' : 'grid';
+  arrow.style.transform = aperto ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 // ── GIACENZE FINE ANNO ───────────────────────────────────────────
