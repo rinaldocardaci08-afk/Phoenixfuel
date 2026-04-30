@@ -958,23 +958,24 @@ function navigaOrdiniGiorno(dir) {
 async function caricaOrdini() { await caricaOrdiniGiorno(); }
 
 // ════════════════════════════════════════════════════════════════════
-// DETTAGLIO MOVIMENTI GIORNALIERI (patch 30/04 g)
-// Vista a tutto schermo che sostituisce la tabella ordini, mostra:
-//   - 3 sezioni di uscita (vendite cliente / consegne stazione / autoconsumo)
-//     con prodotto come riga padre + fornitori come sottorighe rientrate
-//   - Box totale movimentato per prodotto (somma 3 sezioni)
-//   - Pannello separato in basso per ingressi a deposito (stesso annidamento)
-//   - Toolbar: Indietro · titolo · data · ◀▶ · Oggi · 🖨️ PDF
+// ════════════════════════════════════════════════════════════════════
+// DETTAGLIO MOVIMENTI GIORNALIERI (patch 30/04 i — rifatto stile periodo)
+// Layout 3 colonne: Acquisti / Vendite / Riassunto, con tendine espandibili
+// e vendite scomposte tra "da deposito" e "diretti fornitore". Sentinella
+// di protezione per ogni prodotto se livello cisterne ≠ saldo atteso > 1 L.
 // ════════════════════════════════════════════════════════════════════
 
-// Elenco fissato dei prodotti (in ordine di display)
 var _DM_PRODOTTI = ['Gasolio Autotrazione', 'Gasolio Agricolo', 'Benzina', 'HVO', 'AdBlue'];
+var _DM_STATO = { dataCorrente: null, prodottoFiltrato: null, dati: null, expanded: {} };
 
 function apriDettaglioMovimenti() {
   var inp = document.getElementById('ordini-giorno-data');
   if (!inp || !inp.value) return;
   document.getElementById('ordini-vista-tabella').style.display = 'none';
   document.getElementById('ordini-vista-movimenti').style.display = 'block';
+  _DM_STATO.dataCorrente = inp.value;
+  _DM_STATO.prodottoFiltrato = null;
+  _DM_STATO.expanded = { acquisti_fornitori: true, vendite_clienti: true, vendite_deposito: true, vendite_diretti: true, stazione: false, autoconsumo: false };
   renderDettaglioMovimenti(inp.value);
 }
 
@@ -984,173 +985,335 @@ function chiudiDettaglioMovimenti() {
 }
 
 function navigaDettaglioMovimenti(dir) {
-  var inp = document.getElementById('ordini-giorno-data');
-  var d = new Date(inp.value + 'T12:00:00');
+  var d = new Date(_DM_STATO.dataCorrente + 'T12:00:00');
   d.setDate(d.getDate() + dir);
   var y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
-  inp.value = y + '-' + m + '-' + dd;
-  renderDettaglioMovimenti(inp.value);
+  _DM_STATO.dataCorrente = y + '-' + m + '-' + dd;
+  document.getElementById('ordini-giorno-data').value = _DM_STATO.dataCorrente;
+  renderDettaglioMovimenti(_DM_STATO.dataCorrente);
 }
 
 function vaiOggiDettaglioMovimenti() {
-  var inp = document.getElementById('ordini-giorno-data');
   var oggi = new Date();
   var y = oggi.getFullYear(), m = String(oggi.getMonth()+1).padStart(2,'0'), dd = String(oggi.getDate()).padStart(2,'0');
-  inp.value = y + '-' + m + '-' + dd;
-  renderDettaglioMovimenti(inp.value);
+  _DM_STATO.dataCorrente = y + '-' + m + '-' + dd;
+  document.getElementById('ordini-giorno-data').value = _DM_STATO.dataCorrente;
+  renderDettaglioMovimenti(_DM_STATO.dataCorrente);
+}
+
+function _dmCambiaData(val) {
+  if (!val) return;
+  _DM_STATO.dataCorrente = val;
+  document.getElementById('ordini-giorno-data').value = val;
+  renderDettaglioMovimenti(val);
+}
+
+function _dmFiltraProdotto(prod) {
+  _DM_STATO.prodottoFiltrato = (_DM_STATO.prodottoFiltrato === prod) ? null : prod;
+  renderDettaglioMovimenti(_DM_STATO.dataCorrente);
+}
+
+function _dmToggleFold(key) {
+  _DM_STATO.expanded[key] = !_DM_STATO.expanded[key];
+  _dmRenderColonne();
 }
 
 async function renderDettaglioMovimenti(data) {
+  _DM_STATO.dataCorrente = data;
   var cont = document.getElementById('ordini-vista-movimenti');
   if (!cont) return;
   cont.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">Caricamento dati...</div>';
 
-  // Carica ordini del giorno (no annullati)
-  var { data: ordini, error } = await sb.from('ordini')
-    .select('*, basi_carico(nome)')
-    .eq('data', data)
-    .neq('stato', 'annullato');
-  if (error) {
-    cont.innerHTML = '<div style="padding:24px;color:#E24B4A">Errore: ' + esc(error.message) + '</div>';
-    return;
-  }
-  ordini = ordini || [];
-
-  // Raggruppa per tipo: vendite cliente / stazione / autoconsumo / deposito
-  var mappa = { cliente: {}, stazione_servizio: {}, autoconsumo: {}, deposito: {} };
-  ordini.forEach(function(o) {
-    var tipo = o.tipo_ordine || 'cliente';
-    if (!mappa[tipo]) return; // ignora tipi sconosciuti
-    var prod = o.prodotto || 'N/D';
-    var forn = o.fornitore || 'PhoenixFuel (deposito)';
-    if (tipo === 'deposito') {
-      // Per deposito aggiungo anche la base destinazione al label fornitore
-      var base = o.basi_carico && o.basi_carico.nome ? o.basi_carico.nome : '';
-      forn = forn + (base ? ' · ' + base : '');
-    }
-    if (!mappa[tipo][prod]) mappa[tipo][prod] = {};
-    if (!mappa[tipo][prod][forn]) mappa[tipo][prod][forn] = 0;
-    mappa[tipo][prod][forn] += Number(o.litri || 0);
-  });
+  var [ordRes, rettRes] = await Promise.all([
+    sb.from('ordini').select('*, basi_carico(nome)').eq('data', data).neq('stato', 'annullato'),
+    sb.from('rettifiche_inventario').select('*').eq('data', data)
+  ]);
+  if (ordRes.error) { cont.innerHTML = '<div style="padding:24px;color:#E24B4A">Errore: ' + esc(ordRes.error.message) + '</div>'; return; }
+  _DM_STATO.dati = { ordini: ordRes.data || [], rettifiche: (rettRes && rettRes.data) || [] };
 
   var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+  var prodSel = _DM_STATO.prodottoFiltrato;
 
   var html = '';
-  // ── Toolbar ──
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:0.5px solid var(--border)">';
-  html += '<div style="display:flex;align-items:center;gap:10px">';
-  html += '<button onclick="chiudiDettaglioMovimenti()" style="background:transparent;border:0.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;color:var(--text-muted)">← Indietro</button>';
-  html += '<div><div style="font-size:14px;font-weight:600">📊 Dettaglio movimenti giornalieri</div><div style="font-size:11px;color:var(--text-muted);text-transform:capitalize">' + dataFmt + '</div></div>';
+  // Toolbar
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;padding-bottom:12px">';
+  html += '<div style="display:flex;align-items:flex-start;gap:10px">';
+  html += '<button onclick="chiudiDettaglioMovimenti()" style="background:transparent;border:0.5px solid var(--border);border-radius:8px;padding:6px 11px;font-size:12px;cursor:pointer;color:var(--text-muted);margin-top:2px">← Indietro</button>';
+  html += '<div><div style="font-size:14px;font-weight:600">📊 Dettaglio movimenti giornalieri</div><div style="font-size:11px;color:var(--text-muted);text-transform:capitalize;margin-top:2px">' + dataFmt + (prodSel ? ' · ' + esc(prodSel) : ' · Tutti i prodotti') + '</div></div>';
   html += '</div>';
-  html += '<div style="display:flex;gap:4px;align-items:center">';
-  html += '<button onclick="navigaDettaglioMovimenti(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:14px;font-weight:bold">◀</button>';
-  html += '<input type="date" value="' + data + '" onchange="renderDettaglioMovimenti(this.value);document.getElementById(\'ordini-giorno-data\').value=this.value" style="font-size:13px;padding:5px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" />';
-  html += '<button onclick="navigaDettaglioMovimenti(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:14px;font-weight:bold">▶</button>';
+  html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+  html += '<button onclick="navigaDettaglioMovimenti(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:14px">◀</button>';
+  html += '<input type="date" value="' + data + '" onchange="_dmCambiaData(this.value)" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" />';
+  html += '<button onclick="navigaDettaglioMovimenti(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:14px">▶</button>';
   html += '<button onclick="vaiOggiDettaglioMovimenti()" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px">Oggi</button>';
-  html += '<button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#534AB7" onclick="stampaDettaglioMovimenti(\'' + data + '\')">🖨️ PDF</button>';
-  html += '</div>';
-  html += '</div>';
+  html += '<button onclick="stampaDettaglioMovimenti(_DM_STATO.dataCorrente)" style="background:#534AB7;color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px">📄 PDF</button>';
+  html += '</div></div>';
 
-  // ── Sezione helper: render gruppo prodotto+fornitori ──
-  function _renderSezione(titolo, dotColor, mappaProd, includiSezione) {
-    var totSez = 0;
-    Object.keys(mappaProd).forEach(function(p) { Object.keys(mappaProd[p]).forEach(function(f) { totSez += mappaProd[p][f]; }); });
-    var h = '';
-    h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;padding-bottom:5px;border-bottom:0.5px solid var(--border)">';
-    h += '<div style="font-size:12px;font-weight:600;display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:' + dotColor + ';display:inline-block"></span>' + esc(titolo) + '</div>';
-    h += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + totSez.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</div>';
-    h += '</div>';
-    h += '<table style="width:100%;border-collapse:collapse;font-size:11px;font-feature-settings:\'tnum\'">';
-    _DM_PRODOTTI.forEach(function(prod) {
-      var fornitori = mappaProd[prod] || {};
-      var totProd = 0;
-      Object.keys(fornitori).forEach(function(f) { totProd += fornitori[f]; });
-      h += '<tr style="font-weight:500"><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:left">' + esc(prod) + '</td><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + (totProd > 0 ? totProd.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L' : '— L') + '</td></tr>';
-      // Sottorighe fornitori
-      var keysFornitori = Object.keys(fornitori).sort();
-      keysFornitori.forEach(function(f) {
-        h += '<tr><td style="padding:4px 4px 4px 24px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border)">↳ ' + esc(f) + '</td><td style="padding:4px 4px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border);text-align:right;font-family:var(--font-mono)">' + fornitori[f].toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
-      });
-    });
-    h += '</table>';
-    h += '</div>';
-    return { html: h, totale: totSez };
-  }
-
-  // ── 3 sezioni di uscita ──
-  var sezVend = _renderSezione('Vendite a cliente', '#534AB7', mappa.cliente, true);
-  var sezStaz = _renderSezione('Consegne a stazione (Oppido)', '#1D9E75', mappa.stazione_servizio, true);
-  var sezAuto = _renderSezione('Autoconsumo (carico cisterna flotta)', '#BA7517', mappa.autoconsumo, true);
-  html += sezVend.html + sezStaz.html + sezAuto.html;
-
-  // ── Totale movimentato per prodotto (somma 3 sezioni) ──
-  var totPerProd = {};
-  ['cliente','stazione_servizio','autoconsumo'].forEach(function(t) {
-    Object.keys(mappa[t]).forEach(function(p) {
-      Object.keys(mappa[t][p]).forEach(function(f) {
-        totPerProd[p] = (totPerProd[p] || 0) + mappa[t][p][f];
-      });
-    });
+  // Box pillole prodotto
+  html += '<div style="background:var(--bg-card);border:0.5px solid #BA7517;border-radius:8px;padding:11px 14px;margin-bottom:14px;text-align:center">';
+  html += '<div style="font-size:9px;color:var(--text-muted);letter-spacing:0.5px;text-transform:uppercase;font-weight:500">Prodotti filtrati</div>';
+  html += '<div style="font-size:13px;font-weight:500;margin:4px 0 8px">' + (prodSel ? esc(prodSel).toUpperCase() : 'TUTTI I PRODOTTI') + '</div>';
+  html += '<div>';
+  var dotColors = { 'Gasolio Autotrazione': '#BA7517', 'Benzina': '#1D9E75', 'Gasolio Agricolo': '#534AB7', 'HVO': '#639922', 'AdBlue': '#888780' };
+  _DM_PRODOTTI.forEach(function(p) {
+    var active = prodSel === p;
+    var bg = active ? dotColors[p] : 'transparent';
+    var color = active ? '#fff' : 'var(--text-muted)';
+    var border = active ? dotColors[p] : 'var(--border)';
+    html += '<button onclick="_dmFiltraProdotto(\'' + esc(p) + '\')" style="padding:5px 11px;font-size:11px;border-radius:14px;border:0.5px solid ' + border + ';cursor:pointer;background:' + bg + ';color:' + color + ';font-weight:500;margin:0 3px;display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:50%;background:' + dotColors[p] + '"></span>' + esc(p) + '</button>';
   });
-  var totGiornata = 0;
-  Object.keys(totPerProd).forEach(function(p) { totGiornata += totPerProd[p]; });
+  html += '</div></div>';
 
-  html += '<div style="background:rgba(99,153,34,0.10);border:0.5px solid rgba(99,153,34,0.30);border-radius:10px;padding:12px;margin-top:6px">';
-  html += '<div style="font-size:11px;color:#173404;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-bottom:6px">Totale movimentato per prodotto (vendite + stazione + autoconsumo)</div>';
-  html += '<table style="width:100%;border-collapse:collapse;font-size:12px;font-feature-settings:\'tnum\'">';
-  _DM_PRODOTTI.forEach(function(prod) {
-    var v = totPerProd[prod] || 0;
-    if (v <= 0) return; // nel totale finale mostro solo prodotti effettivamente movimentati
-    html += '<tr><td style="padding:5px 4px;text-align:left;font-weight:500;color:#173404">' + esc(prod) + '</td><td style="padding:5px 4px;text-align:right;font-family:var(--font-mono);font-weight:500;color:#173404">' + v.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
-  });
-  html += '<tr><td style="padding:8px 4px 5px;border-top:1px solid rgba(99,153,34,0.40);text-align:left;font-weight:600;color:#173404;font-size:13px">TOTALE GIORNATA</td><td style="padding:8px 4px 5px;border-top:1px solid rgba(99,153,34,0.40);text-align:right;font-family:var(--font-mono);font-weight:600;color:#173404;font-size:13px">' + totGiornata.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
-  html += '</table>';
-  html += '</div>';
-
-  // ── Pannello separato: Ingressi a deposito ──
-  var totDep = 0;
-  Object.keys(mappa.deposito).forEach(function(p) { Object.keys(mappa.deposito[p]).forEach(function(f) { totDep += mappa.deposito[p][f]; }); });
-  html += '<div style="height:14px"></div>';
-  html += '<div style="background:#F1EFE8;border-left:3px solid #888780;border-radius:0 10px 10px 0;padding:12px">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;padding-bottom:5px;border-bottom:0.5px solid rgba(0,0,0,0.06)">';
-  html += '<div style="font-size:12px;color:#2C2C2A;font-weight:600;display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:#888780;display:inline-block"></span>Consegne in ingresso al deposito</div>';
-  html += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#2C2C2A">' + totDep.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</div>';
-  html += '</div>';
-  html += '<table style="width:100%;border-collapse:collapse;font-size:11px;font-feature-settings:\'tnum\';margin-top:6px">';
-  _DM_PRODOTTI.forEach(function(prod) {
-    var fornitori = mappa.deposito[prod] || {};
-    var totProd = 0;
-    Object.keys(fornitori).forEach(function(f) { totProd += fornitori[f]; });
-    html += '<tr style="font-weight:500"><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:left">' + esc(prod) + '</td><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + (totProd > 0 ? totProd.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L' : '— L') + '</td></tr>';
-    Object.keys(fornitori).sort().forEach(function(f) {
-      html += '<tr><td style="padding:4px 4px 4px 24px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border)">↳ ' + esc(f) + '</td><td style="padding:4px 4px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border);text-align:right;font-family:var(--font-mono)">' + fornitori[f].toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
-    });
-  });
-  html += '</table>';
-  html += '</div>';
+  // Layout 3 colonne (le riempirà _dmRenderColonne)
+  html += '<div id="dm-layout" style="display:grid;grid-template-columns:1fr 1fr 280px;gap:12px;align-items:flex-start"></div>';
 
   cont.innerHTML = html;
+  _dmRenderColonne();
+  // Sentinella protezione (asincrona, non blocca render)
+  _dmEseguiSentinella();
 }
 
-// PDF dettaglio movimenti: usa _apriReport esistente, costruisce HTML compatibile
+// Calcola aggregati e popola le 3 colonne
+function _dmRenderColonne() {
+  if (!_DM_STATO.dati) return;
+  var dati = _dmCalcolaAggregati();
+
+  var html = '';
+  // ── Colonna 1: ACQUISTI ──
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:12px">';
+  html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;padding-bottom:8px;border-bottom:0.5px solid var(--border);margin-bottom:10px;color:var(--text-secondary)">ACQUISTI</div>';
+  html += _dmFold('acquisti_fornitori', 'Acquisti da fornitori', dati.acquisti.fornitori.length, dati.acquisti.totFornitori, dati.acquisti.fornitori, _dmRenderRowAcquisto);
+  html += _dmFold('rientri_merce', 'Rientri merce', 0, 0, [], null);
+  html += _dmFold('rettifiche_eccedenze', 'Rettifiche eccedenze', dati.rettifichePos.length, dati.totRettifichePos, dati.rettifichePos, _dmRenderRowRettifica);
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:10px;border-top:0.5px solid var(--border)"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">TOTALE ACQUISTI</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600">' + _dmFmt(dati.acquisti.totale) + ' L</div></div>';
+  html += '</div>';
+
+  // ── Colonna 2: VENDITE ──
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:12px">';
+  html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;padding-bottom:8px;border-bottom:0.5px solid var(--border);margin-bottom:10px;color:var(--text-secondary)">VENDITE</div>';
+  // Vendite a clienti con sottogruppi
+  var totVC = dati.vendite.daDeposito.tot + dati.vendite.diretti.tot;
+  var nVC = dati.vendite.daDeposito.righe.length + dati.vendite.diretti.righe.length;
+  html += '<div style="padding:8px 10px;border-bottom:0.5px solid var(--border)">';
+  html += '<div onclick="_dmToggleFold(\'vendite_clienti\')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">';
+  html += '<div style="font-size:12px;font-weight:500"><span style="font-size:10px;color:var(--text-muted);display:inline-block;' + (_DM_STATO.expanded.vendite_clienti ? 'transform:rotate(90deg);' : '') + '">▶</span> Vendite a clienti <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:var(--bg);color:var(--text-muted);margin-left:4px">' + nVC + '</span></div>';
+  html += '<div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(totVC) + ' L</div>';
+  html += '</div>';
+  if (_DM_STATO.expanded.vendite_clienti) {
+    // Sottogruppo deposito
+    html += '<div style="background:rgba(186,117,23,0.04);border-left:3px solid #BA7517;border-radius:0 4px 4px 0;padding:7px 10px;margin:6px 0">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:500;color:#8B6914;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px"><span>↳ Da deposito (PhoenixFuel) · ' + dati.vendite.daDeposito.righe.length + '</span><span style="font-family:var(--font-mono);color:var(--text)">' + _dmFmt(dati.vendite.daDeposito.tot) + ' L</span></div>';
+    dati.vendite.daDeposito.righe.forEach(function(r) { html += _dmRenderRowVendita(r); });
+    if (!dati.vendite.daDeposito.righe.length) html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic;padding:4px">Nessuna vendita da deposito</div>';
+    html += '</div>';
+    // Sottogruppo diretti
+    html += '<div style="background:rgba(29,158,117,0.04);border-left:3px solid #1D9E75;border-radius:0 4px 4px 0;padding:7px 10px;margin:6px 0">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:500;color:#1D5E47;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px"><span>↳ Diretti da fornitore · ' + dati.vendite.diretti.righe.length + '</span><span style="font-family:var(--font-mono);color:var(--text)">' + _dmFmt(dati.vendite.diretti.tot) + ' L</span></div>';
+    dati.vendite.diretti.righe.forEach(function(r) { html += _dmRenderRowVendita(r); });
+    if (!dati.vendite.diretti.righe.length) html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic;padding:4px">Nessuna consegna diretta</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  // Stazione, autoconsumo, rettifiche
+  html += _dmFold('stazione', 'Consegne a stazione Oppido', dati.stazione.righe.length, dati.stazione.tot, dati.stazione.righe, _dmRenderRowVendita);
+  html += _dmFold('autoconsumo', 'Autoconsumo', dati.autoconsumo.righe.length, dati.autoconsumo.tot, dati.autoconsumo.righe, _dmRenderRowVendita);
+  html += _dmFold('rettifiche_uscite', 'Rettifiche cali/ammanchi', dati.rettificheNeg.length, dati.totRettificheNeg, dati.rettificheNeg, _dmRenderRowRettifica);
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:10px;border-top:0.5px solid var(--border)"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px">TOTALE VENDITE</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:600">' + _dmFmt(dati.vendite.totale) + ' L</div></div>';
+  html += '</div>';
+
+  // ── Colonna 3: RIASSUNTO ──
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:12px">';
+  html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;padding-bottom:8px;border-bottom:0.5px solid var(--border);margin-bottom:10px;color:var(--text-secondary)">RIASSUNTO GIORNATA</div>';
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;color:var(--text-muted)">Totale Acquisti</div><div style="font-family:var(--font-mono);font-size:17px;font-weight:700;margin-top:4px">' + _dmFmt(dati.acquisti.totale) + ' L</div></div>';
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;color:var(--text-muted)">Totale Vendite</div><div style="font-family:var(--font-mono);font-size:17px;font-weight:700;margin-top:4px">' + _dmFmt(dati.vendite.totale) + ' L</div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 6px;border-bottom:0.5px solid var(--border)"><div style="font-size:11px;color:var(--text-secondary)">Vendite a clienti</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(totVC) + ' L</div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 6px 7px 22px;background:rgba(0,0,0,0.02);border-bottom:0.5px solid var(--border);border-left:2px solid #BA7517"><div style="font-size:10px;color:var(--text-muted)">↳ da deposito</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(dati.vendite.daDeposito.tot) + ' L</div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 6px 7px 22px;background:rgba(0,0,0,0.02);border-bottom:0.5px solid var(--border);border-left:2px solid #1D9E75"><div style="font-size:10px;color:var(--text-muted)">↳ diretti fornitore</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(dati.vendite.diretti.tot) + ' L</div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 6px;border-bottom:0.5px solid var(--border)"><div style="font-size:11px;color:var(--text-secondary)">Consegne stazione</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(dati.stazione.tot) + ' L</div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 6px;border-bottom:0.5px solid var(--border)"><div style="font-size:11px;color:var(--text-secondary)">Autoconsumo</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(dati.autoconsumo.tot) + ' L</div></div>';
+  var rettNetto = dati.totRettifichePos - dati.totRettificheNeg;
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 6px"><div style="font-size:11px;color:var(--text-secondary)">Rettifiche (netto)</div><div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + (rettNetto >= 0 ? '+' : '') + _dmFmt(rettNetto) + ' L</div></div>';
+  // Saldo deposito
+  var saldoDep = dati.acquisti.totale - dati.vendite.daDeposito.tot - dati.stazione.tot - dati.autoconsumo.tot + rettNetto;
+  var saldoCol = saldoDep >= 0 ? '#173404' : '#791F1F';
+  var saldoBg = saldoDep >= 0 ? 'rgba(99,153,34,0.10)' : 'rgba(226,75,74,0.08)';
+  var saldoBor = saldoDep >= 0 ? 'rgba(99,153,34,0.30)' : 'rgba(226,75,74,0.30)';
+  html += '<div style="background:' + saldoBg + ';border:0.5px solid ' + saldoBor + ';border-radius:6px;padding:10px;margin-top:10px"><div style="font-size:9px;color:' + saldoCol + ';text-transform:uppercase;letter-spacing:0.5px;font-weight:600">Saldo deposito (impatta cisterne)</div><div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + saldoCol + ';margin-top:4px">' + (saldoDep >= 0 ? '+' : '') + _dmFmt(saldoDep) + ' L</div><div style="font-size:9px;color:var(--text-muted);margin-top:4px;font-style:italic">esclude vendite dirette fornitore</div></div>';
+  html += '</div>';
+
+  document.getElementById('dm-layout').innerHTML = html;
+}
+
+// Helper render fold generico
+function _dmFold(key, titolo, count, totale, righe, renderRowFn) {
+  var open = !!_DM_STATO.expanded[key];
+  var html = '<div style="padding:8px 10px;border-bottom:0.5px solid var(--border)">';
+  html += '<div onclick="_dmToggleFold(\'' + key + '\')" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">';
+  html += '<div style="font-size:12px;font-weight:500"><span style="font-size:10px;color:var(--text-muted);display:inline-block;' + (open ? 'transform:rotate(90deg);' : '') + '">▶</span> ' + esc(titolo) + ' <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:var(--bg);color:var(--text-muted);margin-left:4px">' + count + '</span></div>';
+  html += '<div style="font-family:var(--font-mono);font-size:12px;font-weight:500">' + _dmFmt(totale) + ' L</div>';
+  html += '</div>';
+  if (open && righe && righe.length && renderRowFn) {
+    html += '<div style="padding:6px 0 4px 6px">';
+    righe.forEach(function(r) { html += renderRowFn(r); });
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _dmRenderRowAcquisto(r) {
+  var base = r.basi_carico && r.basi_carico.nome ? r.basi_carico.nome : '';
+  return '<div style="display:grid;grid-template-columns:78px 1fr 90px;gap:6px;padding:4px 4px;border-bottom:0.5px dashed var(--border);align-items:baseline"><div style="color:var(--text-muted);font-size:10px">' + _dmFmtData(r.data) + '</div><div style="font-size:11px">' + esc(r.fornitore || '') + (base ? ' <small style="color:var(--text-muted);font-size:9px">· ' + esc(base) + '</small>' : '') + '</div><div style="text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:500">' + _dmFmt(r.litri) + ' L</div></div>';
+}
+
+function _dmRenderRowVendita(r) {
+  return '<div style="display:grid;grid-template-columns:78px 1fr 90px;gap:6px;padding:4px 4px;border-bottom:0.5px dashed var(--border);align-items:baseline"><div style="color:var(--text-muted);font-size:10px">' + _dmFmtData(r.data) + '</div><div style="font-size:11px">' + esc(r.cliente || '—') + ' <small style="color:var(--text-muted);font-size:9px">· ' + esc(r.fornitore || '') + '</small></div><div style="text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:500">' + _dmFmt(r.litri) + ' L</div></div>';
+}
+
+function _dmRenderRowRettifica(r) {
+  return '<div style="display:grid;grid-template-columns:78px 1fr 90px;gap:6px;padding:4px 4px;border-bottom:0.5px dashed var(--border);align-items:baseline"><div style="color:var(--text-muted);font-size:10px">' + _dmFmtData(r.data) + '</div><div style="font-size:11px">' + esc(r.prodotto || '') + ' <small style="color:var(--text-muted);font-size:9px">' + esc(r.motivo || r.note || 'rettifica') + '</small></div><div style="text-align:right;font-family:var(--font-mono);font-size:11px;font-weight:500">' + _dmFmt(Math.abs(Number(r.litri || 0))) + ' L</div></div>';
+}
+
+function _dmFmt(n) { return Number(n || 0).toLocaleString('it-IT', {maximumFractionDigits:0}); }
+function _dmFmtData(d) { if (!d) return ''; var dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric'}); }
+
+// Calcola aggregati: applica filtro prodotto se attivo, classifica ordini, somma rettifiche.
+function _dmCalcolaAggregati() {
+  var ord = _DM_STATO.dati.ordini;
+  var rett = _DM_STATO.dati.rettifiche;
+  var filtroProd = _DM_STATO.prodottoFiltrato;
+  if (filtroProd) {
+    ord = ord.filter(function(o) { return o.prodotto === filtroProd; });
+    rett = rett.filter(function(r) { return r.prodotto === filtroProd; });
+  }
+  var acquistiFornitori = ord.filter(function(o) { return o.tipo_ordine === 'entrata_deposito'; });
+  var venditeDaDep = ord.filter(function(o) { return o.tipo_ordine === 'cliente' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; });
+  var venditeDiretti = ord.filter(function(o) { return o.tipo_ordine === 'cliente' && (o.fornitore || '').toLowerCase().indexOf('phoenix') < 0; });
+  var staz = ord.filter(function(o) { return o.tipo_ordine === 'stazione_servizio' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; });
+  var autoc = ord.filter(function(o) { return o.tipo_ordine === 'autoconsumo'; });
+  var rettPos = rett.filter(function(r) { return Number(r.litri || 0) > 0; });
+  var rettNeg = rett.filter(function(r) { return Number(r.litri || 0) < 0; });
+  function sumLitri(arr) { return arr.reduce(function(s, x) { return s + Number(x.litri || 0); }, 0); }
+  function sumAbs(arr) { return arr.reduce(function(s, x) { return s + Math.abs(Number(x.litri || 0)); }, 0); }
+  var totFornitori = sumLitri(acquistiFornitori);
+  var totRettPos = sumAbs(rettPos);
+  var totVenditeDep = sumLitri(venditeDaDep);
+  var totVenditeDir = sumLitri(venditeDiretti);
+  var totStaz = sumLitri(staz);
+  var totAutoc = sumLitri(autoc);
+  var totRettNeg = sumAbs(rettNeg);
+  return {
+    acquisti: { fornitori: acquistiFornitori, totFornitori: totFornitori, totale: totFornitori + totRettPos },
+    vendite: { daDeposito: { righe: venditeDaDep, tot: totVenditeDep }, diretti: { righe: venditeDiretti, tot: totVenditeDir }, totale: totVenditeDep + totVenditeDir + totStaz + totAutoc + totRettNeg },
+    stazione: { righe: staz, tot: totStaz },
+    autoconsumo: { righe: autoc, tot: totAutoc },
+    rettifichePos: rettPos, totRettifichePos: totRettPos,
+    rettificheNeg: rettNeg, totRettificheNeg: totRettNeg
+  };
+}
+
+// SENTINELLA: per ogni prodotto verifica scarto tra livello cisterne reale e saldo atteso.
+async function _dmEseguiSentinella() {
+  if (!_DM_STATO.dati || !_DM_STATO.dataCorrente) return;
+  var data = _DM_STATO.dataCorrente;
+  // Carica cisterne deposito + somma movimenti per prodotto fino a "data" e fino a "data-1"
+  var [cistRes, movRes] = await Promise.all([
+    sb.from('cisterne').select('id,prodotto,livello_attuale').eq('sede','deposito_vibo'),
+    sb.from('movimenti_cisterne').select('cisterna_id,tipo,litri,data').lte('data', data)
+  ]);
+  if (cistRes.error || !cistRes.data) return;
+  var cisterne = cistRes.data;
+  var movimenti = (movRes && movRes.data) || [];
+  // Aggrega livello attuale per prodotto
+  var livelloPerProd = {};
+  cisterne.forEach(function(c) { livelloPerProd[c.prodotto] = (livelloPerProd[c.prodotto] || 0) + Number(c.livello_attuale || 0); });
+  // Aggrega netto movimenti fino a ieri (apertura giorno) per prodotto, via cisterna_id → prodotto
+  var prodPerCisterna = {};
+  cisterne.forEach(function(c) { prodPerCisterna[c.id] = c.prodotto; });
+  var aperturaPerProd = {};
+  movimenti.forEach(function(m) {
+    if (m.data >= data) return; // solo fino a ieri compreso
+    var p = prodPerCisterna[m.cisterna_id];
+    if (!p) return;
+    aperturaPerProd[p] = (aperturaPerProd[p] || 0) + (m.tipo === 'entrata' ? Number(m.litri || 0) : -Number(m.litri || 0));
+  });
+  // Per ogni prodotto calcola saldo atteso
+  var anomalie = [];
+  var ordini = _DM_STATO.dati.ordini;
+  var rettifiche = _DM_STATO.dati.rettifiche;
+  _DM_PRODOTTI.forEach(function(prod) {
+    var ordP = ordini.filter(function(o) { return o.prodotto === prod; });
+    var rettP = rettifiche.filter(function(r) { return r.prodotto === prod; });
+    function sum(arr) { return arr.reduce(function(s, x) { return s + Number(x.litri || 0); }, 0); }
+    var acq = sum(ordP.filter(function(o){ return o.tipo_ordine === 'entrata_deposito'; }));
+    var vendDep = sum(ordP.filter(function(o){ return o.tipo_ordine === 'cliente' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }));
+    var staz = sum(ordP.filter(function(o){ return o.tipo_ordine === 'stazione_servizio' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }));
+    var autoc = sum(ordP.filter(function(o){ return o.tipo_ordine === 'autoconsumo'; }));
+    var rettN = rettP.reduce(function(s, x) { return s + Number(x.litri || 0); }, 0);
+    var apertura = aperturaPerProd[prod] || 0;
+    var saldoAtteso = apertura + acq - vendDep - staz - autoc + rettN;
+    var livelloReale = livelloPerProd[prod] || 0;
+    var scarto = livelloReale - saldoAtteso;
+    if (Math.abs(scarto) > 1) {
+      anomalie.push({ prodotto: prod, apertura: apertura, acq: acq, vendDep: vendDep, staz: staz, autoc: autoc, rettN: rettN, saldoAtteso: saldoAtteso, livelloReale: livelloReale, scarto: scarto });
+    }
+  });
+  if (anomalie.length > 0) _dmMostraAllertaSentinella(anomalie);
+}
+
+function _dmMostraAllertaSentinella(anomalie) {
+  var existing = document.getElementById('dm-sentinella-overlay');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.id = 'dm-sentinella-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
+  var html = '<div style="background:var(--bg-card);border:0.5px solid #E24B4A;border-radius:12px;width:100%;max-width:680px;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:calc(100vh - 60px);display:flex;flex-direction:column">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:0.5px solid var(--border);background:rgba(226,75,74,0.06);border-radius:12px 12px 0 0">';
+  html += '<div style="font-size:14px;font-weight:600;color:#791F1F">⚠ Sentinella giacenze: scostamento rilevato</div>';
+  html += '<button onclick="document.getElementById(\'dm-sentinella-overlay\').remove()" style="background:transparent;border:0.5px solid var(--border);border-radius:50%;width:28px;height:28px;cursor:pointer;color:var(--text-muted);font-size:15px">×</button>';
+  html += '</div>';
+  html += '<div style="padding:14px 18px;overflow-y:auto;flex:1">';
+  html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">Le cisterne deposito non quadrano con il calcolo algebrico (apertura + acquisti − vendite). Verifica i seguenti prodotti:</div>';
+  anomalie.forEach(function(a) {
+    var col = a.scarto > 0 ? '#791F1F' : '#173404';
+    var segno = a.scarto > 0 ? 'in eccesso' : 'in difetto';
+    html += '<div style="background:#FCEBEB;border-left:3px solid #E24B4A;border-radius:0 6px 6px 0;padding:10px 12px;margin-bottom:10px">';
+    html += '<div style="font-size:13px;font-weight:600;margin-bottom:6px">' + esc(a.prodotto) + '</div>';
+    html += '<table style="width:100%;font-size:11px;font-feature-settings:\'tnum\'">';
+    html += '<tr><td style="color:var(--text-muted)">Apertura giornata (da movimenti)</td><td style="text-align:right;font-family:var(--font-mono)">' + _dmFmt(a.apertura) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">+ Acquisti del giorno</td><td style="text-align:right;font-family:var(--font-mono);color:#173404">+' + _dmFmt(a.acq) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">− Vendite da deposito</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.vendDep) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">− Consegne stazione</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.staz) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">− Autoconsumo</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.autoc) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">+ Rettifiche netto</td><td style="text-align:right;font-family:var(--font-mono)">' + (a.rettN >= 0 ? '+' : '') + _dmFmt(a.rettN) + ' L</td></tr>';
+    html += '<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td style="padding-top:5px;font-weight:600">= Saldo atteso</td><td style="padding-top:5px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _dmFmt(a.saldoAtteso) + ' L</td></tr>';
+    html += '<tr><td style="font-weight:600">Livello cisterne reale</td><td style="text-align:right;font-family:var(--font-mono);font-weight:600">' + _dmFmt(a.livelloReale) + ' L</td></tr>';
+    html += '<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td style="padding-top:5px;font-weight:700;color:' + col + '">Scarto (' + segno + ')</td><td style="padding-top:5px;text-align:right;font-family:var(--font-mono);font-weight:700;color:' + col + '">' + (a.scarto > 0 ? '+' : '') + _dmFmt(a.scarto) + ' L</td></tr>';
+    html += '</table>';
+    html += '</div>';
+  });
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;font-style:italic">Verifica i movimenti del giorno e i giorni precedenti per individuare l\'origine dello scostamento.</div>';
+  html += '</div>';
+  html += '<div style="display:flex;justify-content:flex-end;padding:12px 18px;border-top:0.5px solid var(--border);background:var(--bg);border-radius:0 0 12px 12px">';
+  html += '<button onclick="document.getElementById(\'dm-sentinella-overlay\').remove()" style="background:#E24B4A;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Ho visto, chiudi</button>';
+  html += '</div>';
+  html += '</div>';
+  ov.innerHTML = html;
+  document.body.appendChild(ov);
+}
+
 function stampaDettaglioMovimenti(data) {
   var w = (typeof _apriReport === 'function') ? _apriReport('Dettaglio movimenti ' + data) : null;
   if (!w) return;
-  // Riusa il rendering già a video, ma "stampabile": prendo l'HTML del container e lo iniezto
   var cont = document.getElementById('ordini-vista-movimenti');
   if (!cont) return;
   var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
-  // Clona il contenuto, rimuove la toolbar (← Indietro, frecce, ecc.)
   var clone = cont.cloneNode(true);
-  // Rimuovi la prima div toolbar (la riconosco perché contiene "← Indietro")
-  var tb = clone.querySelector('button[onclick*="chiudiDettaglioMovimenti"]');
-  if (tb && tb.closest('div')) {
-    var toolbar = tb.closest('div[style*="justify-content:space-between"]');
-    if (toolbar) toolbar.remove();
-  }
+  // Rimuovi toolbar e pillole
+  clone.querySelectorAll('button').forEach(function(b){ b.remove(); });
+  clone.querySelectorAll('input').forEach(function(b){ b.remove(); });
   w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dettaglio movimenti ' + data + '</title>');
-  w.document.write('<style>body{font-family:Arial,sans-serif;padding:18px;color:#1a1a18;font-size:12px}h1{font-size:16px;margin:0 0 4px}h2{font-size:13px;margin:14px 0 6px;color:#444}table{width:100%;border-collapse:collapse;margin-bottom:10px}td{padding:5px 4px;border-bottom:1px solid #ddd;font-feature-settings:"tnum"}td.r{text-align:right;font-family:Courier New,monospace}.box{border:1px solid #aaa;border-radius:6px;padding:10px;margin-bottom:10px}.tot{background:#f0f5e8;border:1px solid #639922}.dep{background:#f3f1e8;border-left:3px solid #888}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}@media print{button{display:none!important}}</style>');
+  w.document.write('<style>body{font-family:Arial,sans-serif;padding:18px;color:#1a1a18;font-size:11px}h1{font-size:16px;margin:0 0 4px}@media print{button{display:none!important}}</style>');
   w.document.write('</head><body>');
   w.document.write('<h1>📊 Dettaglio movimenti giornalieri</h1>');
   w.document.write('<div style="font-size:11px;color:#666;text-transform:capitalize;margin-bottom:14px">' + dataFmt + '</div>');
