@@ -1,10 +1,26 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Sezione Banche & Mutui
-// Versione 29/04/2026 (v20260429a)
+// Versione 30/04/2026 (v20260430b)
 //
-// Patch 29/04:
+// Patch 30/04 (b) — Situazione saldi conti correnti:
+//   - Nuova colonna "📋 Assegni n.v." tra Fido cassa e Saldo contabile.
+//     Editabile per banca, default 0.
+//   - Saldo disponibile diventa CALCOLATO automaticamente come
+//     (saldo contabile + fido cassa - assegni n.v.). Editabile a mano:
+//     se scarto > 1€ vs calcolato, popup conferma override (flag DB).
+//   - Pulsante "💾 Conferma giornata e archivia": passa stato confermato=true.
+//     Avviso se modifichi giornata già confermata (non blocca).
+//   - Banner sentinella in cima: scorre ultimi 10 giorni, segnala buchi
+//     (giornate non confermate).
+//   - Pannello storico saldi: filtri data range + selezione mese/anno + PDF.
+//
+// Patch 29/04 (a):
 //   - Tabella Affidamenti: aggiunta riga "Saldo: X €" sotto Utilizzato per
 //     ogni fido, così a colpo d'occhio si vede accordato → utilizzato → saldo.
+//
+// Patch 29/04 (b):
+//   - Rimosso console.log diagnostico in renderSituazioneSaldi (rumore in
+//     console di produzione + GC overhead su oggetti grossi).
 //
 // Tab implementati: Istituti (anagrafica banche + conti correnti)
 // Tab in costruzione: Affidamenti, Finanziamenti, Anticipi, Piano, Timeline
@@ -3001,30 +3017,32 @@ function _renderPanelSituazioneSaldi() {
   const nSaldiAbbianciati = Object.keys(_situazioneSaldi).filter(id => contiIds.has(id)).length;
   const nSaldiOrfani = nSaldiCaricati - nSaldiAbbianciati;
 
-  // Log in console per diagnostica
-  console.log('[Situazione Saldi]', {
-    data: _situazioneDataCorrente,
-    nConti,
-    nSaldiCaricati,
-    nSaldiAbbianciati,
-    nSaldiOrfani,
-    contiIds: Array.from(contiIds),
-    saldiContiIds: Object.keys(_situazioneSaldi),
-    saldi: _situazioneSaldi
-  });
+  // Diagnostica saldi: dati disponibili in _situazioneSaldi se serve ispezionarli da console.
+
+  // Patch 30/04: stato conferma giornata corrente (true se almeno un record è confermato)
+  const giornataConfermata = Object.values(_situazioneSaldi).some(s => s.confermato === true);
 
   // Totali aggregati
-  let totContabile = 0, totDisponibile = 0, totFido = 0, totUtilizzato = 0, totResiduo = 0;
+  let totContabile = 0, totDisponibile = 0, totFido = 0, totUtilizzato = 0, totResiduo = 0, totAssegni = 0;
 
   let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
+
+  // Banner sentinella: giorni non confermati negli ultimi 10
+  const sentinellaHtml = _situazioneRenderSentinella();
+  if (sentinellaHtml) html += sentinellaHtml;
+
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
   html += '<div style="font-size:13px;font-weight:600;color:var(--text)">💰 Saldi conti correnti</div>';
   // Indicatore di caricamento (solo se non è il giorno corrente vuoto, per non disturbare)
-  if (nSaldiCaricati > 0) {
-    html += '<div style="font-size:10px;color:#27500A;background:#EAF3DE;padding:3px 9px;border-radius:5px;font-weight:600">✓ ' + nSaldiCaricati + ' saldi caricati</div>';
+  let pillHtml = '';
+  if (giornataConfermata) {
+    pillHtml = '<div style="font-size:10px;color:#27500A;background:#EAF3DE;padding:3px 9px;border-radius:5px;font-weight:600">✓ Giornata archiviata</div>';
+  } else if (nSaldiCaricati > 0) {
+    pillHtml = '<div style="font-size:10px;color:#854F0B;background:#FAEEDA;padding:3px 9px;border-radius:5px;font-weight:600" title="Dati in bozza, non ancora archiviati nello storico">● Bozza · ' + nSaldiCaricati + ' saldi</div>';
   } else {
-    html += '<div style="font-size:10px;color:var(--text-hint);font-weight:400">Nessun saldo per questo giorno</div>';
+    pillHtml = '<div style="font-size:10px;color:var(--text-hint);font-weight:400">Nessun saldo per questo giorno</div>';
   }
+  html += pillHtml;
   html += '</div>';
 
   // Banner di warning se ci sono record orfani (conto_id non corrisponde)
@@ -3034,19 +3052,37 @@ function _renderPanelSituazioneSaldi() {
     html += '</div>';
   }
 
+  // Patch 30/04: avviso modifica giornata già confermata
+  if (giornataConfermata) {
+    html += '<div style="background:#EAF3DE;border-left:3px solid #27500A;border-radius:0 6px 6px 0;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#27500A">';
+    html += '✓ Questa giornata è stata <b>archiviata</b>. Le celle restano editabili: ogni modifica viene tracciata.';
+    html += '</div>';
+  }
+
   html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">';
   html += '<thead><tr style="background:var(--bg);border-bottom:0.5px solid var(--border)">';
-  ['Banca / Conto', 'Fido cassa', 'Saldo contabile', 'Saldo disponibile', 'Residuo fido'].forEach((h, i) => {
-    const align = i === 0 ? 'left' : 'right';
-    html += '<th style="text-align:' + align + ';padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">' + h + '</th>';
+  // Patch 30/04: aggiunta colonna "Assegni n.v." tra "Fido cassa" e "Saldo contabile"
+  const headers = [
+    { lbl: 'Banca / Conto', align: 'left' },
+    { lbl: 'Fido cassa', align: 'right' },
+    { lbl: '📋 Assegni n.v.', align: 'right', isNew: true },
+    { lbl: 'Saldo contabile', align: 'right' },
+    { lbl: 'Saldo disponibile', align: 'right' },
+    { lbl: 'Residuo fido', align: 'right' }
+  ];
+  headers.forEach(h => {
+    const extraStyle = h.isNew ? ';color:#72243E' : '';
+    html += '<th style="text-align:' + h.align + ';padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px' + extraStyle + '">' + h.lbl + '</th>';
   });
   html += '</tr></thead><tbody>';
 
   contiSorted.forEach(c => {
     const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '—';
-    const saldo = _situazioneSaldi[c.id] || { saldo_contabile: null, saldo_disponibile: null };
+    const saldo = _situazioneSaldi[c.id] || { saldo_contabile: null, saldo_disponibile: null, assegni_non_valuta: null, saldo_disponibile_override: false };
     const sCont = (saldo.saldo_contabile !== null && saldo.saldo_contabile !== undefined) ? Number(saldo.saldo_contabile) : null;
     const sDisp = (saldo.saldo_disponibile !== null && saldo.saldo_disponibile !== undefined) ? Number(saldo.saldo_disponibile) : null;
+    const assegni = (saldo.assegni_non_valuta !== null && saldo.assegni_non_valuta !== undefined) ? Number(saldo.assegni_non_valuta) : 0;
+    const isOverride = saldo.saldo_disponibile_override === true;
     const fido = fidiCassa[c.id] ? Number(fidiCassa[c.id].accordato) : 0;
 
     // Calcoli derivati
@@ -3054,11 +3090,17 @@ function _renderPanelSituazioneSaldi() {
     const residuo = fido > 0 ? Math.max(0, fido - utilizzato) : 0;
     const pctResiduo = fido > 0 ? (residuo / fido * 100) : 0;
 
+    // Patch 30/04: saldo disponibile calcolato (formula concordata 30/04 con Rinaldo)
+    // = saldo contabile + fido cassa - assegni n.v.
+    // Nota: se sCont è null, non posso calcolare; mostro placeholder.
+    const sDispCalc = (sCont !== null) ? (sCont + fido - assegni) : null;
+
     if (sCont !== null) totContabile += sCont;
     if (sDisp !== null) totDisponibile += sDisp;
     totFido += fido;
     totUtilizzato += utilizzato;
     totResiduo += residuo;
+    totAssegni += assegni;
 
     html += '<tr style="border-bottom:0.5px solid var(--border)">';
 
@@ -3072,21 +3114,36 @@ function _renderPanelSituazioneSaldi() {
     html += fido > 0 ? fmtE(fido) : '<span style="color:var(--text-hint);font-weight:400">—</span>';
     html += '</td>';
 
-    // Col 3: Saldo contabile (editable, BIG, BOLD, RED if neg, GREEN if pos)
+    // Col 3 NEW: Assegni non in valuta (editable)
+    const valAss = assegni > 0 ? assegni.toFixed(2).replace('.', ',') : '';
+    html += '<td style="padding:5px 4px;text-align:right">';
+    html += '<input type="text" value="' + valAss + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="assegni_non_valuta" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:13px;font-weight:600;background:#FBEAF0;color:#72243E" title="Assegni emessi ma non ancora in valuta (riducono il saldo disponibile)">';
+    html += '</td>';
+
+    // Col 4: Saldo contabile (editable, BIG, BOLD, RED if neg, GREEN if pos)
     const valCont = sCont !== null ? sCont.toFixed(2).replace('.', ',') : '';
     const colorCont = sCont === null ? 'var(--text)' : (sCont < 0 ? '#A32D2D' : (sCont > 0 ? '#27500A' : 'var(--text)'));
     html += '<td style="padding:5px 4px;text-align:right">';
     html += '<input type="text" value="' + valCont + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_contabile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:14px;font-weight:700;background:#FFFCEB;color:' + colorCont + '">';
     html += '</td>';
 
-    // Col 4: Saldo disponibile (editable, BIG, BOLD, RED if neg, GREEN if pos)
-    const valDisp = sDisp !== null ? sDisp.toFixed(2).replace('.', ',') : '';
-    const colorDisp = sDisp === null ? 'var(--text)' : (sDisp < 0 ? '#A32D2D' : (sDisp > 0 ? '#27500A' : 'var(--text)'));
+    // Col 5: Saldo disponibile (editable, ma con default = calcolato; popup se override)
+    // Mostro il valore inserito a DB se presente, altrimenti il calcolato come hint
+    const valDispShown = sDisp !== null ? sDisp.toFixed(2).replace('.', ',') : (sDispCalc !== null ? sDispCalc.toFixed(2).replace('.', ',') : '');
+    const colorDispBase = (() => {
+      const v = sDisp !== null ? sDisp : sDispCalc;
+      if (v === null) return 'var(--text)';
+      return v < 0 ? '#A32D2D' : (v > 0 ? '#27500A' : 'var(--text)');
+    })();
+    // Sfondo: verde tenue se calcolato puro; arancione se override manuale tracciato
+    const bgDisp = isOverride ? '#FAEEDA' : '#F0F8E0';
+    const overrideTag = isOverride ? '<div style="font-size:9px;color:#854F0B;font-weight:500;margin-top:2px;text-align:right;padding-right:4px">⚠ override manuale</div>' : '';
     html += '<td style="padding:5px 4px;text-align:right">';
-    html += '<input type="text" value="' + valDisp + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_disponibile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:14px;font-weight:700;background:#FFFCEB;color:' + colorDisp + '">';
+    html += '<input type="text" value="' + valDispShown + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_disponibile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" title="Calcolato: contabile + fido cassa - assegni n.v. — modificabile con conferma se scarto > 1€" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:14px;font-weight:700;background:' + bgDisp + ';color:' + colorDispBase + '">';
+    html += overrideTag;
     html += '</td>';
 
-    // Col 5: Residuo fido (calc, BIG, BOLD, color by % residuo)
+    // Col 6: Residuo fido (calc, BIG, BOLD, color by % residuo)
     html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono)">';
     if (fido > 0) {
       const colorResid = pctResiduo >= 50 ? '#27500A' : (pctResiduo >= 20 ? '#BA7517' : '#A32D2D');
@@ -3100,21 +3157,113 @@ function _renderPanelSituazioneSaldi() {
     html += '</tr>';
   });
 
-  // Riga TOTALE
+  // Riga TOTALE — patch 30/04: aggiunta cella totale assegni
   const pctTotResiduo = totFido > 0 ? (totResiduo / totFido * 100) : 0;
   html += '<tr style="background:var(--bg);font-weight:700;border-top:2px solid var(--border)">';
   html += '<td style="padding:12px 8px;text-transform:uppercase;font-size:11px;letter-spacing:0.4px">TOTALE</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:var(--text)">' + fmtE(totFido) + '</td>';
+  html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:#72243E">' + (totAssegni > 0 ? fmtE(totAssegni) : '—') + '</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (totContabile < 0 ? '#A32D2D' : (totContabile > 0 ? '#27500A' : 'var(--text)')) + '">' + fmtE(totContabile) + '</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (totDisponibile < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(totDisponibile) + '</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (pctTotResiduo >= 50 ? '#27500A' : (pctTotResiduo >= 20 ? '#BA7517' : '#A32D2D')) + '">' + fmtE(totResiduo) + '<div style="font-size:10px;font-weight:500;opacity:0.85;margin-top:2px">' + pctTotResiduo.toFixed(0) + '%</div></td>';
   html += '</tr>';
 
   html += '</tbody></table></div>';
-  html += '<div style="font-size:11px;color:var(--text-hint);margin-top:10px">Le celle gialle sono editabili. Salva automatico al cambio focus o premendo Invio. Il fido cassa proviene dalla tab Affidamenti (tipo "cassa"). Il residuo del fido = accordato − utilizzato (utilizzato derivato dal saldo contabile negativo).</div>';
+  html += '<div style="font-size:11px;color:var(--text-hint);margin-top:10px">Le celle gialle sono editabili. Salva automatico al cambio focus o premendo Invio. Il fido cassa proviene dalla tab Affidamenti (tipo "cassa"). Il residuo del fido = accordato − utilizzato (utilizzato derivato dal saldo contabile negativo).<br>';
+  html += '<b style="color:#26215C">Saldo disponibile</b> calcolato come: <code style="background:#EEEDFE;padding:1px 4px;border-radius:3px;color:#26215C;font-family:var(--font-mono);font-size:10px">saldo contabile + fido cassa − assegni n.v.</code> Override manuale richiede conferma se scarto > 1 €.';
+  html += '</div>';
+
+  // Toolbar conferma giornata
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">';
+  html += '<div style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px">';
+  if (giornataConfermata) {
+    html += '<span style="width:7px;height:7px;border-radius:50%;background:#27500A;display:inline-block"></span>';
+    html += 'Giornata <b style="color:#27500A">archiviata</b>';
+    if (Object.values(_situazioneSaldi).find(s => s.confermato_at)) {
+      const cAt = Object.values(_situazioneSaldi).find(s => s.confermato_at).confermato_at;
+      html += ' · ' + new Date(cAt).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+  } else if (nSaldiCaricati > 0) {
+    html += '<span style="width:7px;height:7px;border-radius:50%;background:#EF9F27;display:inline-block"></span>';
+    html += 'Bozza salvata · giornata <b style="color:#854F0B">non confermata</b>';
+  } else {
+    html += '<span style="color:var(--text-hint)">Inserisci i saldi per iniziare</span>';
+  }
+  html += '</div>';
+
+  if (nSaldiCaricati > 0 && !giornataConfermata) {
+    html += '<button onclick="_situazioneConfermaGiornata()" style="background:#639922;color:#fff;border:none;padding:9px 18px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer">💾 Conferma giornata e archivia</button>';
+  } else if (giornataConfermata) {
+    html += '<div style="font-size:10px;color:var(--text-hint)">Giornata in storico — modifiche tracciate</div>';
+  }
+  html += '</div>';
+
   html += '</div>';
 
   return html;
+}
+
+// ─── Banner sentinella: ultimi 10 giorni non confermati ────────────────────
+function _situazioneRenderSentinella() {
+  if (!_situazioneStorico || !_situazioneStorico.length) return '';
+  // Mappa data → confermato (true se almeno un record di quella data è confermato)
+  const confPerData = {};
+  _situazioneStorico.forEach(s => {
+    if (!confPerData[s.data]) confPerData[s.data] = false;
+    if (s.confermato === true) confPerData[s.data] = true;
+  });
+  const oggi = new Date();
+  oggi.setHours(0, 0, 0, 0);
+  const giorniBuchi = [];
+  for (let i = 1; i <= 10; i++) {
+    const d = new Date(oggi);
+    d.setDate(d.getDate() - i);
+    // Skip weekend (banche chiuse): sabato=6, domenica=0
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) continue;
+    const iso = d.toISOString().split('T')[0];
+    if (!confPerData[iso]) giorniBuchi.push(iso);
+  }
+  if (!giorniBuchi.length) return '';
+  // Mostra solo il più recente non confermato (info principale; se ce ne sono più di 1 lo dico)
+  const piuRecente = giorniBuchi[0];
+  const dObj = new Date(piuRecente + 'T12:00:00');
+  const giornoLabel = dObj.toLocaleDateString('it-IT', { weekday: 'long' });
+  let html = '<div style="background:#FAEEDA;border-left:3px solid #BA7517;border-radius:0 6px 6px 0;padding:9px 13px;margin-bottom:12px;font-size:12px;color:#633806;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">';
+  html += '<div>⚠ <b>Devi registrare i saldi del ' + fmtD(piuRecente) + '</b> (' + giornoLabel + ') — non confermato.';
+  if (giorniBuchi.length > 1) {
+    html += ' <span style="font-size:10px;color:#854F0B">+ altri ' + (giorniBuchi.length - 1) + ' giorni mancanti</span>';
+  }
+  html += '</div>';
+  html += '<button onclick="_situazioneCambiaData(\'' + piuRecente + '\')" style="background:#BA7517;color:#fff;border:none;padding:5px 11px;font-size:11px;font-weight:600;border-radius:5px;cursor:pointer;white-space:nowrap">Vai al giorno mancante →</button>';
+  html += '</div>';
+  return html;
+}
+
+// ─── CONFERMA GIORNATA: passa tutti i record del giorno a confermato=true ──
+async function _situazioneConfermaGiornata() {
+  const dataC = _situazioneDataCorrente;
+  const nRecords = Object.keys(_situazioneSaldi).length;
+  if (!nRecords) { toast('⚠ Nessun saldo da confermare per ' + fmtD(dataC)); return; }
+  if (!confirm('Confermi e archivi nello storico la giornata del ' + fmtD(dataC) + '?\n\n' + nRecords + ' saldi verranno marcati come definitivi.\n\nLe celle resteranno editabili: ogni modifica successiva sarà tracciata.')) return;
+  const nowIso = new Date().toISOString();
+  const ids = Object.values(_situazioneSaldi).filter(s => s.id).map(s => s.id);
+  if (!ids.length) { toast('❌ Nessun ID record valido'); return; }
+  const { error } = await sb.from('banche_saldi_giornalieri')
+    .update({ confermato: true, confermato_at: nowIso })
+    .in('id', ids);
+  if (error) { toast('❌ ' + error.message); return; }
+  // Aggiorna stato locale
+  Object.values(_situazioneSaldi).forEach(s => {
+    if (s.id) { s.confermato = true; s.confermato_at = nowIso; }
+  });
+  // Aggiorna storico locale
+  _situazioneStorico.forEach(s => {
+    if (s.data === dataC && ids.indexOf(s.id) >= 0) { s.confermato = true; s.confermato_at = nowIso; }
+  });
+  if (typeof _auditLog === 'function') _auditLog('conferma_giornata_saldi', 'banche_saldi_giornalieri', dataC + ' (' + nRecords + ' record)');
+  toast('✓ Giornata ' + fmtD(dataC) + ' archiviata nello storico');
+  renderBancheSituazione();
 }
 
 // ═══ PANNELLO RIEPILOGO ═════════════════════════════════════════════════════
@@ -3225,6 +3374,40 @@ function _renderPanelSituazioneRiepilogo() {
 // ═══ PANNELLO STORICO ═══════════════════════════════════════════════════════
 // Tabella ultimi 60 giorni di saldi: righe = data, colonne = conti.
 // Click su una riga → naviga al giorno corrispondente nella tab Saldi.
+// Patch 30/04: state filtri storico (data/range/mese), default = ultimi 60 giorni
+var _situazioneStoricoFiltro = { tipo: 'recenti', daDate: null, aDate: null, mese: null, anno: null };
+
+function _situazioneSetFiltroStorico(tipo, val1, val2) {
+  _situazioneStoricoFiltro.tipo = tipo;
+  if (tipo === 'range') {
+    _situazioneStoricoFiltro.daDate = val1;
+    _situazioneStoricoFiltro.aDate = val2;
+  } else if (tipo === 'mese') {
+    _situazioneStoricoFiltro.mese = val1;
+    _situazioneStoricoFiltro.anno = val2;
+  }
+  renderBancheSituazione();
+}
+
+// Applica filtri allo storico — ritorna l'array delle date filtrate
+function _situazioneFiltraStorico() {
+  if (!_situazioneStorico || !_situazioneStorico.length) return [];
+  const f = _situazioneStoricoFiltro;
+  const perData = {};
+  _situazioneStorico.forEach(s => {
+    if (!perData[s.data]) perData[s.data] = true;
+  });
+  let dates = Object.keys(perData).sort().reverse();
+  if (f.tipo === 'range' && f.daDate && f.aDate) {
+    dates = dates.filter(d => d >= f.daDate && d <= f.aDate);
+  } else if (f.tipo === 'mese' && f.mese && f.anno) {
+    const prefix = f.anno + '-' + String(f.mese).padStart(2, '0');
+    dates = dates.filter(d => d.indexOf(prefix) === 0);
+  }
+  // tipo 'recenti' → tutto (default 60 giorni già caricati)
+  return dates;
+}
+
 function _renderPanelSituazioneStorico() {
   const contiSorted = _sortContiPriorita();
 
@@ -3234,16 +3417,54 @@ function _renderPanelSituazioneStorico() {
     if (!perData[s.data]) perData[s.data] = {};
     perData[s.data][s.conto_id] = s;
   });
-  const dateOrdinate = Object.keys(perData).sort().reverse(); // più recenti prima
+
+  // Patch 30/04: applica filtri (range/mese)
+  const dateOrdinate = _situazioneFiltraStorico();
+  const f = _situazioneStoricoFiltro;
+  const filtroAttivo = (f.tipo !== 'recenti');
 
   let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
   html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
-  html += '<div style="font-size:13px;font-weight:600;color:var(--text)">📈 Storico saldi <span style="color:var(--text-muted);font-weight:400;font-size:11px">(ultimi 60 giorni)</span></div>';
-  html += '<div style="font-size:11px;color:var(--text-muted)">' + dateOrdinate.length + ' giornata' + (dateOrdinate.length === 1 ? '' : 'e') + ' registrata' + (dateOrdinate.length === 1 ? '' : 'e') + '</div>';
+  html += '<div style="font-size:13px;font-weight:600;color:var(--text)">📈 Storico saldi <span style="color:var(--text-muted);font-weight:400;font-size:11px">' + (filtroAttivo ? '(filtrato)' : '(ultimi 60 giorni)') + '</span></div>';
+  html += '<div style="font-size:11px;color:var(--text-muted)">' + dateOrdinate.length + ' giornata' + (dateOrdinate.length === 1 ? '' : 'e') + ' visualizzata' + (dateOrdinate.length === 1 ? '' : 'e') + '</div>';
+  html += '</div>';
+
+  // Patch 30/04: barra filtri + PDF
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">';
+  html += '<div style="font-size:11px;color:var(--text-muted);font-weight:500">Filtri:</div>';
+  // Tipo filtro
+  html += '<select onchange="_situazioneSetFiltroStorico(this.value)" style="font-size:11px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text)">';
+  html += '<option value="recenti"' + (f.tipo === 'recenti' ? ' selected' : '') + '>Tutti (60 gg)</option>';
+  html += '<option value="range"' + (f.tipo === 'range' ? ' selected' : '') + '>Range date</option>';
+  html += '<option value="mese"' + (f.tipo === 'mese' ? ' selected' : '') + '>Mese specifico</option>';
+  html += '</select>';
+  if (f.tipo === 'range') {
+    const valDa = f.daDate || '';
+    const valA = f.aDate || '';
+    html += '<input type="date" id="filtro-stor-da" value="' + valDa + '" onchange="_situazioneSetFiltroStorico(\'range\',this.value,document.getElementById(\'filtro-stor-a\').value)" style="font-size:11px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text)">';
+    html += '<span style="font-size:11px;color:var(--text-muted)">→</span>';
+    html += '<input type="date" id="filtro-stor-a" value="' + valA + '" onchange="_situazioneSetFiltroStorico(\'range\',document.getElementById(\'filtro-stor-da\').value,this.value)" style="font-size:11px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text)">';
+  } else if (f.tipo === 'mese') {
+    const annoOggi = new Date().getFullYear();
+    const meseOggi = new Date().getMonth() + 1;
+    const valMese = f.mese || meseOggi;
+    const valAnno = f.anno || annoOggi;
+    html += '<select id="filtro-stor-mese" onchange="_situazioneSetFiltroStorico(\'mese\',parseInt(this.value),parseInt(document.getElementById(\'filtro-stor-anno\').value))" style="font-size:11px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text)">';
+    ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'].forEach(function(m, i) {
+      html += '<option value="' + (i + 1) + '"' + ((i + 1) === valMese ? ' selected' : '') + '>' + m + '</option>';
+    });
+    html += '</select>';
+    html += '<select id="filtro-stor-anno" onchange="_situazioneSetFiltroStorico(\'mese\',parseInt(document.getElementById(\'filtro-stor-mese\').value),parseInt(this.value))" style="font-size:11px;padding:5px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text)">';
+    [annoOggi - 2, annoOggi - 1, annoOggi].forEach(function(a) {
+      html += '<option value="' + a + '"' + (a === valAnno ? ' selected' : '') + '>' + a + '</option>';
+    });
+    html += '</select>';
+  }
+  html += '<button onclick="_situazioneStampaStoricoSaldi()" style="margin-left:auto;font-size:11px;padding:5px 11px;background:#534AB7;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:500">🖨️ PDF storico</button>';
   html += '</div>';
 
   if (!dateOrdinate.length) {
-    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px;font-size:12px">Nessuna giornata registrata. Inizia inserendo i saldi nel pannello qui sopra.</div>';
+    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px;font-size:12px">Nessuna giornata corrispondente ai filtri selezionati.</div>';
     html += '</div>';
     return html;
   }
@@ -3349,6 +3570,48 @@ async function _situazioneSalvaCella(input) {
     }
   }
 
+  // Patch 30/04: per il SALDO DISPONIBILE check override vs calcolato
+  // Calcolo atteso: saldo_contabile + fido_cassa - assegni_non_valuta
+  // Se scarto > 1€ → popup conferma. Se confermato, flag saldo_disponibile_override=true.
+  let isOverride = false;
+  if (campo === 'saldo_disponibile' && val !== null) {
+    const fidi = _getFidiCassaPerConto();
+    const fido = fidi[contoId] ? Number(fidi[contoId].accordato) : 0;
+    const sa = _situazioneSaldi[contoId] || {};
+    const sCont = (sa.saldo_contabile !== null && sa.saldo_contabile !== undefined) ? Number(sa.saldo_contabile) : null;
+    const assegni = (sa.assegni_non_valuta !== null && sa.assegni_non_valuta !== undefined) ? Number(sa.assegni_non_valuta) : 0;
+    if (sCont !== null) {
+      const calc = sCont + fido - assegni;
+      const scarto = Math.abs(val - calc);
+      if (scarto > 1) {
+        const ok = confirm(
+          '⚠ Saldo disponibile diverso dal calcolato\n\n' +
+          'Calcolato: € ' + calc.toFixed(2).replace('.', ',') + '\n' +
+          'Inserito: € ' + val.toFixed(2).replace('.', ',') + '\n' +
+          'Scarto: € ' + (val - calc).toFixed(2).replace('.', ',') + '\n\n' +
+          'Verifica di non aver dimenticato un assegno o una movimentazione.\n' +
+          'Se confermi, l\'override viene tracciato in audit.\n\n' +
+          'Conferma override manuale?'
+        );
+        if (!ok) {
+          // Annulla: ripristina valore precedente
+          const valOld = (sa.saldo_disponibile !== null && sa.saldo_disponibile !== undefined) ? Number(sa.saldo_disponibile) : calc;
+          input.value = valOld.toFixed(2).replace('.', ',');
+          input.style.borderColor = '';
+          return;
+        }
+        isOverride = true;
+      } else {
+        // Scarto entro 1€ → autosave silenzioso, niente flag override
+        isOverride = false;
+      }
+    }
+  }
+
+  // Patch 30/04: quando si salva CONTABILE / FIDO / ASSEGNI ricalcolo automaticamente
+  // il saldo disponibile suggerito (se non c'è già un override esplicito).
+  // Salviamo in payload sia il campo modificato sia l'eventuale ricalcolo.
+
   // Visual feedback
   const oldBorder = input.style.border;
   input.style.border = '0.5px solid #BA7517';
@@ -3356,9 +3619,26 @@ async function _situazioneSalvaCella(input) {
   // Carico saldo esistente o creo nuovo
   const saldoEsistente = _situazioneSaldi[contoId];
 
-  let payload;
+  // Costruisco payload
+  let payload = { [campo]: val };
+  if (campo === 'saldo_disponibile') {
+    payload.saldo_disponibile_override = isOverride;
+  }
+
+  // Se modifico contabile/assegni e NON c'è override esplicito → ricalcolo automaticamente
+  // il saldo disponibile (così la formula resta coerente).
+  if ((campo === 'saldo_contabile' || campo === 'assegni_non_valuta') && saldoEsistente && saldoEsistente.saldo_disponibile_override !== true) {
+    const fidi = _getFidiCassaPerConto();
+    const fido = fidi[contoId] ? Number(fidi[contoId].accordato) : 0;
+    const sCont = (campo === 'saldo_contabile') ? val : ((saldoEsistente.saldo_contabile !== null && saldoEsistente.saldo_contabile !== undefined) ? Number(saldoEsistente.saldo_contabile) : null);
+    const ass = (campo === 'assegni_non_valuta') ? (val || 0) : Number(saldoEsistente.assegni_non_valuta || 0);
+    if (sCont !== null) {
+      payload.saldo_disponibile = sCont + fido - ass;
+      payload.saldo_disponibile_override = false;
+    }
+  }
+
   if (saldoEsistente && saldoEsistente.id) {
-    payload = { [campo]: val };
     const { error } = await sb.from('banche_saldi_giornalieri')
       .update(payload).eq('id', saldoEsistente.id);
     if (error) {
@@ -3366,17 +3646,26 @@ async function _situazioneSalvaCella(input) {
       input.style.borderColor = '#A32D2D';
       return;
     }
-    saldoEsistente[campo] = val;
+    Object.assign(saldoEsistente, payload);
   } else {
-    // Insert nuovo: serve almeno uno dei due campi (l'altro è 0)
-    payload = {
+    // Insert nuovo: tutti i campi con default sensati
+    const fidi = _getFidiCassaPerConto();
+    const fido = fidi[contoId] ? Number(fidi[contoId].accordato) : 0;
+    const insertPayload = {
       conto_id: contoId,
       data: _situazioneDataCorrente,
       saldo_contabile: campo === 'saldo_contabile' ? val : 0,
-      saldo_disponibile: campo === 'saldo_disponibile' ? val : 0
+      saldo_disponibile: campo === 'saldo_disponibile' ? val : 0,
+      assegni_non_valuta: campo === 'assegni_non_valuta' ? (val || 0) : 0,
+      saldo_disponibile_override: campo === 'saldo_disponibile' ? isOverride : false,
+      confermato: false
     };
+    // Se sto inserendo contabile/assegni, calcolo subito anche il disponibile
+    if (campo === 'saldo_contabile' && val !== null) {
+      insertPayload.saldo_disponibile = val + fido;
+    }
     const { data, error } = await sb.from('banche_saldi_giornalieri')
-      .insert(payload).select().single();
+      .insert(insertPayload).select().single();
     if (error) {
       toast('❌ ' + error.message);
       input.style.borderColor = '#A32D2D';
@@ -3394,6 +3683,102 @@ async function _situazioneSalvaCella(input) {
 
   // Rerender per aggiornare colonne calcolate (utilizzo, totali)
   renderBancheSituazione();
+}
+
+// ─── STAMPA PDF STORICO SALDI (filtrato) ──────────────────────────────────
+// Patch 30/04: stampa storico saldi su range/mese filtrati. Layout A4 landscape.
+function _situazioneStampaStoricoSaldi() {
+  const dateOrdinate = _situazioneFiltraStorico();
+  if (!dateOrdinate.length) { toast('⚠ Nessun dato da stampare nei filtri selezionati'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+
+  const contiSorted = _sortContiPriorita();
+  // Mappa data → conto_id → record
+  const perData = {};
+  _situazioneStorico.forEach(s => {
+    if (!perData[s.data]) perData[s.data] = {};
+    perData[s.data][s.conto_id] = s;
+  });
+
+  const f = _situazioneStoricoFiltro;
+  let titoloFiltro = 'Ultimi 60 giorni';
+  if (f.tipo === 'range' && f.daDate && f.aDate) titoloFiltro = 'Dal ' + fmtD(f.daDate) + ' al ' + fmtD(f.aDate);
+  else if (f.tipo === 'mese' && f.mese && f.anno) {
+    const mesi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+    titoloFiltro = mesi[f.mese - 1] + ' ' + f.anno;
+  }
+
+  const dataGen = new Date().toLocaleDateString('it-IT') + ' ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+
+  w.document.write('<!DOCTYPE html><html><head><title>Storico saldi — Phoenix Fuel</title>');
+  w.document.write('<style>');
+  w.document.write('body{font-family:Arial,sans-serif;padding:18px;font-size:10px;color:#333}');
+  w.document.write('h1{font-size:15px;color:#26215C;margin:0 0 4px}');
+  w.document.write('.meta{font-size:9px;color:#666;margin-bottom:14px}');
+  w.document.write('table{width:100%;border-collapse:collapse;font-size:9px}');
+  w.document.write('th{background:#EEEDFE;padding:6px 5px;text-align:right;border-bottom:1px solid #534AB7;font-size:8.5px;text-transform:uppercase;color:#26215C;font-weight:600}');
+  w.document.write('th:first-child{text-align:left}');
+  w.document.write('td{padding:5px;text-align:right;border-bottom:0.5px solid #eee;font-family:monospace}');
+  w.document.write('td:first-child{text-align:left;font-family:Arial,sans-serif;font-weight:500;color:#444}');
+  w.document.write('td.conf{color:#27500A;font-weight:600}');
+  w.document.write('td.draft{color:#854F0B}');
+  w.document.write('tr.spacer td{padding:0;border:none;height:3px}');
+  w.document.write('@page{size:A4 landscape;margin:0.8cm}');
+  w.document.write('@media print{body{padding:0}}');
+  w.document.write('</style></head><body>');
+  w.document.write('<h1>📈 Storico saldi conti correnti — Phoenix Fuel S.r.l.</h1>');
+  w.document.write('<div class="meta">' + titoloFiltro + ' · ' + dateOrdinate.length + ' giornate · Generato il ' + dataGen + '</div>');
+
+  w.document.write('<table>');
+  w.document.write('<thead><tr>');
+  w.document.write('<th>Data</th>');
+  w.document.write('<th>Stato</th>');
+  contiSorted.forEach(c => {
+    const istNome = (_bancheIstituti.find(i => i.id === c.istituto_id) || {}).nome || '—';
+    w.document.write('<th>' + esc(istNome) + '</th>');
+  });
+  w.document.write('<th>Totale</th>');
+  w.document.write('</tr></thead><tbody>');
+
+  dateOrdinate.forEach(d => {
+    let totaleData = 0, nValori = 0;
+    let hasConfermato = false;
+    contiSorted.forEach(c => {
+      const rec = perData[d] ? perData[d][c.id] : null;
+      if (rec && rec.saldo_contabile !== null && rec.saldo_contabile !== undefined) {
+        totaleData += Number(rec.saldo_contabile);
+        nValori++;
+      }
+      if (rec && rec.confermato === true) hasConfermato = true;
+    });
+    const dObj = new Date(d + 'T12:00:00');
+    const giornoLab = dObj.toLocaleDateString('it-IT', { weekday: 'short' });
+    w.document.write('<tr>');
+    w.document.write('<td>' + fmtD(d) + ' <span style="color:#999;font-size:8px">' + giornoLab + '</span></td>');
+    w.document.write('<td class="' + (hasConfermato ? 'conf' : 'draft') + '">' + (hasConfermato ? '✓ archiv.' : '● bozza') + '</td>');
+    contiSorted.forEach(c => {
+      const rec = perData[d] ? perData[d][c.id] : null;
+      if (rec && rec.saldo_contabile !== null && rec.saldo_contabile !== undefined) {
+        const v = Number(rec.saldo_contabile);
+        const col = v < 0 ? '#A32D2D' : (v > 0 ? '#27500A' : '#666');
+        w.document.write('<td style="color:' + col + '">' + v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>');
+      } else {
+        w.document.write('<td style="color:#ccc">—</td>');
+      }
+    });
+    if (nValori > 0) {
+      const colTot = totaleData < 0 ? '#A32D2D' : '#27500A';
+      w.document.write('<td style="color:' + colTot + ';font-weight:600;background:#f9f9f9">' + totaleData.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>');
+    } else {
+      w.document.write('<td style="color:#ccc;background:#f9f9f9">—</td>');
+    }
+    w.document.write('</tr>');
+  });
+  w.document.write('</tbody></table>');
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(() => w.print(), 400);
 }
 
 // ─── STAMPA PDF SITUAZIONE ─────────────────────────────────────────────────
