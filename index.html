@@ -324,6 +324,7 @@
               <span id="ordini-giorno-count" style="font-size:13px;color:var(--text-muted)"></span>
               <button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#6B5FCC" onclick="stampaOrdiniGiorno()">🖨️ PDF</button>
               <button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#BA7517" onclick="stampaOrdiniGiornoPerProdotto()">📋 Dettaglio ordini</button>
+              <button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#1D9E75" onclick="apriDettaglioMovimenti()">📊 Dettaglio movimenti giornalieri</button>
             </div>
           </div>
           <!-- Backlog ordini offline -->
@@ -339,10 +340,15 @@
               </div>
             </div>
           </div>
+          <!-- Patch 30/04 (g): vista normale tabella ordini, alternata col report movimenti -->
+          <div id="ordini-vista-tabella">
           <div style="overflow-x:auto">
           <table><thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Dest.</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Base</th><th>Trasporto/L</th><th>€/L netto</th><th>Margine/L</th><th>Prezzo/L</th><th>Totale</th><th>Stato</th><th></th></tr></thead>
           <tbody id="tabella-ordini"><tr><td colspan="14" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
+          </div>
+          <!-- Vista report dettaglio movimenti giornalieri (nascosta di default) -->
+          <div id="ordini-vista-movimenti" style="display:none"></div>
         </div>
 
         <!-- EXPORT DANEA EASYFATT -->
@@ -2810,7 +2816,7 @@
 <script src="pf-config.js?v=20260430a"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
-<script src="pf-ordini.js?v=20260430a"></script>
+<script src="pf-ordini.js?v=20260430g"></script>
 <script src="pf-deposito.js?v=20260428a"></script>
 <script src="pf-anagrafica.js?v=20260421b"></script>
 <script src="pf-data.js?v=20260419f"></script>

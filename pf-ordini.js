@@ -853,13 +853,7 @@ function _renderRigaOrdine(r) {
   // Badge "futuro" se data > oggi
   var badgeFuturo = (r.data && r.data > oggiISO_bg) ? ' <span style="display:inline-block;background:#FAEEDA;color:#854F0B;font-size:9px;padding:1px 6px;border-radius:8px;font-weight:500;margin-left:4px">📅 ' + fmtD(r.data) + '</span>' : '';
   var destHtml = r.destinazione ? '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '';
-  // Patch 30/04/2026: rimossa colonna Scadenza, aggiunto €/L netto IVA prima
-  // di Margine/L. IVA 10% per Gasolio Agricolo, 22% per tutti gli altri (o letta
-  // da r.iva se presente — fonte di verità).
-  var aliquotaIva = Number(r.iva) > 0 ? Number(r.iva)
-    : (/agric/i.test(r.prodotto || '') ? 10 : 22);
-  var pNettoL = pL / (1 + aliquotaIva / 100);
-  return '<tr><td>' + fmtD(r.data) + badgeFuturo + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(127,119,221,0.06);font-weight:500" title="Prezzo per litro al netto IVA (' + aliquotaIva + '%)">' + fmt(pNettoL) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+  return '<tr><td>' + fmtD(r.data) + badgeFuturo + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td style="font-size:11px;color:var(--text-hint)">' + (r.data_scadenza?fmtD(r.data_scadenza):'—') + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -920,6 +914,209 @@ function navigaOrdiniGiorno(dir) {
 
 // Alias per compatibilità (chiamato dopo salvataggio ordine, eliminazione, ecc.)
 async function caricaOrdini() { await caricaOrdiniGiorno(); }
+
+// ════════════════════════════════════════════════════════════════════
+// DETTAGLIO MOVIMENTI GIORNALIERI (patch 30/04 g)
+// Vista a tutto schermo che sostituisce la tabella ordini, mostra:
+//   - 3 sezioni di uscita (vendite cliente / consegne stazione / autoconsumo)
+//     con prodotto come riga padre + fornitori come sottorighe rientrate
+//   - Box totale movimentato per prodotto (somma 3 sezioni)
+//   - Pannello separato in basso per ingressi a deposito (stesso annidamento)
+//   - Toolbar: Indietro · titolo · data · ◀▶ · Oggi · 🖨️ PDF
+// ════════════════════════════════════════════════════════════════════
+
+// Elenco fissato dei prodotti (in ordine di display)
+var _DM_PRODOTTI = ['Gasolio Autotrazione', 'Gasolio Agricolo', 'Benzina', 'HVO', 'AdBlue'];
+
+function apriDettaglioMovimenti() {
+  var inp = document.getElementById('ordini-giorno-data');
+  if (!inp || !inp.value) return;
+  document.getElementById('ordini-vista-tabella').style.display = 'none';
+  document.getElementById('ordini-vista-movimenti').style.display = 'block';
+  renderDettaglioMovimenti(inp.value);
+}
+
+function chiudiDettaglioMovimenti() {
+  document.getElementById('ordini-vista-movimenti').style.display = 'none';
+  document.getElementById('ordini-vista-tabella').style.display = 'block';
+}
+
+function navigaDettaglioMovimenti(dir) {
+  var inp = document.getElementById('ordini-giorno-data');
+  var d = new Date(inp.value + 'T12:00:00');
+  d.setDate(d.getDate() + dir);
+  var y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+  inp.value = y + '-' + m + '-' + dd;
+  renderDettaglioMovimenti(inp.value);
+}
+
+function vaiOggiDettaglioMovimenti() {
+  var inp = document.getElementById('ordini-giorno-data');
+  var oggi = new Date();
+  var y = oggi.getFullYear(), m = String(oggi.getMonth()+1).padStart(2,'0'), dd = String(oggi.getDate()).padStart(2,'0');
+  inp.value = y + '-' + m + '-' + dd;
+  renderDettaglioMovimenti(inp.value);
+}
+
+async function renderDettaglioMovimenti(data) {
+  var cont = document.getElementById('ordini-vista-movimenti');
+  if (!cont) return;
+  cont.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">Caricamento dati...</div>';
+
+  // Carica ordini del giorno (no annullati)
+  var { data: ordini, error } = await sb.from('ordini')
+    .select('*, basi_carico(nome)')
+    .eq('data', data)
+    .neq('stato', 'annullato');
+  if (error) {
+    cont.innerHTML = '<div style="padding:24px;color:#E24B4A">Errore: ' + esc(error.message) + '</div>';
+    return;
+  }
+  ordini = ordini || [];
+
+  // Raggruppa per tipo: vendite cliente / stazione / autoconsumo / deposito
+  var mappa = { cliente: {}, stazione_servizio: {}, autoconsumo: {}, deposito: {} };
+  ordini.forEach(function(o) {
+    var tipo = o.tipo_ordine || 'cliente';
+    if (!mappa[tipo]) return; // ignora tipi sconosciuti
+    var prod = o.prodotto || 'N/D';
+    var forn = o.fornitore || 'PhoenixFuel (deposito)';
+    if (tipo === 'deposito') {
+      // Per deposito aggiungo anche la base destinazione al label fornitore
+      var base = o.basi_carico && o.basi_carico.nome ? o.basi_carico.nome : '';
+      forn = forn + (base ? ' · ' + base : '');
+    }
+    if (!mappa[tipo][prod]) mappa[tipo][prod] = {};
+    if (!mappa[tipo][prod][forn]) mappa[tipo][prod][forn] = 0;
+    mappa[tipo][prod][forn] += Number(o.litri || 0);
+  });
+
+  var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  var html = '';
+  // ── Toolbar ──
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:0.5px solid var(--border)">';
+  html += '<div style="display:flex;align-items:center;gap:10px">';
+  html += '<button onclick="chiudiDettaglioMovimenti()" style="background:transparent;border:0.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;color:var(--text-muted)">← Indietro</button>';
+  html += '<div><div style="font-size:14px;font-weight:600">📊 Dettaglio movimenti giornalieri</div><div style="font-size:11px;color:var(--text-muted);text-transform:capitalize">' + dataFmt + '</div></div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:4px;align-items:center">';
+  html += '<button onclick="navigaDettaglioMovimenti(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:14px;font-weight:bold">◀</button>';
+  html += '<input type="date" value="' + data + '" onchange="renderDettaglioMovimenti(this.value);document.getElementById(\'ordini-giorno-data\').value=this.value" style="font-size:13px;padding:5px 8px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)" />';
+  html += '<button onclick="navigaDettaglioMovimenti(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:14px;font-weight:bold">▶</button>';
+  html += '<button onclick="vaiOggiDettaglioMovimenti()" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px">Oggi</button>';
+  html += '<button class="btn-primary" style="font-size:12px;padding:6px 14px;background:#534AB7" onclick="stampaDettaglioMovimenti(\'' + data + '\')">🖨️ PDF</button>';
+  html += '</div>';
+  html += '</div>';
+
+  // ── Sezione helper: render gruppo prodotto+fornitori ──
+  function _renderSezione(titolo, dotColor, mappaProd, includiSezione) {
+    var totSez = 0;
+    Object.keys(mappaProd).forEach(function(p) { Object.keys(mappaProd[p]).forEach(function(f) { totSez += mappaProd[p][f]; }); });
+    var h = '';
+    h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;padding-bottom:5px;border-bottom:0.5px solid var(--border)">';
+    h += '<div style="font-size:12px;font-weight:600;display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:' + dotColor + ';display:inline-block"></span>' + esc(titolo) + '</div>';
+    h += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + totSez.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</div>';
+    h += '</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px;font-feature-settings:\'tnum\'">';
+    _DM_PRODOTTI.forEach(function(prod) {
+      var fornitori = mappaProd[prod] || {};
+      var totProd = 0;
+      Object.keys(fornitori).forEach(function(f) { totProd += fornitori[f]; });
+      h += '<tr style="font-weight:500"><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:left">' + esc(prod) + '</td><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + (totProd > 0 ? totProd.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L' : '— L') + '</td></tr>';
+      // Sottorighe fornitori
+      var keysFornitori = Object.keys(fornitori).sort();
+      keysFornitori.forEach(function(f) {
+        h += '<tr><td style="padding:4px 4px 4px 24px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border)">↳ ' + esc(f) + '</td><td style="padding:4px 4px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border);text-align:right;font-family:var(--font-mono)">' + fornitori[f].toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
+      });
+    });
+    h += '</table>';
+    h += '</div>';
+    return { html: h, totale: totSez };
+  }
+
+  // ── 3 sezioni di uscita ──
+  var sezVend = _renderSezione('Vendite a cliente', '#534AB7', mappa.cliente, true);
+  var sezStaz = _renderSezione('Consegne a stazione (Oppido)', '#1D9E75', mappa.stazione_servizio, true);
+  var sezAuto = _renderSezione('Autoconsumo (carico cisterna flotta)', '#BA7517', mappa.autoconsumo, true);
+  html += sezVend.html + sezStaz.html + sezAuto.html;
+
+  // ── Totale movimentato per prodotto (somma 3 sezioni) ──
+  var totPerProd = {};
+  ['cliente','stazione_servizio','autoconsumo'].forEach(function(t) {
+    Object.keys(mappa[t]).forEach(function(p) {
+      Object.keys(mappa[t][p]).forEach(function(f) {
+        totPerProd[p] = (totPerProd[p] || 0) + mappa[t][p][f];
+      });
+    });
+  });
+  var totGiornata = 0;
+  Object.keys(totPerProd).forEach(function(p) { totGiornata += totPerProd[p]; });
+
+  html += '<div style="background:rgba(99,153,34,0.10);border:0.5px solid rgba(99,153,34,0.30);border-radius:10px;padding:12px;margin-top:6px">';
+  html += '<div style="font-size:11px;color:#173404;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-bottom:6px">Totale movimentato per prodotto (vendite + stazione + autoconsumo)</div>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px;font-feature-settings:\'tnum\'">';
+  _DM_PRODOTTI.forEach(function(prod) {
+    var v = totPerProd[prod] || 0;
+    if (v <= 0) return; // nel totale finale mostro solo prodotti effettivamente movimentati
+    html += '<tr><td style="padding:5px 4px;text-align:left;font-weight:500;color:#173404">' + esc(prod) + '</td><td style="padding:5px 4px;text-align:right;font-family:var(--font-mono);font-weight:500;color:#173404">' + v.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
+  });
+  html += '<tr><td style="padding:8px 4px 5px;border-top:1px solid rgba(99,153,34,0.40);text-align:left;font-weight:600;color:#173404;font-size:13px">TOTALE GIORNATA</td><td style="padding:8px 4px 5px;border-top:1px solid rgba(99,153,34,0.40);text-align:right;font-family:var(--font-mono);font-weight:600;color:#173404;font-size:13px">' + totGiornata.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
+  html += '</table>';
+  html += '</div>';
+
+  // ── Pannello separato: Ingressi a deposito ──
+  var totDep = 0;
+  Object.keys(mappa.deposito).forEach(function(p) { Object.keys(mappa.deposito[p]).forEach(function(f) { totDep += mappa.deposito[p][f]; }); });
+  html += '<div style="height:14px"></div>';
+  html += '<div style="background:#F1EFE8;border-left:3px solid #888780;border-radius:0 10px 10px 0;padding:12px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;padding-bottom:5px;border-bottom:0.5px solid rgba(0,0,0,0.06)">';
+  html += '<div style="font-size:12px;color:#2C2C2A;font-weight:600;display:flex;gap:6px;align-items:center"><span style="width:8px;height:8px;border-radius:50%;background:#888780;display:inline-block"></span>Consegne in ingresso al deposito</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#2C2C2A">' + totDep.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</div>';
+  html += '</div>';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:11px;font-feature-settings:\'tnum\';margin-top:6px">';
+  _DM_PRODOTTI.forEach(function(prod) {
+    var fornitori = mappa.deposito[prod] || {};
+    var totProd = 0;
+    Object.keys(fornitori).forEach(function(f) { totProd += fornitori[f]; });
+    html += '<tr style="font-weight:500"><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:left">' + esc(prod) + '</td><td style="padding:7px 4px 6px;border-bottom:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + (totProd > 0 ? totProd.toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L' : '— L') + '</td></tr>';
+    Object.keys(fornitori).sort().forEach(function(f) {
+      html += '<tr><td style="padding:4px 4px 4px 24px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border)">↳ ' + esc(f) + '</td><td style="padding:4px 4px;color:var(--text-muted);font-size:10px;border-bottom:0.5px dashed var(--border);text-align:right;font-family:var(--font-mono)">' + fornitori[f].toLocaleString('it-IT', {maximumFractionDigits:0}) + ' L</td></tr>';
+    });
+  });
+  html += '</table>';
+  html += '</div>';
+
+  cont.innerHTML = html;
+}
+
+// PDF dettaglio movimenti: usa _apriReport esistente, costruisce HTML compatibile
+function stampaDettaglioMovimenti(data) {
+  var w = (typeof _apriReport === 'function') ? _apriReport('Dettaglio movimenti ' + data) : null;
+  if (!w) return;
+  // Riusa il rendering già a video, ma "stampabile": prendo l'HTML del container e lo iniezto
+  var cont = document.getElementById('ordini-vista-movimenti');
+  if (!cont) return;
+  var dataFmt = new Date(data + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+  // Clona il contenuto, rimuove la toolbar (← Indietro, frecce, ecc.)
+  var clone = cont.cloneNode(true);
+  // Rimuovi la prima div toolbar (la riconosco perché contiene "← Indietro")
+  var tb = clone.querySelector('button[onclick*="chiudiDettaglioMovimenti"]');
+  if (tb && tb.closest('div')) {
+    var toolbar = tb.closest('div[style*="justify-content:space-between"]');
+    if (toolbar) toolbar.remove();
+  }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dettaglio movimenti ' + data + '</title>');
+  w.document.write('<style>body{font-family:Arial,sans-serif;padding:18px;color:#1a1a18;font-size:12px}h1{font-size:16px;margin:0 0 4px}h2{font-size:13px;margin:14px 0 6px;color:#444}table{width:100%;border-collapse:collapse;margin-bottom:10px}td{padding:5px 4px;border-bottom:1px solid #ddd;font-feature-settings:"tnum"}td.r{text-align:right;font-family:Courier New,monospace}.box{border:1px solid #aaa;border-radius:6px;padding:10px;margin-bottom:10px}.tot{background:#f0f5e8;border:1px solid #639922}.dep{background:#f3f1e8;border-left:3px solid #888}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}@media print{button{display:none!important}}</style>');
+  w.document.write('</head><body>');
+  w.document.write('<h1>📊 Dettaglio movimenti giornalieri</h1>');
+  w.document.write('<div style="font-size:11px;color:#666;text-transform:capitalize;margin-bottom:14px">' + dataFmt + '</div>');
+  w.document.write(clone.innerHTML);
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(function() { w.print(); }, 600);
+}
 
 // ── STORICO ORDINI (espandibile con filtri) ──
 function toggleStoricoOrdini() {
