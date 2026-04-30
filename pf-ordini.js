@@ -964,8 +964,8 @@ async function caricaOrdini() { await caricaOrdiniGiorno(); }
 // ════════════════════════════════════════════════════════════════════
 // DETTAGLIO MOVIMENTI GIORNALIERI (patch 30/04 i — rifatto stile periodo)
 // Layout 3 colonne: Acquisti / Vendite / Riassunto, con tendine espandibili
-// e vendite scomposte tra "da deposito" e "diretti fornitore". Sentinella
-// di protezione per ogni prodotto se livello cisterne ≠ saldo atteso > 1 L.
+// e vendite scomposte tra "da deposito" e "diretti fornitore".
+// Patch v20260430n: rimossa la sentinella di protezione (non funzionava).
 // ════════════════════════════════════════════════════════════════════
 
 var _DM_PRODOTTI = ['Gasolio Autotrazione', 'Gasolio Agricolo', 'Benzina', 'HVO', 'AdBlue'];
@@ -1072,8 +1072,6 @@ async function renderDettaglioMovimenti(data) {
 
   cont.innerHTML = html;
   _dmRenderColonne();
-  // Sentinella protezione (asincrona, non blocca render)
-  _dmEseguiSentinella();
 }
 
 // Calcola aggregati e popola le 3 colonne
@@ -1215,129 +1213,9 @@ function _dmCalcolaAggregati() {
   };
 }
 
-// SENTINELLA: per ogni prodotto verifica scarto tra livello cisterne reale e saldo atteso.
-async function _dmEseguiSentinella() {
-  if (!_DM_STATO.dati || !_DM_STATO.dataCorrente) return;
-  var data = _DM_STATO.dataCorrente;
-  // Apertura anno = rettifica fine anno precedente (31/12 anno-1) per ogni prodotto.
-  // Es: per data del 2026, leggo rettifiche_inventario del 31/12/2025.
-  var anno = parseInt(data.substring(0,4), 10);
-  var dataApertura = (anno - 1) + '-12-31';
-  var dataInizioAnno = anno + '-01-01';
-  // Carico in parallelo:
-  // 1) cisterne deposito (livello attuale)
-  // 2) rettifica apertura anno (saldo finale anno precedente)
-  // 3) ordini DELL'ANNO da 1/1 a ieri (esclusi 2025) — per saldo atteso
-  // 4) ordini di OGGI (già caricati in _DM_STATO.dati ma dobbiamo confrontare)
-  // 5) rettifiche dell'anno fino a ieri
-  var [cistRes, rettAperturaRes, ordPrecRes, rettPrecRes] = await Promise.all([
-    sb.from('cisterne').select('id,prodotto,livello_attuale').eq('sede','deposito_vibo'),
-    sb.from('rettifiche_inventario').select('prodotto,litri').eq('data', dataApertura),
-    sb.from('ordini').select('prodotto,tipo_ordine,fornitore,litri,stato').gte('data', dataInizioAnno).lt('data', data).neq('stato','annullato'),
-    sb.from('rettifiche_inventario').select('prodotto,litri').gte('data', dataInizioAnno).lt('data', data)
-  ]);
-  if (cistRes.error || !cistRes.data) return;
-  var cisterne = cistRes.data;
-  var rettApertura = (rettAperturaRes && rettAperturaRes.data) || [];
-  var ordPrec = (ordPrecRes && ordPrecRes.data) || [];
-  var rettPrec = (rettPrecRes && rettPrecRes.data) || [];
-  // Aggrega livello cisterne per prodotto
-  var livelloPerProd = {};
-  cisterne.forEach(function(c) { livelloPerProd[c.prodotto] = (livelloPerProd[c.prodotto] || 0) + Number(c.livello_attuale || 0); });
-  // Apertura anno per prodotto (dalla rettifica del 31/12 anno-1)
-  var aperturaAnnoPerProd = {};
-  rettApertura.forEach(function(r) { aperturaAnnoPerProd[r.prodotto] = Number(r.litri || 0); });
-  // Per ogni prodotto: calcola saldo atteso al giorno corrente
-  var anomalie = [];
-  var ordiniOggi = _DM_STATO.dati.ordini;
-  var rettifeOggi = _DM_STATO.dati.rettifiche;
-  function isVendDep(o) { return o.tipo_ordine === 'cliente' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }
-  function isStazDep(o) { return o.tipo_ordine === 'stazione_servizio' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }
-  function isAutoc(o) { return o.tipo_ordine === 'autoconsumo'; }
-  function isAcq(o) { return o.tipo_ordine === 'entrata_deposito'; }
-  _DM_PRODOTTI.forEach(function(prod) {
-    function sumOrd(arr, filterFn) {
-      return arr.filter(function(o){ return o.prodotto === prod && filterFn(o); })
-                .reduce(function(s, x) { return s + Number(x.litri || 0); }, 0);
-    }
-    function sumRett(arr) {
-      return arr.filter(function(r){ return r.prodotto === prod; })
-                .reduce(function(s, x) { return s + Number(x.litri || 0); }, 0);
-    }
-    // Movimenti dei giorni precedenti (dall'inizio anno a ieri)
-    var acqPrec = sumOrd(ordPrec, isAcq);
-    var vendDepPrec = sumOrd(ordPrec, isVendDep);
-    var stazPrec = sumOrd(ordPrec, isStazDep);
-    var autocPrec = sumOrd(ordPrec, isAutoc);
-    var rettPrecN = sumRett(rettPrec);
-    // Apertura giorno corrente = apertura anno + movimenti netti dei giorni precedenti
-    var aperturaAnno = aperturaAnnoPerProd[prod] || 0;
-    var aperturaGiorno = aperturaAnno + acqPrec - vendDepPrec - stazPrec - autocPrec + rettPrecN;
-    // Movimenti di oggi
-    var acqOggi = sumOrd(ordiniOggi, isAcq);
-    var vendDepOggi = sumOrd(ordiniOggi, isVendDep);
-    var stazOggi = sumOrd(ordiniOggi, isStazDep);
-    var autocOggi = sumOrd(ordiniOggi, isAutoc);
-    var rettOggi = sumRett(rettifeOggi);
-    // Saldo atteso fine giornata
-    var saldoAtteso = aperturaGiorno + acqOggi - vendDepOggi - stazOggi - autocOggi + rettOggi;
-    var livelloReale = livelloPerProd[prod] || 0;
-    var scarto = livelloReale - saldoAtteso;
-    if (Math.abs(scarto) > 1) {
-      anomalie.push({
-        prodotto: prod,
-        aperturaAnno: aperturaAnno,
-        aperturaGiorno: aperturaGiorno,
-        acq: acqOggi, vendDep: vendDepOggi, staz: stazOggi, autoc: autocOggi, rettN: rettOggi,
-        saldoAtteso: saldoAtteso, livelloReale: livelloReale, scarto: scarto
-      });
-    }
-  });
-  if (anomalie.length > 0) _dmMostraAllertaSentinella(anomalie);
-}
-
-function _dmMostraAllertaSentinella(anomalie) {
-  var existing = document.getElementById('dm-sentinella-overlay');
-  if (existing) existing.remove();
-  var ov = document.createElement('div');
-  ov.id = 'dm-sentinella-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow-y:auto';
-  var html = '<div style="background:var(--bg-card);border:0.5px solid #E24B4A;border-radius:12px;width:100%;max-width:680px;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-height:calc(100vh - 60px);display:flex;flex-direction:column">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:0.5px solid var(--border);background:rgba(226,75,74,0.06);border-radius:12px 12px 0 0">';
-  html += '<div style="font-size:14px;font-weight:600;color:#791F1F">⚠ Sentinella giacenze: scostamento rilevato</div>';
-  html += '<button onclick="document.getElementById(\'dm-sentinella-overlay\').remove()" style="background:transparent;border:0.5px solid var(--border);border-radius:50%;width:28px;height:28px;cursor:pointer;color:var(--text-muted);font-size:15px">×</button>';
-  html += '</div>';
-  html += '<div style="padding:14px 18px;overflow-y:auto;flex:1">';
-  html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">Le cisterne deposito non quadrano con il calcolo algebrico (apertura + acquisti − vendite). Verifica i seguenti prodotti:</div>';
-  anomalie.forEach(function(a) {
-    var col = a.scarto > 0 ? '#791F1F' : '#173404';
-    var segno = a.scarto > 0 ? 'in eccesso' : 'in difetto';
-    html += '<div style="background:#FCEBEB;border-left:3px solid #E24B4A;border-radius:0 6px 6px 0;padding:10px 12px;margin-bottom:10px">';
-    html += '<div style="font-size:13px;font-weight:600;margin-bottom:6px">' + esc(a.prodotto) + '</div>';
-    html += '<table style="width:100%;font-size:11px;font-feature-settings:\'tnum\'">';
-    html += '<tr><td style="color:var(--text-muted)">Apertura anno (rettifica 31/12 anno-1)</td><td style="text-align:right;font-family:var(--font-mono)">' + _dmFmt(a.aperturaAnno) + ' L</td></tr>';
-    html += '<tr><td style="color:var(--text-muted)">+ movimenti netti dei giorni precedenti</td><td style="text-align:right;font-family:var(--font-mono)">' + _dmFmt(a.aperturaGiorno - a.aperturaAnno) + ' L</td></tr>';
-    html += '<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td style="padding-top:5px;font-weight:600">= Apertura giornata</td><td style="padding-top:5px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _dmFmt(a.aperturaGiorno) + ' L</td></tr>';
-    html += '<tr><td style="color:var(--text-muted)">+ Acquisti del giorno</td><td style="text-align:right;font-family:var(--font-mono);color:#173404">+' + _dmFmt(a.acq) + ' L</td></tr>';
-    html += '<tr><td style="color:var(--text-muted)">− Vendite da deposito</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.vendDep) + ' L</td></tr>';
-    html += '<tr><td style="color:var(--text-muted)">− Consegne stazione</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.staz) + ' L</td></tr>';
-    html += '<tr><td style="color:var(--text-muted)">− Autoconsumo</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.autoc) + ' L</td></tr>';
-    html += '<tr><td style="color:var(--text-muted)">+ Rettifiche netto</td><td style="text-align:right;font-family:var(--font-mono)">' + (a.rettN >= 0 ? '+' : '') + _dmFmt(a.rettN) + ' L</td></tr>';
-    html += '<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td style="padding-top:5px;font-weight:600">= Saldo atteso</td><td style="padding-top:5px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _dmFmt(a.saldoAtteso) + ' L</td></tr>';
-    html += '<tr><td style="font-weight:600">Livello cisterne reale</td><td style="text-align:right;font-family:var(--font-mono);font-weight:600">' + _dmFmt(a.livelloReale) + ' L</td></tr>';
-    html += '<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td style="padding-top:5px;font-weight:700;color:' + col + '">Scarto (' + segno + ')</td><td style="padding-top:5px;text-align:right;font-family:var(--font-mono);font-weight:700;color:' + col + '">' + (a.scarto > 0 ? '+' : '') + _dmFmt(a.scarto) + ' L</td></tr>';
-    html += '</table>';
-    html += '</div>';
-  });
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;font-style:italic">Verifica i movimenti del giorno e i giorni precedenti per individuare l\'origine dello scostamento.</div>';
-  html += '</div>';
-  html += '<div style="display:flex;justify-content:flex-end;padding:12px 18px;border-top:0.5px solid var(--border);background:var(--bg);border-radius:0 0 12px 12px">';
-  html += '<button onclick="document.getElementById(\'dm-sentinella-overlay\').remove()" style="background:#E24B4A;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Ho visto, chiudi</button>';
-  html += '</div>';
-  html += '</div>';
-  ov.innerHTML = html;
-  document.body.appendChild(ov);
-}
+// SENTINELLA RIMOSSA in v20260430n: le funzioni _dmEseguiSentinella e
+// _dmMostraAllertaSentinella sono state cancellate. Il modulo Dettaglio
+// movimenti mostra solo aggregati di ordini/rettifiche.
 
 function stampaDettaglioMovimenti(data) {
   var w = (typeof _apriReport === 'function') ? _apriReport('Dettaglio movimenti ' + data) : null;
