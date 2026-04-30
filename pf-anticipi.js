@@ -1,13 +1,35 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
-// Phoenix Fuel — 29/04/2026 (v20260429a)
+// Phoenix Fuel — 30/04/2026 (v20260430a)
 //
-// Patch 29/04:
+// Patch 30/04: permessi granulari per operatori (Adele, Chiara)
+//   Aggiunti 5 sub-permessi sotto 'anticipi' in SEZIONI_SISTEMA:
+//     - anticipi.presenta   → crea nuovo modulo SBF
+//     - anticipi.accredito  → registra accrediti banca
+//     - anticipi.incasso    → registra incassi clienti
+//     - anticipi.modifica   → modifica modulo/fattura
+//     - anticipi.regole     → gestione regole + blacklist
+//   Helper _antPuo... ammettono ora admin OPPURE sub-permesso specifico.
+//   Operatori abilitati su tutti e 5 i sub-permessi operano a 360°.
+//   Toast aggiornati: "Permesso negato: chiedi all'amministratore..."
+//
+// Patch 29/04 (a):
 //   - Caricamento clienti.cliente_rete in cache (si distingue rete vs consumo)
 //   - Modale Presenta: righe rete in arancione + badge "RETE" + warning
 //   - Filtro "solo consumo" / "tutti" per nascondere/vedere fatture rete
 //   - Propagazione stato modulo→fatture: gestita lato DB dal nuovo trigger
 //     trg_propaga_stato_pres_a_fatture (vedi fix_propagazione_anticipi.sql)
+//
+// Patch 29/04 (b) — audit performance + bugfix:
+//   - FIX filtro RETE: lookup per cliente_id NON funzionava perché Danea
+//     non popola cliente_id su fatture_emesse (solo cessionario_denominazione).
+//     Ora indicizza i clienti rete sia per id sia per nome (case-insensitive).
+//   - PERF modale Presenta: 3 query iniziali (regole/busy/fatture) ora in
+//     Promise.all → 1 round-trip invece di 3.
+//   - PERF chunk fatture_pagamenti: prima loop sequenziale (fino a 8 round-trip
+//     per 1500 fatture); ora Promise.all su tutti i chunk → 1 round-trip.
+//   - PERF modale Dettaglio: 3 query dipendenti (fatture/accrediti/costi)
+//     ora in Promise.all → 1 round-trip invece di 3.
 //
 // Architettura:
 //   - Tab "Anticipo Fatture" dentro Banche & Mutui (id: banche-panel-anticipi)
@@ -48,12 +70,14 @@ function _antPuoVedere() {
   if (utenteCorrente.ruolo === 'admin') return true;
   return (typeof _haPermesso === 'function') && _haPermesso('anticipi');
 }
-// Tutti i write = solo admin (decisione utente 28/04)
-function _antPuoPresentare()    { return _antIsAdmin(); }
-function _antPuoAccredito()     { return _antIsAdmin(); }
-function _antPuoIncasso()       { return _antIsAdmin(); }
-function _antPuoModificare()    { return _antIsAdmin(); }
-function _antPuoGestireRegole() { return _antIsAdmin(); }
+// Patch 30/04: write configurabile via sub-permessi granulari (admin sempre).
+// Operatori (Adele, Chiara) abilitati su tutti e 5 i sub-permessi operano a 360°.
+// Sub-permessi dichiarati in SEZIONI_SISTEMA di pf-admin.js sotto id 'anticipi'.
+function _antPuoPresentare()    { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.presenta')); }
+function _antPuoAccredito()     { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.accredito')); }
+function _antPuoIncasso()       { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.incasso')); }
+function _antPuoModificare()    { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.modifica')); }
+function _antPuoGestireRegole() { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.regole')); }
 function _antPuoVedereStorico() { return _antPuoVedere(); }
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
@@ -733,7 +757,7 @@ function _antApriDettaglioModulo(presentazioneId) {
 var _antPresentaState = null;
 
 async function _antRenderModalePresenta(affidamentoId) {
-  if (!_antPuoPresentare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoPresentare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
 
   apriModal('<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Carico fatture presentabili...</div>');
 
@@ -753,22 +777,23 @@ async function _antRenderModalePresenta(affidamentoId) {
     return;
   }
 
-  // 2. Carica blacklist banca + fatture già impegnate + fatture candidate
-  var resBL = await sb.from('anticipi_sbf_regole').select('cliente_id').eq('affidamento_id', affidamentoId).eq('stato', 'esclusa');
+  // 2. Carica in parallelo: blacklist banca + fatture già impegnate + fatture candidate
+  // (prima erano 3 await sequenziali = 3 round-trip; ora 1 round-trip parallelo)
+  var [resBL, resBusy, resF] = await Promise.all([
+    sb.from('anticipi_sbf_regole').select('cliente_id').eq('affidamento_id', affidamentoId).eq('stato', 'esclusa'),
+    sb.from('anticipi_sbf_fatture').select('fattura_id').not('fattura_id', 'is', null).neq('stato', 'esclusa'),
+    // Fatture emesse: query molto larga, filtraggio fine in JS dopo.
+    // - Includiamo tutti i tipi vendita (TD01/TD06/TD24/TD25) — note credito TD04 escluse perché negative
+    // - Niente filtro temporale duro: prendiamo le 1500 più recenti
+    // - importo_totale > 0 per evitare note credito (TD04) e fatture acconto azzerate
+    sb.from('fatture_emesse')
+      .select('id, numero, data, cliente_id, cessionario_denominazione, importo_totale, imponibile_totale, tipo_documento')
+      .gt('importo_totale', 0)
+      .order('data', { ascending: false })
+      .limit(1500)
+  ]);
   var blacklistSet = new Set((resBL.data || []).map(function(r) { return r.cliente_id; }).filter(Boolean));
-
-  var resBusy = await sb.from('anticipi_sbf_fatture').select('fattura_id').not('fattura_id', 'is', null).neq('stato', 'esclusa');
   var fattureBusy = new Set((resBusy.data || []).map(function(r) { return r.fattura_id; }));
-
-  // Fatture emesse: query molto larga, filtraggio fine in JS dopo.
-  // - Includiamo tutti i tipi vendita (TD01/TD06/TD24/TD25) — note credito TD04 escluse perché negative
-  // - Niente filtro temporale duro: prendiamo le 1500 più recenti
-  // - importo_totale > 0 per evitare note credito (TD04) e fatture acconto azzerate
-  var resF = await sb.from('fatture_emesse')
-    .select('id, numero, data, cliente_id, cessionario_denominazione, importo_totale, imponibile_totale, tipo_documento')
-    .gt('importo_totale', 0)
-    .order('data', { ascending: false })
-    .limit(1500);
 
   if (resF.error) {
     apriModal('<div style="max-width:520px;padding:20px"><div style="color:#A32D2D;font-weight:600">❌ Errore caricamento fatture: ' + esc(resF.error.message) + '</div><div style="margin-top:12px;text-align:right"><button onclick="chiudiModal()" style="padding:8px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div></div>');
@@ -807,15 +832,19 @@ async function _antRenderModalePresenta(affidamentoId) {
   var fIds = fattureCandidate.map(function(f) { return f.id; });
   var pagPerFatt = {};
   if (fIds.length) {
-    // Chunk a 200 per non superare limiti URL
-    for (var i = 0; i < fIds.length; i += 200) {
-      var chunk = fIds.slice(i, i + 200);
-      var resP = await sb.from('fatture_pagamenti').select('fattura_id, data_scadenza, importo_pagamento').in('fattura_id', chunk).order('data_scadenza');
+    // Chunk a 200 per non superare limiti URL — eseguiti in PARALLELO (Promise.all)
+    // Prima erano sequenziali (8 round-trip per 1500 fatture); ora 1 round-trip parallelo.
+    var chunks = [];
+    for (var i = 0; i < fIds.length; i += 200) chunks.push(fIds.slice(i, i + 200));
+    var risChunks = await Promise.all(chunks.map(function(chunk) {
+      return sb.from('fatture_pagamenti').select('fattura_id, data_scadenza, importo_pagamento').in('fattura_id', chunk).order('data_scadenza');
+    }));
+    risChunks.forEach(function(resP) {
       (resP.data || []).forEach(function(p) {
         if (!pagPerFatt[p.fattura_id]) pagPerFatt[p.fattura_id] = [];
         pagPerFatt[p.fattura_id].push(p);
       });
-    }
+    });
   }
 
   // Inietta scadenza_cliente più lontana (tipicamente l'ultima rata) su ogni fattura
@@ -838,18 +867,32 @@ async function _antRenderModalePresenta(affidamentoId) {
     ? (Number(fido.massimale_cliente_pct) / 100) * Number(fido.importo_accordato)
     : null;
 
-  // Cache clienti per flag cliente_rete (se non già caricata)
-  if (!_antClientiCache) {
+  // Cache clienti per flag cliente_rete (se non già caricata o se manca il campo)
+  // NB: Danea NON popola cliente_id su fatture_emesse — abbiamo solo cessionario_denominazione.
+  // Quindi indicizziamo i clienti rete sia per id sia per nome (case-insensitive) per matching robusto.
+  if (!_antClientiCache || !_antClientiCache.length || typeof _antClientiCache[0].cliente_rete === 'undefined') {
     try {
       var resCli = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome, cliente_rete').limit(2000);
       _antClientiCache = (resCli.data || []).map(function(c) {
-        return { id: c.id, nome: c.ragione_sociale || c.denominazione || c.nome || '—', cliente_rete: c.cliente_rete === true };
+        return {
+          id: c.id,
+          nome: c.ragione_sociale || c.denominazione || c.nome || '—',
+          cliente_rete: c.cliente_rete === true
+        };
       }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
     } catch (e) { _antClientiCache = []; }
   }
-  var clientiReteSet = new Set((_antClientiCache || []).filter(function(c){ return c.cliente_rete; }).map(function(c){ return c.id; }));
+  var clientiReteIdSet = new Set();
+  var clientiReteNomeSet = new Set();
+  (_antClientiCache || []).forEach(function(c) {
+    if (!c.cliente_rete) return;
+    if (c.id) clientiReteIdSet.add(c.id);
+    if (c.nome) clientiReteNomeSet.add(c.nome.trim().toLowerCase());
+  });
   fattureCandidate.forEach(function(f) {
-    f._is_rete = !!(f.cliente_id && clientiReteSet.has(f.cliente_id));
+    var byId = f.cliente_id && clientiReteIdSet.has(f.cliente_id);
+    var byNome = f.cessionario_denominazione && clientiReteNomeSet.has(f.cessionario_denominazione.trim().toLowerCase());
+    f._is_rete = !!(byId || byNome);
   });
 
   // State globale modale
@@ -1312,9 +1355,13 @@ async function _antRenderDettaglioModulo(presentazioneId) {
   }
   var p = resP.data;
 
-  var resF = await sb.from('anticipi_sbf_fatture').select('*').eq('presentazione_id', presentazioneId).order('numero_fattura');
-  var resA = await sb.from('anticipi_sbf_accrediti').select('*').eq('presentazione_id', presentazioneId).order('data_accredito');
-  var resC = await sb.from('anticipi_sbf_costi').select('*').eq('presentazione_id', presentazioneId).order('data_competenza');
+  // Le 3 query dipendenti (fatture/accrediti/costi) si fanno in parallelo:
+  // prima erano 3 await sequenziali (3 round-trip), ora 1 round-trip parallelo.
+  var [resF, resA, resC] = await Promise.all([
+    sb.from('anticipi_sbf_fatture').select('*').eq('presentazione_id', presentazioneId).order('numero_fattura'),
+    sb.from('anticipi_sbf_accrediti').select('*').eq('presentazione_id', presentazioneId).order('data_accredito'),
+    sb.from('anticipi_sbf_costi').select('*').eq('presentazione_id', presentazioneId).order('data_competenza')
+  ]);
 
   var fatture = resF.data || [];
   var accrediti = resA.data || [];
@@ -1531,7 +1578,7 @@ function _antStampaPDFBanca(affidamentoId) {
 // si scrive solo stato='esclusa' (decisione utente 28/04).
 // ─────────────────────────────────────────────────────────────────────────────
 async function _antApriModaleRegola(regolaId, affidamentoId) {
-  if (!_antPuoGestireRegole()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoGestireRegole()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
 
   // Carica regola esistente se in modifica
   var regola = null;
@@ -1615,7 +1662,7 @@ async function _antApriModaleRegola(regolaId, affidamentoId) {
 }
 
 async function _antSalvaRegola(regolaId, affidamentoId) {
-  if (!_antPuoGestireRegole()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoGestireRegole()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
 
   var clienteIdRaw = (document.getElementById('mod-reg-cliente').value || '').trim();
   var clienteId = clienteIdRaw || null;
@@ -1665,7 +1712,7 @@ async function _antSalvaRegola(regolaId, affidamentoId) {
 }
 
 async function _antEliminaRegola(regolaId) {
-  if (!_antPuoGestireRegole()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoGestireRegole()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!regolaId) return;
 
   // Recupera info regola per messaggio confirm
@@ -1693,7 +1740,7 @@ async function _antEliminaRegola(regolaId) {
 // Più accrediti per stesso modulo sono ammessi (caso reale: 49.759 il 23/04
 // + 14.448 il 24/04). UI: data, importo, note + lista accrediti già fatti.
 async function _antRenderModaleAccredito(presentazioneId) {
-  if (!_antPuoAccredito()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoAccredito()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!presentazioneId) return;
 
   apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
@@ -1766,7 +1813,7 @@ async function _antRenderModaleAccredito(presentazioneId) {
 }
 
 async function _antSalvaAccredito(presentazioneId) {
-  if (!_antPuoAccredito()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoAccredito()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   var data = document.getElementById('ant-acc-data').value;
   var importoRaw = document.getElementById('ant-acc-importo').value;
   var note = (document.getElementById('ant-acc-note').value || '').trim() || null;
@@ -1790,7 +1837,7 @@ async function _antSalvaAccredito(presentazioneId) {
 }
 
 async function _antEliminaAccredito(accreditoId, presentazioneId) {
-  if (!_antPuoAccredito()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoAccredito()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!confirm('Eliminare questo accredito?\n\nIl trigger DB ricalcolerà importo_anticipato_totale e stato del modulo.')) return;
   var resD = await sb.from('anticipi_sbf_accrediti').delete().eq('id', accreditoId);
   if (resD.error) { toast('❌ Errore: ' + resD.error.message); return; }
@@ -1810,7 +1857,7 @@ async function _antEliminaAccredito(accreditoId, presentazioneId) {
 // dell'importo è importo_anticipato_calcolato (caso 95%). Se diverso, l'utente
 // modifica. Stato passa a 'estinta'.
 async function _antRenderModaleIncasso(fatturaAntId) {
-  if (!_antPuoIncasso()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoIncasso()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!fatturaAntId) return;
 
   apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
@@ -1865,7 +1912,7 @@ async function _antRenderModaleIncasso(fatturaAntId) {
 }
 
 async function _antSalvaIncasso(fatturaAntId) {
-  if (!_antPuoIncasso()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoIncasso()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   var insoluta = document.getElementById('ant-inc-insoluta').checked;
   var data = document.getElementById('ant-inc-data').value;
   var importoRaw = document.getElementById('ant-inc-importo').value;
@@ -1905,7 +1952,7 @@ async function _antSalvaIncasso(fatturaAntId) {
 // con stato in_delibera: "Annulla modulo" → cancella presentazione (cascade
 // cancella fatture, che tornano disponibili).
 async function _antRenderModaleModulo(presentazioneId) {
-  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!presentazioneId) return;
 
   apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
@@ -1961,7 +2008,7 @@ async function _antRenderModaleModulo(presentazioneId) {
 }
 
 async function _antSalvaModulo(presentazioneId) {
-  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   var dataPres = document.getElementById('mod-mod-data').value;
   var prot = (document.getElementById('mod-mod-prot').value || '').trim() || null;
   var stato = document.getElementById('mod-mod-stato').value;
@@ -1984,7 +2031,7 @@ async function _antSalvaModulo(presentazioneId) {
 }
 
 async function _antEliminaModulo(presentazioneId) {
-  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!confirm('Annullare definitivamente questo modulo?\n\nTutte le fatture associate torneranno disponibili per altri moduli. Operazione irreversibile.')) return;
   // ON DELETE CASCADE su anticipi_sbf_fatture e _accrediti li rimuove insieme
   var resD = await sb.from('anticipi_sbf_presentazioni').delete().eq('id', presentazioneId);
@@ -2003,7 +2050,7 @@ async function _antEliminaModulo(presentazioneId) {
 // era stato registrato, viene azzerato). Una fattura esclusa torna disponibile
 // per essere presentata su un altro modulo.
 async function _antRenderModaleFattura(fatturaAntId) {
-  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!fatturaAntId) return;
 
   apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">⏳ Caricamento...</div>');
@@ -2051,7 +2098,7 @@ async function _antRenderModaleFattura(fatturaAntId) {
 }
 
 async function _antSalvaFattura(fatturaAntId) {
-  if (!_antPuoModificare()) { toast('Operazione riservata all\'amministratore'); return; }
+  if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   var scad = document.getElementById('mod-fat-scad').value;
   var stato = document.getElementById('mod-fat-stato').value;
   var note = (document.getElementById('mod-fat-note').value || '').trim() || null;

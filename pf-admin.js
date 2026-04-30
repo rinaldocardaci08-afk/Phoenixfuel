@@ -18,7 +18,13 @@ const SEZIONI_SISTEMA = [
   {id:'finanze',label:'Finanze',icon:'🏦'},
   {id:'fatture',label:'Fatture',icon:'🧾'},
   {id:'banche',label:'Banche & Mutui',icon:'🏛'},
-  {id:'anticipi',label:'Anticipo Fatture',icon:'📄'},
+  {id:'anticipi',label:'Anticipo Fatture',icon:'📄', sub:[
+    {id:'anticipi.presenta',label:'Crea nuovo modulo SBF'},
+    {id:'anticipi.accredito',label:'Registra accrediti banca'},
+    {id:'anticipi.incasso',label:'Registra incassi clienti'},
+    {id:'anticipi.modifica',label:'Modifica modulo/fattura'},
+    {id:'anticipi.regole',label:'Gestione regole e blacklist'}
+  ]},
   {id:'clienti',label:'Clienti',icon:'👤'},
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
   {id:'basi',label:'Basi di carico',icon:'📍'},
