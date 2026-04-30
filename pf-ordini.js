@@ -1216,46 +1216,78 @@ function _dmCalcolaAggregati() {
 async function _dmEseguiSentinella() {
   if (!_DM_STATO.dati || !_DM_STATO.dataCorrente) return;
   var data = _DM_STATO.dataCorrente;
-  // Carica cisterne deposito + somma movimenti per prodotto fino a "data" e fino a "data-1"
-  var [cistRes, movRes] = await Promise.all([
+  // Apertura anno = rettifica fine anno precedente (31/12 anno-1) per ogni prodotto.
+  // Es: per data del 2026, leggo rettifiche_inventario del 31/12/2025.
+  var anno = parseInt(data.substring(0,4), 10);
+  var dataApertura = (anno - 1) + '-12-31';
+  var dataInizioAnno = anno + '-01-01';
+  // Carico in parallelo:
+  // 1) cisterne deposito (livello attuale)
+  // 2) rettifica apertura anno (saldo finale anno precedente)
+  // 3) ordini DELL'ANNO da 1/1 a ieri (esclusi 2025) — per saldo atteso
+  // 4) ordini di OGGI (già caricati in _DM_STATO.dati ma dobbiamo confrontare)
+  // 5) rettifiche dell'anno fino a ieri
+  var [cistRes, rettAperturaRes, ordPrecRes, rettPrecRes] = await Promise.all([
     sb.from('cisterne').select('id,prodotto,livello_attuale').eq('sede','deposito_vibo'),
-    sb.from('movimenti_cisterne').select('cisterna_id,tipo,litri,data').lte('data', data)
+    sb.from('rettifiche_inventario').select('prodotto,litri').eq('data', dataApertura),
+    sb.from('ordini').select('prodotto,tipo_ordine,fornitore,litri,stato').gte('data', dataInizioAnno).lt('data', data).neq('stato','annullato'),
+    sb.from('rettifiche_inventario').select('prodotto,litri').gte('data', dataInizioAnno).lt('data', data)
   ]);
   if (cistRes.error || !cistRes.data) return;
   var cisterne = cistRes.data;
-  var movimenti = (movRes && movRes.data) || [];
-  // Aggrega livello attuale per prodotto
+  var rettApertura = (rettAperturaRes && rettAperturaRes.data) || [];
+  var ordPrec = (ordPrecRes && ordPrecRes.data) || [];
+  var rettPrec = (rettPrecRes && rettPrecRes.data) || [];
+  // Aggrega livello cisterne per prodotto
   var livelloPerProd = {};
   cisterne.forEach(function(c) { livelloPerProd[c.prodotto] = (livelloPerProd[c.prodotto] || 0) + Number(c.livello_attuale || 0); });
-  // Aggrega netto movimenti fino a ieri (apertura giorno) per prodotto, via cisterna_id → prodotto
-  var prodPerCisterna = {};
-  cisterne.forEach(function(c) { prodPerCisterna[c.id] = c.prodotto; });
-  var aperturaPerProd = {};
-  movimenti.forEach(function(m) {
-    if (m.data >= data) return; // solo fino a ieri compreso
-    var p = prodPerCisterna[m.cisterna_id];
-    if (!p) return;
-    aperturaPerProd[p] = (aperturaPerProd[p] || 0) + (m.tipo === 'entrata' ? Number(m.litri || 0) : -Number(m.litri || 0));
-  });
-  // Per ogni prodotto calcola saldo atteso
+  // Apertura anno per prodotto (dalla rettifica del 31/12 anno-1)
+  var aperturaAnnoPerProd = {};
+  rettApertura.forEach(function(r) { aperturaAnnoPerProd[r.prodotto] = Number(r.litri || 0); });
+  // Per ogni prodotto: calcola saldo atteso al giorno corrente
   var anomalie = [];
-  var ordini = _DM_STATO.dati.ordini;
-  var rettifiche = _DM_STATO.dati.rettifiche;
+  var ordiniOggi = _DM_STATO.dati.ordini;
+  var rettifeOggi = _DM_STATO.dati.rettifiche;
+  function isVendDep(o) { return o.tipo_ordine === 'cliente' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }
+  function isStazDep(o) { return o.tipo_ordine === 'stazione_servizio' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }
+  function isAutoc(o) { return o.tipo_ordine === 'autoconsumo'; }
+  function isAcq(o) { return o.tipo_ordine === 'entrata_deposito'; }
   _DM_PRODOTTI.forEach(function(prod) {
-    var ordP = ordini.filter(function(o) { return o.prodotto === prod; });
-    var rettP = rettifiche.filter(function(r) { return r.prodotto === prod; });
-    function sum(arr) { return arr.reduce(function(s, x) { return s + Number(x.litri || 0); }, 0); }
-    var acq = sum(ordP.filter(function(o){ return o.tipo_ordine === 'entrata_deposito'; }));
-    var vendDep = sum(ordP.filter(function(o){ return o.tipo_ordine === 'cliente' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }));
-    var staz = sum(ordP.filter(function(o){ return o.tipo_ordine === 'stazione_servizio' && (o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0; }));
-    var autoc = sum(ordP.filter(function(o){ return o.tipo_ordine === 'autoconsumo'; }));
-    var rettN = rettP.reduce(function(s, x) { return s + Number(x.litri || 0); }, 0);
-    var apertura = aperturaPerProd[prod] || 0;
-    var saldoAtteso = apertura + acq - vendDep - staz - autoc + rettN;
+    function sumOrd(arr, filterFn) {
+      return arr.filter(function(o){ return o.prodotto === prod && filterFn(o); })
+                .reduce(function(s, x) { return s + Number(x.litri || 0); }, 0);
+    }
+    function sumRett(arr) {
+      return arr.filter(function(r){ return r.prodotto === prod; })
+                .reduce(function(s, x) { return s + Number(x.litri || 0); }, 0);
+    }
+    // Movimenti dei giorni precedenti (dall'inizio anno a ieri)
+    var acqPrec = sumOrd(ordPrec, isAcq);
+    var vendDepPrec = sumOrd(ordPrec, isVendDep);
+    var stazPrec = sumOrd(ordPrec, isStazDep);
+    var autocPrec = sumOrd(ordPrec, isAutoc);
+    var rettPrecN = sumRett(rettPrec);
+    // Apertura giorno corrente = apertura anno + movimenti netti dei giorni precedenti
+    var aperturaAnno = aperturaAnnoPerProd[prod] || 0;
+    var aperturaGiorno = aperturaAnno + acqPrec - vendDepPrec - stazPrec - autocPrec + rettPrecN;
+    // Movimenti di oggi
+    var acqOggi = sumOrd(ordiniOggi, isAcq);
+    var vendDepOggi = sumOrd(ordiniOggi, isVendDep);
+    var stazOggi = sumOrd(ordiniOggi, isStazDep);
+    var autocOggi = sumOrd(ordiniOggi, isAutoc);
+    var rettOggi = sumRett(rettifeOggi);
+    // Saldo atteso fine giornata
+    var saldoAtteso = aperturaGiorno + acqOggi - vendDepOggi - stazOggi - autocOggi + rettOggi;
     var livelloReale = livelloPerProd[prod] || 0;
     var scarto = livelloReale - saldoAtteso;
     if (Math.abs(scarto) > 1) {
-      anomalie.push({ prodotto: prod, apertura: apertura, acq: acq, vendDep: vendDep, staz: staz, autoc: autoc, rettN: rettN, saldoAtteso: saldoAtteso, livelloReale: livelloReale, scarto: scarto });
+      anomalie.push({
+        prodotto: prod,
+        aperturaAnno: aperturaAnno,
+        aperturaGiorno: aperturaGiorno,
+        acq: acqOggi, vendDep: vendDepOggi, staz: stazOggi, autoc: autocOggi, rettN: rettOggi,
+        saldoAtteso: saldoAtteso, livelloReale: livelloReale, scarto: scarto
+      });
     }
   });
   if (anomalie.length > 0) _dmMostraAllertaSentinella(anomalie);
@@ -1280,7 +1312,9 @@ function _dmMostraAllertaSentinella(anomalie) {
     html += '<div style="background:#FCEBEB;border-left:3px solid #E24B4A;border-radius:0 6px 6px 0;padding:10px 12px;margin-bottom:10px">';
     html += '<div style="font-size:13px;font-weight:600;margin-bottom:6px">' + esc(a.prodotto) + '</div>';
     html += '<table style="width:100%;font-size:11px;font-feature-settings:\'tnum\'">';
-    html += '<tr><td style="color:var(--text-muted)">Apertura giornata (da movimenti)</td><td style="text-align:right;font-family:var(--font-mono)">' + _dmFmt(a.apertura) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">Apertura anno (rettifica 31/12 anno-1)</td><td style="text-align:right;font-family:var(--font-mono)">' + _dmFmt(a.aperturaAnno) + ' L</td></tr>';
+    html += '<tr><td style="color:var(--text-muted)">+ movimenti netti dei giorni precedenti</td><td style="text-align:right;font-family:var(--font-mono)">' + _dmFmt(a.aperturaGiorno - a.aperturaAnno) + ' L</td></tr>';
+    html += '<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td style="padding-top:5px;font-weight:600">= Apertura giornata</td><td style="padding-top:5px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _dmFmt(a.aperturaGiorno) + ' L</td></tr>';
     html += '<tr><td style="color:var(--text-muted)">+ Acquisti del giorno</td><td style="text-align:right;font-family:var(--font-mono);color:#173404">+' + _dmFmt(a.acq) + ' L</td></tr>';
     html += '<tr><td style="color:var(--text-muted)">− Vendite da deposito</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.vendDep) + ' L</td></tr>';
     html += '<tr><td style="color:var(--text-muted)">− Consegne stazione</td><td style="text-align:right;font-family:var(--font-mono)">−' + _dmFmt(a.staz) + ' L</td></tr>';
