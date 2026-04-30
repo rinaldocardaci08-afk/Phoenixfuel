@@ -393,13 +393,55 @@ async function confermaCostoDeposito(prodotto) {
   const prodottoMap = getProdottoTipoCisterna();
   const tipo = prodottoMap[prodotto] || 'autotrazione';
 
-  const { error } = await sb.from('cisterne').update({ costo_medio: nuovoCosto, updated_at: new Date().toISOString() }).eq('tipo', tipo);
+  // Patch 30/04 (h): leggi prima il CMP precedente e i litri totali, così posso
+  // registrare la rettifica nello storico CMP (stesso pattern usato dalla
+  // modifica CMP manuale da Deposito - vedi pf-deposito.js:_salvaModificaCMP).
+  // Senza questo step, la modifica restava su `cisterne.costo_medio` ma la pagina
+  // continuava a mostrare il CMP storico vecchio (visibile via _cmpStoricoAllaData).
+  const { data: cisternePre } = await sb.from('cisterne')
+    .select('id,prodotto,sede,costo_medio,livello_attuale')
+    .eq('tipo', tipo)
+    .eq('sede', 'deposito_vibo');
+  const cmpPrecedente = cisternePre && cisternePre[0] ? Number(cisternePre[0].costo_medio || 0) : 0;
+  const sede = cisternePre && cisternePre[0] ? cisternePre[0].sede : 'deposito_vibo';
+  const litriTotali = (cisternePre || []).reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
+
+  // 1) Aggiorna costo_medio sulle cisterne (filtro sede + tipo per non toccare la stazione)
+  const { error } = await sb.from('cisterne')
+    .update({ costo_medio: nuovoCosto, updated_at: new Date().toISOString() })
+    .eq('tipo', tipo)
+    .eq('sede', 'deposito_vibo');
   if (error) { toast('Errore: ' + error.message); return; }
 
-  // Invalida cache cisterne
-  _cacheCisterne = null;
+  // 2) Registra la rettifica nello storico CMP (data odierna). Da questo momento
+  //    _cmpStoricoAllaData(prodotto, 'deposito_vibo', oggi) restituirà il nuovo valore.
+  const oggiISO = new Date().toISOString().split('T')[0];
+  try {
+    await sb.from('stazione_cmp_storico').insert([{
+      data: oggiISO,
+      prodotto: prodotto,
+      sede: sede,
+      cmp_precedente: cmpPrecedente,
+      cmp_nuovo: nuovoCosto,
+      litri_precedenti: litriTotali,
+      litri_caricati: 0,
+      costo_carico: nuovoCosto,
+      ordine_id: null
+    }]);
+  } catch (e) {
+    console.warn('Impossibile registrare modifica CMP nello storico:', e);
+  }
 
-  toast('Costo medio ' + prodotto + ' aggiornato a ' + fmt(nuovoCosto));
+  // 3) Invalida cache cisterne (e storico CMP se esiste una cache locale)
+  _cacheCisterne = null;
+  if (typeof _cmpStoricoCache !== 'undefined') _cmpStoricoCache = null;
+
+  // 4) Audit log se disponibile
+  if (typeof _auditLog === 'function') {
+    _auditLog('modifica_cmp_da_listino', 'cisterne', 'CMP ' + prodotto + ' modificato da ' + cmpPrecedente.toFixed(6) + ' a ' + nuovoCosto.toFixed(6) + ' (rettifica da Listino, storico aggiornato)');
+  }
+
+  toast('✓ CMP ' + prodotto + ' aggiornato a ' + fmt(nuovoCosto) + ' (storico registrato)');
   chiudiModalePermessi();
   caricaPrezzi();
 }
