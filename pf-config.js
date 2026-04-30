@@ -280,18 +280,27 @@ function fmtL(n) {
 // fmtMe(v) → margine in euro (totali), 2 decimali, grassetto, colorato. Restituisce HTML.
 // Usare SOLO per valori che rappresentano margine/marginalità/guadagno. Per costi o
 // prezzi generici continuare a usare fmt() e fmtE().
+// fmtM(v) → margine €/L (4 decimali) — verde acceso se positivo, rosso se negativo.
+// Patch 30/04/2026: colori più accesi (#639922 / #E24B4A) e segno + esplicito sui
+// positivi per leggibilità immediata nella tabella Ordini.
 function fmtM(n) {
   const v = Number(n) || 0;
   const txt = '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 }));
-  const col = v > 0.00005 ? '#27500A' : (v < -0.00005 ? '#A32D2D' : 'var(--text-muted)');
-  return '<strong style="color:' + col + '">' + txt + '</strong>';
+  let col, prefix = '';
+  if (v > 0.00005) { col = '#639922'; prefix = '+'; }
+  else if (v < -0.00005) { col = '#E24B4A'; }
+  else { col = 'var(--text-muted)'; }
+  return '<strong style="color:' + col + '">' + prefix + txt + '</strong>';
 }
 function fmtMe(n) {
   const v = Number(n) || 0;
   const dec = v % 1 === 0 ? 0 : 2;
   const txt = '€ ' + _sep(v.toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: 2 }));
-  const col = v > 0.005 ? '#27500A' : (v < -0.005 ? '#A32D2D' : 'var(--text-muted)');
-  return '<strong style="color:' + col + '">' + txt + '</strong>';
+  let col, prefix = '';
+  if (v > 0.005) { col = '#639922'; prefix = '+'; }
+  else if (v < -0.005) { col = '#E24B4A'; }
+  else { col = 'var(--text-muted)'; }
+  return '<strong style="color:' + col + '">' + prefix + txt + '</strong>';
 }
 function badgeStato(stato, record) {
   // Se passato l'intero record, rileva stati "virtuali" di visualizzazione:
