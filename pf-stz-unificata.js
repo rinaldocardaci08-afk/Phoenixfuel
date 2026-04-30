@@ -1,6 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
-// Versione 30/04/2026 (v20260430c)
+// Versione 30/04/2026 (v20260430d)
+//
+// Patch 30/04 (d) — hotfix caricamento bloccato:
+//   - Sostituito Promise.all con Promise.allSettled. Se una query fallisce
+//     (es. tabella stazione_cambio_prezzo non creata sul DB), il render
+//     prosegue invece di bloccare tutto il caricamento.
 //
 // Patch 30/04 (c): cambio prezzo SPOSTATO da pompa a PRODOTTO.
 //   Il cambio prezzo è un evento contabile a livello di prodotto, non per
@@ -55,16 +60,35 @@ async function caricaUnificata() {
   var annoCorr = new Date().getFullYear();
   var limISO = (annoCorr - 1) + '-01-01';
 
-  var [lettRes, pompeRes, prezziRes, costiRes, cisRes, cmpRes, cpRes] = await Promise.all([
+  // Patch 30/04 (d): Promise.allSettled invece di Promise.all così se una
+  // query fallisce (es. tabella stazione_cambio_prezzo non ancora creata)
+  // il caricamento prosegue con i dati che ci sono.
+  var [lettSet, pompeSet, prezziSet, costiSet, cisSet, cmpSet, cpSet] = await Promise.allSettled([
     sb.from('stazione_letture').select('*').gte('data', limISO).order('data', { ascending: false }),
     sb.from('stazione_pompe').select('*').eq('attiva', true).order('ordine'),
     sb.from('stazione_prezzi').select('*').gte('data', limISO).order('data', { ascending: false }),
     sb.from('stazione_costi').select('*').gte('data', limISO).order('data', { ascending: false }),
     sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede', 'stazione_oppido'),
     sb.from('stazione_cmp_storico').select('*').eq('sede', 'stazione_oppido').order('created_at', { ascending: false }).limit(20),
-    // Patch 30/04 (c): nuova tabella cambio prezzo per prodotto/giorno
     sb.from('stazione_cambio_prezzo').select('*').gte('data', limISO).order('data', { ascending: false })
   ]);
+  // Estrai data o array vuoto + log warning per ogni query fallita
+  function _safeData(set, label) {
+    if (set.status === 'fulfilled') {
+      if (set.value && set.value.error) { console.warn('[caricaUnificata] ' + label + ' query error:', set.value.error.message); return []; }
+      return (set.value && set.value.data) || [];
+    } else {
+      console.warn('[caricaUnificata] ' + label + ' rejected:', set.reason);
+      return [];
+    }
+  }
+  var lettRes = { data: _safeData(lettSet, 'stazione_letture') };
+  var pompeRes = { data: _safeData(pompeSet, 'stazione_pompe') };
+  var prezziRes = { data: _safeData(prezziSet, 'stazione_prezzi') };
+  var costiRes = { data: _safeData(costiSet, 'stazione_costi') };
+  var cisRes = { data: _safeData(cisSet, 'cisterne') };
+  var cmpRes = { data: _safeData(cmpSet, 'stazione_cmp_storico') };
+  var cpRes = { data: _safeData(cpSet, 'stazione_cambio_prezzo') };
 
   var letture = lettRes.data || [];
   var pompe = pompeRes.data || [];
