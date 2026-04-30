@@ -1,6 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
-// Versione 30/04/2026 (v20260430d)
+// Versione 30/04/2026 (v20260430e)
+//
+// Patch 30/04 (e) — fix bug critico bloccante render:
+//   - Nel box "Cambio prezzo per prodotto" il loop per costruire prodottiUnici
+//     usava `pompe` invece di `m.pompe`. ReferenceError silenzioso che bloccava
+//     tutto il rendering della tab Letture & Marginalità (loading infinito).
+//   - Aggiunto try/catch difensivo in caricaUnificata: se ora un blocco
+//     fallisce, viene mostrato un messaggio d'errore esplicito invece di
+//     restare bloccato.
 //
 // Patch 30/04 (d) — hotfix caricamento bloccato:
 //   - Sostituito Promise.all con Promise.allSettled. Se una query fallisce
@@ -214,10 +222,19 @@ async function caricaUnificata() {
     dirty: false // true se l'operatore ha modificato qualcosa senza salvare
   };
 
-  _uniRenderGiorno(idxIniziale);
-  _uniRenderStoricoMarg();
-  _uniRenderStoricoLett(idxIniziale);
-  _uniRenderStoricoCMP();
+  // Patch 30/04 (e): try/catch difensivo. Se una delle render fallisce
+  // (es. errore non previsto su un nuovo blocco), il loading dovrebbe almeno
+  // mostrare l'errore esplicito invece di restare in "Caricamento dati..."
+  try {
+    _uniRenderGiorno(idxIniziale);
+  } catch(e) {
+    console.error('[caricaUnificata] _uniRenderGiorno crash:', e);
+    el.innerHTML = '<div style="padding:24px;background:#FCEBEB;border:1px solid #E24B4A;border-radius:8px;color:#791F1F;font-size:13px"><strong>⚠ Errore rendering giorno corrente</strong><br><br>Dettaglio: ' + (e && e.message ? e.message : String(e)) + '<br><br><small>Stack visibile in console (F12)</small></div>';
+    return;
+  }
+  try { _uniRenderStoricoMarg(); } catch(e) { console.error('[_uniRenderStoricoMarg] crash:', e); }
+  try { _uniRenderStoricoLett(idxIniziale); } catch(e) { console.error('[_uniRenderStoricoLett] crash:', e); }
+  try { _uniRenderStoricoCMP(); } catch(e) { console.error('[_uniRenderStoricoCMP] crash:', e); }
 }
 
 // ── Navigazione ◀ ▶ + input data ──
@@ -492,7 +509,7 @@ function _uniRenderPerPompa(data) {
     // ════════════════════════════════════════════════════════════════════
     var prodottiUnici = [];
     var visti = {};
-    pompe.forEach(function(pp) { if (!visti[pp.prodotto]) { visti[pp.prodotto] = true; prodottiUnici.push(pp.prodotto); } });
+    m.pompe.forEach(function(pp) { if (!visti[pp.prodotto]) { visti[pp.prodotto] = true; prodottiUnici.push(pp.prodotto); } });
 
     if (prodottiUnici.length) {
       html += '<div style="margin-top:14px;padding:12px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px">';
@@ -569,7 +586,7 @@ function _uniRenderPerPompa(data) {
 
     el.innerHTML = html;
     // Lancia subito il calcolo live (mostra 0 o valori sensati anche prima dell'input)
-    _uniCalcolaLive();
+    try { _uniCalcolaLive(); } catch(e) { console.error('[_uniCalcolaLive] crash iniziale:', e); }
     return;
   }
 
