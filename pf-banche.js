@@ -1,6 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Sezione Banche & Mutui
-// Versione 30/04/2026 (v20260430b)
+// Versione 30/04/2026 (v20260430d)
+//
+// Patch 30/04 (d) — fix override "incollato":
+//   - Se inserisci saldo_disponibile = 0 (azzeramento) NON viene più trattato
+//     come override permanente. Override resta false così al prossimo cambio
+//     di saldo contabile o assegni il disponibile torna a ricalcolarsi.
+//
+// Patch 30/04 (c) — fix saldo disponibile non aggiornato:
+//   - Bug: record creati prima della patch (b) avevano saldo_disponibile=0
+//     come placeholder. La logica visualizzava 0 invece del calcolato.
+//   - Fix: il render ora usa SEMPRE il calcolato se saldo_disponibile_override
+//     è false (anche quando in DB c'è già un valore). Solo override=true
+//     mostra il valore in DB. I totali usano il valore effettivo.
+//   - Hotfix SQL retroattivo separato: hotfix_ricalcolo_saldi_disponibile.sql
 //
 // Patch 30/04 (b) — Situazione saldi conti correnti:
 //   - Nuova colonna "📋 Assegni n.v." tra Fido cassa e Saldo contabile.
@@ -3095,8 +3108,16 @@ function _renderPanelSituazioneSaldi() {
     // Nota: se sCont è null, non posso calcolare; mostro placeholder.
     const sDispCalc = (sCont !== null) ? (sCont + fido - assegni) : null;
 
+    // Patch 30/04 (b-fix): saldo disponibile EFFETTIVO mostrato in UI
+    //   - Se override=true → mostra il valore in DB (utente l'ha sovrascritto a mano)
+    //   - Altrimenti → mostra SEMPRE il calcolato (anche se in DB c'è un valore vecchio
+    //     residuo dalla logica pre-patch che salvava 0 di placeholder)
+    const sDispEffettivo = isOverride
+      ? sDisp
+      : (sDispCalc !== null ? sDispCalc : sDisp);
+
     if (sCont !== null) totContabile += sCont;
-    if (sDisp !== null) totDisponibile += sDisp;
+    if (sDispEffettivo !== null) totDisponibile += sDispEffettivo;
     totFido += fido;
     totUtilizzato += utilizzato;
     totResiduo += residuo;
@@ -3127,11 +3148,11 @@ function _renderPanelSituazioneSaldi() {
     html += '<input type="text" value="' + valCont + '" placeholder="—" data-conto-id="' + c.id + '" data-campo="saldo_contabile" onblur="_situazioneSalvaCella(this)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:100%;text-align:right;padding:8px 10px;border:0.5px solid var(--border);border-radius:5px;font-family:var(--font-mono);font-size:14px;font-weight:700;background:#FFFCEB;color:' + colorCont + '">';
     html += '</td>';
 
-    // Col 5: Saldo disponibile (editable, ma con default = calcolato; popup se override)
-    // Mostro il valore inserito a DB se presente, altrimenti il calcolato come hint
-    const valDispShown = sDisp !== null ? sDisp.toFixed(2).replace('.', ',') : (sDispCalc !== null ? sDispCalc.toFixed(2).replace('.', ',') : '');
+    // Col 5: Saldo disponibile (editable, default = calcolato; popup se override)
+    // Patch 30/04 (b-fix): mostra sDispEffettivo (calcolato se override=false, valore in DB se override=true)
+    const valDispShown = sDispEffettivo !== null ? sDispEffettivo.toFixed(2).replace('.', ',') : '';
     const colorDispBase = (() => {
-      const v = sDisp !== null ? sDisp : sDispCalc;
+      const v = sDispEffettivo;
       if (v === null) return 'var(--text)';
       return v < 0 ? '#A32D2D' : (v > 0 ? '#27500A' : 'var(--text)');
     })();
@@ -3573,6 +3594,9 @@ async function _situazioneSalvaCella(input) {
   // Patch 30/04: per il SALDO DISPONIBILE check override vs calcolato
   // Calcolo atteso: saldo_contabile + fido_cassa - assegni_non_valuta
   // Se scarto > 1€ → popup conferma. Se confermato, flag saldo_disponibile_override=true.
+  // ECCEZIONE (fix 30/04 d): se l'utente inserisce esattamente 0 o svuota la cella,
+  // NON è un override — è un "reset". Override=false così al prossimo cambio di
+  // contabile/assegni il disponibile si ricalcola normalmente.
   let isOverride = false;
   if (campo === 'saldo_disponibile' && val !== null) {
     const fidi = _getFidiCassaPerConto();
@@ -3580,7 +3604,11 @@ async function _situazioneSalvaCella(input) {
     const sa = _situazioneSaldi[contoId] || {};
     const sCont = (sa.saldo_contabile !== null && sa.saldo_contabile !== undefined) ? Number(sa.saldo_contabile) : null;
     const assegni = (sa.assegni_non_valuta !== null && sa.assegni_non_valuta !== undefined) ? Number(sa.assegni_non_valuta) : 0;
-    if (sCont !== null) {
+
+    // Caso reset: valore inserito = 0 → resetta override, ricalcola al prossimo cambio
+    if (val === 0) {
+      isOverride = false;
+    } else if (sCont !== null) {
       const calc = sCont + fido - assegni;
       const scarto = Math.abs(val - calc);
       if (scarto > 1) {
