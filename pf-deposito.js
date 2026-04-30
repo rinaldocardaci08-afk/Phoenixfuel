@@ -1,4 +1,42 @@
 // PhoenixFuel — Deposito, Rettifiche, Autoconsumo
+// ─────────────────────────────────────────────────────────────────────────────
+// Patch 29/04/2026 (v20260429a):
+//   CMP unificato per prodotto (regola Phoenix Fuel: tutte le cisterne dello
+//   stesso prodotto deposito sono trattate come un pool unico finché non se
+//   ne stacca una per conti deposito). Cambiamenti SOLO display:
+//     - Card singola cisterna: rimosso "CMP €" individuale (riga 130)
+//     - Modal scelta cisterna in uscita: rimosso "CMP" da ogni opzione (riga
+//       482); aggiunto banner CMP prodotto in cima al modal
+//     - Audit log uscita: scrive "CMP prodotto €" (media ponderata) invece
+//       del CMP della singola cisterna scelta (riga 509)
+//   Lo schema DB resta invariato: cisterne.costo_medio per cisterna è
+//   necessario per ricalcolo media ponderata + storico per cisterna.
+//   Helper riusabile: _pfDepCmpProdotto(prodNome, sede) per altri moduli.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper: media ponderata costo_medio sulle cisterne di un prodotto/sede.
+// Ritorna un Number (0 se nessun litro). Riusabile da qualsiasi modulo.
+async function _pfDepCmpProdotto(prodNome, sede) {
+  if (!prodNome) return 0;
+  if (!sede) sede = 'deposito_vibo';
+  try {
+    var { data, error } = await sb
+      .from('cisterne')
+      .select('livello_attuale, costo_medio')
+      .eq('sede', sede)
+      .eq('prodotto', prodNome);
+    if (error || !data || !data.length) return 0;
+    var totLitri = 0, totValore = 0;
+    data.forEach(function(c) {
+      var l = Number(c.livello_attuale || 0);
+      var cmp = Number(c.costo_medio || 0);
+      totLitri += l;
+      totValore += l * cmp;
+    });
+    return totLitri > 0 ? (totValore / totLitri) : 0;
+  } catch (e) { return 0; }
+}
+
 // ── DEPOSITO ─────────────────────────────────────────────────────
 
 function switchDepositoTab(btn) {
@@ -110,7 +148,9 @@ async function caricaDeposito() {
       const capMax = Number(c.capacita_max);
       const livAtt = Number(c.livello_attuale);
       const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
-      const cmp = Number(c.costo_medio||0);
+      // Patch 29/04: il CMP individuale per cisterna NON va più mostrato in
+      // card. Il valore unico ponderato è già visibile sopra il gruppo prodotto
+      // (cmpLabel). costo_medio resta in DB per il ricalcolo della media.
       totG += livAtt;
       // Numero progressivo dentro il gruppo (1, 2, 3…)
       var numCis = idx + 1;
@@ -127,7 +167,6 @@ async function caricaDeposito() {
         '</div>' +
         '<div class="litri-wrap"><div class="litri-box"><span class="litri-valore">' + livAtt.toLocaleString('it-IT') + '</span><span class="litri-unita">' + um + '</span></div></div>' +
         '<div class="info"><span class="pct">' + pct + '%</span> · cap. ' + capMax.toLocaleString('it-IT') + ' ' + um + '</div>' +
-        (cmp > 0 ? '<div class="cmp">CMP € ' + cmp.toFixed(4) + '</div>' : '') +
         '</div>';
     });
 
@@ -463,13 +502,28 @@ async function confermaUscitaDeposito(ordineId, auto) {
 
   // 2+ cisterne e click manuale → mostra selettore
   var defaultCis = cisConGiac[0]; // già ordinato per livello desc
+
+  // Patch 29/04: CMP unificato per prodotto (regola Phoenix Fuel: tutte le
+  // cisterne dello stesso prodotto sono un pool unico). Calcolato qui sulla
+  // base delle cisterne effettivamente in giacenza. Dopo lo scarico l'audit
+  // log scriverà questo valore (non quello individuale della cisterna scelta).
+  var totLitriPool = 0, totValPool = 0;
+  cisConGiac.forEach(function(c) {
+    var l = Number(c.livello_attuale || 0);
+    totLitriPool += l;
+    totValPool += l * Number(c.costo_medio || 0);
+  });
+  var cmpProdotto = totLitriPool > 0 ? (totValPool / totLitriPool) : 0;
+
   var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Scegli cisterna per uscita — ' + ordine.prodotto + '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">' + ordine.cliente + ' · <strong>' + fmtL(ordine.litri) + '</strong></div>';
-  html += '<div style="margin:14px 0">';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">' + ordine.cliente + ' · <strong>' + fmtL(ordine.litri) + '</strong></div>';
+  if (cmpProdotto > 0) {
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:var(--text-muted)">CMP <strong>' + esc(ordine.prodotto) + '</strong>: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + cmpProdotto.toFixed(4) + '</strong> <span style="font-size:10px">(media ponderata su tutte le cisterne)</span></div>';
+  }
+  html += '<div style="margin:6px 0 14px 0">';
 
   cisConGiac.forEach(function(c) {
     var pct = Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100);
-    var cmp = Number(c.costo_medio || 0);
     var isDefault = c.id === defaultCis.id;
     var barColor = pct < 20 ? '#E24B4A' : pct < 40 ? '#BA7517' : '#639922';
 
@@ -479,7 +533,7 @@ async function confermaUscitaDeposito(ordineId, auto) {
     html += '<div style="flex:1">';
     html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:500">' + c.nome + '</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmtL(c.livello_attuale) + ' / ' + fmtL(c.capacita_max) + '</span></div>';
     html += '<div style="height:5px;background:var(--border);border-radius:3px;margin-bottom:4px"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:3px"></div></div>';
-    html += '<div style="display:flex;gap:16px;font-size:10px;color:var(--text-muted)"><span>Riempimento: ' + pct + '%</span><span>CMP: <strong style="font-family:var(--font-mono)">€ ' + cmp.toFixed(4) + '</strong></span><span>Dopo uscita: ' + fmtL(Number(c.livello_attuale) - Number(ordine.litri)) + '</span></div>';
+    html += '<div style="display:flex;gap:16px;font-size:10px;color:var(--text-muted)"><span>Riempimento: ' + pct + '%</span><span>Dopo uscita: ' + fmtL(Number(c.livello_attuale) - Number(ordine.litri)) + '</span></div>';
     html += '</div></div></label>';
   });
 
@@ -506,7 +560,11 @@ async function _eseguiUscitaDeposito(ordineId, ordine, cis) {
   // Fix 14/04 sera: set caricato_deposito=true per il nuovo lock difensivo
   // (prima usava cisterna_id come flag, ora usa caricato_deposito)
   await sb.from('ordini').update({ stato:'confermato', cisterna_id:cis.id, caricato_deposito:true }).eq('id', ordineId);
-  _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente + ' da ' + cis.nome + ' (CMP € ' + Number(cis.costo_medio||0).toFixed(4) + ')');
+  // Patch 29/04: log con CMP prodotto (media ponderata) — riflette il valore
+  // ai fini operativi/contabili come pool unico, non quello individuale.
+  // Letto DOPO l'aggiornamento cisterna così include lo scarico appena fatto.
+  var cmpProd = await _pfDepCmpProdotto(ordine.prodotto, cis.sede || 'deposito_vibo');
+  _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente + ' da ' + cis.nome + ' (CMP prodotto € ' + cmpProd.toFixed(4) + ')');
   toast('Uscita registrata da ' + cis.nome + '!');
   caricaDeposito();
   caricaOrdini();
