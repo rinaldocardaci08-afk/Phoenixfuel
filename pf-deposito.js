@@ -109,6 +109,22 @@ function _testoSuColore(hex) {
 
 async function caricaDeposito() {
   _cacheCisterne = null; // Invalida cache per ordini
+
+  // Patch v20260501j: auto-heal cisterne PRIMA del SELECT.
+  // Modello "fiume": livello_attuale derivato da apertura + ordini entrata
+  // - ordini uscita (clienti/stazione/autoconsumo) + rettifiche.
+  try {
+    var prodRes = await sb.from('cisterne').select('prodotto').eq('sede','deposito_vibo');
+    var prodSet = {};
+    (prodRes.data || []).forEach(function(c){ if(c.prodotto) prodSet[c.prodotto] = true; });
+    var prodList = Object.keys(prodSet);
+    for (var i = 0; i < prodList.length; i++) {
+      if (typeof pfDepositoRicalcolaCisterne === 'function') {
+        try { await pfDepositoRicalcolaCisterne(prodList[i]); } catch(e) { console.warn('auto-heal deposito errore ' + prodList[i] + ':', e); }
+      }
+    }
+  } catch (e) { console.warn('caricaDeposito auto-heal errore:', e); }
+
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','deposito_vibo').order('tipo').order('nome');
   if (!cisterne) return;
 
@@ -257,7 +273,14 @@ async function caricaDeposito() {
 // Versione forzata disponibile per manutenzione: pfDepositoRicalcolaCisterneForzato.
 // ═══════════════════════════════════════════════════════════════════
 async function pfDepositoRicalcolaCisterne(prodotto) {
-  // NO-OP: rispetto lo stato DB, il Distribuisci manuale non viene piu' toccato.
+  // ─── Patch v20260501j ─────────────────────────────────────────────────
+  // Riattivata (era no-op da v20260415). Stessa logica di stazione: i litri
+  // sono il "fiume" (apertura + movimenti), le cisterne sono contenitori.
+  // Se delta=0 no-op, altrimenti redistribuisce in cascata.
+  // ──────────────────────────────────────────────────────────────────────
+  if (typeof pfDepositoRicalcolaCisterneForzato === 'function') {
+    return await pfDepositoRicalcolaCisterneForzato(prodotto);
+  }
   return;
 }
 

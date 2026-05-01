@@ -185,6 +185,22 @@ async function eliminaPompa(id, nome) {
 }
 
 async function caricaGiacenzeStazione() {
+  // Patch v20260501j: auto-heal cisterne PRIMA del SELECT.
+  // Allinea livello_attuale al calcolato (apertura + ricezioni - vendite letture
+  // + rettifiche). Così il pannello mostra sempre dati canonici, senza che
+  // l'utente debba premere "⚖️ Allinea cisterne".
+  try {
+    var prodRes = await sb.from('cisterne').select('prodotto').eq('sede','stazione_oppido');
+    var prodSet = {};
+    (prodRes.data || []).forEach(function(c){ if(c.prodotto) prodSet[c.prodotto] = true; });
+    var prodList = Object.keys(prodSet);
+    for (var i = 0; i < prodList.length; i++) {
+      if (typeof pfStzRicalcolaCisterne === 'function') {
+        try { await pfStzRicalcolaCisterne(prodList[i]); } catch(e) { console.warn('auto-heal stazione errore ' + prodList[i] + ':', e); }
+      }
+    }
+  } catch (e) { console.warn('caricaGiacenzeStazione auto-heal errore:', e); }
+
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido').order('tipo').order('nome');
 
   let cisHtmlAll = '';
@@ -240,12 +256,7 @@ async function caricaGiacenzeStazione() {
       // Guardia permesso modifica CMP: admin sempre, altri solo se sub-permesso 'deposito.modifica-cmp' attivo
       var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
       var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
-      // Patch v20260501c: bottone "🔍 Analisi" CMP — riusa la funzione
-      // _apriAnalisiCMP(prodotto, sede) già esistente in pf-deposito.js
-      // (parametrizzata per sede). Mostra ultimi 15 giorni di variazioni
-      // CMP con verifica del calcolo, fornitore, e grafico evoluzione.
-      var cmpAnalisiBtn = ' <button onclick="_apriAnalisiCMP(\'' + esc(prodNome) + '\',\'stazione_oppido\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Analisi CMP">🔍 Analisi</button>';
-      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + cmpAnalisiBtn + '</div>' : '';
+      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + '</div>' : '';
       const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
       const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
       const pctTotHtml = '<div class="tot-pct"><span class="val">' + pctGruppo + '%</span> della capacità totale</div>';
@@ -265,14 +276,7 @@ async function caricaGiacenzeStazione() {
     cisHtmlAll = '<div class="loading">Nessuna cisterna configurata per la stazione</div>';
   }
   const elCis = document.getElementById('stz-cisterne-grafiche');
-  if (elCis) {
-    // Patch v20260501c: bottone admin per allineare cisterne al calcolato
-    // algebrico (apertura + entrate − uscite) usando pfStzRicalcolaCisterneForzato.
-    // Risolve casi di disallineamento da race condition o rettifiche manuali.
-    var puoAllineare = typeof _isAdmin === 'function' ? _isAdmin() : (utenteCorrente && utenteCorrente.ruolo === 'admin');
-    var btnAllinea = puoAllineare ? '<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button onclick="_stzAllineaCisterneAlCalcolato()" style="padding:8px 14px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;color:var(--text);font-weight:500" title="Allinea le cisterne al saldo calcolato (apertura + entrate − uscite)">⚖️ Allinea cisterne al calcolato</button></div>' : '';
-    elCis.innerHTML = btnAllinea + cisHtmlAll;
-  }
+  if (elCis) elCis.innerHTML = cisHtmlAll;
 
   // Popola dropdown anni
   const selAnno = document.getElementById('stz-acq-anno');
@@ -618,74 +622,4 @@ async function salvaDistribuzione() {
   chiudiModalePermessi();
   if (d.sede === 'stazione_oppido') caricaGiacenzeStazione();
   else if (typeof caricaDeposito === 'function') caricaDeposito();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Allinea cisterne stazione al calcolato algebrico (Patch v20260501c)
-// Bottone manuale per riconciliazione: apertura + entrate − uscite =
-// somma(cisterne.livello_attuale). Usa pfStzRicalcolaCisterneForzato
-// che è stato lasciato disponibile per manutenzione (non chiamato in
-// automatico da 16/04).
-// Conferma utente, mostra delta, scrive audit log.
-// ═══════════════════════════════════════════════════════════════════
-async function _stzAllineaCisterneAlCalcolato() {
-  if (typeof pfStzRicalcolaCisterneForzato !== 'function') {
-    toast('Funzione non disponibile');
-    return;
-  }
-  if (typeof pfData === 'undefined' || !pfData.getGiacenzaAllaData) {
-    toast('pfData non disponibile, riprova fra qualche secondo');
-    return;
-  }
-  // Trova prodotti delle cisterne stazione
-  var { data: cisterne } = await sb.from('cisterne')
-    .select('prodotto,livello_attuale')
-    .eq('sede', 'stazione_oppido');
-  if (!cisterne || !cisterne.length) { toast('Nessuna cisterna stazione'); return; }
-
-  var prodSet = {};
-  cisterne.forEach(function(c) { if (c.prodotto) prodSet[c.prodotto] = true; });
-  var prodList = Object.keys(prodSet);
-
-  // Calcola anteprima delta per ogni prodotto
-  var oggi = new Date().toISOString().split('T')[0];
-  var antepriama = [];
-  for (var i = 0; i < prodList.length; i++) {
-    var prod = prodList[i];
-    var giac = await pfData.getGiacenzaAllaData('stazione_oppido', prod, oggi);
-    var totCalc = Math.max(0, Math.round(giac.calcolata));
-    var sommaDB = cisterne.filter(function(c) { return c.prodotto === prod; })
-      .reduce(function(s, c) { return s + Number(c.livello_attuale || 0); }, 0);
-    var delta = totCalc - Math.round(sommaDB);
-    antepriama.push({ prodotto: prod, calcolato: totCalc, attuale: Math.round(sommaDB), delta: delta });
-  }
-
-  var msg = 'Allineamento cisterne stazione al saldo calcolato:\n\n';
-  var nDaModificare = 0;
-  antepriama.forEach(function(a) {
-    var sign = a.delta > 0 ? '+' : '';
-    var label = a.delta === 0 ? '✓ già allineato' : (sign + a.delta + ' L');
-    msg += '• ' + a.prodotto + ': ' + a.attuale.toLocaleString('it-IT') + ' L → ' + a.calcolato.toLocaleString('it-IT') + ' L (' + label + ')\n';
-    if (a.delta !== 0) nDaModificare++;
-  });
-
-  if (nDaModificare === 0) {
-    toast('✓ Tutte le cisterne stazione sono già allineate');
-    return;
-  }
-  msg += '\nProcedere?';
-  if (!confirm(msg)) return;
-
-  var modificate = 0;
-  for (var j = 0; j < prodList.length; j++) {
-    try {
-      await pfStzRicalcolaCisterneForzato(prodList[j]);
-      modificate++;
-    } catch (e) { console.error('[allineaCisterneStazione] errore su ' + prodList[j] + ':', e); }
-  }
-  if (typeof _auditLog === 'function') {
-    _auditLog('cisterne_allinea_calcolato', 'cisterne', 'Stazione: allineate ' + modificate + '/' + prodList.length + ' prodotti al calcolato');
-  }
-  toast('✅ Cisterne allineate al calcolato (' + modificate + ' prodotti)');
-  caricaGiacenzeStazione();
 }

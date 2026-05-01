@@ -13,8 +13,16 @@
 // Nessuna logica magica in background.
 // ═══════════════════════════════════════════════════════════════════
 async function pfStzRicalcolaCisterne(prodotto) {
-  // NO-OP: lascio la cisterna come sta nel DB.
-  // Se serve heal manuale in futuro, chiamare pfStzRicalcolaCisterneForzato().
+  // ─── Patch v20260501j ─────────────────────────────────────────────────
+  // Riattivata (era no-op da v20260415). Modello "fiume": le cisterne sono
+  // solo contenitori, i litri totali del prodotto sono SEMPRE quelli derivati
+  // dai movimenti (apertura + entrate - uscite + rettifiche via pfData).
+  // L'auto-heal è idempotente: se delta=0 no-op, altrimenti distribuisce il
+  // delta sulle cisterne in cascata. Non tocca mai costo_medio.
+  // ──────────────────────────────────────────────────────────────────────
+  if (typeof pfStzRicalcolaCisterneForzato === 'function') {
+    return await pfStzRicalcolaCisterneForzato(prodotto);
+  }
   return;
 }
 
