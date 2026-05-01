@@ -2614,17 +2614,7 @@ async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
 
   toast('✓ CMP ' + prodNome + ' aggiornato a € ' + nuovoCMP.toFixed(6));
   chiudiModale();
-  // Patch v20260501c: refresh UI corretta in base alla sede.
-  // Bug originale: _confermaCMPDeposito chiamava sempre caricaDeposito()
-  // anche se il CMP era stato modificato dalla matita ✏️ del magazzino
-  // STAZIONE. Risultato: DB aggiornata, toast OK, ma UI stazione mostrava
-  // ancora il valore vecchio.
-  if (sede === 'stazione_oppido') {
-    if (typeof caricaGiacenzeStazione === 'function') caricaGiacenzeStazione();
-    if (typeof caricaStazioneDashboard === 'function') caricaStazioneDashboard();
-  } else {
-    caricaDeposito();
-  }
+  caricaDeposito();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3067,6 +3057,10 @@ async function _apriAnalisiCMP(prodotto, sede) {
 
       var dataFmt = _fmtDataIt(r.data);
       var fornitore = fornitoriPerOrdine[r.ordine_id] || '—';
+      // Patch v20260501d: bottone ℹ per aprire popup con dettaglio calcolo CMP.
+      // Sanifico stringhe in onclick contro apostrofi (improbabili ma possibili).
+      var prodSafe = String(prodotto).replace(/'/g, '');
+      var dataSafe = String(dataFmt).replace(/'/g, '');
       righeHtml += '<tr style="border-bottom:0.5px solid var(--border)">' +
         '<td style="padding:6px 8px">' + dataFmt + '</td>' +
         '<td style="padding:6px 8px;font-size:11px" title="' + esc(fornitore) + '">' + esc(fornitore.length > 18 ? fornitore.substring(0, 18) + '…' : fornitore) + '</td>' +
@@ -3075,8 +3069,9 @@ async function _apriAnalisiCMP(prodotto, sede) {
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">€ ' + cp.toFixed(4) + '</td>' +
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#6B5FCC">€ ' + cc.toFixed(4) + '</td>' +
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">€ ' + cn.toFixed(4) + '</td>' +
-        '<td style="padding:6px 8px;text-align:center">' +
+        '<td style="padding:6px 8px;text-align:center;white-space:nowrap">' +
           (flagAnomalia ? '<span style="color:#A32D2D" title="Scostamento calcolo: ' + delta.toFixed(6) + '">⚠</span>' : '<span style="color:#639922">✓</span>') +
+          ' <button onclick="_apriPopupCalcoloCMP(\'' + esc(prodSafe) + '\',\'' + esc(dataSafe) + '\',' + lp + ',' + cp + ',' + lc + ',' + cc + ',' + cn + ')" style="background:none;border:0.5px solid var(--border);border-radius:4px;padding:1px 6px;cursor:pointer;font-size:11px;color:var(--text-muted);margin-left:4px;font-family:var(--font-sans)" title="Dettaglio calcolo CMP">ℹ</button>' +
         '</td>' +
       '</tr>';
       puntiGrafico.push({ data: r.data, cmp: cn, etichetta: 'Carico ' + (i+1) });
@@ -3206,4 +3201,122 @@ function _fmtDataIt(isoDate) {
   var p = String(isoDate).substring(0, 10).split('-');
   if (p.length !== 3) return isoDate;
   return p[2] + '/' + p[1] + '/' + p[0];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Popup dettaglio calcolo CMP (Patch v20260501d)
+// Apre un secondo overlay sopra il modale di Analisi CMP, mostrando
+// il dettaglio della media ponderata: litri presenti × CMP precedente
+// + litri entrati × costo carico = totale, diviso litri totali = nuovo
+// CMP. Caso speciale per modifica manuale (litri_caricati = 0).
+// Funziona per deposito e stazione (la funzione _apriAnalisiCMP è
+// parametrizzata per sede).
+// ═══════════════════════════════════════════════════════════════════
+function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn) {
+  // Rimuovo eventuale popup precedente
+  var existing = document.getElementById('cmp-info-popup-overlay');
+  if (existing) existing.remove();
+
+  lp = Number(lp); cp = Number(cp); lc = Number(lc); cc = Number(cc); cn = Number(cn);
+  var totLitri = lp + lc;
+  var valPrec = lp * cp;
+  var valCar = lc * cc;
+  var valTot = valPrec + valCar;
+  var delta = cn - cp;
+  var deltaPct = cp > 0 ? (delta / cp) * 100 : 0;
+
+  function fmtN(v, dec) { return v.toLocaleString('it-IT', { minimumFractionDigits: dec || 2, maximumFractionDigits: dec || 2 }); }
+  function fmtL(v) { return v.toLocaleString('it-IT', { maximumFractionDigits: 0 }); }
+
+  var html = '<div id="cmp-info-popup-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.remove()">';
+  html += '<div style="background:var(--bg-card);border-radius:12px;border:0.5px solid var(--border);padding:18px;width:520px;max-width:100%;max-height:calc(100vh - 32px);overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.3)" onclick="event.stopPropagation()">';
+
+  // Header
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">';
+  html += '<div style="display:flex;align-items:center;gap:8px">';
+  html += '<div style="width:28px;height:28px;border-radius:50%;background:#FAEEDA;display:flex;align-items:center;justify-content:center;font-size:14px">🧮</div>';
+  html += '<div><div style="font-size:15px;font-weight:600;color:var(--text)">Calcolo CMP</div><div style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono)">' + esc(prodotto) + ' · ' + esc(dataFmt) + '</div></div>';
+  html += '</div>';
+  html += '<button onclick="document.getElementById(\'cmp-info-popup-overlay\').remove()" style="background:transparent;border:0.5px solid var(--border);border-radius:50%;width:24px;height:24px;cursor:pointer;color:var(--text-muted);font-size:13px;line-height:1">×</button>';
+  html += '</div>';
+
+  html += '<div style="border-top:0.5px solid var(--border);margin:12px 0 14px 0"></div>';
+
+  // Caso speciale: modifica manuale (litri_caricati = 0)
+  if (lc <= 0) {
+    html += '<div style="background:#F1EFE8;border:0.5px solid #B4B2A9;border-radius:8px;padding:14px;text-align:center">';
+    html += '<div style="font-size:11px;color:#5F5E5A;font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Modifica manuale CMP</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:13px;color:#5F5E5A;margin-bottom:4px">CMP precedente: <strong style="color:#2C2C2A">€ ' + cp.toFixed(4) + '</strong></div>';
+    html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#26215C">→ CMP nuovo: € ' + cn.toFixed(4) + '</div>';
+    html += '<div style="font-size:11px;color:#5F5E5A;margin-top:10px;font-style:italic">CMP impostato manualmente dal pulsante ✏️ — nessun carico associato</div>';
+    html += '</div>';
+    html += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    return;
+  }
+
+  // Caso carico normale: due card affiancate
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+
+  // Card litri presenti
+  html += '<div style="background:#F1EFE8;border:0.5px solid #B4B2A9;border-radius:8px;padding:10px 12px">';
+  html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#5F5E5A;font-weight:500;margin-bottom:6px">Litri presenti</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#2C2C2A">' + fmtL(lp) + ' L</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:12px;color:#5F5E5A;margin-top:2px">× € ' + cp.toFixed(4) + '</div>';
+  html += '<div style="border-top:0.5px solid #B4B2A9;margin:6px 0"></div>';
+  html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#2C2C2A">= € ' + fmtN(valPrec) + '</div>';
+  html += '</div>';
+
+  // Card litri entrati
+  html += '<div style="background:#EAF3DE;border:0.5px solid #639922;border-radius:8px;padding:10px 12px">';
+  html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#27500A;font-weight:500;margin-bottom:6px">+ Litri entrati</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#173404">' + fmtL(lc) + ' L</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:12px;color:#27500A;margin-top:2px">× € ' + cc.toFixed(4) + ' <span style="background:#C0DD97;color:#173404;font-size:9px;padding:1px 4px;border-radius:3px;font-weight:600;margin-left:2px;font-family:var(--font-sans)">CARICO</span></div>';
+  html += '<div style="border-top:0.5px solid #639922;margin:6px 0"></div>';
+  html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#173404">= € ' + fmtN(valCar) + '</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // Indicatore somma
+  html += '<div style="display:flex;justify-content:center;align-items:center;gap:6px;margin:12px 0 4px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px"><span style="font-size:14px">↓</span><span>somma valori</span></div>';
+
+  // Totale
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px">';
+  html += '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);font-weight:500;margin-bottom:6px">Totale dopo carico</div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  html += '<div><div style="font-size:11px;color:var(--text-muted)">Litri totali</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--text)">' + fmtL(totLitri) + ' L</div></div>';
+  html += '<div><div style="font-size:11px;color:var(--text-muted)">Valore totale</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--text)">€ ' + fmtN(valTot) + '</div></div>';
+  html += '</div></div>';
+
+  // Indicatore divisione
+  html += '<div style="display:flex;justify-content:center;align-items:center;gap:6px;margin:12px 0 4px 0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px"><span style="font-size:14px">÷</span><span>litri totali</span></div>';
+
+  // Risultato finale
+  html += '<div style="background:#FAEEDA;border:0.5px solid #BA7517;border-radius:8px;padding:12px 14px">';
+  html += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">';
+  html += '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#633806;font-weight:500;margin-bottom:2px">Nuovo CMP</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:11px;color:#854F0B">€ ' + fmtN(valTot) + ' / ' + fmtL(totLitri) + ' L</div></div>';
+  html += '<div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:#412402">€&nbsp;' + cn.toFixed(4) + '</div>';
+  html += '</div>';
+
+  // Delta
+  if (Math.abs(delta) > 0.00005) {
+    var deltaCol = delta >= 0 ? '#A32D2D' : '#27500A';
+    var deltaBg = delta >= 0 ? '#F7C1C1' : '#C0DD97';
+    var deltaSign = delta >= 0 ? '+' : '−';
+    html += '<div style="margin-top:8px;font-size:11px;color:#854F0B;display:flex;align-items:center;gap:6px;flex-wrap:wrap">';
+    html += '<span style="background:' + deltaBg + ';color:' + deltaCol + ';font-size:10px;padding:2px 6px;border-radius:3px;font-weight:600">' + deltaSign + ' € ' + Math.abs(delta).toFixed(4) + '</span>';
+    html += '<span style="font-family:var(--font-mono)">vs CMP precedente € ' + cp.toFixed(4) + ' (' + deltaSign + ' ' + Math.abs(deltaPct).toFixed(2) + '%)</span>';
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Nota finale
+  html += '<div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:center;font-style:italic">Media ponderata: i litri vecchi e i nuovi pesano in proporzione</div>';
+
+  html += '</div></div>';
+
+  document.body.insertAdjacentHTML('beforeend', html);
 }
