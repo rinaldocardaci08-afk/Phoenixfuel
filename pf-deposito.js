@@ -3044,28 +3044,101 @@ async function _apriAnalisiCMP(prodotto, sede) {
   if (!records || records.length === 0) {
     righeHtml = '<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Nessuna variazione CMP negli ultimi 15 giorni</td></tr>';
   } else {
-    records.forEach(function(r, i) {
-      var lp = Number(r.litri_precedenti || 0);
-      var lc = Number(r.litri_caricati || 0);
-      var cp = Number(r.cmp_precedente || 0);
-      var cc = Number(r.costo_carico || 0);
-      var cn = Number(r.cmp_nuovo || 0);
-      // Verifica calcolo (se diverge di più di 0.0001 c'è anomalia)
+    // ────────────────────────────────────────────────────────────────
+    // Patch v20260501e: aggregazione per ordine_id.
+    // Il DB salva 1 record per cisterna in stazione_cmp_storico (es: ordine
+    // da 6000 L splittato 5000+1000 tra 2 cisterne → 2 record). Per la
+    // visualizzazione la regola è: 1 riga per ordine ricevuto, con litri
+    // totali e CMP a livello prodotto (media ponderata delle cisterne).
+    // I record manuali (ordine_id=null) restano singoli.
+    // ────────────────────────────────────────────────────────────────
+    var perOrdine = {};
+    var ordineKeys = []; // mantiene l'ordine cronologico
+    records.forEach(function(r) {
+      var key;
+      if (r.ordine_id) {
+        key = 'ord:' + r.ordine_id;
+      } else {
+        key = 'manual:' + r.id; // ogni manuale è una riga a sé
+      }
+      if (!perOrdine[key]) {
+        perOrdine[key] = { records: [], data: r.data, ordine_id: r.ordine_id, isManual: !r.ordine_id };
+        ordineKeys.push(key);
+      }
+      perOrdine[key].records.push(r);
+    });
+
+    var righeAggregate = ordineKeys.map(function(key) {
+      var grp = perOrdine[key];
+      var rs = grp.records;
+      if (rs.length === 1 || grp.isManual) {
+        // Singolo record: usa direttamente i campi
+        var r0 = rs[0];
+        return {
+          data: r0.data,
+          ordine_id: r0.ordine_id,
+          litri_precedenti: Number(r0.litri_precedenti || 0),
+          litri_caricati: Number(r0.litri_caricati || 0),
+          cmp_precedente: Number(r0.cmp_precedente || 0),
+          costo_carico: Number(r0.costo_carico || 0),
+          cmp_nuovo: Number(r0.cmp_nuovo || 0),
+          isAggregato: false,
+          nCisterne: 1
+        };
+      }
+      // Aggrego N record dello stesso ordine
+      var sumLP = 0, sumValPre = 0, sumLC = 0, costoCar = 0;
+      rs.forEach(function(r) {
+        var lp = Number(r.litri_precedenti || 0);
+        var lc = Number(r.litri_caricati || 0);
+        var cp = Number(r.cmp_precedente || 0);
+        var cc = Number(r.costo_carico || 0);
+        sumLP += lp;
+        sumValPre += lp * cp;
+        sumLC += lc;
+        costoCar = cc; // costo_carico è uguale per tutti i record dello stesso ordine
+      });
+      var cmpPreAgg = sumLP > 0 ? sumValPre / sumLP : 0;
+      var totLitri = sumLP + sumLC;
+      var totVal = sumValPre + sumLC * costoCar;
+      var cmpPostAgg = totLitri > 0 ? totVal / totLitri : 0;
+      return {
+        data: rs[0].data,
+        ordine_id: rs[0].ordine_id,
+        litri_precedenti: sumLP,
+        litri_caricati: sumLC,
+        cmp_precedente: cmpPreAgg,
+        costo_carico: costoCar,
+        cmp_nuovo: cmpPostAgg,
+        isAggregato: true,
+        nCisterne: rs.length
+      };
+    });
+
+    righeAggregate.forEach(function(r, i) {
+      var lp = r.litri_precedenti;
+      var lc = r.litri_caricati;
+      var cp = r.cmp_precedente;
+      var cc = r.costo_carico;
+      var cn = r.cmp_nuovo;
+      // Verifica calcolo (sempre matematicamente coerente per le righe aggregate
+      // perché il CMP nuovo è ricalcolato dagli stessi input → ✓ sempre)
       var cnCalcolato = (lp + lc) > 0 ? (lp * cp + lc * cc) / (lp + lc) : 0;
       var delta = Math.abs(cn - cnCalcolato);
       var flagAnomalia = delta > 0.0001;
 
       var dataFmt = _fmtDataIt(r.data);
       var fornitore = fornitoriPerOrdine[r.ordine_id] || '—';
-      // Patch v20260501d: bottone ℹ per aprire popup con dettaglio calcolo CMP.
-      // Sanifico stringhe in onclick contro apostrofi (improbabili ma possibili).
       var prodSafe = String(prodotto).replace(/'/g, '');
       var dataSafe = String(dataFmt).replace(/'/g, '');
+      var badgeAggr = r.isAggregato
+        ? ' <span style="background:#E6F1FB;color:#0C447C;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:4px;font-family:var(--font-sans)" title="Aggregato da ' + r.nCisterne + ' cisterne dello stesso ordine">' + r.nCisterne + ' cist.</span>'
+        : '';
       righeHtml += '<tr style="border-bottom:0.5px solid var(--border)">' +
         '<td style="padding:6px 8px">' + dataFmt + '</td>' +
-        '<td style="padding:6px 8px;font-size:11px" title="' + esc(fornitore) + '">' + esc(fornitore.length > 18 ? fornitore.substring(0, 18) + '…' : fornitore) + '</td>' +
-        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + lp.toLocaleString('it-IT') + '</td>' +
-        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#639922">+' + lc.toLocaleString('it-IT') + '</td>' +
+        '<td style="padding:6px 8px;font-size:11px" title="' + esc(fornitore) + '">' + esc(fornitore.length > 18 ? fornitore.substring(0, 18) + '…' : fornitore) + badgeAggr + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + Math.round(lp).toLocaleString('it-IT') + '</td>' +
+        '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#639922">+' + Math.round(lc).toLocaleString('it-IT') + '</td>' +
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">€ ' + cp.toFixed(4) + '</td>' +
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#6B5FCC">€ ' + cc.toFixed(4) + '</td>' +
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">€ ' + cn.toFixed(4) + '</td>' +
