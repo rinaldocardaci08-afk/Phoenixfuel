@@ -31,6 +31,11 @@ async function caricaLogistica() {
   const repA = document.getElementById('rep-viaggio-a');
   if (repDa && !repDa.value) repDa.value = oggiISO.substring(0,8) + '01';
   if (repA && !repA.value) repA.value = oggiISO;
+
+  // v20260501l: carica dashboard riepilogo vettori (mese corrente)
+  if (typeof caricaDashboardVettori === 'function') {
+    try { await caricaDashboardVettori(); } catch (e) { console.warn('caricaDashboardVettori errore:', e); }
+  }
 }
 
 async function aggiornaVeicoliVettore() {
@@ -65,6 +70,187 @@ async function aggiornaVeicoliVettore() {
       selA.innerHTML = '<option value="">Seleziona autista...</option>' + (autistiTr||[]).map(a => '<option value="' + esc(a.nome) + '">' + esc(a.nome) + '</option>').join('');
     }
   }
+}
+
+// ── DASHBOARD VETTORI (v20260501l) ────────────────────────────────────
+// Stato: mese/anno/tutto + indice mese (0..11) o anno (es 2026)
+var _dashVettState = {
+  modo: 'mese',          // 'mese' | 'anno' | 'tutto'
+  mese: null,            // YYYY-MM (es '2026-05')
+  anno: null             // YYYY (es '2026')
+};
+
+function _dashVettColore(nome) {
+  // Hash deterministico sul nome → stesso vettore = stesso colore sempre
+  var palette = ['#185FA5','#1D9E75','#BA7517','#534AB7','#993C1D','#A32D2D','#0F6E56','#854F0B','#3C3489','#3B6D11'];
+  var h = 0;
+  var s = String(nome || '');
+  for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
+}
+
+function _dashVettCalcolaPeriodo() {
+  // Ritorna { da, a, label } in base allo stato corrente
+  var oggi = new Date();
+  if (_dashVettState.modo === 'tutto') {
+    return { da: '2020-01-01', a: oggi.toISOString().split('T')[0], label: 'Tutto' };
+  }
+  if (_dashVettState.modo === 'anno') {
+    var anno = _dashVettState.anno || String(oggi.getFullYear());
+    return { da: anno + '-01-01', a: anno + '-12-31', label: 'Anno ' + anno };
+  }
+  // Mese (default)
+  var mese = _dashVettState.mese;
+  if (!mese) {
+    var m = (oggi.getMonth() + 1).toString().padStart(2, '0');
+    mese = oggi.getFullYear() + '-' + m;
+    _dashVettState.mese = mese;
+  }
+  var anno2 = mese.substring(0, 4);
+  var mm = mese.substring(5, 7);
+  var lastDay = new Date(Number(anno2), Number(mm), 0).getDate();
+  var meseNomi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  return {
+    da: mese + '-01',
+    a: mese + '-' + String(lastDay).padStart(2, '0'),
+    label: meseNomi[Number(mm) - 1] + ' ' + anno2
+  };
+}
+
+function _dashVettCambiaModo(modo) {
+  _dashVettState.modo = modo;
+  if (modo === 'mese' && !_dashVettState.mese) {
+    var oggi = new Date();
+    _dashVettState.mese = oggi.getFullYear() + '-' + (oggi.getMonth() + 1).toString().padStart(2, '0');
+  }
+  if (modo === 'anno' && !_dashVettState.anno) {
+    _dashVettState.anno = String(new Date().getFullYear());
+  }
+  caricaDashboardVettori();
+}
+
+function _dashVettNavigaPeriodo(direzione) {
+  // direzione: -1 (indietro) o +1 (avanti)
+  if (_dashVettState.modo === 'tutto') return; // niente navigazione
+  if (_dashVettState.modo === 'mese') {
+    var p = _dashVettState.mese.split('-');
+    var d = new Date(Number(p[0]), Number(p[1]) - 1 + direzione, 1);
+    _dashVettState.mese = d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0');
+  } else if (_dashVettState.modo === 'anno') {
+    _dashVettState.anno = String(Number(_dashVettState.anno) + direzione);
+  }
+  caricaDashboardVettori();
+}
+
+function _dashVettApplicaFiltro(vettoreId) {
+  // Click su pannello vettore: applica filtro nei controlli sotto e lancia ricerca
+  var sel = document.getElementById('rep-vettore');
+  var repDa = document.getElementById('rep-viaggio-da');
+  var repA = document.getElementById('rep-viaggio-a');
+  var p = _dashVettCalcolaPeriodo();
+  if (sel) sel.value = vettoreId; // '', 'proprio', o uuid trasportatore
+  if (repDa) repDa.value = p.da;
+  if (repA) repA.value = p.a;
+  if (typeof generaReportViaggi === 'function') generaReportViaggi();
+  // Scroll alla tabella
+  setTimeout(function() {
+    var el = document.getElementById('report-viaggi-content');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 200);
+}
+
+async function caricaDashboardVettori() {
+  var el = document.getElementById('dash-vettori-content');
+  if (!el) return;
+  var p = _dashVettCalcolaPeriodo();
+
+  var query = sb.from('carichi')
+    .select('id,data,trasportatore_id,carico_ordini(ordini(litri,trasporto_litro)),trasportatori(nome)')
+    .gte('data', p.da).lte('data', p.a);
+  var carRes = await query;
+  if (carRes.error) {
+    el.innerHTML = '<div class="loading" style="padding:12px;color:#A32D2D">Errore caricamento dashboard: ' + esc(carRes.error.message) + '</div>';
+    return;
+  }
+  var carichi = carRes.data || [];
+
+  // Aggrego per vettore
+  var perVettore = {}; // key: vettoreId|'proprio' → { nome, vettoreId, viaggi, litri, fatturato }
+  var totViaggi = 0, totLitri = 0, totFatt = 0;
+  carichi.forEach(function(c) {
+    var ordini = (c.carico_ordini || []).map(function(co) { return co.ordini; }).filter(Boolean);
+    var litri = ordini.reduce(function(s, o) { return s + Number(o.litri || 0); }, 0);
+    var fatt = ordini.reduce(function(s, o) { return s + (Number(o.trasporto_litro || 0) * Number(o.litri || 0)); }, 0);
+    var key, nome;
+    if (c.trasportatori && c.trasportatore_id) {
+      key = c.trasportatore_id;
+      nome = c.trasportatori.nome;
+    } else {
+      key = 'proprio';
+      nome = 'Mezzi propri';
+    }
+    if (!perVettore[key]) perVettore[key] = { nome: nome, vettoreId: key, viaggi: 0, litri: 0, fatturato: 0 };
+    perVettore[key].viaggi += 1;
+    perVettore[key].litri += litri;
+    perVettore[key].fatturato += fatt;
+    totViaggi += 1;
+    totLitri += litri;
+    totFatt += fatt;
+  });
+
+  var vettori = Object.values(perVettore).sort(function(a, b) { return b.litri - a.litri; });
+
+  // Header con periodo + selettore
+  var modoBtn = function(modo, label) {
+    var attivo = _dashVettState.modo === modo;
+    return '<button onclick="_dashVettCambiaModo(\'' + modo + '\')" style="font-size:12px;padding:6px 10px;background:' + (attivo ? '#185FA5' : 'transparent') + ';color:' + (attivo ? 'white' : 'var(--text)') + ';border:0.5px solid var(--border);border-radius:4px;cursor:pointer;font-weight:' + (attivo ? '500' : '400') + '">' + label + '</button>';
+  };
+  var navDisabled = _dashVettState.modo === 'tutto';
+  var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">' +
+    '<div><div style="font-size:14px;font-weight:500;color:var(--text)">Riepilogo periodo</div>' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + esc(p.label) + '</div></div>' +
+    '<div style="display:flex;gap:6px;align-items:center">' +
+      '<button onclick="_dashVettNavigaPeriodo(-1)" ' + (navDisabled ? 'disabled' : '') + ' style="font-size:13px;padding:4px 10px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:' + (navDisabled ? 'not-allowed;opacity:0.4' : 'pointer') + '">◀</button>' +
+      modoBtn('mese', 'Mese') + modoBtn('anno', 'Anno') + modoBtn('tutto', 'Tutto') +
+      '<button onclick="_dashVettNavigaPeriodo(1)" ' + (navDisabled ? 'disabled' : '') + ' style="font-size:13px;padding:4px 10px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:' + (navDisabled ? 'not-allowed;opacity:0.4' : 'pointer') + '">▶</button>' +
+    '</div></div>';
+
+  // KPI
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">' +
+    '<div style="background:var(--bg);border-radius:8px;padding:12px 14px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:4px">Viaggi totali</div><div style="font-family:var(--font-mono);font-size:22px;font-weight:500;color:var(--text)">' + totViaggi.toLocaleString('it-IT') + '</div></div>' +
+    '<div style="background:var(--bg);border-radius:8px;padding:12px 14px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:4px">Litri trasportati</div><div style="font-family:var(--font-mono);font-size:22px;font-weight:500;color:var(--text)">' + fmtL(totLitri) + '</div></div>' +
+    '<div style="background:var(--bg);border-radius:8px;padding:12px 14px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-muted);margin-bottom:4px">Fatturato totale</div><div style="font-family:var(--font-mono);font-size:22px;font-weight:500;color:var(--text)">' + fmtE(totFatt) + '</div></div>' +
+    '</div>';
+
+  // Pannelli vettori
+  if (!vettori.length) {
+    html += '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;background:var(--bg);border-radius:8px">Nessun viaggio registrato in questo periodo</div>';
+  } else {
+    html += '<div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:8px">Per vettore</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">';
+    vettori.forEach(function(v) {
+      var pct = totLitri > 0 ? (v.litri / totLitri * 100) : 0;
+      var pctStr = pct >= 10 ? Math.round(pct) + '%' : pct.toFixed(1) + '%';
+      var colore = _dashVettColore(v.nome);
+      var fattHtml = (v.vettoreId === 'proprio' && v.fatturato === 0)
+        ? '<div style="font-family:var(--font-mono);font-weight:500;font-size:13px;color:var(--text-muted)">—</div>'
+        : '<div style="font-family:var(--font-mono);font-weight:500;font-size:13px;color:var(--text)">' + fmtE(v.fatturato) + '</div>';
+      html += '<div onclick="_dashVettApplicaFiltro(\'' + esc(v.vettoreId) + '\')" style="background:var(--bg-card);border:0.5px solid var(--border);border-left:3px solid ' + colore + ';border-radius:0 8px 8px 0;padding:12px 14px;cursor:pointer;transition:background 0.1s" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'var(--bg-card)\'" title="Click per filtrare la tabella sotto">' +
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">' +
+          '<div style="font-size:14px;font-weight:500;color:var(--text)">' + esc(v.nome) + '</div>' +
+          '<div style="font-family:var(--font-mono);font-size:26px;font-weight:500;color:' + colore + ';line-height:1">' + pctStr + '</div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' +
+          '<div><div style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:10px">Viaggi</div><div style="font-family:var(--font-mono);font-weight:500;font-size:13px;color:var(--text)">' + v.viaggi + '</div></div>' +
+          '<div><div style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:10px">Litri</div><div style="font-family:var(--font-mono);font-weight:500;font-size:13px;color:var(--text)">' + fmtL(v.litri) + '</div></div>' +
+          '<div><div style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:10px">Fatturato</div>' + fattHtml + '</div>' +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
 }
 
 // ── REPORT VIAGGI PER VETTORE ──

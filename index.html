@@ -2395,16 +2395,24 @@
           <!-- REPORT VIAGGI PER VETTORE -->
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Report viaggi per vettore</div>
-            <div class="form-grid">
-              <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
-              <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" data-nav="day" /></div>
-              <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" data-nav="day" /></div>
+
+            <!-- v20260501l: Dashboard riepilogo vettori (mese corrente di default) -->
+            <div id="dash-vettori-content" style="margin-bottom:16px"><div class="loading" style="padding:12px;font-size:12px">Caricamento dashboard...</div></div>
+
+            <!-- Sezione "Ricerca dettagliata": filtri + tabella + PDF (invariati) -->
+            <div style="border-top:0.5px solid var(--border);padding-top:14px;margin-top:8px">
+              <div style="font-size:13px;font-weight:500;color:var(--text);margin-bottom:10px">Ricerca dettagliata</div>
+              <div class="form-grid">
+                <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
+                <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" data-nav="day" /></div>
+                <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" data-nav="day" /></div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+                <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
+                <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
+              </div>
+              <div id="report-viaggi-content" style="margin-top:16px"></div>
             </div>
-            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-              <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
-              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
-            </div>
-            <div id="report-viaggi-content" style="margin-top:16px"></div>
           </div>
         </div>
 
@@ -2837,7 +2845,7 @@
 <script src="pf-movimenti-totali.js?v=20260420b"></script>
 <script src="pf-movimenti-dettaglio.js?v=20260420f"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
-<script src="pf-logistica.js?v=20260428a"></script>
+<script src="pf-logistica.js?v=20260501l"></script>
 <script src="pf-admin.js?v=20260428b"></script>
 <script src="pf-dashboard.js?v=20260419e"></script>
 <script src="pf-home.js?v=20260419a"></script>
