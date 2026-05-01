@@ -228,7 +228,10 @@ async function caricaGiacenzeStazione() {
         const capMax = Number(c.capacita_max);
         const livAtt = Number(c.livello_attuale);
         const pct = capMax > 0 ? Math.round((livAtt / capMax) * 100) : 0;
-        const cmp = Number(c.costo_medio||0);
+        // Patch v20260501j: il CMP individuale per cisterna NON va più mostrato.
+        // Il CMP è proprietà del PRODOTTO, non della cisterna (modello "fiume").
+        // Il valore unico ponderato è già visibile sopra il gruppo prodotto (cmpLabel).
+        // costo_medio resta in DB per il calcolo della media ponderata.
         totG += livAtt;
         // Numero progressivo dentro il gruppo (1, 2, 3…) — evita di prendere la capacità dal nome
         var numCis = idx + 1;
@@ -245,7 +248,6 @@ async function caricaGiacenzeStazione() {
           '</div>' +
           '<div class="litri-wrap"><div class="litri-box"><span class="litri-valore">' + livAtt.toLocaleString('it-IT') + '</span><span class="litri-unita">L</span></div></div>' +
           '<div class="info"><span class="pct">' + pct + '%</span> · cap. ' + capMax.toLocaleString('it-IT') + ' L</div>' +
-          (cmp > 0 ? '<div class="cmp">CMP € ' + cmp.toFixed(4) + '</div>' : '') +
           '</div>';
       });
 
