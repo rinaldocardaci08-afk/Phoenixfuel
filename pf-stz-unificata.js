@@ -1,6 +1,22 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
-// Versione 01/05/2026 (v20260501a)
+// Versione 01/05/2026 (v20260501b)
+//
+// Patch v20260501b (01/05 mattina): FIX INCONGRUENZE PANNELLO
+//   - Pannello "Marginalità live" ora SEMPRE coerente tra le viste (Per
+//     pompa / Per prodotto / modalità Editable). Calcolato da helper unico
+//     _uniCalcolaTotaliPerProdotto(data) che aggrega per prodotto, mai
+//     per pompa.
+//   - Modalità editable: card pompa con cambio prezzo NON mostra più
+//     "Venduto pompa" né dettaglio "↳ N L × prezzo + ↳ M L × prezzo cp"
+//     né margine €/L pompa. Mostra solo "Litri pompa: N L" con nota
+//     "fatturato e margine calcolati a livello prodotto (vedi pannello)".
+//   - Card pompe SENZA cambio prezzo: invariate (Venduto e margine OK).
+//   - Helper _uniCalcolaTotaliPerProdotto usa doppia fonte per cambio
+//     prezzo: nuovo (stazione_cambio_prezzo) → fallback storico aggregato
+//     (stazione_letture.litri_prezzo_diverso somma per prodotto). Se
+//     costo_prezzo_diverso storico mancante → fallback al costo standard.
+// ───────────────────────────────────────────────────────────────────
 //
 // Patch v20260501a (01/05): UNIFICAZIONE VISTA CAMBIO PREZZO
 //   - Vista per pompa: rimossa tabella Prima/Dopo/Totale (divisione fascia
@@ -720,7 +736,8 @@ function _uniRenderPerPompa(data) {
       html += _uniCardPompaVuota(pompa, colore);
     });
     el.innerHTML = html;
-    _uniRenderPanel(totGasolio, totBenzina);
+    var _tF = _uniCalcolaTotaliPerProdotto(data);
+    _uniRenderPanel(_tF.gasolio, _tF.benzina);
     return;
   }
 
@@ -892,7 +909,8 @@ function _uniRenderPerPompa(data) {
       html += _uniCardPompaVuota(pompa, colore);
     });
     el.innerHTML = html;
-    _uniRenderPanel(totGasolio, totBenzina);
+    var _t0 = _uniCalcolaTotaliPerProdotto(data);
+    _uniRenderPanel(_t0.gasolio, _t0.benzina);
     return;
   }
 
@@ -1044,10 +1062,11 @@ function _uniRenderPerPompa(data) {
   html += '</div>';
 
   el.innerHTML = html;
-  _uniRenderPanel(totGasolio, totBenzina);
+  // Patch v20260501b: pannello sempre da helper unico, non più dagli
+  // accumulatori inline (che erano incoerenti tra le viste).
+  var _t1 = _uniCalcolaTotaliPerProdotto(data);
+  _uniRenderPanel(_t1.gasolio, _t1.benzina);
 }
-
-// ── Card pompa vuota (giorno senza letture) ──
 function _uniCardPompaVuota(pompa, colore) {
   var h = '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px;opacity:0.5">';
   h += '<div style="display:flex;align-items:center;gap:6px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(pompa.nome) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + esc(pompa.prodotto) + ' — nessuna lettura</span></div>';
@@ -1263,7 +1282,85 @@ function _uniRenderPerProdotto(data) {
   });
 
   el.innerHTML = html;
-  _uniRenderPanel(totGasolio, totBenzina);
+  // Patch v20260501b: pannello sempre da helper unico
+  var _tP = _uniCalcolaTotaliPerProdotto(data);
+  _uniRenderPanel(_tP.gasolio, _tP.benzina);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPER UNICO TOTALI GIORNATA (Patch v20260501b)
+// Calcola sempre lo stesso oggetto {gasolio, benzina} a partire dai dati
+// DB già caricati in _uniData. Aggregazione PER PRODOTTO, mai per pompa.
+// Usato da: _uniRenderPerPompa, _uniRenderPerProdotto, _uniCalcolaLive.
+// Invariante: il pannello "Marginalità live" deve dare lo stesso identico
+// numero indipendentemente dalla vista attiva o dalla modalità (editable
+// vs readonly, una volta che i dati sono salvati).
+// Output: euro = VENDUTO NETTO (il pannello fa × 1,22 per ottenere IVA).
+// ═══════════════════════════════════════════════════════════════════
+function _uniCalcolaTotaliPerProdotto(data) {
+  var m = _uniData;
+  var empty = { gasolio: { litri: 0, euro: 0, marg: 0 }, benzina: { litri: 0, euro: 0, marg: 0 } };
+  if (!m || !data) return empty;
+
+  // Step 1: aggrego per prodotto litri venduti + dati cambio prezzo storico per pompa
+  var perProd = {};
+  var lettureGiorno = m.lettureByData[data] || [];
+  lettureGiorno.forEach(function(l) {
+    var pompa = m.pompeMap[l.pompa_id];
+    if (!pompa) return;
+    var prod = pompa.prodotto;
+    var storPompa = (m.lettureByPompa[l.pompa_id] || []).slice().sort(function(a, b) { return b.data.localeCompare(a.data); });
+    var myIdx = storPompa.findIndex(function(x) { return x.id === l.id; });
+    var prec = myIdx < storPompa.length - 1 ? storPompa[myIdx + 1] : null;
+    var litri = prec ? Math.max(0, Number(l.lettura) - Number(prec.lettura)) : 0;
+    if (!perProd[prod]) perProd[prod] = { litri: 0, litriPDStor: 0, valPDw: 0, costoPDw: 0 };
+    perProd[prod].litri += litri;
+    var lpd = Number(l.litri_prezzo_diverso || 0);
+    var ppd = Number(l.prezzo_diverso || 0);
+    var cpd = Number(l.costo_prezzo_diverso || 0);
+    if (lpd > 0 && ppd > 0) {
+      perProd[prod].litriPDStor += lpd;
+      perProd[prod].valPDw += lpd * ppd;
+      perProd[prod].costoPDw += lpd * cpd; // se cpd=0, contributo 0 (gestito poi con fallback)
+    }
+  });
+
+  // Step 2: per ogni prodotto calcolo venduto netto + costo + margine
+  var tot = { gasolio: { litri: 0, euro: 0, marg: 0 }, benzina: { litri: 0, euro: 0, marg: 0 } };
+  Object.keys(perProd).forEach(function(prod) {
+    var p = perProd[prod];
+    var prezzo = Number(m.prezziMap[data + '_' + prod] || 0);
+    var prezzoN = prezzo > 0 ? prezzo / 1.22 : 0;
+    var costo = Number(m.costiMap[data + '_' + prod] || 0);
+    if (!costo && m.cmpCorrente && m.cmpCorrente[prod]) costo = Number(m.cmpCorrente[prod] || 0);
+
+    // Cambio prezzo: priorità nuovo meccanismo (stazione_cambio_prezzo),
+    // fallback storico aggregato per prodotto. Se costo cambio prezzo
+    // mancante, fallback al costo standard del prodotto.
+    var cpKey = data + '_' + prod;
+    var cpNew = (m.cambioPrezzoMap || {})[cpKey] || null;
+    var litriPD = 0, prezzoPD = 0, costoPD = 0;
+    if (cpNew && Number(cpNew.prezzo_iva_nuovo || 0) > 0 && Number(cpNew.litri_al_nuovo_prezzo || 0) > 0) {
+      litriPD = Number(cpNew.litri_al_nuovo_prezzo);
+      prezzoPD = Number(cpNew.prezzo_iva_nuovo);
+      costoPD = Number(cpNew.costo_netto_nuovo || 0) || costo;
+    } else if (p.litriPDStor > 0) {
+      litriPD = p.litriPDStor;
+      prezzoPD = p.valPDw / p.litriPDStor;
+      costoPD = p.costoPDw > 0 ? (p.costoPDw / p.litriPDStor) : costo;
+    }
+    var prezzoPDN = prezzoPD > 0 ? prezzoPD / 1.22 : 0;
+    var litriStd = Math.max(0, p.litri - litriPD);
+    var euroNetto = litriStd * prezzoN + litriPD * prezzoPDN;
+    var costoTot = litriStd * costo + litriPD * costoPD;
+    var margine = (costo > 0) ? (euroNetto - costoTot) : 0;
+    var bucket = prod.toLowerCase().indexOf('gasolio') >= 0 ? 'gasolio' : 'benzina';
+    tot[bucket].litri += p.litri;
+    tot[bucket].euro  += euroNetto;
+    tot[bucket].marg  += margine;
+  });
+
+  return tot;
 }
 
 // ── PANNELLO SCURO MARGINALITÀ LIVE ──
@@ -1675,13 +1772,14 @@ function _uniCalcolaLive() {
   });
 
   // ════════════════════════════════════════════════════════════════════
-  // FASE 3 — calcolo litri/euro/margine per ogni pompa.
-  // I litri al nuovo prezzo del prodotto si distribuiscono tra le pompe
-  // dello stesso prodotto in PROPORZIONE ai litri erogati (è la migliore
-  // approssimazione possibile non avendo il dato per pompa).
-  // Nota: il totale per prodotto resta esatto, la ripartizione è solo
-  // un'approssimazione interna alla pompa per il pannello margine destra.
+  // FASE 3 — aggiornamento UI card pompa (Patch v20260501b).
+  // PRIMA: ripartiva i litri tra pompe con proporzionale e mostrava
+  //   "Venduto pompa" e "↳ N L × prezzo + ↳ M L × prezzo cp" in card.
+  // ORA: la card pompa con cambio prezzo mostra SOLO i litri totali pompa
+  //   (niente venduto, niente margine). Il calcolo univoco è solo a livello
+  //   prodotto (FASE 4 sotto). Card pompe SENZA cambio prezzo: invariate.
   // ════════════════════════════════════════════════════════════════════
+  var perProdLive = {}; // { prodotto: { litri: somma } }
   pompe.forEach(function(p) {
     var inpLett = document.querySelector('.uni-lettura-input[data-pompa="' + p.id + '"]');
     var elCalc = document.getElementById('uni-calc-' + p.id);
@@ -1697,22 +1795,14 @@ function _uniCalcolaLive() {
     var costo = inpCosto ? (parseFloat(inpCosto.value) || 0) : 0;
     if (!costo && _uniData.cmpCorrente && _uniData.cmpCorrente[p.prodotto]) costo = _uniData.cmpCorrente[p.prodotto];
 
-    // Cambio prezzo per QUESTO prodotto (dal box CPP)
+    // Cambio prezzo per QUESTO prodotto (dal modale popup → cambioPrezzoMap)
     var cpProd = cppPerProdotto[p.prodotto] || { litri: 0, prezzoIva: 0, costoNetto: 0 };
+    var hasCpProd = cpProd.litri > 0 && cpProd.prezzoIva > 0;
 
     if (!isNaN(valOggi) && valPrec > 0) {
       var litri = valOggi - valPrec;
-      // Ripartizione proporzionale dei litri al nuovo prezzo nella pompa
-      var litriProdTot = litriPerProdotto[p.prodotto] || 0;
-      var litriDivPompa = (cpProd.litri > 0 && litriProdTot > 0)
-        ? Math.min(litri, (litri / litriProdTot) * cpProd.litri)
-        : 0;
-      var litriStdPompa = Math.max(0, litri - litriDivPompa);
-      var euroStd = litriStdPompa * prezzoStd;
-      var euroDiv = litriDivPompa * cpProd.prezzoIva;
-      var euro = euroStd + euroDiv;
 
-      // Box grande litri erogati accanto al contatore
+      // Box grande litri erogati accanto al contatore (sempre)
       var elLitri = document.getElementById('uni-litri-' + p.id);
       if (elLitri) {
         if (litri >= 0) {
@@ -1722,38 +1812,30 @@ function _uniCalcolaLive() {
         }
       }
 
-      // Box calcolo: solo euro venduto e dettaglio cambio prezzo se presente
-      var calcHtml = '<div style="font-size:15px"><span style="color:var(--text-muted)">Venduto: </span><strong style="font-family:var(--font-mono);color:#639922;font-size:18px">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>';
-      if (litriDivPompa > 0 && cpProd.prezzoIva > 0) {
-        calcHtml += '<div style="font-size:13px;color:var(--text-muted);padding-top:6px;margin-top:6px;border-top:0.5px dashed var(--border)">'
-          + '<div>↳ ' + litriStdPompa.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + prezzoStd.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroStd.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong></div>'
-          + '<div style="color:#1a1a18">↳ ' + litriDivPompa.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L × € ' + cpProd.prezzoIva.toFixed(3) + ' = <strong style="font-family:var(--font-mono)">€ ' + euroDiv.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</strong> <span style="font-size:10px;background:#1a1a18;color:#fff;padding:1px 5px;border-radius:4px">cambio prezzo</span></div>'
-          + '</div>';
+      if (hasCpProd) {
+        // Card pompa con cambio prezzo: solo litri totali, niente fatturato
+        // né margine pompa (calcolo univoco solo a livello prodotto)
+        elCalc.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Litri pompa: <strong style="font-family:var(--font-mono);color:var(--text);font-size:15px">' + litri.toLocaleString('it-IT',{maximumFractionDigits:2}) + ' L</strong> <span style="font-size:11px;color:var(--text-muted);margin-left:6px">— fatturato e margine calcolati a livello prodotto (vedi pannello)</span></div>';
+        if (elMarg) elMarg.innerHTML = '<span style="color:var(--text-muted);font-size:13px">—</span><div style="font-size:9px;color:var(--text-muted)">cambio prezzo: vedi pannello</div>';
+      } else {
+        // Card pompa senza cambio prezzo: invariata (Venduto e margine pompa OK)
+        var euro = litri * prezzoStd;
+        elCalc.innerHTML = '<div style="font-size:15px"><span style="color:var(--text-muted)">Venduto: </span><strong style="font-family:var(--font-mono);color:#639922;font-size:18px">€ ' + euro.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>';
+        if (elMarg) {
+          var prezzoN = prezzoStd > 0 ? prezzoStd / 1.22 : 0;
+          var margL = prezzoN > 0 && costo > 0 ? prezzoN - costo : 0;
+          var margTot = margL * litri;
+          var mColor = margL >= 0 ? '#639922' : '#E24B4A';
+          elMarg.innerHTML = (costo > 0 && prezzoStd > 0)
+            ? '<span style="color:' + mColor + '">€ ' + margL.toFixed(4) + '</span><div style="font-size:10px;color:var(--text-muted);font-weight:400">tot ' + margTot.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>'
+            : '—';
+        }
       }
-      elCalc.innerHTML = calcHtml;
 
-      // Margine pompa (resta basato sul prezzo standard per la cella ✓)
-      if (elMarg) {
-        var prezzoN = prezzoStd > 0 ? prezzoStd / 1.22 : 0;
-        var margL = prezzoN > 0 && costo > 0 ? prezzoN - costo : 0;
-        var margTot = margL * litri;
-        var mColor = margL >= 0 ? '#639922' : '#E24B4A';
-        elMarg.innerHTML = (costo > 0 && prezzoStd > 0)
-          ? '<span style="color:' + mColor + '">€ ' + margL.toFixed(4) + '</span><div style="font-size:10px;color:var(--text-muted);font-weight:400">tot ' + margTot.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>'
-          : '—';
-      }
-
-      // Accumula per pannello destra (con cambio prezzo)
+      // Aggrego litri per prodotto (sarà usato in FASE 4 per il pannello)
       if (litri >= 0) {
-        totLitri += litri; totEuro += euro;
-        var isGasolio = p.prodotto.toLowerCase().indexOf('gasolio') >= 0;
-        var margLNetto = (prezzoStd > 0 && costo > 0) ? (prezzoStd / 1.22) - costo : 0;
-        var costoCp = cpProd.costoNetto || costo; // se costo CP non valorizzato, usa costo std
-        var prezzoCpNet = cpProd.prezzoIva > 0 ? cpProd.prezzoIva / 1.22 : 0;
-        var margLDivNetto = (prezzoCpNet > 0 && costoCp > 0) ? prezzoCpNet - costoCp : 0;
-        var margPompaTot = (margLNetto * litriStdPompa) + (margLDivNetto * litriDivPompa);
-        if (isGasolio) { litriGasolio += litri; euroGasolio += euro; margGasolio += margPompaTot; }
-        else { litriBenzina += litri; euroBenzina += euro; margBenzina += margPompaTot; }
+        if (!perProdLive[p.prodotto]) perProdLive[p.prodotto] = { litri: 0 };
+        perProdLive[p.prodotto].litri += litri;
       }
     } else {
       elCalc.innerHTML = '<span style="color:var(--text-muted);font-size:15px">Venduto: <strong style="font-family:var(--font-mono)">€ —</strong></span>';
@@ -1763,11 +1845,47 @@ function _uniCalcolaLive() {
     }
   });
 
-  // Aggiorna pannello marginalita' a destra (stile identico pannello tab marginalita')
-  _uniRenderPanel(
-    { litri: litriGasolio, euro: euroGasolio, marg: margGasolio },
-    { litri: litriBenzina, euro: euroBenzina, marg: margBenzina }
-  );
+  // ════════════════════════════════════════════════════════════════════
+  // FASE 4 — totali pannello live aggregati PER PRODOTTO (Patch v20260501b)
+  // Niente più ripartizione proporzionale per pompa. Il calcolo segue la
+  // stessa logica dell'helper _uniCalcolaTotaliPerProdotto (che invece
+  // legge da DB). Qui usa gli input live degli operatori.
+  // ════════════════════════════════════════════════════════════════════
+  var totGasolio = { litri: 0, euro: 0, marg: 0 };
+  var totBenzina = { litri: 0, euro: 0, marg: 0 };
+  Object.keys(perProdLive).forEach(function(prod) {
+    var litriProd = perProdLive[prod].litri;
+    if (litriProd <= 0) return;
+    var inpPrezzo = document.querySelector('.uni-prezzo-input[data-prodotto="' + prod + '"]');
+    var inpCosto  = document.querySelector('.uni-costo-input[data-prodotto="' + prod + '"]');
+    var prezzoStd = inpPrezzo ? (parseFloat(inpPrezzo.value) || 0) : 0;
+    var costoStd  = inpCosto  ? (parseFloat(inpCosto.value) || 0) : 0;
+    if (!costoStd && _uniData.cmpCorrente && _uniData.cmpCorrente[prod]) costoStd = Number(_uniData.cmpCorrente[prod] || 0);
+    var prezzoStdN = prezzoStd > 0 ? prezzoStd / 1.22 : 0;
+
+    var cpProd = cppPerProdotto[prod] || { litri: 0, prezzoIva: 0, costoNetto: 0 };
+    var litriCp = (cpProd.litri > 0 && cpProd.prezzoIva > 0) ? cpProd.litri : 0;
+    var prezzoCpN = litriCp > 0 ? cpProd.prezzoIva / 1.22 : 0;
+    var costoCp = litriCp > 0 ? (cpProd.costoNetto > 0 ? cpProd.costoNetto : costoStd) : 0;
+
+    var litriStd = Math.max(0, litriProd - litriCp);
+    var euroNetto = litriStd * prezzoStdN + litriCp * prezzoCpN;
+    var costoTot = litriStd * costoStd + litriCp * costoCp;
+    var margine = (costoStd > 0) ? (euroNetto - costoTot) : 0;
+
+    var bucket = prod.toLowerCase().indexOf('gasolio') >= 0 ? 'gasolio' : 'benzina';
+    if (bucket === 'gasolio') {
+      totGasolio.litri += litriProd;
+      totGasolio.euro  += euroNetto;
+      totGasolio.marg  += margine;
+    } else {
+      totBenzina.litri += litriProd;
+      totBenzina.euro  += euroNetto;
+      totBenzina.marg  += margine;
+    }
+  });
+
+  _uniRenderPanel(totGasolio, totBenzina);
   // Patch 30/04 (f): rimosso blocco pulsante salva per errore CPP. La validazione
   // tolleranza è ora gestita dentro la modale popup (con bottone "Salva cambio prezzo"
   // disabilitato se errore). Il pulsante "Salva giornata" della pagina principale
