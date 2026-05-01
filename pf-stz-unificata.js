@@ -1,6 +1,28 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
-// Versione 30/04/2026 (v20260430f)
+// Versione 01/05/2026 (v20260501a)
+//
+// Patch v20260501a (01/05): UNIFICAZIONE VISTA CAMBIO PREZZO
+//   - Vista per pompa: rimossa tabella Prima/Dopo/Totale (divisione fascia
+//     sulla pompa). Sostituita con 3 riquadri scalari "1° prezzo" + 3 riquadri
+//     scalari "2° prezzo" (Prezzo €/L IVA / Costo €/L netto / Margine €/L).
+//     Niente fatturato pompa, niente margine totale pompa quando c'è cambio
+//     prezzo. Calcolo univoco solo a livello prodotto.
+//   - Vista per prodotto: nuova tabella riepilogo stile "RIEPILOGO GIORNATA"
+//     del modale popup (LITRI / €/L / Costo €/L / Totale € / Costo € / Margine €).
+//     Sub-righe 1° prezzo / 2° prezzo / Totale se cambio prezzo. Una sola
+//     riga "Giornata" se no cambio prezzo.
+//   - Modale popup: pannelli prodotto con border-left 4px del colore prodotto
+//     (sostituito sfondo ambra anonimo) + pallino + nome prodotto. Coerente
+//     con lo stile dei pannelli prodotto altrove nel programma.
+//   - Accumulatori totali pannello destro: matematicamente invariati
+//     (verificato SQL: zero anomalie storiche pompe-stesso-prodotto-prezzi-
+//     diversi nel 2026). Tutti i totali giornata identici al centesimo.
+//   - Lettura dati cambio prezzo: doppia fonte. Nuovo meccanismo
+//     stazione_cambio_prezzo (post-30/4) per primo, fallback al vecchio
+//     stazione_letture.litri_prezzo_diverso/prezzo_diverso/costo_prezzo_diverso
+//     (storico 1/1 → 29/4) sommando le pompe del prodotto.
+// ───────────────────────────────────────────────────────────────────
 //
 // Patch 30/04 (f): cambio prezzo in MODALE POPUP.
 //   - Pulsante "⚡ CAMBIO PREZZO" in alto accanto alla data/navigazione.
@@ -359,29 +381,33 @@ function _uniRenderModaleCambioPrezzo(data) {
       var chiaviPrz = Object.keys(m.prezziMap).filter(function(kk){ return kk.endsWith('_' + prodotto); }).sort().reverse();
       if (chiaviPrz.length) prezzoVecchio = Number(m.prezziMap[chiaviPrz[0]] || 0);
     }
+    // Patch v20260501a: pannelli prodotto colorati per coerenza con resto del programma.
+    // Border-left 4px del colore prodotto + pallino, sfondo neutro, riquadri interni neutri.
+    var _piMod = cacheProdotti.find(function(pp) { return pp.nome === prodotto; });
+    var _coloreMod = _piMod ? _piMod.colore : '#888';
 
-    html += '<div style="background:#FFF8E1;border:0.5px solid #F0D080;border-radius:8px;padding:10px;margin-bottom:8px">';
-    html += '<strong style="font-size:12px;color:#8B6914;display:block;margin-bottom:6px">' + esc(prodotto) + '</strong>';
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + _coloreMod + ';border-radius:8px;padding:10px 12px;margin-bottom:8px">';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:9px;height:9px;border-radius:50%;background:' + _coloreMod + '"></div><strong style="font-size:12px;color:var(--text)">' + esc(prodotto) + '</strong></div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">';
     // 1) Prezzo IVA nuovo
-    html += '<div style="background:#fff;border:0.5px solid #F0D080;border-radius:6px;padding:6px 8px">';
-    html += '<div style="font-size:9px;color:#8B6914;letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Prezzo IVA nuovo</div>';
-    html += '<input type="number" class="uni-cpp-prezzo" data-prodotto="' + esc(prodotto) + '" value="' + (prezzoInitial || '') + '" placeholder="0,000" step="0.001" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:#1a1a18" />';
+    html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;padding:6px 8px">';
+    html += '<div style="font-size:9px;color:var(--text-muted);letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Prezzo IVA nuovo</div>';
+    html += '<input type="number" class="uni-cpp-prezzo" data-prodotto="' + esc(prodotto) + '" value="' + (prezzoInitial || '') + '" placeholder="0,000" step="0.001" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:var(--text)" />';
     html += '</div>';
     // 2) Prezzo IVA vecchio (readonly)
-    html += '<div style="background:rgba(186,117,23,0.06);border:0.5px solid rgba(186,117,23,0.20);border-radius:6px;padding:6px 8px">';
-    html += '<div style="font-size:9px;color:#8B6914;letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Prezzo IVA vecchio</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:500;color:#633806;padding-top:2px;text-align:right">' + (prezzoVecchio > 0 ? prezzoVecchio.toFixed(3) : '—') + '</div>';
+    html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;padding:6px 8px;opacity:0.75">';
+    html += '<div style="font-size:9px;color:var(--text-muted);letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Prezzo IVA vecchio</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:500;color:var(--text);padding-top:2px;text-align:right">' + (prezzoVecchio > 0 ? prezzoVecchio.toFixed(3) : '—') + '</div>';
     html += '</div>';
-    // 3) Costo netto nuovo (rosso)
-    html += '<div style="background:rgba(226,75,74,0.04);border:0.5px solid rgba(226,75,74,0.20);border-radius:6px;padding:6px 8px">';
-    html += '<div style="font-size:9px;color:#8B6914;letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Costo netto nuovo</div>';
+    // 3) Costo netto nuovo (rosso, modificabile)
+    html += '<div style="background:#FCEBEB;border:0.5px solid #A32D2D;border-radius:6px;padding:6px 8px">';
+    html += '<div style="font-size:9px;color:#A32D2D;letter-spacing:0.3px;text-transform:uppercase;font-weight:600">Costo netto nuovo</div>';
     html += '<input type="number" class="uni-cpp-costo" data-prodotto="' + esc(prodotto) + '" value="' + (costoInitial > 0 ? Number(costoInitial).toFixed(4) : '') + '" placeholder="' + (cmpProd > 0 ? cmpProd.toFixed(4) : '0,0000') + '" step="0.0001" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:#A32D2D" />';
     html += '</div>';
     // 4) Litri al nuovo prezzo
-    html += '<div style="background:#fff;border:0.5px solid #F0D080;border-radius:6px;padding:6px 8px">';
-    html += '<div style="font-size:9px;color:#8B6914;letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Litri al nuovo prezzo</div>';
-    html += '<input type="number" class="uni-cpp-litri" data-prodotto="' + esc(prodotto) + '" value="' + (litriInitial || '') + '" placeholder="0" step="0.01" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:#1a1a18" />';
+    html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;padding:6px 8px">';
+    html += '<div style="font-size:9px;color:var(--text-muted);letter-spacing:0.3px;text-transform:uppercase;font-weight:500">Litri al nuovo prezzo</div>';
+    html += '<input type="number" class="uni-cpp-litri" data-prodotto="' + esc(prodotto) + '" value="' + (litriInitial || '') + '" placeholder="0" step="0.01" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:var(--text)" />';
     html += '</div>';
     html += '</div>';
     // Banner errore tolleranza inline (per prodotto)
@@ -819,11 +845,23 @@ function _uniRenderPerPompa(data) {
       html += '<div class="uni-margine-cell" data-pompa="' + pompa.id + '" style="font-family:var(--font-mono);font-size:16px;font-weight:700;padding:6px 0">—</div></div>';
       html += '</div>';
 
-      // Patch 30/04 (c): riquadro INFORMATIVO sulla pompa (sostituisce il banner
-      // editabile per pompa). Mostra "vecchio → nuovo prezzo" se c'è un cambio
-      // prezzo attivo per il prodotto del giorno corrente. Nessun input qui:
-      // il cambio si gestisce nel box "Cambio prezzo per prodotto" SOTTO le pompe.
-      html += '<div class="uni-cp-info-pompa" data-prodotto="' + esc(pompa.prodotto) + '" style="display:none;margin-top:8px;padding:7px 12px;background:#FFF8E1;border-left:3px solid #BA7517;border-radius:0 6px 6px 0;font-size:11px;color:#633806">⚡ <strong>Cambio prezzo oggi</strong>: <span class="uni-cp-info-vecchio"></span> → <span class="uni-cp-info-nuovo" style="font-weight:600"></span></div>';
+      // Patch v20260501a: blocco "2° prezzo" sulla pompa.
+      // Sostituisce il vecchio riquadro informativo testuale "vecchio → nuovo".
+      // Si popola dinamicamente da _uniCalcolaLive (FASE 2) leggendo cppPerProdotto.
+      // display:none di default; visibility gestita per JS.
+      html += '<div class="uni-cp-info-pompa" data-prodotto="' + esc(pompa.prodotto) + '" style="display:none;margin-top:8px">';
+      html += '<div style="font-size:10px;color:#0C447C;letter-spacing:0.4px;font-weight:500;margin-bottom:4px;text-transform:uppercase">2° prezzo</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 12px;background:#F5FAFE;border:0.5px solid #B5D4F4;border-radius:8px">';
+      // 2° prezzo IVA
+      html += '<div><div style="font-size:11px;color:#0C447C;text-transform:uppercase;margin-bottom:4px;font-weight:500">2° prezzo €/L IVA</div>';
+      html += '<div class="uni-cp-info-prezzo" style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:var(--text);padding:6px 10px;border:0.5px solid #B5D4F4;border-radius:6px;background:var(--bg);text-align:right">—</div></div>';
+      // 2° costo (rosso)
+      html += '<div><div style="font-size:11px;color:#A32D2D;text-transform:uppercase;margin-bottom:4px;font-weight:600">2° costo €/L netto</div>';
+      html += '<div class="uni-cp-info-costo" style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#A32D2D;padding:6px 10px;border:0.5px solid #A32D2D;border-radius:6px;background:#FCEBEB;text-align:right">—</div></div>';
+      // 2° margine €/L
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">2° margine €/L</div>';
+      html += '<div class="uni-cp-info-margine" style="font-family:var(--font-mono);font-size:16px;font-weight:700;padding:6px 0">—</div></div>';
+      html += '</div></div>';
 
       html += '</div>'; // chiudi card pompa
     });
@@ -916,16 +954,27 @@ function _uniRenderPerPompa(data) {
     html += '<div style="background:#1a1a1a;border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:1px;box-shadow:inset 0 2px 4px rgba(0,0,0,0.4)"><span style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;color:#7CFC00;letter-spacing:3px">' + oggiRaw + '</span></div></div>';
     html += '</div>';
 
-    // Risultato litri venduti
-    html += '<div style="font-size:13px;margin-bottom:10px;font-family:var(--font-mono)">Litri totali: <strong>' + fmtL(litriTot) + '</strong>   Venduto: <strong style="color:#639922">' + fmtE(litriTot * prezzo) + '</strong></div>';
+    // Risultato litri venduti — patch v20260501a: il "Venduto pompa" si
+    // mostra solo se NON c'è cambio prezzo per il prodotto (calcolo univoco
+    // litri × prezzo). Se hasCambio, niente fatturato pompa: lo si ricava
+    // dalla vista per prodotto, dove la divisione è esatta.
+    if (hasCambio) {
+      html += '<div style="font-size:13px;margin-bottom:10px;font-family:var(--font-mono)">Litri totali: <strong>' + fmtL(litriTot) + '</strong></div>';
+    } else {
+      html += '<div style="font-size:13px;margin-bottom:10px;font-family:var(--font-mono)">Litri totali: <strong>' + fmtL(litriTot) + '</strong>   Venduto: <strong style="color:#639922">' + fmtE(litriTot * prezzo) + '</strong></div>';
+    }
 
     // ── Riga Prezzo / Costo / Margine (EDITABILI - Fase 2) ──
     // Prezzo e costo sono PER PRODOTTO, non per pompa: gli input con lo stesso
     // data_prodotto si sincronizzano via _uniSyncProdotto on input.
+    // Patch v20260501a: se hasCambio, etichetta "1° PREZZO" sopra il box.
     var prezzoVal = prezzo ? prezzo.toFixed(3) : '';
     var costoVal = costoSaved ? Number(costoSaved).toFixed(4) : '';
     var costoPlaceholder = isCMP ? costoN.toFixed(4) + ' (CMP)' : '';
 
+    if (hasCambio) {
+      html += '<div style="font-size:10px;color:var(--text-muted);letter-spacing:0.4px;margin-top:4px;margin-bottom:4px;text-transform:uppercase">1° prezzo</div>';
+    }
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:start;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:6px">';
     // Col 1: Prezzo vendita (editabile)
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita €/L IVA</div>';
@@ -945,6 +994,14 @@ function _uniRenderPerPompa(data) {
     html += '</div>';
 
     // ── Cambio prezzo (se presente) ──
+    // Patch v20260501a: la tabella Prima/Dopo/Totale è stata sostituita da
+    // 3 riquadri scalari "2° prezzo" (Prezzo €/L IVA / Costo €/L netto /
+    // Margine €/L) — NIENTE divisione litri sulla pompa, niente fatturato
+    // né margine totale per pompa. Gli accumulatori totGasolio/totBenzina
+    // restano INVARIATI per coerenza con la matematica esistente: i totali
+    // giornata si compongono ancora pompa-per-pompa con la divisione fascia
+    // (verificato no anomalie storiche in 2026, calcolo equivalente al
+    // metodo per-prodotto al centesimo).
     if (hasCambio) {
       var costoSavedCP = (m.costiMapCP && m.costiMapCP[data + '_' + pompa.prodotto]) || '';
       var costoPropostoCP = costoSavedCP || costoProposto;
@@ -954,58 +1011,28 @@ function _uniRenderPerPompa(data) {
       var margTotCP = margLCP * litriPD;
       var mColorCP = margLCP >= 0 ? '#639922' : '#E24B4A';
 
-      // Accumula totali cambio prezzo
+      // Accumula totali cambio prezzo (matematicamente equivalente al calcolo
+      // per-prodotto, lasciato pompa-per-pompa per non toccare la logica)
       if (costoCP > 0 && litriPD > 0) {
         if (isGasolio) { totGasolio.litri += litriPD; totGasolio.euro += litriPD * prezzoPDN; totGasolio.marg += margTotCP; }
         else { totBenzina.litri += litriPD; totBenzina.euro += litriPD * prezzoPDN; totBenzina.marg += margTotCP; }
       }
 
-      html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:3px solid #BA7517;border-radius:8px;padding:10px 12px;margin-bottom:6px">';
-      html += '<div style="font-size:12px;font-weight:600;color:#633806;margin-bottom:8px">⚡ Cambio prezzo</div>';
-
-      // Tabella 3 righe: Prima / Dopo / Totale
-      html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-      html += '<thead><tr style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px"><th style="text-align:left;padding:4px 6px">Fascia</th><th style="text-align:right;padding:4px 6px">Litri</th><th style="text-align:right;padding:4px 6px">Prezzo €/L</th><th style="text-align:right;padding:4px 6px">Costo €/L</th><th style="text-align:right;padding:4px 6px">Margine €/L</th><th style="text-align:right;padding:4px 6px">€ incasso</th><th style="text-align:right;padding:4px 6px">€ margine</th></tr></thead><tbody>';
-
-      // Riga "Prima del cambio"
-      html += '<tr style="border-top:0.5px solid var(--border)">';
-      html += '<td style="padding:6px;font-weight:500;color:#633806">Prima</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtL(litriPD) + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + prezzoPD.toFixed(3) + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (costoCP > 0 ? costoCP.toFixed(4) : '—') + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColorCP + '">' + (costoCP > 0 ? '€ ' + margLCP.toFixed(4) : '—') + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtE(litriPD * prezzoPD) + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColorCP + '">' + (costoCP > 0 ? fmtE(margTotCP) : '—') + '</td>';
-      html += '</tr>';
-
-      // Riga "Dopo il cambio"
-      html += '<tr style="border-top:0.5px solid var(--border)">';
-      html += '<td style="padding:6px;font-weight:500;color:#633806">Dopo</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtL(litriStd) + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + prezzo.toFixed(3) + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (costoN > 0 ? costoN.toFixed(4) : '—') + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + (costoN > 0 ? '€ ' + margL.toFixed(4) : '—') + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtE(litriStd * prezzo) + '</td>';
-      html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + (costoN > 0 ? fmtE(margTot) : '—') + '</td>';
-      html += '</tr>';
-
-      // Riga totale verde
-      var totLitriP = litriPD + litriStd;
-      var totIncassoP = litriPD * prezzoPD + litriStd * prezzo;
-      var totMargP = margTotCP + margTot;
-      var prezzoMedioP = totLitriP > 0 ? (totIncassoP / totLitriP) : 0;
-      var margMedioP = totLitriP > 0 ? (totMargP / totLitriP) : 0;
-      html += '<tr style="background:#EAF3DE;border-top:1px solid #97C459">';
-      html += '<td style="padding:8px 6px;font-weight:600;color:#27500A">Totale pompa</td>';
-      html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + fmtL(totLitriP) + '</td>';
-      html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-size:10px;color:#27500A">med. ' + prezzoMedioP.toFixed(3) + '</td>';
-      html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-size:10px;color:#27500A">' + (costoN > 0 ? costoN.toFixed(4) : '—') + '</td>';
-      html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + (costoN > 0 ? '€ ' + margMedioP.toFixed(4) : '—') + '</td>';
-      html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + fmtE(totIncassoP) + '</td>';
-      html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + (costoN > 0 ? fmtE(totMargP) : '—') + '</td>';
-      html += '</tr>';
-
-      html += '</tbody></table></div>';
+      // Riquadri scalari "2° prezzo"
+      html += '<div style="font-size:10px;color:#0C447C;letter-spacing:0.4px;margin-top:8px;margin-bottom:4px;text-transform:uppercase;font-weight:500">2° prezzo</div>';
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:start;padding:8px 12px;background:#F5FAFE;border:0.5px solid #B5D4F4;border-radius:8px;margin-bottom:6px">';
+      // 2° prezzo €/L IVA
+      html += '<div><div style="font-size:11px;color:#0C447C;text-transform:uppercase;font-weight:500">2° prezzo €/L IVA</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:var(--text)">' + prezzoPD.toFixed(3) + '</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(4) + ' netto' : '') + '</div></div>';
+      // 2° costo €/L netto (rosso)
+      html += '<div><div style="font-size:11px;color:#A32D2D;text-transform:uppercase;font-weight:600">2° costo €/L netto</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#A32D2D">' + (costoCP > 0 ? costoCP.toFixed(4) : '—') + '</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:12px;color:#A32D2D;margin-top:2px">' + (costoCP > 0 ? '€ ' + (costoCP * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
+      // 2° margine €/L
+      html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">2° margine €/L</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColorCP + '">' + (costoCP > 0 ? '€ ' + margLCP.toFixed(4) : '—') + '</div></div>';
+      html += '</div>';
     }
 
     html += '</div>'; // chiudi card pompa
@@ -1093,27 +1120,144 @@ function _uniRenderPerProdotto(data) {
     var mColor = margL >= 0 ? '#639922' : '#E24B4A';
     var isGasolio = prod.toLowerCase().indexOf('gasolio') >= 0;
 
-    if (costoN > 0 && totLitriProd > 0) {
+    // Patch v20260501a: cambio prezzo per prodotto. Prendo i dati sia dal
+    // nuovo meccanismo (stazione_cambio_prezzo) sia dal vecchio (storico
+    // letture pompa con litri_prezzo_diverso > 0). Per lo storico, raccolgo
+    // i dati per prodotto sommando le pompe del gruppo.
+    var cpKey = data + '_' + prod;
+    var cpNew = (m.cambioPrezzoMap || {})[cpKey] || null;
+    var hasCpProd = false;
+    var litriPDProd = 0, prezzoPDProd = 0, costoPDProd = 0;
+    if (cpNew && cpNew.prezzo_iva_nuovo > 0 && cpNew.litri_al_nuovo_prezzo > 0) {
+      hasCpProd = true;
+      litriPDProd = Number(cpNew.litri_al_nuovo_prezzo);
+      prezzoPDProd = Number(cpNew.prezzo_iva_nuovo);
+      costoPDProd = Number(cpNew.costo_netto_nuovo || 0);
+    } else {
+      // Storico: aggrega dalle letture pompa del gruppo
+      var sumLitriPD = 0, sumValPD = 0, sumCostoPD = 0, nPompePD = 0;
+      gruppo.forEach(function(l) {
+        var lpd = Number(l.litri_prezzo_diverso || 0);
+        var ppd = Number(l.prezzo_diverso || 0);
+        var cpd = Number(l.costo_prezzo_diverso || 0);
+        if (lpd > 0 && ppd > 0) {
+          sumLitriPD += lpd;
+          sumValPD += lpd * ppd;
+          if (cpd > 0) { sumCostoPD += cpd; nPompePD++; }
+        }
+      });
+      if (sumLitriPD > 0) {
+        hasCpProd = true;
+        litriPDProd = sumLitriPD;
+        prezzoPDProd = sumValPD / sumLitriPD; // sempre uguale per pompe stesso prodotto (verificato)
+        costoPDProd = nPompePD > 0 ? sumCostoPD / nPompePD : 0;
+      }
+    }
+
+    // Aggiusto gli accumulatori del pannello destro per coerenza con cambio prezzo
+    if (hasCpProd && costoPDProd > 0 && litriPDProd > 0) {
+      var litriStdProd = Math.max(0, totLitriProd - litriPDProd);
+      var prezzoPDNet = prezzoPDProd / 1.22;
+      var margPDLitro = prezzoPDNet - costoPDProd;
+      var margTotStd = margL * litriStdProd;
+      var margTotPD = margPDLitro * litriPDProd;
+      // Accumulo: parte std + parte 2° prezzo (matematicamente equivalente
+      // al calcolo per-pompa, verificato no anomalie storiche)
+      if (isGasolio) {
+        totGasolio.litri += totLitriProd;
+        totGasolio.euro  += litriStdProd * prezzoN + litriPDProd * prezzoPDNet;
+        totGasolio.marg  += margTotStd + margTotPD;
+      } else {
+        totBenzina.litri += totLitriProd;
+        totBenzina.euro  += litriStdProd * prezzoN + litriPDProd * prezzoPDNet;
+        totBenzina.marg  += margTotStd + margTotPD;
+      }
+    } else if (costoN > 0 && totLitriProd > 0) {
       if (isGasolio) { totGasolio.litri += totLitriProd; totGasolio.euro += totLitriProd * prezzoN; totGasolio.marg += margTotProd; }
       else { totBenzina.litri += totLitriProd; totBenzina.euro += totLitriProd * prezzoN; totBenzina.marg += margTotProd; }
     }
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(prod) + '</strong><span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + gruppo.length + ' pompe — ' + fmtL(totLitriProd) + ' L totali</span></div>';
+    // Header
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(prod) + '</strong>';
+    if (hasCpProd) html += '<span style="background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:0.3px;margin-left:4px">CAMBIO PREZZO</span>';
+    html += '<span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + gruppo.length + ' pompe — ' + fmtL(totLitriProd) + ' L totali</span></div>';
 
     // Dettaglio pompe
     html += '<div style="margin-bottom:10px;font-size:13px">' + dettaglioHtml + '</div>';
 
-    // Riga Prezzo / Costo / Margine
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:start;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border)">';
-    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (prezzo ? '€ ' + prezzo.toFixed(3) + ' IVA' : '—') + '</div></div>';
-    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L' + cmpBadge + '</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (costoN ? costoN.toFixed(4) + ' netto' : '—') + '</div></div>';
-    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costoN > 0 ? '€ ' + margL.toFixed(4) : '—') + '</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + mColor + ';margin-top:4px">Tot: ' + (costoN > 0 ? fmtE(margTotProd) : '—') + '</div></div>';
-    html += '</div>';
+    // Tabella riepilogo (stile RIEPILOGO GIORNATA del modale popup)
+    html += '<div style="background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);overflow:hidden">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += '<thead><tr style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;background:var(--bg)">';
+    html += '<th style="text-align:left;padding:8px 10px;font-weight:500">Fascia</th>';
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:500">Litri</th>';
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:500">€/L IVA</th>';
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:500;color:#A32D2D">Costo €/L</th>';
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:500">Totale €</th>';
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:500;color:#A32D2D">Costo €</th>';
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:500">Margine €</th>';
+    html += '</tr></thead><tbody>';
+
+    if (hasCpProd && costoPDProd > 0) {
+      var litriStdProdR = Math.max(0, totLitriProd - litriPDProd);
+      var prezzoPDNetR = prezzoPDProd / 1.22;
+      var fattStd = litriStdProdR * prezzo;
+      var costoStdTot = costoN * litriStdProdR;
+      var margStdTot = (prezzoN - costoN) * litriStdProdR;
+      var fattPD = litriPDProd * prezzoPDProd;
+      var costoPDTot = costoPDProd * litriPDProd;
+      var margPDTot = (prezzoPDNetR - costoPDProd) * litriPDProd;
+      var totFatt = fattStd + fattPD;
+      var totCosto = costoStdTot + costoPDTot;
+      var totMarg = margStdTot + margPDTot;
+
+      // 1° prezzo
+      html += '<tr style="border-top:0.5px solid var(--border)">';
+      html += '<td style="padding:8px 10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-tertiary,#888);margin-right:6px;vertical-align:middle"></span>1° prezzo</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(litriStdProdR) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + prezzo.toFixed(3) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? costoN.toFixed(4) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtE(fattStd) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? fmtE(costoStdTot) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + (costoN > 0 ? fmtE(margStdTot) : '—') + '</td>';
+      html += '</tr>';
+      // 2° prezzo
+      var mColorPD = (prezzoPDNetR - costoPDProd) >= 0 ? '#639922' : '#E24B4A';
+      html += '<tr style="border-top:0.5px solid var(--border);background:#F5FAFE">';
+      html += '<td style="padding:8px 10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#378ADD;margin-right:6px;vertical-align:middle"></span>2° prezzo</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(litriPDProd) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + prezzoPDProd.toFixed(3) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + costoPDProd.toFixed(4) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtE(fattPD) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + fmtE(costoPDTot) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + mColorPD + '">' + fmtE(margPDTot) + '</td>';
+      html += '</tr>';
+      // Totale
+      html += '<tr style="border-top:1px solid ' + colore + ';background:var(--bg);font-weight:600">';
+      html += '<td style="padding:9px 10px">Totale</td>';
+      html += '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(totLitriProd) + '</td>';
+      html += '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px">—</td>';
+      html += '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px">—</td>';
+      html += '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono)">' + fmtE(totFatt) + '</td>';
+      html += '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? fmtE(totCosto) : '—') + '</td>';
+      html += '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);color:' + (totMarg >= 0 ? '#639922' : '#E24B4A') + '">' + (costoN > 0 ? fmtE(totMarg) : '—') + '</td>';
+      html += '</tr>';
+    } else {
+      // No cambio prezzo: 1 sola riga riepilogo
+      var fattTot = totLitriProd * prezzo;
+      var costoTotProd = costoN * totLitriProd;
+      html += '<tr style="border-top:0.5px solid var(--border)">';
+      html += '<td style="padding:8px 10px;color:var(--text-muted)">Giornata</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(totLitriProd) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + (prezzo ? prezzo.toFixed(3) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? costoN.toFixed(4) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + (prezzo ? fmtE(fattTot) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? fmtE(costoTotProd) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + (costoN > 0 ? fmtE(margTotProd) : '—') + '</td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table></div>';
 
     html += '</div>';
   });
@@ -1478,33 +1622,55 @@ function _uniCalcolaLive() {
   // FASE 2 — popola riquadro info "Cambio prezzo oggi" su ogni pompa
   // (mostra "vecchio → nuovo prezzo" quando il prodotto ha un CP attivo)
   // ════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════
+  // FASE 2 — riquadri 2° prezzo per ogni pompa (Patch v20260501a).
+  // Popola "2° prezzo €/L IVA / 2° costo €/L netto / 2° margine €/L" se
+  // esiste un cambio prezzo per il prodotto in questo giorno e il nuovo
+  // prezzo differisce dallo standard (>0,001 €).
+  // ════════════════════════════════════════════════════════════════════
   pompe.forEach(function(p) {
-    var elInfo = null;
-    var elInfoVecchio = null;
-    var elInfoNuovo = null;
-    // Cerco l'elemento info dentro la card di QUESTA pompa specifica
+    var elInfo = null, elPrezzo = null, elCosto = null, elMargine = null;
     var inpL = document.querySelector('.uni-lettura-input[data-pompa="' + p.id + '"]');
     if (inpL) {
       var card = inpL.closest('div[style*="border-left:4px solid"]');
       if (card) {
         elInfo = card.querySelector('.uni-cp-info-pompa[data-prodotto="' + p.prodotto + '"]');
         if (elInfo) {
-          elInfoVecchio = elInfo.querySelector('.uni-cp-info-vecchio');
-          elInfoNuovo = elInfo.querySelector('.uni-cp-info-nuovo');
+          elPrezzo  = elInfo.querySelector('.uni-cp-info-prezzo');
+          elCosto   = elInfo.querySelector('.uni-cp-info-costo');
+          elMargine = elInfo.querySelector('.uni-cp-info-margine');
         }
       }
     }
     var inpPrezzo = document.querySelector('.uni-prezzo-input[data-prodotto="' + p.prodotto + '"]');
     var prezzoStd = inpPrezzo ? (parseFloat(inpPrezzo.value) || 0) : 0;
     var cpProdotto = cppPerProdotto[p.prodotto];
-    if (elInfo) {
-      if (cpProdotto && cpProdotto.prezzoIva > 0 && prezzoStd > 0 && Math.abs(cpProdotto.prezzoIva - prezzoStd) > 0.001) {
-        elInfo.style.display = 'block';
-        if (elInfoVecchio) elInfoVecchio.textContent = '€ ' + prezzoStd.toFixed(3) + ' IVA';
-        if (elInfoNuovo) elInfoNuovo.textContent = '€ ' + cpProdotto.prezzoIva.toFixed(3) + ' IVA';
-      } else {
-        elInfo.style.display = 'none';
+    if (!elInfo) return;
+    if (cpProdotto && cpProdotto.prezzoIva > 0 && prezzoStd > 0 && Math.abs(cpProdotto.prezzoIva - prezzoStd) > 0.001) {
+      elInfo.style.display = 'block';
+      // Prezzo IVA nuovo
+      if (elPrezzo) elPrezzo.textContent = cpProdotto.prezzoIva.toFixed(3);
+      // Costo netto nuovo (rosso, fallback al CMP del prodotto se costo nuovo non valorizzato)
+      var costoNuovo = Number(cpProdotto.costoNetto || 0);
+      if (!costoNuovo && _uniData.cmpCorrente && _uniData.cmpCorrente[p.prodotto]) {
+        costoNuovo = Number(_uniData.cmpCorrente[p.prodotto] || 0);
       }
+      if (elCosto) elCosto.textContent = costoNuovo > 0 ? costoNuovo.toFixed(4) : '—';
+      // Margine €/L = prezzo netto nuovo − costo netto nuovo
+      if (elMargine) {
+        var prezzoNuovoNet = cpProdotto.prezzoIva / 1.22;
+        if (costoNuovo > 0) {
+          var margNuovo = prezzoNuovoNet - costoNuovo;
+          var col = margNuovo >= 0 ? '#639922' : '#E24B4A';
+          elMargine.style.color = col;
+          elMargine.textContent = (margNuovo >= 0 ? '+' : '') + margNuovo.toFixed(4);
+        } else {
+          elMargine.style.color = 'var(--text-muted)';
+          elMargine.textContent = '—';
+        }
+      }
+    } else {
+      elInfo.style.display = 'none';
     }
   });
 
