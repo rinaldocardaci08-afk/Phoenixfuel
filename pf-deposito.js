@@ -458,6 +458,7 @@ async function confermaCaricoDeposito(ordineId) {
   }
 
   await sb.from('ordini').update({ stato:'confermato', caricato_deposito:true }).eq('id', ordineId);
+  if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache(); // Patch v20260501i: invalida cache dopo carico
   _auditLog('carico_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' da ' + ordine.fornitore + ' · CMP ' + res.cmpPrec.toFixed(4) + ' → ' + res.cmpNuovo.toFixed(4));
   toast('Carico confermato! CMP prodotto: € ' + res.cmpNuovo.toFixed(4));
   chiudiModalePermessi();
@@ -2624,6 +2625,7 @@ async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
   }
 
   _auditLog('modifica_cmp_manuale', 'cisterne', 'CMP ' + prodNome + ' modificato da ' + cmpPrecedente.toFixed(6) + ' a ' + nuovoCMP.toFixed(6) + ' (storico aggiornato)');
+  if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache(); // Patch v20260501i
 
   toast('✓ CMP ' + prodNome + ' aggiornato a € ' + nuovoCMP.toFixed(6));
   chiudiModale();

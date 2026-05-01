@@ -286,6 +286,7 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
 
     // Auto-heal cisterne (no-op attualmente, lasciato per backward compat)
     try { await pfStzRicalcolaCisterne(prodotto); } catch (e) { console.warn('pfStzRicalcolaCisterne errore:', e); }
+    if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache(); // Patch v20260501i: invalida cache dopo ricezione
 
     toast('✅ ' + fmtL(resCarico.litriCaricati) + ' L ricevuti · CMP € ' + resCarico.cmpNuovo.toFixed(4));
     chiudiModal();
