@@ -121,6 +121,18 @@ function _corrRender() {
   var totDiff = 0;
   var versRenderati = {}; // per non ripetere righe versamento
 
+  // Patch v20260501f: pre-pass per identificare l'ULTIMO indice di riga
+  // per ogni versamento_id. La riga "↳ Versamento" verrà mostrata solo
+  // sotto l'ultimo giorno componente, non sopra il primo (era contro-
+  // intuitivo: il versamento del 24/04 con giorni 20-21-22 appariva
+  // prima del 21/04).
+  var ultimoIdxPerVers = {};
+  m.righe.forEach(function(r, idx) {
+    if (r.versamento && r.versamento.id) {
+      ultimoIdxPerVers[r.versamento.id] = idx;
+    }
+  });
+
   m.righe.forEach(function(r, i) {
     var bgRow = i % 2 === 1 ? 'background:var(--bg-card)' : '';
     var opac = r.hasCassa ? '' : 'opacity:0.3;';
@@ -180,8 +192,8 @@ function _corrRender() {
     }
     html += '</tr>';
 
-    // Riga versamento raggruppato (mostra solo una volta per versamento)
-    if (r.versamento && !versRenderati[r.versamento.id]) {
+    // Riga versamento raggruppato (mostra dopo l'ULTIMO giorno componente — Patch v20260501f)
+    if (r.versamento && ultimoIdxPerVers[r.versamento.id] === i && !versRenderati[r.versamento.id]) {
       versRenderati[r.versamento.id] = true;
       var v = r.versamento;
       var giorniCop = (v.giorni_coperti || []).map(function(g) {
