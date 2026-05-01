@@ -10,6 +10,10 @@ function switchLogisticaTab(btn) {
   btn.classList.add('active');
   document.querySelectorAll('.log-panel').forEach(function(p) { p.style.display = 'none'; });
   document.getElementById(btn.dataset.tab).style.display = '';
+  // Patch v20260501m: ricarica dashboard quando si apre la linguetta Report Vettori
+  if (btn.dataset.tab === 'log-report-vettori' && typeof caricaDashboardVettori === 'function') {
+    try { caricaDashboardVettori(); } catch (e) { console.warn('caricaDashboardVettori errore:', e); }
+  }
 }
 
 async function caricaLogistica() {
