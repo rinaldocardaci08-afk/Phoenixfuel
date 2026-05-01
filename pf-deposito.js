@@ -1,26 +1,5 @@
 // PhoenixFuel — Deposito, Rettifiche, Autoconsumo
 // ─────────────────────────────────────────────────────────────────────────────
-// Patch 30/04/2026 sera (v20260430l) — FIX FRECCETTA E LOCK ATOMICI
-//   Risolto bug movimenti fantasma generati da carico/scarico/annullamento
-//   (caso Eni 30/04 mattina: 4 movimenti per 1 ordine). Tre livelli di guard:
-//     1. Lock IN-MEMORY (window._pfOrdiniLock) anti-doppio-click stesso tab.
-//     2. Lock DB ATOMICO via UPDATE conditional con .eq('caricato_deposito',
-//        false): se due click in race, solo il primo passa il filtro.
-//     3. Sentinella PRE-INSERT su movimenti_cisterne (count): prima di
-//        chiamare aggiornaCisterna, conferma che non esistano già movimenti
-//        per quell'ordine_id. Comandamento #6 ("un ordine = un solo
-//        movimento") blindato.
-//   Cambio semantica annullaOperazioneDeposito (↩️):
-//     - PRIMA: INSERT movimento compensativo (entrata+uscita rimanevano in
-//       tabella, accumulo fino a 4-6 movimenti dopo cicli carica/annulla).
-//     - ORA:   DELETE FROM movimenti_cisterne WHERE ordine_id=X (riallinea
-//       cisterna calcolando il netto inverso). Dopo annullamento la tabella
-//       ha 0 movimenti per quell'ordine. Un successivo "Carica" parte
-//       pulito. Comandamento #6 rispettato sempre.
-//   CMP non viene toccato dall'annullamento (comandamento #8). Le righe in
-//   stazione_cmp_storico vengono cancellate per coerenza con la cancellazione
-//   del movimento entrata.
-// ─────────────────────────────────────────────────────────────────────────────
 // Patch 29/04/2026 (v20260429a):
 //   CMP unificato per prodotto (regola Phoenix Fuel: tutte le cisterne dello
 //   stesso prodotto deposito sono trattate come un pool unico finché non se
@@ -34,45 +13,6 @@
 //   necessario per ricalcolo media ponderata + storico per cisterna.
 //   Helper riusabile: _pfDepCmpProdotto(prodNome, sede) per altri moduli.
 // ─────────────────────────────────────────────────────────────────────────────
-
-// ── LOCK IN-MEMORY ANTI-DOPPIO-CLICK (patch v20260430l) ──
-// Set globale di ordineId con operazione cisterna in corso. Difesa di primo
-// livello: un secondo click sullo stesso ordine entro pochi ms trova l'id già
-// nel Set e si ferma con toast prima ancora di toccare il DB. Pulito sempre
-// in finally{} per evitare lock perpetui in caso di errore.
-window._pfOrdiniLock = window._pfOrdiniLock || new Set();
-
-// Helper: prova a prendere il lock in-memory. Ritorna true se ok, false se già
-// preso (significa: c'è un'altra operazione in corso, ferma tutto).
-function _pfTryLockOrdine(ordineId, opLabel) {
-  if (window._pfOrdiniLock.has(ordineId)) {
-    if (typeof toast === 'function') toast('⏳ Operazione "' + (opLabel||'cisterna') + '" già in corso su questo ordine');
-    return false;
-  }
-  window._pfOrdiniLock.add(ordineId);
-  return true;
-}
-
-// Helper: rilascia il lock (chiamare in finally{}).
-function _pfUnlockOrdine(ordineId) {
-  window._pfOrdiniLock.delete(ordineId);
-}
-
-// Helper: conta movimenti già esistenti per un ordine (sentinella anti-duplicato).
-// Ritorna il numero di movimenti già presenti in tabella per quell'ordine_id.
-// Se > 0, l'operazione di carico/scarico NON deve procedere.
-async function _pfContaMovimentiOrdine(ordineId) {
-  try {
-    var { count, error } = await sb.from('movimenti_cisterne')
-      .select('id', { count: 'exact', head: true })
-      .eq('ordine_id', ordineId);
-    if (error) { console.warn('_pfContaMovimentiOrdine errore:', error); return -1; }
-    return Number(count || 0);
-  } catch(e) {
-    console.warn('_pfContaMovimentiOrdine eccezione:', e);
-    return -1;
-  }
-}
 
 // Helper: media ponderata costo_medio sulle cisterne di un prodotto/sede.
 // Ritorna un Number (0 se nessun litro). Riusabile da qualsiasi modulo.
@@ -478,237 +418,151 @@ function aggiornaTotaleCarico2(totaleOrdine) {
 }
 
 async function confermaCaricoDeposito(ordineId) {
-  // ── GUARD #1: lock in-memory anti-doppio-click stesso tab ──
-  if (!_pfTryLockOrdine(ordineId, 'carico')) return;
-  try {
-    const cisterne = window._cisterneCarico || [];
-    const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-    if (!ordine) return;
-    // ── LOCK DIFENSIVO: impedisce doppi carichi (legacy, stale read) ──
-    if (ordine.caricato_deposito) {
-      toast('⚠ Ordine già caricato sul deposito. Usa ↩️ per annullare prima di riprovare.');
-      return;
-    }
-    if (ordine.stato === 'annullato') {
-      toast('Ordine annullato: non caricabile');
-      return;
-    }
-    // Warning ordini con data futura
-    var oggiISO_c = new Date().toISOString().split('T')[0];
-    if (ordine.data && ordine.data > oggiISO_c) {
-      if (!confirm('⚠ Questo ordine è programmato per il ' + fmtD(ordine.data) + ' (futuro).\n\nSe confermi ora, la cisterna verrà caricata oggi ' + fmtD(oggiISO_c) + ' e la giacenza potrebbe non riflettere la realtà fisica fino alla data dell\'ordine.\n\nContinuare comunque?')) return;
-    }
-    let totAssegnato = 0;
-    cisterne.forEach(c => { const inp = document.getElementById('cis-qty-'+c.id); if(inp) totAssegnato += parseFloat(inp.value)||0; });
-    const diff = Math.abs(Number(ordine.litri) - totAssegnato);
-    if (diff > 1) { toast('Il totale assegnato non corrisponde. Ordine: ' + fmtL(ordine.litri) + ', Assegnato: ' + fmtL(totAssegnato)); return; }
-
-    // ── GUARD #2: lock atomico DB ──
-    // UPDATE conditional su caricato_deposito=false → solo 1 click passa il filtro
-    // se due richieste arrivano in race. Se 0 righe modificate, abort.
-    const { data: lockRows, error: lockErr } = await sb.from('ordini')
-      .update({ stato: 'confermato', caricato_deposito: true })
-      .eq('id', ordineId)
-      .eq('caricato_deposito', false)
-      .neq('stato', 'annullato')
-      .select('id');
-    if (lockErr) { toast('Errore lock ordine: ' + lockErr.message); return; }
-    if (!lockRows || lockRows.length === 0) {
-      toast('⚠ Ordine già caricato (intercetto concorrenza). Ricarica la pagina.');
-      caricaOrdini();
-      return;
-    }
-
-    // ── GUARD #3: sentinella anti-duplicato pre-INSERT su movimenti_cisterne ──
-    // Comandamento #6: "un ordine = un solo movimento". Se per qualunque
-    // motivo (bug pregresso, import, cron) esistono già movimenti per questo
-    // ordine, NON inserisco di nuovo: rilascio il lock atomico DB e fermo.
-    var nMovEsistenti = await _pfContaMovimentiOrdine(ordineId);
-    if (nMovEsistenti > 0) {
-      // Rollback del lock atomico (l'ordine NON è stato realmente caricato)
-      await sb.from('ordini').update({ stato: ordine.stato, caricato_deposito: false }).eq('id', ordineId);
-      toast('⚠ Movimenti già presenti (' + nMovEsistenti + ') per questo ordine. Annulla prima con ↩️ poi ricarica.');
-      caricaOrdini();
-      return;
-    }
-
-    // Solo qui tocco le cisterne (sicuro: nessuna race possibile, nessun duplicato)
-    for (const c of cisterne) {
-      const inp = document.getElementById('cis-qty-'+c.id);
-      const qta = parseFloat(inp?.value)||0;
-      if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, Number(ordine.costo_litro||0) + Number(ordine.trasporto_litro||0));
-    }
-    _auditLog('carico_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' da ' + ordine.fornitore);
-    toast('Carico confermato! Cisterne aggiornate.');
-    chiudiModalePermessi();
-    caricaDeposito();
-    caricaOrdini();
-  } finally {
-    _pfUnlockOrdine(ordineId);
+  const cisterne = window._cisterneCarico || [];
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) return;
+  // ── LOCK DIFENSIVO: impedisce doppi carichi ──
+  if (ordine.caricato_deposito) {
+    toast('⚠ Ordine già caricato sul deposito. Usa ↩️ per annullare prima di riprovare.');
+    return;
   }
+  if (ordine.stato === 'annullato') {
+    toast('Ordine annullato: non caricabile');
+    return;
+  }
+  // Warning ordini con data futura
+  var oggiISO_c = new Date().toISOString().split('T')[0];
+  if (ordine.data && ordine.data > oggiISO_c) {
+    if (!confirm('⚠ Questo ordine è programmato per il ' + fmtD(ordine.data) + ' (futuro).\n\nSe confermi ora, la cisterna verrà caricata oggi ' + fmtD(oggiISO_c) + ' e la giacenza potrebbe non riflettere la realtà fisica fino alla data dell\'ordine.\n\nContinuare comunque?')) return;
+  }
+  let totAssegnato = 0;
+  cisterne.forEach(c => { const inp = document.getElementById('cis-qty-'+c.id); if(inp) totAssegnato += parseFloat(inp.value)||0; });
+  const diff = Math.abs(Number(ordine.litri) - totAssegnato);
+  if (diff > 1) { toast('Il totale assegnato non corrisponde. Ordine: ' + fmtL(ordine.litri) + ', Assegnato: ' + fmtL(totAssegnato)); return; }
+  for (const c of cisterne) {
+    const inp = document.getElementById('cis-qty-'+c.id);
+    const qta = parseFloat(inp?.value)||0;
+    if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, Number(ordine.costo_litro||0) + Number(ordine.trasporto_litro||0));
+  }
+  await sb.from('ordini').update({ stato:'confermato', caricato_deposito:true }).eq('id', ordineId);
+  _auditLog('carico_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' da ' + ordine.fornitore);
+  toast('Carico confermato! Cisterne aggiornate.');
+  chiudiModalePermessi();
+  caricaDeposito();
+  caricaOrdini();
 }
 
 async function confermaUscitaDeposito(ordineId, auto) {
-  // ── GUARD #1: lock in-memory anti-doppio-click stesso tab ──
-  // Per il flusso 1-cisterna o auto, il lock si rilascia in _eseguiUscitaDeposito (finally).
-  // Per il flusso multi-cisterna, il modale resta aperto: il lock si rilascia
-  // o alla conferma (in _eseguiUscitaDeposito) o alla chiusura modale (chiudiModalePermessi
-  // viene chiamata ma il finally di _eseguiUscitaDeposito non scatta). Per
-  // sicurezza, in caso di multi-cisterna rilascio il lock subito dopo aver
-  // mostrato il modale (l'utente avrà già il selettore davanti, doppio click
-  // sul bottone "Scarica" non è più possibile).
-  if (!_pfTryLockOrdine(ordineId, 'scarico')) return;
-  var _lockReleasedEarly = false;
-  try {
-    const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-    if (!ordine) return;
-    // ── LOCK DIFENSIVO: impedisce doppi scarichi (legacy, stale read) ──
-    if (ordine.caricato_deposito === true) {
-      if (!auto) {
-        toast('⚠ Ordine già scaricato dalla cisterna. Usa ↩️ per annullare prima di riprovare.');
-      }
-      return;
+  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) return;
+  // ── LOCK DIFENSIVO: impedisce doppi scarichi ──
+  // Fix 14/04 sera: controllo caricato_deposito invece di cisterna_id.
+  // Prima controllava solo cisterna_id, ma un ordine può avere cisterna_id
+  // valorizzato come pre-assegnazione (es. smistamento o selettore aperto
+  // senza conferma) SENZA essere stato davvero scaricato. caricato_deposito=true
+  // è il vero flag di "uscita eseguita sulle cisterne".
+  if (ordine.caricato_deposito === true) {
+    if (!auto) {
+      toast('⚠ Ordine già scaricato dalla cisterna. Usa ↩️ per annullare prima di riprovare.');
     }
-    if (ordine.stato === 'consegnato') {
-      if (!auto) toast('Ordine già consegnato: non è possibile scaricare di nuovo');
-      return;
-    }
-    if (ordine.stato === 'annullato') {
-      if (!auto) toast('Ordine annullato: non scaricabile');
-      return;
-    }
-    // Warning ordini con data futura
-    var oggiISO_u = new Date().toISOString().split('T')[0];
-    if (ordine.data && ordine.data > oggiISO_u) {
-      if (!confirm('⚠ Questo ordine è programmato per il ' + fmtD(ordine.data) + ' (futuro).\n\nSe confermi ora, la cisterna verrà scaricata oggi ' + fmtD(oggiISO_u) + ' e la giacenza potrebbe non riflettere la realtà fisica fino alla data dell\'ordine.\n\nContinuare comunque?')) return;
-    }
-    const prodottoMap = getProdottoTipoCisterna();
-    const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
-    const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).eq('sede','deposito_vibo').order('livello_attuale',{ascending:false});
-    if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
-
-    // Filtra cisterne con giacenza sufficiente
-    var cisConGiac = cisterne.filter(function(c) { return Number(c.livello_attuale) >= Number(ordine.litri); });
-
-    // Nessuna cisterna ha abbastanza
-    if (cisConGiac.length === 0) {
-      toast('Nessuna cisterna ha giacenza sufficiente per ' + fmtL(ordine.litri) + ' L! Max: ' + fmtL(cisterne[0].livello_attuale));
-      return;
-    }
-
-    // 1 sola cisterna O flusso automatico → scarico diretto dalla più piena
-    if (cisConGiac.length === 1 || auto) {
-      // 1 cisterna o auto: confermaUscitaDeposito rilascia il lock nel suo
-      // finally (_lockReleasedEarly resta false). _eseguiUscitaDeposito è
-      // agnostica ai lock in-memory.
-      await _eseguiUscitaDeposito(ordineId, ordine, cisConGiac[0]);
-      return;
-    }
-
-    // 2+ cisterne e click manuale → mostra selettore
-    var defaultCis = cisConGiac[0]; // già ordinato per livello desc
-
-    // Patch 29/04: CMP unificato per prodotto (regola Phoenix Fuel: tutte le
-    // cisterne dello stesso prodotto sono un pool unico). Calcolato qui sulla
-    // base delle cisterne effettivamente in giacenza. Dopo lo scarico l'audit
-    // log scriverà questo valore (non quello individuale della cisterna scelta).
-    var totLitriPool = 0, totValPool = 0;
-    cisConGiac.forEach(function(c) {
-      var l = Number(c.livello_attuale || 0);
-      totLitriPool += l;
-      totValPool += l * Number(c.costo_medio || 0);
-    });
-    var cmpProdotto = totLitriPool > 0 ? (totValPool / totLitriPool) : 0;
-
-    var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Scegli cisterna per uscita — ' + ordine.prodotto + '</div>';
-    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">' + ordine.cliente + ' · <strong>' + fmtL(ordine.litri) + '</strong></div>';
-    if (cmpProdotto > 0) {
-      html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:var(--text-muted)">CMP <strong>' + esc(ordine.prodotto) + '</strong>: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + cmpProdotto.toFixed(4) + '</strong> <span style="font-size:10px">(media ponderata su tutte le cisterne)</span></div>';
-    }
-    html += '<div style="margin:6px 0 14px 0">';
-
-    cisConGiac.forEach(function(c) {
-      var pct = Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100);
-      var isDefault = c.id === defaultCis.id;
-      var barColor = pct < 20 ? '#E24B4A' : pct < 40 ? '#BA7517' : '#639922';
-
-      html += '<label style="display:block;padding:14px 16px;background:' + (isDefault ? '#EAF3DE' : 'var(--bg)') + ';border:' + (isDefault ? '2px solid #639922' : '0.5px solid var(--border)') + ';border-radius:10px;margin-bottom:8px;cursor:pointer">';
-      html += '<div style="display:flex;align-items:center;gap:10px">';
-      html += '<input type="radio" name="cis-uscita" value="' + c.id + '"' + (isDefault ? ' checked' : '') + ' style="width:18px;height:18px" />';
-      html += '<div style="flex:1">';
-      html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:500">' + c.nome + '</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmtL(c.livello_attuale) + ' / ' + fmtL(c.capacita_max) + '</span></div>';
-      html += '<div style="height:5px;background:var(--border);border-radius:3px;margin-bottom:4px"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:3px"></div></div>';
-      html += '<div style="display:flex;gap:16px;font-size:10px;color:var(--text-muted)"><span>Riempimento: ' + pct + '%</span><span>Dopo uscita: ' + fmtL(Number(c.livello_attuale) - Number(ordine.litri)) + '</span></div>';
-      html += '</div></div></label>';
-    });
-
-    html += '</div>';
-    html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1;background:#639922" onclick="confermaSceltaCisternaUscita(\'' + ordineId + '\')">Conferma uscita</button><button onclick="chiudiModalePermessi();_pfUnlockOrdine(\'' + ordineId + '\')" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
-
-    apriModal(html);
-    // Lock rimane attivo finché l'utente non conferma o annulla il modale.
-    // confermaSceltaCisternaUscita → _eseguiUscitaDeposito (rilascia lock).
-    // bottone Annulla del modale → chiama _pfUnlockOrdine inline.
-    _lockReleasedEarly = true; // il lock è gestito dai callback del modale, non dal finally qui
-  } finally {
-    if (!_lockReleasedEarly) _pfUnlockOrdine(ordineId);
+    return;
   }
+  if (ordine.stato === 'consegnato') {
+    if (!auto) toast('Ordine già consegnato: non è possibile scaricare di nuovo');
+    return;
+  }
+  if (ordine.stato === 'annullato') {
+    if (!auto) toast('Ordine annullato: non scaricabile');
+    return;
+  }
+  // Warning ordini con data futura
+  var oggiISO_u = new Date().toISOString().split('T')[0];
+  if (ordine.data && ordine.data > oggiISO_u) {
+    if (!confirm('⚠ Questo ordine è programmato per il ' + fmtD(ordine.data) + ' (futuro).\n\nSe confermi ora, la cisterna verrà scaricata oggi ' + fmtD(oggiISO_u) + ' e la giacenza potrebbe non riflettere la realtà fisica fino alla data dell\'ordine.\n\nContinuare comunque?')) return;
+  }
+  const prodottoMap = getProdottoTipoCisterna();
+  const tipo = prodottoMap[ordine.prodotto] || 'autotrazione';
+  const { data: cisterne } = await sb.from('cisterne').select('*').eq('tipo', tipo).eq('sede','deposito_vibo').order('livello_attuale',{ascending:false});
+  if (!cisterne||!cisterne.length) { toast('Nessuna cisterna trovata per questo prodotto'); return; }
+
+  // Filtra cisterne con giacenza sufficiente
+  var cisConGiac = cisterne.filter(function(c) { return Number(c.livello_attuale) >= Number(ordine.litri); });
+
+  // Nessuna cisterna ha abbastanza
+  if (cisConGiac.length === 0) {
+    toast('Nessuna cisterna ha giacenza sufficiente per ' + fmtL(ordine.litri) + ' L! Max: ' + fmtL(cisterne[0].livello_attuale));
+    return;
+  }
+
+  // 1 sola cisterna O flusso automatico → scarico diretto dalla più piena
+  if (cisConGiac.length === 1 || auto) {
+    await _eseguiUscitaDeposito(ordineId, ordine, cisConGiac[0]);
+    return;
+  }
+
+  // 2+ cisterne e click manuale → mostra selettore
+  var defaultCis = cisConGiac[0]; // già ordinato per livello desc
+
+  // Patch 29/04: CMP unificato per prodotto (regola Phoenix Fuel: tutte le
+  // cisterne dello stesso prodotto sono un pool unico). Calcolato qui sulla
+  // base delle cisterne effettivamente in giacenza. Dopo lo scarico l'audit
+  // log scriverà questo valore (non quello individuale della cisterna scelta).
+  var totLitriPool = 0, totValPool = 0;
+  cisConGiac.forEach(function(c) {
+    var l = Number(c.livello_attuale || 0);
+    totLitriPool += l;
+    totValPool += l * Number(c.costo_medio || 0);
+  });
+  var cmpProdotto = totLitriPool > 0 ? (totValPool / totLitriPool) : 0;
+
+  var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Scegli cisterna per uscita — ' + ordine.prodotto + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">' + ordine.cliente + ' · <strong>' + fmtL(ordine.litri) + '</strong></div>';
+  if (cmpProdotto > 0) {
+    html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:var(--text-muted)">CMP <strong>' + esc(ordine.prodotto) + '</strong>: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + cmpProdotto.toFixed(4) + '</strong> <span style="font-size:10px">(media ponderata su tutte le cisterne)</span></div>';
+  }
+  html += '<div style="margin:6px 0 14px 0">';
+
+  cisConGiac.forEach(function(c) {
+    var pct = Math.round((Number(c.livello_attuale) / Number(c.capacita_max)) * 100);
+    var isDefault = c.id === defaultCis.id;
+    var barColor = pct < 20 ? '#E24B4A' : pct < 40 ? '#BA7517' : '#639922';
+
+    html += '<label style="display:block;padding:14px 16px;background:' + (isDefault ? '#EAF3DE' : 'var(--bg)') + ';border:' + (isDefault ? '2px solid #639922' : '0.5px solid var(--border)') + ';border-radius:10px;margin-bottom:8px;cursor:pointer">';
+    html += '<div style="display:flex;align-items:center;gap:10px">';
+    html += '<input type="radio" name="cis-uscita" value="' + c.id + '"' + (isDefault ? ' checked' : '') + ' style="width:18px;height:18px" />';
+    html += '<div style="flex:1">';
+    html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:500">' + c.nome + '</span><span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmtL(c.livello_attuale) + ' / ' + fmtL(c.capacita_max) + '</span></div>';
+    html += '<div style="height:5px;background:var(--border);border-radius:3px;margin-bottom:4px"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:3px"></div></div>';
+    html += '<div style="display:flex;gap:16px;font-size:10px;color:var(--text-muted)"><span>Riempimento: ' + pct + '%</span><span>Dopo uscita: ' + fmtL(Number(c.livello_attuale) - Number(ordine.litri)) + '</span></div>';
+    html += '</div></div></label>';
+  });
+
+  html += '</div>';
+  html += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1;background:#639922" onclick="confermaSceltaCisternaUscita(\'' + ordineId + '\')">Conferma uscita</button><button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
+
+  apriModal(html);
 }
 
-// ── confermaSceltaCisternaUscita (patch v20260430l) ──
-// Entry point dal click "Conferma uscita" del modale multi-cisterna. Il lock
-// in-memory preso da confermaUscitaDeposito è già stato rilasciato all'apertura
-// del modale, quindi va ripreso qui contro doppio-click sul bottone modale.
 async function confermaSceltaCisternaUscita(ordineId) {
   var sel = document.querySelector('input[name="cis-uscita"]:checked');
   if (!sel) { toast('Seleziona una cisterna'); return; }
-  if (!_pfTryLockOrdine(ordineId, 'scarico')) return;
-  try {
-    var cisId = sel.value;
-    var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-    var { data: cis } = await sb.from('cisterne').select('*').eq('id', cisId).single();
-    if (!ordine || !cis) { toast('Errore dati'); return; }
-    if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('Giacenza insufficiente!'); return; }
-    await _eseguiUscitaDeposito(ordineId, ordine, cis);
-    try { chiudiModalePermessi(); } catch(e) {}
-  } finally {
-    _pfUnlockOrdine(ordineId);
-  }
+  var cisId = sel.value;
+  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  var { data: cis } = await sb.from('cisterne').select('*').eq('id', cisId).single();
+  if (!ordine || !cis) { toast('Errore dati'); return; }
+  if (Number(cis.livello_attuale) < Number(ordine.litri)) { toast('Giacenza insufficiente!'); return; }
+  await _eseguiUscitaDeposito(ordineId, ordine, cis);
+  chiudiModalePermessi();
 }
 
-// ── _eseguiUscitaDeposito (patch v20260430l) ──
-// Funzione interna: agnostica ai lock in-memory (gestiti dal chiamante).
-// Implementa il lock atomico DB + sentinella anti-duplicato pre-INSERT.
 async function _eseguiUscitaDeposito(ordineId, ordine, cis) {
-  // GUARD #2: lock atomico DB. UPDATE conditional su caricato_deposito=false:
-  // se due richieste arrivano in race, solo una passa il filtro.
-  const { data: lockRows, error: lockErr } = await sb.from('ordini')
-    .update({ stato: 'confermato', cisterna_id: cis.id, caricato_deposito: true })
-    .eq('id', ordineId)
-    .eq('caricato_deposito', false)
-    .neq('stato', 'annullato')
-    .neq('stato', 'consegnato')
-    .select('id');
-  if (lockErr) { toast('Errore lock ordine: ' + lockErr.message); return; }
-  if (!lockRows || lockRows.length === 0) {
-    toast('⚠ Ordine già scaricato (intercetto concorrenza). Ricarica la pagina.');
-    caricaOrdini();
-    return;
-  }
-
-  // GUARD #3: sentinella anti-duplicato pre-INSERT (comandamento #6)
-  var nMovEsistenti = await _pfContaMovimentiOrdine(ordineId);
-  if (nMovEsistenti > 0) {
-    // Rollback del lock atomico DB
-    await sb.from('ordini').update({ caricato_deposito: false, cisterna_id: null }).eq('id', ordineId);
-    toast('⚠ Movimenti già presenti (' + nMovEsistenti + ') per questo ordine. Annulla prima con ↩️ poi riprova.');
-    caricaOrdini();
-    return;
-  }
-
-  // Solo qui INSERT movimento + UPDATE livello cisterna (operazione sicura)
   await aggiornaCisterna(cis.id, ordine.litri, 'uscita', ordineId, ordine.data);
-  // Patch 29/04: log con CMP prodotto (media ponderata).
+  // Fix 14/04 sera: set caricato_deposito=true per il nuovo lock difensivo
+  // (prima usava cisterna_id come flag, ora usa caricato_deposito)
+  await sb.from('ordini').update({ stato:'confermato', cisterna_id:cis.id, caricato_deposito:true }).eq('id', ordineId);
+  // Patch 29/04: log con CMP prodotto (media ponderata) — riflette il valore
+  // ai fini operativi/contabili come pool unico, non quello individuale.
+  // Letto DOPO l'aggiornamento cisterna così include lo scarico appena fatto.
   var cmpProd = await _pfDepCmpProdotto(ordine.prodotto, cis.sede || 'deposito_vibo');
   _auditLog('uscita_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' per ' + ordine.cliente + ' da ' + cis.nome + ' (CMP prodotto € ' + cmpProd.toFixed(4) + ')');
   toast('Uscita registrata da ' + cis.nome + '!');
@@ -2760,7 +2614,17 @@ async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
 
   toast('✓ CMP ' + prodNome + ' aggiornato a € ' + nuovoCMP.toFixed(6));
   chiudiModale();
-  caricaDeposito();
+  // Patch v20260501c: refresh UI corretta in base alla sede.
+  // Bug originale: _confermaCMPDeposito chiamava sempre caricaDeposito()
+  // anche se il CMP era stato modificato dalla matita ✏️ del magazzino
+  // STAZIONE. Risultato: DB aggiornata, toast OK, ma UI stazione mostrava
+  // ancora il valore vecchio.
+  if (sede === 'stazione_oppido') {
+    if (typeof caricaGiacenzeStazione === 'function') caricaGiacenzeStazione();
+    if (typeof caricaStazioneDashboard === 'function') caricaStazioneDashboard();
+  } else {
+    caricaDeposito();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3050,110 +2914,78 @@ function _movRenderBlocchi(entrate, uscite, mostraEntrate, mostraUscite, modo) {
 }
 
 // ── ANNULLA OPERAZIONE DEPOSITO (scarico o carico) ─────────────────
-// Patch v20260430l: cambio semantica da INSERT compensativo a DELETE movimenti.
-// Comandamento #6: "un ordine = un solo movimento, mai 2, mai 0".
-// Dopo l'annullamento la tabella movimenti_cisterne NON contiene più righe per
-// quell'ordine_id. Un successivo "Carica" parte pulito (passa la sentinella
-// pre-INSERT in confermaCaricoDeposito).
-// Il livello cisterna viene riallineato applicando il delta inverso del netto
-// attuale dei movimenti (somma algebrica entrate+uscite dell'ordine).
-// CMP non viene toccato (comandamento #8). Le righe stazione_cmp_storico
-// dell'ordine vengono cancellate per coerenza con la rimozione del movimento.
+// Compensativo: non modifica il CMP, inserisce un movimento inverso.
+// Azzera cisterna_id/caricato_deposito sull'ordine e lo riporta a 'in attesa'.
 async function annullaOperazioneDeposito(ordineId, tipoOperazione) {
-  // GUARD #1: lock in-memory anti-doppio-click
-  if (!_pfTryLockOrdine(ordineId, 'annulla')) return;
+  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+
+  var msgOp, movCompensativo, nuovoStato;
+  if (tipoOperazione === 'uscita') {
+    if (!ordine.cisterna_id) { toast('Ordine non risulta scaricato da alcuna cisterna'); return; }
+    msgOp = 'Vuoi annullare lo scarico di ' + fmtL(ordine.litri) + ' ' + esc(ordine.prodotto) + ' per ' + esc(ordine.cliente || ordine.fornitore) + '?\n\nI litri verranno ripristinati sulla cisterna (movimento compensativo, CMP invariato).\nL\'ordine tornerà allo stato "in attesa".\n\nContinuare?';
+    movCompensativo = 'entrata'; // reinserisco i litri
+    nuovoStato = 'in attesa';
+  } else if (tipoOperazione === 'entrata') {
+    if (!ordine.caricato_deposito) { toast('Ordine non risulta caricato'); return; }
+    msgOp = 'Vuoi annullare il carico di ' + fmtL(ordine.litri) + ' ' + esc(ordine.prodotto) + ' da ' + esc(ordine.fornitore) + '?\n\nI litri verranno rimossi dalle cisterne caricate (movimento compensativo, CMP invariato).\nL\'ordine tornerà allo stato "in attesa".\n\nContinuare?';
+    movCompensativo = 'uscita';
+    nuovoStato = 'in attesa';
+  } else {
+    toast('Tipo operazione non riconosciuto'); return;
+  }
+
+  if (!confirm(msgOp)) return;
+
   try {
-    var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-    if (!ordine) { toast('Ordine non trovato'); return; }
-
-    var msgOp;
     if (tipoOperazione === 'uscita') {
-      if (!ordine.cisterna_id && !ordine.caricato_deposito) { toast('Ordine non risulta scaricato da alcuna cisterna'); return; }
-      msgOp = 'Vuoi annullare lo scarico di ' + fmtL(ordine.litri) + ' ' + esc(ordine.prodotto) + ' per ' + esc(ordine.cliente || ordine.fornitore) + '?\n\nI litri verranno ripristinati sulla cisterna (movimento cancellato, CMP invariato).\nL\'ordine tornerà allo stato "in attesa".\n\nContinuare?';
-    } else if (tipoOperazione === 'entrata') {
-      if (!ordine.caricato_deposito) { toast('Ordine non risulta caricato'); return; }
-      msgOp = 'Vuoi annullare il carico di ' + fmtL(ordine.litri) + ' ' + esc(ordine.prodotto) + ' da ' + esc(ordine.fornitore) + '?\n\nI litri verranno rimossi dalle cisterne caricate (movimento cancellato, CMP invariato).\nL\'ordine tornerà allo stato "in attesa".\n\nContinuare?';
-    } else {
-      toast('Tipo operazione non riconosciuto'); return;
-    }
-    if (!confirm(msgOp)) return;
-
-    // GUARD #2: lock atomico DB. UPDATE conditional che azzera flag SOLO se
-    // attualmente true. Se due click di annullamento arrivano in race, solo
-    // uno passa il filtro.
-    const { data: lockRows, error: lockErr } = await sb.from('ordini')
-      .update({ stato: 'in attesa', cisterna_id: null, caricato_deposito: false })
-      .eq('id', ordineId)
-      .eq('caricato_deposito', true)
-      .select('id');
-    if (lockErr) { toast('Errore lock ordine: ' + lockErr.message); return; }
-    if (!lockRows || lockRows.length === 0) {
-      toast('⚠ Ordine già in attesa o annullamento concorrente. Ricarica la pagina.');
-      caricaOrdini();
-      return;
-    }
-
-    // SELECT TUTTI i movimenti dell'ordine (compresi eventuali compensativi
-    // storici lasciati da versioni precedenti del codice). Il netto viene
-    // calcolato sommando algebricamente: entrata = +litri, uscita = -litri.
-    var { data: movimenti } = await sb.from('movimenti_cisterne').select('*').eq('ordine_id', ordineId);
-    if (!movimenti) movimenti = [];
-
-    // Raggruppa per cisterna: delta inverso da applicare al livello.
-    // Per ogni movimento entrata = +litri sulla cisterna → inverso -litri
-    // Per ogni movimento uscita  = -litri sulla cisterna → inverso +litri
-    var deltaPerCisterna = {};
-    movimenti.forEach(function(m) {
-      if (!m.cisterna_id) return;
-      var segno = m.tipo === 'entrata' ? -1 : +1;
-      deltaPerCisterna[m.cisterna_id] = (deltaPerCisterna[m.cisterna_id] || 0) + segno * Number(m.litri || 0);
-    });
-
-    // Applica i delta sui livelli. Warning se supera capacità (caso annullamento
-    // scarico dopo che la cisterna è stata ricaricata nel frattempo).
-    var idsCisterne = Object.keys(deltaPerCisterna);
-    for (var i = 0; i < idsCisterne.length; i++) {
-      var cisId = idsCisterne[i];
-      var delta = deltaPerCisterna[cisId];
-      var { data: cis } = await sb.from('cisterne').select('*').eq('id', cisId).single();
-      if (!cis) continue;
-      var nuovoLiv = Number(cis.livello_attuale) + delta;
-      if (nuovoLiv < 0) nuovoLiv = 0; // clamp difensivo
-      if (delta > 0 && cis.capacita_max && nuovoLiv > Number(cis.capacita_max)) {
-        if (!confirm('⚠ Il ripristino porterebbe ' + cis.nome + ' sopra capacità massima (' + fmtL(nuovoLiv) + ' > ' + fmtL(cis.capacita_max) + '). Procedere comunque?')) {
-          // Rollback: rimetto il flag caricato_deposito a true (utente ha rifiutato)
-          await sb.from('ordini').update({ caricato_deposito: true }).eq('id', ordineId);
-          caricaOrdini();
-          return;
-        }
+      // Reinserisco i litri sulla cisterna scaricata
+      var { data: cis } = await sb.from('cisterne').select('*').eq('id', ordine.cisterna_id).single();
+      if (!cis) { toast('Cisterna originale non trovata'); return; }
+      var nuovoLiv = Number(cis.livello_attuale) + Number(ordine.litri);
+      // Attenzione: potrebbe superare capacita_max se nel frattempo è stata caricata. Avviso ma procedo.
+      if (cis.capacita_max && nuovoLiv > Number(cis.capacita_max)) {
+        if (!confirm('⚠ Il ripristino porterebbe la cisterna sopra la capacità massima (' + fmtL(nuovoLiv) + ' > ' + fmtL(cis.capacita_max) + '). Procedere comunque?')) return;
       }
-      await sb.from('cisterne').update({ livello_attuale: nuovoLiv, updated_at: new Date().toISOString() }).eq('id', cisId);
+      await sb.from('cisterne').update({ livello_attuale: nuovoLiv, updated_at: new Date().toISOString() }).eq('id', cis.id);
+      await sb.from('movimenti_cisterne').insert([{
+        cisterna_id: cis.id, ordine_id: ordineId, tipo: 'entrata',
+        litri: Number(ordine.litri),
+        data: new Date().toISOString().split('T')[0],
+        note: 'Compensativo: annullamento scarico ordine'
+      }]);
+      await sb.from('ordini').update({ stato: nuovoStato, cisterna_id: null, caricato_deposito: false }).eq('id', ordineId);
+    } else {
+      // Annullamento carico: trovo tutti i movimenti 'entrata' di questo ordine e inverto ciascuno
+      var { data: movimenti } = await sb.from('movimenti_cisterne').select('*').eq('ordine_id', ordineId).eq('tipo', 'entrata');
+      if (!movimenti || !movimenti.length) { toast('Nessun movimento di carico trovato per questo ordine'); return; }
+      for (var i = 0; i < movimenti.length; i++) {
+        var m = movimenti[i];
+        // Salto quelli che sono già compensativi o potrebbero creare loop
+        if (m.note && m.note.indexOf('Compensativo') >= 0) continue;
+        var { data: cisEntr } = await sb.from('cisterne').select('*').eq('id', m.cisterna_id).single();
+        if (!cisEntr) continue;
+        var nLiv = Math.max(0, Number(cisEntr.livello_attuale) - Number(m.litri));
+        await sb.from('cisterne').update({ livello_attuale: nLiv, updated_at: new Date().toISOString() }).eq('id', m.cisterna_id);
+        await sb.from('movimenti_cisterne').insert([{
+          cisterna_id: m.cisterna_id, ordine_id: ordineId, tipo: 'uscita',
+          litri: Number(m.litri),
+          data: new Date().toISOString().split('T')[0],
+          note: 'Compensativo: annullamento carico ordine'
+        }]);
+      }
+      await sb.from('ordini').update({ stato: nuovoStato, caricato_deposito: false }).eq('id', ordineId);
     }
 
-    // DELETE definitivo dei movimenti per quell'ordine (comandamento #6: lo
-    // stato dopo annullamento è "0 movimenti", non "movimento + compensativo").
-    var { error: delMovErr } = await sb.from('movimenti_cisterne').delete().eq('ordine_id', ordineId);
-    if (delMovErr) console.warn('Errore DELETE movimenti_cisterne:', delMovErr);
-
-    // DELETE righe stazione_cmp_storico per coerenza (l'entrata che le ha
-    // generate non esiste più). NB: il CMP della cisterna non viene
-    // ricalcolato (comandamento #8: solo nuova consegna o rettifica manuale).
-    var { error: delCmpErr } = await sb.from('stazione_cmp_storico').delete().eq('ordine_id', ordineId);
-    if (delCmpErr) console.warn('Errore DELETE stazione_cmp_storico:', delCmpErr);
-
-    _auditLog('annulla_' + tipoOperazione + '_deposito', 'ordini',
-      'Annullato ' + tipoOperazione + ' ordine ' + ordineId + ' (' + fmtL(ordine.litri) + ' ' + ordine.prodotto + ') — ' +
-      movimenti.length + ' movimenti cancellati, delta cisterne: ' +
-      idsCisterne.map(function(id){ return id.substring(0,8) + ':' + (deltaPerCisterna[id]>=0?'+':'') + fmtL(deltaPerCisterna[id]); }).join(', '));
-
-    toast('✓ Operazione annullata. ' + movimenti.length + ' movimenti cancellati. Ordine in attesa.');
+    _auditLog('annulla_' + tipoOperazione + '_deposito', 'ordini', 'Annullato ' + tipoOperazione + ' ordine ' + ordineId + ' (' + fmtL(ordine.litri) + ' ' + ordine.prodotto + ')');
+    // Auto-healing: riallinea cisterne al calcolato pfData (copre entrambi i rami uscita/carico)
+    await pfDepositoRicalcolaCisterne(ordine.prodotto);
+    toast('✓ Operazione annullata. Ordine tornato in attesa.');
     caricaDeposito();
     caricaOrdini();
   } catch (e) {
     console.error('annullaOperazioneDeposito:', e);
     toast('Errore durante l\'annullamento: ' + (e.message || e));
-  } finally {
-    _pfUnlockOrdine(ordineId);
   }
 }
 
