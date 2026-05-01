@@ -1,4 +1,15 @@
 // PhoenixFuel — Stazione: Core, Dashboard, Ricezione ordini
+// Versione 01/05/2026 (v20260501c)
+//
+// Patch v20260501c (01/05): FIX RACE CONDITION RICEZIONE STAZIONE
+//   - confermaRicezioneStazione ora ha 3 livelli di guardia anti-doppio-click
+//     (analogo al fix freccetta deposito v20260430l).
+//   - Bug originale: doppio click sul bottone "Conferma ricezione" sommava
+//     le entrate due volte sulla cisterna (osservato 30/04: 4193+6000+6000=
+//     16193 invece di 10193).
+//   - Fix: lock IN-MEMORY + lock ATOMICO DB su ricevuto_stazione + sentinella
+//     anti-duplicato pre-INSERT su stazione_cmp_storico.
+//
 // PhoenixFuel — Stazione Oppido
 
 // ═══════════════════════════════════════════════════════════════════
@@ -197,64 +208,127 @@ function calcolaRicezioneStazione(totLitri) {
 }
 
 async function confermaRicezioneStazione(ordineId, totLitri) {
-  const inputs = document.querySelectorAll('.stz-ricevi-input');
-  let totAssegnati = 0;
-  inputs.forEach(inp => { totAssegnati += parseFloat(inp.value) || 0; });
-  if (Math.abs(totLitri - totAssegnati) > 0.5) {
-    if (!confirm('I litri assegnati (' + fmtL(totAssegnati) + ') non corrispondono al totale ordine (' + fmtL(totLitri) + '). Procedere comunque?')) return;
+  // ════════════════════════════════════════════════════════════════════
+  // Patch v20260501c: 3 livelli di guardia anti-doppio-click (analogo al
+  // fix freccetta deposito v20260430l). Il bug era che doppio click sul
+  // bottone "Conferma ricezione" eseguiva il READ-MODIFY-WRITE su
+  // cisterne.livello_attuale due volte, sommando le entrate due volte
+  // (es. 30/04: 4193 + 6000 + 6000 = 16193 invece di 10193).
+  //
+  // 1. Lock IN-MEMORY: ordineId in _pfStzRicezioneLock = abort
+  // 2. Lock ATOMICO DB: UPDATE ordini ricevuto_stazione=true con guard
+  //    .eq('ricevuto_stazione', false). Se 0 righe → un altro click ha
+  //    già vinto, abort.
+  // 3. Sentinella anti-duplicato pre-INSERT su stazione_cmp_storico
+  // ════════════════════════════════════════════════════════════════════
+  if (!window._pfStzRicezioneLock) window._pfStzRicezioneLock = new Set();
+  if (window._pfStzRicezioneLock.has(ordineId)) {
+    console.warn('[confermaRicezioneStazione] LOCK: ordine ' + ordineId + ' già in elaborazione');
+    return;
   }
+  window._pfStzRicezioneLock.add(ordineId);
 
-  // Carica ordine per ottenere costo e trasporto
-  const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
-  if (!ordine) { toast('Ordine non trovato'); return; }
-  const costoCarico = Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0);
-  const prodotto = ordine.prodotto;
-
-  for (const inp of inputs) {
-    const val = parseFloat(inp.value) || 0;
-    if (val <= 0) continue;
-    const cisId = inp.dataset.cisterna;
-    const { data: cis } = await sb.from('cisterne').select('livello_attuale,costo_medio').eq('id', cisId).single();
-    if (!cis) continue;
-
-    // Calcolo CMP: (litri_esistenti × costo_medio_attuale + litri_nuovi × costo_carico) / totale_litri
-    const litriPrec = Number(cis.livello_attuale);
-    const cmpPrec = Number(cis.costo_medio || 0);
-    const nuovoLivello = litriPrec + val;
-    var cmpNuovo = 0;
-    if (nuovoLivello > 0) {
-      cmpNuovo = ((litriPrec * cmpPrec) + (val * costoCarico)) / nuovoLivello;
+  try {
+    const inputs = document.querySelectorAll('.stz-ricevi-input');
+    let totAssegnati = 0;
+    inputs.forEach(inp => { totAssegnati += parseFloat(inp.value) || 0; });
+    if (Math.abs(totLitri - totAssegnati) > 0.5) {
+      if (!confirm('I litri assegnati (' + fmtL(totAssegnati) + ') non corrispondono al totale ordine (' + fmtL(totLitri) + '). Procedere comunque?')) return;
     }
-    // Arrotonda a 6 decimali
-    cmpNuovo = Math.round(cmpNuovo * 1000000) / 1000000;
 
-    const { error } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, costo_medio: cmpNuovo, updated_at: new Date().toISOString() }).eq('id', cisId);
-    if (error) { toast('Errore cisterna: ' + error.message); return; }
+    // ─── LOCK ATOMICO DB: marca ricevuto_stazione=true PRIMA di toccare le ───
+    // cisterne. Se 0 righe aggiornate, un altro click ha già vinto.
+    const lockRes = await sb.from('ordini')
+      .update({ ricevuto_stazione: true })
+      .eq('id', ordineId)
+      .eq('ricevuto_stazione', false)
+      .select('id');
+    if (lockRes.error) {
+      toast('Errore lock: ' + lockRes.error.message);
+      return;
+    }
+    if (!lockRes.data || lockRes.data.length === 0) {
+      // Già ricevuto da un altro click/tab/sessione: abort silenzioso
+      console.warn('[confermaRicezioneStazione] LOCK DB: ordine ' + ordineId + ' già ricevuto, abort');
+      toast('⚠ Ordine già ricevuto');
+      chiudiModal();
+      caricaOrdiniDaCaricare();
+      return;
+    }
 
-    // Registra nello storico CMP
-    await sb.from('stazione_cmp_storico').insert([{
-      data: ordine.data || oggiISO,
-      prodotto: prodotto,
-      sede: 'stazione_oppido',
-      cmp_precedente: cmpPrec,
-      cmp_nuovo: cmpNuovo,
-      litri_precedenti: litriPrec,
-      litri_caricati: val,
-      costo_carico: costoCarico,
-      ordine_id: ordineId
-    }]);
+    // ─── SENTINELLA: verifica zero record stazione_cmp_storico per ordine_id ───
+    const sentRes = await sb.from('stazione_cmp_storico')
+      .select('id', { count: 'exact', head: true })
+      .eq('ordine_id', ordineId);
+    if (sentRes.error) {
+      console.error('[confermaRicezioneStazione] sentinella query errore:', sentRes.error);
+    } else if (sentRes.count && sentRes.count > 0) {
+      console.warn('[confermaRicezioneStazione] SENTINELLA: ordine ' + ordineId + ' ha già ' + sentRes.count + ' record cmp_storico, abort');
+      toast('⚠ Ricezione già registrata, non riapplicata');
+      chiudiModal();
+      caricaOrdiniDaCaricare();
+      return;
+    }
+
+    // ─── Carica ordine per ottenere costo e trasporto ───
+    const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+    if (!ordine) {
+      toast('Ordine non trovato');
+      // Rollback flag (eccezionalmente)
+      await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
+      return;
+    }
+    const costoCarico = Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0);
+    const prodotto = ordine.prodotto;
+
+    for (const inp of inputs) {
+      const val = parseFloat(inp.value) || 0;
+      if (val <= 0) continue;
+      const cisId = inp.dataset.cisterna;
+      const { data: cis } = await sb.from('cisterne').select('livello_attuale,costo_medio').eq('id', cisId).single();
+      if (!cis) continue;
+
+      // Calcolo CMP: (litri_esistenti × costo_medio_attuale + litri_nuovi × costo_carico) / totale_litri
+      const litriPrec = Number(cis.livello_attuale);
+      const cmpPrec = Number(cis.costo_medio || 0);
+      const nuovoLivello = litriPrec + val;
+      var cmpNuovo = 0;
+      if (nuovoLivello > 0) {
+        cmpNuovo = ((litriPrec * cmpPrec) + (val * costoCarico)) / nuovoLivello;
+      }
+      cmpNuovo = Math.round(cmpNuovo * 1000000) / 1000000;
+
+      const { error } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, costo_medio: cmpNuovo, updated_at: new Date().toISOString() }).eq('id', cisId);
+      if (error) { toast('Errore cisterna: ' + error.message); return; }
+
+      // Registra nello storico CMP
+      await sb.from('stazione_cmp_storico').insert([{
+        data: ordine.data || oggiISO,
+        prodotto: prodotto,
+        sede: 'stazione_oppido',
+        cmp_precedente: cmpPrec,
+        cmp_nuovo: cmpNuovo,
+        litri_precedenti: litriPrec,
+        litri_caricati: val,
+        costo_carico: costoCarico,
+        ordine_id: ordineId
+      }]);
+    }
+
+    // (ricevuto_stazione=true è già stato impostato dal lock atomico iniziale)
+
+    // Auto-heal cisterne: riallinea alla cascata pfData (stazione)
+    try { await pfStzRicalcolaCisterne(prodotto); } catch (e) { console.warn('pfStzRicalcolaCisterne errore:', e); }
+
+    let totEffettivi = 0;
+    inputs.forEach(inp => { totEffettivi += parseFloat(inp.value) || 0; });
+    toast('✅ ' + fmtL(totEffettivi) + ' L ricevuti');
+    chiudiModal();
+    caricaOrdiniDaCaricare();
+    caricaStazioneDashboard();
+  } finally {
+    window._pfStzRicezioneLock.delete(ordineId);
   }
-
-  const { error } = await sb.from('ordini').update({ ricevuto_stazione: true }).eq('id', ordineId);
-  if (error) { toast('Errore: ' + error.message); return; }
-
-  // Auto-heal cisterne: riallinea alla cascata pfData (stazione)
-  try { await pfStzRicalcolaCisterne(prodotto); } catch (e) { console.warn('pfStzRicalcolaCisterne errore:', e); }
-
-  toast('✅ ' + fmtL(totAssegnati) + ' ricevuti — CMP aggiornato a € ' + cmpNuovo.toFixed(4) + '/L');
-  chiudiModal();
-  caricaOrdiniDaCaricare();
-  caricaStazioneDashboard();
 }
 
 let _stzDashCharts = {};
