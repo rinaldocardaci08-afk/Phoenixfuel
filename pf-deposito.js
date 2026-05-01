@@ -439,14 +439,27 @@ async function confermaCaricoDeposito(ordineId) {
   cisterne.forEach(c => { const inp = document.getElementById('cis-qty-'+c.id); if(inp) totAssegnato += parseFloat(inp.value)||0; });
   const diff = Math.abs(Number(ordine.litri) - totAssegnato);
   if (diff > 1) { toast('Il totale assegnato non corrisponde. Ordine: ' + fmtL(ordine.litri) + ', Assegnato: ' + fmtL(totAssegnato)); return; }
-  for (const c of cisterne) {
-    const inp = document.getElementById('cis-qty-'+c.id);
-    const qta = parseFloat(inp?.value)||0;
-    if (qta > 0) await aggiornaCisterna(c.id, qta, 'entrata', ordineId, ordine.data, Number(ordine.costo_litro||0) + Number(ordine.trasporto_litro||0));
+
+  // ── Patch v20260501h: carico a livello PRODOTTO via _eseguiCaricoCisterneProdotto ──
+  // Prima si chiamava aggiornaCisterna in loop → 1 record cmp_storico per cisterna,
+  // CMP cisterna-specifico. Ora: 1 record cmp_storico per ordine, CMP unico prodotto
+  // applicato a tutte le cisterne del prodotto+sede.
+  var distribuzione = {};
+  cisterne.forEach(function(c) {
+    var inp = document.getElementById('cis-qty-' + c.id);
+    var qta = parseFloat(inp ? inp.value : 0) || 0;
+    if (qta > 0) distribuzione[c.id] = qta;
+  });
+  var costoCarico = Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0);
+  var res = await _eseguiCaricoCisterneProdotto('deposito_vibo', ordine.prodotto, distribuzione, costoCarico, ordineId, ordine.data);
+  if (!res.ok) {
+    toast('Errore carico: ' + (res.error || 'sconosciuto'));
+    return;
   }
+
   await sb.from('ordini').update({ stato:'confermato', caricato_deposito:true }).eq('id', ordineId);
-  _auditLog('carico_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' da ' + ordine.fornitore);
-  toast('Carico confermato! Cisterne aggiornate.');
+  _auditLog('carico_deposito', 'cisterne', ordine.prodotto + ' ' + fmtL(ordine.litri) + ' da ' + ordine.fornitore + ' · CMP ' + res.cmpPrec.toFixed(4) + ' → ' + res.cmpNuovo.toFixed(4));
+  toast('Carico confermato! CMP prodotto: € ' + res.cmpNuovo.toFixed(4));
   chiudiModalePermessi();
   caricaDeposito();
   caricaOrdini();
@@ -3487,4 +3500,131 @@ function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn) {
   html += '</div></div>';
 
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// _eseguiCaricoCisterneProdotto — Patch v20260501h
+// ═══════════════════════════════════════════════════════════════════
+// Logica unica di carico cisterne a livello PRODOTTO.
+// Il CMP è proprietà del PRODOTTO, non delle cisterne. 1 ricezione
+// genera 1 nuovo CMP che si applica a TUTTE le cisterne del prodotto.
+// La distribuzione fisica tra cisterne è solo movimento di livelli.
+//
+// Comportamento:
+//  1. Carica tutte le cisterne del prodotto+sede
+//  2. Calcola CMP prodotto pre-carico (media ponderata litri × costo_medio)
+//  3. Calcola CMP prodotto post-carico applicando il carico ai litri totali
+//  4. UPDATE cisterne: livello_attuale (solo per quelle toccate) e
+//     costo_medio = nuovo CMP prodotto (per TUTTE)
+//  5. INSERT 1 SOLO RECORD in stazione_cmp_storico (1 ordine = 1 evento)
+//  6. INSERT movimenti_cisterne per cisterne toccate (solo deposito;
+//     la stazione non usa questa tabella)
+//
+// Parametri:
+//   sede         : 'deposito_vibo' | 'stazione_oppido'
+//   prodotto     : nome prodotto
+//   distribuzione: oggetto { cisterna_id: litri_da_aggiungere }
+//   costoCarico  : € netto per litro (incluso trasporto)
+//   ordineId     : id ordine
+//   dataOrdine   : data ISO YYYY-MM-DD
+//
+// Ritorna: { ok, cmpPrec, cmpNuovo, litriPrec, litriCaricati, error? }
+// ═══════════════════════════════════════════════════════════════════
+async function _eseguiCaricoCisterneProdotto(sede, prodotto, distribuzione, costoCarico, ordineId, dataOrdine) {
+  if (!sede || !prodotto || !distribuzione || !ordineId) {
+    return { ok: false, error: 'parametri mancanti' };
+  }
+  costoCarico = Number(costoCarico || 0);
+
+  // 1. Carico TUTTE le cisterne del prodotto+sede
+  var cisRes = await sb.from('cisterne')
+    .select('id,nome,livello_attuale,costo_medio,capacita_max,tipo')
+    .eq('sede', sede).eq('prodotto', prodotto);
+  if (cisRes.error) return { ok: false, error: cisRes.error.message };
+  var cisterneAll = cisRes.data || [];
+  if (!cisterneAll.length) return { ok: false, error: 'nessuna cisterna per ' + prodotto + ' a ' + sede };
+
+  // 2. CMP prodotto PRE-carico (media ponderata di tutte le cisterne)
+  var litriPrec = 0, valPrec = 0;
+  cisterneAll.forEach(function(c) {
+    var l = Number(c.livello_attuale || 0);
+    var cmp = Number(c.costo_medio || 0);
+    litriPrec += l;
+    valPrec += l * cmp;
+  });
+  var cmpPrec = litriPrec > 0 ? valPrec / litriPrec : 0;
+
+  // 3. CMP prodotto POST-carico
+  var litriCaricati = 0;
+  Object.keys(distribuzione).forEach(function(cisId) {
+    litriCaricati += Number(distribuzione[cisId] || 0);
+  });
+  if (litriCaricati <= 0) return { ok: false, error: 'distribuzione vuota' };
+  var litriPost = litriPrec + litriCaricati;
+  var valPost = valPrec + litriCaricati * costoCarico;
+  var cmpNuovo = litriPost > 0 ? valPost / litriPost : 0;
+  cmpNuovo = Math.round(cmpNuovo * 1000000) / 1000000;
+
+  // 4. UPDATE cisterne: livello (toccate) + costo_medio (TUTTE = stesso CMP)
+  var updPromises = cisterneAll.map(function(c) {
+    var qta = Number(distribuzione[c.id] || 0);
+    var nuovoLivello = Number(c.livello_attuale || 0) + qta;
+    return sb.from('cisterne')
+      .update({
+        livello_attuale: nuovoLivello,
+        costo_medio: cmpNuovo,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', c.id);
+  });
+  var updResults = await Promise.all(updPromises);
+  var errUpd = updResults.find(function(r) { return r && r.error; });
+  if (errUpd) return { ok: false, error: errUpd.error.message };
+
+  // 5. INSERT 1 SOLO RECORD cmp_storico per l'ordine
+  var dataIns = dataOrdine || (typeof oggiISO !== 'undefined' ? oggiISO : new Date().toISOString().split('T')[0]);
+  var insRes = await sb.from('stazione_cmp_storico').insert([{
+    data: dataIns,
+    prodotto: prodotto,
+    sede: sede,
+    cmp_precedente: cmpPrec,
+    cmp_nuovo: cmpNuovo,
+    litri_precedenti: Math.round(litriPrec),
+    litri_caricati: Math.round(litriCaricati),
+    costo_carico: costoCarico,
+    ordine_id: ordineId
+  }]);
+  if (insRes.error) return { ok: false, error: insRes.error.message };
+
+  // 6. INSERT movimenti_cisterne SOLO per deposito (la stazione non usa la tabella)
+  if (sede === 'deposito_vibo') {
+    var movPromises = [];
+    Object.keys(distribuzione).forEach(function(cisId) {
+      var qta = Number(distribuzione[cisId] || 0);
+      if (qta > 0) {
+        movPromises.push(sb.from('movimenti_cisterne').insert([{
+          cisterna_id: cisId,
+          ordine_id: ordineId,
+          tipo: 'entrata',
+          litri: qta,
+          data: dataIns
+        }]));
+      }
+    });
+    if (movPromises.length > 0) {
+      var movResults = await Promise.all(movPromises);
+      var errMov = movResults.find(function(r) { return r && r.error; });
+      if (errMov) console.warn('[_eseguiCaricoCisterneProdotto] errore movimenti_cisterne:', errMov.error);
+    }
+  }
+
+  console.log('[_eseguiCaricoCisterneProdotto] ' + sede + '/' + prodotto + ': +' + Math.round(litriCaricati) + ' L, CMP ' + cmpPrec.toFixed(4) + ' → ' + cmpNuovo.toFixed(4));
+
+  return {
+    ok: true,
+    cmpPrec: cmpPrec,
+    cmpNuovo: cmpNuovo,
+    litriPrec: litriPrec,
+    litriCaricati: litriCaricati
+  };
 }

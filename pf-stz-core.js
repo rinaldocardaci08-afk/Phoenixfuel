@@ -1,15 +1,4 @@
 // PhoenixFuel — Stazione: Core, Dashboard, Ricezione ordini
-// Versione 01/05/2026 (v20260501c)
-//
-// Patch v20260501c (01/05): FIX RACE CONDITION RICEZIONE STAZIONE
-//   - confermaRicezioneStazione ora ha 3 livelli di guardia anti-doppio-click
-//     (analogo al fix freccetta deposito v20260430l).
-//   - Bug originale: doppio click sul bottone "Conferma ricezione" sommava
-//     le entrate due volte sulla cisterna (osservato 30/04: 4193+6000+6000=
-//     16193 invece di 10193).
-//   - Fix: lock IN-MEMORY + lock ATOMICO DB su ricevuto_stazione + sentinella
-//     anti-duplicato pre-INSERT su stazione_cmp_storico.
-//
 // PhoenixFuel — Stazione Oppido
 
 // ═══════════════════════════════════════════════════════════════════
@@ -209,21 +198,18 @@ function calcolaRicezioneStazione(totLitri) {
 
 async function confermaRicezioneStazione(ordineId, totLitri) {
   // ════════════════════════════════════════════════════════════════════
-  // Patch v20260501c: 3 livelli di guardia anti-doppio-click (analogo al
-  // fix freccetta deposito v20260430l). Il bug era che doppio click sul
-  // bottone "Conferma ricezione" eseguiva il READ-MODIFY-WRITE su
-  // cisterne.livello_attuale due volte, sommando le entrate due volte
-  // (es. 30/04: 4193 + 6000 + 6000 = 16193 invece di 10193).
-  //
-  // 1. Lock IN-MEMORY: ordineId in _pfStzRicezioneLock = abort
-  // 2. Lock ATOMICO DB: UPDATE ordini ricevuto_stazione=true con guard
-  //    .eq('ricevuto_stazione', false). Se 0 righe → un altro click ha
-  //    già vinto, abort.
-  // 3. Sentinella anti-duplicato pre-INSERT su stazione_cmp_storico
+  // Patch v20260501h (cumulativa di v20260501c + carico prodotto):
+  //  • 3 livelli di guardia anti-doppio-click:
+  //      1. Lock IN-MEMORY su _pfStzRicezioneLock (stesso utente, stesso tab)
+  //      2. Lock ATOMICO DB su ricevuto_stazione (multi-tab, multi-utente)
+  //      3. Sentinella anti-duplicato pre-INSERT su stazione_cmp_storico
+  //  • Carico a livello PRODOTTO via _eseguiCaricoCisterneProdotto (helper
+  //    in pf-deposito.js): 1 record cmp_storico per ordine, CMP unico
+  //    prodotto applicato a TUTTE le cisterne del prodotto+sede.
   // ════════════════════════════════════════════════════════════════════
   if (!window._pfStzRicezioneLock) window._pfStzRicezioneLock = new Set();
   if (window._pfStzRicezioneLock.has(ordineId)) {
-    console.warn('[confermaRicezioneStazione] LOCK: ordine ' + ordineId + ' già in elaborazione');
+    console.warn('[confermaRicezioneStazione] LOCK MEM: ordine ' + ordineId + ' già in elaborazione');
     return;
   }
   window._pfStzRicezioneLock.add(ordineId);
@@ -236,8 +222,8 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
       if (!confirm('I litri assegnati (' + fmtL(totAssegnati) + ') non corrispondono al totale ordine (' + fmtL(totLitri) + '). Procedere comunque?')) return;
     }
 
-    // ─── LOCK ATOMICO DB: marca ricevuto_stazione=true PRIMA di toccare le ───
-    // cisterne. Se 0 righe aggiornate, un altro click ha già vinto.
+    // ─── Lock atomico DB: marca ricevuto_stazione=true PRIMA di toccare cisterne.
+    //     Se 0 righe aggiornate, un altro click ha già vinto.
     const lockRes = await sb.from('ordini')
       .update({ ricevuto_stazione: true })
       .eq('id', ordineId)
@@ -248,7 +234,6 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
       return;
     }
     if (!lockRes.data || lockRes.data.length === 0) {
-      // Già ricevuto da un altro click/tab/sessione: abort silenzioso
       console.warn('[confermaRicezioneStazione] LOCK DB: ordine ' + ordineId + ' già ricevuto, abort');
       toast('⚠ Ordine già ricevuto');
       chiudiModal();
@@ -256,73 +241,53 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
       return;
     }
 
-    // ─── SENTINELLA: verifica zero record stazione_cmp_storico per ordine_id ───
+    // ─── Sentinella anti-duplicato: zero record cmp_storico per questo ordine
     const sentRes = await sb.from('stazione_cmp_storico')
       .select('id', { count: 'exact', head: true })
       .eq('ordine_id', ordineId);
     if (sentRes.error) {
-      console.error('[confermaRicezioneStazione] sentinella query errore:', sentRes.error);
+      console.error('[confermaRicezioneStazione] sentinella errore:', sentRes.error);
     } else if (sentRes.count && sentRes.count > 0) {
-      console.warn('[confermaRicezioneStazione] SENTINELLA: ordine ' + ordineId + ' ha già ' + sentRes.count + ' record cmp_storico, abort');
+      console.warn('[confermaRicezioneStazione] SENTINELLA: ordine ' + ordineId + ' ha già ' + sentRes.count + ' record, abort');
       toast('⚠ Ricezione già registrata, non riapplicata');
       chiudiModal();
       caricaOrdiniDaCaricare();
       return;
     }
 
-    // ─── Carica ordine per ottenere costo e trasporto ───
+    // ─── Carico ordine per ottenere costo e prodotto
     const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
     if (!ordine) {
       toast('Ordine non trovato');
-      // Rollback flag (eccezionalmente)
+      // Rollback lock atomico
       await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
       return;
     }
     const costoCarico = Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0);
     const prodotto = ordine.prodotto;
 
-    for (const inp of inputs) {
-      const val = parseFloat(inp.value) || 0;
-      if (val <= 0) continue;
-      const cisId = inp.dataset.cisterna;
-      const { data: cis } = await sb.from('cisterne').select('livello_attuale,costo_medio').eq('id', cisId).single();
-      if (!cis) continue;
-
-      // Calcolo CMP: (litri_esistenti × costo_medio_attuale + litri_nuovi × costo_carico) / totale_litri
-      const litriPrec = Number(cis.livello_attuale);
-      const cmpPrec = Number(cis.costo_medio || 0);
-      const nuovoLivello = litriPrec + val;
-      var cmpNuovo = 0;
-      if (nuovoLivello > 0) {
-        cmpNuovo = ((litriPrec * cmpPrec) + (val * costoCarico)) / nuovoLivello;
-      }
-      cmpNuovo = Math.round(cmpNuovo * 1000000) / 1000000;
-
-      const { error } = await sb.from('cisterne').update({ livello_attuale: nuovoLivello, costo_medio: cmpNuovo, updated_at: new Date().toISOString() }).eq('id', cisId);
-      if (error) { toast('Errore cisterna: ' + error.message); return; }
-
-      // Registra nello storico CMP
-      await sb.from('stazione_cmp_storico').insert([{
-        data: ordine.data || oggiISO,
-        prodotto: prodotto,
-        sede: 'stazione_oppido',
-        cmp_precedente: cmpPrec,
-        cmp_nuovo: cmpNuovo,
-        litri_precedenti: litriPrec,
-        litri_caricati: val,
-        costo_carico: costoCarico,
-        ordine_id: ordineId
-      }]);
+    // ─── Costruisco distribuzione fisica e chiamo helper a livello prodotto
+    var distribuzione = {};
+    inputs.forEach(function(inp) {
+      var v = parseFloat(inp.value) || 0;
+      if (v > 0) distribuzione[inp.dataset.cisterna] = v;
+    });
+    if (Object.keys(distribuzione).length === 0) {
+      toast('⚠ Nessuna quantità assegnata');
+      await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
+      return;
+    }
+    var resCarico = await _eseguiCaricoCisterneProdotto('stazione_oppido', prodotto, distribuzione, costoCarico, ordineId, ordine.data);
+    if (!resCarico.ok) {
+      toast('Errore carico: ' + (resCarico.error || 'sconosciuto'));
+      await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
+      return;
     }
 
-    // (ricevuto_stazione=true è già stato impostato dal lock atomico iniziale)
-
-    // Auto-heal cisterne: riallinea alla cascata pfData (stazione)
+    // Auto-heal cisterne (no-op attualmente, lasciato per backward compat)
     try { await pfStzRicalcolaCisterne(prodotto); } catch (e) { console.warn('pfStzRicalcolaCisterne errore:', e); }
 
-    let totEffettivi = 0;
-    inputs.forEach(inp => { totEffettivi += parseFloat(inp.value) || 0; });
-    toast('✅ ' + fmtL(totEffettivi) + ' L ricevuti');
+    toast('✅ ' + fmtL(resCarico.litriCaricati) + ' L ricevuti · CMP € ' + resCarico.cmpNuovo.toFixed(4));
     chiudiModal();
     caricaOrdiniDaCaricare();
     caricaStazioneDashboard();
