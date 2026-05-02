@@ -1414,6 +1414,7 @@ async function _antRenderDettaglioModulo(presentazioneId) {
     'anticipata_parziale': { bg: '#FAEEDA', fg: '#633806', label: 'Anticipata parziale' },
     'anticipata':          { bg: '#E6F1FB', fg: '#0C447C', label: 'Anticipata' },
     'estinta':             { bg: '#EAF3DE', fg: '#27500A', label: 'Estinta' },
+    'insoluta':            { bg: '#FCEBEB', fg: '#791F1F', label: 'Insoluta' },
     'rifiutata':           { bg: '#FCEBEB', fg: '#791F1F', label: 'Rifiutata' }
   }[p.stato] || { bg: '#f0f0f0', fg: '#666', label: p.stato };
 
@@ -1437,7 +1438,18 @@ async function _antRenderDettaglioModulo(presentazioneId) {
   html += _antKpiCard('Richiesto', fmtE(p.importo_richiesto), '');
   html += _antKpiCard('Anticipato', fmtE(p.importo_anticipato_totale), '#26215C');
   if (totaleEstinto > 0) html += _antKpiCard('Estinto', fmtE(totaleEstinto), '#27500A');
-  if (importoAperto > 0) html += _antKpiCard('Aperto', fmtE(importoAperto), '#BA7517');
+  // Patch v20260502g: render condizionale dello stato "aperto" coerente con la card
+  if (p.stato === 'estinta') {
+    html += _antKpiCard('Stato finale', '✓ Rientrata' + (p.data_estinta ? '<br><small style="font-size:10px">' + fmtD(p.data_estinta) + '</small>' : ''), '#27500A');
+  } else if (p.stato === 'insoluta') {
+    html += _antKpiCard('Stato finale', '❌ Insoluta' + (p.data_insoluto ? '<br><small style="font-size:10px">' + fmtD(p.data_insoluto) + '</small>' : ''), '#A32D2D');
+  } else if (p.stato === 'rifiutata') {
+    html += _antKpiCard('Stato finale', '✗ Rifiutata', '#888');
+  } else if (p.stato === 'anticipata' && importoAperto > 0) {
+    html += _antKpiCard('Da rientrare', fmtE(importoAperto), '#BA7517');
+  } else if (importoAperto > 0) {
+    html += _antKpiCard('Aperto', fmtE(importoAperto), '#BA7517');
+  }
   if (costoReale > 0) html += _antKpiCard('Costi banca', fmtE(costoReale), '#A32D2D');
   if (costoReale > 0 || costoPreventivato > 0) html += _antKpiCard('Netto incassato', fmtE(nettoIncassato), '#27500A');
   html += '</div>';
