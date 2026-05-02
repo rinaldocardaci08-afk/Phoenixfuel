@@ -165,6 +165,9 @@ async function caricaFoglioGiornale() {
   // Header con navigazione e toggle modo
   html += _fgRenderHeader(p);
 
+  // Patch v20260502i: blocco riepilogo (KPI 2x2 + barre giornaliere)
+  html += _fgRenderRiepilogo(p, perGiorno);
+
   // Calendario in alto
   if (_fgStato.modo === 'settimana') {
     html += _fgRenderCalendarioSettimana(p, perGiorno);
@@ -1266,4 +1269,178 @@ async function fgStampaMese() {
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCH v20260502i — RIEPILOGO PERIODO (KPI 2x2 + grafico barre giornaliero)
+// ═══════════════════════════════════════════════════════════════════════════
+// Pannello compatto sopra il calendario con:
+//  - 4 KPI: entrate, uscite, saldo netto, n° movimenti
+//  - Grafico SVG a barre verticali: una coppia entrate/uscite per ogni giorno
+//    del periodo selezionato. Click su una barra → seleziona quel giorno.
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+function _fgRenderRiepilogo(p, perGiorno) {
+  // Calcolo totali periodo
+  var totEnt = 0, totUsc = 0, nMov = 0;
+  Object.keys(perGiorno).forEach(function(iso) {
+    totEnt += perGiorno[iso].totEnt;
+    totUsc += perGiorno[iso].totUsc;
+    nMov += (perGiorno[iso].entrate || []).length + (perGiorno[iso].uscite || []).length;
+  });
+  var saldoNetto = totEnt - totUsc;
+
+  // Genero serie giornaliera per il periodo (per barre)
+  var giorniSerie = _fgSerieGiornaliera(p, perGiorno);
+
+  var html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">';
+
+  // Layout 3 colonne: 2 KPI sx, 2 KPI centro, grafico dx (più largo)
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px">';
+
+  // Colonna 1: Entrate + Uscite
+  html += '<div style="display:flex;flex-direction:column;gap:6px">';
+  html += '<div style="background:#EAF3DE;padding:8px 10px;border-radius:6px;border-left:3px solid #639922">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:#27500A;letter-spacing:0.4px;font-weight:500">Entrate</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500;color:#173404">+ ' + _fgFmtImporto(totEnt) + '</div>';
+  html += '</div>';
+  html += '<div style="background:#FCEBEB;padding:8px 10px;border-radius:6px;border-left:3px solid #A32D2D">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:#791F1F;letter-spacing:0.4px;font-weight:500">Uscite</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500;color:#501313">− ' + _fgFmtImporto(totUsc) + '</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // Colonna 2: Saldo + Movimenti
+  html += '<div style="display:flex;flex-direction:column;gap:6px">';
+  var saldoBg = saldoNetto >= 0 ? '#FAEEDA' : '#FCEBEB';
+  var saldoBorder = saldoNetto >= 0 ? '#BA7517' : '#A32D2D';
+  var saldoColor = saldoNetto >= 0 ? '#173404' : '#501313';
+  var saldoLabelColor = saldoNetto >= 0 ? '#412402' : '#791F1F';
+  html += '<div style="background:' + saldoBg + ';padding:8px 10px;border-radius:6px;border-left:3px solid ' + saldoBorder + '">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:' + saldoLabelColor + ';letter-spacing:0.4px;font-weight:500">Saldo netto</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500;color:' + saldoColor + '">' + (saldoNetto >= 0 ? '+ ' : '− ') + _fgFmtImporto(Math.abs(saldoNetto)) + '</div>';
+  html += '</div>';
+  html += '<div style="background:var(--bg);padding:8px 10px;border-radius:6px">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:var(--text-muted);letter-spacing:0.4px;font-weight:500">Movimenti</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500;color:var(--text)">' + nMov + '</div>';
+  html += '</div>';
+  html += '</div>';
+
+  // Colonna 3: grafico barre
+  html += '<div style="background:var(--bg);padding:8px 10px;border-radius:6px;display:flex;flex-direction:column;min-height:96px">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:var(--text-muted);letter-spacing:0.4px;font-weight:500;margin-bottom:6px">Andamento ' + (_fgStato.modo === 'anno' ? 'mensile' : 'giornaliero') + '</div>';
+  html += _fgRenderBarreGrafico(giorniSerie);
+  html += '</div>';
+
+  html += '</div>'; // chiude grid 3 colonne
+  html += '</div>'; // chiude card
+  return html;
+}
+
+
+// Serie aggregata per il grafico in base al modo
+function _fgSerieGiornaliera(p, perGiorno) {
+  var serie = [];
+  if (_fgStato.modo === 'anno') {
+    // Aggrega per mese
+    var perMese = {};
+    Object.keys(perGiorno).forEach(function(iso) {
+      var mese = iso.substring(0, 7);
+      if (!perMese[mese]) perMese[mese] = { ent: 0, usc: 0 };
+      perMese[mese].ent += perGiorno[iso].totEnt;
+      perMese[mese].usc += perGiorno[iso].totUsc;
+    });
+    var anno = _fgIsoToDate(p.daISO).getFullYear();
+    for (var m = 1; m <= 12; m++) {
+      var key = anno + '-' + String(m).padStart(2, '0');
+      serie.push({
+        label: _FG_MESI[m - 1].substring(0, 3),
+        iso: key + '-15', // metà mese (per click)
+        ent: (perMese[key] || {}).ent || 0,
+        usc: (perMese[key] || {}).usc || 0
+      });
+    }
+  } else {
+    // Settimana o mese: una barra per giorno
+    var inizio = _fgIsoToDate(p.daISO);
+    var fine = _fgIsoToDate(p.aISO);
+    var d = new Date(inizio);
+    while (d <= fine) {
+      var iso = _fgDateToIso(d);
+      var dati = perGiorno[iso] || { totEnt: 0, totUsc: 0 };
+      serie.push({
+        label: String(d.getDate()),
+        iso: iso,
+        ent: dati.totEnt,
+        usc: dati.totUsc
+      });
+      d.setDate(d.getDate() + 1);
+    }
+  }
+  return serie;
+}
+
+
+// SVG barre verticali entrate (verde sopra zero) / uscite (rosso sotto zero)
+function _fgRenderBarreGrafico(serie) {
+  if (!serie.length) {
+    return '<div style="font-size:11px;color:var(--text-muted);font-style:italic;text-align:center;padding:12px">Nessun dato</div>';
+  }
+
+  // Trovo max (entrate o uscite, in assoluto)
+  var maxVal = 0;
+  serie.forEach(function(s) {
+    if (s.ent > maxVal) maxVal = s.ent;
+    if (s.usc > maxVal) maxVal = s.usc;
+  });
+  if (maxVal <= 0) maxVal = 1; // evita div/0
+
+  // Layout SVG
+  var w = 600;
+  var h = 70;
+  var nBarre = serie.length;
+  var slotW = w / nBarre;
+  var barreW = Math.max(2, Math.min(slotW * 0.6, 14));
+  var spacingX = (slotW - barreW) / 2;
+  var middleY = h / 2;
+  var maxBarH = (h / 2) - 4; // spazio per linea zero
+
+  var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="width:100%;height:60px;flex:1">';
+
+  // Linea zero (orizzontale tratteggiata)
+  svg += '<line x1="0" y1="' + middleY + '" x2="' + w + '" y2="' + middleY + '" stroke="rgba(0,0,0,0.15)" stroke-width="0.5" stroke-dasharray="2,2"/>';
+
+  // Barre
+  serie.forEach(function(s, idx) {
+    var x = idx * slotW + spacingX;
+    var heEnt = (s.ent / maxVal) * maxBarH;
+    var heUsc = (s.usc / maxVal) * maxBarH;
+
+    if (heEnt > 0) {
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + (middleY - heEnt).toFixed(1) + '" width="' + barreW.toFixed(1) + '" height="' + heEnt.toFixed(1) + '" fill="#639922" rx="1" style="cursor:pointer" onclick="fgSelezionaGiorno(\'' + s.iso + '\')"><title>' + esc(s.label) + ' — Entrate: + ' + _fgFmtImporto(s.ent) + '</title></rect>';
+    }
+    if (heUsc > 0) {
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + middleY + '" width="' + barreW.toFixed(1) + '" height="' + heUsc.toFixed(1) + '" fill="#A32D2D" rx="1" style="cursor:pointer" onclick="fgSelezionaGiorno(\'' + s.iso + '\')"><title>' + esc(s.label) + ' — Uscite: − ' + _fgFmtImporto(s.usc) + '</title></rect>';
+    }
+  });
+
+  svg += '</svg>';
+
+  // Etichette: prima, metà, ultima
+  var html = svg;
+  html += '<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-top:2px;padding:0 2px">';
+  if (serie.length >= 3) {
+    html += '<span>' + esc(serie[0].label) + '</span>';
+    html += '<span>' + esc(serie[Math.floor(serie.length / 2)].label) + '</span>';
+    html += '<span>' + esc(serie[serie.length - 1].label) + '</span>';
+  } else if (serie.length === 2) {
+    html += '<span>' + esc(serie[0].label) + '</span><span>' + esc(serie[1].label) + '</span>';
+  } else if (serie.length === 1) {
+    html += '<span>' + esc(serie[0].label) + '</span>';
+  }
+  html += '</div>';
+
+  return html;
 }
