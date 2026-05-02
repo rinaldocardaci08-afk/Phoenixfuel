@@ -99,20 +99,39 @@ function _sostCalcola13Settimane() {
 // Caricamento dati: saldo iniziale + flussi previsti
 // ────────────────────────────────────────────────────────────────────────
 async function _sostCaricaSaldoIniziale() {
-  // Somma ultimi saldi per ogni conto banca (semplificazione: prendo gli ultimi
-  // disponibili, anche di giorni diversi). Cassa esclusa (poco impattante).
-  var sb_d = sb.from('banche_saldi_giornalieri').select('conto_id,saldo_contabile,data').order('data', { ascending: false });
-  var res = await sb_d;
-  if (res.error) { console.warn('saldi:', res.error); return 0; }
+  // Patch v20260502j (opzione C): ritorno oggetto strutturato con
+  //   - cashNetto: somma algebrica saldi conti (positivi e negativi)
+  //   - dispFidi: capacità residua su affidamenti attivi (accordato - utilizzato)
+  //   - dettaglio: array per visualizzazione opzionale
+  // Solo "cashNetto" è usato nel calcolo dell'indice (prudente).
+  // "dispFidi" è informativo nell'header.
 
-  var perConto = {};
-  (res.data || []).forEach(function(r) {
-    if (!perConto[r.conto_id]) perConto[r.conto_id] = Number(r.saldo_contabile || 0);
+  // 1. Saldi più recenti per conto (solo conti attivi)
+  var resC = await sb.from('banche_conti').select('id,attivo,istituto_id').eq('attivo', true);
+  var contiAttivi = {};
+  (resC.data || []).forEach(function(c) { contiAttivi[c.id] = true; });
+
+  var resS = await sb.from('banche_saldi_giornalieri').select('conto_id,saldo_contabile,data').order('data', { ascending: false });
+  if (resS.error) { console.warn('[sost] saldi:', resS.error); return { cashNetto: 0, dispFidi: 0, dettaglio: [] }; }
+
+  var ultimoPerConto = {};
+  (resS.data || []).forEach(function(r) {
+    if (!ultimoPerConto[r.conto_id] && contiAttivi[r.conto_id]) {
+      ultimoPerConto[r.conto_id] = Number(r.saldo_contabile || 0);
+    }
+  });
+  var cashNetto = 0;
+  Object.keys(ultimoPerConto).forEach(function(k) { cashNetto += ultimoPerConto[k]; });
+
+  // 2. Disponibilità residua su affidamenti attivi
+  var resA = await sb.from('banche_affidamenti').select('importo_accordato,importo_utilizzato,stato').eq('stato', 'attivo');
+  var dispFidi = 0;
+  (resA.data || []).forEach(function(a) {
+    var residuo = Number(a.importo_accordato || 0) - Number(a.importo_utilizzato || 0);
+    if (residuo > 0) dispFidi += residuo;
   });
 
-  var totale = 0;
-  Object.keys(perConto).forEach(function(k) { totale += perConto[k]; });
-  return totale;
+  return { cashNetto: cashNetto, dispFidi: dispFidi, dettaglio: ultimoPerConto };
 }
 
 
@@ -319,11 +338,14 @@ async function caricaSostenibilita() {
   var daISO = settimane[0].daISO;
   var aISO = settimane[12].aISO;
 
-  var saldoIniziale = await _sostCaricaSaldoIniziale();
+  var saldoInizialeData = await _sostCaricaSaldoIniziale();
+  var saldoIniziale = saldoInizialeData.cashNetto;
+  var dispFidi = saldoInizialeData.dispFidi;
   var flussi = await _sostCaricaFlussi(daISO, aISO);
   var agg = _sostAggrega(settimane, flussi, saldoIniziale);
 
   _sostStato.saldoIniziale = saldoIniziale;
+  _sostStato.dispFidi = dispFidi;
   _sostStato.blocchi = agg.blocchi;
   _sostStato.serie = agg.serie;
   _sostStato.perSett = agg.perSett;
@@ -338,7 +360,7 @@ async function caricaSostenibilita() {
   _sostStato.deficitMassimo = deficitMassimo;
 
   var html = '';
-  html += _sostRenderHeader(saldoIniziale, agg.serie);
+  html += _sostRenderHeader(saldoIniziale, dispFidi, agg.serie);
   html += _sostRenderSemafori(agg.blocchi);
   if (deficitMassimo > 0) {
     var sugg = await _sostSuggerisciAnticipi(deficitMassimo);
@@ -355,14 +377,30 @@ async function caricaSostenibilita() {
 // ────────────────────────────────────────────────────────────────────────
 // Render: Header
 // ────────────────────────────────────────────────────────────────────────
-function _sostRenderHeader(saldoIniziale, serie) {
+function _sostRenderHeader(saldoIniziale, dispFidi, serie) {
   var ultimo = serie.length ? serie[serie.length - 1].saldoCumulato : saldoIniziale;
+  // Capacità totale = cashNetto + dispFidi (capacità operativa reale dell'azienda)
+  var capTot = saldoIniziale + dispFidi;
+  var capPrevista = ultimo + dispFidi;
+
   var html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:14px">';
-  html += '<div>';
+  html += '<div style="flex:1;min-width:280px">';
   html += '<div style="font-size:15px;font-weight:500;color:var(--text)">📊 Sostenibilità finanziaria — 13 settimane</div>';
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Saldo conti attuale: <strong style="font-family:var(--font-mono)">' + _sostFmtImporto(saldoIniziale) + ' €</strong> · Saldo previsto a 13 sett: <strong style="font-family:var(--font-mono);color:' + (ultimo >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(ultimo) + ' €</strong></div>';
+  // Riga 1: cash netto attuale e previsto
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">';
+  html += 'Cash netto conti: <strong style="font-family:var(--font-mono);color:' + (saldoIniziale >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(saldoIniziale) + ' €</strong>';
+  html += ' · Previsto a 13 sett: <strong style="font-family:var(--font-mono);color:' + (ultimo >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(ultimo) + ' €</strong>';
   html += '</div>';
-  html += '<button onclick="caricaSostenibilita()" style="font-size:11px;padding:6px 12px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:pointer">🔄 Aggiorna</button>';
+  // Riga 2: disponibile fidi + capacità totale
+  if (dispFidi > 0) {
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">';
+    html += 'Disponibile su affidamenti: <strong style="font-family:var(--font-mono);color:#0C447C">' + _sostFmtImporto(dispFidi) + ' €</strong>';
+    html += ' · Capacità operativa totale: <strong style="font-family:var(--font-mono);color:' + (capTot >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(capTot) + ' €</strong>';
+    html += '</div>';
+    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;font-style:italic">L\'indice di sostenibilità è calcolato sul cash netto (prudente). Il disponibile su fidi è capacità di assorbimento.</div>';
+  }
+  html += '</div>';
+  html += '<button onclick="caricaSostenibilita()" style="font-size:11px;padding:6px 12px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:pointer;align-self:flex-start">🔄 Aggiorna</button>';
   html += '</div>';
   return html;
 }
@@ -585,6 +623,7 @@ function _sostRenderNoteImpl() {
     'ℹ️ <strong>Stima parziale</strong>: spese ricorrenti (stipendi, F24, affitti, bollette) <strong>non incluse</strong> nel calcolo automatico. ' +
     'Per averle considerate, registrale dal foglio giornale come uscite Modo B. ' +
     'Le scadenze fatture clienti sono stimate a +60 giorni dalla data fattura. ' +
+    'Il <strong>cash netto</strong> è la somma algebrica dei saldi conti attivi (positivi e negativi). Il <strong>disponibile su affidamenti</strong> è (accordato − utilizzato) sui fidi attivi e rappresenta la capacità di credito ancora disponibile. ' +
     'Soglie modificabili nel codice (variabile <code>SOSTENIBILITA_SOGLIE</code>).' +
     '</div>';
 }
