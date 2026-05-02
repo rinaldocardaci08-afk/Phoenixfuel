@@ -267,9 +267,22 @@ function _sostAggrega(settimane, flussi, saldoIniziale) {
     }
 
     var indice = usc > 0 ? (saldoInizioBlocco + entr) / usc : 999;
-    var semaforo = indice >= SOSTENIBILITA_SOGLIE.verde ? 'verde'
-                 : indice >= SOSTENIBILITA_SOGLIE.giallo ? 'giallo'
-                 : 'rosso';
+    var saldoNettoBlocco = entr - usc;
+
+    // Patch v20260502k: regola di sicurezza
+    // - Verde solo se saldo netto del blocco >= 0 E indice >= soglia verde
+    //   (significa: incassi sufficienti e capacità di pagare uscite)
+    // - Giallo se indice tra giallo e verde, OPPURE se saldo netto blocco < 0
+    //   anche con indice alto (= "stai bruciando cassa anche se hai riserva")
+    // - Rosso se indice sotto soglia giallo (cassa insufficiente)
+    var semaforo;
+    if (indice < SOSTENIBILITA_SOGLIE.giallo) {
+      semaforo = 'rosso';
+    } else if (saldoNettoBlocco < 0 || indice < SOSTENIBILITA_SOGLIE.verde) {
+      semaforo = 'giallo';
+    } else {
+      semaforo = 'verde';
+    }
 
     return {
       label: b.label,
@@ -277,7 +290,7 @@ function _sostAggrega(settimane, flussi, saldoIniziale) {
       aISO: sett[sett.length - 1] ? sett[sett.length - 1].aISO : null,
       entrate: entr,
       uscite: usc,
-      saldoNetto: entr - usc,
+      saldoNetto: saldoNettoBlocco,
       indice: indice,
       semaforo: semaforo,
       saldoInizio: saldoInizioBlocco
