@@ -1015,6 +1015,7 @@
         <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">
           <button class="btn-primary fin-subtab active" data-tab="fin-tab-calendario" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px">📅 Calendario</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-foglio" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📓 Foglio giornale</button>
+          <button class="btn-primary fin-subtab" data-tab="fin-tab-sostenibilita" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Sostenibilità</button>
         </div>
 
         <!-- PANEL: CALENDARIO (esistente, immutato) -->
@@ -1054,6 +1055,13 @@
         <div class="fin-subpanel" id="fin-tab-foglio" style="display:none">
           <div class="card">
             <div id="fg-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento foglio giornale...</div></div>
+          </div>
+        </div>
+
+        <!-- PANEL: SOSTENIBILITÀ FINANZIARIA (Patch v20260502h) -->
+        <div class="fin-subpanel" id="fin-tab-sostenibilita" style="display:none">
+          <div class="card">
+            <div id="sost-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento sostenibilità...</div></div>
           </div>
         </div>
       </div>
@@ -2862,7 +2870,8 @@
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>
-<script src="pf-foglio-giornale.js?v=20260502g"></script>
+<script src="pf-foglio-giornale.js?v=20260502h"></script>
+<script src="pf-finanze-sostenibilita.js?v=20260502h"></script>
 <script src="pf-allegati.js?v=20260416d"></script>
 <script src="pf-fatture.js?v=20260423j"></script>
 <script src="pf-fatture-import.js?v=20260422c"></script>

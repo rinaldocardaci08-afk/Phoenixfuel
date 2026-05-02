@@ -454,6 +454,10 @@ function switchFinanzeSubTab(btn) {
   if (btn.dataset.tab === 'fin-tab-foglio' && typeof caricaFoglioGiornale === 'function') {
     try { caricaFoglioGiornale(); } catch (e) { console.warn('caricaFoglioGiornale errore:', e); }
   }
+  // Patch v20260502h: caricamento sostenibilità all'apertura della sub-tab
+  if (btn.dataset.tab === 'fin-tab-sostenibilita' && typeof caricaSostenibilita === 'function') {
+    try { caricaSostenibilita(); } catch (e) { console.warn('caricaSostenibilita errore:', e); }
+  }
 }
 
 
