@@ -409,7 +409,21 @@ function _antRenderModuloCard(p, aff) {
   html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Richiesto</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + fmtE(p.importo_richiesto) + '</span></div>';
   html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Anticipato</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#26215C">' + fmtE(p.importo_anticipato_totale) + '</span></div>';
   if (importoEstinto > 0) html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Estinto</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:#27500A">' + fmtE(importoEstinto) + '</span></div>';
-  html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Aperto</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + (importoAttivo > 0 ? '#BA7517' : '#888') + '">' + fmtE(importoAttivo) + '</span></div>';
+  // Patch v20260502f: terzo valore dipende dallo stato. Per moduli chiusi
+  // (estinta/insoluta/rifiutata) non mostro "Aperto" che sarebbe fuorviante.
+  if (p.stato === 'estinta') {
+    html += '<div style="background:#EAF3DE;color:#27500A;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600">✓ Rientrata' + (p.data_estinta ? ' il ' + fmtD(p.data_estinta) : '') + '</div>';
+  } else if (p.stato === 'insoluta') {
+    html += '<div style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600" title="La banca ha prelevato i soldi dal conto. La fattura cliente resta da incassare normalmente.">❌ Insoluta' + (p.data_insoluto ? ' il ' + fmtD(p.data_insoluto) : '') + '</div>';
+  } else if (p.stato === 'rifiutata') {
+    html += '<div style="background:#f0f0f0;color:#666;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600">✗ Rifiutata dalla banca</div>';
+  } else if (p.stato === 'anticipata') {
+    // Modulo attivo: mostro "Da rientrare" (più chiaro di "Aperto")
+    html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px" title="Importo ancora da rientrare alla banca">Da rientrare</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + (importoAttivo > 0 ? '#BA7517' : '#888') + '">' + fmtE(importoAttivo) + '</span></div>';
+  } else {
+    // in_delibera / anticipata_parziale → "Aperto" classico
+    html += '<div><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px">Aperto</span> <span style="font-family:var(--font-mono);font-size:13px;font-weight:600;color:' + (importoAttivo > 0 ? '#BA7517' : '#888') + '">' + fmtE(importoAttivo) + '</span></div>';
+  }
   html += '<div style="margin-left:auto;display:flex;gap:5px">';
   if (_antPuoAccredito() && (p.stato === 'in_delibera' || p.stato === 'anticipata_parziale')) {
     html += '<button onclick="_antApriModaleAccredito(\'' + p.id + '\')" title="Registra accredito banca" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">💰 Accredito</button>';
