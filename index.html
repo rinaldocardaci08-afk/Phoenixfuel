@@ -1011,6 +1011,14 @@
 
       <!-- FINANZE -->
       <div class="section" id="s-finanze">
+        <!-- Patch v20260502b: sub-tab interna Calendario / Foglio giornale -->
+        <div style="display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn-primary fin-subtab active" data-tab="fin-tab-calendario" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px">📅 Calendario</button>
+          <button class="btn-primary fin-subtab" data-tab="fin-tab-foglio" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📓 Foglio giornale</button>
+        </div>
+
+        <!-- PANEL: CALENDARIO (esistente, immutato) -->
+        <div class="fin-subpanel" id="fin-tab-calendario">
         <!-- KPI mensili -->
         <div class="grid4" style="margin-bottom:12px" id="fin-kpi"></div>
 
@@ -1039,6 +1047,14 @@
           </div>
           <!-- Grid calendario -->
           <div id="fin-calendario" style="overflow-x:auto"></div>
+        </div>
+        </div>
+
+        <!-- PANEL: FOGLIO GIORNALE (nuovo) -->
+        <div class="fin-subpanel" id="fin-tab-foglio" style="display:none">
+          <div class="card">
+            <div id="fg-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento foglio giornale...</div></div>
+          </div>
         </div>
       </div>
 
@@ -2354,7 +2370,6 @@
         <div style="display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap">
           <button class="btn-primary log-tab active" data-tab="log-carichi" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px">🚛 Carichi</button>
           <button class="btn-primary log-tab" data-tab="log-mezzi-propri" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🚗 Mezzi propri</button>
-          <button class="btn-primary log-tab" data-tab="log-report-vettori" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Report Vettori</button>
           <button class="btn-primary log-tab" data-tab="log-vettori" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏭 Crea Vettori</button>
         </div>
 
@@ -2393,7 +2408,20 @@
             <div id="tabella-carichi"><div class="loading">Caricamento...</div></div>
           </div>
 
-          <!-- REPORT VIAGGI PER VETTORE → spostato in linguetta dedicata "Report Vettori" (Patch v20260501m) -->
+          <!-- REPORT VIAGGI PER VETTORE -->
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Report viaggi per vettore</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
+              <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" data-nav="day" /></div>
+              <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" data-nav="day" /></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+              <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
+              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
+            </div>
+            <div id="report-viaggi-content" style="margin-top:16px"></div>
+          </div>
         </div>
 
         <!-- PANEL: MEZZI PROPRI -->
@@ -2417,30 +2445,6 @@
             <div class="card-title">Mezzi propri</div>
             <table><thead><tr><th>Targa</th><th>Descrizione</th><th>Capacità</th><th>Autista</th><th>Scomparti</th><th></th></tr></thead>
             <tbody id="tabella-mezzi"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
-          </div>
-        </div>
-
-        <!-- PANEL: REPORT VETTORI (Patch v20260501m) -->
-        <div class="log-panel" id="log-report-vettori" style="display:none">
-          <!-- Dashboard riepilogo vettori (mese corrente di default) -->
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Dashboard vettori</div>
-            <div id="dash-vettori-content"><div class="loading" style="padding:12px;font-size:12px">Caricamento...</div></div>
-          </div>
-
-          <!-- Ricerca dettagliata: filtri + tabella + PDF (filtri esistenti) -->
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-title">Ricerca dettagliata</div>
-            <div class="form-grid">
-              <div class="form-group"><label>Vettore</label><select id="rep-vettore"><option value="">Tutti i vettori</option></select></div>
-              <div class="form-group"><label>Da</label><input type="date" id="rep-viaggio-da" data-nav="day" /></div>
-              <div class="form-group"><label>A</label><input type="date" id="rep-viaggio-a" data-nav="day" /></div>
-            </div>
-            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-              <button class="btn-primary" onclick="generaReportViaggi()">📊 Genera</button>
-              <button class="btn-primary" style="background:#6B5FCC" onclick="stampaReportViaggi()">🖨️ Stampa proforma</button>
-            </div>
-            <div id="report-viaggi-content" style="margin-top:16px"></div>
           </div>
         </div>
 
@@ -2828,17 +2832,17 @@
 <script src="pf-config.js?v=20260430a"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
-<script src="pf-ordini.js?v=20260430n"></script>
-<script src="pf-deposito.js?v=20260501j"></script>
+<script src="pf-ordini.js?v=20260430k"></script>
+<script src="pf-deposito.js?v=20260428a"></script>
 <script src="pf-anagrafica.js?v=20260421b"></script>
 <script src="pf-data.js?v=20260419f"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
-<script src="pf-stz-core.js?v=20260501j"></script>
+<script src="pf-stz-core.js?v=20260416j"></script>
 <script src="pf-stz-letture.js?v=20260419c"></script>
 <script src="pf-stz-marginalita.js?v=1775149951158"></script>
-<script src="pf-stz-unificata.js?v=20260501b"></script>
-<script src="pf-stz-corrispettivi.js?v=20260501f"></script>
-<script src="pf-stz-magazzino.js?v=20260501k"></script>
+<script src="pf-stz-unificata.js?v=20260430f"></script>
+<script src="pf-stz-corrispettivi.js?v=20260417a"></script>
+<script src="pf-stz-magazzino.js?v=20260421a"></script>
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
 <script src="pf-stz-report.js?v=20260421a"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
@@ -2849,7 +2853,7 @@
 <script src="pf-movimenti-totali.js?v=20260420b"></script>
 <script src="pf-movimenti-dettaglio.js?v=20260420f"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
-<script src="pf-logistica.js?v=20260501m"></script>
+<script src="pf-logistica.js?v=20260428a"></script>
 <script src="pf-admin.js?v=20260428b"></script>
 <script src="pf-dashboard.js?v=20260419e"></script>
 <script src="pf-home.js?v=20260419a"></script>
@@ -2858,6 +2862,7 @@
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>
+<script src="pf-foglio-giornale.js?v=20260502b"></script>
 <script src="pf-allegati.js?v=20260416d"></script>
 <script src="pf-fatture.js?v=20260423j"></script>
 <script src="pf-fatture-import.js?v=20260422c"></script>
