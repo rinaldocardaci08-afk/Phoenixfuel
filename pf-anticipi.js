@@ -399,6 +399,9 @@ function _antRenderModuloCard(p, aff) {
   html += '</div>';
   html += '<div style="display:flex;gap:6px;align-items:center">';
   html += '<span style="background:' + statoColor.bg + ';color:' + statoColor.fg + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.3px">' + statoColor.label + '</span>';
+  if (p.prorogato) {
+    html += '<span title="Scadenza prorogata" style="background:#FAEEDA;color:#412402;padding:3px 8px;border-radius:10px;font-size:10px;font-weight:600">🔄 prorogata</span>';
+  }
   html += '</div>';
   html += '</div>';
   // Importi
@@ -410,6 +413,12 @@ function _antRenderModuloCard(p, aff) {
   html += '<div style="margin-left:auto;display:flex;gap:5px">';
   if (_antPuoAccredito() && (p.stato === 'in_delibera' || p.stato === 'anticipata_parziale')) {
     html += '<button onclick="_antApriModaleAccredito(\'' + p.id + '\')" title="Registra accredito banca" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">💰 Accredito</button>';
+  }
+  // Patch v20260502d: bottoni Proroga / Rientro / Insoluta sulle presentazioni anticipate
+  if (_antPuoAccredito() && (p.stato === 'anticipata' || p.stato === 'anticipata_parziale')) {
+    html += '<button onclick="_antApriModaleProroga(\'' + p.id + '\')" title="Proroga scadenza SBF (estensione data)" style="background:#0C447C;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">📅 Proroga</button>';
+    html += '<button onclick="_antApriModaleRientro(\'' + p.id + '\')" title="Marca come rientrata (cliente ha pagato, banca chiude SBF)" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">✓ Rientro</button>';
+    html += '<button onclick="_antApriModaleInsoluta(\'' + p.id + '\')" title="Marca come insoluta (cliente non ha pagato, banca preleva soldi)" style="background:#A32D2D;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">❌ Insoluta</button>';
   }
   if (_antPuoModificare()) {
     html += '<button onclick="_antApriModaleModulo(\'' + p.id + '\')" title="Modifica modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
@@ -2122,5 +2131,227 @@ async function _antSalvaFattura(fatturaAntId) {
   if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
   chiudiModal();
   toast('✓ Fattura aggiornata');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCH v20260502d — MODALI PROROGA / RIENTRO / INSOLUTA
+// ═══════════════════════════════════════════════════════════════════════════
+// Bottoni visibili nel pannello presentazione quando stato è 'anticipata' o
+// 'anticipata_parziale'. I trigger SQL su anticipi_sbf_presentazioni
+// generano automaticamente i movimenti nel foglio giornale per Rientro e
+// Insoluta. Per la Proroga non c'è movimento (è solo cambio data scadenza).
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+// ───────────────────────────────────────────────────────────────────────
+// PROROGA — sposta avanti la data di scadenza, stato resta 'anticipata'
+// ───────────────────────────────────────────────────────────────────────
+async function _antApriModaleProroga(presentazioneId) {
+  if (!_antPuoAccredito()) { toast('Permesso negato'); return; }
+  if (!presentazioneId) return;
+
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
+  if (resP.error || !resP.data) { toast('Modulo non trovato'); return; }
+  var p = resP.data;
+
+  var dataAttuale = p.scadenza_banca_default || '';
+  var oggiISO = new Date().toISOString().split('T')[0];
+
+  var html = '<div style="max-width:480px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#0C447C">📅 Proroga scadenza SBF</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">📋 Modulo del ' + fmtD(p.data_presentazione) + ' · importo ' + fmtE(p.importo_anticipato_totale) + '</div>';
+
+  html += '<div style="background:var(--bg);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px">';
+  html += '<div style="margin-bottom:4px"><strong>Scadenza attuale:</strong> ' + (dataAttuale ? fmtD(dataAttuale) : '— non impostata —') + '</div>';
+  if (p.prorogato) {
+    html += '<div style="font-size:11px;color:#BA7517"><strong>⚠ Già prorogata in precedenza.</strong> Scadenza originale: ' + (p.data_rientro_originale ? fmtD(p.data_rientro_originale) : '—') + '</div>';
+  }
+  html += '</div>';
+
+  html += '<div style="background:#E6F1FB;border:0.5px solid #185FA5;border-radius:6px;padding:12px;margin-bottom:14px">';
+  html += '<label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Nuova scadenza *</label>';
+  html += '<input type="date" id="ant-proroga-data" value="' + (dataAttuale || oggiISO) + '" style="width:100%;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/>';
+  html += '<label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-top:10px;margin-bottom:4px">Note (opzionale)</label>';
+  html += '<textarea id="ant-proroga-note" rows="2" placeholder="Es: estensione concordata con banca fino al..." style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px;resize:vertical">' + (p.note_proroga ? esc(p.note_proroga) : '') + '</textarea>';
+  html += '</div>';
+
+  html += '<div style="font-size:11px;color:var(--text-muted);font-style:italic;margin-bottom:14px">La proroga non genera movimenti nel foglio giornale. Lo stato resta "anticipata".</div>';
+
+  html += '<div style="display:flex;justify-content:flex-end;gap:8px">';
+  html += '<button onclick="chiudiModal()" style="font-size:12px;padding:6px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antConfermaProroga(\'' + presentazioneId + '\')" style="font-size:12px;padding:6px 14px;background:#0C447C;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">Conferma proroga</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+
+async function _antConfermaProroga(presentazioneId) {
+  var nuovaData = document.getElementById('ant-proroga-data').value;
+  var note = (document.getElementById('ant-proroga-note').value || '').trim();
+  if (!nuovaData) { toast('⚠ Inserisci la nuova data'); return; }
+
+  // Carico stato corrente per salvare data_rientro_originale solo la prima volta
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('scadenza_banca_default,prorogato,data_rientro_originale').eq('id', presentazioneId).single();
+  if (resP.error) { toast('Errore: ' + resP.error.message); return; }
+  var p = resP.data;
+
+  var payload = {
+    scadenza_banca_default: nuovaData,
+    prorogato: true,
+    note_proroga: note || null,
+    modificato_at: new Date().toISOString()
+  };
+  // Salvo la data originale solo la prima volta (per tracciabilità)
+  if (!p.prorogato && !p.data_rientro_originale && p.scadenza_banca_default) {
+    payload.data_rientro_originale = p.scadenza_banca_default;
+  }
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update(payload).eq('id', presentazioneId);
+  if (resU.error) { toast('Errore: ' + resU.error.message); return; }
+
+  if (typeof _auditLog === 'function') {
+    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'Proroga modulo ' + presentazioneId.substring(0,8) + ' a ' + fmtD(nuovaData));
+  }
+
+  chiudiModal();
+  toast('✓ Scadenza prorogata al ' + fmtD(nuovaData));
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+
+// ───────────────────────────────────────────────────────────────────────
+// MARCA RIENTRO — cliente ha pagato, banca chiude SBF, stato 'estinta'
+// Trigger SQL crea automaticamente uscita nel foglio giornale.
+// ───────────────────────────────────────────────────────────────────────
+async function _antApriModaleRientro(presentazioneId) {
+  if (!_antPuoAccredito()) { toast('Permesso negato'); return; }
+  if (!presentazioneId) return;
+
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
+  if (resP.error || !resP.data) { toast('Modulo non trovato'); return; }
+  var p = resP.data;
+
+  var oggiISO = new Date().toISOString().split('T')[0];
+  var importo = Number(p.importo_anticipato_totale || 0);
+
+  var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
+  var bancaLabel = ist.nome || '—';
+
+  var html = '<div style="max-width:480px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#27500A">✓ Marca rientro SBF</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">📋 Modulo del ' + fmtD(p.data_presentazione) + ' · 🏛 ' + esc(bancaLabel) + '</div>';
+
+  html += '<div style="background:#EAF3DE;border:0.5px solid #97C459;border-radius:6px;padding:12px 14px;margin-bottom:14px">';
+  html += '<div style="font-size:13px;color:#173404;margin-bottom:6px"><strong>Importo che la banca tratterrà:</strong> ' + fmtE(importo) + '</div>';
+  html += '<div style="font-size:11px;color:#27500A">Il trigger genererà automaticamente un\'uscita di pari importo nel foglio giornale (conto: ' + esc(bancaLabel) + ').</div>';
+  html += '</div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Data rientro effettivo *</label>';
+  html += '<input type="date" id="ant-rientro-data" value="' + oggiISO + '" style="width:100%;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+
+  html += '<div style="font-size:11px;color:var(--text-muted);font-style:italic;margin:14px 0">Lo stato passerà da "anticipata" a "estinta". Le fatture cliente collegate vengono considerate saldate via SBF.</div>';
+
+  html += '<div style="display:flex;justify-content:flex-end;gap:8px">';
+  html += '<button onclick="chiudiModal()" style="font-size:12px;padding:6px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antConfermaRientro(\'' + presentazioneId + '\')" style="font-size:12px;padding:6px 14px;background:#27500A;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">Conferma rientro</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+
+async function _antConfermaRientro(presentazioneId) {
+  var data = document.getElementById('ant-rientro-data').value;
+  if (!data) { toast('⚠ Inserisci la data rientro'); return; }
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update({
+    stato: 'estinta',
+    data_estinta: data,
+    modificato_at: new Date().toISOString()
+  }).eq('id', presentazioneId);
+  if (resU.error) { toast('Errore: ' + resU.error.message); return; }
+
+  if (typeof _auditLog === 'function') {
+    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'Rientro SBF modulo ' + presentazioneId.substring(0,8) + ' al ' + fmtD(data));
+  }
+
+  chiudiModal();
+  toast('✓ Modulo rientrato il ' + fmtD(data) + ' (uscita registrata in foglio giornale)');
+  if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+
+// ───────────────────────────────────────────────────────────────────────
+// MARCA INSOLUTA — cliente non ha pagato, banca riprende soldi
+// Trigger SQL crea automaticamente uscita nel foglio giornale.
+// La fattura cliente torna "viva" come non anticipata.
+// ───────────────────────────────────────────────────────────────────────
+async function _antApriModaleInsoluta(presentazioneId) {
+  if (!_antPuoAccredito()) { toast('Permesso negato'); return; }
+  if (!presentazioneId) return;
+
+  var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
+  if (resP.error || !resP.data) { toast('Modulo non trovato'); return; }
+  var p = resP.data;
+
+  var oggiISO = new Date().toISOString().split('T')[0];
+  var importo = Number(p.importo_anticipato_totale || 0);
+
+  var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
+  var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
+  var bancaLabel = ist.nome || '—';
+
+  var html = '<div style="max-width:520px">';
+  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#A32D2D">❌ Marca insoluta SBF</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">📋 Modulo del ' + fmtD(p.data_presentazione) + ' · 🏛 ' + esc(bancaLabel) + '</div>';
+
+  html += '<div style="background:#FCEBEB;border:0.5px solid #A32D2D;border-radius:6px;padding:12px 14px;margin-bottom:14px">';
+  html += '<div style="font-size:13px;color:#501313;margin-bottom:8px"><strong>⚠ Conferma operazione critica</strong></div>';
+  html += '<div style="font-size:12px;color:#501313;line-height:1.5">';
+  html += 'Stai marcando come INSOLUTA la presentazione: il cliente non ha pagato la banca, che si riprende l\'importo dal tuo conto.';
+  html += '<br/><br/><strong>Conseguenze:</strong>';
+  html += '<ul style="margin:6px 0 0 18px;padding:0">';
+  html += '<li>Uscita automatica di ' + fmtE(importo) + ' nel foglio giornale (conto ' + esc(bancaLabel) + ')</li>';
+  html += '<li>Le fatture cliente collegate restano "aperte" e vanno gestite come se non fossero mai state anticipate</li>';
+  html += '<li>Nessun rientro futuro verso banca da fare</li>';
+  html += '</ul></div></div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Data insoluto *</label>';
+  html += '<input type="date" id="ant-insoluta-data" value="' + oggiISO + '" style="width:100%;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+
+  html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">';
+  html += '<button onclick="chiudiModal()" style="font-size:12px;padding:6px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antConfermaInsoluta(\'' + presentazioneId + '\')" style="font-size:12px;padding:6px 14px;background:#A32D2D;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">Conferma insoluta</button>';
+  html += '</div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
+
+async function _antConfermaInsoluta(presentazioneId) {
+  var data = document.getElementById('ant-insoluta-data').value;
+  if (!data) { toast('⚠ Inserisci la data insoluto'); return; }
+  if (!confirm('Sei sicuro di marcare questa presentazione come INSOLUTA?\n\nL\'operazione registrerà un\'uscita nel foglio giornale e non è facilmente reversibile.')) return;
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update({
+    stato: 'insoluta',
+    data_insoluto: data,
+    modificato_at: new Date().toISOString()
+  }).eq('id', presentazioneId);
+  if (resU.error) { toast('Errore: ' + resU.error.message); return; }
+
+  if (typeof _auditLog === 'function') {
+    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'INSOLUTA modulo ' + presentazioneId.substring(0,8) + ' al ' + fmtD(data));
+  }
+
+  chiudiModal();
+  toast('❌ Modulo marcato insoluto il ' + fmtD(data) + ' (uscita registrata in foglio giornale)');
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
