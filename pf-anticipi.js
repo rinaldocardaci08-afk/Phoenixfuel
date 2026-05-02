@@ -2235,8 +2235,23 @@ async function _antApriModaleRientro(presentazioneId) {
   if (resP.error || !resP.data) { toast('Modulo non trovato'); return; }
   var p = resP.data;
 
+  // Patch v20260502e: calcolo importo da SUM(fatture) invece di p.importo_anticipato_totale
+  // (il campo aggregato può non essere sincronizzato).
+  var resF = await sb.from('anticipi_sbf_fatture').select('importo_anticipato_calcolato,importo_estinto,stato').eq('presentazione_id', presentazioneId);
+  var fatture = resF.data || [];
+  var sumAnticipato = 0, sumEstinto = 0;
+  fatture.forEach(function(f) {
+    if (f.stato === 'esclusa') return;
+    sumAnticipato += Number(f.importo_anticipato_calcolato || 0);
+    sumEstinto += Number(f.importo_estinto || 0);
+  });
+  var importo = Math.max(0, sumAnticipato - sumEstinto);
+  // Fallback al campo aggregato se le fatture non hanno importi (caso anomalo)
+  if (importo <= 0 && Number(p.importo_anticipato_totale || 0) > 0) {
+    importo = Number(p.importo_anticipato_totale);
+  }
+
   var oggiISO = new Date().toISOString().split('T')[0];
-  var importo = Number(p.importo_anticipato_totale || 0);
 
   var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
   var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
@@ -2248,11 +2263,19 @@ async function _antApriModaleRientro(presentazioneId) {
 
   html += '<div style="background:#EAF3DE;border:0.5px solid #97C459;border-radius:6px;padding:12px 14px;margin-bottom:14px">';
   html += '<div style="font-size:13px;color:#173404;margin-bottom:6px"><strong>Importo che la banca tratterrà:</strong> ' + fmtE(importo) + '</div>';
-  html += '<div style="font-size:11px;color:#27500A">Il trigger genererà automaticamente un\'uscita di pari importo nel foglio giornale (conto: ' + esc(bancaLabel) + ').</div>';
+  if (importo <= 0) {
+    html += '<div style="font-size:11px;color:#A32D2D;margin-top:4px">⚠ Importo zero — controlla che le fatture associate abbiano importi anticipati validi.</div>';
+  } else {
+    html += '<div style="font-size:11px;color:#27500A">Il trigger genererà automaticamente un\'uscita di pari importo nel foglio giornale (conto: ' + esc(bancaLabel) + ').</div>';
+  }
   html += '</div>';
 
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Data rientro effettivo *</label>';
   html += '<input type="date" id="ant-rientro-data" value="' + oggiISO + '" style="width:100%;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px;margin-top:10px">Importo (override opzionale)</label>';
+  html += '<input type="number" step="0.01" id="ant-rientro-importo" value="' + importo.toFixed(2) + '" style="width:100%;font-size:13px;font-family:var(--font-mono);padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;font-style:italic">Modifica solo se la banca ha trattenuto un importo diverso (commissioni, errori, ecc.)</div></div>';
 
   html += '<div style="font-size:11px;color:var(--text-muted);font-style:italic;margin:14px 0">Lo stato passerà da "anticipata" a "estinta". Le fatture cliente collegate vengono considerate saldate via SBF.</div>';
 
@@ -2268,21 +2291,28 @@ async function _antApriModaleRientro(presentazioneId) {
 
 async function _antConfermaRientro(presentazioneId) {
   var data = document.getElementById('ant-rientro-data').value;
+  var importoOverride = parseFloat(document.getElementById('ant-rientro-importo').value) || 0;
   if (!data) { toast('⚠ Inserisci la data rientro'); return; }
+  if (importoOverride <= 0) { toast('⚠ L\'importo deve essere maggiore di zero'); return; }
 
-  var resU = await sb.from('anticipi_sbf_presentazioni').update({
+  // Sincronizzo importo_anticipato_totale prima del cambio stato.
+  // Il trigger SQL legge questo campo per generare il movimento foglio giornale.
+  var payload = {
     stato: 'estinta',
     data_estinta: data,
+    importo_anticipato_totale: importoOverride,
     modificato_at: new Date().toISOString()
-  }).eq('id', presentazioneId);
+  };
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update(payload).eq('id', presentazioneId);
   if (resU.error) { toast('Errore: ' + resU.error.message); return; }
 
   if (typeof _auditLog === 'function') {
-    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'Rientro SBF modulo ' + presentazioneId.substring(0,8) + ' al ' + fmtD(data));
+    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'Rientro SBF modulo ' + presentazioneId.substring(0,8) + ' al ' + fmtD(data) + ' (' + fmtE(importoOverride) + ')');
   }
 
   chiudiModal();
-  toast('✓ Modulo rientrato il ' + fmtD(data) + ' (uscita registrata in foglio giornale)');
+  toast('✓ Modulo rientrato il ' + fmtD(data) + ' (uscita ' + fmtE(importoOverride) + ' registrata in foglio giornale)');
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -2300,8 +2330,21 @@ async function _antApriModaleInsoluta(presentazioneId) {
   if (resP.error || !resP.data) { toast('Modulo non trovato'); return; }
   var p = resP.data;
 
+  // Patch v20260502e: calcolo importo da SUM(fatture)
+  var resF = await sb.from('anticipi_sbf_fatture').select('importo_anticipato_calcolato,importo_estinto,stato').eq('presentazione_id', presentazioneId);
+  var fatture = resF.data || [];
+  var sumAnticipato = 0, sumEstinto = 0;
+  fatture.forEach(function(f) {
+    if (f.stato === 'esclusa') return;
+    sumAnticipato += Number(f.importo_anticipato_calcolato || 0);
+    sumEstinto += Number(f.importo_estinto || 0);
+  });
+  var importo = Math.max(0, sumAnticipato - sumEstinto);
+  if (importo <= 0 && Number(p.importo_anticipato_totale || 0) > 0) {
+    importo = Number(p.importo_anticipato_totale);
+  }
+
   var oggiISO = new Date().toISOString().split('T')[0];
-  var importo = Number(p.importo_anticipato_totale || 0);
 
   var aff = (_bancheAffidamenti || []).find(function(a) { return a.id === p.affidamento_id; }) || {};
   var ist = (_bancheIstituti || []).find(function(i) { return i.id === aff.istituto_id; }) || {};
@@ -2317,13 +2360,21 @@ async function _antApriModaleInsoluta(presentazioneId) {
   html += 'Stai marcando come INSOLUTA la presentazione: il cliente non ha pagato la banca, che si riprende l\'importo dal tuo conto.';
   html += '<br/><br/><strong>Conseguenze:</strong>';
   html += '<ul style="margin:6px 0 0 18px;padding:0">';
-  html += '<li>Uscita automatica di ' + fmtE(importo) + ' nel foglio giornale (conto ' + esc(bancaLabel) + ')</li>';
+  html += '<li>Uscita automatica di <strong>' + fmtE(importo) + '</strong> nel foglio giornale (conto ' + esc(bancaLabel) + ')</li>';
   html += '<li>Le fatture cliente collegate restano "aperte" e vanno gestite come se non fossero mai state anticipate</li>';
   html += '<li>Nessun rientro futuro verso banca da fare</li>';
-  html += '</ul></div></div>';
+  html += '</ul>';
+  if (importo <= 0) {
+    html += '<div style="margin-top:10px;color:#A32D2D"><strong>⚠ Importo zero rilevato</strong> — controlla le fatture associate o usa il campo override sotto.</div>';
+  }
+  html += '</div></div>';
 
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Data insoluto *</label>';
   html += '<input type="date" id="ant-insoluta-data" value="' + oggiISO + '" style="width:100%;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px;margin-top:10px">Importo (override opzionale)</label>';
+  html += '<input type="number" step="0.01" id="ant-insoluta-importo" value="' + importo.toFixed(2) + '" style="width:100%;font-size:13px;font-family:var(--font-mono);padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;font-style:italic">Modifica solo se la banca ha prelevato un importo diverso.</div></div>';
 
   html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">';
   html += '<button onclick="chiudiModal()" style="font-size:12px;padding:6px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Annulla</button>';
@@ -2337,21 +2388,26 @@ async function _antApriModaleInsoluta(presentazioneId) {
 
 async function _antConfermaInsoluta(presentazioneId) {
   var data = document.getElementById('ant-insoluta-data').value;
+  var importoOverride = parseFloat(document.getElementById('ant-insoluta-importo').value) || 0;
   if (!data) { toast('⚠ Inserisci la data insoluto'); return; }
-  if (!confirm('Sei sicuro di marcare questa presentazione come INSOLUTA?\n\nL\'operazione registrerà un\'uscita nel foglio giornale e non è facilmente reversibile.')) return;
+  if (importoOverride <= 0) { toast('⚠ L\'importo deve essere maggiore di zero'); return; }
+  if (!confirm('Sei sicuro di marcare questa presentazione come INSOLUTA?\n\nL\'operazione registrerà un\'uscita di ' + fmtE(importoOverride) + ' nel foglio giornale e non è facilmente reversibile.')) return;
 
-  var resU = await sb.from('anticipi_sbf_presentazioni').update({
+  var payload = {
     stato: 'insoluta',
     data_insoluto: data,
+    importo_anticipato_totale: importoOverride,
     modificato_at: new Date().toISOString()
-  }).eq('id', presentazioneId);
+  };
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update(payload).eq('id', presentazioneId);
   if (resU.error) { toast('Errore: ' + resU.error.message); return; }
 
   if (typeof _auditLog === 'function') {
-    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'INSOLUTA modulo ' + presentazioneId.substring(0,8) + ' al ' + fmtD(data));
+    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'INSOLUTA modulo ' + presentazioneId.substring(0,8) + ' al ' + fmtD(data) + ' (' + fmtE(importoOverride) + ')');
   }
 
   chiudiModal();
-  toast('❌ Modulo marcato insoluto il ' + fmtD(data) + ' (uscita registrata in foglio giornale)');
+  toast('❌ Modulo marcato insoluto il ' + fmtD(data) + ' (uscita ' + fmtE(importoOverride) + ' registrata in foglio giornale)');
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
