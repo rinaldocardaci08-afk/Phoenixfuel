@@ -196,12 +196,21 @@ function _fgRenderHeader(p) {
   var html = '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">';
   html += '<div><div style="font-size:15px;font-weight:500;color:var(--text)">' + esc(p.label) + '</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Foglio giornale aziendale — movimenti monetari</div></div>';
-  html += '<div style="display:flex;gap:6px;align-items:center">';
+  html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
   html += '<button onclick="fgNavigaPeriodo(-1)" style="font-size:14px;padding:4px 10px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:pointer">◀</button>';
   html += btn('settimana', 'Settimana');
   html += btn('mese', 'Mese');
   html += btn('anno', 'Anno');
   html += '<button onclick="fgNavigaPeriodo(1)" style="font-size:14px;padding:4px 10px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:pointer">▶</button>';
+  // Patch v20260502g: bottone stampa con dropdown 3 modalità
+  html += '<div style="position:relative;margin-left:6px">';
+  html += '<button onclick="_fgToggleMenuStampa(event)" style="font-size:12px;padding:6px 12px;background:#6B5FCC;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">🖨️ Stampa ▾</button>';
+  html += '<div id="fg-menu-stampa" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;background:white;border:0.5px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:100;min-width:200px;overflow:hidden">';
+  html += '<button onclick="_fgChiudiMenuStampa();fgStampaGiorno()" style="display:block;width:100%;padding:10px 14px;background:white;border:none;border-bottom:0.5px solid var(--border);text-align:left;font-size:12px;cursor:pointer" onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'white\'">📄 Stampa giorno selezionato</button>';
+  html += '<button onclick="_fgChiudiMenuStampa();fgStampaSettimana()" style="display:block;width:100%;padding:10px 14px;background:white;border:none;border-bottom:0.5px solid var(--border);text-align:left;font-size:12px;cursor:pointer" onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'white\'">📅 Stampa settimana</button>';
+  html += '<button onclick="_fgChiudiMenuStampa();fgStampaMese()" style="display:block;width:100%;padding:10px 14px;background:white;border:none;text-align:left;font-size:12px;cursor:pointer" onmouseover="this.style.background=\'#f5f5f5\'" onmouseout="this.style.background=\'white\'">🗓️ Stampa mese</button>';
+  html += '</div>';
+  html += '</div>';
   html += '</div></div>';
   return html;
 }
@@ -915,4 +924,342 @@ async function _fgConfermaMovimento() {
   toast('✅ ' + (m.tipo === 'entrata' ? 'Entrata' : 'Uscita') + ' di € ' + _fgFmtImporto(importo) + ' registrata');
   _fgChiudiModale();
   caricaFoglioGiornale();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STEP 5 — STAMPA PDF FOGLIO GIORNALE (Patch v20260502g)
+// ═══════════════════════════════════════════════════════════════════════════
+// Tre modalità: giorno singolo, settimana, mese.
+// Apre una finestra HTML stampabile (window.print() invocato automaticamente).
+// Pattern coerente con il resto del sistema (es. pf-anagrafica, pf-deposito).
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+function _fgToggleMenuStampa(ev) {
+  if (ev) ev.stopPropagation();
+  var menu = document.getElementById('fg-menu-stampa');
+  if (!menu) return;
+  if (menu.style.display === 'none' || !menu.style.display) {
+    menu.style.display = 'block';
+    setTimeout(function() {
+      document.addEventListener('click', _fgChiudiMenuStampa, { once: true });
+    }, 100);
+  } else {
+    _fgChiudiMenuStampa();
+  }
+}
+
+function _fgChiudiMenuStampa() {
+  var menu = document.getElementById('fg-menu-stampa');
+  if (menu) menu.style.display = 'none';
+}
+
+
+// CSS comune per tutte le stampe
+function _fgStampaCSS() {
+  return '<style>' +
+    '@page { size: A4; margin: 12mm; }' +
+    '* { box-sizing: border-box; }' +
+    'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a2332; margin: 0; padding: 0; font-size: 11pt; line-height: 1.4; }' +
+    '.header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a2332; padding-bottom: 10px; margin-bottom: 16px; }' +
+    '.azienda { font-size: 14pt; font-weight: 700; }' +
+    '.azienda-sub { font-size: 9pt; color: #666; margin-top: 2px; }' +
+    '.titolo { font-size: 13pt; font-weight: 600; text-align: right; }' +
+    '.titolo-sub { font-size: 10pt; color: #666; margin-top: 2px; text-align: right; }' +
+    '.partita-doppia { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }' +
+    '.col-titolo { font-size: 10pt; text-transform: uppercase; font-weight: 700; padding: 6px 10px; border-radius: 4px; margin-bottom: 8px; letter-spacing: 0.5px; }' +
+    '.col-entrate { background: #EAF3DE; color: #173404; }' +
+    '.col-uscite { background: #FCEBEB; color: #501313; }' +
+    '.riga-mov { font-size: 10pt; padding: 6px 10px; border-bottom: 0.5px solid #ddd; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }' +
+    '.riga-desc { flex: 1; }' +
+    '.riga-meta { font-size: 8pt; color: #666; margin-top: 2px; }' +
+    '.riga-importo { font-family: "SF Mono", Monaco, monospace; font-weight: 600; white-space: nowrap; }' +
+    '.imp-pos { color: #173404; }' +
+    '.imp-neg { color: #501313; }' +
+    '.imp-sbf { color: #0C447C; }' +
+    '.totale { background: #f5f5f5; padding: 8px 10px; border-radius: 4px; font-weight: 700; font-size: 11pt; display: flex; justify-content: space-between; margin-top: 8px; }' +
+    '.saldo-box { background: #FAEEDA; border: 1px solid #BA7517; border-radius: 6px; padding: 10px 14px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 12pt; }' +
+    '.giorno-block { page-break-inside: avoid; margin-bottom: 22px; }' +
+    '.giorno-titolo { font-size: 12pt; font-weight: 700; padding: 6px 10px; background: #f0f0f0; border-radius: 4px; margin-bottom: 8px; }' +
+    'table { width: 100%; border-collapse: collapse; font-size: 10pt; }' +
+    'th { text-align: left; padding: 6px 8px; background: #f5f5f5; font-weight: 600; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 1px solid #ddd; }' +
+    'td { padding: 5px 8px; border-bottom: 0.5px solid #eee; }' +
+    '.tbl-totale { font-weight: 700; background: #f5f5f5; }' +
+    '.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }' +
+    '.kpi-card { background: #f5f5f5; border-radius: 4px; padding: 8px 10px; }' +
+    '.kpi-label { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.4px; color: #666; }' +
+    '.kpi-val { font-family: "SF Mono", Monaco, monospace; font-size: 12pt; font-weight: 600; margin-top: 2px; }' +
+    '.footer { position: fixed; bottom: 6mm; left: 12mm; right: 12mm; font-size: 8pt; color: #999; text-align: center; border-top: 0.5px solid #ddd; padding-top: 4px; }' +
+    '.no-print button { padding: 8px 16px; margin: 0 4px; background: #6B5FCC; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12pt; font-weight: 600; }' +
+    '.no-print { position: fixed; bottom: 20px; right: 20px; }' +
+    '@media print { .no-print { display: none !important; } }' +
+    '</style>';
+}
+
+
+function _fgStampaHeader(titolo, sottotitolo) {
+  var oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+  return '<div class="header">' +
+    '<div><div class="azienda">PHOENIX FUEL S.r.l.</div>' +
+    '<div class="azienda-sub">Vibo Valentia (VV) — Distribuzione carburanti</div></div>' +
+    '<div><div class="titolo">' + esc(titolo) + '</div>' +
+    '<div class="titolo-sub">' + esc(sottotitolo) + '</div>' +
+    '<div class="titolo-sub" style="font-size:8pt;margin-top:4px">Stampa: ' + oggi + '</div></div>' +
+    '</div>';
+}
+
+
+function _fgStampaFooter() {
+  return '<div class="footer">PhoenixFuel ERP — Foglio giornale aziendale — pagina <span class="page"></span></div>' +
+    '<div class="no-print"><button onclick="window.print()">🖨️ Stampa</button>' +
+    '<button onclick="window.close()" style="background:#A32D2D">✕ Chiudi</button></div>';
+}
+
+
+function _fgRigaMovimentoHTML(m, tipo) {
+  var classImp = 'imp-' + (tipo === 'entrata' ? 'pos' : 'neg');
+  var sign = tipo === 'entrata' ? '+ ' : '− ';
+  if (m.origine === 'auto-anticipo-erogato' || m.origine === 'auto-anticipo-rientro' || m.origine === 'auto-anticipo-insoluto') {
+    classImp = 'imp-sbf';
+  }
+  var meta = [];
+  if (m.banca_id) meta.push('Banca');
+  else if (m.cassa_tipo) meta.push(m.cassa_tipo === 'cassa_centrale' ? 'Cassa centrale' : 'Cassa stazione');
+  if (m.metodo) meta.push(m.metodo);
+  if (m.origine === 'auto-anticipo-erogato') meta.push('anticipo SBF');
+  else if (m.origine === 'auto-anticipo-rientro') meta.push('rientro SBF');
+  else if (m.origine === 'auto-anticipo-insoluto') meta.push('insoluto SBF');
+
+  var html = '<div class="riga-mov">';
+  html += '<div class="riga-desc"><div>' + esc(m.descrizione) + '</div>';
+  if (meta.length) html += '<div class="riga-meta">' + esc(meta.join(' · ')) + '</div>';
+  html += '</div>';
+  html += '<div class="riga-importo ' + classImp + '">' + sign + _fgFmtImporto(m.importo) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+
+function _fgRenderBloccoGiorno(iso, dati) {
+  var d = _fgIsoToDate(iso);
+  var label = _FG_GIORNI_FULL[d.getDay()] + ' ' + d.getDate() + ' ' + _FG_MESI[d.getMonth()] + ' ' + d.getFullYear();
+  var saldo = dati.totEnt - dati.totUsc;
+  var nMov = (dati.entrate || []).length + (dati.uscite || []).length;
+
+  var html = '<div class="giorno-block">';
+  html += '<div class="giorno-titolo">' + esc(label) + ' · ' + nMov + ' movimenti</div>';
+
+  html += '<div class="partita-doppia">';
+
+  // Entrate
+  html += '<div>';
+  html += '<div class="col-titolo col-entrate">▼ Entrate</div>';
+  if (!(dati.entrate || []).length) {
+    html += '<div style="font-size:10pt;color:#999;font-style:italic;padding:6px">Nessuna entrata</div>';
+  } else {
+    dati.entrate.forEach(function(m) { html += _fgRigaMovimentoHTML(m, 'entrata'); });
+  }
+  html += '<div class="totale"><span>Totale entrate</span><span class="imp-pos">+ ' + _fgFmtImporto(dati.totEnt) + '</span></div>';
+  html += '</div>';
+
+  // Uscite
+  html += '<div>';
+  html += '<div class="col-titolo col-uscite">▼ Uscite</div>';
+  if (!(dati.uscite || []).length) {
+    html += '<div style="font-size:10pt;color:#999;font-style:italic;padding:6px">Nessuna uscita</div>';
+  } else {
+    dati.uscite.forEach(function(m) { html += _fgRigaMovimentoHTML(m, 'uscita'); });
+  }
+  html += '<div class="totale"><span>Totale uscite</span><span class="imp-neg">− ' + _fgFmtImporto(dati.totUsc) + '</span></div>';
+  html += '</div>';
+
+  html += '</div>';
+
+  // Saldo netto
+  html += '<div class="saldo-box">';
+  html += '<span style="color:#633806;font-weight:600">Saldo netto giornata</span>';
+  html += '<span class="riga-importo ' + (saldo >= 0 ? 'imp-pos' : 'imp-neg') + '" style="font-size:13pt">' +
+    (saldo >= 0 ? '+ ' : '− ') + _fgFmtImporto(Math.abs(saldo)) + ' €</span>';
+  html += '</div>';
+
+  html += '</div>';
+  return html;
+}
+
+
+// ───────────────────────────────────────────────────────────────────
+// 1. STAMPA GIORNO SINGOLO
+// ───────────────────────────────────────────────────────────────────
+async function fgStampaGiorno() {
+  var iso = _fgStato.giornoSelezionato;
+  if (!iso) { toast('⚠ Seleziona prima un giorno dal calendario'); return; }
+
+  var movimenti = await _fgCaricaMovimenti(iso, iso);
+  var dati = { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+  movimenti.forEach(function(m) {
+    if (m.tipo === 'entrata') { dati.entrate.push(m); dati.totEnt += Number(m.importo || 0); }
+    else { dati.uscite.push(m); dati.totUsc += Number(m.importo || 0); }
+  });
+
+  var d = _fgIsoToDate(iso);
+  var label = _FG_GIORNI_FULL[d.getDay()] + ' ' + d.getDate() + ' ' + _FG_MESI[d.getMonth()] + ' ' + d.getFullYear();
+
+  var w = window.open('', '_blank', 'width=900,height=1100');
+  var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Foglio giornale ' + _fgFmtData(iso) + '</title>';
+  html += _fgStampaCSS() + '</head><body>';
+  html += _fgStampaHeader('Foglio giornale', label);
+  html += _fgRenderBloccoGiorno(iso, dati);
+  html += _fgStampaFooter();
+  html += '<script>window.onload=function(){setTimeout(function(){window.print()},300)}</' + 'script>';
+  html += '</body></html>';
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+
+// ───────────────────────────────────────────────────────────────────
+// 2. STAMPA SETTIMANA
+// ───────────────────────────────────────────────────────────────────
+async function fgStampaSettimana() {
+  // Calcolo settimana basata sul giorno selezionato
+  var ancora = _fgIsoToDate(_fgStato.giornoSelezionato || _fgStato.dataAncora);
+  var dow = ancora.getDay();
+  var diffLun = dow === 0 ? -6 : 1 - dow;
+  var lunedi = new Date(ancora);
+  lunedi.setDate(ancora.getDate() + diffLun);
+  var domenica = new Date(lunedi);
+  domenica.setDate(lunedi.getDate() + 6);
+  var daISO = _fgDateToIso(lunedi);
+  var aISO = _fgDateToIso(domenica);
+
+  var movimenti = await _fgCaricaMovimenti(daISO, aISO);
+
+  // Aggrego per giorno
+  var perGiorno = {};
+  movimenti.forEach(function(m) {
+    if (!perGiorno[m.data]) perGiorno[m.data] = { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+    if (m.tipo === 'entrata') { perGiorno[m.data].entrate.push(m); perGiorno[m.data].totEnt += Number(m.importo || 0); }
+    else { perGiorno[m.data].uscite.push(m); perGiorno[m.data].totUsc += Number(m.importo || 0); }
+  });
+
+  // KPI settimana
+  var totEnt = 0, totUsc = 0;
+  Object.keys(perGiorno).forEach(function(k) { totEnt += perGiorno[k].totEnt; totUsc += perGiorno[k].totUsc; });
+
+  var label = 'Settimana dal ' + _fgFmtData(daISO) + ' al ' + _fgFmtData(aISO);
+
+  var w = window.open('', '_blank', 'width=900,height=1100');
+  var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Foglio giornale settimanale</title>';
+  html += _fgStampaCSS() + '</head><body>';
+  html += _fgStampaHeader('Foglio giornale settimanale', label);
+
+  // KPI in alto
+  html += '<div class="kpi-row">';
+  html += '<div class="kpi-card"><div class="kpi-label">Movimenti</div><div class="kpi-val">' + movimenti.length + '</div></div>';
+  html += '<div class="kpi-card"><div class="kpi-label">Totale entrate</div><div class="kpi-val imp-pos">+ ' + _fgFmtImporto(totEnt) + '</div></div>';
+  html += '<div class="kpi-card"><div class="kpi-label">Totale uscite</div><div class="kpi-val imp-neg">− ' + _fgFmtImporto(totUsc) + '</div></div>';
+  var saldo = totEnt - totUsc;
+  html += '<div class="kpi-card"><div class="kpi-label">Saldo netto</div><div class="kpi-val ' + (saldo >= 0 ? 'imp-pos' : 'imp-neg') + '">' + (saldo >= 0 ? '+' : '−') + ' ' + _fgFmtImporto(Math.abs(saldo)) + '</div></div>';
+  html += '</div>';
+
+  // Blocchi giornalieri (lun-dom, anche giorni vuoti per chiarezza calendariale)
+  var d = new Date(lunedi);
+  for (var i = 0; i < 7; i++) {
+    var iso = _fgDateToIso(d);
+    var dati = perGiorno[iso] || { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+    if (dati.entrate.length === 0 && dati.uscite.length === 0) {
+      // Giorno vuoto: blocco compatto
+      var dl = _fgIsoToDate(iso);
+      var lbl = _FG_GIORNI_FULL[dl.getDay()] + ' ' + dl.getDate() + ' ' + _FG_MESI[dl.getMonth()];
+      html += '<div class="giorno-block" style="padding:6px 10px;background:#fafafa;border-radius:4px;color:#999;font-size:10pt;font-style:italic">' + esc(lbl) + ' — nessun movimento</div>';
+    } else {
+      html += _fgRenderBloccoGiorno(iso, dati);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+
+  html += _fgStampaFooter();
+  html += '<script>window.onload=function(){setTimeout(function(){window.print()},300)}</' + 'script>';
+  html += '</body></html>';
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+
+// ───────────────────────────────────────────────────────────────────
+// 3. STAMPA MESE
+// ───────────────────────────────────────────────────────────────────
+async function fgStampaMese() {
+  var ancora = _fgIsoToDate(_fgStato.giornoSelezionato || _fgStato.dataAncora);
+  var primo = new Date(ancora.getFullYear(), ancora.getMonth(), 1);
+  var ultimo = new Date(ancora.getFullYear(), ancora.getMonth() + 1, 0);
+  var daISO = _fgDateToIso(primo);
+  var aISO = _fgDateToIso(ultimo);
+
+  var movimenti = await _fgCaricaMovimenti(daISO, aISO);
+
+  // KPI globali e per settimana
+  var totEnt = 0, totUsc = 0;
+  movimenti.forEach(function(m) {
+    if (m.tipo === 'entrata') totEnt += Number(m.importo || 0);
+    else totUsc += Number(m.importo || 0);
+  });
+
+  var label = _FG_MESI[ancora.getMonth()] + ' ' + ancora.getFullYear();
+
+  var w = window.open('', '_blank', 'width=900,height=1100');
+  var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Foglio giornale mensile ' + esc(label) + '</title>';
+  html += _fgStampaCSS() + '</head><body>';
+  html += _fgStampaHeader('Foglio giornale mensile', label);
+
+  // KPI globali
+  html += '<div class="kpi-row">';
+  html += '<div class="kpi-card"><div class="kpi-label">Movimenti</div><div class="kpi-val">' + movimenti.length + '</div></div>';
+  html += '<div class="kpi-card"><div class="kpi-label">Totale entrate</div><div class="kpi-val imp-pos">+ ' + _fgFmtImporto(totEnt) + '</div></div>';
+  html += '<div class="kpi-card"><div class="kpi-label">Totale uscite</div><div class="kpi-val imp-neg">− ' + _fgFmtImporto(totUsc) + '</div></div>';
+  var saldo = totEnt - totUsc;
+  html += '<div class="kpi-card"><div class="kpi-label">Saldo netto</div><div class="kpi-val ' + (saldo >= 0 ? 'imp-pos' : 'imp-neg') + '">' + (saldo >= 0 ? '+' : '−') + ' ' + _fgFmtImporto(Math.abs(saldo)) + '</div></div>';
+  html += '</div>';
+
+  // Tabella elenco completo movimenti del mese (compatta)
+  if (movimenti.length === 0) {
+    html += '<div style="padding:20px;text-align:center;color:#999;font-style:italic">Nessun movimento registrato in questo mese</div>';
+  } else {
+    html += '<table>';
+    html += '<thead><tr><th>Data</th><th>Tipo</th><th>Descrizione</th><th>Conto</th><th>Metodo</th><th style="text-align:right">Importo</th></tr></thead><tbody>';
+    movimenti.forEach(function(m) {
+      var classImp = m.tipo === 'entrata' ? 'imp-pos' : 'imp-neg';
+      var sign = m.tipo === 'entrata' ? '+' : '−';
+      var conto = m.banca_id ? 'Banca' : (m.cassa_tipo === 'cassa_centrale' ? 'Cassa centrale' : (m.cassa_tipo === 'cassa_stazione' ? 'Cassa stazione' : '—'));
+      var origine = '';
+      if (m.origine === 'auto-anticipo-erogato') origine = ' [SBF↑]';
+      else if (m.origine === 'auto-anticipo-rientro') origine = ' [SBF↓]';
+      else if (m.origine === 'auto-anticipo-insoluto') origine = ' [SBF✗]';
+      html += '<tr>';
+      html += '<td>' + _fgFmtData(m.data) + '</td>';
+      html += '<td>' + (m.tipo === 'entrata' ? 'Entrata' : 'Uscita') + '</td>';
+      html += '<td>' + esc(m.descrizione) + esc(origine) + '</td>';
+      html += '<td>' + esc(conto) + '</td>';
+      html += '<td>' + esc(m.metodo || '—') + '</td>';
+      html += '<td style="text-align:right" class="riga-importo ' + classImp + '">' + sign + ' ' + _fgFmtImporto(m.importo) + '</td>';
+      html += '</tr>';
+    });
+    // Riga totale
+    html += '<tr class="tbl-totale"><td colspan="5" style="text-align:right">SALDO NETTO MESE</td>';
+    html += '<td style="text-align:right" class="riga-importo ' + (saldo >= 0 ? 'imp-pos' : 'imp-neg') + '">' + (saldo >= 0 ? '+' : '−') + ' ' + _fgFmtImporto(Math.abs(saldo)) + '</td></tr>';
+    html += '</tbody></table>';
+  }
+
+  html += _fgStampaFooter();
+  html += '<script>window.onload=function(){setTimeout(function(){window.print()},300)}</' + 'script>';
+  html += '</body></html>';
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
