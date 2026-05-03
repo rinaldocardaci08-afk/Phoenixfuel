@@ -106,6 +106,23 @@ function fgNavigaPeriodo(direzione) {
     ancora.setFullYear(ancora.getFullYear() + direzione);
   }
   _fgStato.dataAncora = _fgDateToIso(ancora);
+
+  // Patch v20260503c: sposta anche giorno selezionato al primo giorno del nuovo periodo
+  // (altrimenti il dettaglio sotto resta su un giorno fuori dal periodo visualizzato)
+  var nuovoSelezionato;
+  if (_fgStato.modo === 'settimana') {
+    var dow = ancora.getDay();
+    var diffLun = dow === 0 ? -6 : 1 - dow;
+    var lun = new Date(ancora);
+    lun.setDate(ancora.getDate() + diffLun);
+    nuovoSelezionato = _fgDateToIso(lun);
+  } else if (_fgStato.modo === 'mese') {
+    nuovoSelezionato = _fgDateToIso(new Date(ancora.getFullYear(), ancora.getMonth(), 1));
+  } else {
+    nuovoSelezionato = ancora.getFullYear() + '-01-01';
+  }
+  _fgStato.giornoSelezionato = nuovoSelezionato;
+
   caricaFoglioGiornale();
 }
 
