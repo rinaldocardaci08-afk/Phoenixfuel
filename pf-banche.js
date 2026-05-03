@@ -149,6 +149,9 @@ function switchBancheTab(btn) {
   if (tabId === 'banche-panel-affidamenti') renderBancheAffidamenti();
   if (tabId === 'banche-panel-situazione') renderBancheSituazione();
   if (tabId === 'banche-panel-anticipi') renderBancheAnticipi();
+  if (tabId === 'banche-panel-anticipi-storico') {
+    if (typeof renderAntStorico === 'function') renderAntStorico();
+  }
   if (tabId === 'banche-panel-piano') renderBanchePianoAnnuale();
   if (tabId === 'banche-panel-timeline') renderBancheTimeline();
 }

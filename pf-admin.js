@@ -30,7 +30,8 @@ const SEZIONI_SISTEMA = [
     {id:'anticipi.modifica',label:'Modifica modulo/fattura'},
     {id:'anticipi.regole',label:'Gestione regole e blacklist'},
     {id:'anticipi.proroga',label:'Proroga scadenza modulo'},
-    {id:'anticipi.chiudi-modulo',label:'Marca rientro/insoluta modulo'}
+    {id:'anticipi.chiudi-modulo',label:'Marca rientro/insoluta modulo'},
+    {id:'anticipi.storico',label:'Visualizza storico per banca'}
   ]},
   {id:'clienti',label:'Clienti',icon:'👤'},
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
