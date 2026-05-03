@@ -445,6 +445,8 @@ function _antRenderModuloCard(p, aff) {
   if (_antPuoModificare()) {
     html += '<button onclick="_antApriModaleModulo(\'' + p.id + '\')" title="Modifica modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
   }
+  // Patch v20260503e: bottone stampa PDF banca
+  html += '<button onclick="_antStampaPdfBanca(\'' + p.id + '\')" title="Stampa modulo PDF da consegnare alla banca" style="background:#185FA5;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">📄 Stampa PDF</button>';
   html += '<button onclick="_antApriDettaglioModulo(\'' + p.id + '\')" title="Dettaglio completo modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">🔍</button>';
   html += '</div>';
   html += '</div>';
