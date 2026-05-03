@@ -1,32 +1,45 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// PhoenixFuel — Sostenibilità Finanziaria (Patch v20260502h)
+// PhoenixFuel — Sostenibilità Finanziaria operativa (Patch v20260503b)
 // ═══════════════════════════════════════════════════════════════════════════
-// Sub-tab "📊 Sostenibilità" dentro la sezione Finanze.
-// Vista A (semafori in alto) + Vista B (curva saldo previsto in basso).
-// Previsionale 13 settimane (standard bancario).
-// Algoritmo suggerimento anticipi SBF per coprire periodi deficitari.
+// Sub-tab "📊 Sostenibilità" dentro Finanze.
+// REWRITE COMPLETO: da vista cumulativa 13 settimane a vista operativa
+// settimanale con orizzonte 8 settimane (~2 mesi, copre ciclo Q8 45gg).
 //
-// NESSUNA scrittura DB: solo aggregazione e visualizzazione di dati esistenti.
+// Layout:
+//   1. Header con cash netto + dispFidi + capacità totale
+//   2. 4 semafori in alto (blocchi: Sett 1-2 / 3-4 / 5-6 / 7-8)
+//   3. Calendario settimanale (7 giorni) con frecce ◀▶ Sett +/- 1
+//   4. Dettaglio giorno selezionato: lista flussi previsti
+//   5. Grafico barre giornaliero del giorno+settimana
+//   6. Note implementazione
+//
+// FIX ricompresi:
+//   - bug 2: fatture già anticipate via SBF escluse dalle entrate cliente
+//   - bug 4: cliente_rete=true escluso dal suggerimento anticipi
+//   - bug 5: cache fatture passata al suggerimento (no doppio fetch)
+//   - bug 6: query saldo iniziale parallelizzate
+//   - bug 7: saldi limitati ultimi 90 giorni
 // ═══════════════════════════════════════════════════════════════════════════
 
 
 // ────────────────────────────────────────────────────────────────────────
-// COSTANTI CONFIGURABILI (modificare qui per aggiustare soglie)
+// COSTANTI CONFIGURABILI
 // ────────────────────────────────────────────────────────────────────────
 var SOSTENIBILITA_SOGLIE = {
-  verde:  1.20,   // indice >= 1.20 → verde "comodo"
-  giallo: 0.95    // 0.95 <= indice < 1.20 → giallo "sotto pressione"
-                  // indice < 0.95 → rosso "critico"
+  verde:  1.20,
+  giallo: 0.95
 };
 
-var SOSTENIBILITA_SCARTO_SBF = 0.10;  // 10% scarto banca tipico per anticipi
+var SOSTENIBILITA_SCARTO_SBF = 0.10;
 
 var SOSTENIBILITA_BLOCCHI = [
-  { label: 'Sett. 1-2',    settimane: [1, 2] },
-  { label: 'Sett. 3-6',    settimane: [3, 4, 5, 6] },
-  { label: 'Sett. 7-10',   settimane: [7, 8, 9, 10] },
-  { label: 'Sett. 11-13',  settimane: [11, 12, 13] }
+  { label: 'Sett. 1-2', settimane: [1, 2] },
+  { label: 'Sett. 3-4', settimane: [3, 4] },
+  { label: 'Sett. 5-6', settimane: [5, 6] },
+  { label: 'Sett. 7-8', settimane: [7, 8] }
 ];
+
+var SOSTENIBILITA_NUM_SETTIMANE = 8;
 
 
 // ────────────────────────────────────────────────────────────────────────
@@ -34,22 +47,24 @@ var SOSTENIBILITA_BLOCCHI = [
 // ────────────────────────────────────────────────────────────────────────
 var _sostStato = {
   saldoIniziale: 0,
-  blocchi: [],         // [{label, daISO, aISO, settimane, entrate, uscite, indice, semaforo}]
-  serie: [],           // [{settimana, saldoCumulato}] per curva 13 settimane
-  fattureAperte: [],   // per algoritmo suggerimento
-  deficitMassimo: 0
+  dispFidi: 0,
+  blocchi: [],
+  perSett: [],
+  perGiorno: {},
+  flussiCache: null,
+  settimanaIdx: 1,
+  giornoSelezionato: null
 };
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Helper formattazione (riusa quelli del foglio giornale se disponibili)
+// Helper formattazione
 // ────────────────────────────────────────────────────────────────────────
 function _sostFmtImporto(n) {
   return Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function _sostFmtImpKb(n) {
-  // Versione compatta per la curva: "12k" o "1.5k"
   var v = Number(n || 0);
   var abs = Math.abs(v);
   if (abs >= 1000) return (v / 1000).toFixed(0) + 'k';
@@ -60,6 +75,10 @@ function _sostDateToIso(d) {
   return d.toISOString().split('T')[0];
 }
 
+function _sostIsoToDate(iso) {
+  return new Date(iso + 'T12:00:00');
+}
+
 function _sostFmtData(iso) {
   if (!iso) return '—';
   var p = String(iso).substring(0, 10).split('-');
@@ -67,20 +86,23 @@ function _sostFmtData(iso) {
   return p[2] + '/' + p[1];
 }
 
+var _SOST_GIORNI = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+var _SOST_GIORNI_FULL = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+var _SOST_MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
 
 // ────────────────────────────────────────────────────────────────────────
-// Calcolo settimane: lunedì-domenica, partendo dalla settimana corrente
+// Calcolo settimane
 // ────────────────────────────────────────────────────────────────────────
-function _sostCalcola13Settimane() {
+function _sostCalcolaSettimane() {
   var settimane = [];
   var oggi = new Date();
-  // Lunedì della settimana corrente
   var dow = oggi.getDay();
   var diffLun = dow === 0 ? -6 : 1 - dow;
   var lun = new Date(oggi);
   lun.setDate(oggi.getDate() + diffLun);
 
-  for (var i = 0; i < 13; i++) {
+  for (var i = 0; i < SOSTENIBILITA_NUM_SETTIMANE; i++) {
     var inizio = new Date(lun);
     inizio.setDate(lun.getDate() + (i * 7));
     var fine = new Date(inizio);
@@ -88,7 +110,8 @@ function _sostCalcola13Settimane() {
     settimane.push({
       numero: i + 1,
       daISO: _sostDateToIso(inizio),
-      aISO: _sostDateToIso(fine)
+      aISO: _sostDateToIso(fine),
+      lunedi: new Date(inizio)
     });
   }
   return settimane;
@@ -96,23 +119,26 @@ function _sostCalcola13Settimane() {
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Caricamento dati: saldo iniziale + flussi previsti
+// Caricamento saldo iniziale (parallelo + 90gg recenti)
 // ────────────────────────────────────────────────────────────────────────
 async function _sostCaricaSaldoIniziale() {
-  // Patch v20260502j (opzione C): ritorno oggetto strutturato con
-  //   - cashNetto: somma algebrica saldi conti (positivi e negativi)
-  //   - dispFidi: capacità residua su affidamenti attivi (accordato - utilizzato)
-  //   - dettaglio: array per visualizzazione opzionale
-  // Solo "cashNetto" è usato nel calcolo dell'indice (prudente).
-  // "dispFidi" è informativo nell'header.
+  var oggi = new Date();
+  var unTrimestreFa = new Date(oggi);
+  unTrimestreFa.setDate(oggi.getDate() - 90);
+  var sogliaIso = _sostDateToIso(unTrimestreFa);
 
-  // 1. Saldi più recenti per conto (solo conti attivi)
-  var resC = await sb.from('banche_conti').select('id,attivo,istituto_id').eq('attivo', true);
+  var [resC, resS, resA] = await Promise.all([
+    sb.from('banche_conti').select('id,attivo').eq('attivo', true),
+    sb.from('banche_saldi_giornalieri').select('conto_id,saldo_contabile,data').gte('data', sogliaIso).order('data', { ascending: false }),
+    sb.from('banche_affidamenti').select('importo_accordato,importo_utilizzato,stato').eq('stato', 'attivo')
+  ]);
+
+  if (resC.error || resS.error || resA.error) {
+    console.warn('[sost] errore carico saldi:', resC.error || resS.error || resA.error);
+  }
+
   var contiAttivi = {};
   (resC.data || []).forEach(function(c) { contiAttivi[c.id] = true; });
-
-  var resS = await sb.from('banche_saldi_giornalieri').select('conto_id,saldo_contabile,data').order('data', { ascending: false });
-  if (resS.error) { console.warn('[sost] saldi:', resS.error); return { cashNetto: 0, dispFidi: 0, dettaglio: [] }; }
 
   var ultimoPerConto = {};
   (resS.data || []).forEach(function(r) {
@@ -123,55 +149,53 @@ async function _sostCaricaSaldoIniziale() {
   var cashNetto = 0;
   Object.keys(ultimoPerConto).forEach(function(k) { cashNetto += ultimoPerConto[k]; });
 
-  // 2. Disponibilità residua su affidamenti attivi
-  var resA = await sb.from('banche_affidamenti').select('importo_accordato,importo_utilizzato,stato').eq('stato', 'attivo');
   var dispFidi = 0;
   (resA.data || []).forEach(function(a) {
     var residuo = Number(a.importo_accordato || 0) - Number(a.importo_utilizzato || 0);
     if (residuo > 0) dispFidi += residuo;
   });
 
-  return { cashNetto: cashNetto, dispFidi: dispFidi, dettaglio: ultimoPerConto };
+  return { cashNetto: cashNetto, dispFidi: dispFidi };
 }
 
 
+// ────────────────────────────────────────────────────────────────────────
+// Caricamento flussi (con esclusione fatture già anticipate)
+// ────────────────────────────────────────────────────────────────────────
 async function _sostCaricaFlussi(daISO, aISO) {
-  // Carica in parallelo tutte le fonti di entrata/uscita previste nel periodo
-  var [fattRes, ordRes, mutRes, sbfRes] = await Promise.all([
-    // 1. Fatture clienti aperte: TUTTE quelle ancora aperte (semplificazione,
-    //    senza scadenza precisa il sistema non può sapere quando arriveranno).
-    //    Le considero spalmate sui 13 settimane in base a data fattura + 60gg medi.
-    sb.from('estratto_conto_cliente').select('fattura_id,data,saldo_residuo,stato_pagamento').gt('saldo_residuo', 0.01),
-
-    // 2. Ordini fornitori non pagati nel periodo (scadenza = data + giorni_pagamento)
-    sb.from('ordini').select('id,data,fornitore,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore')
-      .eq('tipo_ordine', 'entrata_deposito').eq('pagato_fornitore', false),
-
-    // 3. Rate mutui in scadenza nel periodo
-    sb.from('banche_finanziamenti_rate').select('finanziamento_id,data_scadenza,rata').gte('data_scadenza', daISO).lte('data_scadenza', aISO),
-
-    // 4. Rientri SBF previsti (fatture anticipate con scadenza_banca nel periodo)
-    sb.from('anticipi_sbf_fatture').select('id,scadenza_banca,importo_anticipato_calcolato,importo_estinto,stato')
-      .eq('stato', 'anticipata').gte('scadenza_banca', daISO).lte('scadenza_banca', aISO)
+  var [fattRes, ordRes, mutRes, sbfRes, sbfFatturaIds] = await Promise.all([
+    sb.from('estratto_conto_cliente').select('fattura_id,cliente_id,cessionario_denominazione,numero,anno,data,importo_totale,saldo_residuo,stato_pagamento').gt('saldo_residuo', 0.01),
+    sb.from('ordini').select('id,data,fornitore,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore,prodotto').eq('tipo_ordine', 'entrata_deposito').eq('pagato_fornitore', false),
+    sb.from('banche_finanziamenti_rate').select('id,finanziamento_id,data_scadenza,rata').gte('data_scadenza', daISO).lte('data_scadenza', aISO),
+    sb.from('anticipi_sbf_fatture').select('id,fattura_emessa_id,scadenza_banca,importo_anticipato_calcolato,importo_estinto,stato').eq('stato', 'anticipata').gte('scadenza_banca', daISO).lte('scadenza_banca', aISO),
+    sb.from('anticipi_sbf_fatture').select('fattura_emessa_id,stato').eq('stato', 'anticipata')
   ]);
 
+  var fattureGiaAnticipate = {};
+  (sbfFatturaIds.data || []).forEach(function(f) {
+    if (f.fattura_emessa_id) fattureGiaAnticipate[f.fattura_emessa_id] = true;
+  });
+
+  var fatture = (fattRes.data || []).filter(function(f) {
+    return !fattureGiaAnticipate[f.fattura_id];
+  });
+
   return {
-    fatture: fattRes.data || [],
+    fatture: fatture,
     ordini: ordRes.data || [],
     mutui: mutRes.data || [],
-    sbfRientri: sbfRes.data || []
+    sbfRientri: sbfRes.data || [],
+    fattureAnticipateCount: Object.keys(fattureGiaAnticipate).length
   };
 }
 
 
-// Calcola data scadenza prevista per un ordine fornitore
 function _sostScadenzaOrdine(o) {
   var dt = new Date(o.data + 'T12:00:00');
   dt.setDate(dt.getDate() + Number(o.giorni_pagamento || 30));
   return _sostDateToIso(dt);
 }
 
-// Calcola importo netto fattura passiva (prezzo + trasporto, IVA inclusa)
 function _sostImportoOrdine(o) {
   var litri = Number(o.litri || 0);
   var costoUnit = Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0);
@@ -179,7 +203,6 @@ function _sostImportoOrdine(o) {
   return imponibile * (1 + (Number(o.iva || 22)) / 100);
 }
 
-// Calcola data scadenza presunta per fattura cliente (data + 60 giorni medi)
 function _sostScadenzaFattura(f) {
   var dt = new Date((f.data || _sostDateToIso(new Date())) + 'T12:00:00');
   dt.setDate(dt.getDate() + 60);
@@ -188,51 +211,87 @@ function _sostScadenzaFattura(f) {
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Aggregazione settimanale → blocchi per semafori + serie per curva
+// Aggregazione per giorno + settimana + blocco
 // ────────────────────────────────────────────────────────────────────────
 function _sostAggrega(settimane, flussi, saldoIniziale) {
-  // Per ogni settimana calcolo entrate/uscite previste
+  var perGiorno = {};
+
+  function addEntrata(iso, item) {
+    if (!perGiorno[iso]) perGiorno[iso] = { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+    perGiorno[iso].entrate.push(item);
+    perGiorno[iso].totEnt += item.importo;
+  }
+  function addUscita(iso, item) {
+    if (!perGiorno[iso]) perGiorno[iso] = { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+    perGiorno[iso].uscite.push(item);
+    perGiorno[iso].totUsc += item.importo;
+  }
+
+  var daISO = settimane[0].daISO;
+  var aISO = settimane[settimane.length - 1].aISO;
+
+  flussi.fatture.forEach(function(f) {
+    var scad = _sostScadenzaFattura(f);
+    if (scad >= daISO && scad <= aISO) {
+      addEntrata(scad, {
+        tipo: 'fattura_cliente',
+        importo: Number(f.saldo_residuo || 0),
+        descrizione: 'Ft. ' + (f.numero || '?') + '/' + (f.anno || '?') + ' — ' + (f.cessionario_denominazione || '—').substring(0, 40),
+        riferimento: f.fattura_id
+      });
+    }
+  });
+
+  flussi.ordini.forEach(function(o) {
+    var scad = _sostScadenzaOrdine(o);
+    if (scad >= daISO && scad <= aISO) {
+      addUscita(scad, {
+        tipo: 'ordine_fornitore',
+        importo: _sostImportoOrdine(o),
+        descrizione: 'Pag. ' + (o.fornitore || '—').substring(0, 40) + ' — ' + (o.prodotto || '') + ' ' + Number(o.litri || 0).toLocaleString('it-IT') + ' L',
+        riferimento: o.id
+      });
+    }
+  });
+
+  flussi.mutui.forEach(function(r) {
+    if (r.data_scadenza >= daISO && r.data_scadenza <= aISO) {
+      addUscita(r.data_scadenza, {
+        tipo: 'rata_mutuo',
+        importo: Number(r.rata || 0),
+        descrizione: 'Rata mutuo',
+        riferimento: r.id
+      });
+    }
+  });
+
+  flussi.sbfRientri.forEach(function(sbf) {
+    if (sbf.scadenza_banca >= daISO && sbf.scadenza_banca <= aISO) {
+      var imp = Number(sbf.importo_anticipato_calcolato || 0) - Number(sbf.importo_estinto || 0);
+      if (imp > 0) {
+        addUscita(sbf.scadenza_banca, {
+          tipo: 'rientro_sbf',
+          importo: imp,
+          descrizione: 'Rientro SBF banca',
+          riferimento: sbf.id
+        });
+      }
+    }
+  });
+
+  // Aggrego per settimana
   var perSett = settimane.map(function(s) {
     var entrate = 0, uscite = 0;
-    var dettaglio = { fatture: [], ordini: [], mutui: [], sbfRientri: [] };
-
-    // Entrate: fatture clienti con scadenza prevista nella settimana
-    flussi.fatture.forEach(function(f) {
-      var scad = _sostScadenzaFattura(f);
-      if (scad >= s.daISO && scad <= s.aISO) {
-        entrate += Number(f.saldo_residuo || 0);
-        dettaglio.fatture.push(f);
-      }
-    });
-
-    // Uscite: ordini fornitori
-    flussi.ordini.forEach(function(o) {
-      var scad = _sostScadenzaOrdine(o);
-      if (scad >= s.daISO && scad <= s.aISO) {
-        uscite += _sostImportoOrdine(o);
-        dettaglio.ordini.push(o);
-      }
-    });
-
-    // Uscite: rate mutui
-    flussi.mutui.forEach(function(r) {
-      if (r.data_scadenza >= s.daISO && r.data_scadenza <= s.aISO) {
-        uscite += Number(r.rata || 0);
-        dettaglio.mutui.push(r);
-      }
-    });
-
-    // Uscite: rientri SBF
-    flussi.sbfRientri.forEach(function(sbf) {
-      if (sbf.scadenza_banca >= s.daISO && sbf.scadenza_banca <= s.aISO) {
-        var imp = Number(sbf.importo_anticipato_calcolato || 0) - Number(sbf.importo_estinto || 0);
-        if (imp > 0) {
-          uscite += imp;
-          dettaglio.sbfRientri.push(sbf);
-        }
-      }
-    });
-
+    var d = new Date(s.lunedi);
+    var giorniSett = [];
+    for (var i = 0; i < 7; i++) {
+      var iso = _sostDateToIso(d);
+      var dati = perGiorno[iso] || { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+      entrate += dati.totEnt;
+      uscite += dati.totUsc;
+      giorniSett.push({ iso: iso, dow: d.getDay(), giorno: d.getDate(), dati: dati });
+      d.setDate(d.getDate() + 1);
+    }
     return {
       numero: s.numero,
       daISO: s.daISO,
@@ -240,82 +299,73 @@ function _sostAggrega(settimane, flussi, saldoIniziale) {
       entrate: entrate,
       uscite: uscite,
       saldoNetto: entrate - uscite,
-      dettaglio: dettaglio
+      giorni: giorniSett
     };
   });
 
-  // Calcolo serie cumulata (saldo previsto a fine ogni settimana)
-  var serie = [];
   var cumulato = saldoIniziale;
   perSett.forEach(function(s) {
+    s.saldoInizio = cumulato;
     cumulato += s.saldoNetto;
-    serie.push({ numero: s.numero, saldoCumulato: cumulato });
+    s.saldoFine = cumulato;
   });
 
-  // Blocchi (raggruppamento settimane secondo SOSTENIBILITA_BLOCCHI)
   var blocchi = SOSTENIBILITA_BLOCCHI.map(function(b) {
-    var sett = perSett.filter(function(s) { return b.settimane.indexOf(s.numero) >= 0; });
-    var entr = sett.reduce(function(s, x) { return s + x.entrate; }, 0);
-    var usc = sett.reduce(function(s, x) { return s + x.uscite; }, 0);
-
-    // Saldo iniziale del blocco = saldo cumulato alla fine della settimana precedente
-    var saldoInizioBlocco = saldoIniziale;
-    var primaSett = b.settimane[0];
-    if (primaSett > 1) {
-      var serPrec = serie.find(function(x) { return x.numero === primaSett - 1; });
-      if (serPrec) saldoInizioBlocco = serPrec.saldoCumulato;
-    }
-
-    var indice = usc > 0 ? (saldoInizioBlocco + entr) / usc : 999;
+    var settBlocco = perSett.filter(function(s) { return b.settimane.indexOf(s.numero) >= 0; });
+    var entr = settBlocco.reduce(function(s, x) { return s + x.entrate; }, 0);
+    var usc = settBlocco.reduce(function(s, x) { return s + x.uscite; }, 0);
+    var saldoInizioBlocco = settBlocco.length ? settBlocco[0].saldoInizio : saldoIniziale;
+    var saldoFineBlocco = settBlocco.length ? settBlocco[settBlocco.length - 1].saldoFine : saldoIniziale;
     var saldoNettoBlocco = entr - usc;
 
-    // Patch v20260502k: regola di sicurezza
-    // - Verde solo se saldo netto del blocco >= 0 E indice >= soglia verde
-    //   (significa: incassi sufficienti e capacità di pagare uscite)
-    // - Giallo se indice tra giallo e verde, OPPURE se saldo netto blocco < 0
-    //   anche con indice alto (= "stai bruciando cassa anche se hai riserva")
-    // - Rosso se indice sotto soglia giallo (cassa insufficiente)
+    var indice = usc > 0 ? (saldoInizioBlocco + entr) / usc : 999;
+
     var semaforo;
-    if (indice < SOSTENIBILITA_SOGLIE.giallo) {
-      semaforo = 'rosso';
-    } else if (saldoNettoBlocco < 0 || indice < SOSTENIBILITA_SOGLIE.verde) {
-      semaforo = 'giallo';
-    } else {
-      semaforo = 'verde';
-    }
+    if (indice < SOSTENIBILITA_SOGLIE.giallo) semaforo = 'rosso';
+    else if (saldoNettoBlocco < 0 || indice < SOSTENIBILITA_SOGLIE.verde) semaforo = 'giallo';
+    else semaforo = 'verde';
 
     return {
       label: b.label,
-      daISO: sett[0] ? sett[0].daISO : null,
-      aISO: sett[sett.length - 1] ? sett[sett.length - 1].aISO : null,
-      entrate: entr,
-      uscite: usc,
+      daISO: settBlocco.length ? settBlocco[0].daISO : null,
+      aISO: settBlocco.length ? settBlocco[settBlocco.length - 1].aISO : null,
+      entrate: entr, uscite: usc,
       saldoNetto: saldoNettoBlocco,
-      indice: indice,
-      semaforo: semaforo,
-      saldoInizio: saldoInizioBlocco
+      saldoInizio: saldoInizioBlocco, saldoFine: saldoFineBlocco,
+      indice: indice, semaforo: semaforo
     };
   });
 
-  return { perSett: perSett, blocchi: blocchi, serie: serie };
+  return { perGiorno: perGiorno, perSett: perSett, blocchi: blocchi };
 }
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Algoritmo suggerimento anticipi (Algoritmo A: importo decrescente)
+// Suggerimento anticipi (con filtro cliente_rete)
 // ────────────────────────────────────────────────────────────────────────
-async function _sostSuggerisciAnticipi(deficit) {
+async function _sostSuggerisciAnticipi(deficit, fattureCache) {
   if (deficit <= 0) return null;
-  var fabbisognoLordo = deficit / (1 - SOSTENIBILITA_SCARTO_SBF);
 
-  // Carico fatture aperte ordinate per saldo decrescente
-  var res = await sb.from('estratto_conto_cliente')
-    .select('fattura_id,cliente_id,cessionario_denominazione,numero,anno,data,importo_totale,saldo_residuo,stato_pagamento')
-    .eq('stato_pagamento', 'aperta')
-    .order('saldo_residuo', { ascending: false })
-    .limit(50);
+  var clientIds = {};
+  fattureCache.forEach(function(f) { if (f.cliente_id) clientIds[f.cliente_id] = true; });
+  var idsArr = Object.keys(clientIds);
 
-  var fatture = (res.data || []).filter(function(f) { return Number(f.saldo_residuo || 0) > 0; });
+  var clientiRete = {};
+  if (idsArr.length > 0) {
+    var resCli = await sb.from('clienti').select('id,cliente_rete').in('id', idsArr);
+    (resCli.data || []).forEach(function(c) {
+      if (c.cliente_rete === true) clientiRete[c.id] = true;
+    });
+  }
+
+  var fatture = fattureCache
+    .filter(function(f) {
+      return f.stato_pagamento === 'aperta'
+          && Number(f.saldo_residuo || 0) > 0
+          && !clientiRete[f.cliente_id];
+    })
+    .sort(function(a, b) { return Number(b.saldo_residuo) - Number(a.saldo_residuo); })
+    .slice(0, 50);
 
   var selezione = [];
   var lordo = 0, netto = 0;
@@ -340,48 +390,58 @@ async function _sostSuggerisciAnticipi(deficit) {
 
 
 // ────────────────────────────────────────────────────────────────────────
-// CARICAMENTO E RENDER PRINCIPALE
+// MAIN
 // ────────────────────────────────────────────────────────────────────────
 async function caricaSostenibilita() {
   var el = document.getElementById('sost-content');
   if (!el) return;
   el.innerHTML = '<div class="loading" style="padding:20px;font-size:12px">Caricamento sostenibilità...</div>';
 
-  var settimane = _sostCalcola13Settimane();
+  var settimane = _sostCalcolaSettimane();
   var daISO = settimane[0].daISO;
-  var aISO = settimane[12].aISO;
+  var aISO = settimane[settimane.length - 1].aISO;
 
-  var saldoInizialeData = await _sostCaricaSaldoIniziale();
-  var saldoIniziale = saldoInizialeData.cashNetto;
-  var dispFidi = saldoInizialeData.dispFidi;
-  var flussi = await _sostCaricaFlussi(daISO, aISO);
+  var [saldoData, flussi] = await Promise.all([
+    _sostCaricaSaldoIniziale(),
+    _sostCaricaFlussi(daISO, aISO)
+  ]);
+
+  var saldoIniziale = saldoData.cashNetto;
+  var dispFidi = saldoData.dispFidi;
   var agg = _sostAggrega(settimane, flussi, saldoIniziale);
 
   _sostStato.saldoIniziale = saldoIniziale;
   _sostStato.dispFidi = dispFidi;
   _sostStato.blocchi = agg.blocchi;
-  _sostStato.serie = agg.serie;
   _sostStato.perSett = agg.perSett;
+  _sostStato.perGiorno = agg.perGiorno;
+  _sostStato.flussiCache = flussi;
 
-  // Trovo blocco più critico (per suggerimento anticipi)
+  if (!_sostStato.settimanaIdx || _sostStato.settimanaIdx < 1 || _sostStato.settimanaIdx > 8) {
+    _sostStato.settimanaIdx = 1;
+  }
+  if (!_sostStato.giornoSelezionato) {
+    _sostStato.giornoSelezionato = _sostDateToIso(new Date());
+  }
+
   var blocchiCritici = agg.blocchi.filter(function(b) { return b.semaforo === 'rosso'; });
   var deficitMassimo = 0;
   blocchiCritici.forEach(function(b) {
     var def = b.uscite - (b.saldoInizio + b.entrate);
     if (def > deficitMassimo) deficitMassimo = def;
   });
-  _sostStato.deficitMassimo = deficitMassimo;
 
   var html = '';
-  html += _sostRenderHeader(saldoIniziale, dispFidi, agg.serie);
+  html += _sostRenderHeader(saldoIniziale, dispFidi, agg.blocchi);
   html += _sostRenderSemafori(agg.blocchi);
+
   if (deficitMassimo > 0) {
-    var sugg = await _sostSuggerisciAnticipi(deficitMassimo);
+    var sugg = await _sostSuggerisciAnticipi(deficitMassimo, flussi.fatture);
     html += _sostRenderSuggerimento(sugg, blocchiCritici[0]);
   }
-  html += _sostRenderCurva(agg.serie, saldoIniziale);
-  html += _sostRenderRiepilogo(agg.blocchi);
-  html += _sostRenderNoteImpl();
+
+  html += _sostRenderSezioneCalendario();
+  html += _sostRenderNoteImpl(flussi.fattureAnticipateCount);
 
   el.innerHTML = html;
 }
@@ -390,27 +450,22 @@ async function caricaSostenibilita() {
 // ────────────────────────────────────────────────────────────────────────
 // Render: Header
 // ────────────────────────────────────────────────────────────────────────
-function _sostRenderHeader(saldoIniziale, dispFidi, serie) {
-  var ultimo = serie.length ? serie[serie.length - 1].saldoCumulato : saldoIniziale;
-  // Capacità totale = cashNetto + dispFidi (capacità operativa reale dell'azienda)
+function _sostRenderHeader(saldoIniziale, dispFidi, blocchi) {
+  var ultimo = blocchi.length ? blocchi[blocchi.length - 1].saldoFine : saldoIniziale;
   var capTot = saldoIniziale + dispFidi;
-  var capPrevista = ultimo + dispFidi;
 
   var html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:14px">';
   html += '<div style="flex:1;min-width:280px">';
-  html += '<div style="font-size:15px;font-weight:500;color:var(--text)">📊 Sostenibilità finanziaria — 13 settimane</div>';
-  // Riga 1: cash netto attuale e previsto
+  html += '<div style="font-size:15px;font-weight:500;color:var(--text)">📊 Sostenibilità finanziaria operativa — 8 settimane</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">';
   html += 'Cash netto conti: <strong style="font-family:var(--font-mono);color:' + (saldoIniziale >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(saldoIniziale) + ' €</strong>';
-  html += ' · Previsto a 13 sett: <strong style="font-family:var(--font-mono);color:' + (ultimo >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(ultimo) + ' €</strong>';
+  html += ' · Previsto a 8 sett: <strong style="font-family:var(--font-mono);color:' + (ultimo >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(ultimo) + ' €</strong>';
   html += '</div>';
-  // Riga 2: disponibile fidi + capacità totale
   if (dispFidi > 0) {
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">';
     html += 'Disponibile su affidamenti: <strong style="font-family:var(--font-mono);color:#0C447C">' + _sostFmtImporto(dispFidi) + ' €</strong>';
     html += ' · Capacità operativa totale: <strong style="font-family:var(--font-mono);color:' + (capTot >= 0 ? '#173404' : '#501313') + '">' + _sostFmtImporto(capTot) + ' €</strong>';
     html += '</div>';
-    html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;font-style:italic">L\'indice di sostenibilità è calcolato sul cash netto (prudente). Il disponibile su fidi è capacità di assorbimento.</div>';
   }
   html += '</div>';
   html += '<button onclick="caricaSostenibilita()" style="font-size:11px;padding:6px 12px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:pointer;align-self:flex-start">🔄 Aggiorna</button>';
@@ -420,30 +475,29 @@ function _sostRenderHeader(saldoIniziale, dispFidi, serie) {
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Render: 4 blocchi semafori
+// Render: 4 semafori compatti
 // ────────────────────────────────────────────────────────────────────────
 function _sostRenderSemafori(blocchi) {
-  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:18px">';
-  blocchi.forEach(function(b) {
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:18px">';
+  blocchi.forEach(function(b, idx) {
     var col;
-    if (b.semaforo === 'verde')  col = { bg: '#EAF3DE', border: '#639922', text: '#173404', label: 'VERDE',  pallino: '#639922' };
+    if (b.semaforo === 'verde') col = { bg: '#EAF3DE', border: '#639922', text: '#173404', label: 'VERDE', pallino: '#639922' };
     else if (b.semaforo === 'giallo') col = { bg: '#FAEEDA', border: '#BA7517', text: '#412402', label: 'GIALLO', pallino: '#BA7517' };
-    else col = { bg: '#FCEBEB', border: '#A32D2D', text: '#501313', label: 'ROSSO',  pallino: '#A32D2D' };
+    else col = { bg: '#FCEBEB', border: '#A32D2D', text: '#501313', label: 'ROSSO', pallino: '#A32D2D' };
 
     var indiceLabel = b.indice >= 99 ? '∞' : b.indice.toFixed(2);
     var icona = b.semaforo === 'verde' ? '✓' : b.semaforo === 'giallo' ? '⚠' : '✗';
+    var primaSett = SOSTENIBILITA_BLOCCHI[idx].settimane[0];
 
-    html += '<div style="background:' + col.bg + ';border:0.5px solid ' + col.border + ';border-radius:6px;padding:12px">';
-    html += '<div style="font-size:10px;text-transform:uppercase;color:' + col.text + ';letter-spacing:0.4px;font-weight:600;margin-bottom:4px">' + esc(b.label) + '</div>';
-    html += '<div style="font-size:11px;color:' + col.text + ';margin-bottom:6px">' + _sostFmtData(b.daISO) + ' - ' + _sostFmtData(b.aISO) + '</div>';
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">';
-    html += '<span style="width:10px;height:10px;border-radius:50%;background:' + col.pallino + ';display:inline-block"></span>';
-    html += '<span style="font-size:10px;color:' + col.text + ';font-weight:600">' + col.label + '</span>';
+    html += '<div onclick="_sostVaiAllaSettimana(' + primaSett + ')" title="Click per andare alla settimana ' + primaSett + '" style="background:' + col.bg + ';border:0.5px solid ' + col.border + ';border-radius:6px;padding:10px;cursor:pointer;transition:transform 0.1s" onmouseover="this.style.transform=\'translateY(-1px)\'" onmouseout="this.style.transform=\'\'">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+    html += '<div style="font-size:10px;text-transform:uppercase;color:' + col.text + ';letter-spacing:0.4px;font-weight:600">' + esc(b.label) + '</div>';
+    html += '<span style="width:8px;height:8px;border-radius:50%;background:' + col.pallino + ';display:inline-block"></span>';
     html += '</div>';
+    html += '<div style="font-size:10px;color:' + col.text + ';margin-bottom:4px">' + _sostFmtData(b.daISO) + ' - ' + _sostFmtData(b.aISO) + '</div>';
     var sn = b.saldoNetto;
-    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:500;color:' + col.text + '">' + (sn >= 0 ? '+ ' : '− ') + _sostFmtImporto(Math.abs(sn)) + '</div>';
-    html += '<div style="font-size:9px;color:' + col.text + ';margin-top:2px">Entrate ' + _sostFmtImpKb(b.entrate) + ' · Uscite ' + _sostFmtImpKb(b.uscite) + '</div>';
-    html += '<div style="font-size:10px;color:' + col.text + ';margin-top:6px;font-weight:500">Indice ' + indiceLabel + ' ' + icona + '</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:13px;font-weight:500;color:' + col.text + '">' + (sn >= 0 ? '+ ' : '− ') + _sostFmtImporto(Math.abs(sn)) + '</div>';
+    html += '<div style="font-size:9px;color:' + col.text + ';margin-top:2px">Idx ' + indiceLabel + ' ' + icona + ' · E ' + _sostFmtImpKb(b.entrate) + ' · U ' + _sostFmtImpKb(b.uscite) + '</div>';
     html += '</div>';
   });
   html += '</div>';
@@ -452,7 +506,7 @@ function _sostRenderSemafori(blocchi) {
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Render: Suggerimento anticipi SBF (se deficit)
+// Render: suggerimento anticipi
 // ────────────────────────────────────────────────────────────────────────
 function _sostRenderSuggerimento(sugg, bloccoCritico) {
   if (!sugg || !bloccoCritico) return '';
@@ -461,166 +515,208 @@ function _sostRenderSuggerimento(sugg, bloccoCritico) {
   html += '<div style="font-size:18px">⚠️</div>';
   html += '<div style="font-size:13px;font-weight:600;color:#501313">Periodo critico: ' + esc(bloccoCritico.label) + ' (' + _sostFmtData(bloccoCritico.daISO) + ' - ' + _sostFmtData(bloccoCritico.aISO) + ')</div>';
   html += '</div>';
-  html += '<div style="font-size:11px;color:#501313;line-height:1.5;margin-bottom:10px">';
-  html += 'Il deficit previsto è <strong>' + _sostFmtImporto(sugg.deficit) + ' €</strong>. Le uscite superano gli incassi attesi più il saldo iniziale.';
-  html += '</div>';
+  html += '<div style="font-size:11px;color:#501313;line-height:1.5;margin-bottom:10px">Deficit previsto: <strong>' + _sostFmtImporto(sugg.deficit) + ' €</strong>.</div>';
 
   if (sugg.selezione.length === 0) {
-    html += '<div style="background:white;border-radius:4px;padding:10px 12px;font-size:11px;color:var(--text-muted);font-style:italic">Nessuna fattura aperta disponibile per anticipo. Considera altre fonti di finanziamento.</div>';
+    html += '<div style="background:white;border-radius:4px;padding:10px 12px;font-size:11px;color:var(--text-muted);font-style:italic">Nessuna fattura aperta disponibile per anticipo (escluse fatture cliente_rete e già anticipate).</div>';
   } else {
     html += '<div style="background:white;border-radius:4px;padding:10px 12px">';
     html += '<div style="font-size:11px;color:#501313;margin-bottom:6px;font-weight:600">💡 Suggerimento anticipo SBF</div>';
     html += '<div style="font-size:11px;color:#501313;line-height:1.6">';
-    html += 'Anticipa <strong>' + sugg.selezione.length + ' fattur' + (sugg.selezione.length > 1 ? 'e' : 'a') + ' apert' + (sugg.selezione.length > 1 ? 'e' : 'a') + '</strong> ';
-    html += '(totale lordo <strong>' + _sostFmtImporto(sugg.lordo) + ' €</strong>, netto stimato <strong>' + _sostFmtImporto(sugg.netto) + ' €</strong> dopo scarto ' + (SOSTENIBILITA_SCARTO_SBF * 100).toFixed(0) + '%) ordinate per importo decrescente:';
+    html += 'Anticipa <strong>' + sugg.selezione.length + ' fattur' + (sugg.selezione.length > 1 ? 'e' : 'a') + '</strong> ';
+    html += '(lordo <strong>' + _sostFmtImporto(sugg.lordo) + ' €</strong>, netto stimato <strong>' + _sostFmtImporto(sugg.netto) + ' €</strong>):';
     html += '</div>';
     html += '<ul style="font-size:11px;color:#501313;margin:6px 0 0 18px;padding:0">';
     sugg.selezione.slice(0, 5).forEach(function(f) {
-      html += '<li>F.' + esc(String(f.numero || '')) + '/' + esc(String(f.anno || '')) + ' ' + esc((f.cessionario_denominazione || '').substring(0, 40)) + ' — ' + _sostFmtImporto(f.saldo_residuo) + ' € (' + _sostFmtData(f.data) + ')</li>';
+      html += '<li>F.' + esc(String(f.numero || '')) + '/' + esc(String(f.anno || '')) + ' ' + esc((f.cessionario_denominazione || '').substring(0, 40)) + ' — ' + _sostFmtImporto(f.saldo_residuo) + ' €</li>';
     });
-    if (sugg.selezione.length > 5) {
-      html += '<li>... + altre ' + (sugg.selezione.length - 5) + ' fatture</li>';
-    }
+    if (sugg.selezione.length > 5) html += '<li>... + altre ' + (sugg.selezione.length - 5) + '</li>';
     html += '</ul>';
     html += '<div style="font-size:10px;color:' + (sugg.coperturaCompleta ? '#27500A' : '#A32D2D') + ';margin-top:8px;font-style:italic">';
-    if (sugg.coperturaCompleta) {
-      html += '✓ Copertura completa del deficit con questa selezione';
-    } else {
-      html += '⚠ Selezione esaurita: ' + _sostFmtImporto(sugg.netto) + ' € coperti su ' + _sostFmtImporto(sugg.deficit) + ' € necessari';
-    }
-    html += '</div>';
-    html += '</div>';
+    if (sugg.coperturaCompleta) html += '✓ Copertura completa del deficit';
+    else html += '⚠ Copertura parziale: ' + _sostFmtImporto(sugg.netto) + ' € su ' + _sostFmtImporto(sugg.deficit) + ' €';
+    html += '</div></div>';
   }
-
   html += '</div>';
   return html;
 }
 
 
 // ────────────────────────────────────────────────────────────────────────
-// Render: Curva saldo previsto SVG
+// Render: SEZIONE CALENDARIO OPERATIVO
 // ────────────────────────────────────────────────────────────────────────
-function _sostRenderCurva(serie, saldoIniziale) {
+function _sostRenderSezioneCalendario() {
+  var idx = _sostStato.settimanaIdx;
+  var sett = _sostStato.perSett[idx - 1];
+  if (!sett) return '<div style="padding:14px;color:var(--text-muted);font-style:italic">Settimana non disponibile</div>';
+
   var html = '<div style="border-top:0.5px solid var(--border);padding-top:14px;margin-top:8px">';
-  html += '<div style="font-size:13px;font-weight:500;margin-bottom:10px;color:var(--text)">Andamento saldo previsto — vista analitica</div>';
-  html += '<div style="background:var(--bg);border-radius:6px;padding:14px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">';
+  html += '<div>';
+  html += '<div style="font-size:14px;font-weight:500;color:var(--text)">📅 Settimana ' + idx + ' di 8</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + _sostFmtData(sett.daISO) + ' - ' + _sostFmtData(sett.aISO) + ' · Saldo inizio ' + _sostFmtImporto(sett.saldoInizio) + ' € → fine ' + _sostFmtImporto(sett.saldoFine) + ' €</div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:6px;align-items:center">';
+  html += '<button ' + (idx <= 1 ? 'disabled' : '') + ' onclick="_sostNavigaSett(-1)" style="font-size:14px;padding:4px 10px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:' + (idx <= 1 ? 'not-allowed' : 'pointer') + ';opacity:' + (idx <= 1 ? '0.4' : '1') + '">◀</button>';
+  html += '<span style="font-size:11px;color:var(--text-muted);min-width:60px;text-align:center">Sett. ' + idx + '/8</span>';
+  html += '<button ' + (idx >= 8 ? 'disabled' : '') + ' onclick="_sostNavigaSett(1)" style="font-size:14px;padding:4px 10px;background:var(--bg);border:0.5px solid var(--border);border-radius:4px;cursor:' + (idx >= 8 ? 'not-allowed' : 'pointer') + ';opacity:' + (idx >= 8 ? '0.4' : '1') + '">▶</button>';
+  html += '</div>';
+  html += '</div>';
 
-  // Calcolo viewport
-  var w = 700, h = 240;
-  var pad = { top: 20, right: 20, bottom: 30, left: 50 };
-  var innerW = w - pad.left - pad.right;
-  var innerH = h - pad.top - pad.bottom;
+  html += _sostRenderKpiSettimana(sett);
+  html += _sostRenderCalendarioSett(sett);
+  html += _sostRenderBarreSett(sett);
+  html += _sostRenderDettaglioGiorno(sett);
 
-  // Range Y
-  var valori = [saldoIniziale].concat(serie.map(function(s) { return s.saldoCumulato; }));
-  var maxY = Math.max.apply(null, valori);
-  var minY = Math.min.apply(null, valori);
-  if (minY > 0) minY = 0;
-  if (maxY < 0) maxY = 0;
-  // Aggiungo padding 10%
-  var range = maxY - minY;
-  if (range === 0) range = Math.abs(maxY) || 1000;
-  maxY += range * 0.1;
-  minY -= range * 0.1;
+  html += '</div>';
+  return html;
+}
 
-  function xPos(idx) { return pad.left + (idx / 13) * innerW; }
-  function yPos(val) { return pad.top + ((maxY - val) / (maxY - minY)) * innerH; }
 
-  var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%;height:auto;max-height:280px">';
-  svg += '<defs><linearGradient id="critArea" x1="0%" y1="0%" x2="0%" y2="100%">';
-  svg += '<stop offset="0%" style="stop-color:#A32D2D;stop-opacity:0.15"/>';
-  svg += '<stop offset="100%" style="stop-color:#A32D2D;stop-opacity:0.02"/>';
-  svg += '</linearGradient></defs>';
+function _sostRenderKpiSettimana(sett) {
+  var saldoSett = sett.saldoNetto;
+  var saldoBg = saldoSett >= 0 ? '#FAEEDA' : '#FCEBEB';
+  var saldoBorder = saldoSett >= 0 ? '#BA7517' : '#A32D2D';
+  var saldoColor = saldoSett >= 0 ? '#173404' : '#501313';
+  var saldoLabel = saldoSett >= 0 ? '#412402' : '#791F1F';
 
-  // Linea zero
-  if (minY < 0 && maxY > 0) {
-    var y0 = yPos(0);
-    svg += '<line x1="' + pad.left + '" y1="' + y0 + '" x2="' + (w - pad.right) + '" y2="' + y0 + '" stroke="#A32D2D" stroke-width="1" stroke-dasharray="4,4"/>';
-    svg += '<text x="' + (pad.left - 5) + '" y="' + (y0 - 3) + '" font-size="9" fill="#A32D2D" text-anchor="end">Soglia critica</text>';
-  }
+  var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">';
+  html += '<div style="background:#EAF3DE;padding:8px 10px;border-radius:6px;border-left:3px solid #639922">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:#27500A;letter-spacing:0.4px;font-weight:500">Entrate previste</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:15px;font-weight:500;color:#173404">+ ' + _sostFmtImporto(sett.entrate) + '</div></div>';
 
-  // Assi
-  svg += '<line x1="' + pad.left + '" y1="' + pad.top + '" x2="' + pad.left + '" y2="' + (h - pad.bottom) + '" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>';
-  svg += '<line x1="' + pad.left + '" y1="' + (h - pad.bottom) + '" x2="' + (w - pad.right) + '" y2="' + (h - pad.bottom) + '" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>';
+  html += '<div style="background:#FCEBEB;padding:8px 10px;border-radius:6px;border-left:3px solid #A32D2D">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:#791F1F;letter-spacing:0.4px;font-weight:500">Uscite previste</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:15px;font-weight:500;color:#501313">− ' + _sostFmtImporto(sett.uscite) + '</div></div>';
 
-  // Tick Y (5 livelli)
-  for (var t = 0; t <= 4; t++) {
-    var v = minY + (maxY - minY) * (t / 4);
-    var y = yPos(v);
-    svg += '<text x="' + (pad.left - 5) + '" y="' + (y + 3) + '" font-size="9" fill="rgba(0,0,0,0.5)" text-anchor="end">' + _sostFmtImpKb(v) + '</text>';
-  }
+  html += '<div style="background:' + saldoBg + ';padding:8px 10px;border-radius:6px;border-left:3px solid ' + saldoBorder + '">';
+  html += '<div style="font-size:9px;text-transform:uppercase;color:' + saldoLabel + ';letter-spacing:0.4px;font-weight:500">Saldo netto sett.</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:15px;font-weight:500;color:' + saldoColor + '">' + (saldoSett >= 0 ? '+ ' : '− ') + _sostFmtImporto(Math.abs(saldoSett)) + '</div></div>';
+  html += '</div>';
+  return html;
+}
 
-  // Linea curva (con punto 0 = saldo iniziale)
-  var puntiPath = ['M ' + xPos(0) + ' ' + yPos(saldoIniziale)];
-  serie.forEach(function(s, idx) {
-    puntiPath.push('L ' + xPos(idx + 1) + ' ' + yPos(s.saldoCumulato));
+
+function _sostRenderCalendarioSett(sett) {
+  var oggiIso = _sostDateToIso(new Date());
+  var html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:12px">';
+  sett.giorni.forEach(function(g) {
+    var dati = g.dati;
+    var isOggi = g.iso === oggiIso;
+    var isSelez = g.iso === _sostStato.giornoSelezionato;
+    var isWeekend = g.dow === 0 || g.dow === 6;
+
+    var bg, border, color;
+    if (isSelez) { bg = '#BFDFF7'; border = '2px solid #185FA5'; color = '#0C447C'; }
+    else if (isOggi) { bg = '#EAF3DE'; border = '1.5px solid #639922'; color = '#173404'; }
+    else if (isWeekend) { bg = '#F5F1E8'; border = '0.5px solid var(--border)'; color = 'var(--text-muted)'; }
+    else { bg = 'var(--bg)'; border = '0.5px solid var(--border)'; color = 'var(--text)'; }
+
+    html += '<div onclick="_sostSelezionaGiorno(\'' + g.iso + '\')" style="background:' + bg + ';border:' + border + ';border-radius:6px;padding:8px 6px;cursor:pointer;min-height:78px;color:' + color + '">';
+    html += '<div style="font-size:11px;font-weight:500;margin-bottom:4px">' + _SOST_GIORNI[g.dow] + ' ' + g.giorno + '</div>';
+    if (dati.totEnt > 0) html += '<div style="font-size:10px;color:#173404;font-family:var(--font-mono)">+ ' + _sostFmtImpKb(dati.totEnt) + '</div>';
+    if (dati.totUsc > 0) html += '<div style="font-size:10px;color:#501313;font-family:var(--font-mono)">− ' + _sostFmtImpKb(dati.totUsc) + '</div>';
+    if (dati.totEnt === 0 && dati.totUsc === 0) html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic">—</div>';
+    html += '</div>';
   });
-  svg += '<path d="' + puntiPath.join(' ') + '" stroke="#185FA5" stroke-width="2.5" fill="none"/>';
+  html += '</div>';
+  return html;
+}
 
-  // Punti colorati per ogni settimana
-  serie.forEach(function(s, idx) {
-    var col = '#639922';
-    // Capisco semaforo del blocco corrispondente
-    var bloccoSem = 'verde';
-    _sostStato.blocchi.forEach(function(b) {
-      if (SOSTENIBILITA_BLOCCHI[_sostStato.blocchi.indexOf(b)]) {
-        var settInBlocco = SOSTENIBILITA_BLOCCHI[_sostStato.blocchi.indexOf(b)].settimane;
-        if (settInBlocco.indexOf(s.numero) >= 0) bloccoSem = b.semaforo;
-      }
-    });
-    if (bloccoSem === 'giallo') col = '#BA7517';
-    else if (bloccoSem === 'rosso') col = '#A32D2D';
-    var r = bloccoSem === 'rosso' ? 4 : 3.5;
-    svg += '<circle cx="' + xPos(idx + 1) + '" cy="' + yPos(s.saldoCumulato) + '" r="' + r + '" fill="' + col + '"><title>Sett. ' + s.numero + ': ' + _sostFmtImporto(s.saldoCumulato) + ' €</title></circle>';
+
+function _sostRenderBarreSett(sett) {
+  var maxVal = 0;
+  sett.giorni.forEach(function(g) {
+    if (g.dati.totEnt > maxVal) maxVal = g.dati.totEnt;
+    if (g.dati.totUsc > maxVal) maxVal = g.dati.totUsc;
   });
+  if (maxVal <= 0) maxVal = 1;
 
-  // Punto 0 (saldo iniziale)
-  svg += '<circle cx="' + xPos(0) + '" cy="' + yPos(saldoIniziale) + '" r="4" fill="#185FA5"><title>Saldo iniziale: ' + _sostFmtImporto(saldoIniziale) + ' €</title></circle>';
+  var w = 600, h = 70;
+  var slotW = w / 7;
+  var barreW = Math.min(slotW * 0.4, 32);
+  var spacingX = (slotW - barreW) / 2;
+  var middleY = h / 2;
+  var maxBarH = (h / 2) - 4;
 
-  // Etichette X (settimane)
-  for (var i = 0; i <= 13; i++) {
-    if (i === 0 || i === 13 || i % 2 === 1) {
-      svg += '<text x="' + xPos(i) + '" y="' + (h - pad.bottom + 14) + '" font-size="9" fill="rgba(0,0,0,0.5)" text-anchor="middle">' + (i === 0 ? 'Oggi' : 'S.' + i) + '</text>';
+  var svg = '<div style="background:var(--bg);padding:8px 10px;border-radius:6px;margin-bottom:12px">';
+  svg += '<div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);letter-spacing:0.4px;font-weight:500;margin-bottom:6px">Andamento giornaliero settimana</div>';
+  svg += '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="width:100%;height:60px">';
+  svg += '<line x1="0" y1="' + middleY + '" x2="' + w + '" y2="' + middleY + '" stroke="rgba(0,0,0,0.15)" stroke-width="0.5" stroke-dasharray="2,2"/>';
+
+  sett.giorni.forEach(function(g, idx) {
+    var x = idx * slotW + spacingX;
+    var heEnt = (g.dati.totEnt / maxVal) * maxBarH;
+    var heUsc = (g.dati.totUsc / maxVal) * maxBarH;
+    if (heEnt > 0) {
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + (middleY - heEnt).toFixed(1) + '" width="' + barreW.toFixed(1) + '" height="' + heEnt.toFixed(1) + '" fill="#639922" rx="2" style="cursor:pointer" onclick="_sostSelezionaGiorno(\'' + g.iso + '\')"><title>' + _SOST_GIORNI[g.dow] + ' ' + g.giorno + ' — Entrate: + ' + _sostFmtImporto(g.dati.totEnt) + '</title></rect>';
     }
+    if (heUsc > 0) {
+      svg += '<rect x="' + x.toFixed(1) + '" y="' + middleY + '" width="' + barreW.toFixed(1) + '" height="' + heUsc.toFixed(1) + '" fill="#A32D2D" rx="2" style="cursor:pointer" onclick="_sostSelezionaGiorno(\'' + g.iso + '\')"><title>' + _SOST_GIORNI[g.dow] + ' ' + g.giorno + ' — Uscite: − ' + _sostFmtImporto(g.dati.totUsc) + '</title></rect>';
+    }
+  });
+  svg += '</svg>';
+
+  svg += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:9px;color:var(--text-muted);margin-top:2px;text-align:center">';
+  sett.giorni.forEach(function(g) {
+    svg += '<span>' + _SOST_GIORNI[g.dow] + '</span>';
+  });
+  svg += '</div>';
+  svg += '</div>';
+  return svg;
+}
+
+
+function _sostRenderDettaglioGiorno(sett) {
+  var iso = _sostStato.giornoSelezionato;
+  var giorno = sett.giorni.find(function(g) { return g.iso === iso; });
+  if (!giorno) {
+    giorno = sett.giorni[0];
+    _sostStato.giornoSelezionato = giorno.iso;
+  }
+  var dati = giorno.dati;
+  var d = _sostIsoToDate(giorno.iso);
+  var labelGiorno = _SOST_GIORNI_FULL[d.getDay()] + ' ' + d.getDate() + ' ' + _SOST_MESI[d.getMonth()] + ' ' + d.getFullYear();
+  var saldo = dati.totEnt - dati.totUsc;
+
+  var html = '<div style="border-top:0.5px solid var(--border);padding-top:12px">';
+  html += '<div style="font-size:13px;font-weight:500;color:var(--text);margin-bottom:8px">' + esc(labelGiorno) + '</div>';
+
+  if (dati.entrate.length === 0 && dati.uscite.length === 0) {
+    html += '<div style="font-size:11px;color:var(--text-muted);font-style:italic;padding:14px 0;text-align:center">Nessun flusso previsto in questo giorno</div>';
+    html += '</div>';
+    return html;
   }
 
-  svg += '</svg>';
-  html += svg;
-  html += '</div>';
-  html += '</div>';
-  return html;
-}
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
 
-
-// ────────────────────────────────────────────────────────────────────────
-// Render: Riepilogo statistico (3 colonne)
-// ────────────────────────────────────────────────────────────────────────
-function _sostRenderRiepilogo(blocchi) {
-  var nVerde = 0, nGiallo = 0, nRosso = 0;
-  blocchi.forEach(function(b) {
-    if (b.semaforo === 'verde') nVerde += SOSTENIBILITA_BLOCCHI[blocchi.indexOf(b)].settimane.length;
-    else if (b.semaforo === 'giallo') nGiallo += SOSTENIBILITA_BLOCCHI[blocchi.indexOf(b)].settimane.length;
-    else nRosso += SOSTENIBILITA_BLOCCHI[blocchi.indexOf(b)].settimane.length;
-  });
-
-  var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">';
-
-  html += '<div style="background:#EAF3DE;border-left:3px solid #639922;border-radius:0 6px 6px 0;padding:10px 12px">';
-  html += '<div style="font-size:10px;text-transform:uppercase;color:#27500A;font-weight:600;letter-spacing:0.4px;margin-bottom:4px">Periodi sostenibili</div>';
-  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#173404">' + nVerde + ' sett.</div>';
-  html += '<div style="font-size:10px;color:#27500A;margin-top:2px">indice ≥ ' + SOSTENIBILITA_SOGLIE.verde.toFixed(2) + '</div>';
+  html += '<div>';
+  html += '<div style="font-size:10px;text-transform:uppercase;color:#27500A;font-weight:600;letter-spacing:0.4px;padding:0 4px;margin-bottom:6px">▼ Entrate previste</div>';
+  if (dati.entrate.length === 0) {
+    html += '<div style="font-size:11px;color:var(--text-muted);font-style:italic;padding:6px 12px">—</div>';
+  } else {
+    dati.entrate.forEach(function(item) { html += _sostRenderRigaFlusso(item, 'entrata'); });
+  }
+  html += '<div style="background:#F1EFE8;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;display:flex;justify-content:space-between;margin-top:6px">';
+  html += '<span>Totale</span><span style="font-family:var(--font-mono);color:#173404">+ ' + _sostFmtImporto(dati.totEnt) + '</span></div>';
   html += '</div>';
 
-  html += '<div style="background:#FAEEDA;border-left:3px solid #BA7517;border-radius:0 6px 6px 0;padding:10px 12px">';
-  html += '<div style="font-size:10px;text-transform:uppercase;color:#633806;font-weight:600;letter-spacing:0.4px;margin-bottom:4px">Sotto pressione</div>';
-  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#412402">' + nGiallo + ' sett.</div>';
-  html += '<div style="font-size:10px;color:#633806;margin-top:2px">indice ' + SOSTENIBILITA_SOGLIE.giallo.toFixed(2) + ' - ' + SOSTENIBILITA_SOGLIE.verde.toFixed(2) + '</div>';
+  html += '<div>';
+  html += '<div style="font-size:10px;text-transform:uppercase;color:#791F1F;font-weight:600;letter-spacing:0.4px;padding:0 4px;margin-bottom:6px">▼ Uscite previste</div>';
+  if (dati.uscite.length === 0) {
+    html += '<div style="font-size:11px;color:var(--text-muted);font-style:italic;padding:6px 12px">—</div>';
+  } else {
+    dati.uscite.forEach(function(item) { html += _sostRenderRigaFlusso(item, 'uscita'); });
+  }
+  html += '<div style="background:#F1EFE8;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;display:flex;justify-content:space-between;margin-top:6px">';
+  html += '<span>Totale</span><span style="font-family:var(--font-mono);color:#501313">− ' + _sostFmtImporto(dati.totUsc) + '</span></div>';
   html += '</div>';
 
-  html += '<div style="background:#FCEBEB;border-left:3px solid #A32D2D;border-radius:0 6px 6px 0;padding:10px 12px">';
-  html += '<div style="font-size:10px;text-transform:uppercase;color:#791F1F;font-weight:600;letter-spacing:0.4px;margin-bottom:4px">Critiche</div>';
-  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#501313">' + nRosso + ' sett.</div>';
-  html += '<div style="font-size:10px;color:#791F1F;margin-top:2px">indice &lt; ' + SOSTENIBILITA_SOGLIE.giallo.toFixed(2) + '</div>';
+  html += '</div>';
+
+  html += '<div style="background:' + (saldo >= 0 ? '#FAEEDA' : '#FCEBEB') + ';border:1px solid ' + (saldo >= 0 ? '#BA7517' : '#A32D2D') + ';border-radius:6px;padding:10px 14px;margin-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:12px">';
+  html += '<span style="color:' + (saldo >= 0 ? '#633806' : '#791F1F') + ';font-weight:500">Saldo netto giornata</span>';
+  html += '<span style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:' + (saldo >= 0 ? '#173404' : '#501313') + '">' + (saldo >= 0 ? '+ ' : '− ') + _sostFmtImporto(Math.abs(saldo)) + ' €</span>';
   html += '</div>';
 
   html += '</div>';
@@ -628,15 +724,105 @@ function _sostRenderRiepilogo(blocchi) {
 }
 
 
+function _sostRenderRigaFlusso(item, tipo) {
+  var bg, borderL, amountColor;
+  if (tipo === 'entrata') {
+    bg = '#EAF3DE'; borderL = '#639922'; amountColor = '#173404';
+  } else if (item.tipo === 'rientro_sbf') {
+    bg = '#E6F1FB'; borderL = '#185FA5'; amountColor = '#0C447C';
+  } else {
+    bg = '#FCEBEB'; borderL = '#A32D2D'; amountColor = '#501313';
+  }
+  var sign = tipo === 'entrata' ? '+ ' : '− ';
+
+  var tagTipo = '';
+  if (item.tipo === 'fattura_cliente') tagTipo = '<span style="background:rgba(0,0,0,0.05);color:var(--text-muted);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px">cliente</span>';
+  else if (item.tipo === 'ordine_fornitore') tagTipo = '<span style="background:rgba(0,0,0,0.05);color:var(--text-muted);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px">fornitore</span>';
+  else if (item.tipo === 'rata_mutuo') tagTipo = '<span style="background:rgba(0,0,0,0.05);color:var(--text-muted);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px">mutuo</span>';
+  else if (item.tipo === 'rientro_sbf') tagTipo = '<span style="background:#BFDFF7;color:#0C447C;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:600">SBF</span>';
+
+  var html = '<div style="background:' + bg + ';border-left:3px solid ' + borderL + ';border-radius:0 6px 6px 0;padding:7px 10px;font-size:11px;margin-bottom:5px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">';
+  html += '<div style="flex:1">' + esc(item.descrizione) + tagTipo + '</div>';
+  html += '<div style="font-family:var(--font-mono);font-weight:500;color:' + amountColor + '">' + sign + _sostFmtImporto(item.importo) + '</div>';
+  html += '</div></div>';
+  return html;
+}
+
+
 // ────────────────────────────────────────────────────────────────────────
-// Note implementazione per primo rilascio
+// Navigazione
 // ────────────────────────────────────────────────────────────────────────
-function _sostRenderNoteImpl() {
-  return '<div style="border-top:0.5px solid var(--border);margin-top:18px;padding-top:12px;font-size:10px;color:var(--text-muted);font-style:italic;line-height:1.6">' +
-    'ℹ️ <strong>Stima parziale</strong>: spese ricorrenti (stipendi, F24, affitti, bollette) <strong>non incluse</strong> nel calcolo automatico. ' +
-    'Per averle considerate, registrale dal foglio giornale come uscite Modo B. ' +
-    'Le scadenze fatture clienti sono stimate a +60 giorni dalla data fattura. ' +
-    'Il <strong>cash netto</strong> è la somma algebrica dei saldi conti attivi (positivi e negativi). Il <strong>disponibile su affidamenti</strong> è (accordato − utilizzato) sui fidi attivi e rappresenta la capacità di credito ancora disponibile. ' +
-    'Soglie modificabili nel codice (variabile <code>SOSTENIBILITA_SOGLIE</code>).' +
-    '</div>';
+function _sostNavigaSett(direzione) {
+  var nuovo = _sostStato.settimanaIdx + direzione;
+  if (nuovo < 1 || nuovo > SOSTENIBILITA_NUM_SETTIMANE) return;
+  _sostStato.settimanaIdx = nuovo;
+  var sett = _sostStato.perSett[nuovo - 1];
+  if (sett && sett.giorni.length) {
+    _sostStato.giornoSelezionato = sett.giorni[0].iso;
+  }
+  _sostRiRender();
+}
+
+function _sostVaiAllaSettimana(numSett) {
+  if (numSett < 1 || numSett > SOSTENIBILITA_NUM_SETTIMANE) return;
+  _sostStato.settimanaIdx = numSett;
+  var sett = _sostStato.perSett[numSett - 1];
+  if (sett && sett.giorni.length) {
+    _sostStato.giornoSelezionato = sett.giorni[0].iso;
+  }
+  _sostRiRender();
+}
+
+function _sostSelezionaGiorno(iso) {
+  _sostStato.giornoSelezionato = iso;
+  _sostRiRender();
+}
+
+function _sostRiRender() {
+  if (!_sostStato.perSett.length) {
+    caricaSostenibilita();
+    return;
+  }
+  var el = document.getElementById('sost-content');
+  if (!el) return;
+
+  var html = '';
+  html += _sostRenderHeader(_sostStato.saldoIniziale, _sostStato.dispFidi, _sostStato.blocchi);
+  html += _sostRenderSemafori(_sostStato.blocchi);
+
+  var blocchiCritici = _sostStato.blocchi.filter(function(b) { return b.semaforo === 'rosso'; });
+  if (blocchiCritici.length) {
+    var deficitMassimo = 0;
+    blocchiCritici.forEach(function(b) {
+      var def = b.uscite - (b.saldoInizio + b.entrate);
+      if (def > deficitMassimo) deficitMassimo = def;
+    });
+    _sostSuggerisciAnticipi(deficitMassimo, _sostStato.flussiCache.fatture).then(function(sugg) {
+      var box = document.getElementById('sost-sugg-box');
+      if (box) box.innerHTML = _sostRenderSuggerimento(sugg, blocchiCritici[0]);
+    });
+    html += '<div id="sost-sugg-box"></div>';
+  }
+
+  html += _sostRenderSezioneCalendario();
+  html += _sostRenderNoteImpl(_sostStato.flussiCache ? _sostStato.flussiCache.fattureAnticipateCount : 0);
+
+  el.innerHTML = html;
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Note
+// ────────────────────────────────────────────────────────────────────────
+function _sostRenderNoteImpl(fattureAnticipateCount) {
+  var html = '<div style="border-top:0.5px solid var(--border);margin-top:18px;padding-top:12px;font-size:10px;color:var(--text-muted);font-style:italic;line-height:1.6">';
+  html += 'ℹ️ <strong>Stima parziale</strong>: spese ricorrenti (stipendi, F24, affitti, bollette) non incluse. Per averle considerate, registrale dal foglio giornale come uscite Modo B. ';
+  html += 'Le scadenze fatture clienti sono stimate a +60 giorni dalla data fattura.';
+  if (fattureAnticipateCount > 0) {
+    html += ' Sono escluse <strong>' + fattureAnticipateCount + ' fatture già anticipate via SBF</strong> (sono già state monetizzate).';
+  }
+  html += ' Cash netto = somma saldi conti attivi. Disponibile fidi = (accordato − utilizzato) sui fidi attivi.';
+  html += '</div>';
+  return html;
 }
