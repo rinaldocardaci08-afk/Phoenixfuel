@@ -483,62 +483,101 @@ async function apriPaginaAllineamento(annoIniziale, meseIniziale) {
   const filtri = window._allineamento.filtri;
   filtri.anno = annoIniziale || filtri.anno || new Date().getFullYear();
   filtri.mese = meseIniziale != null ? meseIniziale : filtri.mese;
-  // Render scheletro modale
+
+  // Patch v20260503g: trasformato in overlay fullscreen (più spazio per liste lunghe)
+  // Rimuovo eventuale overlay precedente
+  const existing = document.getElementById('all-fullscreen-overlay');
+  if (existing) existing.remove();
+
   const html = `
-    <div style="max-width:1400px;width:95vw">
-      <h2 style="margin:0 0 6px 0;color:#26215C">⚖ Allineamento ordini ↔ fatture</h2>
-      <div style="font-size:11px;color:#666;margin-bottom:10px">
-        Sistema gli ordini senza fattura e le righe fattura senza ordine.
-        I bottoni "🔗 Collega" mostrano solo controparti compatibili (cliente+prodotto+data).
-      </div>
+    <div id="all-fullscreen-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:99997;display:flex;align-items:center;justify-content:center;padding:16px"
+         onclick="if(event.target===this)allChiudiFullscreen()">
+      <div style="background:white;border-radius:12px;width:100%;height:calc(100vh - 32px);display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.35);overflow:hidden">
 
-      <!-- Filtri -->
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fafaf8;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:11px">
-        <label style="font-weight:600;color:#555">Anno:</label>
-        <select id="all-f-anno" onchange="caricaAllineamento()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
-          ${[2026,2025,2024,2023].map(y => `<option value="${y}" ${y==filtri.anno?'selected':''}>${y}</option>`).join('')}
-        </select>
-        <label style="font-weight:600;color:#555;margin-left:6px">Mese:</label>
-        <select id="all-f-mese" onchange="caricaAllineamento()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
-          <option value="">Tutto l'anno</option>
-          ${['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
-            .map((n,i) => `<option value="${i+1}" ${(i+1)==filtri.mese?'selected':''}>${n}</option>`).join('')}
-        </select>
-        <input id="all-f-cerca" type="text" placeholder="🔍 Cerca cliente / numero fattura..."
-               oninput="filtraAllineamento()" value="${_esc(filtri.cerca||'')}"
-               style="flex:1;min-width:180px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
-        <button class="btn-primary" onclick="caricaAllineamento()" style="font-size:11px;padding:4px 10px">🔄 Ricarica</button>
-        <button onclick="chiudiModal()" style="background:#888;color:white;border:0;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer">Chiudi</button>
-      </div>
-
-      <!-- 2 colonne -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;height:65vh">
-        <!-- SX: ordini senza fattura -->
-        <div style="border:1px solid #e8e5dc;border-radius:6px;display:flex;flex-direction:column;overflow:hidden">
-          <div style="background:#FFF7E6;padding:8px 12px;border-bottom:1px solid #e8e5dc">
-            <div style="font-size:12px;font-weight:700;color:#8B6A00">⚠ Ordini senza fattura <span id="all-cnt-ord" style="font-family:monospace">…</span></div>
-            <div style="font-size:10px;color:#8B6A00" id="all-tot-ord"></div>
+        <!-- Header -->
+        <div style="padding:14px 20px;border-bottom:0.5px solid var(--border);background:#FAF8F2;flex-shrink:0">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:10px">
+            <div>
+              <h2 style="margin:0 0 4px 0;color:#26215C;font-size:18px">⚖ Allineamento ordini ↔ fatture</h2>
+              <div style="font-size:11px;color:#666">
+                Sistema gli ordini senza fattura e le righe fattura senza ordine.
+                I bottoni "🔗 Collega" mostrano solo controparti compatibili (cliente+prodotto+data).
+              </div>
+            </div>
+            <button onclick="allChiudiFullscreen()" title="Chiudi" style="font-size:14px;padding:8px 12px;background:white;border:0.5px solid var(--border);border-radius:6px;cursor:pointer;flex-shrink:0">✕</button>
           </div>
-          <div id="all-lista-ord" style="flex:1;overflow-y:auto;padding:6px">
-            <div style="text-align:center;color:#888;padding:20px;font-size:11px">Caricamento…</div>
+
+          <!-- Filtri -->
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px">
+            <label style="font-weight:600;color:#555">Anno:</label>
+            <select id="all-f-anno" onchange="caricaAllineamento()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+              ${[2026,2025,2024,2023].map(y => `<option value="${y}" ${y==filtri.anno?'selected':''}>${y}</option>`).join('')}
+            </select>
+            <label style="font-weight:600;color:#555;margin-left:6px">Mese:</label>
+            <select id="all-f-mese" onchange="caricaAllineamento()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+              <option value="">Tutto l'anno</option>
+              ${['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
+                .map((n,i) => `<option value="${i+1}" ${(i+1)==filtri.mese?'selected':''}>${n}</option>`).join('')}
+            </select>
+            <input id="all-f-cerca" type="text" placeholder="🔍 Cerca cliente / numero fattura..."
+                   oninput="filtraAllineamento()" value="${_esc(filtri.cerca||'')}"
+                   style="flex:1;min-width:180px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+            <button class="btn-primary" onclick="caricaAllineamento()" style="font-size:11px;padding:4px 10px">🔄 Ricarica</button>
           </div>
         </div>
-        <!-- DX: righe fattura senza ordine -->
-        <div style="border:1px solid #e8e5dc;border-radius:6px;display:flex;flex-direction:column;overflow:hidden">
-          <div style="background:#FDECEC;padding:8px 12px;border-bottom:1px solid #e8e5dc">
-            <div style="font-size:12px;font-weight:700;color:#791F1F">✗ Righe fattura senza ordine <span id="all-cnt-fatt" style="font-family:monospace">…</span></div>
-            <div style="font-size:10px;color:#791F1F" id="all-tot-fatt"></div>
+
+        <!-- Body 2 colonne -->
+        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 20px;overflow:hidden">
+          <!-- SX: ordini senza fattura -->
+          <div style="border:1px solid #e8e5dc;border-radius:6px;display:flex;flex-direction:column;overflow:hidden;min-height:0">
+            <div style="background:#FFF7E6;padding:10px 14px;border-bottom:1px solid #e8e5dc;flex-shrink:0">
+              <div style="font-size:13px;font-weight:700;color:#8B6A00">⚠ Ordini senza fattura <span id="all-cnt-ord" style="font-family:monospace">…</span></div>
+              <div style="font-size:10px;color:#8B6A00" id="all-tot-ord"></div>
+            </div>
+            <div id="all-lista-ord" style="flex:1;overflow-y:auto;padding:8px;min-height:0">
+              <div style="text-align:center;color:#888;padding:20px;font-size:11px">Caricamento…</div>
+            </div>
           </div>
-          <div id="all-lista-fatt" style="flex:1;overflow-y:auto;padding:6px">
-            <div style="text-align:center;color:#888;padding:20px;font-size:11px">Caricamento…</div>
+          <!-- DX: righe fattura senza ordine -->
+          <div style="border:1px solid #e8e5dc;border-radius:6px;display:flex;flex-direction:column;overflow:hidden;min-height:0">
+            <div style="background:#FDECEC;padding:10px 14px;border-bottom:1px solid #e8e5dc;flex-shrink:0">
+              <div style="font-size:13px;font-weight:700;color:#791F1F">✗ Righe fattura senza ordine <span id="all-cnt-fatt" style="font-family:monospace">…</span></div>
+              <div style="font-size:10px;color:#791F1F" id="all-tot-fatt"></div>
+            </div>
+            <div id="all-lista-fatt" style="flex:1;overflow-y:auto;padding:8px;min-height:0">
+              <div style="text-align:center;color:#888;padding:20px;font-size:11px">Caricamento…</div>
+            </div>
           </div>
         </div>
+
       </div>
     </div>
   `;
-  apriModal(html);
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
   // Carico dati
   await caricaAllineamento();
+}
+
+
+// Patch v20260503g: chiusura fullscreen + listener ESC
+function allChiudiFullscreen() {
+  const ov = document.getElementById('all-fullscreen-overlay');
+  if (ov) ov.remove();
+}
+
+// ESC chiude la fullscreen (registrato una sola volta)
+if (typeof window._allEscRegistrato === 'undefined') {
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('all-fullscreen-overlay')) {
+      // Chiudo solo se NON c'è una modal sopra (modal candidati)
+      if (!document.getElementById('all-candidati-modal')) {
+        allChiudiFullscreen();
+      }
+    }
+  });
+  window._allEscRegistrato = true;
 }
 
 
@@ -840,67 +879,181 @@ async function allSalvaEditOrdine(ordineId) {
 }
 
 
-// Collega ordine → riga fattura (apre dropdown con righe compatibili)
+// Patch v20260503g: vista lista (non dropdown) con pannello origine sticky in alto
 async function allCollegaOrdineAFattura(ordineId) {
   const o = window._allineamento.ordini.find(oo => oo.id === ordineId);
   if (!o) { toast('Ordine non trovato'); return; }
 
-  // Score di compatibilità: stesso prodotto + data±5gg + litri vicini = top
+  // Score di compatibilità
   const score = (r) => {
     let s = 0;
     if (r.prodotto_normalizzato === _normalizzaProdottoIt(o.prodotto)) s += 30;
     const gg = Math.abs((new Date(o.data) - new Date(r._fattura?.data)) / 86400000);
     if (gg <= 2) s += 20; else if (gg <= 7) s += 10; else if (gg <= 30) s += 3;
     if (Math.abs(Number(r.quantita||0) - Number(o.litri||0)) <= 1) s += 15;
-    // Match cliente: confronto su PIVA o nome
     return s;
   };
   const cand = window._allineamento.righeOrfane.slice().sort((a,b) => score(b) - score(a));
 
-  const opzioni = cand.slice(0, 80).map(r => {
+  // Salvo in stato per selezione
+  window._allineamento._candidatiCorrenti = cand.slice(0, 200);
+  window._allineamento._origineCorrente = { tipo: 'ordine', dati: o };
+  window._allineamento._sceltaCorrente = null;
+
+  // Importo ordine (no IVA per riferimento)
+  const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+  const impOrd = noIva * Number(o.litri||0);
+
+  const candidatiHtml = cand.slice(0, 200).map((r, idx) => {
     const f = r._fattura;
-    const vicino = score(r) >= 30 ? '🟢' : '⚪';
-    return `<option value="${r.id}|${r.fattura_id}">${vicino} Fatt ${_esc(f?.numero||'?')}/${_fmtD(f?.data)} · ${_esc((f?.cessionario_denominazione||'').substring(0,30))} · ${_esc(r.prodotto_normalizzato)} · ${Number(r.quantita||0).toLocaleString('it-IT')}L · ${_fmtE(r.prezzo_totale||0)}</option>`;
+    const sc = score(r);
+    const verde = sc >= 30;
+    const ggDiff = Math.abs((new Date(o.data) - new Date(f?.data)) / 86400000);
+    const litriDiff = Math.abs(Number(r.quantita||0) - Number(o.litri||0));
+    return `
+      <div onclick="allSelezionaCandidato(${idx})" id="all-cand-${idx}"
+           style="border:1px solid ${verde?'#9FD06A':'#ddd'};border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;background:${verde?'#F4FBE9':'#fff'};transition:all 0.1s"
+           onmouseover="this.style.background='#E8F1FB'" onmouseout="if(!this.classList.contains('selezionato'))this.style.background='${verde?'#F4FBE9':'#fff'}'">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;color:#26215C;margin-bottom:3px">
+              ${verde?'🟢':'⚪'} Fattura ${_esc(f?.numero||'?')} del ${_fmtD(f?.data)}
+            </div>
+            <div style="font-size:11px;color:#444;margin-bottom:2px">${_esc(f?.cessionario_denominazione||'—')}</div>
+            <div style="font-size:11px;color:#666">
+              ${_esc(r.prodotto_normalizzato)} · ${Number(r.quantita||0).toLocaleString('it-IT')} L · <strong>${_fmtE(r.prezzo_totale||0)}</strong>
+            </div>
+            <div style="font-size:10px;color:#888;margin-top:4px">
+              ${ggDiff <= 30 ? '📅 ' + Math.round(ggDiff) + 'gg di differenza' : ''}
+              ${litriDiff <= 1 ? ' · ⚖️ litri identici' : ''}
+              ${verde ? ' · ✓ stesso prodotto' : ''}
+            </div>
+          </div>
+          <div style="font-size:18px;color:#ccc;flex-shrink:0">›</div>
+        </div>
+      </div>
+    `;
   }).join('');
 
   const html = `
-    <div style="max-width:700px">
-      <h2 style="margin:0 0 6px 0;color:#26215C">🔗 Collega ordine a riga fattura</h2>
-      <div style="font-size:11px;color:#666;margin-bottom:10px">
-        Ordine: <strong>${_fmtD(o.data)} · ${_esc(o.cliente)} · ${_esc(o.prodotto)} · ${Number(o.litri||0).toLocaleString('it-IT')}L</strong>
-      </div>
-      <label style="font-size:11px;font-weight:600;color:#555">Scegli riga fattura (top 80, ordinate per pertinenza):</label>
-      <select id="all-cof-r" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:11px;font-family:monospace;margin-top:4px">
-        <option value="">— Scegli —</option>${opzioni}
-      </select>
-      <div style="font-size:10px;color:#888;margin-top:5px">🟢 = stesso prodotto · ⚪ = altri</div>
-      <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
-        <button onclick="apriPaginaAllineamento()" style="background:#888;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">Annulla</button>
-        <button onclick="allConfermaCollegaOrdine('${ordineId}')" style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Collega</button>
+    <div id="all-candidati-modal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px"
+         onclick="if(event.target===this)allChiudiCandidati()">
+      <div style="background:white;border-radius:12px;width:100%;max-width:900px;height:calc(100vh - 40px);display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.4);overflow:hidden">
+
+        <!-- Header con titolo + chiudi -->
+        <div style="padding:14px 20px;border-bottom:0.5px solid var(--border);background:#FAF8F2;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+          <h2 style="margin:0;color:#26215C;font-size:16px">🔗 Collega ordine a riga fattura</h2>
+          <button onclick="allChiudiCandidati()" style="font-size:14px;padding:6px 10px;background:white;border:0.5px solid var(--border);border-radius:6px;cursor:pointer">✕</button>
+        </div>
+
+        <!-- Pannello ORIGINE (sticky, sempre visibile) -->
+        <div style="padding:12px 20px;background:#FFF7E6;border-bottom:2px solid #BA7517;flex-shrink:0">
+          <div style="font-size:10px;text-transform:uppercase;color:#8B6A00;font-weight:600;letter-spacing:0.5px;margin-bottom:6px">⚠ STAI COLLEGANDO QUESTO ORDINE:</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:11px">
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Data</div><strong>${_fmtD(o.data)}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Cliente</div><strong>${_esc(o.cliente)}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Prodotto</div><strong>${_esc(o.prodotto)}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Litri</div><strong>${Number(o.litri||0).toLocaleString('it-IT')} L</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Importo</div><strong style="color:#27500A;font-family:var(--font-mono)">${_fmtE(impOrd)}</strong></div>
+          </div>
+        </div>
+
+        <!-- Lista candidati scrollabile -->
+        <div style="flex:1;overflow-y:auto;padding:14px 20px;min-height:0">
+          <div style="font-size:11px;color:#666;margin-bottom:8px">
+            ${cand.length} possibili righe fattura compatibili (top 200, ordinate per pertinenza). 🟢 stesso prodotto · ⚪ altri.
+          </div>
+          ${cand.length === 0
+            ? '<div style="text-align:center;padding:40px;color:#888;font-style:italic">Nessuna riga fattura compatibile trovata.</div>'
+            : candidatiHtml}
+        </div>
+
+        <!-- Footer fisso con riepilogo selezione + conferma -->
+        <div style="padding:14px 20px;border-top:0.5px solid var(--border);background:#fafaf8;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div id="all-cof-selezione" style="font-size:12px;color:#888;flex:1;min-width:0">Seleziona una riga fattura dalla lista</div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button onclick="allChiudiCandidati()" style="background:white;border:0.5px solid var(--border);border-radius:5px;padding:6px 14px;font-size:12px;cursor:pointer">Annulla</button>
+            <button id="all-cof-btn" onclick="allConfermaCollegaOrdine('${ordineId}')" disabled
+                    style="background:#ccc;color:white;border:0;border-radius:5px;padding:6px 14px;font-size:12px;cursor:not-allowed;font-weight:500">✓ Collega</button>
+          </div>
+        </div>
+
       </div>
     </div>
   `;
-  apriModal(html);
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+function allChiudiCandidati() {
+  const m = document.getElementById('all-candidati-modal');
+  if (m) m.remove();
+  window._allineamento._candidatiCorrenti = null;
+  window._allineamento._origineCorrente = null;
+  window._allineamento._sceltaCorrente = null;
+}
+
+
+// Selezione candidato (visivamente)
+function allSelezionaCandidato(idx) {
+  const cand = window._allineamento._candidatiCorrenti;
+  if (!cand || !cand[idx]) return;
+
+  // Rimuovo selezione precedente
+  document.querySelectorAll('[id^="all-cand-"]').forEach(el => {
+    el.classList.remove('selezionato');
+    el.style.borderColor = '';
+    el.style.background = '';
+    // Riapplico stile "verde compatibile" se serve (basato sull'idx)
+  });
+
+  // Marco questa
+  const el = document.getElementById('all-cand-' + idx);
+  if (el) {
+    el.classList.add('selezionato');
+    el.style.borderColor = '#185FA5';
+    el.style.background = '#E6F1FB';
+    el.style.borderWidth = '2px';
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  window._allineamento._sceltaCorrente = cand[idx];
+
+  // Aggiorno footer
+  const r = cand[idx];
+  const f = r._fattura;
+  const desc = `Selezionato: <strong>Fatt ${_esc(f?.numero||'?')} del ${_fmtD(f?.data)}</strong> · ${_esc((f?.cessionario_denominazione||'').substring(0,30))} · ${Number(r.quantita||0).toLocaleString('it-IT')} L · ${_fmtE(r.prezzo_totale||0)}`;
+  const elS = document.getElementById('all-cof-selezione');
+  if (elS) { elS.innerHTML = desc; elS.style.color = '#0C447C'; }
+
+  // Abilito bottone conferma
+  const btn = document.getElementById('all-cof-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.style.background = '#6B5FCC';
+    btn.style.cursor = 'pointer';
+  }
 }
 
 
 async function allConfermaCollegaOrdine(ordineId) {
-  const sel = document.getElementById('all-cof-r');
-  if (!sel || !sel.value) { toast('Scegli una riga'); return; }
-  const [rigaId, fattId] = sel.value.split('|');
+  const sc = window._allineamento._sceltaCorrente;
+  if (!sc) { toast('Scegli una riga fattura'); return; }
   const { error } = await sb.from('ordini')
-    .update({ fattura_id: fattId, fattura_riga_id: rigaId, stato: 'consegnato' })
+    .update({ fattura_id: sc.fattura_id, fattura_riga_id: sc.id, stato: 'consegnato' })
     .eq('id', ordineId);
   if (error) { toast('Errore: '+error.message); return; }
   toast('✓ Ordine collegato a fattura');
-  await apriPaginaAllineamento();
+  allChiudiCandidati();
+  await caricaAllineamento();
 }
 
 
-// Collega riga fattura → ordine
+// Patch v20260503g: vista lista con pannello origine fattura sticky
 async function allCollegaFatturaAOrdine(rigaId, fattId) {
   const r = window._allineamento.righeOrfane.find(rr => rr.id === rigaId);
   if (!r) { toast('Riga non trovata'); return; }
+  const f = r._fattura;
 
   const score = (o) => {
     let s = 0;
@@ -912,45 +1065,137 @@ async function allCollegaFatturaAOrdine(rigaId, fattId) {
   };
   const cand = window._allineamento.ordini.slice().sort((a,b) => score(b) - score(a));
 
-  const opzioni = cand.slice(0, 80).map(o => {
+  window._allineamento._candidatiCorrenti = cand.slice(0, 200);
+  window._allineamento._origineCorrente = { tipo: 'fattura', dati: r };
+  window._allineamento._sceltaCorrente = null;
+
+  const candidatiHtml = cand.slice(0, 200).map((o, idx) => {
+    const sc = score(o);
+    const verde = sc >= 30;
     const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
     const imp = noIva * Number(o.litri||0);
-    const vicino = score(o) >= 30 ? '🟢' : '⚪';
-    return `<option value="${o.id}">${vicino} ${_fmtD(o.data)} · ${_esc((o.cliente||'').substring(0,28))} · ${_esc(o.prodotto)} · ${Number(o.litri||0).toLocaleString('it-IT')}L · ${_fmtE(imp)}</option>`;
+    const ggDiff = Math.abs((new Date(f?.data) - new Date(o.data)) / 86400000);
+    const litriDiff = Math.abs(Number(o.litri||0) - Number(r.quantita||0));
+    return `
+      <div onclick="allSelezionaCandidatoFatt(${idx})" id="all-candf-${idx}"
+           style="border:1px solid ${verde?'#9FD06A':'#ddd'};border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;background:${verde?'#F4FBE9':'#fff'};transition:all 0.1s"
+           onmouseover="this.style.background='#E8F1FB'" onmouseout="if(!this.classList.contains('selezionato'))this.style.background='${verde?'#F4FBE9':'#fff'}'">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;color:#26215C;margin-bottom:3px">
+              ${verde?'🟢':'⚪'} Ordine del ${_fmtD(o.data)}
+            </div>
+            <div style="font-size:11px;color:#444;margin-bottom:2px">${_esc(o.cliente||'—')}</div>
+            <div style="font-size:11px;color:#666">
+              ${_esc(o.prodotto)} · ${Number(o.litri||0).toLocaleString('it-IT')} L · <strong>${_fmtE(imp)}</strong>
+            </div>
+            <div style="font-size:10px;color:#888;margin-top:4px">
+              ${ggDiff <= 30 ? '📅 ' + Math.round(ggDiff) + 'gg di differenza' : ''}
+              ${litriDiff <= 1 ? ' · ⚖️ litri identici' : ''}
+              ${verde ? ' · ✓ stesso prodotto' : ''}
+            </div>
+          </div>
+          <div style="font-size:18px;color:#ccc;flex-shrink:0">›</div>
+        </div>
+      </div>
+    `;
   }).join('');
 
-  const f = r._fattura;
   const html = `
-    <div style="max-width:700px">
-      <h2 style="margin:0 0 6px 0;color:#26215C">🔗 Collega riga fattura a ordine</h2>
-      <div style="font-size:11px;color:#666;margin-bottom:10px">
-        Riga: <strong>Fatt ${_esc(f?.numero||'?')}/${_fmtD(f?.data)} · ${_esc(f?.cessionario_denominazione||'')} · ${_esc(r.prodotto_normalizzato)} · ${Number(r.quantita||0).toLocaleString('it-IT')}L · ${_fmtE(r.prezzo_totale||0)}</strong>
-      </div>
-      <label style="font-size:11px;font-weight:600;color:#555">Scegli ordine (top 80, ordinati per pertinenza):</label>
-      <select id="all-cfo-o" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:11px;font-family:monospace;margin-top:4px">
-        <option value="">— Scegli —</option>${opzioni}
-      </select>
-      <div style="font-size:10px;color:#888;margin-top:5px">🟢 = stesso prodotto · ⚪ = altri</div>
-      <div style="margin-top:12px;display:flex;gap:6px;justify-content:flex-end">
-        <button onclick="apriPaginaAllineamento()" style="background:#888;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">Annulla</button>
-        <button onclick="allConfermaCollegaFattura('${rigaId}', '${fattId}')" style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:5px 12px;font-size:11px;cursor:pointer">✓ Collega</button>
+    <div id="all-candidati-modal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px"
+         onclick="if(event.target===this)allChiudiCandidati()">
+      <div style="background:white;border-radius:12px;width:100%;max-width:900px;height:calc(100vh - 40px);display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.4);overflow:hidden">
+
+        <div style="padding:14px 20px;border-bottom:0.5px solid var(--border);background:#FAF8F2;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+          <h2 style="margin:0;color:#26215C;font-size:16px">🔗 Collega riga fattura a ordine</h2>
+          <button onclick="allChiudiCandidati()" style="font-size:14px;padding:6px 10px;background:white;border:0.5px solid var(--border);border-radius:6px;cursor:pointer">✕</button>
+        </div>
+
+        <!-- Pannello ORIGINE FATTURA (sticky) -->
+        <div style="padding:12px 20px;background:#FDECEC;border-bottom:2px solid #A32D2D;flex-shrink:0">
+          <div style="font-size:10px;text-transform:uppercase;color:#791F1F;font-weight:600;letter-spacing:0.5px;margin-bottom:6px">✗ STAI COLLEGANDO QUESTA RIGA FATTURA:</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:11px">
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">N° fattura</div><strong>${_esc(f?.numero||'?')}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Data fattura</div><strong>${_fmtD(f?.data)}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis">Cliente</div><strong>${_esc(f?.cessionario_denominazione||'—')}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Prodotto</div><strong>${_esc(r.prodotto_normalizzato)}</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Litri</div><strong>${Number(r.quantita||0).toLocaleString('it-IT')} L</strong></div>
+            <div><div style="color:#888;font-size:9px;text-transform:uppercase">Importo</div><strong style="color:#791F1F;font-family:var(--font-mono)">${_fmtE(r.prezzo_totale||0)}</strong></div>
+          </div>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;padding:14px 20px;min-height:0">
+          <div style="font-size:11px;color:#666;margin-bottom:8px">
+            ${cand.length} possibili ordini compatibili (top 200, ordinati per pertinenza). 🟢 stesso prodotto · ⚪ altri.
+          </div>
+          ${cand.length === 0
+            ? '<div style="text-align:center;padding:40px;color:#888;font-style:italic">Nessun ordine compatibile trovato.</div>'
+            : candidatiHtml}
+        </div>
+
+        <div style="padding:14px 20px;border-top:0.5px solid var(--border);background:#fafaf8;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div id="all-cfo-selezione" style="font-size:12px;color:#888;flex:1;min-width:0">Seleziona un ordine dalla lista</div>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button onclick="allChiudiCandidati()" style="background:white;border:0.5px solid var(--border);border-radius:5px;padding:6px 14px;font-size:12px;cursor:pointer">Annulla</button>
+            <button id="all-cfo-btn" onclick="allConfermaCollegaFattura('${rigaId}', '${fattId}')" disabled
+                    style="background:#ccc;color:white;border:0;border-radius:5px;padding:6px 14px;font-size:12px;cursor:not-allowed;font-weight:500">✓ Collega</button>
+          </div>
+        </div>
+
       </div>
     </div>
   `;
-  apriModal(html);
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+function allSelezionaCandidatoFatt(idx) {
+  const cand = window._allineamento._candidatiCorrenti;
+  if (!cand || !cand[idx]) return;
+
+  document.querySelectorAll('[id^="all-candf-"]').forEach(el => {
+    el.classList.remove('selezionato');
+    el.style.borderColor = '';
+    el.style.background = '';
+  });
+
+  const el = document.getElementById('all-candf-' + idx);
+  if (el) {
+    el.classList.add('selezionato');
+    el.style.borderColor = '#185FA5';
+    el.style.background = '#E6F1FB';
+    el.style.borderWidth = '2px';
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  window._allineamento._sceltaCorrente = cand[idx];
+
+  const o = cand[idx];
+  const noIva = Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0);
+  const imp = noIva * Number(o.litri||0);
+  const desc = `Selezionato: <strong>Ordine ${_fmtD(o.data)}</strong> · ${_esc((o.cliente||'').substring(0,30))} · ${Number(o.litri||0).toLocaleString('it-IT')} L · ${_fmtE(imp)}`;
+  const elS = document.getElementById('all-cfo-selezione');
+  if (elS) { elS.innerHTML = desc; elS.style.color = '#0C447C'; }
+
+  const btn = document.getElementById('all-cfo-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.style.background = '#6B5FCC';
+    btn.style.cursor = 'pointer';
+  }
 }
 
 
 async function allConfermaCollegaFattura(rigaId, fattId) {
-  const sel = document.getElementById('all-cfo-o');
-  if (!sel || !sel.value) { toast('Scegli un ordine'); return; }
-  const ordineId = sel.value;
+  const sc = window._allineamento._sceltaCorrente;
+  if (!sc) { toast('Scegli un ordine'); return; }
   const { error } = await sb.from('ordini')
     .update({ fattura_id: fattId, fattura_riga_id: rigaId, stato: 'consegnato' })
-    .eq('id', ordineId);
+    .eq('id', sc.id);
   if (error) { toast('Errore: '+error.message); return; }
   toast('✓ Riga collegata a ordine');
-  await apriPaginaAllineamento();
+  allChiudiCandidati();
+  await caricaAllineamento();
 }
 
 
