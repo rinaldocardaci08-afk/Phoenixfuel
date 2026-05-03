@@ -359,8 +359,11 @@ function _fgRenderDettaglioGiorno(perGiorno) {
   html += '<div><div style="font-size:13px;font-weight:500;color:var(--text)">' + esc(labelGiorno) + '</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (dati.entrate.length + dati.uscite.length) + ' movimenti</div></div>';
   html += '<div style="display:flex;gap:6px">';
-  html += '<button onclick="fgApriModaleEntrata(\'' + iso + '\')" style="font-size:11px;padding:6px 10px;background:transparent;border:0.5px solid #639922;color:#27500A;border-radius:4px;cursor:pointer;font-weight:500">+ Entrata</button>';
-  html += '<button onclick="fgApriModaleUscita(\'' + iso + '\')" style="font-size:11px;padding:6px 10px;background:transparent;border:0.5px solid #A32D2D;color:#791F1F;border-radius:4px;cursor:pointer;font-weight:500">+ Uscita</button>';
+  // Patch v20260503a: bottoni nascosti se utente non ha permesso registrazione movimenti
+  if (_fgPuoRegistrare()) {
+    html += '<button onclick="fgApriModaleEntrata(\'' + iso + '\')" style="font-size:11px;padding:6px 10px;background:transparent;border:0.5px solid #639922;color:#27500A;border-radius:4px;cursor:pointer;font-weight:500">+ Entrata</button>';
+    html += '<button onclick="fgApriModaleUscita(\'' + iso + '\')" style="font-size:11px;padding:6px 10px;background:transparent;border:0.5px solid #A32D2D;color:#791F1F;border-radius:4px;cursor:pointer;font-weight:500">+ Uscita</button>';
+  }
   html += '</div></div>';
 
   // 2 colonne entrate / uscite
@@ -488,11 +491,22 @@ var _fgModale = {
 var _fgListaBanche = null; // cache banche_istituti
 
 
+// Patch v20260503a: helper permessi
+function _fgIsAdmin() {
+  return typeof _utenteCorrente !== 'undefined' && _utenteCorrente && _utenteCorrente.ruolo === 'admin';
+}
+function _fgPuoRegistrare() {
+  return _fgIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('finanze.registra-movimento'));
+}
+
+
 async function fgApriModaleEntrata(iso) {
+  if (!_fgPuoRegistrare()) { if (typeof toast === 'function') toast('Permesso negato'); return; }
   await _fgApriModale(iso, 'entrata');
 }
 
 async function fgApriModaleUscita(iso) {
+  if (!_fgPuoRegistrare()) { if (typeof toast === 'function') toast('Permesso negato'); return; }
   await _fgApriModale(iso, 'uscita');
 }
 

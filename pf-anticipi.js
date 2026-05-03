@@ -76,6 +76,9 @@ function _antPuoVedere() {
 function _antPuoPresentare()    { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.presenta')); }
 function _antPuoAccredito()     { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.accredito')); }
 function _antPuoIncasso()       { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.incasso')); }
+// Patch v20260503a: permessi specifici per le 3 nuove azioni di chiusura/proroga
+function _antPuoProroga()       { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.proroga')); }
+function _antPuoChiudere()      { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.chiudi-modulo')); }
 function _antPuoModificare()    { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.modifica')); }
 function _antPuoGestireRegole() { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.regole')); }
 function _antPuoVedereStorico() { return _antPuoVedere(); }
@@ -429,10 +432,15 @@ function _antRenderModuloCard(p, aff) {
     html += '<button onclick="_antApriModaleAccredito(\'' + p.id + '\')" title="Registra accredito banca" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">💰 Accredito</button>';
   }
   // Patch v20260502d: bottoni Proroga / Rientro / Insoluta sulle presentazioni anticipate
-  if (_antPuoAccredito() && (p.stato === 'anticipata' || p.stato === 'anticipata_parziale')) {
-    html += '<button onclick="_antApriModaleProroga(\'' + p.id + '\')" title="Proroga scadenza SBF (estensione data)" style="background:#0C447C;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">📅 Proroga</button>';
-    html += '<button onclick="_antApriModaleRientro(\'' + p.id + '\')" title="Marca come rientrata (cliente ha pagato, banca chiude SBF)" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">✓ Rientro</button>';
-    html += '<button onclick="_antApriModaleInsoluta(\'' + p.id + '\')" title="Marca come insoluta (cliente non ha pagato, banca preleva soldi)" style="background:#A32D2D;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">❌ Insoluta</button>';
+  // Patch v20260503a: permessi separati - Proroga ha suo permesso, Rientro+Insoluta condividono "chiudi-modulo"
+  if (p.stato === 'anticipata' || p.stato === 'anticipata_parziale') {
+    if (_antPuoProroga()) {
+      html += '<button onclick="_antApriModaleProroga(\'' + p.id + '\')" title="Proroga scadenza SBF (estensione data)" style="background:#0C447C;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">📅 Proroga</button>';
+    }
+    if (_antPuoChiudere()) {
+      html += '<button onclick="_antApriModaleRientro(\'' + p.id + '\')" title="Marca come rientrata (cliente ha pagato, banca chiude SBF)" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">✓ Rientro</button>';
+      html += '<button onclick="_antApriModaleInsoluta(\'' + p.id + '\')" title="Marca come insoluta (cliente non ha pagato, banca preleva soldi)" style="background:#A32D2D;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">❌ Insoluta</button>';
+    }
   }
   if (_antPuoModificare()) {
     html += '<button onclick="_antApriModaleModulo(\'' + p.id + '\')" title="Modifica modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
@@ -2175,7 +2183,7 @@ async function _antSalvaFattura(fatturaAntId) {
 // PROROGA — sposta avanti la data di scadenza, stato resta 'anticipata'
 // ───────────────────────────────────────────────────────────────────────
 async function _antApriModaleProroga(presentazioneId) {
-  if (!_antPuoAccredito()) { toast('Permesso negato'); return; }
+  if (!_antPuoProroga()) { toast('Permesso negato'); return; }
   if (!presentazioneId) return;
 
   var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
@@ -2254,7 +2262,7 @@ async function _antConfermaProroga(presentazioneId) {
 // Trigger SQL crea automaticamente uscita nel foglio giornale.
 // ───────────────────────────────────────────────────────────────────────
 async function _antApriModaleRientro(presentazioneId) {
-  if (!_antPuoAccredito()) { toast('Permesso negato'); return; }
+  if (!_antPuoChiudere()) { toast('Permesso negato'); return; }
   if (!presentazioneId) return;
 
   var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
@@ -2349,7 +2357,7 @@ async function _antConfermaRientro(presentazioneId) {
 // La fattura cliente torna "viva" come non anticipata.
 // ───────────────────────────────────────────────────────────────────────
 async function _antApriModaleInsoluta(presentazioneId) {
-  if (!_antPuoAccredito()) { toast('Permesso negato'); return; }
+  if (!_antPuoChiudere()) { toast('Permesso negato'); return; }
   if (!presentazioneId) return;
 
   var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();

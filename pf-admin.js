@@ -15,7 +15,12 @@ const SEZIONI_SISTEMA = [
     {id:'vendite.margine-cliente',label:'Margine per cliente'}
   ]},
   {id:'benchmark',label:'Benchmark mercato',icon:'📈'},
-  {id:'finanze',label:'Finanze',icon:'🏦'},
+  {id:'finanze',label:'Finanze',icon:'🏦', sub:[
+    {id:'finanze.calendario',label:'Calendario entrate/uscite'},
+    {id:'finanze.foglio-giornale',label:'Foglio giornale'},
+    {id:'finanze.registra-movimento',label:'Registrare movimenti'},
+    {id:'finanze.sostenibilita',label:'Sostenibilità finanziaria'}
+  ]},
   {id:'fatture',label:'Fatture',icon:'🧾'},
   {id:'banche',label:'Banche & Mutui',icon:'🏛'},
   {id:'anticipi',label:'Anticipo Fatture',icon:'📄', sub:[
@@ -23,7 +28,9 @@ const SEZIONI_SISTEMA = [
     {id:'anticipi.accredito',label:'Registra accrediti banca'},
     {id:'anticipi.incasso',label:'Registra incassi clienti'},
     {id:'anticipi.modifica',label:'Modifica modulo/fattura'},
-    {id:'anticipi.regole',label:'Gestione regole e blacklist'}
+    {id:'anticipi.regole',label:'Gestione regole e blacklist'},
+    {id:'anticipi.proroga',label:'Proroga scadenza modulo'},
+    {id:'anticipi.chiudi-modulo',label:'Marca rientro/insoluta modulo'}
   ]},
   {id:'clienti',label:'Clienti',icon:'👤'},
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
