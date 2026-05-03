@@ -1127,12 +1127,29 @@ function _antPresentaRender() {
     });
     html += '</tr></thead><tbody>';
 
+    // Patch v20260503l: separatori visivi per categoria banca quando sortBy='banca_cli'
+    // 1=stessa banca SBF (verde) · 2=assegno/contanti (giallo) · 3=altra banca (rosso, sub-ottimale)
+    var lastCat = 0;
+    var showSeparators = (st.sortBy === 'banca_cli');
+
     visible.forEach(function(f) {
       var checked = st.selezionate.has(f.id);
       var k = f.cliente_id || ('_' + f.cessionario_denominazione);
       var anticipoSelezPerCl = anticipoPerClSelez[k] || 0;
       var sopraMassimale = (st.massEuro && checked && anticipoSelezPerCl > st.massEuro);
       var isRete = !!f._is_rete;
+
+      // Inserisci header di categoria al cambio
+      if (showSeparators && f._categoria_banca && f._categoria_banca !== lastCat) {
+        if (f._categoria_banca === 1) {
+          html += '<tr><td colspan="8" style="background:#EAF3DE;color:#2B5016;font-weight:700;padding:8px 12px;font-size:11px;letter-spacing:0.3px;border-top:1px solid #B8D49A;border-bottom:1px solid #B8D49A">🟢 Bonifico/RiBa su ' + esc(st.bancaLabel || 'banca SBF') + ' <span style="font-weight:400;color:#4F7A2F;margin-left:6px">— stessa banca, anticipo ottimale</span></td></tr>';
+        } else if (f._categoria_banca === 2) {
+          html += '<tr><td colspan="8" style="background:#FAEEDA;color:#7A5316;font-weight:700;padding:8px 12px;font-size:11px;letter-spacing:0.3px;border-top:1px solid #E8C98A;border-bottom:1px solid #E8C98A">💵 Assegno / Contanti <span style="font-weight:400;color:#9B7A40;margin-left:6px">— girabili a qualsiasi banca</span></td></tr>';
+        } else if (f._categoria_banca === 3) {
+          html += '<tr><td colspan="8" style="background:#FCEBEB;color:#7A1F1F;font-weight:700;padding:8px 12px;font-size:11px;letter-spacing:0.3px;border-top:2px dashed #C97A7A;border-bottom:1px solid #E8B5B5">⚠ Bonifico/RiBa su altre banche <span style="font-weight:400;color:#9B4444;margin-left:6px">— sub-ottimale, l\'incasso entrerà su banca diversa</span></td></tr>';
+        }
+        lastCat = f._categoria_banca;
+      }
 
       // Sfondi cumulabili: rete (arancione tenue) ha priorità su massimale solo se non selezionata; se selezionata vince selezionato
       var bgRow = '';

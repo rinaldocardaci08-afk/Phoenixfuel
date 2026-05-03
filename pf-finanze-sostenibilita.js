@@ -167,13 +167,14 @@ async function _sostCaricaFlussi(daISO, aISO) {
     sb.from('estratto_conto_cliente').select('fattura_id,cliente_id,cessionario_denominazione,numero,anno,data,importo_totale,saldo_residuo,stato_pagamento').gt('saldo_residuo', 0.01),
     sb.from('ordini').select('id,data,fornitore,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore,prodotto').eq('tipo_ordine', 'entrata_deposito').eq('pagato_fornitore', false),
     sb.from('banche_finanziamenti_rate').select('id,finanziamento_id,data_scadenza,rata').gte('data_scadenza', daISO).lte('data_scadenza', aISO),
-    sb.from('anticipi_sbf_fatture').select('id,fattura_emessa_id,scadenza_banca,importo_anticipato_calcolato,importo_estinto,stato').eq('stato', 'anticipata').gte('scadenza_banca', daISO).lte('scadenza_banca', aISO),
-    sb.from('anticipi_sbf_fatture').select('fattura_emessa_id,stato').eq('stato', 'anticipata')
+    // Patch v20260503l: la colonna in anticipi_sbf_fatture si chiama "fattura_id" (NON fattura_emessa_id)
+    sb.from('anticipi_sbf_fatture').select('id,fattura_id,scadenza_banca,importo_anticipato_calcolato,importo_estinto,stato').eq('stato', 'anticipata').gte('scadenza_banca', daISO).lte('scadenza_banca', aISO),
+    sb.from('anticipi_sbf_fatture').select('fattura_id,stato').eq('stato', 'anticipata')
   ]);
 
   var fattureGiaAnticipate = {};
   (sbfFatturaIds.data || []).forEach(function(f) {
-    if (f.fattura_emessa_id) fattureGiaAnticipate[f.fattura_emessa_id] = true;
+    if (f.fattura_id) fattureGiaAnticipate[f.fattura_id] = true;
   });
 
   var fatture = (fattRes.data || []).filter(function(f) {
