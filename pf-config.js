@@ -233,6 +233,9 @@ function switchClientiTab(btn) {
   document.querySelectorAll('.cli-panel').forEach(p => p.style.display='none');
   document.getElementById(btn.dataset.tab).style.display='block';
   if (btn.dataset.tab === 'cli-scadenzario') caricaScadenzario();
+  if (btn.dataset.tab === 'cli-estratto') {
+    if (typeof renderEstrattoConto === 'function') renderEstrattoConto();
+  }
 }
 
 // ── SIDEBAR MOBILE ───────────────────────────────────────────────

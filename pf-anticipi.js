@@ -638,11 +638,14 @@ async function _antRenderTabRegole() {
   // Cache clienti
   if (!_antClientiCache) {
     try {
-      const { data } = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome, cliente_rete').limit(2000);
+      // Patch v20260503k: include modalita_pagamento + banca_accredito_id per ordinamento intelligente
+      const { data } = await sb.from('clienti').select('id, ragione_sociale, denominazione, nome, cliente_rete, modalita_pagamento, banca_accredito_id').limit(2000);
       _antClientiCache = (data || []).map(c => ({
         id: c.id,
         nome: c.ragione_sociale || c.denominazione || c.nome || '—',
-        cliente_rete: c.cliente_rete === true
+        cliente_rete: c.cliente_rete === true,
+        modalita_pagamento: c.modalita_pagamento || null,
+        banca_accredito_id: c.banca_accredito_id || null
       })).sort((a, b) => a.nome.localeCompare(b.nome));
     } catch (e) { _antClientiCache = []; }
   }
@@ -926,6 +929,22 @@ async function _antRenderModalePresenta(affidamentoId) {
     var byId = f.cliente_id && clientiReteIdSet.has(f.cliente_id);
     var byNome = f.cessionario_denominazione && clientiReteNomeSet.has(f.cessionario_denominazione.trim().toLowerCase());
     f._is_rete = !!(byId || byNome);
+
+    // Patch v20260503k: classifico in base a modalità pagamento cliente vs banca SBF corrente
+    // 1 = stessa banca (bonifico/riba sulla banca SBF)
+    // 2 = pagamento "libero" (assegno, contanti, modalità non definita) — girabili dove si vuole
+    // 3 = altra banca (bonifico/riba su banca diversa) — sub-ottimale
+    var cli = (_antClientiCache || []).find(function(c) { return c.id === f.cliente_id; });
+    var modalita = cli ? cli.modalita_pagamento : null;
+    var bancaCli = cli ? cli.banca_accredito_id : null;
+    if ((modalita === 'bonifico' || modalita === 'riba') && bancaCli) {
+      if (bancaCli === fido.istituto_id) f._categoria_banca = 1; // stessa banca
+      else f._categoria_banca = 3; // altra banca
+    } else {
+      f._categoria_banca = 2; // assegno / contanti / non def
+    }
+    f._modalita_pagamento = modalita;
+    f._banca_cli_id = bancaCli;
   });
 
   // State globale modale
@@ -938,7 +957,7 @@ async function _antRenderModalePresenta(affidamentoId) {
     massEuro: massEuro,
     fatture: fattureCandidate,
     selezionate: new Set(),
-    sortBy: 'data_desc',
+    sortBy: 'banca_cli',
     filterCliente: '',
     filterSearch: '',
     filterRete: 'tutti',     // 'tutti' | 'solo_consumo' | 'solo_rete'
@@ -998,7 +1017,7 @@ function _antPresentaRender() {
   });
   html += '</select>';
   html += '<select onchange="_antPresentaSetFilter(\'sortBy\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
-  [['data_desc','📅 Data ↓'],['data_asc','📅 Data ↑'],['cliente','👤 Cliente'],['scad_banca','🏦 Scad. cliente'],['totale_desc','💰 Totale ↓']].forEach(function(s) {
+  [['banca_cli','🏦 Banca cliente (consigliato)'],['data_desc','📅 Data ↓'],['data_asc','📅 Data ↑'],['cliente','👤 Cliente'],['scad_banca','🏦 Scad. cliente'],['totale_desc','💰 Totale ↓']].forEach(function(s) {
     html += '<option value="' + s[0] + '"' + (st.sortBy === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
   });
   html += '</select>';
@@ -1057,6 +1076,12 @@ function _antPresentaRender() {
     if (st.sortBy === 'cliente') return (a.cessionario_denominazione || '').localeCompare(b.cessionario_denominazione || '');
     if (st.sortBy === 'scad_banca') return (a._scadenza_cliente || '9999').localeCompare(b._scadenza_cliente || '9999');
     if (st.sortBy === 'totale_desc') return Number(b.importo_totale || 0) - Number(a.importo_totale || 0);
+    if (st.sortBy === 'banca_cli') {
+      // Patch v20260503k: prima per categoria (1=stessa banca, 2=libera, 3=altra banca), poi per data desc
+      var ca = a._categoria_banca || 9, cb = b._categoria_banca || 9;
+      if (ca !== cb) return ca - cb;
+      return (b.data || '').localeCompare(a.data || '');
+    }
     return 0;
   });
 

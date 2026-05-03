@@ -33,7 +33,11 @@ const SEZIONI_SISTEMA = [
     {id:'anticipi.chiudi-modulo',label:'Marca rientro/insoluta modulo'},
     {id:'anticipi.storico',label:'Visualizza storico per banca'}
   ]},
-  {id:'clienti',label:'Clienti',icon:'👤'},
+  {id:'clienti',label:'Clienti',icon:'👤', sub:[
+    {id:'clienti.elenco',label:'Elenco e modifica clienti'},
+    {id:'clienti.scadenzario',label:'Scadenzario crediti'},
+    {id:'clienti.estratto-conto',label:'Estratto Conto e modalità pagamento'}
+  ]},
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
   {id:'basi',label:'Basi di carico',icon:'📍'},
   {id:'prodotti',label:'Prodotti',icon:'📦'},

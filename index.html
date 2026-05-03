@@ -1405,6 +1405,7 @@
         <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
           <button class="btn-primary cli-tab active" data-tab="cli-elenco" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px">👥 Elenco clienti</button>
           <button class="btn-primary cli-tab" data-tab="cli-scadenzario" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Scadenzario crediti</button>
+          <button class="btn-primary cli-tab" data-tab="cli-estratto" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Estratto Conto</button>
         </div>
 
         <!-- PANEL: ELENCO CLIENTI -->
@@ -1453,6 +1454,13 @@
             <table><thead><tr><th>Cliente</th><th>Gruppo</th><th>Ordini aperti</th><th>Importo totale</th><th>Di cui scaduto</th><th>Scaduto max gg</th><th>Fido max</th><th>% fido usato</th></tr></thead>
             <tbody id="scad-dettaglio"><tr><td colspan="8" class="loading">Seleziona Scadenzario per caricare</td></tr></tbody></table>
             </div>
+          </div>
+        </div>
+
+        <!-- PANEL: ESTRATTO CONTO (Patch v20260503k) -->
+        <div class="cli-panel" id="cli-estratto" style="display:none">
+          <div id="ec-content" style="padding:14px">
+            <div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">⏳ Caricamento estratto conto...</div>
           </div>
         </div>
       </div>
@@ -2849,7 +2857,7 @@
   <button onclick="chiudiLightbox()" style="position:fixed;top:16px;right:20px;background:rgba(255,255,255,0.2);border:none;font-size:28px;cursor:pointer;color:#fff;padding:4px 12px;border-radius:8px;z-index:1101;line-height:1">✕</button>
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
-<script src="pf-config.js?v=20260430a"></script>
+<script src="pf-config.js?v=20260503k"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260430k"></script>
@@ -2874,7 +2882,7 @@
 <script src="pf-movimenti-dettaglio.js?v=20260420f"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=20260428a"></script>
-<script src="pf-admin.js?v=20260503h"></script>
+<script src="pf-admin.js?v=20260503k"></script>
 <script src="pf-dashboard.js?v=20260419e"></script>
 <script src="pf-home.js?v=20260419a"></script>
 <script src="pf-benchmark.js?v=20260416e"></script>
@@ -2888,9 +2896,10 @@
 <script src="pf-fatture.js?v=20260503g"></script>
 <script src="pf-fatture-import.js?v=20260422c"></script>
 <script src="pf-banche.js?v=20260503h"></script>
-<script src="pf-anticipi.js?v=20260503e"></script>
+<script src="pf-anticipi.js?v=20260503k"></script>
 <script src="pf-anticipi-stampa.js?v=20260503f"></script>
 <script src="pf-anticipi-storico.js?v=20260503j"></script>
+<script src="pf-estratto-conto.js?v=20260503k"></script>
 <script src="pf-dep-giacenze.js?v=20260419i"></script>
 <script src="pf-dep-giac-week.js?v=20260420a"></script>
 <script src="pf-system.js?v=20260417a"></script>
