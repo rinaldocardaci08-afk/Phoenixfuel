@@ -162,12 +162,14 @@ async function _antStampaPdfBanca(presentazioneId) {
   if (!presentazioneId) return;
   if (typeof toast === 'function') toast('⏳ Generazione PDF...');
 
-  // Carico presentazione + fatture + cliente per ognuna + banca
+  // Carico presentazione
   var resP = await sb.from('anticipi_sbf_presentazioni').select('*').eq('id', presentazioneId).single();
   if (resP.error || !resP.data) { if (typeof toast === 'function') toast('Modulo non trovato'); return; }
   var p = resP.data;
 
-  // Carico le righe fatture della presentazione
+  // Patch v20260503f: uso colonne dirette di anticipi_sbf_fatture (no JOIN con fatture_emesse)
+  // Schema reale: numero_fattura, data_emissione, cliente_nome, cliente_id,
+  //   totale_fattura, scadenza_banca, scadenza_cliente, importo_anticipato_calcolato
   var resF = await sb.from('anticipi_sbf_fatture').select('*').eq('presentazione_id', presentazioneId).neq('stato', 'esclusa').order('scadenza_banca', { ascending: true });
   var fattureSbf = resF.data || [];
   if (fattureSbf.length === 0) {
@@ -175,40 +177,50 @@ async function _antStampaPdfBanca(presentazioneId) {
     return;
   }
 
+  // Per il layout generico carico anche P.IVA clienti
+  var clientIds = {};
+  fattureSbf.forEach(function(f) { if (f.cliente_id) clientIds[f.cliente_id] = true; });
+  var idsArr = Object.keys(clientIds);
+  var pivaMap = {};
+  if (idsArr.length > 0) {
+    var resCli = await sb.from('clienti').select('id,piva,codice_fiscale').in('id', idsArr);
+    (resCli.data || []).forEach(function(c) {
+      pivaMap[c.id] = c.piva || c.codice_fiscale || '';
+    });
+  }
+
   // Carico dati banca dall'affidamento
   var aff = (typeof _bancheAffidamenti !== 'undefined' ? _bancheAffidamenti : []).find(function(a) { return a.id === p.affidamento_id; }) || {};
   var ist = (typeof _bancheIstituti !== 'undefined' ? _bancheIstituti : []).find(function(i) { return i.id === aff.istituto_id; }) || {};
   var nomeBanca = ist.nome || '—';
 
-  // Carico fatture emesse (per dettaglio cliente, P.IVA, importo IVA inclusa)
-  var fattureIds = fattureSbf.map(function(f) { return f.fattura_emessa_id; }).filter(function(x) { return x; });
-  var fattureEmesse = [];
-  if (fattureIds.length > 0) {
-    var resE = await sb.from('fatture_emesse').select('id,numero,anno,data,importo_totale,cessionario_denominazione,cessionario_piva,cliente_id').in('id', fattureIds);
-    fattureEmesse = resE.data || [];
-  }
-  var mappaFatt = {};
-  fattureEmesse.forEach(function(f) { mappaFatt[f.id] = f; });
-
   // Calcolo totali
   var totaleFatture = 0;
   var importoAnticipato = 0;
   fattureSbf.forEach(function(f) {
-    var fe = mappaFatt[f.fattura_emessa_id];
-    if (fe) totaleFatture += Number(fe.importo_totale || 0);
+    totaleFatture += Number(f.totale_fattura || 0);
     importoAnticipato += Number(f.importo_anticipato_calcolato || 0);
   });
+
+  // Fallback scadenza presentazione: se manca, prendo la più lontana tra le fatture
+  if (!p.scadenza_banca_default) {
+    var maxScad = null;
+    fattureSbf.forEach(function(f) {
+      if (f.scadenza_banca && (!maxScad || f.scadenza_banca > maxScad)) maxScad = f.scadenza_banca;
+    });
+    if (maxScad) p.scadenza_banca_default = maxScad;
+  }
 
   // Determina layout
   var sel = _antDeterminaLayoutBanca(nomeBanca);
   var html = '';
 
   if (sel.layout === 'mps') {
-    html = _antBuildPdfMps(p, fattureSbf, mappaFatt, totaleFatture, importoAnticipato, sel.dati);
+    html = _antBuildPdfMps(p, fattureSbf, totaleFatture, importoAnticipato, sel.dati);
   } else if (sel.layout === 'bcc') {
-    html = _antBuildPdfBcc(p, fattureSbf, mappaFatt, totaleFatture, importoAnticipato, sel.dati);
+    html = _antBuildPdfBcc(p, fattureSbf, totaleFatture, importoAnticipato, sel.dati);
   } else {
-    html = _antBuildPdfGenerico(p, fattureSbf, mappaFatt, totaleFatture, importoAnticipato, nomeBanca);
+    html = _antBuildPdfGenerico(p, fattureSbf, totaleFatture, importoAnticipato, nomeBanca, pivaMap);
   }
 
   // Apri finestra di stampa
@@ -256,7 +268,7 @@ function _antStampaFooterButtons() {
 // ────────────────────────────────────────────────────────────────────────
 // LAYOUT 1: MPS (Mod. 8239_1) — 1 pagina
 // ────────────────────────────────────────────────────────────────────────
-function _antBuildPdfMps(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, dati) {
+function _antBuildPdfMps(p, fattureSbf, totaleFatture, importoAnt, dati) {
   var dataStampa = _antFmtData((p.data_presentazione || new Date().toISOString().split('T')[0]));
   var scadenzaPrev = _antFmtData(p.scadenza_banca_default || '');
   var importoNum = _antFmtImporto(importoAnt);
@@ -313,13 +325,12 @@ function _antBuildPdfMps(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, da
   for (var i = 0; i < 15; i++) {
     var f = fattureSbf[i];
     if (f) {
-      var fe = mappaFatt[f.fattura_emessa_id] || {};
       html += '<tr>';
       html += '<td class="center">' + (i + 1) + '</td>';
-      html += '<td>' + _antEsc((fe.numero || '') + '/' + (fe.anno || '')) + '</td>';
-      html += '<td>' + _antFmtData(fe.data || '') + '</td>';
-      html += '<td>' + _antEsc((fe.cessionario_denominazione || '—').substring(0, 40)) + '</td>';
-      html += '<td class="num">' + _antFmtImporto(fe.importo_totale || 0) + '</td>';
+      html += '<td>' + _antEsc(f.numero_fattura || '') + '</td>';
+      html += '<td>' + _antFmtData(f.data_emissione || '') + '</td>';
+      html += '<td>' + _antEsc((f.cliente_nome || '—').substring(0, 40)) + '</td>';
+      html += '<td class="num">' + _antFmtImporto(f.totale_fattura || 0) + '</td>';
       html += '<td>' + _antFmtData(f.scadenza_banca || '') + '</td>';
       html += '</tr>';
     } else {
@@ -371,7 +382,7 @@ function _antBuildPdfMps(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, da
 // ────────────────────────────────────────────────────────────────────────
 // LAYOUT 2: BCC (modello A)
 // ────────────────────────────────────────────────────────────────────────
-function _antBuildPdfBcc(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, dati) {
+function _antBuildPdfBcc(p, fattureSbf, totaleFatture, importoAnt, dati) {
   var dataStampa = _antFmtData((p.data_presentazione || new Date().toISOString().split('T')[0]));
   var importoNum = _antFmtImporto(importoAnt);
 
@@ -418,12 +429,11 @@ function _antBuildPdfBcc(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, da
   html += '</tr></thead><tbody>';
 
   fattureSbf.forEach(function(f) {
-    var fe = mappaFatt[f.fattura_emessa_id] || {};
     html += '<tr>';
-    html += '<td>' + _antEsc((fe.numero || '') + '/' + (fe.anno || '')) + '</td>';
-    html += '<td>' + _antFmtData(fe.data || '') + '</td>';
-    html += '<td>' + _antEsc((fe.cessionario_denominazione || '—').substring(0, 50)) + '</td>';
-    html += '<td class="num">' + _antFmtImporto(fe.importo_totale || 0) + '</td>';
+    html += '<td>' + _antEsc(f.numero_fattura || '') + '</td>';
+    html += '<td>' + _antFmtData(f.data_emissione || '') + '</td>';
+    html += '<td>' + _antEsc((f.cliente_nome || '—').substring(0, 50)) + '</td>';
+    html += '<td class="num">' + _antFmtImporto(f.totale_fattura || 0) + '</td>';
     html += '<td>' + _antFmtData(f.scadenza_banca || '') + '</td>';
     html += '</tr>';
   });
@@ -477,7 +487,7 @@ function _antBuildPdfBcc(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, da
 // ────────────────────────────────────────────────────────────────────────
 // LAYOUT 3: GENERICO (Intesa, BNL, altre)
 // ────────────────────────────────────────────────────────────────────────
-function _antBuildPdfGenerico(p, fattureSbf, mappaFatt, totaleFatture, importoAnt, nomeBanca) {
+function _antBuildPdfGenerico(p, fattureSbf, totaleFatture, importoAnt, nomeBanca, pivaMap) {
   var dataStampa = _antFmtData((p.data_presentazione || new Date().toISOString().split('T')[0]));
   var importoNum = _antFmtImporto(importoAnt);
   var importoLet = _antNumeroInLettere(importoAnt);
@@ -528,13 +538,13 @@ function _antBuildPdfGenerico(p, fattureSbf, mappaFatt, totaleFatture, importoAn
   html += '</tr></thead><tbody>';
 
   fattureSbf.forEach(function(f) {
-    var fe = mappaFatt[f.fattura_emessa_id] || {};
+    var piva = (pivaMap && f.cliente_id) ? (pivaMap[f.cliente_id] || '—') : '—';
     html += '<tr>';
-    html += '<td class="num" style="text-align:left">' + _antEsc((fe.numero || '') + '/' + (fe.anno || '')) + '</td>';
-    html += '<td>' + _antFmtData(fe.data || '') + '</td>';
-    html += '<td>' + _antEsc((fe.cessionario_denominazione || '—').substring(0, 40)) + '</td>';
-    html += '<td style="font-family:\'SF Mono\',Monaco,monospace;font-size:9pt">' + _antEsc(fe.cessionario_piva || '—') + '</td>';
-    html += '<td class="num">' + _antFmtImporto(fe.importo_totale || 0) + '</td>';
+    html += '<td class="num" style="text-align:left">' + _antEsc(f.numero_fattura || '') + '</td>';
+    html += '<td>' + _antFmtData(f.data_emissione || '') + '</td>';
+    html += '<td>' + _antEsc((f.cliente_nome || '—').substring(0, 40)) + '</td>';
+    html += '<td style="font-family:\'SF Mono\',Monaco,monospace;font-size:9pt">' + _antEsc(piva) + '</td>';
+    html += '<td class="num">' + _antFmtImporto(f.totale_fattura || 0) + '</td>';
     html += '<td>' + _antFmtData(f.scadenza_banca || '') + '</td>';
     html += '</tr>';
   });
