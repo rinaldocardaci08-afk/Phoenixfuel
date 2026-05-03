@@ -381,6 +381,8 @@ function _fgRenderDettaglioGiorno(perGiorno) {
     html += '<button onclick="fgApriModaleEntrata(\'' + iso + '\')" style="font-size:11px;padding:6px 10px;background:transparent;border:0.5px solid #639922;color:#27500A;border-radius:4px;cursor:pointer;font-weight:500">+ Entrata</button>';
     html += '<button onclick="fgApriModaleUscita(\'' + iso + '\')" style="font-size:11px;padding:6px 10px;background:transparent;border:0.5px solid #A32D2D;color:#791F1F;border-radius:4px;cursor:pointer;font-weight:500">+ Uscita</button>';
   }
+  // Patch v20260503d: bottone fullscreen per vista espansa giorno (ottimo con tanti movimenti)
+  html += '<button onclick="fgApriFullscreenGiorno(\'' + iso + '\')" title="Apri vista espansa del giorno" style="font-size:11px;padding:6px 10px;background:#185FA5;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">⛶ Espandi</button>';
   html += '</div></div>';
 
   // 2 colonne entrate / uscite
@@ -950,6 +952,7 @@ async function _fgConfermaMovimento() {
       console.error(insRic.error);
       _fgChiudiModale();
       caricaFoglioGiornale();
+      if (typeof _fgFullscreenGiornoIso !== 'undefined' && _fgFullscreenGiornoIso) _fgRenderFullscreen();
       return;
     }
   }
@@ -962,6 +965,10 @@ async function _fgConfermaMovimento() {
   toast('✅ ' + (m.tipo === 'entrata' ? 'Entrata' : 'Uscita') + ' di € ' + _fgFmtImporto(importo) + ' registrata');
   _fgChiudiModale();
   caricaFoglioGiornale();
+  // Patch v20260503d: se la vista fullscreen è aperta, ricarico anche quella
+  if (typeof _fgFullscreenGiornoIso !== 'undefined' && _fgFullscreenGiornoIso) {
+    _fgRenderFullscreen();
+  }
 }
 
 
@@ -1475,3 +1482,403 @@ function _fgRenderBarreGrafico(serie) {
 
   return html;
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PATCH v20260503d — VISTA FULLSCREEN GIORNO + MODIFICA/ELIMINA MOVIMENTI
+// ═══════════════════════════════════════════════════════════════════════════
+// Modale a tutto schermo per visualizzare/gestire un singolo giorno con
+// più spazio. Include navigazione ◀ ▶ giorno per giorno, modifica e
+// eliminazione di movimenti manuali (origine='manuale').
+// I movimenti automatici (auto-anticipo-*) sono read-only.
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+var _fgFullscreenGiornoIso = null;
+
+
+async function fgApriFullscreenGiorno(iso) {
+  _fgFullscreenGiornoIso = iso || _fgStato.giornoSelezionato;
+  await _fgRenderFullscreen();
+}
+
+
+function fgChiudiFullscreen() {
+  var ov = document.getElementById('fg-fullscreen-overlay');
+  if (ov) ov.remove();
+  _fgFullscreenGiornoIso = null;
+  // Re-render foglio sotto per riflettere eventuali modifiche
+  if (typeof caricaFoglioGiornale === 'function') caricaFoglioGiornale();
+}
+
+
+async function fgFullscreenNavigaGiorno(direzione) {
+  if (!_fgFullscreenGiornoIso) return;
+  var d = _fgIsoToDate(_fgFullscreenGiornoIso);
+  d.setDate(d.getDate() + direzione);
+  _fgFullscreenGiornoIso = _fgDateToIso(d);
+  // Aggiorno anche il giorno selezionato del foglio sotto
+  _fgStato.giornoSelezionato = _fgFullscreenGiornoIso;
+  await _fgRenderFullscreen();
+}
+
+
+async function _fgRenderFullscreen() {
+  var iso = _fgFullscreenGiornoIso;
+  if (!iso) return;
+
+  // Carico movimenti del giorno
+  var movimenti = await _fgCaricaMovimenti(iso, iso);
+  var dati = { entrate: [], uscite: [], totEnt: 0, totUsc: 0 };
+  movimenti.forEach(function(m) {
+    if (m.tipo === 'entrata') {
+      dati.entrate.push(m);
+      dati.totEnt += Number(m.importo || 0);
+    } else {
+      dati.uscite.push(m);
+      dati.totUsc += Number(m.importo || 0);
+    }
+  });
+
+  var d = _fgIsoToDate(iso);
+  var labelGiorno = _FG_GIORNI_FULL[d.getDay()] + ' ' + d.getDate() + ' ' + _FG_MESI[d.getMonth()] + ' ' + d.getFullYear();
+  var saldo = dati.totEnt - dati.totUsc;
+  var nMov = dati.entrate.length + dati.uscite.length;
+
+  // Rimuovo overlay esistente se c'è (re-render)
+  var existing = document.getElementById('fg-fullscreen-overlay');
+  if (existing) existing.remove();
+
+  var html = '<div id="fg-fullscreen-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)fgChiudiFullscreen()">';
+  html += '<div style="background:white;border-radius:12px;width:100%;max-width:1400px;height:calc(100vh - 40px);display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.35);overflow:hidden">';
+
+  // Header fullscreen
+  html += '<div style="padding:16px 20px;border-bottom:0.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;background:#FAF8F2">';
+
+  // Lato sx: titolo + nav giorni
+  html += '<div style="display:flex;align-items:center;gap:10px">';
+  html += '<button onclick="fgFullscreenNavigaGiorno(-1)" style="font-size:16px;padding:6px 12px;background:white;border:0.5px solid var(--border);border-radius:6px;cursor:pointer">◀</button>';
+  html += '<div>';
+  html += '<div style="font-size:18px;font-weight:500;color:var(--text)">' + esc(labelGiorno) + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + nMov + ' movimenti · click ◀ ▶ per cambiare giorno</div>';
+  html += '</div>';
+  html += '<button onclick="fgFullscreenNavigaGiorno(1)" style="font-size:16px;padding:6px 12px;background:white;border:0.5px solid var(--border);border-radius:6px;cursor:pointer">▶</button>';
+  html += '</div>';
+
+  // Lato dx: bottoni azione + chiudi
+  html += '<div style="display:flex;gap:8px;align-items:center">';
+  if (_fgPuoRegistrare()) {
+    html += '<button onclick="fgApriModaleEntrata(\'' + iso + '\')" style="font-size:12px;padding:8px 14px;background:#27500A;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500">+ Entrata</button>';
+    html += '<button onclick="fgApriModaleUscita(\'' + iso + '\')" style="font-size:12px;padding:8px 14px;background:#A32D2D;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:500">+ Uscita</button>';
+  }
+  html += '<button onclick="fgChiudiFullscreen()" title="Chiudi vista espansa" style="font-size:14px;padding:8px 12px;background:white;border:0.5px solid var(--border);border-radius:6px;cursor:pointer">✕</button>';
+  html += '</div>';
+  html += '</div>'; // fine header
+
+  // KPI 4 colonne
+  html += '<div style="padding:14px 20px;background:var(--bg);border-bottom:0.5px solid var(--border);display:grid;grid-template-columns:repeat(4,1fr);gap:10px">';
+  html += '<div style="background:white;padding:10px 14px;border-radius:6px;border-left:3px solid #639922">';
+  html += '<div style="font-size:10px;text-transform:uppercase;color:#27500A;letter-spacing:0.4px;font-weight:500">Entrate</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#173404;margin-top:2px">+ ' + _fgFmtImporto(dati.totEnt) + '</div></div>';
+  html += '<div style="background:white;padding:10px 14px;border-radius:6px;border-left:3px solid #A32D2D">';
+  html += '<div style="font-size:10px;text-transform:uppercase;color:#791F1F;letter-spacing:0.4px;font-weight:500">Uscite</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#501313;margin-top:2px">− ' + _fgFmtImporto(dati.totUsc) + '</div></div>';
+  var saldoBg = saldo >= 0 ? '#BA7517' : '#A32D2D';
+  var saldoColor = saldo >= 0 ? '#173404' : '#501313';
+  html += '<div style="background:white;padding:10px 14px;border-radius:6px;border-left:3px solid ' + saldoBg + '">';
+  html += '<div style="font-size:10px;text-transform:uppercase;color:' + (saldo >= 0 ? '#412402' : '#791F1F') + ';letter-spacing:0.4px;font-weight:500">Saldo netto</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:' + saldoColor + ';margin-top:2px">' + (saldo >= 0 ? '+ ' : '− ') + _fgFmtImporto(Math.abs(saldo)) + '</div></div>';
+  html += '<div style="background:white;padding:10px 14px;border-radius:6px;border-left:3px solid #185FA5">';
+  html += '<div style="font-size:10px;text-transform:uppercase;color:#0C447C;letter-spacing:0.4px;font-weight:500">Movimenti</div>';
+  html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:#0C447C;margin-top:2px">' + nMov + '</div></div>';
+  html += '</div>';
+
+  // Body: 2 colonne grandi entrate/uscite
+  html += '<div style="flex:1;overflow-y:auto;padding:18px 20px">';
+
+  if (nMov === 0) {
+    html += '<div style="text-align:center;padding:60px 20px;color:var(--text-muted);font-style:italic;font-size:14px">';
+    html += 'Nessun movimento registrato in questo giorno.';
+    if (_fgPuoRegistrare()) {
+      html += '<br/><br/>Usa i bottoni <strong>+ Entrata</strong> o <strong>+ Uscita</strong> in alto a destra per registrare un movimento.';
+    }
+    html += '</div>';
+  } else {
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">';
+
+    // Colonna entrate
+    html += '<div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;padding:0 4px">';
+    html += '<div style="font-size:12px;text-transform:uppercase;color:#27500A;font-weight:600;letter-spacing:0.5px">▼ Entrate (' + dati.entrate.length + ')</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#173404">+ ' + _fgFmtImporto(dati.totEnt) + ' €</div>';
+    html += '</div>';
+    if (dati.entrate.length === 0) {
+      html += '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:20px;text-align:center;background:var(--bg);border-radius:6px">Nessuna entrata</div>';
+    } else {
+      dati.entrate.forEach(function(m) {
+        html += _fgRenderRigaMovimentoFs(m, 'entrata');
+      });
+    }
+    html += '</div>';
+
+    // Colonna uscite
+    html += '<div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;padding:0 4px">';
+    html += '<div style="font-size:12px;text-transform:uppercase;color:#791F1F;font-weight:600;letter-spacing:0.5px">▼ Uscite (' + dati.uscite.length + ')</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:14px;font-weight:600;color:#501313">− ' + _fgFmtImporto(dati.totUsc) + ' €</div>';
+    html += '</div>';
+    if (dati.uscite.length === 0) {
+      html += '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:20px;text-align:center;background:var(--bg);border-radius:6px">Nessuna uscita</div>';
+    } else {
+      dati.uscite.forEach(function(m) {
+        html += _fgRenderRigaMovimentoFs(m, 'uscita');
+      });
+    }
+    html += '</div>';
+
+    html += '</div>'; // fine grid 2 colonne
+  }
+
+  html += '</div>'; // fine body
+
+  // Footer fisso con saldo grande
+  if (nMov > 0) {
+    html += '<div style="padding:14px 20px;background:' + (saldo >= 0 ? '#FAEEDA' : '#FCEBEB') + ';border-top:1px solid ' + (saldo >= 0 ? '#BA7517' : '#A32D2D') + ';display:flex;justify-content:space-between;align-items:center">';
+    html += '<span style="font-size:13px;color:' + (saldo >= 0 ? '#633806' : '#791F1F') + ';font-weight:500">Saldo netto giornata</span>';
+    html += '<span style="font-family:var(--font-mono);font-size:20px;font-weight:600;color:' + saldoColor + '">' + (saldo >= 0 ? '+ ' : '− ') + _fgFmtImporto(Math.abs(saldo)) + ' €</span>';
+    html += '</div>';
+  }
+
+  html += '</div>'; // fine modal box
+  html += '</div>'; // fine overlay
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+// Render riga movimento per fullscreen (più ricco, con bottoni modifica/elimina)
+function _fgRenderRigaMovimentoFs(m, tipo) {
+  var bg, borderL, amountColor;
+  if (tipo === 'entrata') {
+    bg = '#EAF3DE'; borderL = '#639922'; amountColor = '#173404';
+  } else {
+    bg = '#FCEBEB'; borderL = '#A32D2D'; amountColor = '#501313';
+  }
+  // Override per movimenti SBF auto
+  var isAuto = m.origine && m.origine.indexOf('auto-') === 0;
+  if (isAuto) {
+    bg = '#E6F1FB'; borderL = '#185FA5'; amountColor = '#0C447C';
+  }
+  var sign = tipo === 'entrata' ? '+ ' : '− ';
+
+  // Tag origine
+  var tagHtml = '';
+  if (m.origine === 'auto-anticipo-erogato') {
+    tagHtml = '<span style="background:#BFDFF7;color:#0C447C;font-size:10px;padding:2px 6px;border-radius:3px;font-weight:600;margin-left:6px">anticipo SBF</span>';
+  } else if (m.origine === 'auto-anticipo-rientro') {
+    tagHtml = '<span style="background:#BFDFF7;color:#0C447C;font-size:10px;padding:2px 6px;border-radius:3px;font-weight:600;margin-left:6px">rientro SBF</span>';
+  } else if (m.origine === 'auto-anticipo-insoluto') {
+    tagHtml = '<span style="background:#F7C1C1;color:#791F1F;font-size:10px;padding:2px 6px;border-radius:3px;font-weight:600;margin-left:6px">insoluto SBF</span>';
+  }
+
+  var contoLabel = m.banca_id ? 'Banca' : (m.cassa_tipo === 'cassa_centrale' ? 'Cassa centrale' : (m.cassa_tipo === 'cassa_stazione' ? 'Cassa stazione' : '—'));
+
+  var html = '<div style="background:' + bg + ';border-left:4px solid ' + borderL + ';border-radius:0 8px 8px 0;padding:12px 14px;font-size:13px;margin-bottom:8px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">';
+  // Lato sx: descrizione + meta + note
+  html += '<div style="flex:1;min-width:0">';
+  html += '<div style="font-weight:500;line-height:1.3">' + esc(m.descrizione) + tagHtml + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">';
+  html += esc(contoLabel);
+  if (m.metodo) html += ' · ' + esc(m.metodo);
+  html += '</div>';
+  if (m.note) {
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic;background:rgba(255,255,255,0.5);padding:4px 8px;border-radius:4px">📝 ' + esc(m.note) + '</div>';
+  }
+  html += '</div>';
+  // Lato dx: importo + bottoni azione
+  html += '<div style="text-align:right;flex-shrink:0">';
+  html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:15px;color:' + amountColor + '">' + sign + _fgFmtImporto(m.importo) + ' €</div>';
+  if (!isAuto && _fgPuoRegistrare()) {
+    html += '<div style="display:flex;gap:4px;justify-content:flex-end;margin-top:6px">';
+    html += '<button onclick="fgModificaMovimento(\'' + m.id + '\')" title="Modifica movimento" style="font-size:11px;padding:3px 8px;background:white;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">✏️</button>';
+    html += '<button onclick="fgEliminaMovimento(\'' + m.id + '\')" title="Elimina movimento" style="font-size:11px;padding:3px 8px;background:white;border:0.5px solid #A32D2D;color:#A32D2D;border-radius:4px;cursor:pointer">🗑️</button>';
+    html += '</div>';
+  } else if (isAuto) {
+    html += '<div style="font-size:9px;color:var(--text-muted);font-style:italic;margin-top:4px" title="Generato automaticamente dal sistema">🔒 auto</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// MODIFICA movimento manuale
+// ────────────────────────────────────────────────────────────────────────
+async function fgModificaMovimento(movId) {
+  if (!_fgPuoRegistrare()) { if (typeof toast === 'function') toast('Permesso negato'); return; }
+  if (!movId) return;
+
+  // Carico movimento
+  var resM = await sb.from('foglio_giornale_movimenti').select('*').eq('id', movId).single();
+  if (resM.error || !resM.data) { if (typeof toast === 'function') toast('Movimento non trovato'); return; }
+  var m = resM.data;
+
+  if (m.origine && m.origine.indexOf('auto-') === 0) {
+    if (typeof toast === 'function') toast('Movimento automatico, non modificabile');
+    return;
+  }
+
+  // Carico banche se non in cache
+  if (!_fgListaBanche) {
+    var banchRes = await sb.from('banche_istituti').select('id,nome').order('nome');
+    _fgListaBanche = banchRes.data || [];
+  }
+
+  // Costruisco modale modifica (semplice: importo + descrizione + conto + metodo + note)
+  // Le riconciliazioni con fatture/ordini NON le tocco (per ora)
+  var html = '<div style="max-width:560px;width:100%">';
+  html += '<div style="font-size:15px;font-weight:500;margin-bottom:12px;color:' + (m.tipo === 'entrata' ? '#27500A' : '#791F1F') + '">';
+  html += '✏️ Modifica ' + (m.tipo === 'entrata' ? 'entrata' : 'uscita') + ' del ' + _fgFmtData(m.data);
+  html += '</div>';
+
+  html += '<div style="background:var(--bg);padding:12px;border-radius:6px;margin-bottom:12px">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+
+  html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Importo €</label>';
+  html += '<input type="number" step="0.01" min="0.01" id="fg-mod-edit-importo" value="' + Number(m.importo).toFixed(2) + '" style="width:100%;font-family:var(--font-mono);font-weight:500;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+
+  // Conto: precompilo
+  var contoCorrente = '';
+  if (m.banca_id) contoCorrente = 'banca:' + m.banca_id;
+  else if (m.cassa_tipo) contoCorrente = 'cassa:' + m.cassa_tipo;
+
+  html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Conto</label>';
+  html += '<select id="fg-mod-edit-conto" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px">';
+  html += '<option value="">— scegli —</option>';
+  _fgListaBanche.forEach(function(b) {
+    var sel = ('banca:' + b.id) === contoCorrente ? ' selected' : '';
+    html += '<option value="banca:' + esc(b.id) + '"' + sel + '>' + esc(b.nome) + '</option>';
+  });
+  html += '<option value="cassa:cassa_centrale"' + (contoCorrente === 'cassa:cassa_centrale' ? ' selected' : '') + '>Cassa centrale</option>';
+  html += '<option value="cassa:cassa_stazione"' + (contoCorrente === 'cassa:cassa_stazione' ? ' selected' : '') + '>Cassa stazione</option>';
+  html += '</select></div>';
+
+  html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Metodo</label>';
+  html += '<select id="fg-mod-edit-metodo" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px">';
+  ['bonifico','riba','contanti','assegno','pos','altro'].forEach(function(opt) {
+    var sel = m.metodo === opt ? ' selected' : '';
+    html += '<option value="' + opt + '"' + sel + '>' + opt.charAt(0).toUpperCase() + opt.slice(1) + '</option>';
+  });
+  html += '</select></div>';
+
+  html += '</div></div>';
+
+  html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Descrizione *</label>';
+  html += '<input type="text" id="fg-mod-edit-descrizione" value="' + esc(m.descrizione || '') + '" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+
+  html += '<div style="margin-top:10px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Note</label>';
+  html += '<textarea id="fg-mod-edit-note" rows="2" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px;resize:vertical">' + esc(m.note || '') + '</textarea></div>';
+
+  if ((m.fatture_collegate_count || 0) > 0 || (m.ordini_collegati_count || 0) > 0) {
+    html += '<div style="background:#FAEEDA;border-left:3px solid #BA7517;padding:8px 12px;font-size:11px;color:#412402;margin-top:10px;border-radius:0 4px 4px 0">⚠ Questo movimento ha riconciliazioni con fatture/ordini. La modifica aggiorna solo i dati base, le riconciliazioni restano invariate.</div>';
+  }
+
+  html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:0.5px solid var(--border)">';
+  html += '<button onclick="chiudiModal()" style="font-size:12px;padding:6px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_fgConfermaModificaMovimento(\'' + movId + '\')" style="font-size:12px;padding:6px 14px;background:#185FA5;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">Salva modifiche</button>';
+  html += '</div>';
+
+  html += '</div>';
+
+  apriModal(html);
+}
+
+
+async function _fgConfermaModificaMovimento(movId) {
+  var importo = parseFloat(document.getElementById('fg-mod-edit-importo').value) || 0;
+  var conto = document.getElementById('fg-mod-edit-conto').value;
+  var metodo = document.getElementById('fg-mod-edit-metodo').value;
+  var descrizione = (document.getElementById('fg-mod-edit-descrizione').value || '').trim();
+  var note = (document.getElementById('fg-mod-edit-note').value || '').trim() || null;
+
+  if (importo <= 0) { alert('⚠ Inserisci un importo > 0'); return; }
+  if (!descrizione) { alert('⚠ Inserisci la descrizione'); return; }
+
+  var banca_id = null, cassa_tipo = null;
+  if (conto.indexOf('banca:') === 0) banca_id = conto.substring(6);
+  else if (conto.indexOf('cassa:') === 0) cassa_tipo = conto.substring(6);
+
+  var resU = await sb.from('foglio_giornale_movimenti').update({
+    importo: importo,
+    descrizione: descrizione,
+    banca_id: banca_id,
+    cassa_tipo: cassa_tipo,
+    metodo: metodo,
+    note: note
+  }).eq('id', movId);
+
+  if (resU.error) { alert('Errore aggiornamento: ' + resU.error.message); console.error(resU.error); return; }
+
+  if (typeof _auditLog === 'function') {
+    _auditLog('foglio_giornale', 'foglio_giornale_movimenti', 'Modifica movimento ' + movId.substring(0,8) + ' nuovo importo ' + _fgFmtImporto(importo));
+  }
+
+  if (typeof toast === 'function') toast('✓ Movimento aggiornato');
+  chiudiModal();
+
+  // Re-render fullscreen e foglio sotto
+  if (_fgFullscreenGiornoIso) await _fgRenderFullscreen();
+  if (typeof caricaFoglioGiornale === 'function') caricaFoglioGiornale();
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// ELIMINA movimento manuale (con conferma + cleanup riconciliazioni)
+// ────────────────────────────────────────────────────────────────────────
+async function fgEliminaMovimento(movId) {
+  if (!_fgPuoRegistrare()) { if (typeof toast === 'function') toast('Permesso negato'); return; }
+  if (!movId) return;
+
+  // Carico movimento per verifica
+  var resM = await sb.from('foglio_giornale_movimenti').select('id,tipo,importo,descrizione,origine').eq('id', movId).single();
+  if (resM.error || !resM.data) { if (typeof toast === 'function') toast('Movimento non trovato'); return; }
+  var m = resM.data;
+
+  if (m.origine && m.origine.indexOf('auto-') === 0) {
+    if (typeof toast === 'function') toast('Movimento automatico, non eliminabile');
+    return;
+  }
+
+  if (!confirm('Vuoi davvero eliminare questo movimento?\n\n' +
+      (m.tipo === 'entrata' ? 'Entrata' : 'Uscita') + ' di € ' + _fgFmtImporto(m.importo) +
+      '\n"' + m.descrizione + '"\n\nL\'operazione non è reversibile. Le eventuali riconciliazioni con fatture/ordini saranno rimosse.')) return;
+
+  // Elimino prima le riconciliazioni (CASCADE dovrebbe farlo da DB ma sicurezza in più)
+  var resR = await sb.from('foglio_giornale_riconciliazioni').delete().eq('movimento_id', movId);
+  if (resR.error) console.warn('[fgElimina] errore pulizia riconciliazioni:', resR.error);
+
+  // Elimino movimento
+  var resD = await sb.from('foglio_giornale_movimenti').delete().eq('id', movId);
+  if (resD.error) { alert('Errore eliminazione: ' + resD.error.message); console.error(resD.error); return; }
+
+  if (typeof _auditLog === 'function') {
+    _auditLog('foglio_giornale', 'foglio_giornale_movimenti', 'Eliminato movimento ' + movId.substring(0,8) + ' (' + m.tipo + ' ' + _fgFmtImporto(m.importo) + ' €)');
+  }
+
+  if (typeof toast === 'function') toast('🗑️ Movimento eliminato');
+
+  // Re-render fullscreen e foglio sotto
+  if (_fgFullscreenGiornoIso) await _fgRenderFullscreen();
+  if (typeof caricaFoglioGiornale === 'function') caricaFoglioGiornale();
+}
+
+
+// Listener ESC per chiudere fullscreen
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && document.getElementById('fg-fullscreen-overlay')) {
+    fgChiudiFullscreen();
+  }
+});
