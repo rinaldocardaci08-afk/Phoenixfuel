@@ -615,7 +615,7 @@ function _antsApriElencoFatture(bancaId, mese) {
   window._antsElencoStato = {
     bancaId: bancaId,
     mese: mese,
-    filtro: 'tutte'  // 'tutte' o 'attive'
+    filtro: 'tutte'  // 'tutte' | 'rientrata' | 'insoluta' | 'attiva'
   };
   _antsRenderElencoFatture();
 }
@@ -640,23 +640,43 @@ function _antsRenderElencoFatture() {
   var presIds = {};
   presFiltrate.forEach(function(p) { presIds[p.id] = p; });
 
-  // Filtro fatture
-  var fatturePres = _antsStato.fatture.filter(function(f) {
+  // Patch v20260503j: classifico fatture in base allo STATO PRESENTAZIONE (non fattura)
+  // Logica:
+  //   - "rientrate" = fatture di presentazioni con stato='estinta'
+  //   - "insolute"  = fatture di presentazioni con stato='insoluta'
+  //   - "attive"    = fatture di presentazioni con stato='anticipata' o 'anticipata_parziale'
+  //   - "tutte"     = tutte e tre le categorie sopra
+  // Le fatture con f.stato='esclusa' sono SEMPRE escluse (Opzione A confermata).
+  function statoPresFattura(f) {
+    var p = presIds[f.presentazione_id];
+    if (!p) return null;
+    if (p.stato === 'estinta') return 'rientrata';
+    if (p.stato === 'insoluta') return 'insoluta';
+    if (p.stato === 'anticipata' || p.stato === 'anticipata_parziale') return 'attiva';
+    return null;
+  }
+
+  // Filtro fatture: in tutti i casi escludo le 'esclusa' e quelle di presentazioni
+  // non visibili nel filtro corrente
+  var fatturePool = _antsStato.fatture.filter(function(f) {
+    if (f.stato === 'esclusa') return false;
     if (!presIds[f.presentazione_id]) return false;
-    if (st.filtro === 'attive') {
-      // Solo ancora aperte: 'anticipata' (esclude 'estinta', 'insoluta', 'esclusa')
-      return f.stato === 'anticipata';
-    }
-    return f.stato !== 'esclusa';
+    var sp = statoPresFattura(f);
+    return sp != null;
   });
 
-  // Conteggi per toggle
-  var nTotali = _antsStato.fatture.filter(function(f) {
-    return presIds[f.presentazione_id] && f.stato !== 'esclusa';
-  }).length;
-  var nAttive = _antsStato.fatture.filter(function(f) {
-    return presIds[f.presentazione_id] && f.stato === 'anticipata';
-  }).length;
+  // Conteggi per le 4 tab
+  var nRientrate = fatturePool.filter(function(f) { return statoPresFattura(f) === 'rientrata'; }).length;
+  var nInsolute = fatturePool.filter(function(f) { return statoPresFattura(f) === 'insoluta'; }).length;
+  var nAttive = fatturePool.filter(function(f) { return statoPresFattura(f) === 'attiva'; }).length;
+  var nTutte = nRientrate + nInsolute + nAttive;
+
+  // Filtro corrente
+  var fatturePres = fatturePool.filter(function(f) {
+    var sp = statoPresFattura(f);
+    if (st.filtro === 'tutte') return true;
+    return sp === st.filtro;
+  });
 
   var totImporto = fatturePres.reduce(function(s, f) { return s + Number(f.totale_fattura || 0); }, 0);
 
@@ -677,12 +697,16 @@ function _antsRenderElencoFatture() {
   html += '<div style="font-size:14px;font-weight:500;color:var(--text)">📋 Fatture anticipate · ' + _antsEsc(banca.nome) + ' · ' + titoloPeriodo + '</div>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + presFiltrate.length + ' presentazioni · ' + fatturePres.length + ' fatture · € ' + _antsFmtImporto(totImporto) + '</div>';
   html += '</div>';
-  html += '<div style="display:flex;gap:6px;align-items:center">';
-  // Toggle Tutte / Attive
+  html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+
+  // Toggle 4 tab: Tutte / Rientrate / Insolute / Attive (ordine richiesto utente)
   html += '<div style="display:flex;background:#f0f0f0;border-radius:5px;padding:2px">';
-  html += '<button onclick="_antsCambiaFiltro(\'tutte\')" style="background:' + (st.filtro === 'tutte' ? '#0C447C' : 'transparent') + ';color:' + (st.filtro === 'tutte' ? 'white' : '#444') + ';font-size:10px;padding:5px 10px;border:0;border-radius:4px;font-weight:500;cursor:pointer">Tutte (' + nTotali + ')</button>';
-  html += '<button onclick="_antsCambiaFiltro(\'attive\')" style="background:' + (st.filtro === 'attive' ? '#0C447C' : 'transparent') + ';color:' + (st.filtro === 'attive' ? 'white' : '#444') + ';font-size:10px;padding:5px 10px;border:0;border-radius:4px;font-weight:500;cursor:pointer">Solo attive (' + nAttive + ')</button>';
+  html += _antsTabBtn('tutte', 'Tutte (' + nTutte + ')', st.filtro === 'tutte', '#0C447C');
+  html += _antsTabBtn('rientrata', '✓ Rientrate (' + nRientrate + ')', st.filtro === 'rientrata', '#0C447C');
+  html += _antsTabBtn('insoluta', '✗ Insolute (' + nInsolute + ')', st.filtro === 'insoluta', '#A32D2D');
+  html += _antsTabBtn('attiva', '🟢 Attive (' + nAttive + ')', st.filtro === 'attiva', '#27500A');
   html += '</div>';
+
   html += '<button onclick="_antsStampaElenco()" style="background:#185FA5;color:white;font-size:11px;padding:6px 12px;border:0;border-radius:4px;font-weight:500;cursor:pointer">🖨️ Stampa</button>';
   html += '<button onclick="_antsChiudiElenco()" style="background:white;border:0.5px solid var(--border);font-size:14px;padding:6px 10px;border-radius:5px;cursor:pointer">✕</button>';
   html += '</div>';
@@ -706,8 +730,11 @@ function _antsRenderElencoFatture() {
     html += '<th style="padding:7px 9px;text-align:center;border-bottom:0.5px solid var(--border)">Stato</th>';
     html += '</tr></thead><tbody>';
 
-    // Ordine: presentazione_id (così le fatture dello stesso modulo restano insieme)
+    // Ordinamento: prima per stato (rientrate, insolute, attive), poi per data presentazione decrescente
+    var ordineStato = { rientrata: 1, insoluta: 2, attiva: 3 };
     fatturePres.sort(function(a, b) {
+      var sa = statoPresFattura(a), sb = statoPresFattura(b);
+      if (sa !== sb) return (ordineStato[sa] || 9) - (ordineStato[sb] || 9);
       var pa = presIds[a.presentazione_id], pb = presIds[b.presentazione_id];
       if (pa.data_presentazione !== pb.data_presentazione) {
         return (pa.data_presentazione < pb.data_presentazione) ? 1 : -1;
@@ -718,7 +745,8 @@ function _antsRenderElencoFatture() {
     fatturePres.forEach(function(f) {
       var p = presIds[f.presentazione_id];
       var protocollo = p.numero_protocollo || ('P-' + p.id.substring(0, 6));
-      var rowBg = f.stato === 'insoluta' ? 'background:#FCEBEB;' : '';
+      var sp = statoPresFattura(f);
+      var rowBg = sp === 'insoluta' ? 'background:#FCEBEB;' : (sp === 'rientrata' ? 'background:#F4F9FE;' : '');
       html += '<tr style="border-bottom:0.5px solid var(--border);' + rowBg + '">';
       html += '<td style="padding:5px 9px;font-family:var(--font-mono);font-size:10px">' + _antsEsc(protocollo) + '</td>';
       html += '<td style="padding:5px 9px">' + _antsFmtData(p.data_presentazione) + '</td>';
@@ -726,7 +754,7 @@ function _antsRenderElencoFatture() {
       html += '<td style="padding:5px 9px">' + _antsEsc((f.cliente_nome || '—').substring(0, 50)) + '</td>';
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono)">' + _antsFmtImportoDec(f.totale_fattura) + '</td>';
       html += '<td style="padding:5px 9px">' + _antsFmtData(f.scadenza_banca) + '</td>';
-      html += '<td style="padding:5px 9px;text-align:center">' + _antsBadgeStato(f.stato) + '</td>';
+      html += '<td style="padding:5px 9px;text-align:center">' + _antsBadgeStatoPres(sp) + '</td>';
       html += '</tr>';
     });
 
@@ -748,13 +776,19 @@ function _antsRenderElencoFatture() {
 }
 
 
-function _antsBadgeStato(stato) {
+// Helper button tab
+function _antsTabBtn(filtro, label, attivo, colore) {
+  return '<button onclick="_antsCambiaFiltro(\'' + filtro + '\')" style="background:' + (attivo ? colore : 'transparent') + ';color:' + (attivo ? 'white' : '#444') + ';font-size:10px;padding:5px 10px;border:0;border-radius:4px;font-weight:500;cursor:pointer">' + label + '</button>';
+}
+
+
+// Badge basato sullo stato della presentazione (più significativo dello stato fattura)
+function _antsBadgeStatoPres(sp) {
   var bg, color, label;
-  if (stato === 'anticipata') { bg = '#EAF3DE'; color = '#27500A'; label = 'Attiva'; }
-  else if (stato === 'estinta') { bg = '#E6F1FB'; color = '#0C447C'; label = 'Estinta'; }
-  else if (stato === 'insoluta') { bg = '#FCEBEB'; color = '#A32D2D'; label = 'Insoluta'; }
-  else if (stato === 'anticipata_parziale') { bg = '#FAEEDA'; color = '#BA7517'; label = 'Parziale'; }
-  else { bg = '#F1EFE8'; color = '#666'; label = stato || '—'; }
+  if (sp === 'attiva') { bg = '#EAF3DE'; color = '#27500A'; label = '🟢 Attiva'; }
+  else if (sp === 'rientrata') { bg = '#E6F1FB'; color = '#0C447C'; label = '✓ Rientrata'; }
+  else if (sp === 'insoluta') { bg = '#FCEBEB'; color = '#A32D2D'; label = '✗ Insoluta'; }
+  else { bg = '#F1EFE8'; color = '#666'; label = '—'; }
   return '<span style="background:' + bg + ';color:' + color + ';font-size:9px;padding:1px 6px;border-radius:3px;font-weight:600">' + _antsEsc(label) + '</span>';
 }
 
@@ -793,13 +827,29 @@ function _antsStampaElenco() {
   var presIds = {};
   presFiltrate.forEach(function(p) { presIds[p.id] = p; });
 
+  // Patch v20260503j: stesso criterio del modale (stato presentazione)
+  function statoPresFattura(f) {
+    var p = presIds[f.presentazione_id];
+    if (!p) return null;
+    if (p.stato === 'estinta') return 'rientrata';
+    if (p.stato === 'insoluta') return 'insoluta';
+    if (p.stato === 'anticipata' || p.stato === 'anticipata_parziale') return 'attiva';
+    return null;
+  }
+
   var fatturePres = _antsStato.fatture.filter(function(f) {
+    if (f.stato === 'esclusa') return false;
     if (!presIds[f.presentazione_id]) return false;
-    if (st.filtro === 'attive') return f.stato === 'anticipata';
-    return f.stato !== 'esclusa';
+    var sp = statoPresFattura(f);
+    if (sp == null) return false;
+    if (st.filtro === 'tutte') return true;
+    return sp === st.filtro;
   });
 
+  var ordineStato = { rientrata: 1, insoluta: 2, attiva: 3 };
   fatturePres.sort(function(a, b) {
+    var sa = statoPresFattura(a), sb = statoPresFattura(b);
+    if (sa !== sb) return (ordineStato[sa] || 9) - (ordineStato[sb] || 9);
     var pa = presIds[a.presentazione_id], pb = presIds[b.presentazione_id];
     if (pa.data_presentazione !== pb.data_presentazione) return (pa.data_presentazione < pb.data_presentazione) ? 1 : -1;
     return (a.numero_fattura || '').localeCompare(b.numero_fattura || '');
@@ -807,7 +857,7 @@ function _antsStampaElenco() {
 
   var totImporto = fatturePres.reduce(function(s, f) { return s + Number(f.totale_fattura || 0); }, 0);
   var titoloPeriodo = st.mese != null ? _ANTS_MESI_FULL[st.mese] + ' ' + anno : 'Anno ' + anno;
-  var filtroLabel = st.filtro === 'attive' ? 'Solo attive' : 'Tutte';
+  var filtroLabel = ({ tutte: 'Tutte', rientrata: 'Solo rientrate', insoluta: 'Solo insolute', attiva: 'Solo attive' })[st.filtro] || 'Tutte';
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Elenco Fatture Anticipate — ' + _antsEsc(banca.nome) + '</title>';
   html += '<style>';
@@ -821,8 +871,10 @@ function _antsStampaElenco() {
   html += '.num { font-family: "SF Mono", monospace; text-align: right; }';
   html += '.totale { background: #f5f5f0; font-weight: 600; }';
   html += '.stato-attiva { background: #EAF3DE; color: #27500A; padding: 1px 5px; border-radius: 3px; font-size: 8.5pt; font-weight: 600; }';
-  html += '.stato-estinta { background: #E6F1FB; color: #0C447C; padding: 1px 5px; border-radius: 3px; font-size: 8.5pt; font-weight: 600; }';
+  html += '.stato-rientrata { background: #E6F1FB; color: #0C447C; padding: 1px 5px; border-radius: 3px; font-size: 8.5pt; font-weight: 600; }';
   html += '.stato-insoluta { background: #FCEBEB; color: #A32D2D; padding: 1px 5px; border-radius: 3px; font-size: 8.5pt; font-weight: 600; }';
+  html += '.row-insoluta { background: #FFF5F5; }';
+  html += '.row-rientrata { background: #F8FBFE; }';
   html += '.no-print { position: fixed; bottom: 20px; right: 20px; }';
   html += '@media print { .no-print { display: none !important; } }';
   html += '</style></head><body>';
@@ -837,9 +889,11 @@ function _antsStampaElenco() {
   fatturePres.forEach(function(f) {
     var p = presIds[f.presentazione_id];
     var prot = p.numero_protocollo || ('P-' + p.id.substring(0, 6));
-    var statoCls = 'stato-' + (f.stato === 'anticipata' ? 'attiva' : f.stato);
-    var statoLabel = f.stato === 'anticipata' ? 'Attiva' : (f.stato === 'estinta' ? 'Estinta' : (f.stato === 'insoluta' ? 'Insoluta' : (f.stato === 'anticipata_parziale' ? 'Parziale' : f.stato)));
-    html += '<tr>';
+    var sp = statoPresFattura(f);
+    var rowCls = sp === 'insoluta' ? 'row-insoluta' : (sp === 'rientrata' ? 'row-rientrata' : '');
+    var statoCls = 'stato-' + sp;
+    var statoLabel = sp === 'attiva' ? 'Attiva' : (sp === 'rientrata' ? 'Rientrata' : (sp === 'insoluta' ? 'Insoluta' : '—'));
+    html += '<tr class="' + rowCls + '">';
     html += '<td>' + _antsEsc(prot) + '</td>';
     html += '<td>' + _antsFmtData(p.data_presentazione) + '</td>';
     html += '<td>' + _antsEsc(f.numero_fattura || '—') + '</td>';
