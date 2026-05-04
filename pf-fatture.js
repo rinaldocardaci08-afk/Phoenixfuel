@@ -771,6 +771,8 @@ function _renderFattAllineamento(r) {
                   style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">➕ Crea</button>
           <button onclick="allIgnoraRiga('${r.id}')" title="Marca come 'non richiede ordine' (conguagli/abbuoni)"
                   style="background:#888;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🚫 Ignora</button>
+          <button onclick="allDiagnosticaFattura('${r.fattura_id}')" title="Diagnostica e ripara accoppiamenti di questa fattura"
+                  style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🔍 Diagnostica</button>
         </div>
       </div>
     </div>
@@ -2284,5 +2286,365 @@ async function generaFattureMulti(){
     console.error(e);
   } finally {
     if(btn){ btn.disabled=false; btn.textContent='🧾 Genera fatture'; }
+  }
+}
+
+
+// ═════════════════════════════════════════════════════════════════════
+// DIAGNOSTICA FATTURA — patch v20260503m
+// Bottone 🔍 sulla riga fattura nel pannello allineamento.
+// Apre popup con: info fattura, righe + stato accoppiamento, ordini collegati,
+// diagnosi automatica del caso (A/B/C) e azioni risolutive.
+// ═════════════════════════════════════════════════════════════════════
+
+async function allDiagnosticaFattura(fatturaId) {
+  if (!fatturaId) { toast('ID fattura mancante'); return; }
+  // Loader sopra il bottone
+  const oldOverlay = document.getElementById('diag-overlay');
+  if (oldOverlay) oldOverlay.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+      <div style="background:white;padding:20px 30px;border-radius:8px;font-family:system-ui;font-size:13px">⏳ Analisi in corso…</div>
+    </div>
+  `);
+  try {
+    // 1. Carica fattura
+    const { data: f, error: errF } = await sb.from('fatture_emesse')
+      .select('id,numero,anno,data,cessionario_piva,cessionario_denominazione,importo_totale,cliente_id')
+      .eq('id', fatturaId).single();
+    if (errF || !f) throw new Error('Fattura non trovata: ' + (errF?.message || 'id non valido'));
+
+    // 2. Carica TUTTE le righe della fattura
+    const { data: righe, error: errR } = await sb.from('fatture_righe')
+      .select('id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+      .eq('fattura_id', fatturaId)
+      .order('numero_linea');
+    if (errR) throw errR;
+
+    // 3. Carica ordini che puntano alla fattura via fattura_id E ordini che puntano alla fattura via fattura_riga_id (anche se fattura_id NULL)
+    const rigaIds = (righe || []).map(r => r.id);
+    let { data: ordPerFatturaId } = await sb.from('ordini')
+      .select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,fattura_id,fattura_riga_id,stato')
+      .eq('fattura_id', fatturaId);
+    let ordPerRiga = [];
+    if (rigaIds.length) {
+      const { data } = await sb.from('ordini')
+        .select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,fattura_id,fattura_riga_id,stato')
+        .in('fattura_riga_id', rigaIds);
+      ordPerRiga = data || [];
+    }
+    // Unione (deduplica per id)
+    const ordMap = new Map();
+    (ordPerFatturaId || []).forEach(o => ordMap.set(o.id, o));
+    (ordPerRiga || []).forEach(o => ordMap.set(o.id, o));
+    const ordini = Array.from(ordMap.values());
+
+    // 4. Cerca eventuali altre fatture con stesso numero (Caso C)
+    const { data: omonime } = await sb.from('fatture_emesse')
+      .select('id,numero,anno,data,cessionario_denominazione,importo_totale')
+      .eq('numero', f.numero)
+      .neq('id', fatturaId);
+
+    // 5. Determina stato di ogni riga
+    const righeAnalizzate = (righe || []).map(r => {
+      const ordPerQuestaRiga = ordini.filter(o => o.fattura_riga_id === r.id);
+      const stato = r.ignora_match ? 'ignorata'
+                  : ordPerQuestaRiga.length === 0 ? 'orfana'
+                  : ordPerQuestaRiga.length === 1 ? 'accoppiata'
+                  : 'doppia';
+      return { ...r, _ordini: ordPerQuestaRiga, _stato: stato };
+    });
+
+    // 6. Diagnosi automatica
+    const ordiniLegacy = ordini.filter(o => o.fattura_id === fatturaId && !o.fattura_riga_id);
+    const righeOrfane = righeAnalizzate.filter(r => r._stato === 'orfana');
+    const righeAccoppiate = righeAnalizzate.filter(r => r._stato === 'accoppiata');
+    let casoDiagnosticato = '';
+    let diagnosi = '';
+    if ((omonime || []).length > 0) {
+      casoDiagnosticato = 'C';
+      diagnosi = `Trovate ${omonime.length} altre fatture con numero "${f.numero}". La 275 mostrata in elenco potrebbe non essere quella che hai accoppiato.`;
+    } else if (ordiniLegacy.length > 0 && righeOrfane.length > 0) {
+      casoDiagnosticato = 'B';
+      diagnosi = `${ordiniLegacy.length} ordine/i collegato/i alla fattura ma SENZA fattura_riga_id (legame "vecchio stile"). Sotto il bottone "🔧 Riallinea" abbina automaticamente questi ordini alle righe orfane.`;
+    } else if (righeOrfane.length > 0 && righeAccoppiate.length > 0) {
+      casoDiagnosticato = 'A';
+      diagnosi = `Fattura con ${righe.length} righe: ${righeAccoppiate.length} già accoppiata/e, ${righeOrfane.length} orfana/e. Per ogni orfana puoi accoppiare manualmente, ignorare o creare l'ordine PhoenixFuel.`;
+    } else if (righeOrfane.length === righe.length) {
+      casoDiagnosticato = 'D';
+      diagnosi = `Tutte le ${righe.length} righe sono orfane. Nessun accoppiamento esistente. Usa il pannello allineamento sopra per accoppiare.`;
+    } else {
+      casoDiagnosticato = 'OK';
+      diagnosi = `Nessuna anomalia rilevata: ${righeAccoppiate.length}/${righe.length} righe accoppiate correttamente.`;
+    }
+
+    // 7. Render popup
+    const ovr = document.getElementById('diag-overlay');
+    if (ovr) ovr.remove();
+    _allDiagRenderPopup({ fattura: f, righe: righeAnalizzate, ordiniLegacy, omonime: omonime || [], casoDiagnosticato, diagnosi });
+
+  } catch (e) {
+    const ovr = document.getElementById('diag-overlay');
+    if (ovr) ovr.remove();
+    toast('Errore diagnostica: ' + e.message);
+    console.error('[diagnostica]', e);
+  }
+}
+
+
+function _allDiagRenderPopup(d) {
+  const f = d.fattura;
+  const totRighe = d.righe.reduce((s,r) => s + Number(r.prezzo_totale||0), 0);
+  const colorCaso = { 'A':'#0E6F8E', 'B':'#C97A1F', 'C':'#A32D2D', 'D':'#A32D2D', 'OK':'#3F7D1F' }[d.casoDiagnosticato] || '#0E6F8E';
+
+  let righeHtml = '';
+  d.righe.forEach(r => {
+    let badge = '';
+    let azioni = '';
+    if (r._stato === 'accoppiata') {
+      const o = r._ordini[0];
+      badge = `<span style="background:#E8F3DE;color:#3F7D1F;padding:2px 6px;border-radius:3px;font-size:10px">✅ Accoppiata</span>`;
+      azioni = `<div style="font-size:10px;color:#666;margin-top:3px">Ordine: ${_fmtD(o.data)} · ${_esc((o.cliente||'').substring(0,30))} · ${Number(o.litri||0).toLocaleString('it-IT')} L
+        <button onclick="allDiagSganciaOrdine('${o.id}','${f.id}')" title="Sgancia ordine da questa riga"
+                style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:6px;cursor:pointer">🔓 Sgancia</button>
+        <button onclick="allDiagApriOrdine('${o.id}')" title="Apri scheda ordine"
+                style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:3px;cursor:pointer">👁 Apri</button>
+      </div>`;
+    } else if (r._stato === 'doppia') {
+      badge = `<span style="background:#FAEEDA;color:#7A5316;padding:2px 6px;border-radius:3px;font-size:10px">⚠️ ${r._ordini.length} ordini su stessa riga</span>`;
+      azioni = '<div style="font-size:10px;color:#666;margin-top:3px">Ordini: ' + r._ordini.map(o => `${_fmtD(o.data)} (<button onclick="allDiagSganciaOrdine('${o.id}','${f.id}')" style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:1px 4px;font-size:9px;cursor:pointer">🔓</button>)`).join(' · ') + '</div>';
+    } else if (r._stato === 'ignorata') {
+      badge = `<span style="background:#EEE;color:#666;padding:2px 6px;border-radius:3px;font-size:10px">🚫 Ignorata</span>`;
+      azioni = `<div style="font-size:10px;margin-top:3px">
+        <button onclick="allDiagRipristinaIgnora('${r.id}','${f.id}')" title="Rimuovi flag ignora"
+                style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:1px 5px;font-size:9px;cursor:pointer">↶ Ripristina</button>
+      </div>`;
+    } else {
+      badge = `<span style="background:#FCEBEB;color:#A32D2D;padding:2px 6px;border-radius:3px;font-size:10px">⚠ Orfana</span>`;
+      azioni = `<div style="font-size:10px;margin-top:3px;display:flex;gap:4px;flex-wrap:wrap">
+        <button onclick="allDiagAccoppiaRiga('${r.id}','${f.id}')" title="Cerca ordini compatibili e accoppia"
+                style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🔗 Accoppia</button>
+        <button onclick="allDiagIgnora('${r.id}','${f.id}')" title="Marca come ignorata (conguagli, spese, ecc.)"
+                style="background:#888;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🚫 Ignora</button>
+        <button onclick="allDiagCrea('${r.id}','${f.id}')" title="Crea ordine PhoenixFuel da questa riga"
+                style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">➕ Crea ordine</button>
+      </div>`;
+    }
+    righeHtml += `
+      <div style="border:1px solid #e8e5dc;border-radius:5px;padding:6px 8px;margin-bottom:6px;background:white">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;font-weight:600;color:#26215C">Riga #${r.numero_linea || '?'} · ${_esc(r.prodotto_normalizzato||'?')}</div>
+            <div style="font-size:10px;color:#666;font-family:monospace;margin-top:1px">${Number(r.quantita||0).toLocaleString('it-IT')} L · ${_fmtE(r.prezzo_totale||0)}</div>
+          </div>
+          <div style="flex-shrink:0">${badge}</div>
+        </div>
+        ${azioni}
+      </div>
+    `;
+  });
+
+  let omonimeHtml = '';
+  if (d.omonime.length > 0) {
+    omonimeHtml = `
+      <div style="background:#FCEBEB;border:1px solid #C97A7A;border-radius:5px;padding:8px;margin:8px 0">
+        <div style="font-size:11px;font-weight:600;color:#A32D2D;margin-bottom:4px">⚠ Trovate ${d.omonime.length} altre fatture con stesso numero "${_esc(f.numero)}"</div>
+        ${d.omonime.map(o => `
+          <div style="font-size:10px;margin:3px 0;padding:4px 6px;background:white;border-radius:3px">
+            ${_fmtD(o.data)} (${o.anno}) · ${_esc((o.cessionario_denominazione||'').substring(0,40))} · ${_fmtE(o.importo_totale||0)}
+            <button onclick="allDiagnosticaFattura('${o.id}')" style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:6px;cursor:pointer">🔍 Apri questa</button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  let azioneCasoB = '';
+  if (d.casoDiagnosticato === 'B') {
+    azioneCasoB = `
+      <div style="background:#FAEEDA;border:1px solid #E8C98A;border-radius:5px;padding:8px;margin:8px 0">
+        <div style="font-size:11px;font-weight:600;color:#7A5316;margin-bottom:6px">🔧 Riparazione automatica disponibile</div>
+        <div style="font-size:10px;color:#7A5316;margin-bottom:6px">${d.ordiniLegacy.length} ordine/i hanno fattura_id ma manca fattura_riga_id. Posso provare ad abbinarli alle righe orfane usando prodotto + litri (match deterministico).</div>
+        <button onclick="allDiagRiparaCasoB('${f.id}')" style="background:#7A5316;color:white;border:0;border-radius:4px;padding:5px 10px;font-size:10px;cursor:pointer;font-weight:600">🔧 Riallinea ordini-righe</button>
+      </div>
+    `;
+  }
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
+      <div style="background:#FAFAF7;border-radius:8px;padding:0;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.3)">
+        <div style="background:${colorCaso};color:white;padding:12px 16px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:14px;font-weight:600">🔍 Diagnostica Fattura ${_esc(f.numero)} · ${_fmtD(f.data)}</div>
+            <div style="font-size:11px;opacity:0.9;margin-top:2px">${_esc((f.cessionario_denominazione||'').substring(0,50))} · ${_fmtE(f.importo_totale||0)}</div>
+          </div>
+          <button onclick="document.getElementById('diag-overlay').remove()" style="background:rgba(255,255,255,0.2);color:white;border:0;border-radius:4px;padding:5px 10px;font-size:14px;cursor:pointer">✕</button>
+        </div>
+        <div style="overflow-y:auto;padding:14px 16px">
+          <div style="background:white;border-left:4px solid ${colorCaso};padding:10px 12px;border-radius:0 4px 4px 0;margin-bottom:10px">
+            <div style="font-size:11px;font-weight:600;color:${colorCaso}">Caso ${d.casoDiagnosticato}</div>
+            <div style="font-size:11px;color:#444;margin-top:4px;line-height:1.5">${_esc(d.diagnosi)}</div>
+          </div>
+          ${omonimeHtml}
+          ${azioneCasoB}
+          <div style="font-size:11px;font-weight:600;color:#26215C;margin:10px 0 6px">Righe della fattura (${d.righe.length}) · Totale ${_fmtE(totRighe)}</div>
+          ${righeHtml}
+        </div>
+        <div style="background:#F0EEE6;padding:10px 16px;border-radius:0 0 8px 8px;display:flex;justify-content:flex-end;gap:8px">
+          <button onclick="document.getElementById('diag-overlay').remove()" style="background:#888;color:white;border:0;border-radius:4px;padding:6px 14px;font-size:11px;cursor:pointer">Chiudi</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+
+// ─── INTERVENTI DIAGNOSTICI ──────────────────────────────────────────
+
+// Sgancia ordine da fattura/riga (mette a NULL fattura_id e fattura_riga_id)
+async function allDiagSganciaOrdine(ordineId, fatturaId) {
+  if (!confirm('Sganciare l\'ordine dalla fattura?\n\nL\'ordine tornerà visibile nel pannello allineamento per essere riaccoppiato.')) return;
+  try {
+    const { error } = await sb.from('ordini')
+      .update({ fattura_id: null, fattura_riga_id: null })
+      .eq('id', ordineId);
+    if (error) throw error;
+    toast('✅ Ordine sganciato');
+    document.getElementById('diag-overlay')?.remove();
+    await allDiagnosticaFattura(fatturaId);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) { toast('Errore: ' + e.message); }
+}
+
+// Apri scheda ordine in popup separato
+async function allDiagApriOrdine(ordineId) {
+  if (typeof allEditOrdine === 'function') {
+    document.getElementById('diag-overlay')?.remove();
+    await allEditOrdine(ordineId);
+  } else {
+    toast('Funzione modifica ordine non disponibile');
+  }
+}
+
+// Riusa flusso esistente di accoppiamento
+async function allDiagAccoppiaRiga(rigaId, fatturaId) {
+  document.getElementById('diag-overlay')?.remove();
+  if (typeof allCollegaFatturaAOrdine === 'function') {
+    await allCollegaFatturaAOrdine(rigaId, fatturaId);
+  } else {
+    toast('Funzione collega non disponibile');
+  }
+}
+
+async function allDiagIgnora(rigaId, fatturaId) {
+  if (!confirm('Marcare questa riga come "ignora_match"?\n\nNon comparirà più come orfana negli accoppiamenti.\nUsa per: conguagli, spese di trasporto fatturate a parte, abbuoni.')) return;
+  try {
+    const { error } = await sb.from('fatture_righe')
+      .update({ ignora_match: true })
+      .eq('id', rigaId);
+    if (error) throw error;
+    toast('✅ Riga marcata come ignorata');
+    document.getElementById('diag-overlay')?.remove();
+    await allDiagnosticaFattura(fatturaId);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) { toast('Errore: ' + e.message); }
+}
+
+async function allDiagRipristinaIgnora(rigaId, fatturaId) {
+  try {
+    const { error } = await sb.from('fatture_righe')
+      .update({ ignora_match: false })
+      .eq('id', rigaId);
+    if (error) throw error;
+    toast('✅ Flag ignora rimosso');
+    document.getElementById('diag-overlay')?.remove();
+    await allDiagnosticaFattura(fatturaId);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) { toast('Errore: ' + e.message); }
+}
+
+async function allDiagCrea(rigaId, fatturaId) {
+  document.getElementById('diag-overlay')?.remove();
+  if (typeof allCreaOrdineDaRiga === 'function') {
+    await allCreaOrdineDaRiga(rigaId);
+  } else {
+    toast('Funzione crea ordine non disponibile');
+  }
+}
+
+// ─── CASO B: ripristino accoppiamenti legacy (fattura_id senza fattura_riga_id) ───
+// Match deterministico tra ordini "legacy" e righe orfane usando prodotto + litri (tolleranza 1%).
+async function allDiagRiparaCasoB(fatturaId) {
+  if (!confirm('Riallineare ordini-righe per questa fattura?\n\n• Cerco ordini con fattura_id valorizzato ma fattura_riga_id NULL\n• Cerco righe orfane della stessa fattura\n• Abbino per prodotto + litri (tolleranza 1%)\n• Se ambiguo, ti chiedo conferma\n\nProcedere?')) return;
+  try {
+    // 1. Carica ordini legacy
+    const { data: ordLegacy, error: errO } = await sb.from('ordini')
+      .select('id,prodotto,litri,data,cliente')
+      .eq('fattura_id', fatturaId)
+      .is('fattura_riga_id', null);
+    if (errO) throw errO;
+    if (!ordLegacy || ordLegacy.length === 0) {
+      toast('Nessun ordine legacy trovato');
+      return;
+    }
+
+    // 2. Carica righe orfane (no ordini puntanti via fattura_riga_id e non ignorate)
+    const { data: righe, error: errR } = await sb.from('fatture_righe')
+      .select('id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+      .eq('fattura_id', fatturaId);
+    if (errR) throw errR;
+
+    const rigaIds = (righe||[]).map(r => r.id);
+    let righePuntate = new Set();
+    if (rigaIds.length) {
+      const { data: oP } = await sb.from('ordini').select('fattura_riga_id').in('fattura_riga_id', rigaIds);
+      (oP||[]).forEach(o => { if (o.fattura_riga_id) righePuntate.add(o.fattura_riga_id); });
+    }
+    const righeOrfane = (righe||[]).filter(r => !r.ignora_match && Number(r.quantita)>0 && !righePuntate.has(r.id));
+
+    if (righeOrfane.length === 0) {
+      toast('Nessuna riga orfana da riallineare');
+      return;
+    }
+
+    // 3. Match deterministico: per ogni riga orfana, trovo l'ordine legacy con prodotto compatibile e litri ±1%
+    const _norm = s => (s||'').toString().toLowerCase().trim().replace(/\s+/g,' ');
+    const usatiOrd = new Set();
+    const abbinamenti = []; // {rigaId, ordineId}
+    const conflitti = [];   // {rigaId, candidatiOrd:[]}
+    righeOrfane.forEach(r => {
+      const tolleranza = Math.max(1, Number(r.quantita) * 0.01);
+      const cand = ordLegacy.filter(o => {
+        if (usatiOrd.has(o.id)) return false;
+        if (_norm(o.prodotto) !== _norm(r.prodotto_normalizzato)) return false;
+        return Math.abs(Number(o.litri) - Number(r.quantita)) <= tolleranza;
+      });
+      if (cand.length === 1) {
+        abbinamenti.push({ rigaId: r.id, ordineId: cand[0].id });
+        usatiOrd.add(cand[0].id);
+      } else if (cand.length > 1) {
+        conflitti.push({ riga: r, candidati: cand });
+      }
+    });
+
+    // 4. Esegui aggiornamenti
+    let nFatti = 0, nErr = 0;
+    for (const a of abbinamenti) {
+      const { error } = await sb.from('ordini').update({ fattura_riga_id: a.rigaId }).eq('id', a.ordineId);
+      if (error) { nErr++; console.error('[ripara-B]', error); }
+      else nFatti++;
+    }
+
+    let msg = `✅ Riallineati ${nFatti}/${abbinamenti.length} ordini`;
+    if (nErr) msg += ` · ${nErr} errore/i`;
+    if (conflitti.length) msg += ` · ${conflitti.length} conflitto/i (più candidati per stessa riga, vanno risolti manualmente)`;
+    toast(msg);
+
+    document.getElementById('diag-overlay')?.remove();
+    await allDiagnosticaFattura(fatturaId);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) {
+    toast('Errore riparazione: ' + e.message);
+    console.error('[ripara-B]', e);
   }
 }
