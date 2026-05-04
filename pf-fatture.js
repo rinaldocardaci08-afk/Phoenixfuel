@@ -528,6 +528,9 @@ async function apriPaginaAllineamento(annoIniziale, meseIniziale) {
           </div>
         </div>
 
+        <!-- Patch v20260503q: banner anomalie (righe doppie) -->
+        <div id="all-banner-anomalie"></div>
+
         <!-- Body 2 colonne -->
         <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 20px;overflow:hidden">
           <!-- SX: ordini senza fattura -->
@@ -648,16 +651,31 @@ async function caricaAllineamento() {
       }
     }
 
-    // 4. Identifico righe puntate da almeno 1 ordine in DB
+    // 4. Identifico righe puntate da ordini in DB (e righe DOPPIE = >1 ordine sulla stessa riga)
     const righeIds = righe.map(r => r.id);
     const righeConOrdine = new Set();
+    const conteggioPerRiga = {}; // rigaId → numero ordini collegati
     for (let i = 0; i < righeIds.length; i += 500) {
       const chunk = righeIds.slice(i, i + 500);
       const { data: oLink } = await sb.from('ordini')
         .select('fattura_riga_id')
         .in('fattura_riga_id', chunk);
-      (oLink || []).forEach(o => { if (o.fattura_riga_id) righeConOrdine.add(o.fattura_riga_id); });
+      (oLink || []).forEach(o => {
+        if (o.fattura_riga_id) {
+          righeConOrdine.add(o.fattura_riga_id);
+          conteggioPerRiga[o.fattura_riga_id] = (conteggioPerRiga[o.fattura_riga_id] || 0) + 1;
+        }
+      });
     }
+    // Patch v20260503q: anomalie "doppia" = riga con 2+ ordini
+    const fattureAnomale = new Set();
+    Object.keys(conteggioPerRiga).forEach(rId => {
+      if (conteggioPerRiga[rId] > 1) {
+        const r = righe.find(rr => rr.id === rId);
+        if (r) fattureAnomale.add(r.fattura_id);
+      }
+    });
+    window._allineamento.fattureAnomale = Array.from(fattureAnomale).map(fId => fattById.get(fId)).filter(Boolean);
 
     // 5. Filtro: righe "vere", non ignorate, senza ordine
     const righeOrfane = righe
@@ -711,6 +729,26 @@ function renderAllineamento() {
   const totFatt = fattVisibili.reduce((s,r) => s + Number(r.prezzo_totale||0), 0);
   if (elTotO) elTotO.textContent = `Totale netto: ${_fmtE(totOrd)}`;
   if (elTotF) elTotF.textContent = `Totale imponibile: ${_fmtE(totFatt)}`;
+
+  // Patch v20260503q: banner anomalie righe doppie
+  const elBanner = document.getElementById('all-banner-anomalie');
+  if (elBanner) {
+    const anom = window._allineamento.fattureAnomale || [];
+    if (anom.length === 0) {
+      elBanner.innerHTML = '';
+    } else {
+      let html = '<div style="background:#FCEBEB;border:1px solid #E8B5B5;border-left:4px solid #A32D2D;padding:10px 14px;margin:0 20px 8px;border-radius:0 6px 6px 0">' +
+        '<div style="font-size:12px;font-weight:600;color:#7A1F1F;margin-bottom:6px">⚠ ' + anom.length + ' fattura/e con righe DOPPIE (più ordini sulla stessa riga) — anomalia da matcher legacy</div>' +
+        '<div style="font-size:11px;color:#7A1F1F;margin-bottom:6px">Le fatture sotto hanno almeno una riga con 2+ ordini collegati. Aprile la diagnostica per riassegnare uno degli ordini a una riga orfana compatibile.</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+      anom.slice(0, 30).forEach(f => {
+        html += '<button onclick="allDiagnosticaFattura(\'' + f.id + '\')" style="background:white;border:1px solid #A32D2D;color:#7A1F1F;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">🔍 Fatt ' + _esc(f.numero) + ' · ' + _fmtD(f.data) + '</button>';
+      });
+      if (anom.length > 30) html += '<span style="font-size:10px;color:#7A1F1F;align-self:center">+' + (anom.length-30) + ' altre…</span>';
+      html += '</div></div>';
+      elBanner.innerHTML = html;
+    }
+  }
 
   // Render colonne
   const elListaO = document.getElementById('all-lista-ord');
@@ -2447,8 +2485,20 @@ function _allDiagRenderPopup(d) {
                 style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:3px;cursor:pointer">👁 Apri</button>
       </div>`;
     } else if (r._stato === 'doppia') {
-      badge = `<span style="background:#FAEEDA;color:#7A5316;padding:2px 6px;border-radius:3px;font-size:10px">⚠️ ${r._ordini.length} ordini su stessa riga</span>`;
-      azioni = '<div style="font-size:10px;color:#666;margin-top:3px">Ordini: ' + r._ordini.map(o => `${_fmtD(o.data)} (<button onclick="allDiagSganciaOrdine('${o.id}','${f.id}')" style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:1px 4px;font-size:9px;cursor:pointer">🔓</button>)`).join(' · ') + '</div>';
+      badge = `<span style="background:#FCEBEB;color:#A32D2D;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600">⚠️ ANOMALIA: ${r._ordini.length} ordini su stessa riga</span>`;
+      // Render: ogni ordine con 3 azioni (Sgancia, Riassegna a orfana, Apri)
+      azioni = '<div style="font-size:10px;color:#666;margin-top:5px">';
+      r._ordini.forEach(function(o, idx) {
+        azioni += '<div style="background:#FFF8F8;border:0.5px solid #E8B5B5;border-radius:4px;padding:5px 7px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">' +
+          '<span style="flex:1;min-width:0">Ord ' + (idx+1) + ': ' + _fmtD(o.data) + ' · ' + _esc((o.cliente||'').substring(0,28)) + ' · ' + Number(o.litri||0).toLocaleString('it-IT') + ' L</span>' +
+          '<span style="display:flex;gap:3px;flex-shrink:0">' +
+            '<button onclick="allDiagRiassegnaOrdine(\'' + o.id + '\',\'' + r.id + '\',\'' + f.id + '\')" title="Sposta questo ordine su una riga orfana compatibile della stessa fattura" style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer;font-weight:600">↪ Riassegna</button>' +
+            '<button onclick="allDiagSganciaOrdine(\'' + o.id + '\',\'' + f.id + '\')" title="Sgancia ordine dalla riga (torna orfano)" style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🔓 Sgancia</button>' +
+            '<button onclick="allDiagApriOrdine(\'' + o.id + '\')" title="Apri scheda ordine" style="background:#6B5FCC;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">👁</button>' +
+          '</span>' +
+        '</div>';
+      });
+      azioni += '</div>';
     } else if (r._stato === 'ignorata') {
       badge = `<span style="background:#EEE;color:#666;padding:2px 6px;border-radius:3px;font-size:10px">🚫 Ignorata</span>`;
       azioni = `<div style="font-size:10px;margin-top:3px">
@@ -2573,6 +2623,104 @@ async function allDiagApriOrdine(ordineId) {
   } else {
     toast('Funzione modifica ordine non disponibile');
   }
+}
+
+// Patch v20260503q: riassegna un ordine duplicato a una riga orfana compatibile della STESSA fattura.
+// Cerca tra le righe orfane (no ordini collegati, no ignora_match, prodotto+litri compatibili ±1%).
+// Se 0 candidate → toast errore. Se 1 candidata → riassegna direttamente con conferma.
+// Se >1 candidate → mostra mini-popup di scelta.
+async function allDiagRiassegnaOrdine(ordineId, rigaCorrId, fatturaId) {
+  try {
+    // 1. Carica ordine
+    const { data: ord, error: errO } = await sb.from('ordini')
+      .select('id,prodotto,litri,cliente,data')
+      .eq('id', ordineId).single();
+    if (errO || !ord) throw new Error('Ordine non trovato');
+
+    // 2. Carica TUTTE le righe della fattura
+    const { data: righe, error: errR } = await sb.from('fatture_righe')
+      .select('id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+      .eq('fattura_id', fatturaId);
+    if (errR) throw errR;
+
+    // 3. Trova quali righe sono già coperte da altri ordini
+    const rigaIds = (righe||[]).map(r => r.id);
+    let righeCoperte = new Set();
+    if (rigaIds.length) {
+      const { data: oColl } = await sb.from('ordini')
+        .select('fattura_riga_id')
+        .in('fattura_riga_id', rigaIds);
+      (oColl||[]).forEach(o => { if (o.fattura_riga_id) righeCoperte.add(o.fattura_riga_id); });
+    }
+
+    // 4. Filtra: orfane (no ordini, no ignora) con prodotto+litri compatibili (±1%, min 1L)
+    const _norm = s => (s||'').toString().toLowerCase().trim().replace(/\s+/g,' ');
+    const tolleranza = Math.max(1, Number(ord.litri||0) * 0.01);
+    const candidate = (righe||[]).filter(r =>
+      !r.ignora_match
+      && Number(r.quantita) > 0
+      && !righeCoperte.has(r.id)
+      && r.id !== rigaCorrId
+      && _norm(r.prodotto_normalizzato) === _norm(ord.prodotto)
+      && Math.abs(Number(r.quantita) - Number(ord.litri)) <= tolleranza
+    );
+
+    if (candidate.length === 0) {
+      toast('⚠ Nessuna riga orfana compatibile (' + _norm(ord.prodotto) + ' · ' + Number(ord.litri).toLocaleString('it-IT') + ' L) in questa fattura');
+      return;
+    }
+
+    if (candidate.length === 1) {
+      const c = candidate[0];
+      const msg = 'Riassegnare l\'ordine alla riga #' + (c.numero_linea||'?') + '?\n\n' +
+        'Ordine: ' + _esc((ord.cliente||'').substring(0,40)) + ' · ' + Number(ord.litri).toLocaleString('it-IT') + ' L\n' +
+        'Riga destinazione: ' + (c.prodotto_normalizzato||'?') + ' · ' + Number(c.quantita).toLocaleString('it-IT') + ' L\n\nProcedere?';
+      if (!confirm(msg)) return;
+      const { error: errU } = await sb.from('ordini').update({ fattura_riga_id: c.id }).eq('id', ordineId);
+      if (errU) throw errU;
+      toast('✅ Ordine riassegnato a riga #' + (c.numero_linea||'?'));
+      document.getElementById('diag-overlay')?.remove();
+      await allDiagnosticaFattura(fatturaId);
+      if (typeof caricaAllineamento === 'function') caricaAllineamento();
+      return;
+    }
+
+    // >1 candidate: mostra mini-popup di scelta
+    document.getElementById('diag-pick-overlay')?.remove();
+    let html = '<div id="diag-pick-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px">' +
+      '<div style="background:white;border-radius:8px;max-width:480px;width:100%;padding:0;box-shadow:0 10px 30px rgba(0,0,0,0.3)">' +
+        '<div style="background:#0E6F8E;color:white;padding:10px 14px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600">↪ Scegli riga destinazione (' + candidate.length + ' compatibili)</div>' +
+        '<div style="padding:12px 14px;max-height:60vh;overflow-y:auto">' +
+          '<div style="font-size:11px;color:#666;margin-bottom:8px">Ordine da riassegnare: <strong>' + _esc((ord.cliente||'').substring(0,40)) + '</strong> · ' + Number(ord.litri).toLocaleString('it-IT') + ' L</div>';
+    candidate.forEach(c => {
+      html += '<div style="border:1px solid #C8E0EA;border-radius:5px;padding:8px 10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+        '<div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600">Riga #' + (c.numero_linea||'?') + ' · ' + _esc(c.prodotto_normalizzato||'?') + '</div>' +
+        '<div style="font-size:10px;color:#666;font-family:monospace">' + Number(c.quantita).toLocaleString('it-IT') + ' L · ' + _fmtE(c.prezzo_totale||0) + '</div></div>' +
+        '<button onclick="allDiagRiassegnaConferma(\'' + ordineId + '\',\'' + c.id + '\',\'' + fatturaId + '\')" style="background:#0E6F8E;color:white;border:0;border-radius:4px;padding:5px 10px;font-size:11px;cursor:pointer;font-weight:600">↪ Scegli</button>' +
+      '</div>';
+    });
+    html += '</div>' +
+      '<div style="background:#F0EEE6;padding:8px 14px;border-radius:0 0 8px 8px;text-align:right">' +
+        '<button onclick="document.getElementById(\'diag-pick-overlay\').remove()" style="background:#888;color:white;border:0;border-radius:4px;padding:5px 12px;font-size:11px;cursor:pointer">Annulla</button>' +
+      '</div>' +
+    '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    toast('Errore riassegnazione: ' + e.message);
+    console.error('[riassegna]', e);
+  }
+}
+
+async function allDiagRiassegnaConferma(ordineId, rigaTargetId, fatturaId) {
+  try {
+    const { error } = await sb.from('ordini').update({ fattura_riga_id: rigaTargetId }).eq('id', ordineId);
+    if (error) throw error;
+    document.getElementById('diag-pick-overlay')?.remove();
+    document.getElementById('diag-overlay')?.remove();
+    toast('✅ Ordine riassegnato');
+    await allDiagnosticaFattura(fatturaId);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) { toast('Errore: ' + e.message); }
 }
 
 // Riusa flusso esistente di accoppiamento
