@@ -58,15 +58,53 @@ async function renderEstrattoConto() {
 
   // Carico tutto in parallelo
   // Patch v20260503s: aggiungo query ordini cliente (per grafico litri)
+  // Patch v20260503t (FIX): paginazione + esclusione annullati per coerenza con anagrafica.
+  //                        Senza paginazione Supabase tronca a 1000 record → grafico falsato.
+  //                        La paginazione si applica anche a fatture/riconciliazioni che possono superare 1000.
   var dueAnniFa = new Date(); dueAnniFa.setFullYear(dueAnniFa.getFullYear() - 2);
   var dueAnniFaIso = dueAnniFa.toISOString().split('T')[0];
-  var [resFatt, resCli, resIst, resRic, resOrd] = await Promise.all([
-    sb.from('estratto_conto_cliente').select('*'),
+
+  // Helper paginazione generica
+  async function _ecCaricaPaginate(builderFn) {
+    var out = [];
+    var from = 0; var batch = 1000;
+    while (true) {
+      var q = await builderFn(from, from + batch - 1);
+      if (q.error) { console.error('[ec/paginate]', q.error); return { data: out, error: q.error }; }
+      var d = q.data || [];
+      if (d.length === 0) break;
+      out = out.concat(d);
+      if (d.length < batch) break;
+      from += batch;
+    }
+    return { data: out, error: null };
+  }
+
+  // Carica clienti e banche (sempre piccoli, no paginazione necessaria)
+  var [resCli, resIst] = await Promise.all([
     sb.from('clienti').select('id,nome,ragione_sociale,piva,codice_fiscale,giorni_pagamento,modalita_pagamento,banca_accredito_id,cliente_rete,attivo').eq('attivo', true),
-    sb.from('banche_istituti').select('id,nome'),
-    sb.from('foglio_giornale_riconciliazioni').select('fattura_emessa_id,importo_imputato,movimento_id'),
-    sb.from('ordini').select('id,cliente_id,data,litri,tipo_ordine,stato').eq('tipo_ordine', 'cliente').gte('data', dueAnniFaIso)
+    sb.from('banche_istituti').select('id,nome')
   ]);
+
+  // Carica fatture (paginate)
+  var resFatt = await _ecCaricaPaginate(function(a, b) {
+    return sb.from('estratto_conto_cliente').select('*').range(a, b);
+  });
+
+  // Carica riconciliazioni (paginate)
+  var resRic = await _ecCaricaPaginate(function(a, b) {
+    return sb.from('foglio_giornale_riconciliazioni').select('fattura_emessa_id,importo_imputato,movimento_id').range(a, b);
+  });
+
+  // Carica ordini (paginati + esclusione annullati)
+  var resOrd = await _ecCaricaPaginate(function(a, b) {
+    return sb.from('ordini')
+      .select('id,cliente_id,data,litri,tipo_ordine,stato')
+      .eq('tipo_ordine', 'cliente')
+      .neq('stato', 'annullato')
+      .gte('data', dueAnniFaIso)
+      .range(a, b);
+  });
 
   if (resFatt.error) {
     el.innerHTML = '<div style="padding:20px;color:#A32D2D">Errore: ' + _ecEsc(resFatt.error.message) + '</div>';
@@ -77,7 +115,7 @@ async function renderEstrattoConto() {
   _ecStato.clienti = resCli.data || [];
   _ecStato.banche = resIst.data || [];
   _ecStato.riconciliazioni = resRic.data || [];
-  _ecStato.ordini = resOrd.data || [];   // Patch v20260503s
+  _ecStato.ordini = resOrd.data || [];
 
   // Render in base alla vista corrente
   if (_ecStato.vista === 'cliente' && _ecStato.clienteSelezionato) {
