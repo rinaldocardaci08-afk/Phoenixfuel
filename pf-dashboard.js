@@ -15,11 +15,30 @@ async function caricaDashboard() {
   var ieri2 = new Date(ieri); ieri2.setDate(ieri2.getDate()-1);
   var ieri2ISO = ieri2.toISOString().split('T')[0];
 
+  // Patch v20260504a: helper paginazione locale (regola Costituzione A.3)
+  async function _paginaQuery(builderFn) {
+    var out = [];
+    var from = 0; var batch = 1000;
+    while (true) {
+      var q = await builderFn(from, from + batch - 1);
+      if (q.error) { console.error('[dashboard/paginate]', q.error); return { data: out, error: q.error }; }
+      var d = q.data || [];
+      if (d.length === 0) break;
+      out = out.concat(d);
+      if (d.length < batch) break;
+      from += batch;
+    }
+    return { data: out, error: null };
+  }
+
   // ══ CARICAMENTO PARALLELO INIZIALE ══
+  // Patch v20260504a: ordMeseRes ora paginato (era .limit(1000) → bug se > 1000 ordini/mese, regola A.3)
   var [ordIeriRes, costiIeriRes, ordMeseRes, recRes, lettIeriRes, lettIeri2Res, prezziIeriRes, lettMeseRes, pompeRes, prezziMeseRes] = await Promise.all([
     sb.from('ordini').select('*').eq('data', ieriISO),
     sb.from('stazione_costi').select('prodotto,costo_litro').eq('data', ieriISO),
-    sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data', meseInizio).lte('data', oggiISO).limit(1000),
+    _paginaQuery(function(a, b) {
+      return sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data', meseInizio).lte('data', oggiISO).range(a, b);
+    }),
     sb.from('ordini').select('*').order('created_at',{ascending:false}).limit(5),
     sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieriISO),
     sb.from('stazione_letture').select('pompa_id,lettura').eq('data', ieri2ISO),
@@ -140,13 +159,34 @@ async function caricaCockpit() {
   var giornoLimite = Math.min(giornoMese, ultimoMesePrev);
   var fineMesePrev = mesePrev.toISOString().split('T')[0].substring(0,8) + String(giornoLimite).padStart(2,'0');
 
+  // Patch v20260504a: helper paginazione locale (regola Costituzione A.3)
+  async function _paginaCockpit(builderFn) {
+    var out = [];
+    var from = 0; var batch = 1000;
+    while (true) {
+      var q = await builderFn(from, from + batch - 1);
+      if (q.error) { console.error('[cockpit/paginate]', q.error); return { data: out, error: q.error }; }
+      var d = q.data || [];
+      if (d.length === 0) break;
+      out = out.concat(d);
+      if (d.length < batch) break;
+      from += batch;
+    }
+    return { data: out, error: null };
+  }
+
+  // Patch v20260504a: paginate (erano .limit(2000) → regola A.3)
   var [meseRes, prevRes] = await Promise.all([
-    sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva')
-      .eq('tipo_ordine','cliente').neq('stato','annullato')
-      .gte('data',inizioMese).lte('data',oggiISO).limit(2000),
-    sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva')
-      .eq('tipo_ordine','cliente').neq('stato','annullato')
-      .gte('data',inizioMesePrev).lte('data',fineMesePrev).limit(2000)
+    _paginaCockpit(function(a, b) {
+      return sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva')
+        .eq('tipo_ordine','cliente').neq('stato','annullato')
+        .gte('data',inizioMese).lte('data',oggiISO).range(a, b);
+    }),
+    _paginaCockpit(function(a, b) {
+      return sb.from('ordini').select('litri,costo_litro,trasporto_litro,margine,iva')
+        .eq('tipo_ordine','cliente').neq('stato','annullato')
+        .gte('data',inizioMesePrev).lte('data',fineMesePrev).range(a, b);
+    })
   ]);
   var ordMese = meseRes.data || [], ordPrev = prevRes.data || [];
 
