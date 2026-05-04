@@ -183,6 +183,14 @@ function scorriGiornoPrezzi(dir) {
   caricaPrezzi();
 }
 
+// Patch v20260503p: cambia filtro base listino prezzi e ricarica
+function setFiltroBaseListino(base) {
+  if (['tutte','vibo','milazzo'].indexOf(base) < 0) return;
+  window._filtroBaseListino = base;
+  try { localStorage.setItem('pf-listino-filtro-base', base); } catch(e) {}
+  caricaPrezzi();
+}
+
 async function caricaPrezzi() {
   // Carica fornitori/clienti solo se cache vuota
   if (!cacheFornitori.length) await caricaSelectFornitori('pr-fornitore');
@@ -252,8 +260,48 @@ async function caricaPrezzi() {
   }
 
   const tuttiPrezzi = [...righeDeposito, ...(data||[])];
+
+  // Patch v20260503p: filtro per base di carico
+  // _filtroBaseListino: 'tutte' (default) | 'vibo' | 'milazzo'
+  // Persistito in localStorage. PhoenixFuel deposito è considerato di Vibo Marina.
+  var _filtroBase = (typeof window._filtroBaseListino !== 'undefined' && window._filtroBaseListino) || localStorage.getItem('pf-listino-filtro-base') || 'tutte';
+  window._filtroBaseListino = _filtroBase;
+
+  function _basePerRiga(r) {
+    if (r._isDeposito) return 'vibo';   // PhoenixFuel deposito è fisicamente a Vibo Marina
+    var nome = (r.basi_carico && r.basi_carico.nome) ? r.basi_carico.nome.toLowerCase() : '';
+    if (nome.indexOf('vibo') >= 0) return 'vibo';
+    if (nome.indexOf('milazzo') >= 0) return 'milazzo';
+    return 'altre';
+  }
+
+  // Conteggi per badge bottoni (calcolati su tuttiPrezzi prima del filtro)
+  var conteggi = { tutte: tuttiPrezzi.length, vibo: 0, milazzo: 0 };
+  tuttiPrezzi.forEach(function(r) {
+    var b = _basePerRiga(r);
+    if (b === 'vibo') conteggi.vibo++;
+    else if (b === 'milazzo') conteggi.milazzo++;
+  });
+  // Aggiorna badge nei bottoni
+  var elT = document.getElementById('lp-cnt-tutte');     if (elT) elT.textContent = '(' + conteggi.tutte + ')';
+  var elV = document.getElementById('lp-cnt-vibo');      if (elV) elV.textContent = '(' + conteggi.vibo + ')';
+  var elM = document.getElementById('lp-cnt-milazzo');   if (elM) elM.textContent = '(' + conteggi.milazzo + ')';
+  // Stato visivo bottoni (active = blu pieno, altri = outline)
+  ['tutte','vibo','milazzo'].forEach(function(k) {
+    var b = document.getElementById('lp-fbase-' + k);
+    if (!b) return;
+    var attivo = (k === _filtroBase);
+    b.style.background = attivo ? '#378ADD' : 'var(--bg)';
+    b.style.color = attivo ? 'white' : 'var(--text)';
+    b.style.fontWeight = attivo ? '600' : '400';
+    b.style.border = attivo ? '0' : '0.5px solid var(--border)';
+  });
+
+  // Filtro effettivo
+  var prezziVisibili = (_filtroBase === 'tutte') ? tuttiPrezzi : tuttiPrezzi.filter(function(r) { return _basePerRiga(r) === _filtroBase; });
+
   const best = {};
-  tuttiPrezzi.forEach(r => { const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
+  prezziVisibili.forEach(r => { const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });
 
   // Genera tabelle prezzi dinamicamente dai prodotti
   const container = document.getElementById('container-tabelle-prezzi');
@@ -269,10 +317,10 @@ async function caricaPrezzi() {
     }).join('');
   }
 
-  // Raggruppa per prodotto
+  // Raggruppa per prodotto (usa prezziVisibili, non tuttiPrezzi)
   const perProdotto = {};
   Object.keys(tabMap).forEach(p => { perProdotto[p] = []; });
-  tuttiPrezzi.forEach(r => {
+  prezziVisibili.forEach(r => {
     if (tabMap[r.prodotto]) perProdotto[r.prodotto].push(r);
   });
 
