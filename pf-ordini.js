@@ -945,8 +945,8 @@ function _renderRigaOrdine(r) {
   var destHtml = r.destinazione ? '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '';
   // Calcolo prezzo netto = costo + trasporto + margine
   var pNetto = Number(r.costo_litro || 0) + Number(r.trasporto_litro || 0) + Number(r.margine || 0);
-  // Patch 30/04 (k): celle riallineate all'header (ordine: Trasporto/L | €/L netto | Margine/L | Prezzo/L IVA | Totale | Stato | Azioni)
-  return '<tr><td>' + fmtD(r.data) + badgeFuturo + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+  // Patch v20260503r: badge accoppiamento fattura sotto la data (display-only, no scrittura DB)
+  return '<tr><td style="vertical-align:top">' + fmtD(r.data) + badgeFuturo + _renderBadgeFatturaInline(r) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente) + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -977,6 +977,8 @@ async function caricaOrdiniGiorno() {
   }
   // Carica Set degli ordini che hanno DAS (qualsiasi tipo): blocca bottone annulla scarico/carico
   await _popolaOrdiniConDas(ordini.map(function(o){return o.id;}));
+  // Patch v20260503r: costruisco mappa accoppiamento fattura per badge inline
+  await _costruisciMappaAccoppiamenti(ordini);
   tbody.innerHTML = ordini.map(_renderRigaOrdine).join('');
   if (countEl) countEl.textContent = ordini.length + ' ordini';
 }
@@ -1342,7 +1344,9 @@ function _renderStoricoFiltrato() {
   var tbody = document.getElementById('tabella-storico-ordini');
   if (!filtrati.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine con questi filtri</td></tr>'; return; }
   // Popola cache DAS per bloccare bottone annulla scarico/carico sui già processati
-  _popolaOrdiniConDas(filtrati.map(function(o){return o.id;})).then(function() {
+  _popolaOrdiniConDas(filtrati.map(function(o){return o.id;})).then(async function() {
+    // Patch v20260503r: costruisco mappa accoppiamento fattura per badge inline
+    await _costruisciMappaAccoppiamenti(filtrati);
     tbody.innerHTML = filtrati.map(_renderRigaOrdine).join('');
   });
 }
@@ -2941,4 +2945,97 @@ function _xmlEsc(str) {
 function _codProdottoDanea(prodotto) {
   var map = { 'Gasolio Autotrazione':'GA', 'Benzina':'BZ', 'Gasolio Agricolo':'GAGR', 'HVO':'HVO' };
   return map[prodotto] || prodotto.substring(0, 4).toUpperCase();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// PATCH v20260503r — Badge accoppiamento fattura nella tabella ordini
+// Display-only: nessuna scrittura DB, solo lettura.
+// Reversibile: setta _SUBROW_ATTIVO a false per disabilitare istantaneamente.
+// ═══════════════════════════════════════════════════════════════════
+
+var _SUBROW_ATTIVO = true;
+var _mappaAccoppiamenti = {};
+
+// Per ogni ordine costruisce: ordine.id → { fatturaNum, anno, ordineDanea, anomaliaDoppia }
+async function _costruisciMappaAccoppiamenti(ordini) {
+  if (!_SUBROW_ATTIVO) { _mappaAccoppiamenti = {}; return; }
+  if (!ordini || !ordini.length) { _mappaAccoppiamenti = {}; return; }
+  try {
+    _mappaAccoppiamenti = {};
+
+    var ordiniConRiga = ordini.filter(function(o) { return o.fattura_riga_id; });
+    if (ordiniConRiga.length === 0) return;
+
+    var rigaIds = [];
+    var mapRigaToOrdine = {};
+    ordiniConRiga.forEach(function(o) {
+      if (rigaIds.indexOf(o.fattura_riga_id) < 0) rigaIds.push(o.fattura_riga_id);
+      if (!mapRigaToOrdine[o.fattura_riga_id]) mapRigaToOrdine[o.fattura_riga_id] = [];
+      mapRigaToOrdine[o.fattura_riga_id].push(o.id);
+    });
+
+    var righeData = [];
+    for (var i = 0; i < rigaIds.length; i += 200) {
+      var chunk = rigaIds.slice(i, i + 200);
+      var resR = await sb.from('fatture_righe')
+        .select('id,fattura_id,ordine_danea_numero,fatture_emesse(numero,anno)')
+        .in('id', chunk);
+      if (resR.error) { console.error('[mappa-accopp]', resR.error); continue; }
+      righeData = righeData.concat(resR.data || []);
+    }
+
+    var righeAnomale = new Set();
+    for (var j = 0; j < rigaIds.length; j += 200) {
+      var chunkR = rigaIds.slice(j, j + 200);
+      var resA = await sb.from('ordini')
+        .select('fattura_riga_id')
+        .in('fattura_riga_id', chunkR);
+      if (resA.error) { console.error('[mappa-accopp-anom]', resA.error); continue; }
+      var conteggi = {};
+      (resA.data || []).forEach(function(o) {
+        if (!o.fattura_riga_id) return;
+        conteggi[o.fattura_riga_id] = (conteggi[o.fattura_riga_id] || 0) + 1;
+      });
+      Object.keys(conteggi).forEach(function(rId) {
+        if (conteggi[rId] > 1) righeAnomale.add(rId);
+      });
+    }
+
+    righeData.forEach(function(rg) {
+      var ordIds = mapRigaToOrdine[rg.id] || [];
+      ordIds.forEach(function(ordId) {
+        _mappaAccoppiamenti[ordId] = {
+          fatturaNum: rg.fatture_emesse ? rg.fatture_emesse.numero : null,
+          anno: rg.fatture_emesse ? rg.fatture_emesse.anno : null,
+          fatturaId: rg.fattura_id,
+          ordineDanea: rg.ordine_danea_numero || null,
+          anomaliaDoppia: righeAnomale.has(rg.id)
+        };
+      });
+    });
+  } catch (e) {
+    console.error('[mappa-accopp]', e);
+    _mappaAccoppiamenti = {};
+  }
+}
+
+// Render badge inline per la cella data della riga ordine.
+function _renderBadgeFatturaInline(r) {
+  if (!_SUBROW_ATTIVO) return '';
+  if (r.tipo_ordine !== 'cliente' && r.tipo_ordine !== 'stazione_servizio') return '';
+  if (r.stato === 'annullato') return '';
+
+  var info = _mappaAccoppiamenti[r.id];
+  if (!info) {
+    return '<div style="margin-top:3px"><span style="display:inline-block;background:#FAEEDA;color:#633806;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:500">⚠ Senza fattura</span></div>';
+  }
+  if (info.anomaliaDoppia) {
+    var fat = info.fatturaNum ? esc(info.fatturaNum) : '?';
+    var ttl = "Anomalia: piu' ordini sulla stessa riga fattura. Apri Fatture > Allineamento > Diagnostica per riassegnare.";
+    return '<div style="margin-top:3px" title="' + ttl + '"><span style="display:inline-block;background:#FCEBEB;color:#501313;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:500;cursor:help">⚠ Anomalia Fatt ' + fat + '</span></div>';
+  }
+  var partiTesto = '🧾 Fatt ' + (info.fatturaNum ? esc(info.fatturaNum) : '?');
+  if (info.ordineDanea) partiTesto += ' · Ord ' + esc(info.ordineDanea);
+  return '<div style="margin-top:3px"><span style="display:inline-block;background:#EAF3DE;color:#173404;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:500">' + partiTesto + '</span></div>';
 }
