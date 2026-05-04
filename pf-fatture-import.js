@@ -2303,7 +2303,13 @@ async function _importFatturaSingola(f, batchId) {
     ordine_id: r._match?.ordine_id || null,       // "principale" (primo del subset N:1, o unico in 1:1)
     riga_match_score: r._match?.score ?? null,
     riga_match_details: r._match?.dettaglio ? r._match.dettaglio : null,
-    ignora_match: !!r._ignora_match,
+    // Patch v20260503n: auto-flag ignora_match per righe-note descrittive
+    // (es. "Rif. conferma d'ordine", "Consegna effettuata dal vettore...")
+    // Riconoscibili perché: senza prodotto normalizzato, OPPURE qta<=0, OPPURE prezzo<=0.
+    ignora_match: !!r._ignora_match
+                  || !r.prodotto_normalizzato
+                  || !(Number(r.quantita) > 0)
+                  || !(Number(r.prezzo_totale) > 0),
   }));
 
   let righeInsertite = [];

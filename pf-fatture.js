@@ -523,6 +523,8 @@ async function apriPaginaAllineamento(annoIniziale, meseIniziale) {
                    oninput="filtraAllineamento()" value="${_esc(filtri.cerca||'')}"
                    style="flex:1;min-width:180px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:11px">
             <button class="btn-primary" onclick="caricaAllineamento()" style="font-size:11px;padding:4px 10px">🔄 Ricarica</button>
+            <button onclick="allDiagSanaTutteLeNote()" title="Sanatoria globale: marca tutte le righe-nota (descrittive senza prodotto/qta/prezzo) come ignorate. Ripulisce lo storico import precedenti alla v20260503n."
+                    style="font-size:11px;padding:4px 10px;background:#4933C3;color:white;border:0;border-radius:4px;cursor:pointer">📝 Sana note</button>
           </div>
         </div>
 
@@ -2316,7 +2318,7 @@ async function allDiagnosticaFattura(fatturaId) {
 
     // 2. Carica TUTTE le righe della fattura
     const { data: righe, error: errR } = await sb.from('fatture_righe')
-      .select('id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+      .select('id,numero_linea,descrizione,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
       .eq('fattura_id', fatturaId)
       .order('numero_linea');
     if (errR) throw errR;
@@ -2346,36 +2348,55 @@ async function allDiagnosticaFattura(fatturaId) {
       .neq('id', fatturaId);
 
     // 5. Determina stato di ogni riga
+    // Patch v20260503n: distinguo le righe-note (descrittive senza prodotto/qta/prezzo)
+    //   dalle righe-prodotto vere. Le note non vengono contate come "orfane" nella diagnosi.
+    const _isNota = r => !r.prodotto_normalizzato || !(Number(r.quantita) > 0) || !(Number(r.prezzo_totale) > 0);
     const righeAnalizzate = (righe || []).map(r => {
       const ordPerQuestaRiga = ordini.filter(o => o.fattura_riga_id === r.id);
-      const stato = r.ignora_match ? 'ignorata'
-                  : ordPerQuestaRiga.length === 0 ? 'orfana'
-                  : ordPerQuestaRiga.length === 1 ? 'accoppiata'
-                  : 'doppia';
+      let stato;
+      if (_isNota(r)) {
+        stato = r.ignora_match ? 'nota_ok' : 'nota_da_ignorare';
+      } else if (r.ignora_match) {
+        stato = 'ignorata';
+      } else if (ordPerQuestaRiga.length === 0) {
+        stato = 'orfana';
+      } else if (ordPerQuestaRiga.length === 1) {
+        stato = 'accoppiata';
+      } else {
+        stato = 'doppia';
+      }
       return { ...r, _ordini: ordPerQuestaRiga, _stato: stato };
     });
 
-    // 6. Diagnosi automatica
+    // 6. Diagnosi automatica (basata SOLO su righe-prodotto, non su note)
     const ordiniLegacy = ordini.filter(o => o.fattura_id === fatturaId && !o.fattura_riga_id);
     const righeOrfane = righeAnalizzate.filter(r => r._stato === 'orfana');
     const righeAccoppiate = righeAnalizzate.filter(r => r._stato === 'accoppiata');
+    const noteVere = righeAnalizzate.filter(r => r._stato === 'nota_ok' || r._stato === 'nota_da_ignorare');
+    const noteDaIgnorare = righeAnalizzate.filter(r => r._stato === 'nota_da_ignorare');
+    const righeProdotto = righeAnalizzate.filter(r => !_isNota(r));
     let casoDiagnosticato = '';
     let diagnosi = '';
     if ((omonime || []).length > 0) {
       casoDiagnosticato = 'C';
-      diagnosi = `Trovate ${omonime.length} altre fatture con numero "${f.numero}". La 275 mostrata in elenco potrebbe non essere quella che hai accoppiato.`;
+      diagnosi = `Trovate ${omonime.length} altre fatture con numero "${f.numero}". La fattura mostrata in elenco potrebbe non essere quella che hai accoppiato.`;
     } else if (ordiniLegacy.length > 0 && righeOrfane.length > 0) {
       casoDiagnosticato = 'B';
       diagnosi = `${ordiniLegacy.length} ordine/i collegato/i alla fattura ma SENZA fattura_riga_id (legame "vecchio stile"). Sotto il bottone "🔧 Riallinea" abbina automaticamente questi ordini alle righe orfane.`;
     } else if (righeOrfane.length > 0 && righeAccoppiate.length > 0) {
       casoDiagnosticato = 'A';
-      diagnosi = `Fattura con ${righe.length} righe: ${righeAccoppiate.length} già accoppiata/e, ${righeOrfane.length} orfana/e. Per ogni orfana puoi accoppiare manualmente, ignorare o creare l'ordine PhoenixFuel.`;
-    } else if (righeOrfane.length === righe.length) {
+      diagnosi = `Fattura con ${righeProdotto.length} righe-prodotto: ${righeAccoppiate.length} già accoppiata/e, ${righeOrfane.length} orfana/e. Per ogni orfana puoi accoppiare manualmente, ignorare o creare l'ordine PhoenixFuel.`;
+    } else if (righeProdotto.length > 0 && righeOrfane.length === righeProdotto.length) {
       casoDiagnosticato = 'D';
-      diagnosi = `Tutte le ${righe.length} righe sono orfane. Nessun accoppiamento esistente. Usa il pannello allineamento sopra per accoppiare.`;
+      diagnosi = `Tutte le ${righeProdotto.length} righe-prodotto sono orfane. Nessun accoppiamento esistente. Usa il pannello allineamento sopra per accoppiare.`;
     } else {
       casoDiagnosticato = 'OK';
-      diagnosi = `Nessuna anomalia rilevata: ${righeAccoppiate.length}/${righe.length} righe accoppiate correttamente.`;
+      const partiOk = `${righeAccoppiate.length}/${righeProdotto.length} righe-prodotto accoppiate`;
+      const partiNote = noteVere.length > 0 ? ` · ${noteVere.length} riga/he descrittiva/e (note)` : '';
+      diagnosi = `Nessuna anomalia rilevata: ${partiOk}${partiNote}.`;
+    }
+    if (noteDaIgnorare.length > 0 && casoDiagnosticato === 'OK') {
+      diagnosi += ` Trovate ${noteDaIgnorare.length} note non ancora marcate come ignorate (sotto il pulsante 📝 le pulisci tutte).`;
     }
 
     // 7. Render popup
@@ -2396,12 +2417,25 @@ function _allDiagRenderPopup(d) {
   const f = d.fattura;
   const totRighe = d.righe.reduce((s,r) => s + Number(r.prezzo_totale||0), 0);
   const colorCaso = { 'A':'#0E6F8E', 'B':'#C97A1F', 'C':'#A32D2D', 'D':'#A32D2D', 'OK':'#3F7D1F' }[d.casoDiagnosticato] || '#0E6F8E';
+  const noteDaIgnorare = d.righe.filter(r => r._stato === 'nota_da_ignorare');
 
   let righeHtml = '';
   d.righe.forEach(r => {
     let badge = '';
     let azioni = '';
-    if (r._stato === 'accoppiata') {
+    if (r._stato === 'nota_ok') {
+      // Riga descrittiva (nota) già correttamente marcata come ignorata
+      badge = `<span style="background:#EEEDFE;color:#4933C3;padding:2px 6px;border-radius:3px;font-size:10px">📝 Nota</span>`;
+      const t = (r.descrizione || '').substring(0, 200);
+      azioni = `<div style="font-size:10px;color:#666;margin-top:3px;font-style:italic">${_esc(t)}${(r.descrizione||'').length > 200 ? '…' : ''}</div>`;
+    } else if (r._stato === 'nota_da_ignorare') {
+      // Riga descrittiva (nota) NON ancora marcata come ignorata
+      badge = `<span style="background:#FAEEDA;color:#7A5316;padding:2px 6px;border-radius:3px;font-size:10px">📝 Nota da ignorare</span>`;
+      const t = (r.descrizione || '').substring(0, 200);
+      azioni = `<div style="font-size:10px;color:#7A5316;margin-top:3px;font-style:italic">${_esc(t)}${(r.descrizione||'').length > 200 ? '…' : ''}</div>
+        <button onclick="allDiagIgnora('${r.id}','${f.id}')" title="Marca questa nota come ignorata"
+                style="background:#7A5316;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;margin-top:3px;cursor:pointer">🚫 Marca come ignorata</button>`;
+    } else if (r._stato === 'accoppiata') {
       const o = r._ordini[0];
       badge = `<span style="background:#E8F3DE;color:#3F7D1F;padding:2px 6px;border-radius:3px;font-size:10px">✅ Accoppiata</span>`;
       azioni = `<div style="font-size:10px;color:#666;margin-top:3px">Ordine: ${_fmtD(o.data)} · ${_esc((o.cliente||'').substring(0,30))} · ${Number(o.litri||0).toLocaleString('it-IT')} L
@@ -2434,7 +2468,7 @@ function _allDiagRenderPopup(d) {
       <div style="border:1px solid #e8e5dc;border-radius:5px;padding:6px 8px;margin-bottom:6px;background:white">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
           <div style="flex:1;min-width:0">
-            <div style="font-size:11px;font-weight:600;color:#26215C">Riga #${r.numero_linea || '?'} · ${_esc(r.prodotto_normalizzato||'?')}</div>
+            <div style="font-size:11px;font-weight:600;color:#26215C">Riga #${r.numero_linea || '?'} · ${_esc(r.prodotto_normalizzato||'(descrittiva)')}</div>
             <div style="font-size:10px;color:#666;font-family:monospace;margin-top:1px">${Number(r.quantita||0).toLocaleString('it-IT')} L · ${_fmtE(r.prezzo_totale||0)}</div>
           </div>
           <div style="flex-shrink:0">${badge}</div>
@@ -2470,6 +2504,18 @@ function _allDiagRenderPopup(d) {
     `;
   }
 
+  // Patch v20260503n: bottone "marca tutte le note" se presenti note non ancora ignorate
+  let azioneNote = '';
+  if (noteDaIgnorare.length > 0) {
+    azioneNote = `
+      <div style="background:#EEEDFE;border:1px solid #C8C2F0;border-radius:5px;padding:8px;margin:8px 0">
+        <div style="font-size:11px;font-weight:600;color:#4933C3;margin-bottom:6px">📝 ${noteDaIgnorare.length} riga/he descrittiva/e (note) non ancora marcate come ignorate</div>
+        <div style="font-size:10px;color:#4933C3;margin-bottom:6px">Sono righe testuali importate da Danea (es. "Rif. conferma d'ordine", "Consegna effettuata dal vettore..."), non vere righe-prodotto. Le marco tutte come ignorate?</div>
+        <button onclick="allDiagMarcaNoteFattura('${f.id}')" style="background:#4933C3;color:white;border:0;border-radius:4px;padding:5px 10px;font-size:10px;cursor:pointer;font-weight:600">📝 Marca tutte come ignorate</button>
+      </div>
+    `;
+  }
+
   document.body.insertAdjacentHTML('beforeend', `
     <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
       <div style="background:#FAFAF7;border-radius:8px;padding:0;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.3)">
@@ -2487,6 +2533,7 @@ function _allDiagRenderPopup(d) {
           </div>
           ${omonimeHtml}
           ${azioneCasoB}
+          ${azioneNote}
           <div style="font-size:11px;font-weight:600;color:#26215C;margin:10px 0 6px">Righe della fattura (${d.righe.length}) · Totale ${_fmtE(totRighe)}</div>
           ${righeHtml}
         </div>
@@ -2648,3 +2695,68 @@ async function allDiagRiparaCasoB(fatturaId) {
     console.error('[ripara-B]', e);
   }
 }
+
+
+// Patch v20260503n: marca tutte le righe-nota di UNA fattura come ignora_match=true
+async function allDiagMarcaNoteFattura(fatturaId) {
+  if (!confirm('Marcare tutte le righe descrittive di questa fattura come ignorate?\n\nSono righe testuali importate da Danea senza prodotto/quantità/prezzo (note di consegna, riferimenti d\'ordine, ecc.). Vengono considerate righe-prodotto vere per errore.')) return;
+  try {
+    // Carica tutte le righe della fattura
+    const { data: righe, error: errR } = await sb.from('fatture_righe')
+      .select('id,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+      .eq('fattura_id', fatturaId);
+    if (errR) throw errR;
+
+    const daMarcare = (righe||[]).filter(r =>
+      !r.ignora_match &&
+      (!r.prodotto_normalizzato || !(Number(r.quantita) > 0) || !(Number(r.prezzo_totale) > 0))
+    );
+
+    if (daMarcare.length === 0) {
+      toast('Nessuna nota da marcare');
+      return;
+    }
+
+    const ids = daMarcare.map(r => r.id);
+    const { error: errU } = await sb.from('fatture_righe')
+      .update({ ignora_match: true })
+      .in('id', ids);
+    if (errU) throw errU;
+
+    toast(`✅ ${daMarcare.length} note marcate come ignorate`);
+    document.getElementById('diag-overlay')?.remove();
+    await allDiagnosticaFattura(fatturaId);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) {
+    toast('Errore: ' + e.message);
+    console.error('[marca-note]', e);
+  }
+}
+
+
+// Patch v20260503n: sanatoria globale storico — marca TUTTE le righe-nota di TUTTE le fatture come ignora_match=true.
+// Esposta su window per essere chiamabile da admin / console; si può anche cablare un bottone in admin.
+async function allDiagSanaTutteLeNote() {
+  // Conteggio preventivo
+  const { count: nDaMarcare, error: errC } = await sb.from('fatture_righe')
+    .select('id', { count: 'exact', head: true })
+    .eq('ignora_match', false)
+    .or('prodotto_normalizzato.is.null,quantita.is.null,quantita.lte.0,prezzo_totale.is.null,prezzo_totale.lte.0');
+  if (errC) { toast('Errore conteggio: ' + errC.message); return; }
+  if (!nDaMarcare || nDaMarcare === 0) { toast('Nessuna nota da sanare nello storico'); return; }
+  if (!confirm(`Sanatoria globale storico: marcare ${nDaMarcare} righe-nota come ignorate?\n\nSi tratta di righe testuali (note descrittive Danea) senza prodotto/quantità/prezzo.\nNon influisce sulle righe-prodotto reali.\n\nProcedere?`)) return;
+  try {
+    // UPDATE diretto - Supabase consente .or() con .update()
+    const { error: errU } = await sb.from('fatture_righe')
+      .update({ ignora_match: true })
+      .eq('ignora_match', false)
+      .or('prodotto_normalizzato.is.null,quantita.is.null,quantita.lte.0,prezzo_totale.is.null,prezzo_totale.lte.0');
+    if (errU) throw errU;
+    toast(`✅ Sanatoria completata: ${nDaMarcare} righe-nota marcate`);
+    if (typeof caricaAllineamento === 'function') caricaAllineamento();
+  } catch (e) {
+    toast('Errore sanatoria: ' + e.message);
+    console.error('[sana-note]', e);
+  }
+}
+window.allDiagSanaTutteLeNote = allDiagSanaTutteLeNote;
