@@ -1930,7 +1930,8 @@ async function caricaConfigFatture(){
   const stato = document.getElementById('cfg-fatt-stato');
 
   // Leggi config esistente
-  const { data: cfg } = await sb.from('fatture_config').select('*').eq('anno', anno).single();
+  // Patch v20260503n: maybeSingle invece di single (evita 406 se nessuna config per l'anno)
+  const { data: cfg } = await sb.from('fatture_config').select('*').eq('anno', anno).maybeSingle();
   const numInput = document.getElementById('cfg-fatt-numero');
   if(cfg && numInput) numInput.value = cfg.numero_iniziale;
   else if(numInput) numInput.value = '';
@@ -1991,7 +1992,7 @@ async function salvaConfigFatture(){
     .eq('anno', anno)
     .order('numero', {ascending:false})
     .limit(1)
-    .single();
+    .maybeSingle();
 
   const maxEmesso = maxRow?.numero || 0;
   if(numero <= maxEmesso){
@@ -2013,19 +2014,20 @@ async function salvaConfigFatture(){
 // Override: calcola prossimo numero tenendo conto dell'offset Danea
 async function _prossimoNumeroFattura(anno){
   // Max già emesso nel db
+  // Patch v20260503n: maybeSingle invece di single (evita 406 se nessuna fattura emessa nell'anno)
   const { data: maxRow } = await sb.from('fatture')
     .select('numero')
     .eq('anno', anno)
     .order('numero', {ascending:false})
     .limit(1)
-    .single();
+    .maybeSingle();
   const maxEmesso = maxRow?.numero || 0;
 
   // Config offset Danea
   const { data: cfg } = await sb.from('fatture_config')
     .select('numero_iniziale')
     .eq('anno', anno)
-    .single();
+    .maybeSingle();
   const offset = cfg?.numero_iniziale || 1;
 
   return Math.max(maxEmesso + 1, offset);
@@ -2305,7 +2307,7 @@ async function allDiagnosticaFattura(fatturaId) {
   const oldOverlay = document.getElementById('diag-overlay');
   if (oldOverlay) oldOverlay.remove();
   document.body.insertAdjacentHTML('beforeend', `
-    <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center">
       <div style="background:white;padding:20px 30px;border-radius:8px;font-family:system-ui;font-size:13px">⏳ Analisi in corso…</div>
     </div>
   `);
@@ -2517,7 +2519,7 @@ function _allDiagRenderPopup(d) {
   }
 
   document.body.insertAdjacentHTML('beforeend', `
-    <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
+    <div id="diag-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px">
       <div style="background:#FAFAF7;border-radius:8px;padding:0;max-width:680px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.3)">
         <div style="background:${colorCaso};color:white;padding:12px 16px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
           <div>
@@ -2698,8 +2700,8 @@ async function allDiagRiparaCasoB(fatturaId) {
 
 
 // Patch v20260503n: marca tutte le righe-nota di UNA fattura come ignora_match=true
+// SAFETY v20260503o: skip righe con ordini collegati via fattura_riga_id (anche se sembrano note)
 async function allDiagMarcaNoteFattura(fatturaId) {
-  if (!confirm('Marcare tutte le righe descrittive di questa fattura come ignorate?\n\nSono righe testuali importate da Danea senza prodotto/quantità/prezzo (note di consegna, riferimenti d\'ordine, ecc.). Vengono considerate righe-prodotto vere per errore.')) return;
   try {
     // Carica tutte le righe della fattura
     const { data: righe, error: errR } = await sb.from('fatture_righe')
@@ -2707,23 +2709,49 @@ async function allDiagMarcaNoteFattura(fatturaId) {
       .eq('fattura_id', fatturaId);
     if (errR) throw errR;
 
-    const daMarcare = (righe||[]).filter(r =>
+    // Candidate: righe-nota non già ignorate
+    const candidate = (righe||[]).filter(r =>
       !r.ignora_match &&
       (!r.prodotto_normalizzato || !(Number(r.quantita) > 0) || !(Number(r.prezzo_totale) > 0))
     );
 
-    if (daMarcare.length === 0) {
+    if (candidate.length === 0) {
       toast('Nessuna nota da marcare');
       return;
     }
 
-    const ids = daMarcare.map(r => r.id);
+    // SAFETY v20260503o: tra le candidate, escludi quelle con ordini collegati via fattura_riga_id.
+    // Una "riga-nota" che ha un ordine puntante non va toccata (caso anomalo, ma se esiste rispettiamolo).
+    const candIds = candidate.map(r => r.id);
+    const { data: ordCollegati } = await sb.from('ordini')
+      .select('fattura_riga_id')
+      .in('fattura_riga_id', candIds);
+    const idsCollegati = new Set((ordCollegati || []).map(o => o.fattura_riga_id));
+
+    const sicure = candidate.filter(r => !idsCollegati.has(r.id));
+    const protette = candidate.filter(r => idsCollegati.has(r.id));
+
+    if (sicure.length === 0) {
+      toast(`⚠ Nessuna nota da marcare: tutte le ${protette.length} candidate hanno ordini collegati e sono protette`);
+      return;
+    }
+
+    let msg = `Marcare ${sicure.length} riga/he descrittiva/e di questa fattura come ignorate?`;
+    if (protette.length > 0) {
+      msg += `\n\n⚠ ${protette.length} altra/e candidata/e SARÀ SALTATA per sicurezza (ha ordine collegato).`;
+    }
+    msg += `\n\nProcedere?`;
+    if (!confirm(msg)) return;
+
+    const ids = sicure.map(r => r.id);
     const { error: errU } = await sb.from('fatture_righe')
       .update({ ignora_match: true })
       .in('id', ids);
     if (errU) throw errU;
 
-    toast(`✅ ${daMarcare.length} note marcate come ignorate`);
+    let toastMsg = `✅ ${sicure.length} note marcate come ignorate`;
+    if (protette.length > 0) toastMsg += ` · ${protette.length} saltate (avevano ordini collegati)`;
+    toast(toastMsg);
     document.getElementById('diag-overlay')?.remove();
     await allDiagnosticaFattura(fatturaId);
     if (typeof caricaAllineamento === 'function') caricaAllineamento();
@@ -2735,24 +2763,76 @@ async function allDiagMarcaNoteFattura(fatturaId) {
 
 
 // Patch v20260503n: sanatoria globale storico — marca TUTTE le righe-nota di TUTTE le fatture come ignora_match=true.
-// Esposta su window per essere chiamabile da admin / console; si può anche cablare un bottone in admin.
+// SAFETY v20260503o: skip righe con ordini collegati via fattura_riga_id (anche se sembrano note).
+// Approccio: SELECT righe candidate (paginazione 1000), filtro JS (gestisce NULL), check ordini collegati, UPDATE chunks da 200.
 async function allDiagSanaTutteLeNote() {
-  // Conteggio preventivo
-  const { count: nDaMarcare, error: errC } = await sb.from('fatture_righe')
-    .select('id', { count: 'exact', head: true })
-    .eq('ignora_match', false)
-    .or('prodotto_normalizzato.is.null,quantita.is.null,quantita.lte.0,prezzo_totale.is.null,prezzo_totale.lte.0');
-  if (errC) { toast('Errore conteggio: ' + errC.message); return; }
-  if (!nDaMarcare || nDaMarcare === 0) { toast('Nessuna nota da sanare nello storico'); return; }
-  if (!confirm(`Sanatoria globale storico: marcare ${nDaMarcare} righe-nota come ignorate?\n\nSi tratta di righe testuali (note descrittive Danea) senza prodotto/quantità/prezzo.\nNon influisce sulle righe-prodotto reali.\n\nProcedere?`)) return;
   try {
-    // UPDATE diretto - Supabase consente .or() con .update()
-    const { error: errU } = await sb.from('fatture_righe')
-      .update({ ignora_match: true })
-      .eq('ignora_match', false)
-      .or('prodotto_normalizzato.is.null,quantita.is.null,quantita.lte.0,prezzo_totale.is.null,prezzo_totale.lte.0');
-    if (errU) throw errU;
-    toast(`✅ Sanatoria completata: ${nDaMarcare} righe-nota marcate`);
+    // 1. Carico tutte le righe con ignora_match=false (paginate per sicurezza)
+    let candidate = [];
+    let from = 0; const batch = 1000;
+    while (true) {
+      const { data, error } = await sb.from('fatture_righe')
+        .select('id,prodotto_normalizzato,quantita,prezzo_totale')
+        .eq('ignora_match', false)
+        .range(from, from + batch - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      candidate = candidate.concat(data);
+      if (data.length < batch) break;
+      from += batch;
+    }
+
+    // 2. Filtro lato JS: solo le righe-nota (no prodotto, no qta, no prezzo)
+    const note = candidate.filter(r =>
+      !r.prodotto_normalizzato
+      || r.quantita == null || Number(r.quantita) <= 0
+      || r.prezzo_totale == null || Number(r.prezzo_totale) <= 0
+    );
+
+    if (note.length === 0) { toast('Nessuna nota da sanare nello storico'); return; }
+
+    // 3. SAFETY v20260503o: escludi righe-nota con ordini collegati via fattura_riga_id.
+    //    Le note non dovrebbero avere ordini, ma se per qualche caso anomalo ne hanno, NON le tocchiamo.
+    //    Query batch in chunks da 500 ID per non superare limiti URL.
+    const noteIds = note.map(r => r.id);
+    const idsCollegati = new Set();
+    for (let i = 0; i < noteIds.length; i += 500) {
+      const chunkIds = noteIds.slice(i, i + 500);
+      const { data: oCol, error: errOC } = await sb.from('ordini')
+        .select('fattura_riga_id')
+        .in('fattura_riga_id', chunkIds);
+      if (errOC) throw errOC;
+      (oCol || []).forEach(o => { if (o.fattura_riga_id) idsCollegati.add(o.fattura_riga_id); });
+    }
+
+    const sicure = note.filter(r => !idsCollegati.has(r.id));
+    const protette = note.filter(r => idsCollegati.has(r.id));
+
+    if (sicure.length === 0) {
+      toast(`⚠ Nessuna nota sanabile: tutte le ${protette.length} candidate hanno ordini collegati e sono protette`);
+      return;
+    }
+
+    let msg = `Sanatoria globale storico: marcare ${sicure.length} righe-nota come ignorate?`;
+    if (protette.length > 0) {
+      msg += `\n\n⚠ ${protette.length} riga/he aggiuntiva/e SARANNO SALTATE per sicurezza (hanno ordini collegati). Verranno mostrate nel popup diagnostica per analisi singola.`;
+    }
+    msg += `\n\nNon influisce sulle righe-prodotto reali (con quantità+prezzo).\n\nProcedere?`;
+    if (!confirm(msg)) return;
+
+    // 4. UPDATE in chunks da 200 ID
+    const ids = sicure.map(r => r.id);
+    let nDone = 0, nErr = 0;
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { error } = await sb.from('fatture_righe').update({ ignora_match: true }).in('id', chunk);
+      if (error) { nErr++; console.error('[sana-note] chunk ' + i + ':', error); }
+      else nDone += chunk.length;
+    }
+
+    let toastMsg = nErr ? `✅ Marcate ${nDone}/${ids.length} righe · ${nErr} chunk in errore (vedi console)` : `✅ Sanatoria completata: ${nDone} righe-nota marcate`;
+    if (protette.length > 0) toastMsg += ` · ${protette.length} protette (avevano ordini collegati)`;
+    toast(toastMsg);
     if (typeof caricaAllineamento === 'function') caricaAllineamento();
   } catch (e) {
     toast('Errore sanatoria: ' + e.message);
