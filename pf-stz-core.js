@@ -143,6 +143,127 @@ async function caricaOrdiniDaCaricare() {
   el.innerHTML = html;
 }
 
+// ── Card "Ordini ricevuti recentemente" con bottone ↩ Annulla ricezione ──
+async function caricaOrdiniRicevutiRecenti() {
+  // Mostra ricezioni stazione effettuate negli ultimi 30 giorni, ordinate dalla più recente,
+  // con bottone per annullare la ricezione (rimette ricevuto_stazione=false e scarica le cisterne).
+  const el = document.getElementById('stz-ricevuti-recenti');
+  if (!el) return;
+  var oggi = new Date();
+  var limite = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() - 30);
+  var limiteISO = limite.toISOString().split('T')[0];
+  const { data: ordini } = await sb.from('ordini')
+    .select('id,data,prodotto,litri,fornitore,stato')
+    .eq('tipo_ordine','stazione_servizio')
+    .eq('ricevuto_stazione', true)
+    .gte('data', limiteISO)
+    .order('data', { ascending: false })
+    .limit(20);
+  if (!ordini || !ordini.length) { el.innerHTML = ''; return; }
+  let html = '<div class="card" style="border-left:4px solid #888;margin-top:12px">';
+  html += '<div class="card-title" style="color:#666">✓ Ordini ricevuti recentemente — ultimi 30 giorni (' + ordini.length + ')</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th></th></tr></thead><tbody>';
+  ordini.forEach(function(r) {
+    const dataFmt = new Date(r.data).toLocaleDateString('it-IT');
+    const _pi = cacheProdotti.find(function(p) { return p.nome === r.prodotto; });
+    const colore = _pi ? _pi.colore : '#888';
+    html += '<tr>' +
+      '<td>' + dataFmt + '</td>' +
+      '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
+      '<td>' + esc(r.fornitore || '—') + '</td>' +
+      '<td><button class="btn-secondary" style="font-size:11px;padding:4px 10px;color:#a04020;border-color:#d4a090;background:#fff5f0" onclick="annullaRicezioneStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto).replace(/'/g, "\\'") + '\')" title="Riporta l\'ordine in elenco da ricevere e scarica i litri dalle cisterne">↩ Annulla ricezione</button></td>' +
+      '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+  el.innerHTML = html;
+}
+
+// ── Annullamento ricezione: scarica cisterne, ripristina CMP precedente, marca ordine non ricevuto ──
+async function annullaRicezioneStazione(ordineId, litri, prodotto) {
+  if (!confirm('Annullare la ricezione di ' + fmtL(litri) + ' L di ' + prodotto + '?\n\n' +
+    'L\'ordine tornerà nell\'elenco "Da ricevere" e i litri verranno sottratti dalle cisterne stazione.\n' +
+    'Il CMP delle cisterne sarà riportato al valore precedente al carico.')) return;
+
+  try {
+    // 1. Recupero il record storico CMP per quest'ordine (contiene cmp_precedente e litri_caricati)
+    const { data: storico } = await sb.from('stazione_cmp_storico')
+      .select('id,cmp_precedente,litri_caricati,prodotto,sede')
+      .eq('ordine_id', ordineId)
+      .eq('sede', 'stazione_oppido')
+      .single();
+    if (!storico) {
+      // Ordine ricevuto senza record storico (forse vecchio, o già annullato): rimetto solo flag
+      await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
+      toast('⚠ Ricezione annullata (nessun storico CMP da ripristinare)');
+      caricaStazioneDashboard();
+      return;
+    }
+    const litriCaricati = Number(storico.litri_caricati);
+    const cmpPrecedente = Number(storico.cmp_precedente);
+
+    // 2. Carico le cisterne di quel prodotto + stazione
+    const { data: cisterne } = await sb.from('cisterne')
+      .select('id,nome,livello_attuale,capacita_max')
+      .eq('sede', 'stazione_oppido')
+      .eq('prodotto', prodotto);
+    if (!cisterne || !cisterne.length) {
+      toast('Errore: nessuna cisterna trovata per ' + prodotto);
+      return;
+    }
+
+    // 3. Sottrazione proporzionale ai livelli attuali
+    //    (best effort: se una cisterna ha meno livello del dovuto, levo solo il disponibile e sposto il resto sulle altre)
+    let totaleAttuale = 0;
+    cisterne.forEach(function(c) { totaleAttuale += Number(c.livello_attuale || 0); });
+    if (totaleAttuale <= 0) {
+      toast('Errore: cisterne vuote, impossibile annullare ricezione');
+      return;
+    }
+    const updates = [];
+    let residuoDaScaricare = litriCaricati;
+    cisterne.forEach(function(c) {
+      const livAtt = Number(c.livello_attuale || 0);
+      // Quota proporzionale al livello attuale di questa cisterna
+      const quotaProp = totaleAttuale > 0 ? (livAtt / totaleAttuale) * litriCaricati : 0;
+      const daScaricare = Math.min(quotaProp, livAtt, residuoDaScaricare);
+      const nuovoLivello = Math.max(0, livAtt - daScaricare);
+      residuoDaScaricare -= daScaricare;
+      updates.push({ id: c.id, nuovo: nuovoLivello });
+    });
+    // Se rimane residuo (per imprecisioni), lo levo dalla cisterna più piena
+    if (residuoDaScaricare > 0.5) {
+      updates.sort(function(a, b) { return b.nuovo - a.nuovo; });
+      updates[0].nuovo = Math.max(0, updates[0].nuovo - residuoDaScaricare);
+    }
+
+    // 4. UPDATE cisterne: livelli + CMP ripristinato a cmp_precedente
+    const updPromises = updates.map(function(u) {
+      return sb.from('cisterne')
+        .update({ livello_attuale: u.nuovo, costo_medio: cmpPrecedente, updated_at: new Date().toISOString() })
+        .eq('id', u.id);
+    });
+    const updResults = await Promise.all(updPromises);
+    const errUpd = updResults.find(function(r) { return r && r.error; });
+    if (errUpd) { toast('Errore aggiornamento cisterne: ' + errUpd.error.message); return; }
+
+    // 5. DELETE record stazione_cmp_storico
+    const delRes = await sb.from('stazione_cmp_storico').delete().eq('id', storico.id);
+    if (delRes.error) console.warn('[annullaRicezione] errore delete cmp_storico:', delRes.error);
+
+    // 6. UPDATE ordine: ricevuto_stazione = false
+    const ordRes = await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
+    if (ordRes.error) { toast('Errore: ' + ordRes.error.message); return; }
+
+    if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
+    toast('✅ Ricezione annullata · ' + fmtL(litriCaricati) + ' L scaricati · CMP ripristinato € ' + cmpPrecedente.toFixed(4));
+    caricaStazioneDashboard();
+  } catch (e) {
+    console.error('[annullaRicezioneStazione] errore:', e);
+    toast('Errore: ' + (e.message || e));
+  }
+}
+
 async function riceviOrdineStazione(ordineId, litri, prodotto) {
   // Trova cisterne stazione per questo prodotto
   const { data: cisterne } = await sb.from('cisterne').select('*').eq('sede','stazione_oppido').eq('prodotto',prodotto).order('nome');
@@ -316,6 +437,7 @@ function _destroyStzDashCharts() { Object.values(_stzDashCharts).forEach(c=>c.de
 
 async function caricaStazioneDashboard() {
   await caricaOrdiniDaCaricare();
+  await caricaOrdiniRicevutiRecenti();
 
   // Auto-heal cisterne stazione: riallinea alla cascata pfData per ogni prodotto
   // (analogo alla sentinella deposito - garantisce che la dashboard mostri sempre dati canonici)
