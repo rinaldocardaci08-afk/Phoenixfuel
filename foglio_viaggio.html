@@ -8,57 +8,57 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
   .page { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
-  @media print { .page { margin: 0; page-break-after: always; } .no-print { display: none; } }
+  @media print { .page { margin: 0; page-break-after: always; } .page:last-child { page-break-after: auto; } .no-print { display: none; } }
 
-  /* HEADER */
-  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 10px; }
+  .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 8px; }
   .header-logo { max-height: 50px; }
   .header-date { font-size: 13px; font-weight: bold; }
 
-  /* INFO CAMION */
-  .truck-info { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; border: 1px solid #ccc; margin-bottom: 10px; }
-  .truck-cell { padding: 4px 6px; border-right: 1px solid #ccc; }
+  .truck-info { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; border: 1px solid #ccc; margin-bottom: 8px; }
+  .truck-cell { padding: 3px 6px; border-right: 1px solid #ccc; }
   .truck-cell:last-child { border-right: none; }
   .truck-label { font-size: 9px; color: #3a7abf; font-weight: bold; display: block; }
   .truck-value { font-size: 11px; font-weight: bold; }
 
-  /* CONSEGNA */
-  .consegna { border: 1px solid #ccc; margin-bottom: 8px; }
-  .consegna-header { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; background: #d0e4f7; padding: 3px 6px; gap: 4px; }
-  .consegna-header span { font-size: 9px; font-weight: bold; color: #3a7abf; }
-  .consegna-row1 { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; padding: 4px 6px; gap: 4px; border-bottom: 1px solid #eee; }
-  .consegna-row1 span { font-size: 12px; font-weight: bold; }
-  .consegna-addr-header { display: grid; grid-template-columns: 2fr 60px 60px 1fr 1fr; background: #d0e4f7; padding: 2px 6px; gap: 4px; }
-  .consegna-addr-header span { font-size: 9px; font-weight: bold; color: #3a7abf; }
-  .consegna-addr-row { display: grid; grid-template-columns: 2fr 60px 60px 1fr 1fr; padding: 4px 6px; gap: 4px; }
-  .consegna-addr-row span { font-size: 11px; }
-  .note-row { padding: 3px 6px; font-size: 10px; color: #555; border-top: 1px dashed #ddd; }
-  .seq-badge { display: inline-block; background: #3a7abf; color: #fff; border-radius: 50%; width: 18px; height: 18px; text-align: center; line-height: 18px; font-size: 9px; font-weight: bold; margin-right: 4px; }
+  .consegne-table { width: 100%; border-collapse: collapse; border: 1px solid #ccc; margin-bottom: 8px; }
+  .consegne-table thead { background: #d0e4f7; }
+  .consegne-table th { padding: 4px 6px; font-size: 9px; color: #3a7abf; font-weight: bold; text-align: left; border-right: 1px solid #b8d4ee; }
+  .consegne-table th:last-child { border-right: none; }
+  .consegne-table th.num-col { text-align: right; }
+  .consegne-table th.seq-col { width: 28px; text-align: center; }
+  .consegne-table th.tel-col { width: 95px; }
+  .consegne-table th.qta-col { width: 70px; }
 
-  /* PAGINA 2 */
-  .p2-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 6px; }
-  .orari-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .consegna-data td { padding: 4px 6px; font-size: 11px; font-weight: bold; border-top: 1px solid #ccc; vertical-align: middle; }
+  .consegna-data td.num-col { text-align: right; white-space: nowrap; color: #1a3a5a; }
+  .consegna-data td.seq-col { text-align: center; }
+  .consegna-data .seq-badge { display: inline-block; background: #3a7abf; color: #fff; border-radius: 50%; width: 20px; height: 20px; text-align: center; line-height: 20px; font-size: 10px; font-weight: bold; }
+  .consegna-data .sede-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 500; background: #EEEDFE; color: #26215C; margin-left: 6px; }
+
+  .consegna-addr td { padding: 1px 6px 4px 36px; font-size: 10px; color: #444; font-weight: normal; }
+  .consegna-addr .addr-pin { color: #c00; font-weight: bold; margin-right: 4px; }
+  .consegna-note td { padding: 2px 6px 4px 36px; font-size: 10px; color: #555; font-style: italic; background: #fafaf7; }
+
+  .p2-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; border-bottom: 2px solid #000; padding-bottom: 6px; }
+  .orari-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
   .orari-field { display: flex; align-items: center; gap: 8px; }
   .orari-label { font-size: 10px; color: #3a7abf; font-weight: bold; white-space: nowrap; }
   .orari-box { border: 1px solid #3a7abf; min-width: 80px; height: 20px; display: inline-block; }
 
-  /* GRAFICA CAMION */
-  .truck-graphic { margin: 10px 0; }
-  .truck-svg { width: 100%; }
+  .truck-graphic { margin: 8px 0; }
+  .truck-svg { width: 100%; display: block; }
+  .truck-cap-info { font-size: 10px; color: #555; margin-top: 4px; padding-left: 4px; }
 
-  /* LEGENDA */
-  .legenda { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; font-size: 10px; }
+  .legenda { display: flex; flex-wrap: wrap; gap: 12px; margin: 6px 0; font-size: 10px; }
   .legenda-item { display: flex; align-items: center; gap: 4px; }
   .legenda-dot { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #999; }
 
-  /* TOTALI */
-  .totali-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin: 10px 0; }
+  .totali-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin: 8px 0; }
   .totale-box { border: 1px solid #3a7abf; padding: 4px 8px; }
   .totale-label { font-size: 9px; color: #3a7abf; font-weight: bold; }
   .totale-val { font-size: 14px; font-weight: bold; color: #3a7abf; }
 
-  /* RIENTRO */
-  .rientro-section { margin-top: 14px; }
+  .rientro-section { margin-top: 12px; }
   .rientro-label { color: #c00; font-weight: bold; font-size: 11px; text-decoration: underline; margin-bottom: 6px; }
   .rientro-field { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .rientro-field-label { font-size: 10px; color: #3a7abf; font-weight: bold; width: 140px; }
@@ -76,7 +76,7 @@
 <div id="loading" class="loading-box">Caricamento foglio viaggio...</div>
 <div id="error-container"></div>
 
-<!-- ═══ PAGINA 1 ═══ -->
+<!-- ═══ PAGINA 1 — CONSEGNE ═══ -->
 <div class="page" id="page1" style="display:none">
 
   <div class="header">
@@ -92,7 +92,6 @@
     </div>
   </div>
 
-  <!-- Info camion -->
   <div class="truck-info">
     <div class="truck-cell"><span class="truck-label">Id Carico</span><span class="truck-value" id="id-ordine">—</span></div>
     <div class="truck-cell"><span class="truck-label">Camion:</span><span class="truck-value" id="camion">—</span></div>
@@ -102,13 +101,24 @@
     <div class="truck-cell"><span class="truck-label">Vettore:</span><span class="truck-value" id="vettore">—</span></div>
   </div>
 
-  <!-- Consegne -->
-  <div id="consegne-container"></div>
+  <table class="consegne-table">
+    <thead>
+      <tr>
+        <th class="seq-col">#</th>
+        <th>Cliente / Indirizzo</th>
+        <th class="qta-col num-col">Quantità</th>
+        <th>Prodotto</th>
+        <th>Fornitore</th>
+        <th class="tel-col">Tel</th>
+      </tr>
+    </thead>
+    <tbody id="consegne-body"></tbody>
+  </table>
 
-  <div style="margin-top:8px;font-size:9px;color:#aaa;text-align:right">PhoenixFuel — generato il <span id="gen-date"></span></div>
+  <div style="margin-top:auto;font-size:9px;color:#aaa;text-align:right">PhoenixFuel — generato il <span id="gen-date"></span></div>
 </div>
 
-<!-- ═══ PAGINA 2 ═══ -->
+<!-- ═══ PAGINA 2 — CAMION + RIENTRO ═══ -->
 <div class="page" id="page2" style="display:none">
 
   <div class="p2-header">
@@ -123,7 +133,6 @@
     </div>
   </div>
 
-  <!-- Orari e contatori -->
   <div class="orari-grid">
     <div class="orari-field"><span class="orari-label">Orario Inizio Viaggio:</span><span class="orari-box"></span></div>
     <div class="orari-field"><span class="orari-label">Litri Totali Contatore Inizio:</span><span class="orari-box"></span></div>
@@ -131,13 +140,11 @@
     <div class="orari-field"><span class="orari-label">Litri Totali Contatore Fine:</span><span class="orari-box"></span></div>
   </div>
 
-  <!-- Grafica camion dinamica -->
   <div class="truck-graphic" id="truck-graphic-container"></div>
+  <div class="truck-cap-info" id="truck-cap-info"></div>
 
-  <!-- Legenda prodotti -->
   <div class="legenda" id="legenda-prodotti"></div>
 
-  <!-- Totali -->
   <div class="totali-grid">
     <div class="totale-box"><div class="totale-label">Totale Consegne:</div><div class="totale-val" id="tot-consegne">0</div></div>
     <div class="totale-box"><div class="totale-label">Litri Totali Caricati:</div><div class="totale-val" id="tot-litri">0</div></div>
@@ -145,7 +152,6 @@
     <div class="totale-box"><div class="totale-label">Totale Gasolio:</div><div class="totale-val" id="tot-gasolio">0</div></div>
   </div>
 
-  <!-- Rientro -->
   <div class="rientro-section">
     <div class="rientro-label">RIENTRO A VUOTO:</div>
     <div class="rientro-field"><div class="rientro-field-label">LUOGO DI PARTENZA</div><div class="rientro-field-box"></div></div>
@@ -165,7 +171,6 @@ const oggi = new Date().toLocaleDateString('it-IT');
 document.getElementById('gen-date').textContent = oggi;
 document.getElementById('gen-date2').textContent = oggi;
 
-// Colori per prodotto - 3 livelli di intensità
 const COLORI_PRODOTTO = {
   'Gasolio Autotrazione': { pieno: '#D4A017', medio: '#E8C44A', basso: '#F4DE8A', label: 'Gasolio Autotraz.' },
   'Gasolio Agricolo':     { pieno: '#639922', medio: '#8BBF44', basso: '#B8D98A', label: 'Gasolio Agricolo' },
@@ -183,229 +188,130 @@ function getColore(prodotto, percentuale) {
 
 function _sep(s) { return String(s).replace(/\./g, "'"); }
 function fmtL(n) { return _sep(Number(n).toLocaleString('it-IT')); }
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
-// ── GRAFICA CAMION SVG (stile realistico + scomparti dinamici) ──
-function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale) {
+const TRUCK_LAYOUTS = {
+  motrice: {
+    imgPath: 'camion.png?v=20260505c',
+    imgW: 700, imgH: 232,
+    tankX: 174, tankY: 11,
+    tankW: 499, tankH: 122,
+    tankPath: 'M 174.0 38.9 L 186.5 22.9 L 199.0 14.9 L 211.5 12.8 L 224.0 12.9 L 236.5 13.1 L 249.0 10.9 L 261.5 11.9 L 274.0 13.0 L 286.5 13.0 L 299.0 13.0 L 311.5 13.0 L 324.0 13.0 L 336.5 13.0 L 349.0 11.8 L 361.5 12.8 L 374.0 12.6 L 386.5 10.7 L 399.0 10.8 L 411.5 13.4 L 424.0 13.5 L 436.5 13.5 L 449.0 13.5 L 461.5 13.5 L 474.0 13.2 L 486.5 13.0 L 499.0 13.0 L 511.5 12.9 L 524.0 11.4 L 536.5 12.4 L 549.0 12.5 L 561.5 11.6 L 574.0 10.9 L 586.5 13.0 L 599.0 13.0 L 611.5 13.0 L 624.0 13.4 L 636.5 13.5 L 649.0 14.7 L 661.5 25.6 L 673.0 46.5 L 673.0 95.8 L 661.5 112.2 L 649.0 116.9 L 636.5 113.8 L 624.0 123.4 L 611.5 130.7 L 599.0 124.2 L 586.5 124.4 L 574.0 128.3 L 561.5 124.2 L 549.0 124.2 L 536.5 124.2 L 524.0 124.5 L 511.5 133.0 L 499.0 124.5 L 486.5 123.8 L 474.0 123.7 L 461.5 123.7 L 449.0 123.7 L 436.5 123.8 L 424.0 123.9 L 411.5 123.6 L 399.0 116.7 L 386.5 118.9 L 374.0 119.5 L 361.5 119.3 L 349.0 119.2 L 336.5 119.2 L 324.0 119.2 L 311.5 119.0 L 299.0 119.1 L 286.5 119.0 L 274.0 118.9 L 261.5 118.9 L 249.0 117.6 L 236.5 114.6 L 224.0 114.8 L 211.5 114.5 L 199.0 114.2 L 186.5 111.8 L 174.0 89.9 Z'
+  },
+  // Quando avremo un'immagine di bilico: misurare il profilo cisterna,
+  // generare tankPath con lo stesso script, popolare tankX/Y/W/H/imgPath.
+  // Finché bilico è null, ricade su motrice.
+  bilico: null
+};
+
+function _getLayout(tipoCamion) {
+  if (tipoCamion === 'bilico' && TRUCK_LAYOUTS.bilico) return TRUCK_LAYOUTS.bilico;
+  return TRUCK_LAYOUTS.motrice;
+}
+
+function _classificaCamion(scomparti, mezzo) {
+  if (scomparti && scomparti.length >= 5) return 'bilico';
+  if (mezzo && Number(mezzo.capacita_totale) > 30000) return 'bilico';
+  return 'motrice';
+}
+
+function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale, tipoCamion) {
+  const L = _getLayout(tipoCamion);
   const nScomp = scomparti.length || 1;
-  const svgW = 700, svgH = 240;
+  const compW = L.tankW / nScomp;
 
-  // Dimensioni rimorchio dinamiche in base al numero scomparti
-  const rimX = 10, rimY = 38;
-  const rimH = 104;
-  const rimW = Math.min(400, Math.max(200, nScomp * 74 + 10));
-  const sW = (rimW - 4) / nScomp;
+  let svg = `<svg class="truck-svg" viewBox="0 0 ${L.imgW} ${L.imgH}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">`;
 
-  // Trattore posizionato dopo il rimorchio
-  const gancioW = 20;
-  const trX = rimX + rimW + gancioW;
-  const trW = 180;
-  const wY = rimY + rimH + 22;
+  svg += `<defs><clipPath id="tankClip"><path d="${L.tankPath}"/></clipPath></defs>`;
 
-  let svg = `<svg class="truck-svg" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<image href="${L.imgPath}" x="0" y="0" width="${L.imgW}" height="${L.imgH}" preserveAspectRatio="xMidYMid meet"/>`;
 
-  // ── TELAIO RIMORCHIO ──
-  svg += `<rect x="${rimX}" y="${rimY + rimH}" width="${rimW}" height="8" rx="2" fill="#555" stroke="#333" stroke-width="0.5"/>`;
-
-  // ── CORPO RIMORCHIO ──
-  svg += `<rect x="${rimX}" y="${rimY}" width="${rimW}" height="${rimH}" rx="3" fill="#d8d8d8" stroke="#888" stroke-width="1.5"/>`;
-
-  // ── SCOMPARTI DINAMICI ──
   scomparti.forEach((sc, i) => {
-    const x = rimX + 2 + i * sW;
-    const w = sW;
+    const x = L.tankX + i * compW;
     const cap = Number(sc.capacita) || 1;
     const litri = ordiniPerScomparto[sc.id] || 0;
     const pct = Math.min(100, Math.round((litri / cap) * 100));
     const prod = sc.prodotto_assegnato || sc.prodotto_default || 'Gasolio Autotrazione';
     const col = getColore(prod, pct);
 
-    // Sfondo scomparto
-    svg += `<rect x="${x}" y="${rimY + 2}" width="${w}" height="${rimH - 4}" fill="#f0f0f0"/>`;
-
-    // Riempimento dal basso
     if (pct > 0) {
-      const fH = Math.round(((rimH - 4) * pct) / 100);
-      const fY = rimY + 2 + (rimH - 4 - fH);
-      svg += `<rect x="${x}" y="${fY}" width="${w}" height="${fH}" fill="${col}" opacity="0.85"/>`;
+      const fH = (L.tankH * pct) / 100;
+      const fY = L.tankY + L.tankH - fH;
+      svg += `<rect x="${x}" y="${fY}" width="${compW}" height="${fH}" fill="${col}" opacity="0.62" clip-path="url(#tankClip)"/>`;
     }
 
-    // Separatore
     if (i > 0) {
-      svg += `<line x1="${x}" y1="${rimY + 2}" x2="${x}" y2="${rimY + rimH - 2}" stroke="#999" stroke-width="1"/>`;
+      svg += `<line x1="${x}" y1="${L.tankY + 8}" x2="${x}" y2="${L.tankY + L.tankH - 8}" stroke="#555" stroke-width="0.7" stroke-dasharray="3,2" clip-path="url(#tankClip)"/>`;
     }
 
-    // Nome scomparto
-    const nameY = rimY + 14;
-    const txtCol = pct > 60 ? '#fff' : '#333';
-    svg += `<text x="${x + w/2}" y="${nameY}" text-anchor="middle" font-size="7" font-weight="bold" fill="${txtCol}" font-family="Arial">${sc.nome}</text>`;
+    svg += `<text x="${x + compW/2}" y="${L.tankY + 14}" text-anchor="middle" font-size="9" font-weight="600" fill="#444" font-family="Arial,sans-serif">${escHtml(sc.nome || '')}</text>`;
 
-    // Litri e percentuale
     if (litri > 0) {
-      const litriTxtCol = pct > 45 ? '#fff' : '#333';
-      const pctTxtCol = pct > 45 ? '#ffd' : '#999';
-      svg += `<text x="${x + w/2}" y="${rimY + rimH/2 + 8}" text-anchor="middle" font-size="10" font-weight="bold" fill="${litriTxtCol}" font-family="Arial">${fmtL(litri)} L</text>`;
-      svg += `<text x="${x + w/2}" y="${rimY + rimH/2 + 21}" text-anchor="middle" font-size="8" fill="${pctTxtCol}" font-family="Arial">${pct}%</text>`;
+      const litriCol = pct >= 50 ? '#fff' : '#1a1a1a';
+      const pctCol = pct >= 50 ? '#ffd' : '#666';
+      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 22}" text-anchor="middle" font-size="11" font-weight="700" fill="${litriCol}" font-family="Arial,sans-serif">${fmtL(litri)} L</text>`;
+      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 9}" text-anchor="middle" font-size="9" fill="${pctCol}" font-family="Arial,sans-serif">${pct}%</text>`;
     } else {
-      svg += `<text x="${x + w/2}" y="${rimY + rimH/2 + 6}" text-anchor="middle" font-size="9" fill="#aaa" font-family="Arial">Vuoto</text>`;
-      svg += `<text x="${x + w/2}" y="${rimY + rimH/2 + 19}" text-anchor="middle" font-size="8" fill="#ccc" font-family="Arial">0%</text>`;
+      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 14}" text-anchor="middle" font-size="9" fill="#999" font-family="Arial,sans-serif">Vuoto</text>`;
     }
   });
-
-  // ── BORDO RIMORCHIO ──
-  svg += `<rect x="${rimX}" y="${rimY}" width="${rimW}" height="${rimH}" rx="3" fill="none" stroke="#666" stroke-width="2"/>`;
-
-  // ── RUOTE RIMORCHIO ──
-  // Asse 1 (anteriore)
-  const rw1a = rimX + rimW * 0.15;
-  const rw1b = rw1a + 40;
-  [rw1a, rw1b].forEach(cx => {
-    svg += `<path d="M${cx-22} ${rimY+rimH+6} A22 22 0 0 1 ${cx+22} ${rimY+rimH+6}" fill="#777" stroke="#555" stroke-width="0.5"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="18" fill="#2a2a2a" stroke="#111" stroke-width="2"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="10" fill="#555"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="4" fill="#888"/>`;
-  });
-  // Asse 2 (posteriore)
-  const rw2a = rimX + rimW * 0.75;
-  const rw2b = rw2a + 40;
-  [rw2a, rw2b].forEach(cx => {
-    svg += `<path d="M${cx-22} ${rimY+rimH+6} A22 22 0 0 1 ${cx+22} ${rimY+rimH+6}" fill="#777" stroke="#555" stroke-width="0.5"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="18" fill="#2a2a2a" stroke="#111" stroke-width="2"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="10" fill="#555"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="4" fill="#888"/>`;
-  });
-
-  // ── GANCIO ──
-  svg += `<rect x="${rimX + rimW}" y="${rimY + rimH - 12}" width="${gancioW}" height="10" rx="3" fill="#777" stroke="#555" stroke-width="0.5"/>`;
-
-  // ── TRATTORE (cabina + cofano verso destra) ──
-  const chassisY = rimY + rimH;
-  
-  // Telaio trattore
-  svg += `<rect x="${trX}" y="${chassisY}" width="${trW + 10}" height="8" rx="2" fill="#555" stroke="#333" stroke-width="0.5"/>`;
-
-  // Cabina (vicino al rimorchio, a sinistra del trattore)
-  const cabW = 86;
-  const realCabX = trX + 4;
-  const cabY = rimY - 26;
-  const cabH = rimH + 34;
-  // Corpo cabina
-  svg += `<path d="M${realCabX} ${cabY + 12} Q${realCabX} ${cabY} ${realCabX + 12} ${cabY} L${realCabX + cabW - 4} ${cabY} Q${realCabX + cabW} ${cabY} ${realCabX + cabW} ${cabY + 12} L${realCabX + cabW} ${cabY + cabH} L${realCabX} ${cabY + cabH} Z" fill="#dd2222" stroke="#aa1111" stroke-width="2"/>`;
-  
-  // Aletta aerodinamica sul tetto (verso destra)
-  svg += `<path d="M${realCabX + cabW - 2} ${cabY + 8} Q${realCabX + cabW + 14} ${cabY - 4} ${realCabX + cabW + 18} ${cabY + 20} L${realCabX + cabW} ${cabY + 20} Z" fill="#dd2222" stroke="#aa1111" stroke-width="1"/>`;
-  
-  // Parabrezza (inclinato verso destra)
-  svg += `<path d="M${realCabX + cabW - 4} ${cabY + 10} L${realCabX + cabW + 8} ${cabY + 56} L${realCabX + cabW + 8} ${cabY + 78} L${realCabX + cabW - 4} ${cabY + 78} Z" fill="#a8d8f0" stroke="#6699aa" stroke-width="1.5"/>`;
-  // Riflesso parabrezza
-  svg += `<path d="M${realCabX + cabW - 2} ${cabY + 14} L${realCabX + cabW + 4} ${cabY + 42} L${realCabX + cabW + 2} ${cabY + 42} L${realCabX + cabW - 4} ${cabY + 18} Z" fill="#c8e8f8" opacity="0.4"/>`;
-  
-  // Finestrino laterale
-  svg += `<rect x="${realCabX + cabW - 44}" y="${cabY + 12}" width="32" height="28" rx="3" fill="#a8d8f0" stroke="#6699aa" stroke-width="1"/>`;
-  svg += `<rect x="${realCabX + cabW - 42}" y="${cabY + 14}" width="8" height="24" rx="2" fill="#c8e8f8" opacity="0.3"/>`;
-  
-  // Porta cabina
-  svg += `<rect x="${realCabX + cabW - 46}" y="${cabY + 44}" width="36" height="60" rx="3" fill="none" stroke="#aa1111" stroke-width="1"/>`;
-  svg += `<circle cx="${realCabX + cabW - 40}" cy="${cabY + 74}" r="3" fill="#ccc" stroke="#999" stroke-width="0.5"/>`;
-  
-  // Specchietto retrovisore (a destra della cabina)
-  svg += `<rect x="${realCabX + cabW + 1}" y="${cabY + 8}" width="3" height="20" rx="1" fill="#333"/>`;
-  svg += `<rect x="${realCabX + cabW + 2}" y="${cabY + 4}" width="12" height="10" rx="2" fill="#444" stroke="#333" stroke-width="0.5"/>`;
-  
-  // Tubo di scarico (a sinistra, lato rimorchio)
-  svg += `<rect x="${realCabX + 4}" y="${cabY - 14}" width="7" height="22" rx="2" fill="#777" stroke="#555" stroke-width="0.5"/>`;
-  svg += `<ellipse cx="${realCabX + 7.5}" cy="${cabY - 14}" rx="5" ry="2" fill="#666"/>`;
-  
-  // Luci tetto
-  svg += `<rect x="${realCabX + cabW - 40}" y="${cabY}" width="5" height="3" rx="1" fill="#ff8800"/>`;
-  svg += `<rect x="${realCabX + cabW - 30}" y="${cabY}" width="5" height="3" rx="1" fill="#ff8800"/>`;
-  svg += `<rect x="${realCabX + cabW - 20}" y="${cabY}" width="5" height="3" rx="1" fill="#ff8800"/>`;
-
-  // Cofano motore (parte destra, il muso del camion)
-  const cofanoX = realCabX + cabW + 10;
-  const cofanoW = trW - cabW - 6;
-  const cofanoY = rimY + 20;
-  const cofanoH = rimH - 12;
-  svg += `<rect x="${cofanoX}" y="${cofanoY}" width="${cofanoW}" height="${cofanoH}" rx="4" fill="#cc2222" stroke="#991111" stroke-width="1.5"/>`;
-  // Presa aria cofano
-  svg += `<rect x="${cofanoX + 8}" y="${cofanoY + 6}" width="${cofanoW - 16}" height="4" rx="2" fill="#aa1111"/>`;
-  svg += `<rect x="${cofanoX + 8}" y="${cofanoY + 14}" width="${cofanoW - 16}" height="4" rx="2" fill="#aa1111"/>`;
-  // Griglia frontale (a destra del cofano)
-  svg += `<rect x="${cofanoX + cofanoW}" y="${cofanoY + 4}" width="6" height="${cofanoH - 8}" rx="2" fill="#ccc" stroke="#999" stroke-width="0.5"/>`;
-  
-  // Serbatoio carburante laterale (tra cabina e cofano, sotto)
-  svg += `<rect x="${cofanoX - 4}" y="${rimY + 60}" width="50" height="48" rx="8" fill="#888" stroke="#666" stroke-width="1"/>`;
-  svg += `<rect x="${cofanoX}" y="${rimY + 64}" width="42" height="6" rx="2" fill="#999" opacity="0.5"/>`;
-  
-  // Fari anteriori (sul muso destro)
-  svg += `<rect x="${cofanoX + cofanoW + 4}" y="${cofanoY + 16}" width="6" height="12" rx="2" fill="#ffee88" stroke="#ccaa44" stroke-width="0.5"/>`;
-  svg += `<rect x="${cofanoX + cofanoW + 4}" y="${cofanoY + 32}" width="6" height="8" rx="2" fill="#ff6633" stroke="#cc4422" stroke-width="0.5"/>`;
-  
-  // Paraurti anteriore (destra)
-  svg += `<rect x="${cofanoX + cofanoW + 4}" y="${cofanoY + cofanoH - 12}" width="8" height="12" rx="2" fill="#ccc" stroke="#999" stroke-width="0.5"/>`;
-
-  // ── RUOTE TRATTORE ──
-  const rtW = [realCabX + 30, cofanoX + 20, cofanoX + cofanoW - 10];
-  rtW.forEach(cx => {
-    svg += `<path d="M${cx-22} ${chassisY + 6} A22 22 0 0 1 ${cx+22} ${chassisY + 6}" fill="#aa0000" stroke="#880000" stroke-width="0.5"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="20" fill="#2a2a2a" stroke="#111" stroke-width="2"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="12" fill="#555"/>`;
-    svg += `<circle cx="${cx}" cy="${wY}" r="5" fill="#888"/>`;
-  });
-
-  // ── TOTALE SUL COFANO ──
-  const tot = Object.values(ordiniPerScomparto).reduce((s, v) => s + v, 0);
-  svg += `<text x="${cofanoX + cofanoW/2}" y="${cofanoY + cofanoH/2 + 2}" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff" font-family="Arial">${fmtL(tot)} L</text>`;
-  svg += `<text x="${cofanoX + cofanoW/2}" y="${cofanoY + cofanoH/2 + 15}" text-anchor="middle" font-size="7" fill="#ffcccc" font-family="Arial">Totale caricato</text>`;
-
-  // Terreno
-  svg += `<line x1="0" y1="${wY + 22}" x2="${svgW}" y2="${wY + 22}" stroke="#ccc" stroke-width="0.5"/>`;
-
-  // ── INFO CAPACITÀ ──
-  const capTot = capacitaTotale || scomparti.reduce((s, sc) => s + Number(sc.capacita || 0), 0);
-  const pctTot = capTot > 0 ? Math.round((tot / capTot) * 100) : 0;
-  svg += `<text x="${rimX}" y="${wY + 38}" font-size="9" fill="#666" font-family="Arial">Capacità totale: ${fmtL(capTot)} L · Caricato: ${fmtL(tot)} L (${pctTot}%)</text>`;
 
   svg += '</svg>';
   return svg;
 }
 
+function aggiornaCapInfo(scomparti, ordiniPerScomparto, capacitaTotale) {
+  const tot = Object.values(ordiniPerScomparto).reduce((s, v) => s + Number(v||0), 0);
+  const capTot = capacitaTotale || scomparti.reduce((s, sc) => s + Number(sc.capacita || 0), 0);
+  const pctTot = capTot > 0 ? Math.round((tot / capTot) * 100) : 0;
+  document.getElementById('truck-cap-info').textContent =
+    `Capacità totale: ${fmtL(capTot)} L · Caricato: ${fmtL(tot)} L (${pctTot}%)`;
+}
 
-// ── RENDER CONSEGNE ──────────────────────────────────────────────
 function renderConsegne(ordini) {
-  const cont = document.getElementById('consegne-container');
-  let totLitri=0, totBenz=0, totGas=0;
+  const tbody = document.getElementById('consegne-body');
+  let totLitri = 0, totBenz = 0, totGas = 0;
 
-  cont.innerHTML = ordini.map((o, idx) => {
-    const litri = Number(o.litri||0);
+  tbody.innerHTML = ordini.map((o, idx) => {
+    const litri = Number(o.litri || 0);
     totLitri += litri;
-    if ((o.prodotto||'').toLowerCase().includes('benzina')) totBenz += litri;
+    if ((o.prodotto || '').toLowerCase().includes('benzina')) totBenz += litri;
     else totGas += litri;
 
-    const sedeBadge = o._sede_nome ? `<span style="display:inline-block;padding:1px 5px;border-radius:8px;font-size:8px;font-weight:500;background:#EEEDFE;color:#26215C;margin-left:4px">📍 ${o._sede_nome}</span>` : '';
+    const sedeBadge = o._sede_nome
+      ? `<span class="sede-badge">📍 ${escHtml(o._sede_nome)}</span>`
+      : '';
 
-    return `<div class="consegna">
-      <div class="consegna-header">
-        <span>Cliente</span><span>Quantità</span><span>Prodotto</span><span>Fornitore</span><span>Seq.</span>
-      </div>
-      <div class="consegna-row1">
-        <span>${o.cliente||'—'}${sedeBadge}</span>
-        <span>${fmtL(litri)} L</span>
-        <span>${o.prodotto||'—'}</span>
-        <span>${o.fornitore||'—'}</span>
-        <span><span class="seq-badge">${idx+1}</span></span>
-      </div>
-      <div class="consegna-addr-header">
-        <span>Indirizzo</span><span>CAP</span><span>Prov</span><span>Città</span><span>Tel</span>
-      </div>
-      <div class="consegna-addr-row">
-        <span>${o._indirizzo||'—'}</span>
-        <span>${o._cap||'—'}</span>
-        <span>${o._provincia||'—'}</span>
-        <span>${o._citta||'—'}</span>
-        <span>${o._telefono||'—'}</span>
-      </div>
-      ${o.note ? '<div class="note-row">Note: '+o.note+'</div>' : ''}
-    </div>`;
+    const addrParts = [];
+    if (o._indirizzo) addrParts.push(escHtml(o._indirizzo));
+    const cittaProvCap = [
+      o._cap ? escHtml(o._cap) : '',
+      o._provincia ? escHtml(o._provincia) : '',
+      o._citta ? escHtml(o._citta) : ''
+    ].filter(Boolean).join(' ');
+    if (cittaProvCap) addrParts.push(cittaProvCap);
+    const addrFull = addrParts.length ? addrParts.join(' — ') : '—';
+
+    let html = `<tr class="consegna-data">
+      <td class="seq-col"><span class="seq-badge">${idx+1}</span></td>
+      <td>${escHtml(o.cliente || '—')}${sedeBadge}</td>
+      <td class="num-col">${fmtL(litri)} L</td>
+      <td>${escHtml(o.prodotto || '—')}</td>
+      <td>${escHtml(o.fornitore || '—')}</td>
+      <td>${escHtml(o._telefono || '—')}</td>
+    </tr>
+    <tr class="consegna-addr">
+      <td colspan="6"><span class="addr-pin">▸</span>${addrFull}</td>
+    </tr>`;
+
+    if (o.note) {
+      html += `<tr class="consegna-note"><td colspan="6"><strong>Note:</strong> ${escHtml(o.note)}</td></tr>`;
+    }
+
+    return html;
   }).join('');
 
   document.getElementById('tot-consegne').textContent = ordini.length;
@@ -414,20 +320,18 @@ function renderConsegne(ordini) {
   document.getElementById('tot-gasolio').textContent = fmtL(totGas);
 }
 
-// ── LEGENDA ──────────────────────────────────────────────────────
 function generaLegenda(prodottiUsati) {
   const el = document.getElementById('legenda-prodotti');
   const unici = [...new Set(prodottiUsati)];
   let html = unici.map(p => {
     const c = COLORI_PRODOTTO[p] || { pieno:'#999', label:p };
-    return `<div class="legenda-item"><div class="legenda-dot" style="background:${c.pieno}"></div><span>${c.label||p}</span></div>`;
+    return `<div class="legenda-item"><div class="legenda-dot" style="background:${c.pieno}"></div><span>${escHtml(c.label||p)}</span></div>`;
   }).join('');
   html += `<span style="margin-left:12px;color:#999">|</span>`;
   html += `<div class="legenda-item"><span style="font-size:9px;color:#666">Colore intenso = pieno &gt;66% · Medio = 33-66% · Chiaro = &lt;33%</span></div>`;
   el.innerHTML = html;
 }
 
-// ── CARICAMENTO DATI ─────────────────────────────────────────────
 async function caricaDati() {
   const caricoId = params.get('carico_id');
   if (!caricoId) {
@@ -436,7 +340,6 @@ async function caricaDati() {
   }
 
   try {
-    // 1. Carica il carico
     const { data: carico, error: errC } = await sb.from('carichi')
       .select('*')
       .eq('id', caricoId).single();
@@ -447,17 +350,13 @@ async function caricaDati() {
       return;
     }
 
-    // 2. Carica le righe carico_ordini
     const { data: caricoOrdini, error: errCO } = await sb.from('carico_ordini')
       .select('*')
       .eq('carico_id', caricoId)
       .order('sequenza');
 
-    if (errCO) {
-      console.error('Errore carico_ordini:', errCO);
-    }
+    if (errCO) console.error('Errore carico_ordini:', errCO);
 
-    // 3. Carica gli ordini collegati
     const ordineIds = (caricoOrdini || []).map(co => co.ordine_id).filter(Boolean);
     let ordini = [];
     if (ordineIds.length > 0) {
@@ -465,7 +364,6 @@ async function caricaDati() {
         .select('*')
         .in('id', ordineIds);
       if (errO) console.error('Errore ordini:', errO);
-      // Ordina per sequenza
       const ordiniMap = {};
       (ordiniData || []).forEach(o => { ordiniMap[o.id] = o; });
       ordini = (caricoOrdini || [])
@@ -474,21 +372,18 @@ async function caricaDati() {
         .filter(Boolean);
     }
 
-    // 4. Carica scomparti del mezzo
     let scomparti = [];
     if (carico.mezzo_id) {
       const { data: sc } = await sb.from('scomparti_mezzo').select('*').eq('mezzo_id', carico.mezzo_id).order('nome');
       scomparti = sc || [];
     }
 
-    // 5. Carica mezzo
     let mezzo = null;
     if (carico.mezzo_id) {
       const { data: m } = await sb.from('mezzi').select('*').eq('id', carico.mezzo_id).single();
       mezzo = m;
     }
 
-    // ── PAGINA 1 ──
     const dataFmt = new Date(carico.data).toLocaleDateString('it-IT');
     document.getElementById('hdr-data').textContent = dataFmt;
     document.getElementById('hdr-data2').textContent = dataFmt;
@@ -500,8 +395,6 @@ async function caricaDati() {
     document.getElementById('autista').textContent = carico.autista || '—';
     document.getElementById('vettore').textContent = 'Phoenix Fuel Srl';
 
-    // ── RISOLVI INDIRIZZI: sede di scarico o indirizzo cliente ──
-    // Carica clienti per indirizzi principali
     const nomiClienti = [...new Set(ordini.map(o => o.cliente).filter(Boolean))];
     let clientiMap = {};
     if (nomiClienti.length) {
@@ -509,7 +402,6 @@ async function caricaDati() {
       (clientiData||[]).forEach(c => { clientiMap[c.nome] = c; if (c.id) clientiMap[c.id] = c; });
     }
 
-    // Carica sedi di scarico per ordini che hanno sede_scarico_id
     const sedeIds = ordini.map(o => o.sede_scarico_id).filter(Boolean);
     let sediMap = {};
     if (sedeIds.length) {
@@ -517,9 +409,6 @@ async function caricaDati() {
       (sediData||[]).forEach(s => { sediMap[s.id] = s; });
     }
 
-    // Carica anche tutte le sedi dei clienti coinvolti, per poter fare
-    // match per nome quando l'ordine ha solo il campo "destinazione" testuale.
-    // Indicizzate per "cliente_id|nome" e anche solo "nome" come fallback.
     let sediPerNomeMap = {};
     const clienteIds = [...new Set(Object.values(clientiMap).map(c => c && c.id).filter(Boolean))];
     if (clienteIds.length) {
@@ -528,25 +417,17 @@ async function caricaDati() {
         if (!s.nome) return;
         const k = (s.cliente_id||'') + '|' + s.nome.trim().toLowerCase();
         sediPerNomeMap[k] = s;
-        // Fallback: anche solo per nome (ultima vince, ma meglio di niente)
         if (!sediPerNomeMap['|' + s.nome.trim().toLowerCase()]) {
           sediPerNomeMap['|' + s.nome.trim().toLowerCase()] = s;
         }
       });
     }
 
-    // Arricchisci ordini con indirizzo corretto
-    // PRIORITÀ: 1) destinazione testuale sull'ordine (verità utente, modificabile)
-    //          2) destinazione con match sulle sedi del cliente per dettagli
-    //          3) sede_scarico_id/nome (smistamento/legacy, usato solo se destinazione vuota)
-    //          4) indirizzo principale cliente
     ordini.forEach(o => {
       const cl = clientiMap[o.cliente_id] || clientiMap[o.cliente] || {};
       o._telefono = cl.telefono || o.telefono || '';
 
       if (o.destinazione) {
-        // Verità utente: la destinazione testuale ha priorità.
-        // Tenta un match con le sedi del cliente per arricchire con indirizzo completo.
         const destTrim = o.destinazione.trim().toLowerCase();
         const cliId = (cl && cl.id) || o.cliente_id || '';
         const sedeMatch = sediPerNomeMap[cliId + '|' + destTrim]
@@ -558,7 +439,6 @@ async function caricaDati() {
           o._provincia = sedeMatch.provincia || '';
           o._cap = sedeMatch.cap || '';
         } else {
-          // Testo libero senza match: mostro il testo esatto inserito dall'utente
           o._sede_nome = o.destinazione;
           o._indirizzo = o.destinazione;
           o._citta = '';
@@ -566,8 +446,6 @@ async function caricaDati() {
           o._cap = '';
         }
       } else if (o.sede_scarico_nome) {
-        // Nessuna destinazione testuale ma presente sede_scarico (ordini da smistamento deposito
-        // o flussi legacy): uso quella come fonte secondaria.
         o._sede_nome = o.sede_scarico_nome;
         if (o.sede_scarico_id && sediMap[o.sede_scarico_id]) {
           const sede = sediMap[o.sede_scarico_id];
@@ -582,7 +460,6 @@ async function caricaDati() {
           o._cap = '';
         }
       } else {
-        // Nessuna destinazione né sede: fallback indirizzo principale del cliente
         o._indirizzo = cl.indirizzo || o.indirizzo || '';
         o._citta = cl.citta || o.citta || '';
         o._provincia = cl.provincia || o.provincia || '';
@@ -593,31 +470,29 @@ async function caricaDati() {
 
     renderConsegne(ordini);
 
-    // ── PAGINA 2 — GRAFICA CAMION ──
     const ordiniPerScomparto = {};
     const prodottiUsati = [];
 
     if (scomparti.length > 0) {
-      // Distribuisci ordini negli scomparti reali
       scomparti.forEach(sc => { ordiniPerScomparto[sc.id] = 0; });
 
       ordini.forEach(o => {
         const prod = o.prodotto || '';
         prodottiUsati.push(prod);
-        // Cerca scomparto compatibile per prodotto
         let target = scomparti.find(sc => sc.prodotto_default === prod && (ordiniPerScomparto[sc.id]||0) < Number(sc.capacita));
         if (!target) target = scomparti.find(sc => !sc.prodotto_default && (ordiniPerScomparto[sc.id]||0) < Number(sc.capacita));
         if (!target) target = scomparti.find(sc => (ordiniPerScomparto[sc.id]||0) < Number(sc.capacita));
-        if (!target) target = scomparti[scomparti.length-1]; // fallback ultimo scomparto
+        if (!target) target = scomparti[scomparti.length-1];
         if (target) {
           ordiniPerScomparto[target.id] = (ordiniPerScomparto[target.id]||0) + Number(o.litri);
           target.prodotto_assegnato = target.prodotto_assegnato || prod;
         }
       });
 
-      document.getElementById('truck-graphic-container').innerHTML = generaCamionSVG(scomparti, ordiniPerScomparto, mezzo ? mezzo.capacita_totale : 0);
+      const tipoCamionA = _classificaCamion(scomparti, mezzo);
+      document.getElementById('truck-graphic-container').innerHTML = generaCamionSVG(scomparti, ordiniPerScomparto, mezzo ? mezzo.capacita_totale : 0, tipoCamionA);
+      aggiornaCapInfo(scomparti, ordiniPerScomparto, mezzo ? mezzo.capacita_totale : 0);
     } else {
-      // Senza scomparti: crea virtuali per prodotto
       const perProd = {};
       ordini.forEach(o => {
         const p = o.prodotto || 'Altro';
@@ -638,12 +513,13 @@ async function caricaDati() {
       const ordV = {};
       scVirt.forEach(sc => { ordV[sc.id] = perProd[sc.prodotto_default]||0; });
 
-      document.getElementById('truck-graphic-container').innerHTML = generaCamionSVG(scVirt, ordV, capT);
+      const tipoCamionB = _classificaCamion(scVirt, mezzo);
+      document.getElementById('truck-graphic-container').innerHTML = generaCamionSVG(scVirt, ordV, capT, tipoCamionB);
+      aggiornaCapInfo(scVirt, ordV, capT);
     }
 
     generaLegenda(prodottiUsati);
 
-    // Mostra pagine
     document.getElementById('loading').style.display = 'none';
     document.getElementById('page1').style.display = 'block';
     document.getElementById('page2').style.display = 'block';
