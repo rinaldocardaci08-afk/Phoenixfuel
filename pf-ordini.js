@@ -662,6 +662,91 @@ async function caricaPrezzoPerOrdine() {
   }
 }
 
+// ── POPUP ULTIMI 5 ORDINI CLIENTE ────────────────────────────────
+async function mostraUltimiOrdiniCliente() {
+  const clienteId = document.getElementById('ord-cliente').value;
+  const prodotto = document.getElementById('ord-prodotto').value;
+  if (!clienteId) { toast('Seleziona prima un cliente'); return; }
+  if (!prodotto) { toast('Seleziona prima un prodotto'); return; }
+  const cliente = cacheClienti.find(c => c.id === clienteId);
+  const clienteNome = cliente ? cliente.nome : '';
+
+  // Loader iniziale
+  let html = '<div style="font-size:15px;font-weight:600;margin-bottom:4px;color:#0C447C">Ultimi 5 ordini</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px"><strong>' + escHtml(clienteNome) + '</strong> · ' + escHtml(prodotto) + '</div>';
+  html += '<div style="text-align:center;padding:20px;color:#888">Caricamento...</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:14px"><button onclick="chiudiModal()" style="flex:1;padding:8px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  apriModal(html);
+
+  // Query: ultimi 5 ordini cliente per quel prodotto, escludendo annullati, solo tipo_ordine='cliente'
+  const { data: ordini, error } = await sb
+    .from('ordini')
+    .select('data,litri,costo_litro,trasporto_litro,margine')
+    .or('cliente_id.eq.' + clienteId + ',cliente.eq.' + (clienteNome || '').replace(/'/g, "\\'"))
+    .eq('prodotto', prodotto)
+    .neq('stato', 'annullato')
+    .eq('tipo_ordine', 'cliente')
+    .order('data', { ascending: false })
+    .limit(5);
+
+  let body = '';
+  if (error) {
+    body = '<div style="text-align:center;padding:20px;color:#c00">Errore: ' + escHtml(error.message) + '</div>';
+  } else if (!ordini || ordini.length === 0) {
+    body = '<div style="text-align:center;padding:24px;color:#888;font-size:13px">Nessun ordine precedente di questo cliente per <strong>' + escHtml(prodotto) + '</strong>.</div>';
+  } else {
+    body = '<table style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--font-mono)">';
+    body += '<thead style="background:#EAF3FB"><tr>';
+    body += '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Data</th>';
+    body += '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Litri</th>';
+    body += '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Prezzo netto/L</th>';
+    body += '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Margine/L</th>';
+    body += '</tr></thead><tbody>';
+    let sumLitri = 0, sumMargine = 0;
+    ordini.forEach((o, i) => {
+      const dt = o.data ? new Date(o.data).toLocaleDateString('it-IT') : '—';
+      const litri = Number(o.litri) || 0;
+      const prezzoNetto = Number(o.costo_litro) + Number(o.trasporto_litro) + Number(o.margine);
+      const mg = Number(o.margine) || 0;
+      sumLitri += litri;
+      sumMargine += mg;
+      const bg = i % 2 === 0 ? '#fff' : '#FAFCFE';
+      body += '<tr style="background:' + bg + '">';
+      body += '<td style="padding:5px 8px;border-bottom:1px solid #EEF;font-weight:600">' + dt + '</td>';
+      body += '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid #EEF">' + fmtL(litri) + '</td>';
+      body += '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid #EEF">' + fmt(prezzoNetto) + '</td>';
+      body += '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid #EEF;color:#1a3a5a;font-weight:700">' + fmtM(mg) + '</td>';
+      body += '</tr>';
+    });
+    body += '</tbody>';
+    if (ordini.length > 1) {
+      const margineMedio = sumMargine / ordini.length;
+      body += '<tfoot><tr style="background:#EAF3FB;font-weight:700">';
+      body += '<td style="padding:6px 8px;color:#0C447C">Media</td>';
+      body += '<td style="padding:6px 8px;text-align:right">' + fmtL(sumLitri) + '</td>';
+      body += '<td style="padding:6px 8px"></td>';
+      body += '<td style="padding:6px 8px;text-align:right;color:#0C447C">' + fmtM(margineMedio) + '</td>';
+      body += '</tr></tfoot>';
+    }
+    body += '</table>';
+  }
+
+  // Ricostruisco il popup con i dati
+  let html2 = '<div style="font-size:15px;font-weight:600;margin-bottom:4px;color:#0C447C">Ultimi 5 ordini</div>';
+  html2 += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px"><strong>' + escHtml(clienteNome) + '</strong> · ' + escHtml(prodotto) + '</div>';
+  html2 += body;
+  html2 += '<div style="display:flex;gap:8px;margin-top:14px"><button onclick="chiudiModal()" style="flex:1;padding:8px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  apriModal(html2);
+}
+
+// Helper escape se non già definito globalmente
+if (typeof escHtml !== 'function') {
+  window.escHtml = function(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  };
+}
+
 // Aggiorna da margine → calcola prezzo netto
 function aggiornaPrevDaMargine() {
   if (!prezzoCorrente) return;
