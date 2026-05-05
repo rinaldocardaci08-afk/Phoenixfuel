@@ -251,8 +251,15 @@ async function annullaRicezioneStazione(ordineId, litri, prodotto) {
     const delRes = await sb.from('stazione_cmp_storico').delete().eq('id', storico.id);
     if (delRes.error) console.warn('[annullaRicezione] errore delete cmp_storico:', delRes.error);
 
-    // 6. UPDATE ordine: ricevuto_stazione = false
-    const ordRes = await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
+    // 6. UPDATE ordine: ricevuto_stazione = false + stato torna a 'confermato' se era 'consegnato'
+    //    (assumiamo che lo stato pre-ricezione tipico sia 'confermato'. Se era altro, l'utente può modificarlo a mano)
+    var ordineUpdate = { ricevuto_stazione: false };
+    // Leggo lo stato attuale per decidere se serve rollback
+    var { data: ordineAttuale } = await sb.from('ordini').select('stato').eq('id', ordineId).single();
+    if (ordineAttuale && ordineAttuale.stato === 'consegnato') {
+      ordineUpdate.stato = 'confermato';
+    }
+    const ordRes = await sb.from('ordini').update(ordineUpdate).eq('id', ordineId);
     if (ordRes.error) { toast('Errore: ' + ordRes.error.message); return; }
 
     if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
@@ -417,6 +424,12 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
       toast('Errore carico: ' + (resCarico.error || 'sconosciuto'));
       await sb.from('ordini').update({ ricevuto_stazione: false }).eq('id', ordineId);
       return;
+    }
+
+    // ─── Auto-update stato a 'consegnato' (regola: ricezione fisica → stato consegnato)
+    //     Solo se non è già 'consegnato' e non è 'annullato'.
+    if (ordine.stato !== 'consegnato' && ordine.stato !== 'annullato') {
+      await sb.from('ordini').update({ stato: 'consegnato' }).eq('id', ordineId);
     }
 
     // Auto-heal cisterne (no-op attualmente, lasciato per backward compat)
