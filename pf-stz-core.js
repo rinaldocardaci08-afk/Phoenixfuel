@@ -114,7 +114,11 @@ async function caricaStazione() {
 
 // ── Dashboard ──
 async function caricaOrdiniDaCaricare() {
-  const { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').eq('stato','confermato').or('ricevuto_stazione.eq.false,ricevuto_stazione.is.null').order('data',{ascending:false});
+  // Mostra TUTTI gli ordini stazione non ancora ricevuti fisicamente, in qualunque stato
+  // amministrativo (in attesa / confermato / programmato / consegnato), escluso annullato.
+  // La ricezione fisica in stazione è indipendente dal flusso amministrativo dell'ordine:
+  // posso ricevere fisicamente prima che l'ordine sia "confermato", o anche dopo "consegnato".
+  const { data: ordini } = await sb.from('ordini').select('*').eq('tipo_ordine','stazione_servizio').neq('stato','annullato').or('ricevuto_stazione.eq.false,ricevuto_stazione.is.null').order('data',{ascending:false});
   const el = document.getElementById('stz-da-caricare');
   if (!el) return;
   if (!ordini || !ordini.length) { el.innerHTML = ''; return; }
