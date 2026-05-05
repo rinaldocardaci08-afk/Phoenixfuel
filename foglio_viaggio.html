@@ -21,6 +21,17 @@
   .truck-value { font-size: 11px; font-weight: bold; }
 
   .consegne-table { width: 100%; border-collapse: collapse; border: 1px solid #ccc; margin-bottom: 8px; }
+  /* Densità adattiva: padding e font scalano in base al numero di consegne */
+  .consegne-table.density-extra-comfortable .consegna-data td { padding: 14px 8px; font-size: 14px; }
+  .consegne-table.density-extra-comfortable .consegna-addr td { padding: 4px 8px 14px 42px; font-size: 12px; }
+  .consegne-table.density-extra-comfortable .seq-badge { width: 24px; height: 24px; line-height: 24px; font-size: 12px; }
+  .consegne-table.density-comfortable .consegna-data td { padding: 10px 7px; font-size: 13px; }
+  .consegne-table.density-comfortable .consegna-addr td { padding: 3px 7px 10px 38px; font-size: 11px; }
+  .consegne-table.density-comfortable .seq-badge { width: 22px; height: 22px; line-height: 22px; font-size: 11px; }
+  .consegne-table.density-standard .consegna-data td { padding: 7px 6px; font-size: 12px; }
+  .consegne-table.density-standard .consegna-addr td { padding: 2px 6px 7px 36px; font-size: 10px; }
+  .consegne-table.density-compact .consegna-data td { padding: 4px 6px; font-size: 11px; }
+  .consegne-table.density-compact .consegna-addr td { padding: 1px 6px 4px 36px; font-size: 10px; }
   .consegne-table thead { background: #d0e4f7; }
   .consegne-table th { padding: 4px 6px; font-size: 9px; color: #3a7abf; font-weight: bold; text-align: left; border-right: 1px solid #b8d4ee; }
   .consegne-table th:last-child { border-right: none; }
@@ -36,6 +47,15 @@
   .consegna-data .sede-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 500; background: #EEEDFE; color: #26215C; margin-left: 6px; }
 
   .consegna-addr td { padding: 1px 6px 4px 36px; font-size: 10px; color: #444; font-weight: normal; }
+  /* Densità adattiva: righe più grandi quando le consegne sono poche */
+  .consegne-table.density-xs .consegna-data td { padding: 14px 8px; font-size: 14px; }
+  .consegne-table.density-xs .consegna-addr td { padding: 4px 8px 14px 40px; font-size: 12px; }
+  .consegne-table.density-xs .consegna-data .seq-badge { width: 26px; height: 26px; line-height: 26px; font-size: 12px; }
+  .consegne-table.density-s  .consegna-data td { padding: 9px 7px; font-size: 13px; }
+  .consegne-table.density-s  .consegna-addr td { padding: 3px 7px 9px 38px; font-size: 11px; }
+  .consegne-table.density-s  .consegna-data .seq-badge { width: 23px; height: 23px; line-height: 23px; font-size: 11px; }
+  .consegne-table.density-m  .consegna-data td { padding: 6px 7px; font-size: 12px; }
+  .consegne-table.density-m  .consegna-addr td { padding: 2px 7px 6px 37px; font-size: 10.5px; }
   .consegna-addr .addr-pin { color: #c00; font-weight: bold; margin-right: 4px; }
   .consegna-note td { padding: 2px 6px 4px 36px; font-size: 10px; color: #555; font-style: italic; background: #fafaf7; }
 
@@ -47,7 +67,7 @@
 
   .truck-graphic { margin: 8px 0; }
   .truck-svg { width: 100%; display: block; }
-  .truck-cap-info { font-size: 10px; color: #555; margin-top: 4px; padding-left: 4px; }
+  .truck-cap-info { font-size: 14px; color: #1a3a5a; font-weight: 700; margin-top: 8px; text-align: center; }
 
   .legenda { display: flex; flex-wrap: wrap; gap: 12px; margin: 6px 0; font-size: 10px; }
   .legenda-item { display: flex; align-items: center; gap: 4px; }
@@ -195,7 +215,7 @@ function escHtml(s) {
 
 const TRUCK_LAYOUTS = {
   motrice: {
-    imgPath: 'camion.png?v=20260505c',
+    imgPath: 'camion.png?v=20260505d',
     imgW: 700, imgH: 232,
     tankX: 174, tankY: 11,
     tankW: 499, tankH: 122,
@@ -252,8 +272,8 @@ function generaCamionSVG(scomparti, ordiniPerScomparto, capacitaTotale, tipoCami
     if (litri > 0) {
       const litriCol = pct >= 50 ? '#fff' : '#1a1a1a';
       const pctCol = pct >= 50 ? '#ffd' : '#666';
-      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 22}" text-anchor="middle" font-size="11" font-weight="700" fill="${litriCol}" font-family="Arial,sans-serif">${fmtL(litri)} L</text>`;
-      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 9}" text-anchor="middle" font-size="9" fill="${pctCol}" font-family="Arial,sans-serif">${pct}%</text>`;
+      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 26}" text-anchor="middle" font-size="16" font-weight="800" fill="${litriCol}" font-family="Arial,sans-serif">${fmtL(litri)} L</text>`;
+      svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 10}" text-anchor="middle" font-size="13" font-weight="700" fill="${pctCol}" font-family="Arial,sans-serif">${pct}%</text>`;
     } else {
       svg += `<text x="${x + compW/2}" y="${L.tankY + L.tankH - 14}" text-anchor="middle" font-size="9" fill="#999" font-family="Arial,sans-serif">Vuoto</text>`;
     }
@@ -271,8 +291,20 @@ function aggiornaCapInfo(scomparti, ordiniPerScomparto, capacitaTotale) {
     `Capacità totale: ${fmtL(capTot)} L · Caricato: ${fmtL(tot)} L (${pctTot}%)`;
 }
 
+function _densityClassFor(n) {
+  if (n <= 4)  return 'density-extra-comfortable';
+  if (n <= 8)  return 'density-comfortable';
+  if (n <= 12) return 'density-standard';
+  return 'density-compact';
+}
+
 function renderConsegne(ordini) {
   const tbody = document.getElementById('consegne-body');
+  const table = tbody && tbody.parentElement;
+  if (table) {
+    table.classList.remove('density-extra-comfortable','density-comfortable','density-standard','density-compact');
+    table.classList.add(_densityClassFor(ordini.length));
+  }
   let totLitri = 0, totBenz = 0, totGas = 0;
 
   tbody.innerHTML = ordini.map((o, idx) => {
@@ -318,6 +350,17 @@ function renderConsegne(ordini) {
   document.getElementById('tot-litri').textContent = fmtL(totLitri);
   document.getElementById('tot-benzina').textContent = fmtL(totBenz);
   document.getElementById('tot-gasolio').textContent = fmtL(totGas);
+  // Densità adattiva: righe più grandi quando consegne poche
+  const tab = document.querySelector('.consegne-table');
+  if (tab) {
+    tab.classList.remove('density-xs','density-s','density-m','density-l');
+    const n = ordini.length;
+    let density = 'l';
+    if (n <= 4) density = 'xs';
+    else if (n <= 7) density = 's';
+    else if (n <= 11) density = 'm';
+    tab.classList.add('density-' + density);
+  }
 }
 
 function generaLegenda(prodottiUsati) {
