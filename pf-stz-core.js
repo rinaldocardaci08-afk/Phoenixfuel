@@ -236,10 +236,12 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
 
     // ─── Lock atomico DB: marca ricevuto_stazione=true PRIMA di toccare cisterne.
     //     Se 0 righe aggiornate, un altro click ha già vinto.
+    //     NB: accetta sia false che null perché i nuovi ordini partono con null
+    //         (default SQL della colonna), non con false.
     const lockRes = await sb.from('ordini')
       .update({ ricevuto_stazione: true })
       .eq('id', ordineId)
-      .eq('ricevuto_stazione', false)
+      .or('ricevuto_stazione.eq.false,ricevuto_stazione.is.null')
       .select('id');
     if (lockRes.error) {
       toast('Errore lock: ' + lockRes.error.message);
