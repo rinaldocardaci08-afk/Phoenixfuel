@@ -1,6 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Sezione Banche & Mutui
-// Versione 30/04/2026 (v20260430d)
+// Versione 05/05/2026 (v20260505a)
+//
+// Patch 05/05 (a) — allineamento permessi alla Costituzione B.4:
+//   - _applicaPermessiTabBanche ora gating della tab "Storico Anticipi"
+//     (banche-panel-anticipi-storico). Bug pre-esistente: la tab era sempre
+//     visibile a chi vedeva la sezione Banche, anche senza permesso 'anticipi'.
+//   - Storico nascosto se manca 'anticipi' (parent) OPPURE se
+//     'anticipi.storico' è esplicitamente=false (sub-permesso permissivo
+//     di default → backward-compatible per utenti già configurati).
+//   - Fallback su tab Istituti se la tab attiva era quella appena nascosta.
+//   - Coordinato con pf-anticipi.js v20260505a che attiva il sub-permesso
+//     'anticipi.storico' nelle helper _antPuoVedereStorico.
 //
 // Patch 30/04 (d) — fix override "incollato":
 //   - Se inserisci saldo_disponibile = 0 (azzeramento) NON viene più trattato
@@ -100,9 +111,11 @@ async function caricaBanche() {
   _applicaPermessiTabBanche();
 }
 
-// ═══ GATING TAB INTERNE BANCHE (regola costituzionale 28/04) ══════════════
+// ═══ GATING TAB INTERNE BANCHE (regola costituzionale B.4) ════════════════
 // Sezione 'banche' = lettura libera del modulo (lo controlla costruisciMenu).
 // Sezione 'anticipi' = lettura tab "Anticipo Fatture": serve permesso esplicito.
+// Sub-permesso 'anticipi.storico' = lettura tab "Storico Anticipi": permissivo
+//   per default (chi ha 'anticipi' lo eredita), bloccabile esplicitamente.
 // Tutti i write nel modulo sono comunque riservati a ruolo 'admin' (decisione
 // utente 28/04). Helpers usati: utenteCorrente + _haPermesso (pf-admin.js).
 function _applicaPermessiTabBanche() {
@@ -110,6 +123,10 @@ function _applicaPermessiTabBanche() {
   if (utenteCorrente.ruolo === 'admin') return; // admin vede tutto
   // Tab Anticipi: serve permesso 'anticipi' esplicito
   var puoAnticipi = (typeof _haPermesso === 'function') && _haPermesso('anticipi');
+  // Tab Storico Anticipi: parent 'anticipi' + sub 'anticipi.storico' (permissivo)
+  var puoAnticipiStorico = puoAnticipi
+    && (typeof _haPermesso === 'function')
+    && _haPermesso('anticipi.storico');
   if (!puoAnticipi) {
     var btnAnt = document.querySelector('.banche-tab[data-tab="banche-panel-anticipi"]');
     if (btnAnt) btnAnt.style.display = 'none';
@@ -120,6 +137,18 @@ function _applicaPermessiTabBanche() {
     if (attiva && attiva.dataset.tab === 'banche-panel-anticipi') {
       var fallback = document.querySelector('.banche-tab[data-tab="banche-panel-istituti"]');
       if (fallback) fallback.click();
+    }
+  }
+  // Patch v20260505a: gating tab Storico Anticipi (bug: era sempre visibile)
+  if (!puoAnticipiStorico) {
+    var btnSto = document.querySelector('.banche-tab[data-tab="banche-panel-anticipi-storico"]');
+    if (btnSto) btnSto.style.display = 'none';
+    var panSto = document.getElementById('banche-panel-anticipi-storico');
+    if (panSto) panSto.style.display = 'none';
+    var attivaSto = document.querySelector('.banche-tab.active');
+    if (attivaSto && attivaSto.dataset.tab === 'banche-panel-anticipi-storico') {
+      var fallbackSto = document.querySelector('.banche-tab[data-tab="banche-panel-istituti"]');
+      if (fallbackSto) fallbackSto.click();
     }
   }
 }

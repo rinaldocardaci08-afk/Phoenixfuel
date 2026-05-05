@@ -1,6 +1,19 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
-// Phoenix Fuel — 30/04/2026 (v20260430a)
+// Phoenix Fuel — 05/05/2026 (v20260505a)
+//
+// Patch 05/05 (a) — allineamento permessi alla Costituzione B.4:
+//   - _antIsAdmin() delega ora al global _isAdmin() di pf-admin.js (rimuove
+//     la duplicazione locale, mantiene fallback se _isAdmin non disponibile).
+//   - _antPuoVedereStorico() controlla davvero il sub-permesso
+//     'anticipi.storico' (era dichiarato in SEZIONI_SISTEMA ma il check
+//     ritornava sempre _antPuoVedere() → sub-permesso morto). Backward-
+//     compatible: _haPermesso('anticipi.storico') è permissivo per default
+//     (true se parent 'anticipi' attivo, false solo se esplicitamente
+//     'anticipi.storico'=false in tabella permessi).
+//   - Coordinato con pf-banche.js v20260505a che ora gating della tab
+//     "Storico Anticipi" (banche-panel-anticipi-storico) — bug pre-esistente:
+//     la tab era sempre visibile a chi vedeva la sezione Banche.
 //
 // Patch 30/04: permessi granulari per operatori (Adele, Chiara)
 //   Aggiunti 5 sub-permessi sotto 'anticipi' in SEZIONI_SISTEMA:
@@ -63,6 +76,10 @@
 //        regole) sono riservati a ruolo 'admin'.
 // ─────────────────────────────────────────────────────────────────────────────
 function _antIsAdmin() {
+  // Patch v20260505a: delega al global _isAdmin (pf-admin.js) per allineamento
+  // alla Costituzione B.4. Fallback al check locale se _isAdmin non disponibile
+  // (safety se ordine di caricamento script cambia).
+  if (typeof _isAdmin === 'function') return _isAdmin();
   return typeof utenteCorrente !== 'undefined' && utenteCorrente && utenteCorrente.ruolo === 'admin';
 }
 function _antPuoVedere() {
@@ -81,7 +98,15 @@ function _antPuoProroga()       { return _antIsAdmin() || (typeof _haPermesso ==
 function _antPuoChiudere()      { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.chiudi-modulo')); }
 function _antPuoModificare()    { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.modifica')); }
 function _antPuoGestireRegole() { return _antIsAdmin() || (typeof _haPermesso === 'function' && _haPermesso('anticipi.regole')); }
-function _antPuoVedereStorico() { return _antPuoVedere(); }
+// Patch v20260505a: attiva il sub-permesso 'anticipi.storico' (era dichiarato
+// in SEZIONI_SISTEMA ma il check ritornava sempre _antPuoVedere() → sub-permesso
+// morto). _haPermesso('anticipi.storico') è permissivo per default: ritorna true
+// se il parent 'anticipi' è attivo e 'anticipi.storico' non è esplicitamente
+// disabilitato → backward-compatible per utenti già configurati.
+function _antPuoVedereStorico() {
+  if (_antIsAdmin()) return true;
+  return (typeof _haPermesso === 'function') && _haPermesso('anticipi.storico');
+}
 
 // ─── STATE ─────────────────────────────────────────────────────────────────
 var _antSubTabAttiva = null;       // id tab attiva: 'banca:<affidamento_id>' | 'storico' | 'regole'
