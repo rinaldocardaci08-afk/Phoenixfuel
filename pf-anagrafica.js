@@ -1547,7 +1547,7 @@ async function caricaClienti() {
       fidoUsatoHtml = '<span style="font-family:var(--font-mono)">' + fmtE(usato) + '</span>';
       fidoResiduoHtml = fidoBar(usato, fidoMax) + ' <span style="font-size:11px;font-family:var(--font-mono)">' + fmtE(residuo) + '</span>';
     }
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td><span class="badge blue">' + esc(r.tipo||'azienda') + '</span></td><td>' + (r.cliente_rete ? '<span class="badge purple">Rete</span>' : '<span class="badge gray">Consumo</span>') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td>' + fidoUsatoHtml + '</td><td>' + fidoResiduoHtml + '</td><td>' + (r.giorni_pagamento||30) + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.prodotti_abituali||'—') + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaCliente(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">📋 Scheda</button> <span onclick="mostraUltimiOrdiniClienteAnagrafica(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')" title="Ultimi 5 ordini di questo cliente" style="display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#85B7EB;color:#fff;font-size:11px;font-weight:700;cursor:pointer;user-select:none;vertical-align:middle">i</span> <button class="btn-edit" onclick="apriModaleCliente(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'clienti\',\'' + r.id + '\',caricaClienti)">x</button></td></tr>';
   }
 
   var html = attivi.map(rigaCliente).join('');
@@ -2291,3 +2291,100 @@ async function eliminaProdotto(id) {
   caricaProdotti();
 }
 
+// ── POPUP ULTIMI 5 ORDINI CLIENTE (da elenco anagrafica) ──────────────
+// Mostra ultimi 5 ordini del cliente, limitato a Benzina + Gasolio Autotrazione.
+// Gli altri prodotti (Agricolo, HVO, AdBlue) non sono mostrati.
+// Tre filtri tramite bottoni: Tutti (default) / Benzina / Gasolio.
+async function mostraUltimiOrdiniClienteAnagrafica(clienteId, clienteNome, filtro) {
+  if (!clienteId) { toast('Cliente non valido'); return; }
+  filtro = filtro || 'tutti';  // 'tutti' | 'benzina' | 'gasolio'
+
+  // Loader iniziale
+  let html = _intestazionePopupOrdini(clienteId, clienteNome, filtro, 'Caricamento...');
+  apriModal(html);
+
+  // Query: ultimi 5 ordini cliente per Benzina e/o Gasolio Autotrazione
+  var q = sb.from('ordini')
+    .select('data,prodotto,litri,costo_litro,trasporto_litro,margine')
+    .or('cliente_id.eq.' + clienteId + ',cliente.eq.' + (clienteNome || '').replace(/'/g, "\\'"))
+    .neq('stato', 'annullato')
+    .eq('tipo_ordine', 'cliente');
+  if (filtro === 'benzina') {
+    q = q.eq('prodotto', 'Benzina');
+  } else if (filtro === 'gasolio') {
+    q = q.eq('prodotto', 'Gasolio Autotrazione');
+  } else {
+    q = q.in('prodotto', ['Benzina', 'Gasolio Autotrazione']);
+  }
+  const { data: ordini, error } = await q.order('data', { ascending: false }).limit(5);
+
+  let body = '';
+  if (error) {
+    body = '<div style="text-align:center;padding:20px;color:#c00">Errore: ' + esc(error.message) + '</div>';
+  } else if (!ordini || ordini.length === 0) {
+    var labelFiltro = filtro === 'benzina' ? 'Benzina' : filtro === 'gasolio' ? 'Gasolio Autotrazione' : 'Benzina o Gasolio';
+    body = '<div style="text-align:center;padding:24px;color:#888;font-size:13px">Nessun ordine ' + esc(labelFiltro) + ' precedente di questo cliente.</div>';
+  } else {
+    body = '<table style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--font-mono)">';
+    body += '<thead style="background:#EAF3FB"><tr>';
+    body += '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Data</th>';
+    body += '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Prodotto</th>';
+    body += '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Litri</th>';
+    body += '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Prezzo netto/L</th>';
+    body += '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;font-weight:700;color:#0C447C">Margine/L</th>';
+    body += '</tr></thead><tbody>';
+    let sumLitri = 0, sumMargine = 0;
+    ordini.forEach(function(o, i) {
+      const dt = o.data ? new Date(o.data).toLocaleDateString('it-IT') : '—';
+      const litri = Number(o.litri) || 0;
+      const prezzoNetto = Number(o.costo_litro) + Number(o.trasporto_litro) + Number(o.margine);
+      const mg = Number(o.margine) || 0;
+      sumLitri += litri;
+      sumMargine += mg;
+      const bg = i % 2 === 0 ? '#fff' : '#FAFCFE';
+      body += '<tr style="background:' + bg + '">';
+      body += '<td style="padding:5px 8px;border-bottom:1px solid #EEF;font-weight:600">' + dt + '</td>';
+      body += '<td style="padding:5px 8px;border-bottom:1px solid #EEF;font-size:11px">' + esc(o.prodotto || '—') + '</td>';
+      body += '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid #EEF">' + fmtL(litri) + '</td>';
+      body += '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid #EEF">' + fmt(prezzoNetto) + '</td>';
+      body += '<td style="padding:5px 8px;text-align:right;border-bottom:1px solid #EEF;color:#1a3a5a;font-weight:700">' + fmtM(mg) + '</td>';
+      body += '</tr>';
+    });
+    body += '</tbody>';
+    if (ordini.length > 1) {
+      const margineMedio = sumMargine / ordini.length;
+      body += '<tfoot><tr style="background:#EAF3FB;font-weight:700">';
+      body += '<td style="padding:6px 8px;color:#0C447C">Media</td>';
+      body += '<td style="padding:6px 8px"></td>';
+      body += '<td style="padding:6px 8px;text-align:right">' + fmtL(sumLitri) + '</td>';
+      body += '<td style="padding:6px 8px"></td>';
+      body += '<td style="padding:6px 8px;text-align:right;color:#0C447C">' + fmtM(margineMedio) + '</td>';
+      body += '</tr></tfoot>';
+    }
+    body += '</table>';
+  }
+
+  // Ricostruisco popup completo con i dati
+  apriModal(_intestazionePopupOrdini(clienteId, clienteNome, filtro, body));
+}
+
+// Helper: header del popup con bottoni filtro Tutti / Benzina / Gasolio
+function _intestazionePopupOrdini(clienteId, clienteNome, filtroAttivo, contenuto) {
+  function bt(label, valore, attivo) {
+    var bg = attivo ? '#0C447C' : '#fff';
+    var col = attivo ? '#fff' : '#0C447C';
+    var bord = attivo ? '#0C447C' : '#85B7EB';
+    var nomeEsc = (clienteNome || '').replace(/'/g, "\\'");
+    return '<button onclick="mostraUltimiOrdiniClienteAnagrafica(\'' + clienteId + '\',\'' + nomeEsc + '\',\'' + valore + '\')" style="padding:5px 14px;border:1px solid ' + bord + ';border-radius:14px;background:' + bg + ';color:' + col + ';font-size:11px;font-weight:600;cursor:pointer">' + label + '</button>';
+  }
+  var html = '<div style="font-size:15px;font-weight:600;margin-bottom:4px;color:#0C447C">Ultimi 5 ordini</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px"><strong>' + esc(clienteNome) + '</strong></div>';
+  html += '<div style="display:flex;gap:6px;margin-bottom:12px">';
+  html += bt('Tutti', 'tutti', filtroAttivo === 'tutti');
+  html += bt('Benzina', 'benzina', filtroAttivo === 'benzina');
+  html += bt('Gasolio', 'gasolio', filtroAttivo === 'gasolio');
+  html += '</div>';
+  html += contenuto;
+  html += '<div style="display:flex;gap:8px;margin-top:14px"><button onclick="chiudiModal()" style="flex:1;padding:8px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
+  return html;
+}
