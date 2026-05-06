@@ -1949,6 +1949,9 @@ async function apriModaleOrdine(id) {
   var statoSel = hasDas ? 'consegnato' : r.stato;
   statiVisibili.forEach(s => { html += '<option value="' + s + '"' + (statoSel===s?' selected':'') + '>' + s + '</option>'; });
   html += '</select></div>';
+  // Data consegna: editabile per ordini in attesa/confermato/programmato. Bloccata se consegnato (dato storico fissato).
+  var dataLocked = (r.stato === 'consegnato');
+  html += '<div class="form-group"><label>Data consegna' + (dataLocked ? ' <span style="font-size:10px;color:#639922;font-weight:500">🔒 Consegnato</span>' : '') + '</label><input type="date" id="mod-data" value="' + (r.data || '') + '"' + (dataLocked ? ' disabled title="Data bloccata: ordine consegnato"' : '') + ' /></div>';
   html += '<div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="' + r.litri + '" /></div>';
   html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.0001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
   html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.0001" value="' + r.trasporto_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
@@ -2079,7 +2082,16 @@ async function salvaModificaOrdine(id, bypassCheck) {
   if (hasDasOrd) {
     statoDaSalvare = 'consegnato';
   }
-  const dataScad = new Date(ordine.data); dataScad.setDate(dataScad.getDate()+ggPag);
+  // Server-side guard: se stato originale era 'consegnato', la data non si tocca.
+  // Vale anche per DAS firmato (ordine bloccato comunque).
+  var dataNuova;
+  if (ordine.stato === 'consegnato' || hasDasOrd) {
+    dataNuova = ordine.data;
+  } else {
+    dataNuova = document.getElementById('mod-data') ? document.getElementById('mod-data').value : ordine.data;
+  }
+  const dataValida = dataNuova && /^\d{4}-\d{2}-\d{2}$/.test(dataNuova) ? dataNuova : ordine.data;
+  const dataScad = new Date(dataValida); dataScad.setDate(dataScad.getDate()+ggPag);
   var modDestVal = document.getElementById('mod-destinazione').value;
   var modDest = modDestVal === '__manuale__' ? (document.getElementById('mod-dest-manuale').value.trim()||null) : (modDestVal || null);
   // Coerenza sede_scarico_id/nome con destinazione selezionata dal dropdown.
@@ -2092,7 +2104,7 @@ async function salvaModificaOrdine(id, bypassCheck) {
       modSedeNome = modDest;
     }
   }
-  var updatePayload = { stato: statoDaSalvare, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome };
+  var updatePayload = { stato: statoDaSalvare, data: dataValida, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome };
   // Se DAS firmato, blocca anche caricato_deposito a true (l'uscita deposito è stata fatta)
   if (hasDasOrd) {
     updatePayload.caricato_deposito = true;
@@ -2112,6 +2124,7 @@ function _mostraPopupConfermaPrezzo(id, nuovoCosto, nuovoTrasporto, margineCorre
   // Snapshot completo del form per non perdere le altre modifiche (stato, litri, note, dest, ecc.)
   window._modSnapshotForm = {
     stato: document.getElementById('mod-stato').value,
+    data: document.getElementById('mod-data') ? document.getElementById('mod-data').value : null,
     litri: document.getElementById('mod-litri').value,
     iva: document.getElementById('mod-iva').value,
     gg: document.getElementById('mod-gg').value,
@@ -2178,6 +2191,7 @@ async function _ripristinaFormESalva(id, costoFinale, trasportoFinale, margineFi
   await new Promise(function(resolve){ setTimeout(resolve, 120); });
   var snap = window._modSnapshotForm || {};
   if (snap.stato !== undefined) document.getElementById('mod-stato').value = snap.stato;
+  if (snap.data !== undefined && snap.data !== null && document.getElementById('mod-data')) document.getElementById('mod-data').value = snap.data;
   if (snap.litri !== undefined) document.getElementById('mod-litri').value = snap.litri;
   if (snap.iva !== undefined) document.getElementById('mod-iva').value = snap.iva;
   if (snap.gg !== undefined) document.getElementById('mod-gg').value = snap.gg;
