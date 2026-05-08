@@ -208,6 +208,7 @@ function _corrRender() {
       html += '<td style="padding:6px"></td>';
       html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#0C447C">' + _fmtC(Number(v.importo_versato || 0)) + '</td>';
       html += '<td style="padding:6px;text-align:center">';
+      html += '<button onclick="_corrModificaVersamento(\'' + v.id + '\')" style="background:#FFC107;color:#1a3a5a;padding:2px 7px;border-radius:4px;font-size:9px;border:none;cursor:pointer;margin-right:3px" title="Modifica versamento">✏️</button>';
       if (v.ricevuta_url) {
         html += '<a href="' + v.ricevuta_url + '" target="_blank" style="background:#378ADD;color:white;padding:2px 6px;border-radius:4px;font-size:9px;text-decoration:none">📎 PDF</a>';
       }
@@ -449,5 +450,235 @@ async function _corrEliminaVersamento(id) {
   var { error } = await sb.from('versamenti_banca').delete().eq('id', id);
   if (error) { toast('Errore: ' + error.message); return; }
   toast('Versamento eliminato');
+  caricaCorrispettivi();
+}
+
+// ── MODIFICA VERSAMENTO BANCARIO ──────────────────────────────────────
+// Apre un modale con i dati del versamento, permette di modificare data, banca, importo, note,
+// e opzionalmente sostituire la ricevuta. Permette anche di aggiungere/togliere giorni coperti
+// (i giorni di altri versamenti restano disabled).
+async function _corrModificaVersamento(id) {
+  if (!id) { toast('ID versamento non valido'); return; }
+
+  // Carico il versamento dal DB
+  var { data: v, error } = await sb.from('versamenti_banca').select('*').eq('id', id).single();
+  if (error || !v) { toast('Errore: versamento non trovato'); return; }
+
+  // Banche disponibili (lette dalla tabella banche se presente, altrimenti lista costituzionale)
+  var bancheLista = [];
+  try {
+    var { data: bk } = await sb.from('banche').select('nome').order('nome');
+    bancheLista = (bk || []).map(function(b) { return b.nome; });
+  } catch (_) {}
+  if (!bancheLista.length) bancheLista = ['Intesa', 'MPS', 'BNL', 'BCC'];
+
+  // Stato locale per il modale: array dei giorni selezionati e info per render
+  var giorniCorrenti = (v.giorni_coperti || []).slice();
+  window._modVersStato = { id: id, giorniSelezionati: giorniCorrenti, righeMese: [] };
+
+  // Recupero le righe del mese da _corrData se è del mese del versamento, altrimenti rifaccio il calcolo
+  var dataVersDate = new Date(v.data_versamento + 'T12:00:00');
+  var annoV = dataVersDate.getFullYear();
+  var meseV = dataVersDate.getMonth() + 1;
+  var righeMese = [];
+  if (_corrData && Number(_corrData.anno) === annoV && Number(_corrData.mese) === meseV) {
+    righeMese = _corrData.righe || [];
+  } else {
+    // Caricamento ad-hoc del mese del versamento
+    righeMese = await _corrCaricaRigheMese(annoV, meseV);
+  }
+  window._modVersStato.righeMese = righeMese;
+
+  var html = '<div style="font-size:15px;font-weight:600;margin-bottom:10px;color:#0C447C">✏️ Modifica versamento bancario</div>';
+
+  html += '<div class="form-group"><label>Data versamento</label><input type="date" id="modvers-data" value="' + (v.data_versamento || '') + '" /></div>';
+
+  html += '<div class="form-group"><label>Banca</label><select id="modvers-banca">';
+  bancheLista.forEach(function(b) {
+    html += '<option value="' + esc(b) + '"' + (b === v.banca ? ' selected' : '') + '>' + esc(b) + '</option>';
+  });
+  html += '</select></div>';
+
+  // Lista giorni coperti (checkbox: corrente checkato, altri liberi disabili checkabili, altri versamenti disabled)
+  html += '<div class="form-group"><label>Giorni coperti dal versamento</label>';
+  html += '<div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:6px;background:#FAFCFE">';
+  html += '<div id="modvers-giorni-lista">' + _corrModVersRenderGiorni() + '</div>';
+  html += '</div>';
+  html += '<div style="margin-top:6px;font-size:11px;color:var(--text-muted)">Importo atteso ricalcolato: <strong id="modvers-atteso" style="color:#0C447C">€ ' + Number(v.importo_atteso || 0).toFixed(2) + '</strong></div>';
+  html += '</div>';
+
+  html += '<div class="form-group"><label>Importo versato (€)</label><input type="number" step="0.01" id="modvers-importo" value="' + Number(v.importo_versato || 0).toFixed(2) + '" oninput="_corrModVersAggiornaDiff()" /></div>';
+  html += '<div style="margin-top:-8px;margin-bottom:10px;font-size:11px">Differenza: <strong id="modvers-diff" style="font-family:var(--font-mono)">€ ' + Number(v.differenza || 0).toFixed(2) + '</strong></div>';
+
+  html += '<div class="form-group"><label>Note</label><input type="text" id="modvers-note" value="' + esc(v.note || '') + '" /></div>';
+
+  html += '<div class="form-group"><label>Sostituisci ricevuta (PDF, opzionale)</label><input type="file" id="modvers-file" accept=".pdf,image/*" />';
+  if (v.ricevuta_url) html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">Ricevuta attuale: <a href="' + v.ricevuta_url + '" target="_blank" style="color:#378ADD">📎 Visualizza</a></div>';
+  html += '</div>';
+
+  html += '<div style="display:flex;gap:8px;margin-top:14px">';
+  html += '<button onclick="chiudiModal()" style="flex:1;padding:8px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button>';
+  html += '<button onclick="_corrSalvaModificaVersamento(\'' + id + '\')" style="flex:1;padding:8px 16px;border:none;border-radius:var(--radius);background:#0C447C;color:#fff;cursor:pointer;font-weight:600">💾 Salva</button>';
+  html += '</div>';
+
+  apriModal(html);
+  _corrModVersAggiornaDiff();
+}
+
+// Render della lista checkbox giorni nel modale modifica versamento
+function _corrModVersRenderGiorni() {
+  var st = window._modVersStato;
+  if (!st || !st.righeMese) return '<div style="padding:8px;color:#888;font-size:11px">Nessun dato disponibile per questo mese</div>';
+  var html = '';
+  st.righeMese.forEach(function(r) {
+    if (!r.hasCassa) return; // niente cassa = niente da versare = saltiamo
+    var dataR = r.data;
+    var coperto = (r.versamento && r.versamento.id) ? r.versamento.id : null;
+    var inQuestoVers = st.giorniSelezionati.indexOf(dataR) >= 0;
+    var inAltroVers = coperto && coperto !== st.id && !inQuestoVers;
+    var dataFmt = new Date(dataR + 'T12:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+    var bg = inQuestoVers ? '#E6F1FB' : (inAltroVers ? '#F4F4F4' : '#fff');
+    var col = inAltroVers ? '#999' : '#1a1a1a';
+    var dis = inAltroVers ? ' disabled' : '';
+    var chk = inQuestoVers ? ' checked' : '';
+    var infoAltro = inAltroVers && r.versamento ? ' <span style="font-size:10px;color:#999">→ versamento ' + new Date(r.versamento.data_versamento + 'T12:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + '</span>' : '';
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;background:' + bg + ';border-radius:4px;margin-bottom:2px;color:' + col + ';font-size:12px">';
+    html += '<input type="checkbox" data-data="' + dataR + '" data-importo="' + r.daVersare + '"' + chk + dis + ' onchange="_corrModVersToggleGiorno(this)" style="accent-color:#639922" />';
+    html += '<span style="font-weight:600">' + dataFmt + '</span>';
+    html += '<span style="margin-left:auto;font-family:var(--font-mono)">' + _fmtC(Number(r.daVersare || 0)) + '</span>';
+    html += infoAltro;
+    html += '</div>';
+  });
+  if (!html) html = '<div style="padding:8px;color:#888;font-size:11px">Nessun giorno con cassa in questo mese</div>';
+  return html;
+}
+
+// Gestione check/uncheck giorno nel modale modifica versamento
+function _corrModVersToggleGiorno(cb) {
+  var st = window._modVersStato;
+  if (!st) return;
+  var dataR = cb.dataset.data;
+  if (cb.checked) {
+    if (st.giorniSelezionati.indexOf(dataR) < 0) st.giorniSelezionati.push(dataR);
+  } else {
+    st.giorniSelezionati = st.giorniSelezionati.filter(function(d) { return d !== dataR; });
+  }
+  _corrModVersAggiornaDiff();
+}
+
+// Ricalcolo importo atteso e differenza ogni volta che cambia selezione o importo versato
+function _corrModVersAggiornaDiff() {
+  var st = window._modVersStato;
+  if (!st) return;
+  var atteso = 0;
+  st.righeMese.forEach(function(r) {
+    if (st.giorniSelezionati.indexOf(r.data) >= 0) atteso += Number(r.daVersare || 0);
+  });
+  atteso = Math.round(atteso * 100) / 100;
+  var versato = parseFloat(document.getElementById('modvers-importo')?.value || 0) || 0;
+  var diff = Math.round((versato - atteso) * 100) / 100;
+  var elA = document.getElementById('modvers-atteso');
+  var elD = document.getElementById('modvers-diff');
+  if (elA) elA.textContent = '€ ' + atteso.toFixed(2);
+  if (elD) {
+    elD.textContent = (diff >= 0 ? '+' : '') + '€ ' + Math.abs(diff).toFixed(2);
+    elD.style.color = diff < 0 ? '#E24B4A' : (diff > 0 ? '#639922' : '#1a3a5a');
+  }
+}
+
+// Caricamento ad-hoc righe mese se _corrData non è del mese corretto
+async function _corrCaricaRigheMese(anno, mese) {
+  var daISO = anno + '-' + String(mese).padStart(2, '0') + '-01';
+  var ultimoG = new Date(anno, mese, 0).getDate();
+  var aISO = anno + '-' + String(mese).padStart(2, '0') + '-' + String(ultimoG).padStart(2, '0');
+
+  var [cassaRes, versRes, speseRes, creditiRes] = await Promise.all([
+    sb.from('stazione_cassa_giornaliera').select('*').gte('data', daISO).lte('data', aISO).order('data'),
+    sb.from('versamenti_banca').select('*').gte('data_versamento', daISO).lte('data_versamento', aISO).order('data_versamento'),
+    sb.from('stazione_spese_contanti').select('*').gte('data', daISO).lte('data', aISO),
+    sb.from('stazione_crediti').select('*').gte('data', daISO).lte('data', aISO)
+  ]);
+  var cassaMap = {};
+  (cassaRes.data || []).forEach(function(c) { cassaMap[c.data] = c; });
+  var giornoVersamento = {};
+  (versRes.data || []).forEach(function(v) { (v.giorni_coperti || []).forEach(function(g) { giornoVersamento[g] = v; }); });
+  var spesePerGiorno = {};
+  (speseRes.data || []).forEach(function(s) { spesePerGiorno[s.data] = (spesePerGiorno[s.data] || 0) + Number(s.importo || 0); });
+  var creditiPerGiorno = {};
+  (creditiRes.data || []).forEach(function(cc) {
+    var d = cc.data; if (!creditiPerGiorno[d]) creditiPerGiorno[d] = { aperti: 0, chiusi: 0 };
+    if (cc.chiuso) creditiPerGiorno[d].chiusi += Number(cc.importo || 0);
+    else creditiPerGiorno[d].aperti += Number(cc.importo || 0);
+  });
+  var righe = [];
+  for (var g = 1; g <= ultimoG; g++) {
+    var dStr = anno + '-' + String(mese).padStart(2, '0') + '-' + String(g).padStart(2, '0');
+    var c = cassaMap[dStr];
+    var contanti = c ? Number(c.contanti || 0) : 0;
+    var saldoCred = creditiPerGiorno[dStr] ? (creditiPerGiorno[dStr].chiusi - creditiPerGiorno[dStr].aperti) : 0;
+    var totSpese = spesePerGiorno[dStr] || 0;
+    var daVersare = Math.round((contanti + saldoCred - totSpese) * 100) / 100;
+    righe.push({ giorno: g, data: dStr, daVersare: daVersare, versamento: giornoVersamento[dStr] || null, hasCassa: !!c });
+  }
+  return righe;
+}
+
+async function _corrSalvaModificaVersamento(id) {
+  var st = window._modVersStato;
+  if (!st || st.id !== id) { toast('Stato modifica perso, riapri la modale'); return; }
+
+  var dataNuova = document.getElementById('modvers-data').value;
+  var bancaNuova = document.getElementById('modvers-banca').value;
+  var importoNuovo = parseFloat(document.getElementById('modvers-importo').value) || 0;
+  var noteNuove = document.getElementById('modvers-note').value.trim();
+  var giorniNuovi = st.giorniSelezionati.slice().sort();
+
+  if (!dataNuova || !/^\d{4}-\d{2}-\d{2}$/.test(dataNuova)) { toast('Data non valida'); return; }
+  if (!importoNuovo) { toast('Inserisci l\'importo versato'); return; }
+  if (!giorniNuovi.length) { toast('Seleziona almeno un giorno coperto'); return; }
+
+  // Ricalcolo importo_atteso dai giorni selezionati
+  var attesoNuovo = 0;
+  st.righeMese.forEach(function(r) {
+    if (giorniNuovi.indexOf(r.data) >= 0) attesoNuovo += Number(r.daVersare || 0);
+  });
+  attesoNuovo = Math.round(attesoNuovo * 100) / 100;
+  var differenzaNuova = Math.round((importoNuovo - attesoNuovo) * 100) / 100;
+
+  var updatePayload = {
+    data_versamento: dataNuova,
+    banca: bancaNuova,
+    importo_versato: importoNuovo,
+    importo_atteso: attesoNuovo,
+    differenza: differenzaNuova,
+    giorni_coperti: giorniNuovi,
+    note: noteNuove
+  };
+
+  // Sostituzione ricevuta opzionale
+  var fileInput = document.getElementById('modvers-file');
+  var newUploadedPath = null;
+  if (fileInput && fileInput.files && fileInput.files.length) {
+    var file = fileInput.files[0];
+    if (file.size > 15 * 1024 * 1024) { toast('File ricevuta troppo grande (max 15MB)'); return; }
+    var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    var path = 'versamenti-banca/' + dataNuova + '_' + Date.now() + '_' + safeName;
+    var { error: upErr } = await sb.storage.from('allegati').upload(path, file, { contentType: file.type });
+    if (upErr) { toast('Errore upload ricevuta: ' + (upErr.message || upErr)); return; }
+    var { data: urlData } = sb.storage.from('allegati').getPublicUrl(path);
+    updatePayload.ricevuta_url = urlData.publicUrl;
+    newUploadedPath = path;
+  }
+
+  var { error } = await sb.from('versamenti_banca').update(updatePayload).eq('id', id);
+  if (error) {
+    if (newUploadedPath) { try { await sb.storage.from('allegati').remove([newUploadedPath]); } catch(_) {} }
+    toast('Errore: ' + error.message);
+    return;
+  }
+
+  toast('✅ Versamento aggiornato' + (newUploadedPath ? ' (nuova ricevuta)' : ''));
+  window._modVersStato = null;
+  chiudiModal();
   caricaCorrispettivi();
 }
