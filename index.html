@@ -1570,34 +1570,34 @@
           <div id="stz-da-caricare" style="margin-bottom:16px"></div>
           <div id="stz-ricevuti-recenti" style="margin-bottom:16px"></div>
 
-          <div class="grid4" style="margin-bottom:16px">
+          <div class="grid4 stz-dash-panel" data-panel-id="kpi-principali" style="position:relative;margin-bottom:16px">
             <div class="kpi"><div class="kpi-label">Litri venduti oggi</div><div class="kpi-value" id="stz-litri-oggi">—</div></div>
             <div class="kpi"><div class="kpi-label">Incasso oggi</div><div class="kpi-value" id="stz-incasso-oggi">—</div></div>
             <div class="kpi"><div class="kpi-label">Litri mese</div><div class="kpi-value" id="stz-litri-mese">—</div></div>
             <div class="kpi"><div class="kpi-label">Incasso mese</div><div class="kpi-value" id="stz-incasso-mese">—</div></div>
           </div>
-          <div class="grid2" style="margin-bottom:16px">
+          <div class="grid2 stz-dash-panel" data-panel-id="kpi-versamenti" style="position:relative;margin-bottom:16px">
             <div class="kpi"><div class="kpi-label">Versamenti mese (contanti)</div><div class="kpi-value" id="stz-vers-contanti">—</div></div>
             <div class="kpi"><div class="kpi-label">Versamenti mese (POS)</div><div class="kpi-value" id="stz-vers-pos">—</div></div>
           </div>
 
           <!-- Giacenze cisterne -->
-          <div class="card" style="margin-bottom:16px">
+          <div class="card stz-dash-panel" data-panel-id="cisterne" style="position:relative;margin-bottom:16px">
             <div class="card-title">Giacenze cisterne stazione</div>
             <div id="stz-dash-cisterne"><div class="loading">Caricamento...</div></div>
           </div>
 
           <!-- Grafici mese corrente -->
-          <div class="grid2" style="margin-bottom:16px">
+          <div class="grid2 stz-dash-panel" data-panel-id="grafici-2" style="position:relative;margin-bottom:16px">
             <div class="card"><div class="card-title">Litri venduti per giorno</div><canvas id="stz-dash-chart-litri" height="200"></canvas></div>
             <div class="card"><div class="card-title">Fatturato per giorno</div><canvas id="stz-dash-chart-fatturato" height="200"></canvas></div>
           </div>
-          <div class="card" style="margin-bottom:16px">
+          <div class="card stz-dash-panel" data-panel-id="margine" style="position:relative;margin-bottom:16px">
             <div class="card-title">Margine per giorno</div>
             <canvas id="stz-dash-chart-margine" height="180"></canvas>
           </div>
 
-          <div class="card">
+          <div class="card stz-dash-panel" data-panel-id="7giorni" style="position:relative">
             <div class="card-title">Ultimi 7 giorni</div>
             <div style="overflow-x:auto">
             <table><thead><tr><th>Data</th><th>Gasolio (L)</th><th>Benzina (L)</th><th>Totale (L)</th><th>Incasso €</th><th>Versamento €</th></tr></thead>

@@ -448,7 +448,89 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
 let _stzDashCharts = {};
 function _destroyStzDashCharts() { Object.values(_stzDashCharts).forEach(c=>c.destroy()); _stzDashCharts={}; }
 
+// ── Pannelli dashboard riordinabili ▲▼ (regola costituzionale) ──
+// Default order: l'ordine in cui appaiono in HTML (lasciato come baseline ragionevole)
+var _STZ_DASH_PANEL_DEFAULT = ['kpi-principali', 'kpi-versamenti', 'cisterne', 'grafici-2', 'margine', '7giorni'];
+
+// Inietta le frecce ▲▼ in alto a destra di ogni pannello (idempotente: se già presenti non duplica)
+function _stzInjectPanelArrows() {
+  var container = document.getElementById('stz-dashboard');
+  if (!container) return;
+  var panels = container.querySelectorAll('.stz-dash-panel');
+  var order = (typeof _getPanelOrder === 'function') ? _getPanelOrder('stz-dashboard') : _STZ_DASH_PANEL_DEFAULT.slice();
+  panels.forEach(function(p) {
+    if (p.querySelector(':scope > .stz-panel-arrows')) return; // già presente
+    var pid = p.dataset.panelId;
+    if (!pid) return;
+    var idx = order.indexOf(pid);
+    var isFirst = idx <= 0;
+    var isLast = idx >= order.length - 1;
+    var arrows = document.createElement('div');
+    arrows.className = 'stz-panel-arrows';
+    arrows.style.cssText = 'position:absolute;top:6px;right:8px;z-index:10;display:flex;gap:3px';
+    arrows.innerHTML =
+      '<button onclick="_stzMovePanel(\'' + pid + '\',-1)" ' + (isFirst ? 'disabled' : '') + ' title="Sposta sopra" style="background:rgba(255,255,255,0.95);border:0.5px solid var(--border);border-radius:4px;width:24px;height:22px;cursor:' + (isFirst ? 'not-allowed' : 'pointer') + ';font-size:10px;color:var(--text);opacity:' + (isFirst ? '0.25' : '0.7') + '">▲</button>' +
+      '<button onclick="_stzMovePanel(\'' + pid + '\',1)" ' + (isLast ? 'disabled' : '') + ' title="Sposta sotto" style="background:rgba(255,255,255,0.95);border:0.5px solid var(--border);border-radius:4px;width:24px;height:22px;cursor:' + (isLast ? 'not-allowed' : 'pointer') + ';font-size:10px;color:var(--text);opacity:' + (isLast ? '0.25' : '0.7') + '">▼</button>';
+    p.appendChild(arrows);
+  });
+}
+
+// Riordina i pannelli nel DOM secondo l'ordine salvato (sposta i div esistenti, NON ricrea HTML
+// — così Chart.js e i contenuti dinamici restano vivi)
+function _stzReorderDashboardPanels() {
+  var container = document.getElementById('stz-dashboard');
+  if (!container) return;
+  var order = (typeof _getPanelOrder === 'function') ? _getPanelOrder('stz-dashboard') : _STZ_DASH_PANEL_DEFAULT.slice();
+  order.forEach(function(panelId) {
+    var el = container.querySelector('.stz-dash-panel[data-panel-id="' + panelId + '"]');
+    if (el) container.appendChild(el); // appendChild SPOSTA un nodo già nel DOM, non duplica
+  });
+  // Aggiorna stato disabilitato delle frecce dopo il riordino
+  _stzAggiornaFrecce();
+}
+
+// Aggiorna disabilitato/opacità delle frecce in base alla nuova posizione
+function _stzAggiornaFrecce() {
+  var container = document.getElementById('stz-dashboard');
+  if (!container) return;
+  var order = (typeof _getPanelOrder === 'function') ? _getPanelOrder('stz-dashboard') : _STZ_DASH_PANEL_DEFAULT.slice();
+  order.forEach(function(panelId, idx) {
+    var p = container.querySelector('.stz-dash-panel[data-panel-id="' + panelId + '"]');
+    if (!p) return;
+    var arrows = p.querySelector(':scope > .stz-panel-arrows');
+    if (!arrows) return;
+    var btnUp = arrows.querySelector('button:first-child');
+    var btnDown = arrows.querySelector('button:last-child');
+    var isFirst = idx <= 0, isLast = idx >= order.length - 1;
+    if (btnUp) {
+      btnUp.disabled = isFirst;
+      btnUp.style.opacity = isFirst ? '0.25' : '0.7';
+      btnUp.style.cursor = isFirst ? 'not-allowed' : 'pointer';
+    }
+    if (btnDown) {
+      btnDown.disabled = isLast;
+      btnDown.style.opacity = isLast ? '0.25' : '0.7';
+      btnDown.style.cursor = isLast ? 'not-allowed' : 'pointer';
+    }
+  });
+}
+
+// Wrapper su _movePanelUp/Down per dashboard stazione, con refresh DOM-based
+function _stzMovePanel(panelId, direzione) {
+  if (typeof _movePanelUp !== 'function' || typeof _movePanelDown !== 'function') return;
+  if (direzione < 0) _movePanelUp('stz-dashboard', panelId);
+  else _movePanelDown('stz-dashboard', panelId);
+  // _movePanelUp/Down chiamano internamente _PANEL_REFRESH_FN se registrato
+}
+
 async function caricaStazioneDashboard() {
+  // Setup pannelli riordinabili (idempotente — sicuro chiamarlo a ogni refresh)
+  _stzInjectPanelArrows();
+  if (typeof _registerPanels === 'function') {
+    _registerPanels('stz-dashboard', _STZ_DASH_PANEL_DEFAULT, _stzReorderDashboardPanels);
+  }
+  _stzReorderDashboardPanels();
+
   await caricaOrdiniDaCaricare();
   await caricaOrdiniRicevutiRecenti();
 
