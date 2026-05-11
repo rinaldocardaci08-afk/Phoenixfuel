@@ -147,6 +147,7 @@ async function caricaOrdiniDaCaricare() {
 async function caricaOrdiniRicevutiRecenti() {
   // Mostra ricezioni stazione effettuate negli ultimi 30 giorni, ordinate dalla più recente,
   // con bottone per annullare la ricezione (rimette ricevuto_stazione=false e scarica le cisterne).
+  // Pannello collassabile: stato (aperto/chiuso) salvato in localStorage.
   const el = document.getElementById('stz-ricevuti-recenti');
   if (!el) return;
   var oggi = new Date();
@@ -160,8 +161,19 @@ async function caricaOrdiniRicevutiRecenti() {
     .order('data', { ascending: false })
     .limit(20);
   if (!ordini || !ordini.length) { el.innerHTML = ''; return; }
+
+  // Stato aperto/chiuso da localStorage (default: chiuso)
+  var isOpen = false;
+  try { isOpen = localStorage.getItem('pf-stz-ricevuti-recenti-open') === '1'; } catch(e) {}
+
   let html = '<div class="card" style="border-left:4px solid #888;margin-top:12px">';
-  html += '<div class="card-title" style="color:#666">✓ Ordini ricevuti recentemente — ultimi 30 giorni (' + ordini.length + ')</div>';
+  // Header cliccabile per espandere/collassare
+  html += '<div onclick="_stzToggleRicevutiRecenti()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:4px 0">';
+  html += '<div class="card-title" style="color:#666;margin:0">✓ Ordini ricevuti recentemente — ultimi 30 giorni (' + ordini.length + ')</div>';
+  html += '<span id="stz-ricevuti-recenti-chevron" style="font-size:14px;color:#888;transition:transform 0.2s;transform:rotate(' + (isOpen ? '180deg' : '0deg') + ')">▼</span>';
+  html += '</div>';
+  // Body collassabile
+  html += '<div id="stz-ricevuti-recenti-body" style="display:' + (isOpen ? 'block' : 'none') + ';margin-top:10px">';
   html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th></th></tr></thead><tbody>';
   ordini.forEach(function(r) {
     const dataFmt = new Date(r.data).toLocaleDateString('it-IT');
@@ -175,8 +187,19 @@ async function caricaOrdiniRicevutiRecenti() {
       '<td><button class="btn-secondary" style="font-size:11px;padding:4px 10px;color:#a04020;border-color:#d4a090;background:#fff5f0" onclick="annullaRicezioneStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto).replace(/'/g, "\\'") + '\')" title="Riporta l\'ordine in elenco da ricevere e scarica i litri dalle cisterne">↩ Annulla ricezione</button></td>' +
       '</tr>';
   });
-  html += '</tbody></table></div></div>';
+  html += '</tbody></table></div></div></div>';
   el.innerHTML = html;
+}
+
+// Toggle pannello "Ordini ricevuti recentemente" + persistenza stato in localStorage
+function _stzToggleRicevutiRecenti() {
+  var body = document.getElementById('stz-ricevuti-recenti-body');
+  var chevron = document.getElementById('stz-ricevuti-recenti-chevron');
+  if (!body) return;
+  var willOpen = body.style.display === 'none';
+  body.style.display = willOpen ? 'block' : 'none';
+  if (chevron) chevron.style.transform = 'rotate(' + (willOpen ? '180deg' : '0deg') + ')';
+  try { localStorage.setItem('pf-stz-ricevuti-recenti-open', willOpen ? '1' : '0'); } catch(e) {}
 }
 
 // ── Annullamento ricezione: scarica cisterne, ripristina CMP precedente, marca ordine non ricevuto ──
