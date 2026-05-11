@@ -259,7 +259,7 @@ async function caricaGiacenzeStazione() {
       var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
       var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
       var cmpAnalisiBtn = ' <button onclick="_apriAnalisiCMP(\'' + esc(prodNome) + '\',\'stazione_oppido\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Analisi CMP">🔍 Analisi</button>';
-      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(4) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + cmpAnalisiBtn + '</div>' : '';
+      const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(6) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + cmpAnalisiBtn + '</div>' : '';
       const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
       const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
       const pctTotHtml = '<div class="tot-pct"><span class="val">' + pctGruppo + '%</span> della capacità totale</div>';
@@ -379,10 +379,10 @@ async function caricaReportAcquistiStazione() {
   html += '<div style="overflow-x:auto"><table><thead><tr><th>Prodotto</th><th>Ordini</th><th>Litri</th><th>Prezzo medio €/L</th><th>Imponibile</th><th>IVA</th><th>Totale</th></tr></thead><tbody>';
   Object.entries(r.perProdotto).forEach(function(e) {
     var prod = e[0], v = e[1];
-    var pm = v.litri > 0 ? (v.costoSum / v.litri).toFixed(4) : '—';
+    var pm = v.litri > 0 ? (v.costoSum / v.litri).toFixed(6) : '—';
     html += '<tr><td><strong>'+esc(prod)+'</strong></td><td style="text-align:center">'+v.ordini+'</td><td style="'+mono+';text-align:right">'+fmtL(v.litri)+'</td><td style="'+mono+';text-align:right">€ '+pm+'</td><td style="'+mono+';text-align:right">'+fmtE(v.imponibile)+'</td><td style="'+mono+';text-align:right">'+fmtE(v.iva)+'</td><td style="'+mono+';text-align:right;font-weight:600">'+fmtE(v.totale)+'</td></tr>';
   });
-  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td style="text-align:center">'+ordini.length+'</td><td style="'+mono+';text-align:right">'+fmtL(r.totLitri)+'</td><td style="'+mono+';text-align:right">€ '+(r.totLitri>0?(r.totImponibile/r.totLitri).toFixed(4):'—')+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totImponibile)+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totIva)+'</td><td style="'+mono+';text-align:right;font-weight:700">'+fmtE(r.totTotale)+'</td></tr>';
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td style="text-align:center">'+ordini.length+'</td><td style="'+mono+';text-align:right">'+fmtL(r.totLitri)+'</td><td style="'+mono+';text-align:right">€ '+(r.totLitri>0?(r.totImponibile/r.totLitri).toFixed(6):'—')+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totImponibile)+'</td><td style="'+mono+';text-align:right">'+fmtE(r.totIva)+'</td><td style="'+mono+';text-align:right;font-weight:700">'+fmtE(r.totTotale)+'</td></tr>';
   html += '</tbody></table></div>';
 
   // Dettaglio ordini
@@ -408,10 +408,10 @@ async function stampaReportAcquistiStazione() {
   var riepilogoHtml = '';
   Object.entries(r.perProdotto).forEach(function(e) {
     var prod = e[0], v = e[1];
-    var pm = v.litri > 0 ? (v.costoSum / v.litri).toFixed(4) : '—';
+    var pm = v.litri > 0 ? (v.costoSum / v.litri).toFixed(6) : '—';
     riepilogoHtml += '<tr><td style="padding:6px 8px;border:1px solid #ddd"><strong>'+esc(prod)+'</strong></td><td style="padding:6px 8px;border:1px solid #ddd;text-align:center">'+v.ordini+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(v.litri)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ '+pm+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(v.imponibile)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(v.iva)+'</td><td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(v.totale)+'</td></tr>';
   });
-  riepilogoHtml += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd">TOTALE</td><td style="padding:8px;border:1px solid #ddd;text-align:center">'+ordini.length+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(r.totLitri)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ '+(r.totLitri>0?(r.totImponibile/r.totLitri).toFixed(4):'—')+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totImponibile)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totIva)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(r.totTotale)+'</td></tr>';
+  riepilogoHtml += '<tr class="tot"><td style="padding:8px;border:1px solid #ddd">TOTALE</td><td style="padding:8px;border:1px solid #ddd;text-align:center">'+ordini.length+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtL(r.totLitri)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">€ '+(r.totLitri>0?(r.totImponibile/r.totLitri).toFixed(6):'—')+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totImponibile)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace">'+fmtE(r.totIva)+'</td><td style="padding:8px;border:1px solid #ddd;text-align:right;font-family:Courier New,monospace;font-weight:bold">'+fmtE(r.totTotale)+'</td></tr>';
 
   // Dettaglio ordini HTML
   var righeHtml = '';

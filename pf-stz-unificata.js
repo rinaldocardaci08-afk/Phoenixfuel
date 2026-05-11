@@ -418,7 +418,7 @@ function _uniRenderModaleCambioPrezzo(data) {
     // 3) Costo netto nuovo (rosso, modificabile)
     html += '<div style="background:#FCEBEB;border:0.5px solid #A32D2D;border-radius:6px;padding:6px 8px">';
     html += '<div style="font-size:9px;color:#A32D2D;letter-spacing:0.3px;text-transform:uppercase;font-weight:600">Costo netto nuovo</div>';
-    html += '<input type="number" class="uni-cpp-costo" data-prodotto="' + esc(prodotto) + '" value="' + (costoInitial > 0 ? Number(costoInitial).toFixed(4) : '') + '" placeholder="' + (cmpProd > 0 ? cmpProd.toFixed(4) : '0,0000') + '" step="0.0001" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:#A32D2D" />';
+    html += '<input type="number" class="uni-cpp-costo" data-prodotto="' + esc(prodotto) + '" value="' + (costoInitial > 0 ? Number(costoInitial).toFixed(6) : '') + '" placeholder="' + (cmpProd > 0 ? cmpProd.toFixed(6) : '0,0000') + '" step="0.000001" oninput="_uniRicalcolaModaleCambioPrezzo()" style="width:100%;border:0;background:transparent;font-family:var(--font-mono);font-size:14px;font-weight:500;padding:2px 0 0;outline:none;text-align:right;color:#A32D2D" />';
     html += '</div>';
     // 4) Litri al nuovo prezzo
     html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;padding:6px 8px">';
@@ -824,9 +824,9 @@ function _uniRenderPerPompa(data) {
         }
       }
       var prezzoVal = prezzoSaved > 0 ? prezzoSaved.toFixed(3) : '';
-      var costoVal = costoSaved > 0 ? costoSaved.toFixed(4) : '';
+      var costoVal = costoSaved > 0 ? costoSaved.toFixed(6) : '';
       var cmpProd = m.cmpCorrente && m.cmpCorrente[pompa.prodotto] ? m.cmpCorrente[pompa.prodotto] : 0;
-      var costoPlaceholder = cmpProd > 0 ? cmpProd.toFixed(4) + ' (CMP)' : '0.000000';
+      var costoPlaceholder = cmpProd > 0 ? cmpProd.toFixed(6) + ' (CMP)' : '0.000000';
 
       // ──── CARD POMPA (stile identico tab Totalizzatori originale) ────
       // Patch 30/04 (c): rimosso bottone "⚡ CAMBIO PREZZO" da header pompa.
@@ -854,7 +854,7 @@ function _uniRenderPerPompa(data) {
       html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 12px;background:var(--bg-card);border-radius:8px;border:0.5px solid var(--border);margin-bottom:8px">';
       html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Prezzo vendita €/L IVA</div>';
       html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\');_uniCalcolaLive()" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%" />';
-      html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">' + (prezzoSaved ? '€ ' + (prezzoSaved / 1.22).toFixed(4) + ' netto' : '') + '</div></div>';
+      html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">' + (prezzoSaved ? '€ ' + (prezzoSaved / 1.22).toFixed(6) + ' netto' : '') + '</div></div>';
       html += '<div><div style="font-size:11px;color:#B91C1C;text-transform:uppercase;margin-bottom:4px;font-weight:700">Costo €/L netto</div>';
       html += '<input type="number" step="0.000001" class="uni-costo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + costoVal + '" oninput="_uniSyncProdotto(this,\'costo\');_uniCalcolaLive()" placeholder="' + costoPlaceholder + '" style="font-family:var(--font-mono);font-size:16px;font-weight:700;padding:6px 10px;border:1px solid #B91C1C;border-radius:6px;background:#FEF2F2;color:#991B1B;width:100%" />';
       html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:11px;color:#B91C1C;margin-top:2px">' + (costoSaved ? '€ ' + (costoSaved * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
@@ -987,8 +987,8 @@ function _uniRenderPerPompa(data) {
     // data_prodotto si sincronizzano via _uniSyncProdotto on input.
     // Patch v20260501a: se hasCambio, etichetta "1° PREZZO" sopra il box.
     var prezzoVal = prezzo ? prezzo.toFixed(3) : '';
-    var costoVal = costoSaved ? Number(costoSaved).toFixed(4) : '';
-    var costoPlaceholder = isCMP ? costoN.toFixed(4) + ' (CMP)' : '';
+    var costoVal = costoSaved ? Number(costoSaved).toFixed(6) : '';
+    var costoPlaceholder = isCMP ? costoN.toFixed(6) + ' (CMP)' : '';
 
     if (hasCambio) {
       html += '<div style="font-size:10px;color:var(--text-muted);letter-spacing:0.4px;margin-top:4px;margin-bottom:4px;text-transform:uppercase">1° prezzo</div>';
@@ -997,7 +997,7 @@ function _uniRenderPerPompa(data) {
     // Col 1: Prezzo vendita (editabile)
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Prezzo vendita €/L IVA</div>';
     html += '<input type="number" step="0.001" class="uni-prezzo-input" data-prodotto="' + esc(pompa.prodotto) + '" data-data="' + data + '" value="' + prezzoVal + '" oninput="_uniSyncProdotto(this,\'prezzo\')" placeholder="0.000" style="font-family:var(--font-mono);font-size:16px;font-weight:600;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%;max-width:110px" />';
-    html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoN ? '€ ' + prezzoN.toFixed(4) + ' netto' : '') + '</div></div>';
+    html += '<div class="uni-prezzo-netto" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoN ? '€ ' + prezzoN.toFixed(6) + ' netto' : '') + '</div></div>';
 
     // Col 2: Costo (editabile)
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Costo €/L netto' + cmpBadge + '</div>';
@@ -1005,7 +1005,7 @@ function _uniRenderPerPompa(data) {
     html += '<div class="uni-costo-iva" data-prodotto="' + esc(pompa.prodotto) + '" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (costoN ? '€ ' + (costoN * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
     // Col 3: Margine
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costoN > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costoN > 0 ? '€ ' + margL.toFixed(6) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>';
     html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div>';
     html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costoN > 0 ? fmtE(margTot) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>';
     html += '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted)">' + (costoN > 0 ? fmtE(margTot * 1.22) + ' IVA' : '') + '</div></div>';
@@ -1042,14 +1042,14 @@ function _uniRenderPerPompa(data) {
       // 2° prezzo €/L IVA
       html += '<div><div style="font-size:11px;color:#0C447C;text-transform:uppercase;font-weight:500">2° prezzo €/L IVA</div>';
       html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:var(--text)">' + prezzoPD.toFixed(3) + '</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(4) + ' netto' : '') + '</div></div>';
+      html += '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:2px">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(6) + ' netto' : '') + '</div></div>';
       // 2° costo €/L netto (rosso)
       html += '<div><div style="font-size:11px;color:#A32D2D;text-transform:uppercase;font-weight:600">2° costo €/L netto</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#A32D2D">' + (costoCP > 0 ? costoCP.toFixed(4) : '—') + '</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#A32D2D">' + (costoCP > 0 ? costoCP.toFixed(6) : '—') + '</div>';
       html += '<div style="font-family:var(--font-mono);font-size:12px;color:#A32D2D;margin-top:2px">' + (costoCP > 0 ? '€ ' + (costoCP * 1.22).toFixed(3) + ' IVA' : '') + '</div></div>';
       // 2° margine €/L
       html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">2° margine €/L</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColorCP + '">' + (costoCP > 0 ? '€ ' + margLCP.toFixed(4) : '—') + '</div></div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColorCP + '">' + (costoCP > 0 ? '€ ' + margLCP.toFixed(6) : '—') + '</div></div>';
       html += '</div>';
     }
 
@@ -1236,7 +1236,7 @@ function _uniRenderPerProdotto(data) {
       html += '<td style="padding:8px 10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-tertiary,#888);margin-right:6px;vertical-align:middle"></span>1° prezzo</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(litriStdProdR) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + prezzo.toFixed(3) + '</td>';
-      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? costoN.toFixed(4) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? costoN.toFixed(6) : '—') + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtE(fattStd) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? fmtE(costoStdTot) : '—') + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + (costoN > 0 ? fmtE(margStdTot) : '—') + '</td>';
@@ -1247,7 +1247,7 @@ function _uniRenderPerProdotto(data) {
       html += '<td style="padding:8px 10px"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#378ADD;margin-right:6px;vertical-align:middle"></span>2° prezzo</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(litriPDProd) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + prezzoPDProd.toFixed(3) + '</td>';
-      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + costoPDProd.toFixed(4) + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + costoPDProd.toFixed(6) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtE(fattPD) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + fmtE(costoPDTot) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + mColorPD + '">' + fmtE(margPDTot) + '</td>';
@@ -1270,7 +1270,7 @@ function _uniRenderPerProdotto(data) {
       html += '<td style="padding:8px 10px;color:var(--text-muted)">Giornata</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + fmtL(totLitriProd) + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + (prezzo ? prezzo.toFixed(3) : '—') + '</td>';
-      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? costoN.toFixed(4) : '—') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? costoN.toFixed(6) : '—') + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono)">' + (prezzo ? fmtE(fattTot) : '—') + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + (costoN > 0 ? fmtE(costoTotProd) : '—') + '</td>';
       html += '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + (costoN > 0 ? fmtE(margTotProd) : '—') + '</td>';
@@ -1418,7 +1418,7 @@ function _uniRenderPanel(totGasolio, totBenzina) {
     // €/L margine medio
     '<div style="margin-top:14px;padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;text-align:center">' +
       '<div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.4px">€/L margine medio</div>' +
-      '<div style="font-family:var(--font-mono);font-size:22px;font-weight:800;color:#7CFC00">€ ' + margMedio.toFixed(4) + '</div>' +
+      '<div style="font-family:var(--font-mono);font-size:22px;font-weight:800;color:#7CFC00">€ ' + margMedio.toFixed(6) + '</div>' +
     '</div>';
 }
 
@@ -1499,7 +1499,7 @@ function _uniRenderStoricoMarg() {
     html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtE(vendN) + '</td>';
     html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + fmtE(costN) + '</td>';
     html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + ';font-weight:500">' + fmtE(marg) + '</td>';
-    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + margL.toFixed(4) + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);color:' + mColor + '">' + margL.toFixed(6) + '</td>';
     html += '</tr>';
   });
 
@@ -1513,7 +1513,7 @@ function _uniRenderStoricoMarg() {
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totVenduto) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totCosto) + '</td>';
   html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + fmtE(totMarg) + '</td>';
-  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + margLTot.toFixed(4) + '</td>';
+  html += '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#27500A">' + margLTot.toFixed(6) + '</td>';
   html += '</tr>';
 
   tbody.innerHTML = html || '<tr><td colspan="7" style="padding:12px;color:var(--text-muted);text-align:center">Nessun dato per questo mese</td></tr>';
@@ -1610,7 +1610,7 @@ function _uniRenderStoricoCMP() {
       if (val > 0) {
         h += '<div style="display:inline-block;background:var(--bg-card);padding:8px 14px;border-radius:8px;margin-right:10px;margin-bottom:6px">';
         h += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">' + esc(prod) + '</div>';
-        h += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500">€ ' + val.toFixed(4) + '</div>';
+        h += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:500">€ ' + val.toFixed(6) + '</div>';
         h += '</div>';
       }
     });
@@ -1634,10 +1634,10 @@ function _uniRenderStoricoCMP() {
     html += '<tr style="border-bottom:0.5px solid var(--border);' + bgRow + '">';
     html += '<td style="padding:6px;font-family:var(--font-mono)">' + dataFmt + '</td>';
     html += '<td style="padding:6px">' + esc(r.prodotto || '—') + '</td>';
-    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.cmp_precedente ? Number(r.cmp_precedente).toFixed(4) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.cmp_precedente ? Number(r.cmp_precedente).toFixed(6) : '—') + '</td>';
     html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.litri_caricati ? fmtL(Number(r.litri_caricati)) : '—') + '</td>';
-    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.costo_carico ? Number(r.costo_carico).toFixed(4) : '—') + '</td>';
-    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:500">' + (r.cmp_nuovo ? Number(r.cmp_nuovo).toFixed(4) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono)">' + (r.costo_carico ? Number(r.costo_carico).toFixed(6) : '—') + '</td>';
+    html += '<td style="padding:6px;text-align:right;font-family:var(--font-mono);font-weight:500">' + (r.cmp_nuovo ? Number(r.cmp_nuovo).toFixed(6) : '—') + '</td>';
     html += '</tr>';
   });
   tbody.innerHTML = html;
@@ -1752,7 +1752,7 @@ function _uniCalcolaLive() {
       if (!costoNuovo && _uniData.cmpCorrente && _uniData.cmpCorrente[p.prodotto]) {
         costoNuovo = Number(_uniData.cmpCorrente[p.prodotto] || 0);
       }
-      if (elCosto) elCosto.textContent = costoNuovo > 0 ? costoNuovo.toFixed(4) : '—';
+      if (elCosto) elCosto.textContent = costoNuovo > 0 ? costoNuovo.toFixed(6) : '—';
       // Margine €/L = prezzo netto nuovo − costo netto nuovo
       if (elMargine) {
         var prezzoNuovoNet = cpProdotto.prezzoIva / 1.22;
@@ -1760,7 +1760,7 @@ function _uniCalcolaLive() {
           var margNuovo = prezzoNuovoNet - costoNuovo;
           var col = margNuovo >= 0 ? '#639922' : '#E24B4A';
           elMargine.style.color = col;
-          elMargine.textContent = (margNuovo >= 0 ? '+' : '') + margNuovo.toFixed(4);
+          elMargine.textContent = (margNuovo >= 0 ? '+' : '') + margNuovo.toFixed(6);
         } else {
           elMargine.style.color = 'var(--text-muted)';
           elMargine.textContent = '—';
@@ -1827,7 +1827,7 @@ function _uniCalcolaLive() {
           var margTot = margL * litri;
           var mColor = margL >= 0 ? '#639922' : '#E24B4A';
           elMarg.innerHTML = (costo > 0 && prezzoStd > 0)
-            ? '<span style="color:' + mColor + '">€ ' + margL.toFixed(4) + '</span><div style="font-size:10px;color:var(--text-muted);font-weight:400">tot ' + margTot.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>'
+            ? '<span style="color:' + mColor + '">€ ' + margL.toFixed(6) + '</span><div style="font-size:10px;color:var(--text-muted);font-weight:400">tot ' + margTot.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</div>'
             : '—';
         }
       }
@@ -2007,7 +2007,7 @@ function _uniSyncProdotto(srcInput, tipo) {
   document.querySelectorAll(clsSub).forEach(function(el) {
     if (el.dataset.prodotto !== prodotto) return;
     if (isNaN(val) || val <= 0) { el.textContent = ''; return; }
-    if (tipo === 'prezzo') el.textContent = '€ ' + (val / 1.22).toFixed(4) + ' netto';
+    if (tipo === 'prezzo') el.textContent = '€ ' + (val / 1.22).toFixed(6) + ' netto';
     else el.textContent = '€ ' + (val * 1.22).toFixed(3) + ' IVA';
   });
 

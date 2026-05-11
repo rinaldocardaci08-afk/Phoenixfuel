@@ -286,7 +286,7 @@ async function annullaRicezioneStazione(ordineId, litri, prodotto) {
     if (ordRes.error) { toast('Errore: ' + ordRes.error.message); return; }
 
     if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
-    toast('✅ Ricezione annullata · ' + fmtL(litriCaricati) + ' L scaricati · CMP ripristinato € ' + cmpPrecedente.toFixed(4));
+    toast('✅ Ricezione annullata · ' + fmtL(litriCaricati) + ' L scaricati · CMP ripristinato € ' + cmpPrecedente.toFixed(6));
     caricaStazioneDashboard();
   } catch (e) {
     console.error('[annullaRicezioneStazione] errore:', e);
@@ -318,9 +318,9 @@ async function riceviOrdineStazione(ordineId, litri, prodotto) {
 
   // Info CMP
   html += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
-  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo carico</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">€ ' + costoOrdine.toFixed(4) + '</div></div>';
-  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">CMP attuale</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + (cmpAttuale > 0 ? '€ ' + cmpAttuale.toFixed(4) : '—') + '</div></div>';
-  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:#EAF3DE;border-radius:8px;border:0.5px solid #639922"><div style="font-size:9px;color:#27500A;text-transform:uppercase">CMP dopo carico</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#639922">€ ' + cmpDopo.toFixed(4) + '</div></div>';
+  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">Costo carico</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">€ ' + costoOrdine.toFixed(6) + '</div></div>';
+  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:var(--bg);border-radius:8px;border:0.5px solid var(--border)"><div style="font-size:9px;color:var(--text-muted);text-transform:uppercase">CMP attuale</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + (cmpAttuale > 0 ? '€ ' + cmpAttuale.toFixed(6) : '—') + '</div></div>';
+  html += '<div style="flex:1;min-width:100px;padding:8px 12px;background:#EAF3DE;border-radius:8px;border:0.5px solid #639922"><div style="font-size:9px;color:#27500A;text-transform:uppercase">CMP dopo carico</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:#639922">€ ' + cmpDopo.toFixed(6) + '</div></div>';
   html += '</div>';
 
   html += '<div style="margin-bottom:12px">';
@@ -459,7 +459,7 @@ async function confermaRicezioneStazione(ordineId, totLitri) {
     try { await pfStzRicalcolaCisterne(prodotto); } catch (e) { console.warn('pfStzRicalcolaCisterne errore:', e); }
     if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache(); // Patch v20260501i: invalida cache dopo ricezione
 
-    toast('✅ ' + fmtL(resCarico.litriCaricati) + ' L ricevuti · CMP € ' + resCarico.cmpNuovo.toFixed(4));
+    toast('✅ ' + fmtL(resCarico.litriCaricati) + ' L ricevuti · CMP € ' + resCarico.cmpNuovo.toFixed(6));
     chiudiModal();
     caricaOrdiniDaCaricare();
     caricaStazioneDashboard();
@@ -603,7 +603,7 @@ async function caricaStazioneDashboard() {
       cisHtml += '<div style="font-size:12px;font-weight:600;margin-bottom:4px">'+esc(c.nome)+'</div>';
       cisHtml += '<div style="height:6px;background:var(--border);border-radius:3px;margin-bottom:6px"><div style="height:100%;width:'+pct+'%;background:'+colore+';border-radius:3px"></div></div>';
       cisHtml += '<div style="display:flex;justify-content:space-between;font-size:11px"><span style="font-family:var(--font-mono);font-weight:700">'+fmtL(c.livello_attuale)+' L</span><span style="color:var(--text-muted)">'+pct+'%</span></div>';
-      if (cmp > 0) cisHtml += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ '+cmp.toFixed(4)+'</strong></div>';
+      if (cmp > 0) cisHtml += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">CMP: <strong style="font-family:var(--font-mono)">€ '+cmp.toFixed(6)+'</strong></div>';
       cisHtml += '</div>';
     });
     cisHtml += '</div>';

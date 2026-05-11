@@ -108,7 +108,7 @@ function renderStoricoMarg() {
       '<td style="font-family:var(--font-mono)">' + fmtE(venduto) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + (hasCosti ? fmtE(costoTot) : '<span style="color:var(--text-muted)">—</span>') + '</td>' +
       '<td style="font-family:var(--font-mono);font-weight:bold;color:' + (hasCosti?margColor:'var(--text-muted)') + '">' + (hasCosti ? fmtMe(margine) : '—') + '</td>' +
-      '<td style="font-family:var(--font-mono);color:' + (hasCosti?margColor:'var(--text-muted)') + '">' + (hasCosti ? '€ ' + margL.toFixed(4) : '—') + '</td></tr>';
+      '<td style="font-family:var(--font-mono);color:' + (hasCosti?margColor:'var(--text-muted)') + '">' + (hasCosti ? '€ ' + margL.toFixed(6) : '—') + '</td></tr>';
   });
   tbody.innerHTML = html || '<tr><td colspan="7" class="loading">Nessun dato</td></tr>';
 }
@@ -125,7 +125,7 @@ function renderStoricoCMP() {
       var _pi = cacheProdotti.find(function(p){return p.nome===prodotto;}); var colore = _pi ? _pi.colore : '#888';
       cmpHtml += '<div style="flex:1;min-width:140px;padding:10px 14px;background:var(--bg);border-radius:8px;border-left:3px solid ' + colore + '">';
       cmpHtml += '<div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;margin-bottom:2px">' + esc(prodotto) + '</div>';
-      cmpHtml += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700">€ ' + (cmp > 0 ? cmp.toFixed(4) : '—') + '</div>';
+      cmpHtml += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700">€ ' + (cmp > 0 ? cmp.toFixed(6) : '—') + '</div>';
       cmpHtml += '<div style="font-size:9px;color:var(--text-muted)">CMP corrente</div>';
       cmpHtml += '</div>';
     });
@@ -148,10 +148,10 @@ function renderStoricoCMP() {
     html += '<tr>' +
       '<td>' + dataFmt + '</td>' +
       '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
-      '<td style="font-family:var(--font-mono);color:var(--text-muted)">€ ' + Number(r.cmp_precedente).toFixed(4) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:var(--text-muted)">€ ' + Number(r.cmp_precedente).toFixed(6) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtL(r.litri_caricati) + ' L</td>' +
-      '<td style="font-family:var(--font-mono)">€ ' + Number(r.costo_carico).toFixed(4) + '/L</td>' +
-      '<td style="font-family:var(--font-mono);font-weight:bold;color:#639922">€ ' + Number(r.cmp_nuovo).toFixed(4) + '</td>' +
+      '<td style="font-family:var(--font-mono)">€ ' + Number(r.costo_carico).toFixed(6) + '/L</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:bold;color:#639922">€ ' + Number(r.cmp_nuovo).toFixed(6) + '</td>' +
       '</tr>';
   });
   tbody.innerHTML = html;
@@ -252,7 +252,7 @@ function renderMargGiorno(idx) {
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Litri</div><div style="font-family:var(--font-mono);font-size:20px;font-weight:700">' + fmtL(litriStd) + '</div></div>';
     // Col 2: Vendita netto + IVA
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Vendita €/L</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#1a1a18">' + (prezzoN ? '€ ' + prezzoN.toFixed(4) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600;color:#1a1a18">' + (prezzoN ? '€ ' + prezzoN.toFixed(6) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
     html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (prezzo ? '€ ' + prezzo.toFixed(3) + ' IVA' : '') + '</div>';
     html += '</div>';
     // Col 3: Costo netto + IVA (linked inputs)
@@ -276,7 +276,7 @@ function renderMargGiorno(idx) {
       html += '<div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Litri <span style="font-size:9px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio</span></div><div style="font-family:var(--font-mono);font-size:20px;font-weight:700">' + fmtL(litriPD) + '</div></div>';
       // Col 2: Vendita netto + IVA
       html += '<div><div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Vendita €/L</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(4) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:16px;font-weight:600">' + (prezzoPDN ? '€ ' + prezzoPDN.toFixed(6) + ' <span style="font-size:10px;color:var(--text-muted)">netto</span>' : '—') + '</div>';
       html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (prezzoPD ? '€ ' + prezzoPD.toFixed(3) + ' IVA' : '') + '</div>';
       html += '</div>';
       // Col 3: Costo netto + IVA
@@ -470,7 +470,7 @@ function renderMargPerProdotto(idx) {
     html += '<div style="font-family:var(--font-mono);font-size:26px;font-weight:700">'+fmtL(g.litriStd)+'</div></div>';
     // Vendita
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Vendita €/L</div>';
-    html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:600">'+(prezzoN?'€ '+prezzoN.toFixed(4)+' <span style="font-size:10px;color:var(--text-muted)">netto</span>':'—')+'</div>';
+    html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:600">'+(prezzoN?'€ '+prezzoN.toFixed(6)+' <span style="font-size:10px;color:var(--text-muted)">netto</span>':'—')+'</div>';
     html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">'+(prezzoStd?'€ '+prezzoStd.toFixed(3)+' IVA':'')+'</div></div>';
     // Costo (unico input per prodotto)
     html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Costo €/L'+cmpBadge+'</div>';
@@ -500,7 +500,7 @@ function renderMargPerProdotto(idx) {
       html += '<div><div style="font-size:11px;text-transform:uppercase;margin-bottom:4px">Litri <span style="font-size:9px;background:#1a1a18;color:#fff;padding:1px 4px;border-radius:3px">cambio</span></div>';
       html += '<div style="font-family:var(--font-mono);font-size:26px;font-weight:700">'+fmtL(g.litriPD)+'</div></div>';
       html += '<div><div style="font-size:11px;text-transform:uppercase;margin-bottom:4px">Vendita €/L</div>';
-      html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:600">'+(prezzoPDN?'€ '+prezzoPDN.toFixed(4)+' <span style="font-size:10px;color:var(--text-muted)">netto</span>':'—')+'</div>';
+      html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:600">'+(prezzoPDN?'€ '+prezzoPDN.toFixed(6)+' <span style="font-size:10px;color:var(--text-muted)">netto</span>':'—')+'</div>';
       html += '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">'+(prezzoPDmedio?'€ '+prezzoPDmedio.toFixed(3)+' IVA':'')+'</div></div>';
       html += '<div><div style="font-size:11px;text-transform:uppercase;margin-bottom:4px">Costo €/L'+cmpBadge+'</div>';
       html += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">';
@@ -553,7 +553,7 @@ function calcolaMarginiProdotto() {
     if (resEl) {
       var els = resEl.querySelectorAll('.marg-pr-eul,.marg-pr-tot');
       if (els[0]) {
-        els[0].textContent = margEL !== null ? '€ '+margEL.toFixed(4) : '—';
+        els[0].textContent = margEL !== null ? '€ '+margEL.toFixed(6) : '—';
         els[0].style.color = margEL !== null ? (margEL >= 0 ? '#2E7D32' : '#C62828') : 'var(--text)';
       }
       if (els[1]) {
@@ -580,7 +580,7 @@ function calcolaMarginiProdotto() {
     var resEl = document.getElementById(resId);
     if (resEl) {
       var els = resEl.querySelectorAll('.marg-pr-eul,.marg-pr-tot');
-      if (els[0]) { els[0].textContent = margEL !== null ? '€ '+margEL.toFixed(4) : '—'; els[0].style.color = margEL !== null ? (margEL >= 0 ? '#2E7D32' : '#C62828') : 'var(--text)'; }
+      if (els[0]) { els[0].textContent = margEL !== null ? '€ '+margEL.toFixed(6) : '—'; els[0].style.color = margEL !== null ? (margEL >= 0 ? '#2E7D32' : '#C62828') : 'var(--text)'; }
       if (els[1]) { els[1].textContent = margTot !== null ? '€ '+margTot.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'; els[1].style.color = margTot !== null ? (margTot >= 0 ? '#2E7D32' : '#C62828') : 'var(--text)'; }
     }
     if (costo > 0) { totMargine += margTot||0; totVenduto += prezzoN*litri; totCosto += costo*litri; }
@@ -613,8 +613,8 @@ function calcolaMargini() {
       var margLIva = margL * 1.22;
       var margTotIva = margTot * 1.22;
       elRes.innerHTML = '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Margine €/L</div>' +
-        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(4) + ' IVA' : '') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(6) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(6) + ' IVA' : '') + '</div>' +
         '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-top:4px">Margine tot</div>' +
         '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
         '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? fmtE(margTotIva) + ' IVA' : '') + '</div>';
@@ -644,8 +644,8 @@ function calcolaMargini() {
       var margLIva = margL * 1.22;
       var margTotIva = margTot * 1.22;
       elRes.innerHTML = '<div style="font-size:11px;color:#1a1a18;text-transform:uppercase">Margine €/L</div>' +
-        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(4) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(4) + ' IVA' : '') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? '€ ' + margL.toFixed(6) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? '€ ' + margLIva.toFixed(6) + ' IVA' : '') + '</div>' +
         '<div style="font-size:11px;color:#1a1a18;text-transform:uppercase;margin-top:4px">Margine tot</div>' +
         '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:' + mColor + '">' + (costo > 0 ? fmtE(margTot) + ' <span style="font-size:10px;font-weight:400;color:var(--text-muted)">netto</span>' : '—') + '</div>' +
         '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted)">' + (costo > 0 ? fmtE(margTotIva) + ' IVA' : '') + '</div>';
@@ -912,7 +912,7 @@ function _addEuroLitroPanel() {
   div.id = 'marg-eul-row';
   div.style.cssText = 'border-top:1px solid rgba(255,255,255,0.15);margin-top:10px;padding-top:10px;display:flex;justify-content:space-between;align-items:center';
   div.innerHTML = '<span style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.5px">€/L margine</span>' +
-    '<span style="font-family:var(--font-mono);font-size:20px;font-weight:800;color:'+color+'">€ '+margEL.toFixed(4)+'</span>';
+    '<span style="font-family:var(--font-mono);font-size:20px;font-weight:800;color:'+color+'">€ '+margEL.toFixed(6)+'</span>';
   el.appendChild(div);
 }
 

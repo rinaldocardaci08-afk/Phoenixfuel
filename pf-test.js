@@ -31,8 +31,8 @@ function _pushTest(t) {
 async function _testPrezzoCalcoli() {
   var o = { costo_litro:1.25, trasporto_litro:0.018, margine:0.05, iva:22 };
   var an = 1.25+0.018+0.05, ai = an*1.22;
-  _pushTest({ nome:'prezzoNoIva calcolo', ok:Math.abs(prezzoNoIva(o)-an)<0.0001, atteso:an.toFixed(4), ottenuto:prezzoNoIva(o).toFixed(4) });
-  _pushTest({ nome:'prezzoConIva calcolo', ok:Math.abs(prezzoConIva(o)-ai)<0.001, atteso:ai.toFixed(4), ottenuto:prezzoConIva(o).toFixed(4) });
+  _pushTest({ nome:'prezzoNoIva calcolo', ok:Math.abs(prezzoNoIva(o)-an)<0.0001, atteso:an.toFixed(6), ottenuto:prezzoNoIva(o).toFixed(6) });
+  _pushTest({ nome:'prezzoConIva calcolo', ok:Math.abs(prezzoConIva(o)-ai)<0.001, atteso:ai.toFixed(6), ottenuto:prezzoConIva(o).toFixed(6) });
 }
 
 async function _testMarginiOrdini() {
@@ -47,14 +47,14 @@ async function _testMarginiOrdini() {
     nome:'Ordini margine negativo', ok:neg.length===0,
     atteso:'0', ottenuto:String(neg.length),
     note:neg.length>0?'Ordini con margine < 0':'',
-    items: neg.map(function(o){return {id:o.id,data:o.data,cliente:o.cliente,prodotto:o.prodotto,litri:o.litri,valore:'margine € '+Number(o.margine).toFixed(4)};}),
+    items: neg.map(function(o){return {id:o.id,data:o.data,cliente:o.cliente,prodotto:o.prodotto,litri:o.litri,valore:'margine € '+Number(o.margine).toFixed(6)};}),
     suggerimento:'Vai in Ordini → apri ordine → modifica margine. Se import sbagliato: cancella e reinserisci con prezzo corretto.'
   });
   _pushTest({
     nome:'Ordini margine > 0.20 €/L', ok:alti.length===0,
     atteso:'0', ottenuto:String(alti.length),
     note:alti.length>0?'Margini molto alti — verificare':'',
-    items: alti.map(function(o){return {id:o.id,data:o.data,cliente:o.cliente,prodotto:o.prodotto,litri:o.litri,valore:'margine € '+Number(o.margine).toFixed(4)};}),
+    items: alti.map(function(o){return {id:o.id,data:o.data,cliente:o.cliente,prodotto:o.prodotto,litri:o.litri,valore:'margine € '+Number(o.margine).toFixed(6)};}),
     suggerimento:'Margini > 20 cent/L sono rari. Verifica che il prezzo di vendita sia corretto (non dimezzato lo sconto, etc).'
   });
   _pushTest({

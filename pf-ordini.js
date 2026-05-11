@@ -45,8 +45,8 @@ function aggiornaPrev() {
   const m=parseFloat(document.getElementById('pr-margine').value)||0;
   const iva=parseInt(document.getElementById('pr-iva').value)||22;
   const noiva=c+t+m;
-  document.getElementById('calc-noiva').textContent = '€ ' + noiva.toFixed(4);
-  document.getElementById('calc-iva').textContent = '€ ' + (noiva*(1+iva/100)).toFixed(4);
+  document.getElementById('calc-noiva').textContent = '€ ' + noiva.toFixed(6);
+  document.getElementById('calc-iva').textContent = '€ ' + (noiva*(1+iva/100)).toFixed(6);
 }
 
 async function caricaBasiPerFornitore() {
@@ -90,8 +90,8 @@ async function salvaPrezzo() {
   if (error) { toast('Errore: '+error.message); return; }
   // FIX 1: audit su inserimento prezzo
   _auditLog('crea_prezzo', 'prezzi',
-    fornitoreNome + ' ' + prodotto + ' €/L ' + costo.toFixed(4) +
-    (trasporto > 0 ? ' (+tr €' + trasporto.toFixed(4) + ')' : '') +
+    fornitoreNome + ' ' + prodotto + ' €/L ' + costo.toFixed(6) +
+    (trasporto > 0 ? ' (+tr €' + trasporto.toFixed(6) + ')' : '') +
     ' | data ' + data +
     (inserted && inserted.id ? ' | id:' + inserted.id : '')
   );
@@ -138,8 +138,8 @@ async function _validaSanitaPrezzo(prodotto, costoNuovo, dataNuova) {
     // HARD BLOCK se fuori ±25%
     if (Math.abs(delta) > 0.25) {
       alert('⛔ Prezzo fuori range plausibile\n\n' +
-        'Costo inserito: €/L ' + costoNuovo.toFixed(4) + '\n' +
-        'BEST ultimi 7gg (' + prodotto + '): €/L ' + best.toFixed(4) + '\n' +
+        'Costo inserito: €/L ' + costoNuovo.toFixed(6) + '\n' +
+        'BEST ultimi 7gg (' + prodotto + '): €/L ' + best.toFixed(6) + '\n' +
         'Scostamento: ' + deltaStr + '\n\n' +
         'Verifica il valore e riprova. Il prezzo non sarà salvato.');
       return false;
@@ -148,8 +148,8 @@ async function _validaSanitaPrezzo(prodotto, costoNuovo, dataNuova) {
     // SOFT WARNING se fuori ±10%
     if (Math.abs(delta) > 0.10) {
       var msg = '⚠️ Scostamento anomalo dal BEST precedente\n\n' +
-        'Costo inserito: €/L ' + costoNuovo.toFixed(4) + '\n' +
-        'BEST ultimi 7gg (' + prodotto + '): €/L ' + best.toFixed(4) + '\n' +
+        'Costo inserito: €/L ' + costoNuovo.toFixed(6) + '\n' +
+        'BEST ultimi 7gg (' + prodotto + '): €/L ' + best.toFixed(6) + '\n' +
         'Scostamento: ' + deltaStr + '\n\n' +
         'Sei sicuro di voler salvare?';
       if (!confirm(msg)) return false;
@@ -377,7 +377,7 @@ async function caricaPrezzi() {
       if (bestRow && !isBest) {
         var delta = prezzoNoIva(r) - prezzoNoIva(bestRow);
         if (delta > 0.00005) {
-          deltaHtml = ' <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:#FDECEA;color:#C0392B;font-family:var(--font-mono);font-weight:600" title="Differenza rispetto al prezzo più basso del giorno (trasporto incluso)">Δ +' + delta.toFixed(4) + '</span>';
+          deltaHtml = ' <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:#FDECEA;color:#C0392B;font-family:var(--font-mono);font-weight:600" title="Differenza rispetto al prezzo più basso del giorno (trasporto incluso)">Δ +' + delta.toFixed(6) + '</span>';
         }
       }
       html += '<tr><td>' + fmtD(r.data) + '</td><td><span style="' + forStyle + '">' + r.fornitore + '</span>' + deltaHtml + giacenzaHtml + '</td><td>' + basNome + '</td>' + tdCosto + tdTrasporto + tdMargine + '<td style="font-family:var(--font-mono)">' + fmt(prezzoNoIva(r)) + '</td><td style="font-family:var(--font-mono);font-weight:600">' + fmt(prezzoConIva(r)) + '</td><td>' + azione + '</td></tr>';
@@ -422,7 +422,7 @@ async function editaCostoDeposito(td, prodotto, valAttuale) {
     html += '<div style="background:#FAEEDA;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#633806">';
     html += '⚠ Questa modifica aggiornerà il <strong>costo medio ponderato</strong> di tutte le cisterne di ' + prodotto + ' nel deposito. Il nuovo valore verrà usato come base per il calcolo dei prezzi futuri.</div>';
     html += '<div class="form-grid" style="margin-bottom:14px">';
-    html += '<div class="form-group"><label>Nuovo costo medio/L</label><input type="number" id="dep-nuovo-costo" step="0.0001" value="' + nv.toFixed(4) + '" /></div>';
+    html += '<div class="form-group"><label>Nuovo costo medio/L</label><input type="number" id="dep-nuovo-costo" step="0.000001" value="' + nv.toFixed(6) + '" /></div>';
     html += '</div>';
     html += '<div style="display:flex;gap:8px">';
     html += '<button class="btn-primary" style="flex:1" onclick="confermaCostoDeposito(\'' + prodotto + '\')">Conferma modifica</button>';
@@ -652,9 +652,9 @@ async function caricaPrezzoPerOrdine() {
       }
     }
 
-    mgInput.value = margineDaUsare.toFixed(4);
+    mgInput.value = margineDaUsare.toFixed(6);
     const noIva = Number(match.costo_litro) + Number(match.trasporto_litro) + margineDaUsare;
-    pnInput.value = noIva.toFixed(4);
+    pnInput.value = noIva.toFixed(6);
     aggiornaPrevOrdine();
   } else {
     prezzoCorrente = null;
@@ -753,7 +753,7 @@ function aggiornaPrevDaMargine() {
   const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
   const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
   const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
-  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(6);
   aggiornaPrevOrdine();
 }
 
@@ -763,7 +763,7 @@ function aggiornaPrevDaTrasporto() {
   const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
   const margine = parseFloat(document.getElementById('ord-margine-custom').value) || 0;
   const noIva = Number(prezzoCorrente.costo_litro) + trasporto + margine;
-  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(4);
+  document.getElementById('ord-prezzo-netto').value = noIva.toFixed(6);
   aggiornaPrevOrdine();
 }
 
@@ -773,7 +773,7 @@ function aggiornaPrevDaPrezzo() {
   const prezzoNetto = parseFloat(document.getElementById('ord-prezzo-netto').value) || 0;
   const trasporto = parseFloat(document.getElementById('ord-trasporto-custom').value) || 0;
   const margine = prezzoNetto - Number(prezzoCorrente.costo_litro) - trasporto;
-  document.getElementById('ord-margine-custom').value = margine.toFixed(4);
+  document.getElementById('ord-margine-custom').value = margine.toFixed(6);
   aggiornaPrevOrdine();
 }
 
@@ -1844,8 +1844,8 @@ async function stampaListinoPrezziGiorno() {
       anomalie.forEach(function(a){
         var deltaStr = (a.delta >= 0 ? '+' : '') + (a.delta * 100).toFixed(1) + '%';
         html += '<div style="font-size:10px;color:#501313;padding:3px 0;font-family:Courier New,monospace">';
-        html += '• <strong>' + a.fornitore + '</strong> ' + a.prodotto + ' (' + a.base + '): €/L ' + a.costo.toFixed(4);
-        html += ' vs BEST storico €/L ' + a.ref.toFixed(4);
+        html += '• <strong>' + a.fornitore + '</strong> ' + a.prodotto + ' (' + a.base + '): €/L ' + a.costo.toFixed(6);
+        html += ' vs BEST storico €/L ' + a.ref.toFixed(6);
         html += ' → scostamento <strong>' + deltaStr + '</strong>';
         html += '</div>';
       });
@@ -1889,7 +1889,7 @@ async function stampaListinoPrezziGiorno() {
       var deltaTag = '';
       if (!isBest && lista.length > 1) {
         var delta = pNetto - best;
-        if (delta > 0.00005) deltaTag = ' <span style="font-size:8px;background:#FDECEA;color:#C0392B;padding:1px 6px;border-radius:8px;vertical-align:middle;font-family:Courier New,monospace">Δ +' + delta.toFixed(4) + '</span>';
+        if (delta > 0.00005) deltaTag = ' <span style="font-size:8px;background:#FDECEA;color:#C0392B;padding:1px 6px;border-radius:8px;vertical-align:middle;font-family:Courier New,monospace">Δ +' + delta.toFixed(6) + '</span>';
       }
       var bgRow = isBest ? 'background:#EAF3DE' : (i % 2 ? 'background:#fafaf5' : '');
 
@@ -1897,11 +1897,11 @@ async function stampaListinoPrezziGiorno() {
       var giacTag = r._isDeposito && r._giacenza ? ' <span style="font-size:8px;background:#EAF3DE;color:#27500A;padding:1px 6px;border-radius:8px;vertical-align:middle">' + r._giacenza.toLocaleString('it-IT') + ' L</span>' : '';
       html += '<td style="font-weight:600;font-size:12px">' + esc(r.fornitore) + bestTag + deltaTag + giacTag + '</td>';
       html += '<td>' + esc(r.basi_carico ? r.basi_carico.nome : '—') + '</td>';
-      html += '<td class="m" style="font-size:15px;font-weight:bold;color:' + col + '">' + Number(r.costo_litro).toFixed(4) + '</td>';
-      html += '<td class="m">' + Number(r.trasporto_litro || 0).toFixed(4) + '</td>';
-      html += '<td class="m" style="font-weight:600;font-size:13px">' + costoTot.toFixed(4) + '</td>';
+      html += '<td class="m" style="font-size:15px;font-weight:bold;color:' + col + '">' + Number(r.costo_litro).toFixed(6) + '</td>';
+      html += '<td class="m">' + Number(r.trasporto_litro || 0).toFixed(6) + '</td>';
+      html += '<td class="m" style="font-weight:600;font-size:13px">' + costoTot.toFixed(6) + '</td>';
       html += '<td style="text-align:center">' + ivaPerc + '%</td>';
-      html += '<td class="m" style="font-weight:500;font-size:13px">' + prezzoIva.toFixed(4) + '</td>';
+      html += '<td class="m" style="font-weight:500;font-size:13px">' + prezzoIva.toFixed(6) + '</td>';
       html += '</tr>';
     });
 
@@ -1953,10 +1953,10 @@ async function apriModaleOrdine(id) {
   var dataLocked = (r.stato === 'consegnato');
   html += '<div class="form-group"><label>Data consegna' + (dataLocked ? ' <span style="font-size:10px;color:#639922;font-weight:500">🔒 Consegnato</span>' : '') + '</label><input type="date" id="mod-data" value="' + (r.data || '') + '"' + (dataLocked ? ' disabled title="Data bloccata: ordine consegnato"' : '') + ' /></div>';
   html += '<div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="' + r.litri + '" /></div>';
-  html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.0001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
-  html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.0001" value="' + r.trasporto_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
-  html += '<div class="form-group"><label>Margine/L</label><input type="number" id="mod-margine" step="0.0001" value="' + r.margine + '" onchange="aggiornaPreviewModifica()" /></div>';
-  html += '<div class="form-group"><label>Prezzo netto/L</label><input type="number" id="mod-prezzo-netto" step="0.0001" value="' + (Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine)).toFixed(4) + '" onchange="aggiornaMargineDaPrezzo()" /></div>';
+  html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.000001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.000001" value="' + r.trasporto_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Margine/L</label><input type="number" id="mod-margine" step="0.000001" value="' + r.margine + '" onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Prezzo netto/L</label><input type="number" id="mod-prezzo-netto" step="0.000001" value="' + (Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine)).toFixed(6) + '" onchange="aggiornaMargineDaPrezzo()" /></div>';
   html += '<div class="form-group"><label>Giorni pagamento</label><select id="mod-gg">';
   [30,45,60].forEach(g => { html += '<option value="' + g + '"' + (r.giorni_pagamento==g?' selected':'') + '>' + g + ' gg</option>'; });
   html += '</select></div>';
@@ -2149,29 +2149,29 @@ function _mostraPopupConfermaPrezzo(id, nuovoCosto, nuovoTrasporto, margineCorre
   html += '<div style="background:var(--bg-kpi);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">';
   html += '<div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 18px;align-items:baseline">';
   html += '<div style="color:var(--text-muted)">Costo €/L</div>';
-  html += '<div style="font-family:var(--font-mono);color:var(--text-muted);text-decoration:line-through">' + _modOrigCosto.toFixed(4) + '</div>';
-  html += '<div style="font-family:var(--font-mono);font-weight:600;color:' + txtWarn + '">' + nuovoCosto.toFixed(4) + '</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted);text-decoration:line-through">' + _modOrigCosto.toFixed(6) + '</div>';
+  html += '<div style="font-family:var(--font-mono);font-weight:600;color:' + txtWarn + '">' + nuovoCosto.toFixed(6) + '</div>';
   html += '<div style="color:var(--text-muted)">Trasporto €/L</div>';
-  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)' + (trasportoCambiato ? ';text-decoration:line-through' : '') + '">' + _modOrigTrasporto.toFixed(4) + '</div>';
-  html += '<div style="font-family:var(--font-mono);' + (trasportoCambiato ? 'font-weight:600;color:' + txtWarn : 'color:var(--text-muted)') + '">' + nuovoTrasporto.toFixed(4) + '</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)' + (trasportoCambiato ? ';text-decoration:line-through' : '') + '">' + _modOrigTrasporto.toFixed(6) + '</div>';
+  html += '<div style="font-family:var(--font-mono);' + (trasportoCambiato ? 'font-weight:600;color:' + txtWarn : 'color:var(--text-muted)') + '">' + nuovoTrasporto.toFixed(6) + '</div>';
   html += '<div style="color:var(--text-muted)">Margine €/L</div>';
-  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)">' + margineCorrente.toFixed(4) + '</div>';
-  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)">' + margineCorrente.toFixed(4) + '</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)">' + margineCorrente.toFixed(6) + '</div>';
+  html += '<div style="font-family:var(--font-mono);color:var(--text-muted)">' + margineCorrente.toFixed(6) + '</div>';
   html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-weight:600">Prezzo netto €/L</div>';
-  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-family:var(--font-mono);font-weight:600">' + prezzoOrig.toFixed(4) + '</div>';
-  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-family:var(--font-mono);font-weight:600;color:' + txtWarn + '">' + prezzoNuovo.toFixed(4) + ' (' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(4) + ')</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-family:var(--font-mono);font-weight:600">' + prezzoOrig.toFixed(6) + '</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-family:var(--font-mono);font-weight:600;color:' + txtWarn + '">' + prezzoNuovo.toFixed(6) + ' (' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(6) + ')</div>';
   html += '</div></div>';
 
   // Opzione 1: mantieni prezzo cliente, ricalcola margine
   html += '<button onclick="_optMantieniPrezzo(\'' + id + '\',' + nuovoCosto + ',' + nuovoTrasporto + ',' + margineRicalc + ')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #639922;background:' + bgOk + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
-  html += '<div style="font-weight:600;font-size:13px;color:' + txtOk + '">✓ Mantieni prezzo netto cliente € ' + prezzoOrig.toFixed(4) + '/L</div>';
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il margine viene ricalcolato: ' + margineCorrente.toFixed(4) + ' → ' + margineRicalc.toFixed(4) + ' €/L</div>';
+  html += '<div style="font-weight:600;font-size:13px;color:' + txtOk + '">✓ Mantieni prezzo netto cliente € ' + prezzoOrig.toFixed(6) + '/L</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il margine viene ricalcolato: ' + margineCorrente.toFixed(6) + ' → ' + margineRicalc.toFixed(6) + ' €/L</div>';
   html += '</button>';
 
   // Opzione 2: accetta nuovo prezzo
   html += '<button onclick="_optAccettaNuovoPrezzo(\'' + id + '\',' + nuovoCosto + ',' + nuovoTrasporto + ',' + margineCorrente + ')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #BA7517;background:' + bgWarn + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
-  html += '<div style="font-weight:600;font-size:13px;color:' + txtWarn + '">⚠ Accetta nuovo prezzo netto € ' + prezzoNuovo.toFixed(4) + '/L</div>';
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il prezzo cliente cambia di ' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(4) + ' €/L. Margine invariato a ' + margineCorrente.toFixed(4) + '</div>';
+  html += '<div style="font-weight:600;font-size:13px;color:' + txtWarn + '">⚠ Accetta nuovo prezzo netto € ' + prezzoNuovo.toFixed(6) + '/L</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il prezzo cliente cambia di ' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(6) + ' €/L. Margine invariato a ' + margineCorrente.toFixed(6) + '</div>';
   html += '</button>';
 
   // Opzione 3: annulla → riapre la modale ricaricando l'ordine, scarta tutto
@@ -2209,9 +2209,9 @@ async function _ripristinaFormESalva(id, costoFinale, trasportoFinale, margineFi
   }
   if (snap.destManuale !== undefined) document.getElementById('mod-dest-manuale').value = snap.destManuale;
   // Applica i valori prezzo finali
-  document.getElementById('mod-costo').value = costoFinale.toFixed(4);
-  document.getElementById('mod-trasporto').value = trasportoFinale.toFixed(4);
-  document.getElementById('mod-margine').value = margineFinale.toFixed(4);
+  document.getElementById('mod-costo').value = costoFinale.toFixed(6);
+  document.getElementById('mod-trasporto').value = trasportoFinale.toFixed(6);
+  document.getElementById('mod-margine').value = margineFinale.toFixed(6);
   aggiornaPreviewModifica();
   // Salva con bypass del check
   await salvaModificaOrdine(id, true);
@@ -2221,7 +2221,7 @@ async function _ripristinaFormESalva(id, costoFinale, trasportoFinale, margineFi
 // Opzione 1: mantieni prezzo netto, ricalcola margine. Avviso se margine negativo.
 async function _optMantieniPrezzo(id, nuovoCosto, nuovoTrasporto, margineRicalc) {
   if (margineRicalc < 0) {
-    if (!confirm('⚠ Attenzione: il margine risultante sarà negativo (' + margineRicalc.toFixed(4) + ' €/L), stai vendendo sotto costo.\n\nConfermi comunque?')) {
+    if (!confirm('⚠ Attenzione: il margine risultante sarà negativo (' + margineRicalc.toFixed(6) + ' €/L), stai vendendo sotto costo.\n\nConfermi comunque?')) {
       return;
     }
   }
@@ -2243,7 +2243,7 @@ function aggiornaPreviewModifica() {
   const prezzoNetto = costo + trasporto + margine;
   const prezzoIva = prezzoNetto * (1 + iva/100);
   const totale = prezzoIva * litri;
-  document.getElementById('mod-prezzo-netto').value = prezzoNetto.toFixed(4);
+  document.getElementById('mod-prezzo-netto').value = prezzoNetto.toFixed(6);
   const prev = document.getElementById('mod-preview');
   if (prev) prev.innerHTML = '<span>Costo: <strong>' + fmt(costo) + '</strong></span><span>Prezzo netto: <strong>' + fmt(prezzoNetto) + '</strong></span><span>Prezzo IVA: <strong>' + fmt(prezzoIva) + '</strong></span><span>Totale: <strong>' + fmtE(totale) + '</strong></span>';
 }
@@ -2254,7 +2254,7 @@ function aggiornaMargineDaPrezzo() {
   const trasporto = parseFloat(document.getElementById('mod-trasporto').value) || 0;
   const prezzoNetto = parseFloat(document.getElementById('mod-prezzo-netto').value) || 0;
   const margine = prezzoNetto - costo - trasporto;
-  document.getElementById('mod-margine').value = margine.toFixed(4);
+  document.getElementById('mod-margine').value = margine.toFixed(6);
   aggiornaPreviewModifica();
 }
 
@@ -2334,8 +2334,8 @@ async function eliminaRecord(tabella, id, callback) {
     if (riga) {
       if (tabella === 'prezzi') {
         dettaglio = (riga.fornitore || '—') + ' | ' + (riga.prodotto || '—') +
-          ' | €/L ' + Number(riga.costo_litro || 0).toFixed(4) +
-          (riga.trasporto_litro ? ' +tr €' + Number(riga.trasporto_litro).toFixed(4) : '') +
+          ' | €/L ' + Number(riga.costo_litro || 0).toFixed(6) +
+          (riga.trasporto_litro ? ' +tr €' + Number(riga.trasporto_litro).toFixed(6) : '') +
           ' | data ' + (riga.data || '—') + ' | id:' + id;
       } else {
         dettaglio = JSON.stringify(riga).substring(0, 450) + ' | id:' + id;
@@ -2412,7 +2412,7 @@ async function generaListinoPrezzi() {
   var wrap = document.getElementById('lp-risultato');
   if (!lista.length) { wrap.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:16px">Nessun cliente con ordini di ' + prodotto + ' negli ultimi 6 mesi</div>'; return; }
 
-  var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Top 20 clienti per volume — ' + prodotto + ' — Costo base: € ' + costo.toFixed(4) + '</div>';
+  var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Top 20 clienti per volume — ' + prodotto + ' — Costo base: € ' + costo.toFixed(6) + '</div>';
   html += '<div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th>Tipo</th><th>Litri (6m)</th><th>Trasporto</th><th>Margine/L</th><th>Prezzo netto</th><th>Prezzo IVA</th></tr></thead><tbody>';
 
   lista.forEach(function(c, idx) {
@@ -2421,10 +2421,10 @@ async function generaListinoPrezzi() {
       '<td><strong>' + esc(c.nome) + '</strong></td>' +
       '<td><span class="badge ' + (c.tipo === 'Rete' ? 'purple' : 'gray') + '" style="font-size:9px">' + c.tipo + '</span></td>' +
       '<td style="font-family:var(--font-mono)">' + fmtL(c.litriStorico) + '</td>' +
-      '<td style="font-family:var(--font-mono)">€ ' + c.trasporto.toFixed(4) + '</td>' +
-      '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + c.margineL.toFixed(4) + '</td>' +
-      '<td style="font-family:var(--font-mono);font-weight:600">€ ' + c.prezzoNetto.toFixed(4) + '</td>' +
-      '<td style="font-family:var(--font-mono);font-weight:700;color:var(--accent)">€ ' + c.prezzoIva.toFixed(4) + '</td></tr>';
+      '<td style="font-family:var(--font-mono)">€ ' + c.trasporto.toFixed(6) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + c.margineL.toFixed(6) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:600">€ ' + c.prezzoNetto.toFixed(6) + '</td>' +
+      '<td style="font-family:var(--font-mono);font-weight:700;color:var(--accent)">€ ' + c.prezzoIva.toFixed(6) + '</td></tr>';
   });
   html += '</tbody></table></div>';
   wrap.innerHTML = html;
@@ -2440,11 +2440,11 @@ async function stampaListinoPrezzi() {
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Listino Prezzi</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:10px;margin:0;padding:8mm}@media print{.no-print{display:none!important}@page{size:landscape;margin:6mm}}table{width:100%;border-collapse:collapse}th{background:#D85A30;color:#fff;padding:5px 6px;font-size:8px;text-transform:uppercase;border:1px solid #C04A20;text-align:right}th:first-child{text-align:left}td{padding:3px 6px;border:1px solid #ddd;font-size:9px;text-align:right;font-family:Courier New,monospace}td:first-child{text-align:left;font-family:Arial;font-weight:500}.alt{background:#fafaf8}</style></head><body>';
 
-  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #D85A30;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:16px;font-weight:bold;color:#D85A30">LISTINO PREZZI CLIENTI</div><div style="font-size:12px;color:#666;margin-top:2px">' + prodotto + ' — Costo base: € ' + costo.toFixed(4) + ' — ' + dataOggi + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
+  html += '<div style="display:flex;justify-content:space-between;border-bottom:2px solid #D85A30;padding-bottom:8px;margin-bottom:10px"><div><div style="font-size:16px;font-weight:bold;color:#D85A30">LISTINO PREZZI CLIENTI</div><div style="font-size:12px;color:#666;margin-top:2px">' + prodotto + ' — Costo base: € ' + costo.toFixed(6) + ' — ' + dataOggi + '</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:bold">PHOENIX FUEL SRL</div></div></div>';
 
   html += '<table><thead><tr><th style="text-align:left">Cliente</th><th>Tipo</th><th>Vol. 6 mesi</th><th>Trasporto</th><th>Margine/L</th><th>Prezzo netto</th><th>Prezzo IVA incl.</th></tr></thead><tbody>';
   _listinoData.forEach(function(c, i) {
-    html += '<tr' + (i % 2 ? ' class="alt"' : '') + '><td>' + esc(c.nome) + '</td><td style="text-align:center">' + c.tipo + '</td><td>' + fmtL(c.litriStorico) + '</td><td>€ ' + c.trasporto.toFixed(4) + '</td><td>€ ' + c.margineL.toFixed(4) + '</td><td style="font-weight:bold">€ ' + c.prezzoNetto.toFixed(4) + '</td><td style="font-weight:bold;color:#D85A30">€ ' + c.prezzoIva.toFixed(4) + '</td></tr>';
+    html += '<tr' + (i % 2 ? ' class="alt"' : '') + '><td>' + esc(c.nome) + '</td><td style="text-align:center">' + c.tipo + '</td><td>' + fmtL(c.litriStorico) + '</td><td>€ ' + c.trasporto.toFixed(6) + '</td><td>€ ' + c.margineL.toFixed(6) + '</td><td style="font-weight:bold">€ ' + c.prezzoNetto.toFixed(6) + '</td><td style="font-weight:bold;color:#D85A30">€ ' + c.prezzoIva.toFixed(6) + '</td></tr>';
   });
   html += '</tbody></table>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#D85A30;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
@@ -2504,20 +2504,20 @@ function generaListinoFasce() {
     var h = '<div style="flex:1;min-width:340px">';
     h += '<div style="background:'+colorBg+';color:#fff;padding:8px 14px;border-radius:8px 8px 0 0;font-weight:600;font-size:14px">' + esc(titolo) + '</div>';
     h += '<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:12px">';
-    h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Costo base + trasporto: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + blocco.base.toFixed(4) + '</strong> (trasporto € ' + blocco.trasporto.toFixed(4) + ')</div>';
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Costo base + trasporto: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + blocco.base.toFixed(6) + '</strong> (trasporto € ' + blocco.trasporto.toFixed(6) + ')</div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     h += '<thead><tr style="background:var(--bg)"><th style="padding:6px 8px;text-align:left;border-bottom:0.5px solid var(--border)">Fascia</th><th style="padding:6px 8px;text-align:right;border-bottom:0.5px solid var(--border)">Marg €/L</th><th style="padding:6px 8px;text-align:right;border-bottom:0.5px solid var(--border)">Prezzo no IVA</th><th style="padding:6px 8px;text-align:right;border-bottom:0.5px solid var(--border)">Prezzo IVA incl.</th></tr></thead>';
     h += '<tbody>';
     blocco.fasce.forEach(function(f, i) {
       var bg = i % 2 === 0 ? 'transparent' : 'var(--bg)';
-      h += '<tr style="background:'+bg+'"><td style="padding:7px 8px;font-weight:500">' + esc(f.nome) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">€ ' + f.marg.toFixed(4) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:600">€ ' + f.netto.toFixed(4) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:'+colorBg+'">€ ' + f.iva.toFixed(4) + '</td></tr>';
+      h += '<tr style="background:'+bg+'"><td style="padding:7px 8px;font-weight:500">' + esc(f.nome) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">€ ' + f.marg.toFixed(6) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:600">€ ' + f.netto.toFixed(6) + '</td><td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:'+colorBg+'">€ ' + f.iva.toFixed(6) + '</td></tr>';
     });
     h += '</tbody></table></div></div>';
     return h;
   }
 
   var wrap = document.getElementById('lf-risultato');
-  var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">' + esc(d.prodotto) + ' — Costo base: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + d.costo.toFixed(4) + '</strong> — IVA ' + d.iva + '%</div>';
+  var html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">' + esc(d.prodotto) + ' — Costo base: <strong style="font-family:var(--font-mono);color:var(--text)">€ ' + d.costo.toFixed(6) + '</strong> — IVA ' + d.iva + '%</div>';
   html += '<div style="display:flex;gap:16px;flex-wrap:wrap">';
   html += tabellaHtml('Clienti Consumo', d.consumo, '#378ADD');
   html += tabellaHtml('Clienti Rete', d.rete, '#BA7517');
@@ -2535,12 +2535,12 @@ function stampaListinoFasce() {
   function tabPdf(titolo, blocco, colorBg) {
     var h = '<div style="width:48%"><div style="background:'+colorBg+';color:#fff;padding:8px 12px;font-weight:bold;font-size:13px;border-radius:6px 6px 0 0">' + titolo + '</div>';
     h += '<div style="border:1px solid #ccc;border-top:none;padding:10px;border-radius:0 0 6px 6px">';
-    h += '<div style="font-size:10px;color:#666;margin-bottom:6px">Costo base + trasporto: <strong>€ ' + blocco.base.toFixed(4) + '</strong> (trasporto € ' + blocco.trasporto.toFixed(4) + ')</div>';
+    h += '<div style="font-size:10px;color:#666;margin-bottom:6px">Costo base + trasporto: <strong>€ ' + blocco.base.toFixed(6) + '</strong> (trasporto € ' + blocco.trasporto.toFixed(6) + ')</div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
     h += '<thead><tr style="background:#f5f5f5"><th style="padding:6px;text-align:left;border-bottom:1px solid #ccc">Fascia</th><th style="padding:6px;text-align:right;border-bottom:1px solid #ccc">Margine</th><th style="padding:6px;text-align:right;border-bottom:1px solid #ccc">Netto</th><th style="padding:6px;text-align:right;border-bottom:1px solid #ccc">IVA incl.</th></tr></thead>';
     h += '<tbody>';
     blocco.fasce.forEach(function(f, i) {
-      h += '<tr' + (i%2 ? ' style="background:#fafafa"' : '') + '><td style="padding:7px 6px;font-weight:500">' + f.nome + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace">€ ' + f.marg.toFixed(4) + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace">€ ' + f.netto.toFixed(4) + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace;font-weight:bold;color:'+colorBg+'">€ ' + f.iva.toFixed(4) + '</td></tr>';
+      h += '<tr' + (i%2 ? ' style="background:#fafafa"' : '') + '><td style="padding:7px 6px;font-weight:500">' + f.nome + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace">€ ' + f.marg.toFixed(6) + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace">€ ' + f.netto.toFixed(6) + '</td><td style="padding:7px 6px;text-align:right;font-family:Courier New,monospace;font-weight:bold;color:'+colorBg+'">€ ' + f.iva.toFixed(6) + '</td></tr>';
     });
     h += '</tbody></table></div></div>';
     return h;
@@ -2548,7 +2548,7 @@ function stampaListinoFasce() {
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Listino fasce — ' + d.prodotto + '</title>';
   html += '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:14mm;color:#1a1a18}@media print{.no-print{display:none!important}@page{size:landscape;margin:10mm}}</style></head><body>';
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #D4A017;padding-bottom:10px;margin-bottom:16px"><div><div style="font-size:22px;font-weight:bold;color:#D4A017">LISTINO FASCE PAGAMENTO</div><div style="font-size:14px;color:#333;margin-top:4px">' + d.prodotto + ' — ' + dataOggi + '</div></div><div style="text-align:right"><div style="font-size:16px;font-weight:bold">PHOENIX FUEL SRL</div><div style="font-size:10px;color:#666">Costo base: € ' + d.costo.toFixed(4) + ' — IVA ' + d.iva + '%</div></div></div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #D4A017;padding-bottom:10px;margin-bottom:16px"><div><div style="font-size:22px;font-weight:bold;color:#D4A017">LISTINO FASCE PAGAMENTO</div><div style="font-size:14px;color:#333;margin-top:4px">' + d.prodotto + ' — ' + dataOggi + '</div></div><div style="text-align:right"><div style="font-size:16px;font-weight:bold">PHOENIX FUEL SRL</div><div style="font-size:10px;color:#666">Costo base: € ' + d.costo.toFixed(6) + ' — IVA ' + d.iva + '%</div></div></div>';
   html += '<div style="display:flex;gap:16px;margin-bottom:16px">';
   html += tabPdf('CLIENTI CONSUMO', d.consumo, '#378ADD');
   html += tabPdf('CLIENTI RETE', d.rete, '#BA7517');
@@ -2593,10 +2593,10 @@ function apriListinoFascePDF() {
   h += '<div class="form-group"><label>Prodotto</label><select id="lfp-prodotto" onchange="_lfpRipopolaFornitori()" style="font-size:14px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">';
   prodottiDisp.forEach(function(p) { h += '<option value="' + p + '">' + p + '</option>'; });
   h += '</select></div>';
-  h += '<div class="form-group"><label>Costo base €/L</label><input type="number" id="lfp-costo" step="0.0001" placeholder="1.6570" style="font-family:var(--font-mono);font-size:16px" autofocus /></div>';
+  h += '<div class="form-group"><label>Costo base €/L</label><input type="number" id="lfp-costo" step="0.000001" placeholder="1.6570" style="font-family:var(--font-mono);font-size:16px" autofocus /></div>';
   h += '<div class="form-group"><label>IVA %</label><select id="lfp-iva"><option value="22">22%</option><option value="10">10%</option></select></div>';
-  h += '<div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lfp-trasp-consumo" step="0.0001" value="0.0190" style="font-family:var(--font-mono)" /></div>';
-  h += '<div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lfp-trasp-rete" step="0.0001" value="0.0140" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lfp-trasp-consumo" step="0.000001" value="0.0190" style="font-family:var(--font-mono)" /></div>';
+  h += '<div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lfp-trasp-rete" step="0.000001" value="0.0140" style="font-family:var(--font-mono)" /></div>';
   h += '<div class="form-group"></div>';
   h += '<div class="form-group"><label>Marg. Dilazionato</label><input type="number" id="lfp-marg-dil" step="0.001" value="0.060" style="font-family:var(--font-mono)" /></div>';
   h += '<div class="form-group"><label>Marg. 30gg</label><input type="number" id="lfp-marg-30" step="0.001" value="0.040" style="font-family:var(--font-mono)" /></div>';
@@ -2647,10 +2647,10 @@ async function _lfpRipopolaFornitori() {
   var opts = '<option value="">Seleziona fornitore...</option>';
   (prezziRes.data || []).forEach(function(p) {
     var costo = Number(p.costo_litro || 0) + Number(p.trasporto_litro || 0);
-    opts += '<option value="' + costo.toFixed(4) + '">' + esc(p.fornitore) + ' (€ ' + costo.toFixed(4).replace('.', ',') + ')</option>';
+    opts += '<option value="' + costo.toFixed(6) + '">' + esc(p.fornitore) + ' (€ ' + costo.toFixed(6).replace('.', ',') + ')</option>';
   });
   if (cmpDep > 0) {
-    opts += '<option value="' + cmpDep.toFixed(4) + '" data-dep="1">PhoenixFuel Deposito (CMP € ' + cmpDep.toFixed(4).replace('.', ',') + ')</option>';
+    opts += '<option value="' + cmpDep.toFixed(6) + '" data-dep="1">PhoenixFuel Deposito (CMP € ' + cmpDep.toFixed(6).replace('.', ',') + ')</option>';
   }
 
   // Applica a tutti i dropdown delle righe esistenti (mantiene la selezione se ancora valida)
@@ -2660,7 +2660,7 @@ async function _lfpRipopolaFornitori() {
     sel.value = prevVal; // resta su vuoto se il valore non esiste più
     // Ricalcola il costo della riga se il fornitore era valido
     var costoInp = sel.closest('.lfp-cmp-riga').querySelector('.lfp-cmp-costo');
-    if (costoInp) costoInp.value = sel.value ? Number(sel.value).toFixed(4).replace('.', ',') : '';
+    if (costoInp) costoInp.value = sel.value ? Number(sel.value).toFixed(6).replace('.', ',') : '';
   });
   _lfpRicalcola();
 }
@@ -2685,7 +2685,7 @@ function _lfpRiaggiornaCosto(sel) {
   var row = sel.closest('.lfp-cmp-riga');
   if (!row) return;
   var costoInp = row.querySelector('.lfp-cmp-costo');
-  costoInp.value = sel.value ? Number(sel.value).toFixed(4).replace('.', ',') : '';
+  costoInp.value = sel.value ? Number(sel.value).toFixed(6).replace('.', ',') : '';
   _lfpRicalcola();
 }
 
@@ -2711,7 +2711,7 @@ function _lfpRicalcola() {
   // Aggiorna totale
   var totEl = document.getElementById('lfp-cmp-totale');
   if (totEl) {
-    totEl.innerHTML = '€ ' + cmp.toFixed(4).replace('.', ',') + (totL > 0 ? ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">su ' + totL.toLocaleString('it-IT') + ' L</span>' : '');
+    totEl.innerHTML = '€ ' + cmp.toFixed(6).replace('.', ',') + (totL > 0 ? ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">su ' + totL.toLocaleString('it-IT') + ' L</span>' : '');
   }
   window._lfpCmpCalcolato = cmp;
 }
@@ -2722,10 +2722,10 @@ function _lfpUsaCostoBase() {
   if (!cmp || cmp <= 0) { toast('Compila almeno una riga con fornitore e litri'); return; }
   var inp = document.getElementById('lfp-costo');
   if (!inp) return;
-  inp.value = cmp.toFixed(4);
+  inp.value = cmp.toFixed(6);
   inp.style.background = '#E6F1FB';
   inp.style.borderColor = '#378ADD';
-  toast('✓ Costo base aggiornato a € ' + cmp.toFixed(4).replace('.', ','));
+  toast('✓ Costo base aggiornato a € ' + cmp.toFixed(6).replace('.', ','));
 }
 
 function _lfpGeneraPDF() {
@@ -2814,9 +2814,9 @@ async function generaOffertaCliente() {
   html += '<thead><tr><th>Prodotto</th><th style="text-align:right">Prezzo €/L (IVA escl.)</th><th style="text-align:right">IVA</th><th style="text-align:right">Prezzo €/L (IVA incl.)</th></tr></thead>';
   html += '<tbody>';
   html += '<tr><td style="font-size:13px;font-weight:600">' + esc(prodotto) + '</td>';
-  html += '<td style="text-align:right;font-family:monospace;font-size:14px;font-weight:500">€ ' + prezzoNetto.toFixed(4) + '</td>';
+  html += '<td style="text-align:right;font-family:monospace;font-size:14px;font-weight:500">€ ' + prezzoNetto.toFixed(6) + '</td>';
   html += '<td style="text-align:right;font-size:12px;color:#666">' + iva + '%</td>';
-  html += '<td style="text-align:right;font-family:monospace;font-size:16px;font-weight:bold;color:#D85A30">€ ' + prezzoIva.toFixed(4) + '</td></tr>';
+  html += '<td style="text-align:right;font-family:monospace;font-size:16px;font-weight:bold;color:#D85A30">€ ' + prezzoIva.toFixed(6) + '</td></tr>';
   html += '</tbody></table>';
 
   // Condizioni
@@ -2943,10 +2943,10 @@ async function esportaDaneaXml() {
     xml += '          <Code>' + _xmlEsc(_codProdottoDanea(o.prodotto)) + '</Code>\n';
     xml += '          <Description>' + _xmlEsc(o.prodotto) + '</Description>\n';
     xml += '          <Qty>' + Number(o.litri) + '</Qty>\n          <Um>LT</Um>\n';
-    xml += '          <Price>' + pNetto.toFixed(4) + '</Price>\n';
+    xml += '          <Price>' + pNetto.toFixed(6) + '</Price>\n';
     xml += '          <VatCode Perc="' + iva + '" Class="Imponibile" Description="Aliquota ' + iva + '%">' + iva + '</VatCode>\n';
     xml += '          <Stock>true</Stock>\n';
-    xml += '          <Notes>Costo ' + Number(o.costo_litro||0).toFixed(4) + ' + Trasp ' + Number(o.trasporto_litro||0).toFixed(4) + ' + Marg ' + Number(o.margine||0).toFixed(4) + '</Notes>\n';
+    xml += '          <Notes>Costo ' + Number(o.costo_litro||0).toFixed(6) + ' + Trasp ' + Number(o.trasporto_litro||0).toFixed(6) + ' + Marg ' + Number(o.margine||0).toFixed(6) + '</Notes>\n';
     xml += '        </Row>\n      </Rows>\n';
     xml += '      <Payments>\n        <Payment>\n          <Advance>false</Advance>\n';
     xml += '          <Date>' + _xmlEsc(o.data_scadenza||o.data) + '</Date>\n';
@@ -2982,7 +2982,7 @@ async function esportaDaneaXml() {
     xml += '          <Code>' + _xmlEsc(_codProdottoDanea(o.prodotto)) + '</Code>\n';
     xml += '          <Description>' + _xmlEsc(o.prodotto) + '</Description>\n';
     xml += '          <Qty>' + Number(o.litri) + '</Qty>\n          <Um>LT</Um>\n';
-    xml += '          <Price>' + costo.toFixed(4) + '</Price>\n';
+    xml += '          <Price>' + costo.toFixed(6) + '</Price>\n';
     xml += '          <VatCode Perc="' + iva + '" Class="Imponibile" Description="Aliquota ' + iva + '%">' + iva + '</VatCode>\n';
     xml += '          <Stock>true</Stock>\n';
     xml += '        </Row>\n      </Rows>\n';
@@ -3010,7 +3010,7 @@ async function esportaDaneaXml() {
     xml += '          <Code>' + _xmlEsc(_codProdottoDanea(o.prodotto)) + '</Code>\n';
     xml += '          <Description>Autoconsumo ' + _xmlEsc(o.prodotto) + '</Description>\n';
     xml += '          <Qty>' + Number(o.litri) + '</Qty>\n          <Um>LT</Um>\n';
-    xml += '          <Price>' + costo.toFixed(4) + '</Price>\n';
+    xml += '          <Price>' + costo.toFixed(6) + '</Price>\n';
     xml += '          <VatCode Perc="' + iva + '" Class="Imponibile" Description="Aliquota ' + iva + '%">' + iva + '</VatCode>\n';
     xml += '          <Stock>true</Stock>\n';
     xml += '        </Row>\n      </Rows>\n';

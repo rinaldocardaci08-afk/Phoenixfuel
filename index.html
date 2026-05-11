@@ -281,9 +281,9 @@
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Base di carico</label><select id="ord-base" onchange="aggiornaProdottiOrdine()" style="border:1px solid #85B7EB"><option value="">— Prima seleziona fornitore —</option></select></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Prodotto</label><select id="ord-prodotto" onchange="caricaPrezzoPerOrdine()" style="border:1px solid #85B7EB"><option value="">— Prima seleziona base —</option></select></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Litri</label><input type="number" id="ord-litri" placeholder="0" oninput="aggiornaPrevOrdine()" style="border:1px solid #85B7EB" /></div>
-            <div class="form-group"><label style="font-weight:700;color:#0C447C">Trasporto/L (€)</label><input type="number" id="ord-trasporto-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevDaTrasporto()" style="border:1px solid #85B7EB" /></div>
-            <div class="form-group"><label style="font-weight:700;color:#0C447C">Margine/L (€) <span id="info-margine-icon" onclick="mostraUltimiOrdiniCliente()" title="Vedi ultimi 5 ordini di questo cliente per questo prodotto" style="display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;background:#85B7EB;color:#fff;font-size:11px;font-weight:700;cursor:pointer;margin-left:4px;user-select:none">i</span></label><input type="number" id="ord-margine-custom" step="0.0001" placeholder="Da listino" oninput="aggiornaPrevDaMargine()" style="border:1px solid #85B7EB" /></div>
-            <div class="form-group"><label style="font-weight:700;color:#0C447C">Prezzo/L netto (€)</label><input type="number" id="ord-prezzo-netto" step="0.0001" placeholder="Calc. automatico" oninput="aggiornaPrevDaPrezzo()" style="border:1px solid #85B7EB" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#0C447C">Trasporto/L (€)</label><input type="number" id="ord-trasporto-custom" step="0.000001" placeholder="Da listino" oninput="aggiornaPrevDaTrasporto()" style="border:1px solid #85B7EB" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#0C447C">Margine/L (€) <span id="info-margine-icon" onclick="mostraUltimiOrdiniCliente()" title="Vedi ultimi 5 ordini di questo cliente per questo prodotto" style="display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;background:#85B7EB;color:#fff;font-size:11px;font-weight:700;cursor:pointer;margin-left:4px;user-select:none">i</span></label><input type="number" id="ord-margine-custom" step="0.000001" placeholder="Da listino" oninput="aggiornaPrevDaMargine()" style="border:1px solid #85B7EB" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#0C447C">Prezzo/L netto (€)</label><input type="number" id="ord-prezzo-netto" step="0.000001" placeholder="Calc. automatico" oninput="aggiornaPrevDaPrezzo()" style="border:1px solid #85B7EB" /></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Giorni pagamento</label><select id="ord-gg" style="border:1px solid #85B7EB"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
             <div class="form-group"><label style="font-weight:700;color:#0C447C">Stato <span onclick="document.getElementById('popup-leg-stati-new').style.display=document.getElementById('popup-leg-stati-new').style.display==='block'?'none':'block'" style="cursor:pointer;font-size:14px;background:#FAEEDA;padding:2px 6px;border-radius:6px;border:1px solid #D4A017">ℹ️</span></label>
               <select id="ord-stato" style="border:1px solid #85B7EB">
@@ -458,9 +458,9 @@
                 <option value="">Seleziona...</option>
               </select>
             </div>
-            <div class="form-group"><label style="font-weight:700;color:#633806">Costo/L (€)</label><input type="number" id="pr-costo" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" style="border:1px solid #D4A017" /></div>
-            <div class="form-group"><label style="font-weight:700;color:#633806">Trasporto/L (€)</label><input type="number" id="pr-trasporto" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" style="border:1px solid #D4A017" /></div>
-            <div class="form-group"><label style="font-weight:700;color:#633806">Margine/L (€)</label><input type="number" id="pr-margine" step="0.0001" placeholder="0.0000" oninput="aggiornaPrev()" style="border:1px solid #D4A017" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#633806">Costo/L (€)</label><input type="number" id="pr-costo" step="0.000001" placeholder="0.000000" oninput="aggiornaPrev()" style="border:1px solid #D4A017" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#633806">Trasporto/L (€)</label><input type="number" id="pr-trasporto" step="0.000001" placeholder="0.000000" oninput="aggiornaPrev()" style="border:1px solid #D4A017" /></div>
+            <div class="form-group"><label style="font-weight:700;color:#633806">Margine/L (€)</label><input type="number" id="pr-margine" step="0.000001" placeholder="0.000000" oninput="aggiornaPrev()" style="border:1px solid #D4A017" /></div>
             <div class="form-group"><label style="font-weight:700;color:#633806">IVA %</label><select id="pr-iva" onchange="aggiornaPrev()" style="border:1px solid #D4A017"><option value="22">22%</option><option value="10">10%</option><option value="4">4%</option></select></div>
           </div>
           <div class="form-preview">Prezzo IVA esclusa: <strong id="calc-noiva">€ —</strong> &nbsp;|&nbsp; Prezzo IVA inclusa: <strong id="calc-iva">€ —</strong></div>
@@ -481,9 +481,9 @@
                 <option value="Gasolio Agricolo">Gasolio Agricolo</option>
               </select>
             </div>
-            <div class="form-group"><label>Costo base €/L</label><input type="number" id="lp-costo" step="0.0001" placeholder="1.5800" style="font-family:var(--font-mono);font-size:16px" /></div>
-            <div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lp-trasp-consumo" step="0.0001" value="0.0190" style="font-family:var(--font-mono)" /></div>
-            <div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lp-trasp-rete" step="0.0001" value="0.0140" style="font-family:var(--font-mono)" /></div>
+            <div class="form-group"><label>Costo base €/L</label><input type="number" id="lp-costo" step="0.000001" placeholder="1.5800" style="font-family:var(--font-mono);font-size:16px" /></div>
+            <div class="form-group"><label>Trasporto Consumo €/L</label><input type="number" id="lp-trasp-consumo" step="0.000001" value="0.0190" style="font-family:var(--font-mono)" /></div>
+            <div class="form-group"><label>Trasporto Rete €/L</label><input type="number" id="lp-trasp-rete" step="0.000001" value="0.0140" style="font-family:var(--font-mono)" /></div>
             <div class="form-group"><label>IVA %</label><select id="lp-iva"><option value="22">22%</option><option value="10">10%</option></select></div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
@@ -1356,7 +1356,7 @@
                 <option value="Benzina">Benzina</option>
               </select>
             </div>
-            <div class="form-group"><label>Prezzo benchmark €/L</label><input type="number" id="bench-prezzo" step="0.0001" placeholder="1.6000" style="font-family:var(--font-mono);font-size:16px" /></div>
+            <div class="form-group"><label>Prezzo benchmark €/L</label><input type="number" id="bench-prezzo" step="0.000001" placeholder="1.6000" style="font-family:var(--font-mono);font-size:16px" /></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn-primary" onclick="salvaBenchmark()">💾 Salva</button>
@@ -2869,19 +2869,19 @@
 <script src="pf-config.js?v=20260503k"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
-<script src="pf-ordini.js?v=20260508d"></script>
-<script src="pf-deposito.js?v=20260428a"></script>
-<script src="pf-anagrafica.js?v=20260508d"></script>
+<script src="pf-ordini.js?v=20260508f"></script>
+<script src="pf-deposito.js?v=20260508f"></script>
+<script src="pf-anagrafica.js?v=20260508f"></script>
 <script src="pf-data.js?v=20260419f"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
-<script src="pf-stz-core.js?v=20260508e"></script>
+<script src="pf-stz-core.js?v=20260508f"></script>
 <script src="pf-stz-letture.js?v=20260419c"></script>
-<script src="pf-stz-marginalita.js?v=1775149951158"></script>
-<script src="pf-stz-unificata.js?v=20260430f"></script>
-<script src="pf-stz-corrispettivi.js?v=20260508d"></script>
-<script src="pf-stz-magazzino.js?v=20260508d"></script>
+<script src="pf-stz-marginalita.js?v=20260508f"></script>
+<script src="pf-stz-unificata.js?v=20260508f"></script>
+<script src="pf-stz-corrispettivi.js?v=20260508f"></script>
+<script src="pf-stz-magazzino.js?v=20260508f"></script>
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
-<script src="pf-stz-report.js?v=20260421a"></script>
+<script src="pf-stz-report.js?v=20260508f"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260420a"></script>
 <script src="pf-stz-giac-giorno.js?v=20260416g"></script>
@@ -2892,10 +2892,10 @@
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=20260428a"></script>
 <script src="pf-admin.js?v=20260503k"></script>
-<script src="pf-dashboard.js?v=20260504a"></script>
+<script src="pf-dashboard.js?v=20260508f"></script>
 <script src="pf-home.js?v=20260419a"></script>
-<script src="pf-benchmark.js?v=20260416e"></script>
-<script src="pf-futures.js?v=1775149951158"></script>
+<script src="pf-benchmark.js?v=20260508f"></script>
+<script src="pf-futures.js?v=20260508f"></script>
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=1775149951158"></script>

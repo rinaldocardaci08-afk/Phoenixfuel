@@ -917,23 +917,23 @@ function _renderTabellaAnnuale() {
     var tL=0,tF=0,tM=0;
     tbody.innerHTML = mesi.map(function(m) {
       tL+=m.ingLitri; tF+=m.ingFatt; tM+=m.ingMarg;
-      var mpl = m.ingLitri > 0 ? (m.ingMarg/m.ingLitri).toFixed(4) : '—';
+      var mpl = m.ingLitri > 0 ? (m.ingMarg/m.ingLitri).toFixed(6) : '—';
       var mc = m.ingMarg >= 0 ? '#639922' : '#E24B4A';
       return '<tr' + (!m.ingLitri?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="'+mono+'">' + fmtL(m.ingLitri) + '</td><td style="'+mono+'">' + fmtE(m.ingFatt) + '</td><td style="'+mono+';color:'+mc+'">' + fmtE(m.ingMarg) + '</td><td style="'+mono+';color:'+mc+'">' + mpl + '</td></tr>';
     }).join('');
     var tc = tM >= 0 ? '#639922' : '#E24B4A';
-    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+'">'+fmtL(tL)+'</td><td style="'+mono+'">'+fmtE(tF)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+'">'+fmtL(tL)+'</td><td style="'+mono+'">'+fmtE(tF)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(6):'—')+'</td></tr>';
   } else if (vista === 'dettaglio') {
     thead.innerHTML = '<tr><th>Mese</th><th>Litri</th><th>Incasso netto</th><th>Margine</th><th>€/L margine</th></tr>';
     var tL=0,tI=0,tM=0;
     tbody.innerHTML = mesi.map(function(m) {
       tL+=m.dettLitri; tI+=m.dettInc; tM+=m.dettMarg;
-      var mpl = m.dettLitri > 0 ? (m.dettMarg/m.dettLitri).toFixed(4) : '—';
+      var mpl = m.dettLitri > 0 ? (m.dettMarg/m.dettLitri).toFixed(6) : '—';
       var mc = m.dettMarg >= 0 ? '#639922' : '#E24B4A';
       return '<tr' + (!m.dettLitri?' style="opacity:0.4"':'') + '><td><strong>' + m.mese + '</strong></td><td style="'+mono+';color:#6B5FCC">' + fmtL(m.dettLitri) + '</td><td style="'+mono+';color:#6B5FCC">' + fmtE(m.dettInc) + '</td><td style="'+mono+';color:'+mc+'">' + fmtE(m.dettMarg) + '</td><td style="'+mono+';color:'+mc+'">' + mpl + '</td></tr>';
     }).join('');
     var tc = tM >= 0 ? '#639922' : '#E24B4A';
-    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(tL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(tI)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(4):'—')+'</td></tr>';
+    tbody.innerHTML += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>'+labelTot+'</td><td style="'+mono+';color:#6B5FCC">'+fmtL(tL)+'</td><td style="'+mono+';color:#6B5FCC">'+fmtE(tI)+'</td><td style="'+mono+';color:'+tc+'">'+fmtE(tM)+'</td><td style="'+mono+';color:'+tc+'">'+(tL>0?(tM/tL).toFixed(6):'—')+'</td></tr>';
   } else {
     thead.innerHTML = '<tr><th>Mese</th><th>Litri ingrosso</th><th>Fatt. ingrosso</th><th>Margine ingrosso</th><th>Litri dettaglio</th><th>Incasso dettaglio</th><th>Margine dettaglio</th><th>Totale litri</th><th>Totale fatturato</th><th>Totale margine</th></tr>';
     var totIL=0,totIF=0,totIM=0,totDL=0,totDI=0,totDM=0,totTL=0,totTF=0,totTM=0;
@@ -1292,7 +1292,7 @@ async function caricaMargineCliente() {
   var pctMarg = totale.fatturato > 0 ? (totale.margine / totale.fatturato) * 100 : 0;
   kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + lista.length + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" style="color:#639922">' + fmtMe(totale.margine) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value">€ ' + margMedio.toFixed(4) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value">€ ' + margMedio.toFixed(6) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">% margine su fatt.</div><div class="kpi-value">' + pctMarg.toFixed(1) + '%</div></div>';
 
   // Tabella
@@ -1313,13 +1313,13 @@ async function caricaMargineCliente() {
       '<td style="font-family:var(--font-mono)">' + fmtE(c.fatturato) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtE(c.costo) + '</td>' +
       '<td style="font-family:var(--font-mono);font-weight:600;color:' + mColor + '">' + fmtMe(c.margine) + '</td>' +
-      '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + ml.toFixed(4) + '</td>' +
+      '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + ml.toFixed(6) + '</td>' +
       '<td style="font-family:var(--font-mono);color:' + mColor + '">' + pct.toFixed(1) + '%</td></tr>';
   }).join('');
 
   // Riga totale
   var tmColor = totale.margine >= 0 ? '#639922' : '#E24B4A';
-  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtMe(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(4) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtMe(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(6) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
   tbody.innerHTML = html;
 
   // Grafici
@@ -1396,10 +1396,10 @@ async function stampaMargineCliente() {
   html += '<table><thead><tr><th style="text-align:left">Cliente</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Costo</th><th>Margine</th><th>€/L</th><th>%</th></tr></thead><tbody>';
   lista.forEach(function(c,i) {
     var ml = c.litri>0?c.margine/c.litri:0; var pct = c.fatturato>0?(c.margine/c.fatturato)*100:0;
-    html += '<tr' + (i%2?' class="alt"':'') + '><td>' + esc(c.cliente) + '</td><td style="text-align:center">' + c.ordini + '</td><td>' + fmtL(c.litri) + '</td><td>' + fmtE(c.fatturato) + '</td><td>' + fmtE(c.costo) + '</td><td style="font-weight:bold;color:' + (c.margine>=0?'#639922':'#E24B4A') + '">' + fmtMe(c.margine) + '</td><td>€ ' + ml.toFixed(4) + '</td><td>' + pct.toFixed(1) + '%</td></tr>';
+    html += '<tr' + (i%2?' class="alt"':'') + '><td>' + esc(c.cliente) + '</td><td style="text-align:center">' + c.ordini + '</td><td>' + fmtL(c.litri) + '</td><td>' + fmtE(c.fatturato) + '</td><td>' + fmtE(c.costo) + '</td><td style="font-weight:bold;color:' + (c.margine>=0?'#639922':'#E24B4A') + '">' + fmtMe(c.margine) + '</td><td>€ ' + ml.toFixed(6) + '</td><td>' + pct.toFixed(1) + '%</td></tr>';
   });
   var tMl = tot.litri>0?tot.margine/tot.litri:0; var tPct = tot.fatturato>0?(tot.margine/tot.fatturato)*100:0;
-  html += '<tr class="tot"><td>TOTALE</td><td style="text-align:center">' + tot.ordini + '</td><td>' + fmtL(tot.litri) + '</td><td>' + fmtE(tot.fatturato) + '</td><td>' + fmtE(tot.costo) + '</td><td style="color:#639922">' + fmtMe(tot.margine) + '</td><td>€ ' + tMl.toFixed(4) + '</td><td>' + tPct.toFixed(1) + '%</td></tr>';
+  html += '<tr class="tot"><td>TOTALE</td><td style="text-align:center">' + tot.ordini + '</td><td>' + fmtL(tot.litri) + '</td><td>' + fmtE(tot.fatturato) + '</td><td>' + fmtE(tot.costo) + '</td><td style="color:#639922">' + fmtMe(tot.margine) + '</td><td>€ ' + tMl.toFixed(6) + '</td><td>' + tPct.toFixed(1) + '%</td></tr>';
   html += '</tbody></table>';
   html += '<div class="no-print" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px"><button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#6B5FCC;color:#fff">Stampa / PDF</button><button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">Chiudi</button></div></body></html>';
   w.document.open(); w.document.write(html); w.document.close();
@@ -2072,7 +2072,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
       html += '<td>' + tipoLabel + '</td>';
       html += '<td style="font-size:11px">' + esc(o.prodotto) + '</td>';
       html += '<td style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>';
-      html += '<td style="font-family:var(--font-mono)">€ ' + costoUnitario.toFixed(4) + '</td>';
+      html += '<td style="font-family:var(--font-mono)">€ ' + costoUnitario.toFixed(6) + '</td>';
       html += '<td style="font-family:var(--font-mono);font-weight:500">' + fmtE(tot) + '</td>';
       html += '<td style="font-size:11px">' + fmtD(scadISO) + (isScaduto ? ' <span style="color:#A32D2D;font-size:9px;font-weight:500">SCADUTA</span>' : '') + '</td>';
       html += '<td><input type="checkbox" ' + (isPagato ? 'checked' : '') + ' onchange="togglePagamentoFornitore(\'' + o.id + '\',this.checked,\'' + fornitoreId + '\',\'' + fornitoreNome.replace(/'/g,"\\'") + '\')" /></td>';

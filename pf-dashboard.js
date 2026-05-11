@@ -89,7 +89,7 @@ async function caricaDashboard() {
     }
     var elMargL = document.getElementById('kpi-dett-marg-litro');
     if (elMargL) {
-      elMargL.textContent = (dettCosto > 0 && dettLitri > 0) ? '€ ' + (margIeri/dettLitri).toFixed(4) + '/L' : '—';
+      elMargL.textContent = (dettCosto > 0 && dettLitri > 0) ? '€ ' + (margIeri/dettLitri).toFixed(6) + '/L' : '—';
       elMargL.style.color = margIeri >= 0 ? '#639922' : '#E24B4A';
     }
   } catch(e) {
@@ -211,7 +211,7 @@ async function caricaCockpit() {
   set('ck-fatt-mese', fmtE(mc.fatturato));
   set('ck-litri-mese', fmtL(mc.litri));
   set('ck-marg-tot-mese', fmtE(mc.margTot));
-  set('ck-margine-medio', mc.litri > 0 ? '€ ' + mc.margMedio.toFixed(4) + '/L' : '—');
+  set('ck-margine-medio', mc.litri > 0 ? '€ ' + mc.margMedio.toFixed(6) + '/L' : '—');
 
   function renderDelta(elId, curr, prev) {
     var el = document.getElementById(elId);
@@ -284,7 +284,7 @@ async function caricaCockpitStazione() {
     set('cks-incasso-mese', fmtE(mc.incasso));
     set('cks-litri-mese', fmtL(mc.litri));
     set('cks-marg-tot-mese', mc.margTot ? fmtE(mc.margTot) : '—');
-    set('cks-margine-medio', mc.margMedio ? '€ ' + mc.margMedio.toFixed(4) + '/L' : '—');
+    set('cks-margine-medio', mc.margMedio ? '€ ' + mc.margMedio.toFixed(6) + '/L' : '—');
 
     function renderDelta(elId, curr, prev) {
       var el = document.getElementById(elId);

@@ -941,7 +941,7 @@ async function stampaReportStazioneMese() {
   function fE(n) { return '€ ' + Number(n).toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function fL(n) { return Number(Math.round(n)).toLocaleString('it-IT'); }
   function f3(n) { return Number(n).toFixed(3).replace('.', ','); }
-  function f4(n) { return Number(n).toFixed(4).replace('.', ','); }
+  function f4(n) { return Number(n).toFixed(6).replace('.', ','); }
 
   // ─── HEADER pompe table ───
   var thPompe = '';
