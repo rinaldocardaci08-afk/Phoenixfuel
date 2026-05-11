@@ -1282,6 +1282,11 @@
             style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
             📊 Timeline
           </button>
+          <button class="btn-primary banche-tab" data-tab="banche-panel-valutazioni"
+            onclick="switchBancheTab(this)"
+            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
+            📈 Valutazioni
+          </button>
         </div>
 
         <!-- Pannello: Istituti -->
@@ -1324,6 +1329,11 @@
         <!-- Pannello: Timeline (placeholder) -->
         <div id="banche-panel-timeline" class="banche-panel" style="display:none">
           <div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ In costruzione — prossima sessione</div>
+        </div>
+
+        <!-- Pannello: Valutazioni (scheda banca singola — Livello 1 framework) -->
+        <div id="banche-panel-valutazioni" class="banche-panel" style="display:none">
+          <div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">⏳ Caricamento valutazioni...</div>
         </div>
 
       </div>
@@ -2905,6 +2915,7 @@
 <script src="pf-fatture.js?v=20260503q"></script>
 <script src="pf-fatture-import.js?v=20260503n"></script>
 <script src="pf-banche.js?v=20260505a"></script>
+<script src="pf-banche-valutazioni.js?v=20260511a"></script>
 <script src="pf-anticipi.js?v=20260505a"></script>
 <script src="pf-anticipi-stampa.js?v=20260503f"></script>
 <script src="pf-anticipi-storico.js?v=20260503j"></script>
