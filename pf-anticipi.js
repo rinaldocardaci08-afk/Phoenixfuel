@@ -401,7 +401,7 @@ async function _antRenderTabBanca(affidamentoId) {
 
   // Carica pannello simulazione costi (async, non blocca il render)
   if (typeof _calcRenderPanelEsempio === 'function' && aff.tasso) {
-    _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId);
+    _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId, Number(aff.importo_accordato || 0));
   }
 }
 
