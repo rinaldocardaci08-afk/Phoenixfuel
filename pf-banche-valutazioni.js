@@ -326,10 +326,9 @@ function _bvFmtDateTime(d) {
 // ── HOOK SU TAB SWITCH ─────────────────────────────────────────────────────
 // Aggancio non-invasivo: ascolto il click sul pulsante tab Valutazioni e
 // chiamo renderBancheValutazioni() dopo che switchBancheTab() ha mostrato il
-// pannello. Così evito di modificare pf-banche.js in questo turno.
-document.addEventListener('DOMContentLoaded', function() {
-  document.addEventListener('click', function(e) {
-    const btn = e.target.closest('.banche-tab[data-tab="banche-panel-valutazioni"]');
-    if (btn) setTimeout(renderBancheValutazioni, 0);
-  });
+// pannello. Listener attaccato direttamente a `document` (non serve attendere
+// DOMContentLoaded: lo script è caricato in fondo al body, document esiste già).
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.banche-tab[data-tab="banche-panel-valutazioni"]');
+  if (btn) setTimeout(renderBancheValutazioni, 0);
 });
