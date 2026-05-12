@@ -393,7 +393,7 @@ function _salvaDepOverrides() { try { localStorage.setItem('phoenix_dep_override
 
 function editaDepositoValore(td, campo, prodotto, valAttuale) {
   const input = document.createElement('input');
-  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=valAttuale;
+  input.className='inline-edit'; input.type='number'; input.step='0.000001'; input.value=valAttuale;
   td.innerHTML=''; td.appendChild(input); input.focus();
   input.onblur = () => {
     const nv = parseFloat(input.value);
@@ -410,7 +410,7 @@ function editaDepositoValore(td, campo, prodotto, valAttuale) {
 
 async function editaCostoDeposito(td, prodotto, valAttuale) {
   const input = document.createElement('input');
-  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=valAttuale;
+  input.className='inline-edit'; input.type='number'; input.step='0.000001'; input.value=valAttuale;
   td.innerHTML=''; td.appendChild(input); input.focus();
   input.onblur = async () => {
     const nv = parseFloat(input.value);
@@ -2304,7 +2304,7 @@ async function eliminaDocumento(docId, percorso, ordineId) {
 // ── MODIFICA INLINE ───────────────────────────────────────────────
 async function editaCella(td, tabella, campo, id, val) {
   const input = document.createElement('input');
-  input.className='inline-edit'; input.type='number'; input.step='0.0001'; input.value=val;
+  input.className='inline-edit'; input.type='number'; input.step='0.000001'; input.value=val;
   td.innerHTML=''; td.appendChild(input); input.focus();
   input.onblur = async () => {
     const nv=parseFloat(input.value);

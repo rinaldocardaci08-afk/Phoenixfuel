@@ -1778,13 +1778,13 @@ async function _apriCreaOrdineDaOrphan(payload64) {
         </div>
         <div class="form-group">
           <label>Costo €/L <span style="color:#A32D2D">*</span> <span style="color:#666;font-size:10px">(costo di acquisto tuo)</span></label>
-          <input type="number" id="fi-orphan-costo" step="0.0001" placeholder="es. 0.4500" autofocus
+          <input type="number" id="fi-orphan-costo" step="0.000001" placeholder="es. 0.450000" autofocus
                  oninput="window.pfFattureImport._aggiornaPreviewOrphan()"
                  style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace" />
         </div>
         <div class="form-group">
           <label>Trasporto €/L <span style="color:#666;font-size:10px">(opzionale)</span></label>
-          <input type="number" id="fi-orphan-trasporto" step="0.0001" value="0"
+          <input type="number" id="fi-orphan-trasporto" step="0.000001" value="0"
                  oninput="window.pfFattureImport._aggiornaPreviewOrphan()"
                  style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace" />
         </div>
@@ -2954,15 +2954,15 @@ async function _apriEditOrdine(ordineId, idx, numeroLinea) {
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Costo / L (€)</label>
-          <input type="number" id="fi-edt-costo" value="${o.costo_litro||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="number" id="fi-edt-costo" value="${o.costo_litro||0}" step="0.000001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Trasporto / L (€)</label>
-          <input type="number" id="fi-edt-trasp" value="${o.trasporto_litro||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="number" id="fi-edt-trasp" value="${o.trasporto_litro||0}" step="0.000001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Margine / L (€)</label>
-          <input type="number" id="fi-edt-marg" value="${o.margine||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="number" id="fi-edt-marg" value="${o.margine||0}" step="0.000001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Imponibile (auto)</label>

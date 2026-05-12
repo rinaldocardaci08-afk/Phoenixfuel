@@ -863,11 +863,11 @@ async function allEditOrdine(ordineId) {
         <div><label style="font-size:10px;font-weight:600;color:#555">IVA %</label>
           <input type="number" id="ae-iva" value="${o.iva||22}" step="0.01" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Costo / L (€)</label>
-          <input type="number" id="ae-costo" value="${o.costo_litro||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+          <input type="number" id="ae-costo" value="${o.costo_litro||0}" step="0.000001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Trasporto / L (€)</label>
-          <input type="number" id="ae-trasp" value="${o.trasporto_litro||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+          <input type="number" id="ae-trasp" value="${o.trasporto_litro||0}" step="0.000001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Margine / L (€)</label>
-          <input type="number" id="ae-marg" value="${o.margine||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+          <input type="number" id="ae-marg" value="${o.margine||0}" step="0.000001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Imponibile (auto)</label>
           <input type="text" id="ae-imp" readonly value="€ ${_fmtN((Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0))*Number(o.litri||0))}" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:3px;font-size:12px;font-family:monospace;background:#fafaf8"></div>
         <div style="grid-column:1/3"><label style="font-size:10px;font-weight:600;color:#555">Sede di scarico</label>

@@ -1615,7 +1615,7 @@ async function apriDirottamento(ordineId, caricoId) {
   html += '<option value="">Seleziona...</option>' + cacheClienti.map(function(c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('');
   html += '</select></div>';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
-  html += '<div class="form-group"><label style="font-weight:700;color:#712B13">Prezzo netto €/L</label><input type="number" id="div-prezzo" step="0.0001" value="' + (Number(ordine.costo_litro)+Number(ordine.trasporto_litro)+Number(ordine.margine)).toFixed(6) + '" style="font-family:var(--font-mono);border:1px solid #F0997B" /></div>';
+  html += '<div class="form-group"><label style="font-weight:700;color:#712B13">Prezzo netto €/L</label><input type="number" id="div-prezzo" step="0.000001" value="' + (Number(ordine.costo_litro)+Number(ordine.trasporto_litro)+Number(ordine.margine)).toFixed(6) + '" style="font-family:var(--font-mono);border:1px solid #F0997B" /></div>';
   html += '<div class="form-group"><label style="font-weight:700;color:#712B13">Sede di scarico</label><select id="div-sede" style="border:1px solid #F0997B"><option value="">— Seleziona cliente prima —</option></select></div>';
   html += '</div></div>';
 
