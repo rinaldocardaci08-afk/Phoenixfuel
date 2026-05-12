@@ -5,7 +5,7 @@
 // - API supabase/google → solo network, mai cache
 // ═══════════════════════════════════════════════════════════════════
 
-var CACHE_NAME = 'phoenixfuel-v32';
+var CACHE_NAME = 'phoenixfuel-v33';
 var FILES_TO_CACHE = [
   '/',
   '/index.html',
