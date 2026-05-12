@@ -360,6 +360,10 @@ async function _antRenderTabBanca(affidamentoId) {
   html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid ' + colorRischio + ';padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Rischio scadenze</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:' + colorRischio + '">' + (nFattureScadute + nFattureScadenza7gg) + '</div><div style="font-size:10px;color:' + colorRischio + ';margin-top:3px">' + (nFattureScadenza7gg > 0 ? nFattureScadenza7gg + ' entro 7gg' : '') + (nFattureScadute > 0 ? (nFattureScadenza7gg > 0 ? ' · ' : '') + nFattureScadute + ' scadute ⚠' : '') + '</div></div>';
   html += '</div>';
 
+  // ─── PANNELLO SIMULAZIONE COSTO ANTICIPO ──────────────────────────────
+  // Placeholder: popolato async da _calcRenderPanelEsempio dopo cont.innerHTML
+  html += '<div id="ant-costi-' + affidamentoId + '"></div>';
+
   // Toolbar
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px">';
   html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">';
@@ -394,6 +398,11 @@ async function _antRenderTabBanca(affidamentoId) {
   }
 
   cont.innerHTML = html;
+
+  // Carica pannello simulazione costi (async, non blocca il render)
+  if (typeof _calcRenderPanelEsempio === 'function' && aff.tasso) {
+    _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId);
+  }
 }
 
 // ─── RENDER SINGOLO MODULO (card espandibile) ─────────────────────────────
@@ -516,7 +525,8 @@ function _antRenderModuloCard(p, aff) {
     if (isScaduta) html += ' <span style="font-size:9px">⚠</span>';
     html += '</td>';
     html += '<td style="padding:5px 8px"><span style="background:' + stColors.bg + ';color:' + stColors.fg + ';padding:2px 8px;border-radius:9px;font-size:9px;font-weight:700;letter-spacing:0.3px">' + stColors.label + '</span></td>';
-    html += '<td style="padding:5px 8px;text-align:right">';
+    html += '<td style="padding:5px 8px;text-align:right;white-space:nowrap">';
+    html += '<button onclick="_calcOpenPopupCosto(\'' + f.id + '\',\'' + aff.id + '\')" title="Costo anticipo per istituto (ℹ︎)" style="background:none;border:0.5px solid #26215C;color:#26215C;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;margin-right:4px;font-weight:600">ℹ️</button>';
     if (f.stato === 'anticipata' && _antPuoIncasso()) {
       html += '<button onclick="_antRegistraIncasso(\'' + f.id + '\')" title="Registra incasso cliente" style="background:none;border:0.5px solid #27500A;color:#27500A;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">✓ Incasso</button>';
     } else if (f.stato !== 'anticipata' && _antPuoModificare()) {
