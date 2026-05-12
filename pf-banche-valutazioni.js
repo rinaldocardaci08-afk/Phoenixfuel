@@ -52,14 +52,19 @@ async function renderBancheValutazioni() {
     _bvSelectedBanca = bancheConDati[0].id;
   }
   // Calcolo anni disponibili: in confronto = tutti gli anni; in banca = solo per banca selezionata
+  // + sempre l'anno corrente (per consentire avvio import su anno vuoto)
+  const annoCorrente = new Date().getFullYear();
   let anniDisponibili;
   if (_bvViewMode === 'confronto') {
-    anniDisponibili = Array.from(new Set(_bvPeriodiCache.map(p => p.anno))).sort((a, b) => b - a);
+    anniDisponibili = Array.from(new Set(_bvPeriodiCache.map(p => p.anno)));
+    if (!anniDisponibili.includes(annoCorrente)) anniDisponibili.push(annoCorrente);
+    anniDisponibili.sort((a, b) => b - a);
   } else {
     anniDisponibili = _bvPeriodiCache
       .filter(p => p.banca_id === _bvSelectedBanca)
-      .map(p => p.anno)
-      .sort((a, b) => b - a);
+      .map(p => p.anno);
+    if (!anniDisponibili.includes(annoCorrente)) anniDisponibili.push(annoCorrente);
+    anniDisponibili.sort((a, b) => b - a);
   }
   if (!_bvSelectedAnno || !anniDisponibili.includes(_bvSelectedAnno)) {
     _bvSelectedAnno = anniDisponibili[0];
@@ -142,7 +147,10 @@ async function renderBancheValutazioni() {
   const voci    = _bvVociCache.filter(v => v.banca_id === _bvSelectedBanca && v.anno === _bvSelectedAnno);
 
   if (!periodo) {
-    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">Nessun dato per ' + (banca ? banca.nome : '?') + ' — esercizio ' + _bvSelectedAnno + '.</div>';
+    html += '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">';
+    html += '<div style="margin-bottom:12px">Nessun dato per ' + (banca ? banca.nome : '?') + ' — esercizio ' + _bvSelectedAnno + '.</div>';
+    html += '<button onclick="_imeOpenModal()" style="background:#1a1a18;color:#FAC775;border:0.5px solid var(--border);border-radius:6px;padding:9px 18px;font-size:12px;font-weight:600;cursor:pointer">📥 Importa primo estratto conto</button>';
+    html += '</div>';
     cont.innerHTML = html;
     return;
   }
@@ -208,6 +216,7 @@ function _bvPanelHeader(banca, p) {
   h += '<div style="font-size:11px;color:var(--text-muted);font-weight:500;letter-spacing:0.5px;margin-bottom:4px">' + nome + '</div>';
   h += '<div style="font-size:18px;font-weight:700;color:var(--text)">Scheda di valutazione · esercizio ' + p.anno + '</div>';
   h += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Ultimo aggiornamento: ' + _bvFmtDateTime(p.updated_at) + '</div>';
+  h += '<div style="margin-top:10px"><button onclick="_imeOpenModal()" style="background:#1a1a18;color:#FAC775;border:0.5px solid var(--border);border-radius:6px;padding:7px 14px;font-size:11.5px;font-weight:600;cursor:pointer" title="Importa estratto conto mensile da file Excel">📥 Importa estratto conto</button></div>';
   h += '</div>';
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
   h += '<div class="kpi"><div class="kpi-label">Costo bancario anno</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(p.costo_bancario_totale) + '</div></div>';
