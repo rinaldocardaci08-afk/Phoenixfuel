@@ -98,16 +98,17 @@ async function renderBancheValutazioni() {
 
   // ── PANNELLI ─────────────────────────────────────────────────────────────
   const panels = {
-    'header':  _bvPanelHeader(banca, periodo),
-    'tab1':    _bvPanelTabella1(voci.filter(v => v.tabella === 'linee_breve')),
-    'tab2':    _bvPanelTabella2(voci.filter(v => v.tabella === 'mutui_mlt')),
-    'tab3':    _bvPanelTabella3(voci.filter(v => v.tabella === 'cdf')),
-    'sintesi': _bvPanelSintesi(periodo),
-    'critica': _bvPanelTesto('Criticità e anomalie', periodo.criticita, '#A32D2D'),
-    'bench':   _bvPanelTesto('Benchmark vs mercato', periodo.benchmark, '#26215C'),
-    'racc':    _bvPanelTesto('Raccomandazioni quantificate', periodo.raccomandazioni, '#633806')
+    'header':    _bvPanelHeader(banca, periodo),
+    'tab1':      _bvPanelTabella1(voci.filter(v => v.tabella === 'linee_breve')),
+    'tab2':      _bvPanelTabella2(voci.filter(v => v.tabella === 'mutui_mlt')),
+    'tab3':      _bvPanelTabella3(voci.filter(v => v.tabella === 'cdf')),
+    'sintesi':   _bvPanelSintesi(periodo),
+    'accessori': _bvPanelAccessori(periodo),
+    'critica':   _bvPanelTesto('Criticità e anomalie', periodo.criticita, '#A32D2D'),
+    'bench':     _bvPanelTesto('Benchmark vs mercato', periodo.benchmark, '#26215C'),
+    'racc':      _bvPanelTesto('Raccomandazioni quantificate', periodo.raccomandazioni, '#633806')
   };
-  _registerPanels('valutazioni', ['header','tab1','tab2','tab3','sintesi','critica','bench','racc'], renderBancheValutazioni);
+  _registerPanels('valutazioni', ['header','tab1','tab2','tab3','sintesi','accessori','critica','bench','racc'], renderBancheValutazioni);
   const order = _getPanelOrder('valutazioni');
   order.forEach(id => {
     if (panels[id]) html += _wrapPanel('valutazioni', id, panels[id]);
@@ -138,9 +139,13 @@ function _bvCambiaAnno(delta) {
   renderBancheValutazioni();
 }
 
-// ── PANNELLO: HEADER (KPI esposizione + costo bancario anno) ──────────────
+// ── PANNELLO: HEADER (KPI esposizione + costo bancario + volume anticipi) ─
 function _bvPanelHeader(banca, p) {
   const nome = (banca && banca.nome ? banca.nome : '').toUpperCase();
+  const volAnt = Number(p.volume_anticipi_lavorato || 0);
+  const fonte = p.volume_anticipi_fonte || 'manuale';
+  const fonteTxt = fonte === 'da_modulo_anticipi' ? '(da modulo Anticipi)' : '(inserito manualmente)';
+
   let h = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px;padding-right:60px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px">';
   h += '<div>';
@@ -151,6 +156,9 @@ function _bvPanelHeader(banca, p) {
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
   h += '<div class="kpi"><div class="kpi-label">Costo bancario anno</div><div class="kpi-value" style="color:#A32D2D">' + fmtE(p.costo_bancario_totale) + '</div></div>';
   h += '<div class="kpi"><div class="kpi-label">Esposizione totale</div><div class="kpi-value" style="color:#26215C">' + fmtE(p.esposizione_totale) + '</div></div>';
+  if (volAnt > 0) {
+    h += '<div class="kpi" title="Volume anticipi presentati ' + fonteTxt + '"><div class="kpi-label">Volume anticipi lavorato</div><div class="kpi-value" style="color:#633806">' + fmtE(volAnt) + '</div></div>';
+  }
   h += '</div></div></div>';
   return h;
 }
@@ -253,6 +261,47 @@ function _bvPanelTabella3(voci) {
       h += '<tr><td colspan="6" style="padding:4px 10px 10px;color:var(--text-muted);font-size:10.5px;border-bottom:0.5px solid var(--border);font-style:italic">' + _bvEscape(v.note) + '</td></tr>';
     }
   });
+  h += '</tbody></table></div></div>';
+  return h;
+}
+
+// ── PANNELLO: COSTI ACCESSORI DETTAGLIO ────────────────────────────────────
+function _bvPanelAccessori(p) {
+  let voci = [];
+  try {
+    if (Array.isArray(p.costi_accessori_dettaglio)) {
+      voci = p.costi_accessori_dettaglio;
+    } else if (typeof p.costi_accessori_dettaglio === 'string') {
+      voci = JSON.parse(p.costi_accessori_dettaglio || '[]');
+    }
+  } catch (e) { voci = []; }
+
+  let h = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
+  h += '<div class="tag" style="background:#633806;color:#FAC775;display:inline-block;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:600;letter-spacing:0.5px;margin-bottom:12px">DETTAGLIO COSTI ACCESSORI</div>';
+
+  if (!voci.length) {
+    h += '<div style="padding:14px;color:var(--text-muted);font-size:12px;font-style:italic">Nessun dettaglio accessori inserito.</div></div>';
+    return h;
+  }
+
+  let tot = 0;
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  h += '<thead><tr style="background:var(--bg);font-weight:600">';
+  h += '<th style="padding:8px 10px;text-align:left;border-bottom:0.5px solid var(--border)">Voce</th>';
+  h += '<th style="padding:8px 10px;text-align:right;border-bottom:0.5px solid var(--border)">Importo €</th>';
+  h += '</tr></thead><tbody>';
+  voci.forEach(v => {
+    const imp = Number(v.importo || 0);
+    tot += imp;
+    const color = imp < 0 ? '#0a7a3a' : '#A32D2D';
+    h += '<tr>';
+    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + _bvEscape(v.voce || '') + '</td>';
+    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);text-align:right;font-weight:600;color:' + color + '">' + fmtE(imp) + '</td>';
+    h += '</tr>';
+  });
+  const totColor = tot < 0 ? '#0a7a3a' : '#A32D2D';
+  h += '<tr><td style="padding:10px;font-weight:700;background:var(--bg)">TOTALE NETTO ACCESSORI</td>';
+  h += '<td style="padding:10px;text-align:right;font-weight:700;background:var(--bg);color:' + totColor + '">' + fmtE(tot) + '</td></tr>';
   h += '</tbody></table></div></div>';
   return h;
 }
