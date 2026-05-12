@@ -114,7 +114,7 @@ async function _calcRenderPanelEsempio(istitutoId, tan, istitutoNome, containerI
 
   const dati = await _calcLookupCdfDati(istitutoId, accordato);
   const importoEsempio = 5000;
-  const giorniList = [30, 60, 90];
+  const giorniList = [30, 60, 90, 120];
   const quotaCdfEsempio = _calcQuotaCdf(importoEsempio, dati.cdfAnno, dati.volumeAnno);
 
   const collapseKey = istitutoId;
@@ -227,11 +227,12 @@ async function _calcOpenPopupCosto(fatturaId, affidamentoCorrenteId) {
       banca: b, tan, accordato: accPerBanca[b.id],
       cdfAnno: dati.cdfAnno, volAnno: dati.volumeAnno,
       fonte: dati.fonte, annoStorico: dati.annoStorico,
-      interessi30: _calcInteressi(importoAnticipato, tan, 30),
-      interessi60: _calcInteressi(importoAnticipato, tan, 60),
-      interessi90: _calcInteressi(importoAnticipato, tan, 90),
-      quotaCdf:    _calcQuotaCdf(importoAnticipato, dati.cdfAnno, dati.volumeAnno),
-      isCurrente:  b.id === istitutoCorrenteId
+      interessi30:  _calcInteressi(importoAnticipato, tan, 30),
+      interessi60:  _calcInteressi(importoAnticipato, tan, 60),
+      interessi90:  _calcInteressi(importoAnticipato, tan, 90),
+      interessi120: _calcInteressi(importoAnticipato, tan, 120),
+      quotaCdf:     _calcQuotaCdf(importoAnticipato, dati.cdfAnno, dati.volumeAnno),
+      isCurrente:   b.id === istitutoCorrenteId
     };
   }));
 
@@ -267,7 +268,7 @@ async function _calcOpenPopupCosto(fatturaId, affidamentoCorrenteId) {
     h += '<div style="margin-bottom:6px">' + _calcBadgeFonte(d.fonte, d.annoStorico) + '</div>';
     h += '<div style="font-size:10.5px;color:var(--text-muted);margin-bottom:8px">TAN <b style="color:var(--text);font-family:var(--font-mono)">' + d.tan.toFixed(3) + '%</b></div>';
     h += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
-    [['30 gg', d.interessi30], ['60 gg', d.interessi60], ['90 gg', d.interessi90]].forEach(arr => {
+    [['30 gg', d.interessi30], ['60 gg', d.interessi60], ['90 gg', d.interessi90], ['120 gg', d.interessi120]].forEach(arr => {
       h += '<tr><td style="padding:3px 0;color:var(--text-muted)">Interessi ' + arr[0] + '</td><td style="padding:3px 0;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + fmtE(arr[1]) + '</td></tr>';
     });
     h += '<tr style="border-top:0.5px dashed var(--border)"><td style="padding:5px 0 3px;font-size:10.5px;color:var(--text-muted)">Quota CDF*</td><td style="padding:5px 0 3px;text-align:right;font-family:var(--font-mono);color:#A32D2D;font-size:10.5px">' + fmtE(d.quotaCdf) + '</td></tr>';
