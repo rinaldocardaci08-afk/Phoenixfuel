@@ -85,6 +85,56 @@ async function salvaPrezzo() {
   const validOk = await _validaSanitaPrezzo(prodotto, costo, data);
   if (!validOk) return;
 
+  // ═══ FIX 3 (v20260512b): CHECK DUPLICATO ═══
+  // Cerca un prezzo già esistente per la stessa (data, fornitore, base, prodotto).
+  // Se esiste → popup conferma per UPDATE invece di INSERT (no duplicati).
+  // Match su fornitore_id se presente, altrimenti su nome (case-insensitive).
+  try {
+    var qDup = sb.from('prezzi').select('id,costo_litro,trasporto_litro,margine,iva')
+      .eq('data', data).eq('prodotto', prodotto);
+    if (fornitoreId) qDup = qDup.eq('fornitore_id', fornitoreId);
+    else qDup = qDup.ilike('fornitore', fornitoreNome);
+    if (baseId) qDup = qDup.eq('base_carico_id', baseId);
+    else qDup = qDup.is('base_carico_id', null);
+    var { data: esistenti } = await qDup;
+    if (esistenti && esistenti.length) {
+      var ex = esistenti[0];
+      var fmtNum = function(n) { return Number(n||0).toLocaleString('it-IT', { minimumFractionDigits: 6, maximumFractionDigits: 6 }); };
+      var nomeBase = baseId ? (document.getElementById('pr-base').options[document.getElementById('pr-base').selectedIndex]?.text || 'base specifica') : 'nessuna base';
+      var msg = '⚠️ Esiste già un prezzo per:\n\n' +
+        '• Data: ' + data.split('-').reverse().join('/') + '\n' +
+        '• Fornitore: ' + fornitoreNome + '\n' +
+        '• Base: ' + nomeBase + '\n' +
+        '• Prodotto: ' + prodotto + '\n\n' +
+        'VALORI ATTUALI:\n' +
+        '  Costo/L:     € ' + fmtNum(ex.costo_litro) + '\n' +
+        '  Trasporto/L: € ' + fmtNum(ex.trasporto_litro) + '\n' +
+        '  Margine/L:   € ' + fmtNum(ex.margine) + '\n\n' +
+        'NUOVI VALORI:\n' +
+        '  Costo/L:     € ' + fmtNum(costo) + '\n' +
+        '  Trasporto/L: € ' + fmtNum(trasporto) + '\n' +
+        '  Margine/L:   € ' + fmtNum(margine) + '\n\n' +
+        'OK = sovrascrivi il prezzo esistente\n' +
+        'Annulla = non salvare nulla';
+      if (!confirm(msg)) { toast('Operazione annullata'); return; }
+      // UPDATE invece di INSERT
+      var ivaNew = parseInt(document.getElementById('pr-iva').value);
+      var { error: errUpd } = await sb.from('prezzi').update({
+        costo_litro: costo, trasporto_litro: trasporto, margine: margine, iva: ivaNew
+      }).eq('id', ex.id);
+      if (errUpd) { toast('Errore aggiornamento: ' + errUpd.message); return; }
+      _auditLog('modifica_prezzo', 'prezzi',
+        fornitoreNome + ' ' + prodotto + ' €/L ' + Number(ex.costo_litro).toFixed(6) + ' → ' + costo.toFixed(6) +
+        ' | data ' + data + ' | id:' + ex.id);
+      toast('Prezzo aggiornato!');
+      caricaPrezzi();
+      _aggiornaBenchmarkAuto(data);
+      return;
+    }
+  } catch(eDup) {
+    console.warn('[salvaPrezzo] check duplicato fallito (non bloccante):', eDup);
+  }
+
   const record = { data, fornitore:fornitoreNome, fornitore_id:fornitoreId||null, base_carico_id:baseId, prodotto, costo_litro:costo, trasporto_litro:trasporto, margine, iva:parseInt(document.getElementById('pr-iva').value) };
   const { data: inserted, error } = await sb.from('prezzi').insert([record]).select().single();
   if (error) { toast('Errore: '+error.message); return; }
