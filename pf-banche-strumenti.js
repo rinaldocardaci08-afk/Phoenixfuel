@@ -161,17 +161,26 @@ function _strRender() {
     {key:'garanzia',  html: _strPanelFondiGaranzia()}
   ];
 
+  // Registra sezione (firma helper progetto: sezione, defaultOrder, refreshFn)
+  const panelKeys = panels.map(p => p.key);
+  if (typeof _registerPanels === 'function') {
+    try { _registerPanels('strumenti', panelKeys, renderBancheStrumenti); } catch(e) {}
+  }
+
   // Ordinamento da localStorage
-  let orderedKeys = panels.map(p => p.key);
+  let orderedKeys = panelKeys.slice();
   if (typeof _getPanelOrder === 'function') {
-    try { orderedKeys = _getPanelOrder('strumenti', orderedKeys); } catch(e) {}
+    try {
+      const got = _getPanelOrder('strumenti');
+      if (got && got.length > 0) orderedKeys = got;
+    } catch(e) {}
   }
 
   const ordered = orderedKeys.map(k => panels.find(p => p.key === k)).filter(Boolean);
 
-  html += ordered.map((p, idx) => {
+  html += ordered.map(p => {
     if (typeof _wrapPanel === 'function') {
-      try { return _wrapPanel('strumenti', p.key, p.html, idx, ordered.length); }
+      try { return _wrapPanel('strumenti', p.key, p.html); }
       catch(e) { return p.html; }
     }
     return p.html;
