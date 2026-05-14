@@ -2,13 +2,14 @@
 // PhoenixFuel — Modulo "Valutazioni Banche"
 // Sotto-tab del modulo Banche & Mutui (panel: banche-panel-valutazioni)
 // Layout: header + tab linee breve + mutui + cdf + sintesi + crit/bench/racc
+//         + sotto-vista "Strumenti finanziari" (modulo esterno pf-banche-strumenti.js)
 // Tutti i pannelli sono spostabili via ▲▼ (localStorage: pf-panel-order-valutazioni)
 // ════════════════════════════════════════════════════════════════════════════
 
 // ── STATO ──────────────────────────────────────────────────────────────────
 let _bvSelectedBanca = null;
 let _bvSelectedAnno  = null;
-let _bvViewMode      = 'banca';   // 'banca' (scheda singola) | 'confronto' (multi-banca)
+let _bvViewMode      = 'banca';   // 'banca' (scheda singola) | 'confronto' (multi-banca) | 'strumenti' (modulo esterno)
 let _bvClassificaTab = 'operativa'; // 'operativa' | 'mutui' | 'totale' (sub-tab pannello Classifica)
 let _bvPeriodiCache  = null;
 let _bvVociCache     = null;
@@ -84,6 +85,13 @@ async function renderBancheValutazioni() {
   const confFw = confrontoAtt ? '600' : '400';
   html += '<button onclick="_bvSetViewConfronto()" style="background:' + confBg + ';color:' + confFg + ';border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:' + confFw + '">📊 Confronto</button>';
 
+  // Pulsante Strumenti Finanziari (modulo esterno pf-banche-strumenti.js)
+  const strumAtt = (_bvViewMode === 'strumenti');
+  const strBg = strumAtt ? '#1a1a18' : 'var(--bg)';
+  const strFg = strumAtt ? '#FAC775' : 'var(--text)';
+  const strFw = strumAtt ? '600' : '400';
+  html += '<button onclick="_bvSetViewStrumenti()" style="background:' + strBg + ';color:' + strFg + ';border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:' + strFw + '">📈 Strumenti finanziari</button>';
+
   // Separatore
   html += '<div style="width:1px;height:24px;background:var(--border);margin:0 4px"></div>';
 
@@ -96,6 +104,23 @@ async function renderBancheValutazioni() {
     html += '<button onclick="_bvSelectBanca(\'' + b.id + '\')" style="background:' + bg + ';color:' + fg + ';border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:' + fw + '">' + (b.nome || '') + '</button>';
   });
   html += '</div>';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BRANCH 0: STRUMENTI FINANZIARI (modulo esterno pf-banche-strumenti.js)
+  // ══════════════════════════════════════════════════════════════════════════
+  // Il modulo ha header interno con selettori anno/banca, quindi salta il
+  // selettore anno globale di valutazioni e renderizza direttamente.
+  if (_bvViewMode === 'strumenti') {
+    html += '<div id="banche-panel-strumenti"></div>';
+    cont.innerHTML = html;
+    if (typeof renderBancheStrumenti === 'function') {
+      renderBancheStrumenti();
+    } else {
+      const sub = document.getElementById('banche-panel-strumenti');
+      if (sub) sub.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12px">⚠ Modulo Strumenti Finanziari non caricato. Verifica che <code>pf-banche-strumenti.js</code> sia incluso in <code>index.html</code>.</div>';
+    }
+    return;
+  }
 
   // Selettore anno (◀ dropdown ▶)
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
@@ -180,6 +205,10 @@ async function renderBancheValutazioni() {
 // ── HANDLERS ───────────────────────────────────────────────────────────────
 function _bvSetViewConfronto() {
   _bvViewMode = 'confronto';
+  renderBancheValutazioni();
+}
+function _bvSetViewStrumenti() {
+  _bvViewMode = 'strumenti';
   renderBancheValutazioni();
 }
 function _bvSelectBanca(id) {
@@ -443,7 +472,9 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
     const irs        = Number(p.differenziali_irs || 0);
     const sommaEspl  = intMutui + intAnticip + cdf + canoni + altri + irs;
     const intCC      = Math.max(0, costoTot - sommaEspl);
-    const costoOp    = costoTot - intMutui;
+    // Costo operativo = costo totale - mutui MLT - differenziali IRS
+    // I differenziali IRS sono tracciati nel modulo "Strumenti finanziari" (📈)
+    const costoOp    = costoTot - intMutui - irs;
     return { costoTot, intMutui, intAnticip, cdf, canoni, altri, irs, intCC, costoOp };
   }
 
@@ -453,7 +484,7 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
   // Sub-tab toggle
   const tabAttuale = _bvClassificaTab || 'operativa';
   const tabs = [
-    {id:'operativa', label:'💼 Costi OPERATIVI', desc:'costi gestionali esclusi interessi mutui MLT'},
+    {id:'operativa', label:'💼 Costi OPERATIVI', desc:'costi gestionali esclusi interessi mutui MLT e differenziali IRS (tracciati in 📈 Strumenti finanziari)'},
     {id:'mutui',     label:'🏦 Mutui MLT',       desc:'interessi e stock mutui in ammortamento'},
     {id:'totale',    label:'📊 Costo TOTALE',    desc:'somma operativi + mutui (vista legacy)'}
   ];
@@ -495,7 +526,7 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
       const vol = Number(p.volume_anticipi_lavorato || 0);
       const per1k = vol > 0 ? ((s.intAnticip + s.cdf) / vol * 1000) : null;
       tIntA += s.intAnticip; tCdf += s.cdf; tIntCC += s.intCC;
-      tCanoni += s.canoni; tAltri += (s.altri + s.irs); tOp += s.costoOp; tVol += vol;
+      tCanoni += s.canoni; tAltri += s.altri; tOp += s.costoOp; tVol += vol;
       const medal = medals[i] || ('  ' + (i + 1) + '°');
       h += '<tr>';
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:600">' + medal + '</td>';
@@ -504,7 +535,7 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.cdf > 0 ? fmtE(s.cdf) : '—') + '</td>';
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.intCC > 0 ? fmtE(s.intCC) : '—') + '</td>';
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.canoni > 0 ? fmtE(s.canoni) : '—') + '</td>';
-      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + ((s.altri + s.irs) !== 0 ? fmtE(s.altri + s.irs) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.altri !== 0 ? fmtE(s.altri) : '—') + '</td>';
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:700;color:#A32D2D">' + fmtE(s.costoOp) + '</td>';
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (vol > 0 ? fmtE(vol) : '—') + '</td>';
       h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:600">' + (per1k !== null ? fmtE(per1k) : '—') + '</td>';
@@ -592,23 +623,24 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
 
   h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
   h += '<thead><tr style="background:var(--bg);font-weight:600">';
-  ['#','Banca','Costo TOTALE','di cui mutui MLT','di cui operativi','Esposizione','Costo/Esposiz.'].forEach(c => {
+  ['#','Banca','Costo TOTALE','di cui mutui MLT','di cui IRS','di cui operativi','Esposizione','Costo/Esposiz.'].forEach(c => {
     h += '<th style="padding:8px 10px;text-align:left;border-bottom:0.5px solid var(--border);white-space:nowrap">' + c + '</th>';
   });
   h += '</tr></thead><tbody>';
 
-  let tCosto = 0, tEsp = 0, tIntMutui = 0, tCostoOp = 0;
+  let tCosto = 0, tEsp = 0, tIntMutui = 0, tIrs = 0, tCostoOp = 0;
   righeTot.forEach((x, i) => {
     const s = _bvScomponi(x.periodo);
     const esp = Number(x.periodo.esposizione_totale || 0);
     const pctCe = esp > 0 ? (s.costoTot / esp * 100) : null;
-    tCosto += s.costoTot; tEsp += esp; tIntMutui += s.intMutui; tCostoOp += s.costoOp;
+    tCosto += s.costoTot; tEsp += esp; tIntMutui += s.intMutui; tIrs += s.irs; tCostoOp += s.costoOp;
     const medal = medals[i] || ('  ' + (i + 1) + '°');
     h += '<tr>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + medal + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + (x.banca.nome || '') + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:700;color:#A32D2D">' + fmtE(s.costoTot) + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);color:#26215C">' + (s.intMutui > 0 ? fmtE(s.intMutui) : '—') + '</td>';
+    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);color:#065f46">' + (s.irs !== 0 ? fmtE(s.irs) : '—') + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + fmtE(s.costoOp) + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + fmtE(esp) + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + (pctCe !== null ? _bvFmtPct(pctCe, 2) : '—') + '</td>';
@@ -618,7 +650,7 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
     h += '<tr style="opacity:0.55">';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">—</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + (x.banca.nome || '') + '</td>';
-    h += '<td colspan="5" style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-style:italic;color:var(--text-muted)">in attesa di dati</td>';
+    h += '<td colspan="6" style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-style:italic;color:var(--text-muted)">in attesa di dati</td>';
     h += '</tr>';
   });
   const pctTotCe = tEsp > 0 ? (tCosto / tEsp * 100) : null;
@@ -626,6 +658,7 @@ function _bvPanelConfrontoClassifica(periodiAnno) {
   h += '<td colspan="2" style="padding:10px;font-weight:700">TOTALE PHOENIX FUEL</td>';
   h += '<td style="padding:10px;font-weight:700;color:#A32D2D">' + fmtE(tCosto) + '</td>';
   h += '<td style="padding:10px;font-weight:700;color:#26215C">' + fmtE(tIntMutui) + '</td>';
+  h += '<td style="padding:10px;font-weight:700;color:#065f46">' + fmtE(tIrs) + '</td>';
   h += '<td style="padding:10px;font-weight:700">' + fmtE(tCostoOp) + '</td>';
   h += '<td style="padding:10px;font-weight:700">' + fmtE(tEsp) + '</td>';
   h += '<td style="padding:10px;font-weight:700">' + (pctTotCe !== null ? _bvFmtPct(pctTotCe, 2) : '—') + '</td>';
