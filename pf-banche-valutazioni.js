@@ -9,6 +9,7 @@
 let _bvSelectedBanca = null;
 let _bvSelectedAnno  = null;
 let _bvViewMode      = 'banca';   // 'banca' (scheda singola) | 'confronto' (multi-banca)
+let _bvClassificaTab = 'operativa'; // 'operativa' | 'mutui' | 'totale' (sub-tab pannello Classifica)
 let _bvPeriodiCache  = null;
 let _bvVociCache     = null;
 
@@ -200,6 +201,10 @@ function _bvCambiaAnno(delta) {
   const ni = i + delta;
   if (ni < 0 || ni >= anni.length) return;
   _bvSelectedAnno = anni[ni];
+  renderBancheValutazioni();
+}
+function _bvSetClassificaTab(t) {
+  _bvClassificaTab = String(t || 'operativa');
   renderBancheValutazioni();
 }
 
@@ -422,63 +427,207 @@ function _bvPanelTesto(titolo, testo, colore) {
 
 // ── CONFRONTO 1: CLASSIFICA COSTO TOTALE ──────────────────────────────────
 function _bvPanelConfrontoClassifica(periodiAnno) {
-  // Banche con dati, ordinate per costo decrescente (più costoso primo)
-  const conDati = periodiAnno
-    .filter(x => x.periodo)
-    .sort((a, b) => Number(b.periodo.costo_bancario_totale) - Number(a.periodo.costo_bancario_totale));
   const senzaDati = periodiAnno.filter(x => !x.periodo);
+  const conDati   = periodiAnno.filter(x => x.periodo);
+
+  // Helper: scompone i costi del periodo separando operativo da mutui MLT.
+  // Interessi c/c (debitori) = costo_bancario_totale - somma colonne dedicate.
+  // Costo operativo = tutto tranne interessi mutui.
+  function _bvScomponi(p) {
+    const costoTot   = Number(p.costo_bancario_totale || 0);
+    const intMutui   = Number(p.interessi_mutui || 0);
+    const intAnticip = Number(p.interessi_anticipi || 0);
+    const cdf        = Number(p.cdf_totali || 0);
+    const canoni     = Number(p.canoni_bolli_spese || 0);
+    const altri      = Number(p.altri_costi_netti || 0);
+    const irs        = Number(p.differenziali_irs || 0);
+    const sommaEspl  = intMutui + intAnticip + cdf + canoni + altri + irs;
+    const intCC      = Math.max(0, costoTot - sommaEspl);
+    const costoOp    = costoTot - intMutui;
+    return { costoTot, intMutui, intAnticip, cdf, canoni, altri, irs, intCC, costoOp };
+  }
 
   let h = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
-  h += '<div class="tag" style="background:#1a1a18;color:#FAC775;display:inline-block;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:600;letter-spacing:0.5px;margin-bottom:12px">CLASSIFICA COSTO BANCARIO TOTALE</div>';
+  h += '<div class="tag" style="background:#1a1a18;color:#FAC775;display:inline-block;padding:4px 10px;border-radius:6px;font-size:10px;font-weight:600;letter-spacing:0.5px;margin-bottom:12px">CLASSIFICA COSTO BANCARIO</div>';
+
+  // Sub-tab toggle
+  const tabAttuale = _bvClassificaTab || 'operativa';
+  const tabs = [
+    {id:'operativa', label:'💼 Costi OPERATIVI', desc:'costi gestionali esclusi interessi mutui MLT'},
+    {id:'mutui',     label:'🏦 Mutui MLT',       desc:'interessi e stock mutui in ammortamento'},
+    {id:'totale',    label:'📊 Costo TOTALE',    desc:'somma operativi + mutui (vista legacy)'}
+  ];
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+  tabs.forEach(t => {
+    const sel = (t.id === tabAttuale);
+    h += '<button onclick="_bvSetClassificaTab(\'' + t.id + '\')" style="background:' + (sel ? '#1a1a18' : 'var(--bg)') + ';color:' + (sel ? '#FAC775' : 'var(--text)') + ';border:0.5px solid var(--border);border-radius:6px;padding:7px 12px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:0.3px">' + t.label + '</button>';
+  });
+  h += '</div>';
+  const descAttuale = tabs.find(t => t.id === tabAttuale);
+  if (descAttuale) {
+    h += '<div style="font-size:10.5px;color:var(--text-muted);font-style:italic;margin-bottom:14px">' + descAttuale.desc + '</div>';
+  }
 
   if (conDati.length === 0) {
     h += '<div style="padding:14px;color:var(--text-muted);font-size:12px;font-style:italic">Nessuna banca popolata per questo anno.</div></div>';
     return h;
   }
 
+  const medals = ['🥇', '🥈', '🥉'];
+
+  // ════════════════════════════════════════════════════════════════════════
+  // SUB-TAB OPERATIVA — costo "vero" della relazione bancaria (no mutui MLT)
+  // ════════════════════════════════════════════════════════════════════════
+  if (tabAttuale === 'operativa') {
+    const righe = conDati.map(x => ({ x, s: _bvScomponi(x.periodo) }))
+      .sort((a, b) => b.s.costoOp - a.s.costoOp);
+
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">';
+    h += '<thead><tr style="background:var(--bg);font-weight:600">';
+    ['#','Banca','Int. anticipi','CDF','Int. c/c','Canoni/bolli','Altri','TOT operativo','Vol. anticipi','€/€1k ant.'].forEach(c => {
+      h += '<th style="padding:8px 9px;text-align:left;border-bottom:0.5px solid var(--border);white-space:nowrap">' + c + '</th>';
+    });
+    h += '</tr></thead><tbody>';
+
+    let tIntA = 0, tCdf = 0, tIntCC = 0, tCanoni = 0, tAltri = 0, tOp = 0, tVol = 0;
+    righe.forEach((r, i) => {
+      const p = r.x.periodo, s = r.s;
+      const vol = Number(p.volume_anticipi_lavorato || 0);
+      const per1k = vol > 0 ? ((s.intAnticip + s.cdf) / vol * 1000) : null;
+      tIntA += s.intAnticip; tCdf += s.cdf; tIntCC += s.intCC;
+      tCanoni += s.canoni; tAltri += (s.altri + s.irs); tOp += s.costoOp; tVol += vol;
+      const medal = medals[i] || ('  ' + (i + 1) + '°');
+      h += '<tr>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:600">' + medal + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:600">' + (r.x.banca.nome || '') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.intAnticip > 0 ? fmtE(s.intAnticip) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.cdf > 0 ? fmtE(s.cdf) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.intCC > 0 ? fmtE(s.intCC) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (s.canoni > 0 ? fmtE(s.canoni) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + ((s.altri + s.irs) !== 0 ? fmtE(s.altri + s.irs) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:700;color:#A32D2D">' + fmtE(s.costoOp) + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (vol > 0 ? fmtE(vol) : '—') + '</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-weight:600">' + (per1k !== null ? fmtE(per1k) : '—') + '</td>';
+      h += '</tr>';
+    });
+    senzaDati.forEach(x => {
+      h += '<tr style="opacity:0.55">';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">—</td>';
+      h += '<td style="padding:7px 9px;border-bottom:0.5px solid var(--border)">' + (x.banca.nome || '') + '</td>';
+      h += '<td colspan="8" style="padding:7px 9px;border-bottom:0.5px solid var(--border);font-style:italic;color:var(--text-muted)">in attesa di dati</td>';
+      h += '</tr>';
+    });
+    h += '<tr style="background:var(--bg)">';
+    h += '<td colspan="2" style="padding:10px;font-weight:700">TOTALE PHOENIX FUEL</td>';
+    h += '<td style="padding:10px;font-weight:700">' + fmtE(tIntA) + '</td>';
+    h += '<td style="padding:10px;font-weight:700">' + fmtE(tCdf) + '</td>';
+    h += '<td style="padding:10px;font-weight:700">' + fmtE(tIntCC) + '</td>';
+    h += '<td style="padding:10px;font-weight:700">' + fmtE(tCanoni) + '</td>';
+    h += '<td style="padding:10px;font-weight:700">' + fmtE(tAltri) + '</td>';
+    h += '<td style="padding:10px;font-weight:700;color:#A32D2D">' + fmtE(tOp) + '</td>';
+    h += '<td style="padding:10px;font-weight:700">' + (tVol > 0 ? fmtE(tVol) : '—') + '</td>';
+    h += '<td style="padding:10px;font-weight:700">' + (tVol > 0 ? fmtE((tIntA + tCdf) / tVol * 1000) : '—') + '</td>';
+    h += '</tr>';
+    h += '</tbody></table></div>';
+    h += '</div>';
+    return h;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // SUB-TAB MUTUI MLT — interessi mutui + nota su stock/residuo
+  // ════════════════════════════════════════════════════════════════════════
+  if (tabAttuale === 'mutui') {
+    const righe = conDati.map(x => ({ x, s: _bvScomponi(x.periodo) }))
+      .filter(r => r.s.intMutui > 0)
+      .sort((a, b) => b.s.intMutui - a.s.intMutui);
+
+    const senzaMutui = conDati.filter(x => Number(x.periodo.interessi_mutui || 0) === 0)
+      .map(x => x.banca.nome).filter(Boolean);
+
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+    h += '<thead><tr style="background:var(--bg);font-weight:600">';
+    ['#','Banca','Interessi mutui anno','% sul costo totale banca','Costo totale banca'].forEach(c => {
+      h += '<th style="padding:8px 10px;text-align:left;border-bottom:0.5px solid var(--border)">' + c + '</th>';
+    });
+    h += '</tr></thead><tbody>';
+
+    let tIntM = 0, tCostoTot = 0;
+    righe.forEach((r, i) => {
+      const s = r.s;
+      const pctCosto = s.costoTot > 0 ? (s.intMutui / s.costoTot * 100) : null;
+      tIntM += s.intMutui; tCostoTot += s.costoTot;
+      const medal = medals[i] || ('  ' + (i + 1) + '°');
+      h += '<tr>';
+      h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + medal + '</td>';
+      h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + (r.x.banca.nome || '') + '</td>';
+      h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:700;color:#26215C">' + fmtE(s.intMutui) + '</td>';
+      h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + (pctCosto !== null ? _bvFmtPct(pctCosto, 1) : '—') + '</td>';
+      h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + fmtE(s.costoTot) + '</td>';
+      h += '</tr>';
+    });
+    if (righe.length === 0) {
+      h += '<tr><td colspan="5" style="padding:14px;color:var(--text-muted);font-size:12px;font-style:italic;text-align:center">Nessuna banca con mutui MLT in ammortamento per ' + _bvSelectedAnno + '.</td></tr>';
+    } else {
+      h += '<tr style="background:var(--bg)">';
+      h += '<td colspan="2" style="padding:10px;font-weight:700">TOTALE INTERESSI MUTUI</td>';
+      h += '<td style="padding:10px;font-weight:700;color:#26215C">' + fmtE(tIntM) + '</td>';
+      h += '<td style="padding:10px;font-weight:700">' + (tCostoTot > 0 ? _bvFmtPct(tIntM / tCostoTot * 100, 1) : '—') + '</td>';
+      h += '<td style="padding:10px;font-weight:700">' + fmtE(tCostoTot) + '</td>';
+      h += '</tr>';
+    }
+    h += '</tbody></table></div>';
+    if (senzaMutui.length > 0) {
+      h += '<div style="margin-top:10px;font-size:10.5px;color:var(--text-muted);font-style:italic">Senza mutui MLT in ' + _bvSelectedAnno + ': ' + senzaMutui.join(', ') + '.</div>';
+    }
+    h += '<div style="margin-top:10px;font-size:10.5px;color:var(--text-muted)">📌 Per dettaglio capitale residuo, rate, scadenze e piano ammortamento → tab <b>📋 Finanziamenti</b>.</div>';
+    h += '</div>';
+    return h;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // SUB-TAB TOTALE (vista legacy) — costo bancario totale incluso int. mutui
+  // ════════════════════════════════════════════════════════════════════════
+  const righeTot = conDati.slice()
+    .sort((a, b) => Number(b.periodo.costo_bancario_totale) - Number(a.periodo.costo_bancario_totale));
+
   h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
   h += '<thead><tr style="background:var(--bg);font-weight:600">';
-  ['#','Banca','Costo anno','Esposizione','Volume anticipi','Costo/Esposiz.'].forEach(c => {
-    h += '<th style="padding:8px 10px;text-align:left;border-bottom:0.5px solid var(--border)">' + c + '</th>';
+  ['#','Banca','Costo TOTALE','di cui mutui MLT','di cui operativi','Esposizione','Costo/Esposiz.'].forEach(c => {
+    h += '<th style="padding:8px 10px;text-align:left;border-bottom:0.5px solid var(--border);white-space:nowrap">' + c + '</th>';
   });
   h += '</tr></thead><tbody>';
 
-  let totCosto = 0, totEsp = 0, totVol = 0;
-  const medals = ['🥇', '🥈', '🥉'];
-  conDati.forEach((x, i) => {
-    const p = x.periodo;
-    const costo = Number(p.costo_bancario_totale || 0);
-    const esp   = Number(p.esposizione_totale || 0);
-    const vol   = Number(p.volume_anticipi_lavorato || 0);
-    const pctCe = esp > 0 ? (costo / esp * 100) : null;
-    totCosto += costo; totEsp += esp; totVol += vol;
+  let tCosto = 0, tEsp = 0, tIntMutui = 0, tCostoOp = 0;
+  righeTot.forEach((x, i) => {
+    const s = _bvScomponi(x.periodo);
+    const esp = Number(x.periodo.esposizione_totale || 0);
+    const pctCe = esp > 0 ? (s.costoTot / esp * 100) : null;
+    tCosto += s.costoTot; tEsp += esp; tIntMutui += s.intMutui; tCostoOp += s.costoOp;
     const medal = medals[i] || ('  ' + (i + 1) + '°');
     h += '<tr>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + medal + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + (x.banca.nome || '') + '</td>';
-    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600;color:#A32D2D">' + fmtE(costo) + '</td>';
+    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:700;color:#A32D2D">' + fmtE(s.costoTot) + '</td>';
+    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);color:#26215C">' + (s.intMutui > 0 ? fmtE(s.intMutui) : '—') + '</td>';
+    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + fmtE(s.costoOp) + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + fmtE(esp) + '</td>';
-    h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + (vol > 0 ? fmtE(vol) : '—') + '</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-weight:600">' + (pctCe !== null ? _bvFmtPct(pctCe, 2) : '—') + '</td>';
     h += '</tr>';
   });
-
-  // Righe placeholder per banche senza dati
   senzaDati.forEach(x => {
     h += '<tr style="opacity:0.55">';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">—</td>';
     h += '<td style="padding:8px 10px;border-bottom:0.5px solid var(--border)">' + (x.banca.nome || '') + '</td>';
-    h += '<td colspan="4" style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-style:italic;color:var(--text-muted)">in attesa di dati</td>';
+    h += '<td colspan="5" style="padding:8px 10px;border-bottom:0.5px solid var(--border);font-style:italic;color:var(--text-muted)">in attesa di dati</td>';
     h += '</tr>';
   });
-
-  // Totale
-  const pctTotCe = totEsp > 0 ? (totCosto / totEsp * 100) : null;
+  const pctTotCe = tEsp > 0 ? (tCosto / tEsp * 100) : null;
   h += '<tr style="background:var(--bg)">';
   h += '<td colspan="2" style="padding:10px;font-weight:700">TOTALE PHOENIX FUEL</td>';
-  h += '<td style="padding:10px;font-weight:700;color:#A32D2D">' + fmtE(totCosto) + '</td>';
-  h += '<td style="padding:10px;font-weight:700">' + fmtE(totEsp) + '</td>';
-  h += '<td style="padding:10px;font-weight:700">' + (totVol > 0 ? fmtE(totVol) : '—') + '</td>';
+  h += '<td style="padding:10px;font-weight:700;color:#A32D2D">' + fmtE(tCosto) + '</td>';
+  h += '<td style="padding:10px;font-weight:700;color:#26215C">' + fmtE(tIntMutui) + '</td>';
+  h += '<td style="padding:10px;font-weight:700">' + fmtE(tCostoOp) + '</td>';
+  h += '<td style="padding:10px;font-weight:700">' + fmtE(tEsp) + '</td>';
   h += '<td style="padding:10px;font-weight:700">' + (pctTotCe !== null ? _bvFmtPct(pctTotCe, 2) : '—') + '</td>';
   h += '</tr>';
   h += '</tbody></table></div></div>';
