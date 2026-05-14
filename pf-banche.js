@@ -1311,6 +1311,14 @@ async function apriPianoFinanziamento(id) {
   html += '<div class="kpi" style="padding:10px"><div class="kpi-label">Tot. interessi</div><div style="font-size:14px;font-weight:600;color:#633806">' + fmtE(totInteressi) + '</div></div>';
   html += '</div>';
 
+  // Badge "Copertura IRS attiva" (popolato in async da pf-banche-strumenti.js se IRS collegato)
+  html += '<div id="irs-badge-' + id + '"></div>';
+  setTimeout(function() {
+    if (typeof window._strRenderIrsBadgeForMutuo === 'function') {
+      window._strRenderIrsBadgeForMutuo(id);
+    }
+  }, 50);
+
   // Tabella piano
   if (!rate.length) {
     html += '<div style="padding:30px;text-align:center;color:var(--text-muted);background:var(--bg);border-radius:8px">Piano di ammortamento non caricato per questo finanziamento</div>';

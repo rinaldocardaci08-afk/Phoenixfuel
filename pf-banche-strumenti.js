@@ -638,4 +638,153 @@ window._strToggleExpand = _strToggleExpand;
 // ── MOVE PANEL HANDLERS (delegano ai globali _movePanelUp / _movePanelDown se presenti) ──
 // Le frecce ▲▼ vengono renderizzate da _wrapPanel che è globale; nessun handler locale necessario.
 
+// ── INTEGRAZIONE PIANO AMMORTAMENTO MUTUO ──────────────────────────────────
+// Funzioni globali esposte per consumo da pf-banche.js (modale piano)
+// _strQueryIrsPerMutuo : query diretta DB (no cache) per IRS collegato al mutuo
+// _strRenderIrsBadgeForMutuo : popola un container con badge "Copertura IRS attiva"
+// strApriPopupIrsMutuo : popup modale con tabella anno → cedolari/IRS/costo netto
+
+async function _strQueryIrsPerMutuo(mutuoId) {
+  if (!mutuoId) return null;
+  try {
+    const rs = await sb.from('banche_strumenti_finanziari')
+      .select('*')
+      .eq('mutuo_collegato_id', mutuoId)
+      .eq('tipo', 'irs');
+    const strum = rs.data || [];
+    if (strum.length === 0) return { strumenti: [], movimenti: [] };
+    const ids = strum.map(s => s.id);
+    const rm = await sb.from('banche_strumenti_movimenti')
+      .select('*')
+      .in('strumento_id', ids)
+      .order('data', {ascending:true});
+    return { strumenti: strum, movimenti: rm.data || [] };
+  } catch(e) {
+    return null;
+  }
+}
+window._strQueryIrsPerMutuo = _strQueryIrsPerMutuo;
+
+async function _strRenderIrsBadgeForMutuo(mutuoId, containerId) {
+  const cont = document.getElementById(containerId || ('irs-badge-' + mutuoId));
+  if (!cont) return;
+  const data = await _strQueryIrsPerMutuo(mutuoId);
+  if (!data || !data.strumenti || data.strumenti.length === 0) return;
+  const cumul = data.movimenti.reduce((s, m) => s + Number(m.importo || 0), 0);
+  const s = data.strumenti[0];
+  const colore = cumul >= 0 ? {bg:'#dcfce7', bd:'#86efac', tit:'#166534', txt:'#14532d', btn:'#fff', bbd:'#86efac'} : {bg:'#fef2f2', bd:'#fecaca', tit:'#991b1b', txt:'#7f1d1d', btn:'#fff', bbd:'#fecaca'};
+  cont.innerHTML =
+    '<div style="background:' + colore.bg + ';border:1px solid ' + colore.bd + ';border-radius:6px;padding:11px 14px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:200px">' +
+        '<div style="font-size:10.5px;color:' + colore.tit + ';font-weight:700;letter-spacing:0.4px;text-transform:uppercase">🔁 Copertura IRS attiva</div>' +
+        '<div style="font-size:12px;color:' + colore.txt + ';margin-top:3px;line-height:1.5">' +
+          s.codice + ' · Beneficio cumulato dal ' + _strFmtData(s.data_inizio) + ': <strong>' + _strFmtESign(cumul) + '</strong> · Nozionale ' + (s.nozionale ? _strFmtE(s.nozionale, 0) : 'TBD') +
+        '</div>' +
+      '</div>' +
+      '<button onclick="strApriPopupIrsMutuo(\'' + mutuoId + '\')" style="background:' + colore.btn + ';color:' + colore.tit + ';border:1px solid ' + colore.bbd + ';border-radius:5px;padding:7px 13px;font-weight:600;cursor:pointer;font-size:11px;white-space:nowrap">ℹ️ Dettaglio costo netto</button>' +
+    '</div>';
+}
+window._strRenderIrsBadgeForMutuo = _strRenderIrsBadgeForMutuo;
+
+async function strApriPopupIrsMutuo(mutuoId) {
+  const data = await _strQueryIrsPerMutuo(mutuoId);
+  if (!data || !data.strumenti || data.strumenti.length === 0) {
+    alert('Nessun IRS collegato a questo mutuo.');
+    return;
+  }
+  // Carico rate mutuo per calcolare cedolari per anno
+  const rateRes = await sb.from('banche_finanziamenti_rate')
+    .select('*').eq('finanziamento_id', mutuoId).order('data_scadenza');
+  const rate = rateRes.data || [];
+
+  const cedolariPerAnno = {};
+  rate.forEach(r => {
+    if (!r.data_scadenza) return;
+    const anno = parseInt(String(r.data_scadenza).substring(0, 4));
+    cedolariPerAnno[anno] = (cedolariPerAnno[anno] || 0) + Number(r.quota_interessi || 0);
+  });
+  const irsPerAnno = {};
+  data.movimenti.forEach(m => {
+    if (!m.anno) return;
+    irsPerAnno[m.anno] = (irsPerAnno[m.anno] || 0) + Number(m.importo || 0);
+  });
+  const tuttiAnni = new Set();
+  Object.keys(cedolariPerAnno).forEach(a => tuttiAnni.add(parseInt(a)));
+  Object.keys(irsPerAnno).forEach(a => tuttiAnni.add(parseInt(a)));
+  const anni = Array.from(tuttiAnni).sort((a, b) => a - b);
+
+  const totIrs = Object.values(irsPerAnno).reduce((s, v) => s + v, 0);
+  const totCed = Object.values(cedolariPerAnno).reduce((s, v) => s + v, 0);
+  const rispTot = totCed > 0 ? (totIrs / totCed * 100) : 0;
+
+  // Overlay modale
+  const overlay = document.createElement('div');
+  overlay.id = '_str-popup-irs';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+  const s0 = data.strumenti[0];
+  let html = '<div style="background:#fff;max-width:820px;width:100%;max-height:90vh;overflow-y:auto;border-radius:10px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,0.35)">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;gap:14px">';
+  html += '<div>';
+  html += '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:3px">🔁 Copertura IRS — Costo netto del mutuo</div>';
+  html += '<div style="font-size:12px;color:#6b7280">' + s0.codice + ' · ' + (s0.descrizione || '') + '</div>';
+  html += '</div>';
+  html += '<button onclick="document.getElementById(\'_str-popup-irs\').remove()" style="background:none;border:none;font-size:26px;cursor:pointer;color:#9ca3af;line-height:1;padding:0;margin:-4px -4px 0 0">×</button>';
+  html += '</div>';
+
+  // KPI cumulati
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">';
+  html += '<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:11px"><div style="font-size:10px;color:#92400e;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">Int. cedolari totali</div><div style="font-size:17px;font-weight:700;color:#78350f;margin-top:3px">' + _strFmtE(totCed) + '</div></div>';
+  html += '<div style="background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:11px"><div style="font-size:10px;color:#166534;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">Beneficio IRS cumulato</div><div style="font-size:17px;font-weight:700;color:#14532d;margin-top:3px">' + _strFmtESign(totIrs) + '</div></div>';
+  html += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:11px"><div style="font-size:10px;color:#1e40af;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">Costo netto reale</div><div style="font-size:17px;font-weight:700;color:#1e3a8a;margin-top:3px">' + _strFmtE(totCed - totIrs) + '</div></div>';
+  html += '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:11px"><div style="font-size:10px;color:#166534;font-weight:700;letter-spacing:0.4px;text-transform:uppercase">% risparmio</div><div style="font-size:17px;font-weight:700;color:#14532d;margin-top:3px">' + (rispTot > 0 ? rispTot.toFixed(1) + ' %' : '—') + '</div></div>';
+  html += '</div>';
+
+  // Tabella anno per anno
+  html += '<div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:6px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+  html += '<thead><tr style="background:#f9fafb">';
+  ['Anno', 'Int. cedolari', 'Differenziale IRS', 'Costo netto', '% risparmio'].forEach(c => {
+    html += '<th style="text-align:right;padding:8px 10px;font-weight:600;border-bottom:1px solid #e5e7eb">' + c + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+  anni.forEach(anno => {
+    const ced = cedolariPerAnno[anno] || 0;
+    const irs = irsPerAnno[anno] || 0;
+    const netto = ced - irs;
+    const risp = ced > 0 ? (irs / ced * 100) : 0;
+    html += '<tr style="border-bottom:1px solid #f3f4f6">';
+    html += '<td style="padding:7px 10px;text-align:right;font-weight:600">' + anno + '</td>';
+    html += '<td style="padding:7px 10px;text-align:right;color:#78350f">' + (ced > 0 ? _strFmtE(ced) : '—') + '</td>';
+    html += '<td style="padding:7px 10px;text-align:right">' + (irs !== 0 ? _strFmtESign(irs) : '—') + '</td>';
+    html += '<td style="padding:7px 10px;text-align:right;font-weight:600;color:#1e3a8a">' + (ced > 0 ? _strFmtE(netto) : '—') + '</td>';
+    html += '<td style="padding:7px 10px;text-align:right">' + (risp > 0 ? '<span style="color:#166534;font-weight:600">' + risp.toFixed(1) + '%</span>' : '—') + '</td>';
+    html += '</tr>';
+  });
+  html += '<tr style="background:#f9fafb;border-top:2px solid #e5e7eb">';
+  html += '<td style="padding:11px;font-weight:700">TOTALE</td>';
+  html += '<td style="padding:11px;text-align:right;font-weight:700;color:#78350f">' + _strFmtE(totCed) + '</td>';
+  html += '<td style="padding:11px;text-align:right;font-weight:700">' + _strFmtESign(totIrs) + '</td>';
+  html += '<td style="padding:11px;text-align:right;font-weight:700;color:#1e3a8a">' + _strFmtE(totCed - totIrs) + '</td>';
+  html += '<td style="padding:11px;text-align:right;font-weight:700;color:#166534">' + (rispTot > 0 ? rispTot.toFixed(1) + '%' : '—') + '</td>';
+  html += '</tr>';
+  html += '</tbody></table></div>';
+
+  // Nota esplicativa
+  html += '<div style="margin-top:16px;padding:13px 14px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:11px;color:#78350f;line-height:1.6">';
+  html += '<strong>📝 Come leggere questi numeri.</strong> ';
+  html += 'Gli <em>interessi cedolari</em> sono quelli pagati formalmente alla banca in base al piano di ammortamento. ';
+  html += 'Il <em>differenziale IRS</em> è quello che la banca paga (o riceve da) Phoenix Fuel in base al contratto di swap di copertura: ';
+  html += 'quando l\'Euribor è sopra lo strike, la banca paga il differenziale a Phoenix (segno positivo). ';
+  html += 'Il <em>costo netto reale</em> è il costo finanziario effettivo del mutuo dopo aver considerato la copertura. ';
+  html += 'La <em>% risparmio</em> indica quanto il beneficio IRS ha abbattuto il costo cedolare nell\'anno.';
+  html += '</div>';
+
+  html += '</div>';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+}
+window.strApriPopupIrsMutuo = strApriPopupIrsMutuo;
+
 // ── FINE MODULO ────────────────────────────────────────────────────────────
