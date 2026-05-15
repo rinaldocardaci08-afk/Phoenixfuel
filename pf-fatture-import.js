@@ -515,7 +515,7 @@ async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
 
   // Ordini tipo_ordine='cliente' (autoconsumo escluso: autofatture non entrano nel matching Danea clienti)
   const { data: ordini, error: errOrd } = await sb.from('ordini')
-    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore,destinazione,sede_scarico_id,sede_scarico_nome,fattura_id,fattura_riga_id')
+    .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,tipo_ordine,stato,fornitore,destinazione,sede_scarico_id,sede_scarico_nome,fattura_id,fattura_riga_id,aggancio_manuale')
     .eq('tipo_ordine', 'cliente')
     .neq('stato', 'annullato')
     .gte('data', rangeMin)
@@ -1778,13 +1778,13 @@ async function _apriCreaOrdineDaOrphan(payload64) {
         </div>
         <div class="form-group">
           <label>Costo €/L <span style="color:#A32D2D">*</span> <span style="color:#666;font-size:10px">(costo di acquisto tuo)</span></label>
-          <input type="number" id="fi-orphan-costo" step="0.000001" placeholder="es. 0.450000" autofocus
+          <input type="number" id="fi-orphan-costo" step="0.0001" placeholder="es. 0.4500" autofocus
                  oninput="window.pfFattureImport._aggiornaPreviewOrphan()"
                  style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace" />
         </div>
         <div class="form-group">
           <label>Trasporto €/L <span style="color:#666;font-size:10px">(opzionale)</span></label>
-          <input type="number" id="fi-orphan-trasporto" step="0.000001" value="0"
+          <input type="number" id="fi-orphan-trasporto" step="0.0001" value="0"
                  oninput="window.pfFattureImport._aggiornaPreviewOrphan()"
                  style="width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace" />
         </div>
@@ -2278,10 +2278,13 @@ async function _importFatturaSingola(f, batchId) {
   await sb.from('fatture_righe').delete().eq('fattura_id', fattId);
 
   // Memo per riagganciare numero_linea → ordini_ids dopo INSERT (la DB restituisce id)
+  // v20260515f: include flag _forzato per popolare aggancio_manuale in DB
   const numLineaToOrdiniIds = new Map();
   f.righe.forEach(r => {
     const ids = r._match?.ordini_ids;
-    if (ids && ids.length > 0) numLineaToOrdiniIds.set(r.numero_linea, ids);
+    if (ids && ids.length > 0) {
+      numLineaToOrdiniIds.set(r.numero_linea, { ids: ids, forzato: !!r._forzato });
+    }
   });
 
   const righePayload = f.righe.map(r => ({
@@ -2326,16 +2329,20 @@ async function _importFatturaSingola(f, batchId) {
   // Regola costituzionale: ordine fatturato → stato = consegnato.
   // Un UPDATE batch per ogni riga con match (1:1 o N:1).
   for (const rigaIns of righeInsertite) {
-    const ordiniIds = numLineaToOrdiniIds.get(rigaIns.numero_linea);
-    if (!ordiniIds || ordiniIds.length === 0) continue;
+    const entry = numLineaToOrdiniIds.get(rigaIns.numero_linea);
+    if (!entry || !entry.ids || entry.ids.length === 0) continue;
+
+    const updatePayload = {
+      fattura_id: fattId,
+      fattura_riga_id: rigaIns.id,
+      stato: 'consegnato',
+    };
+    // v20260515f: marca come manuale se la riga era forzata via _apriForzaMatch
+    if (entry.forzato) updatePayload.aggancio_manuale = true;
 
     const { error: errU } = await sb.from('ordini')
-      .update({
-        fattura_id: fattId,
-        fattura_riga_id: rigaIns.id,
-        stato: 'consegnato',
-      })
-      .in('id', ordiniIds);
+      .update(updatePayload)
+      .in('id', entry.ids);
     if (errU) console.warn(`[import] update ordini riga ${rigaIns.numero_linea}:`, errU.message);
     // Non throw: l'import prosegue, c'è sempre il ricalcolo batch come sanatoria.
   }
@@ -2408,7 +2415,7 @@ async function _avviaRicalcoloNa1(opts) {
   const out = document.getElementById(targetElId);
   if (!out) { alert('Contenitore log non trovato: ' + targetElId); return; }
 
-  if (!skipConfirm && !confirm(`Ricalcolo bijettivo sulle fatture del periodo ${labelPeriodo}.\n\n• Invariante: un ordine = una fattura\n• Accoppia ordini e righe fattura dello stesso bucket (cliente/giorno/prodotto)\n• Risolve il bug "stesso ordine linkato a 2 fatture"\n• Riconosce anche match N:1 (1 riga fattura = somma di N ordini)\n\nProcedere?`)) return;
+  if (!skipConfirm && !confirm(`Ricalcolo bijettivo sulle fatture del periodo ${labelPeriodo}.\n\n• Invariante: un ordine = una fattura\n• Accoppia ordini e righe fattura dello stesso bucket (cliente/giorno/prodotto)\n• Risolve il bug "stesso ordine linkato a 2 fatture"\n• Riconosce anche match N:1 (1 riga fattura = somma di N ordini)\n• 🔒 Gli ordini agganciati manualmente sono PROTETTI: non vengono toccati\n\nProcedere?`)) return;
 
   const logId = `fi-rim-log-${Date.now()}`;
   out.innerHTML = `<div class="fi-log" id="${logId}" style="max-height:320px;overflow-y:auto;background:#f6f6f6;border:0.5px solid #ddd;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;line-height:1.5"><div class="info">[${_now()}] 🔁 Avvio ricalcolo bijettivo (${labelPeriodo})...</div></div>`;
@@ -2458,18 +2465,21 @@ async function _avviaRicalcoloNa1(opts) {
     const fattById = new Map();
     fattEmesse.forEach(f => fattById.set(f.id, f));
 
-    // ── 4. RESET: per poter ricalcolare pulito, sgancio TUTTI gli ordini
-    //     del periodo (fattura_id=NULL) e successivamente li riassegno.
+    // ── 4. RESET: per poter ricalcolare pulito, sgancio gli ordini
+    //     del periodo NON protetti (aggancio_manuale=false) e successivamente
+    //     li riassegno. Gli ordini con aggancio_manuale=true sono blindati:
+    //     restano collegati alla fattura corrente, esclusi dal pool del matcher.
     //     Lo stato 'consegnato' NON viene toccato (è coerente con la storia).
-    _logAppend(log, 'info', 'Reset link ordini → fattura nel periodo...');
+    _logAppend(log, 'info', 'Reset link ordini → fattura nel periodo (esclusi aggancio manuale)...');
     const { error: errReset } = await sb.from('ordini')
       .update({ fattura_id: null, fattura_riga_id: null })
       .eq('tipo_ordine', 'cliente')
       .neq('stato', 'annullato')
       .gte('data', dataMin)
-      .lte('data', dataMax);
+      .lte('data', dataMax)
+      .or('aggancio_manuale.is.null,aggancio_manuale.eq.false');
     if (errReset) throw new Error('reset ordini: ' + errReset.message);
-    _logAppend(log, 'ok', '✓ Reset completato');
+    _logAppend(log, 'ok', '✓ Reset completato (manuali protetti)');
 
     // ── 5. Costruisco i bucket = (cliente_norm, data±2gg, prodotto_norm) ──
     //     Per ogni ordine determino la "cliente_key" usando PIVA se disponibile,
@@ -2515,8 +2525,11 @@ async function _avviaRicalcoloNa1(opts) {
     // Bucketizzo ordini con tolleranza ±2gg sulla data → genero più chiavi
     // per lo stesso ordine se cadono in più "giorni-pivot" di fatture.
     // Per efficienza indicizzo gli ordini per (cliKey, prodotto_norm) → lista
+    // v20260515f: SKIP ordini con aggancio_manuale=true (protetti permanentemente)
     const ordIdx = new Map();  // (cliKey|prodotto_norm) → [ordini]
+    let nOrdProtetti = 0;
     for (const o of _ordiniPeriodo) {
+      if (o.aggancio_manuale === true) { nOrdProtetti++; continue; }
       const prodNorm = normalizzaProdotto(o.prodotto);
       if (!prodNorm) continue;
       const litri = Number(o.litri || 0);
@@ -2543,7 +2556,7 @@ async function _avviaRicalcoloNa1(opts) {
       });
     }
 
-    _logAppend(log, 'info', `Bucket fatture: ${bucketsFatt.size}, indice ordini: ${ordIdx.size}`);
+    _logAppend(log, 'info', `Bucket fatture: ${bucketsFatt.size}, indice ordini: ${ordIdx.size}` + (nOrdProtetti > 0 ? ` · 🔒 ${nOrdProtetti} ordini manuali protetti (esclusi)` : ''));
 
     // ── 6. Per ogni bucket fatture, trovo i candidati ordini e applico
     //       assignment bijettivo (greedy con priorità ai match più "larghi").
@@ -2954,15 +2967,15 @@ async function _apriEditOrdine(ordineId, idx, numeroLinea) {
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Costo / L (€)</label>
-          <input type="number" id="fi-edt-costo" value="${o.costo_litro||0}" step="0.000001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="number" id="fi-edt-costo" value="${o.costo_litro||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Trasporto / L (€)</label>
-          <input type="number" id="fi-edt-trasp" value="${o.trasporto_litro||0}" step="0.000001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="number" id="fi-edt-trasp" value="${o.trasporto_litro||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Margine / L (€)</label>
-          <input type="number" id="fi-edt-marg" value="${o.margine||0}" step="0.000001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="number" id="fi-edt-marg" value="${o.margine||0}" step="0.0001" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;font-family:monospace">
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Imponibile (auto)</label>
