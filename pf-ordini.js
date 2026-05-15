@@ -1977,8 +1977,17 @@ let _ordiniCache = [];
 var _modOrigCosto = null, _modOrigTrasporto = null, _modOrigMargine = null, _modOrigPrezzoNetto = null;
 
 async function apriModaleOrdine(id) {
-  const { data: r } = await sb.from('ordini').select('*').eq('id', id).single();
+  // ═══ v20260515c: carico ordine + clienti in parallelo (Promise.all) ═══
+  const [ordRes, cliRes] = await Promise.all([
+    sb.from('ordini').select('*').eq('id', id).single(),
+    sb.from('clienti').select('id,nome,piva').eq('attivo', true).order('nome')
+  ]);
+  const r = ordRes.data;
   if (!r) return;
+  const clienti = cliRes.data || [];
+  // Salva originali per audit log e check coerenza
+  window._modOrigCliente = r.cliente;
+  window._modOrigClienteId = r.cliente_id;
 
   // Memorizza valori originali per il check di coerenza in salvataggio
   _modOrigCosto = Number(r.costo_litro);
@@ -1998,6 +2007,22 @@ async function apriModaleOrdine(id) {
   var statiVisibili = hasDas ? ['consegnato'] : ['in attesa','confermato','programmato','consegnato','annullato'];
   var statoSel = hasDas ? 'consegnato' : r.stato;
   statiVisibili.forEach(s => { html += '<option value="' + s + '"' + (statoSel===s?' selected':'') + '>' + s + '</option>'; });
+  html += '</select></div>';
+
+  // ═══ v20260515c: Cliente modificabile (bloccato se fattura collegata) ═══
+  var hasFattura = !!(r.fattura_id);
+  var clienteLockReason = hasFattura ? '🔒 Fattura emessa' : '';
+  html += '<div class="form-group"><label>Cliente' + (clienteLockReason ? ' <span style="font-size:10px;color:#8B6A00;font-weight:500">' + clienteLockReason + '</span>' : '') + '</label>';
+  html += '<select id="mod-cliente"' + (hasFattura ? ' disabled title="Cliente bloccato: fattura Danea già emessa. Per cambiare cliente, scollega prima la fattura."' : ' onchange="_modSulCambioCliente()"') + ' style="font-size:13px;padding:7px 10px">';
+  // Opzione corrente (potrebbe non essere in lista se cliente disattivato): la metto in cima
+  var clientePresenteInLista = clienti.some(c => c.id === r.cliente_id);
+  if (!clientePresenteInLista && r.cliente_id) {
+    html += '<option value="' + r.cliente_id + '" data-nome="' + esc(r.cliente||'') + '" selected>' + esc(r.cliente||'(disattivato)') + '</option>';
+  }
+  clienti.forEach(c => {
+    var sel = (c.id === r.cliente_id) ? ' selected' : '';
+    html += '<option value="' + c.id + '" data-nome="' + esc(c.nome) + '"' + sel + '>' + esc(c.nome) + (c.piva ? ' · ' + c.piva : '') + '</option>';
+  });
   html += '</select></div>';
   // Data consegna: editabile per ordini in attesa/confermato/programmato. Bloccata se consegnato (dato storico fissato).
   var dataLocked = (r.stato === 'consegnato');
@@ -2097,6 +2122,29 @@ async function apriModaleOrdine(id) {
   }
 }
 
+// ═══ v20260515c: handler cambio cliente in modale modifica ═══
+// Quando l'utente cambia cliente: ricarica le sedi del nuovo cliente nel
+// select destinazione (le sedi del vecchio cliente non sono più valide).
+async function _modSulCambioCliente() {
+  var sel = document.getElementById('mod-cliente');
+  if (!sel) return;
+  var clienteId = sel.value;
+  var modDestSel = document.getElementById('mod-destinazione');
+  var modDestManGrp = document.getElementById('mod-grp-dest-manuale');
+  if (!modDestSel) return;
+  modDestSel.innerHTML = '<option value="">— Nessuna —</option>';
+  if (modDestManGrp) modDestManGrp.style.display = 'none';
+  if (!clienteId) return;
+  var { data: sediNew } = await sb.from('sedi_scarico').select('*').eq('cliente_id', clienteId).eq('attivo', true).order('is_default',{ascending:false}).order('nome');
+  if (sediNew && sediNew.length) {
+    sediNew.forEach(function(s) {
+      var label = s.nome + (s.indirizzo ? ' — ' + s.indirizzo : '') + (s.citta ? ', ' + s.citta : '');
+      modDestSel.innerHTML += '<option value="' + esc(label) + '" data-sede-id="' + s.id + '">' + esc(label) + '</option>';
+    });
+  }
+  modDestSel.innerHTML += '<option value="__manuale__">✏️ Altro (manuale)</option>';
+}
+
 async function salvaModificaOrdine(id, bypassCheck) {
   const litri = parseFloat(document.getElementById('mod-litri').value);
   const costo = parseFloat(document.getElementById('mod-costo').value);
@@ -2119,10 +2167,49 @@ async function salvaModificaOrdine(id, bypassCheck) {
     }
   }
 
-  const { data: ordine } = await sb.from('ordini').select('data,cliente,das_firmato_url,caricato_deposito,stato').eq('id', id).single();
+  const { data: ordine } = await sb.from('ordini').select('data,cliente,cliente_id,fattura_id,das_firmato_url,caricato_deposito,stato').eq('id', id).single();
+
+  // ═══ v20260515c: cliente modificabile con check sicurezza ═══
+  var modCliSel = document.getElementById('mod-cliente');
+  var clienteIdNew = ordine.cliente_id;  // default: non cambia
+  var clienteNomeNew = ordine.cliente;
+  var clienteCambiato = false;
+  if (modCliSel && !modCliSel.disabled) {
+    var newCliId = modCliSel.value;
+    if (newCliId && newCliId !== ordine.cliente_id) {
+      // Check anti-race: rileggo fattura_id (potrebbe essere stata collegata nel frattempo)
+      if (ordine.fattura_id) {
+        toast('Impossibile cambiare cliente: fattura Danea già emessa.');
+        return;
+      }
+      clienteIdNew = newCliId;
+      var optSel = modCliSel.options[modCliSel.selectedIndex];
+      clienteNomeNew = optSel && optSel.dataset.nome ? optSel.dataset.nome : optSel.text.split(' · ')[0];
+      clienteCambiato = true;
+
+      // ═══ v20260515d: conferma esplicita per ordini consegnati ═══
+      // Lo stato 'consegnato' è un dato storico avvenuto fisicamente.
+      // Cambiare il cliente è eccezionale e va confermato.
+      if (ordine.stato === 'consegnato') {
+        var msgConf = '⚠️ ATTENZIONE: stai cambiando il cliente di un ordine CONSEGNATO.\n\n' +
+          '• Vecchio cliente: ' + (ordine.cliente || '?') + '\n' +
+          '• Nuovo cliente:  ' + clienteNomeNew + '\n' +
+          '• Data consegna:  ' + ordine.data + '\n\n' +
+          'Questa è un\'operazione storica importante. Conferma solo se sei sicuro che la consegna era destinata al nuovo cliente.\n\n' +
+          'OK = procedi col cambio cliente\n' +
+          'Annulla = mantieni cliente vecchio';
+        if (!confirm(msgConf)) {
+          toast('Cambio cliente annullato');
+          return;
+        }
+      }
+    }
+  }
+
   // Guardia Phoenix Fuel: rifornimento interno → margine sempre 0
+  // Guardia Phoenix Fuel: usa il nome cliente NUOVO (potrebbe essere cambiato)
   let margineFinale = margine;
-  if (ordine && _isClientePhoenix(ordine.cliente)) {
+  if (_isClientePhoenix(clienteNomeNew)) {
     margineFinale = 0;
   }
   // Guardia DAS firmato: se allegato, stato resta 'consegnato' e caricato_deposito resta true.
@@ -2155,12 +2242,30 @@ async function salvaModificaOrdine(id, bypassCheck) {
     }
   }
   var updatePayload = { stato: statoDaSalvare, data: dataValida, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome };
+  // ═══ v20260515c: includi cliente nel payload se cambiato ═══
+  if (clienteCambiato) {
+    updatePayload.cliente = clienteNomeNew;
+    updatePayload.cliente_id = clienteIdNew;
+    // Reset destinazione: le sedi del vecchio cliente non sono valide per il nuovo
+    // (se l'utente non ha già selezionato una sede del nuovo cliente nel select aggiornato)
+    if (!modSedeId && !modDest) {
+      updatePayload.destinazione = null;
+      updatePayload.sede_scarico_id = null;
+      updatePayload.sede_scarico_nome = null;
+    }
+  }
   // Se DAS firmato, blocca anche caricato_deposito a true (l'uscita deposito è stata fatta)
   if (hasDasOrd) {
     updatePayload.caricato_deposito = true;
   }
   const { error } = await sb.from('ordini').update(updatePayload).eq('id', id);
   if (error) { toast('Errore: '+error.message); return; }
+  // Audit log se cliente cambiato (operazione sensibile)
+  if (clienteCambiato && typeof _auditLog === 'function') {
+    _auditLog('modifica_cliente_ordine', 'ordini',
+      'Ordine ' + id + ' | ' + (ordine.cliente || '?') + ' → ' + clienteNomeNew +
+      ' | data ' + dataValida + ' | litri ' + litri);
+  }
   // Reset valori originali
   _modOrigCosto = _modOrigTrasporto = _modOrigMargine = _modOrigPrezzoNetto = null;
   toast('Ordine aggiornato!');
