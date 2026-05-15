@@ -20,10 +20,13 @@ async function caricaBenchmark() {
   if (dataInput && !dataInput.value) dataInput.value = oggiISO;
 
   // Carica dati in parallelo: benchmark + CMP deposito + prezzi vendita ingrosso
-  var [benchRes, cisRes, ordRes] = await Promise.all([
+  //                          + storico CMP deposito (per CMP giornaliero canonico)
+  var [benchRes, cisRes, ordRes, cmpStorRes] = await Promise.all([
     sb.from('benchmark_prezzi').select('*').eq('prodotto', prodotto).order('data', { ascending: false }).limit(90),
     sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede', 'deposito_vibo'),
-    sb.from('ordini').select('data,prodotto,costo_litro,trasporto_litro,margine,iva,litri').eq('tipo_ordine', 'cliente').eq('prodotto', prodotto).neq('stato', 'annullato').order('data', { ascending: false }).limit(500)
+    sb.from('ordini').select('data,prodotto,costo_litro,trasporto_litro,margine,iva,litri').eq('tipo_ordine', 'cliente').eq('prodotto', prodotto).neq('stato', 'annullato').order('data', { ascending: false }).limit(500),
+    // Storico CMP canonico (popolato da carichi, rettifiche, modifiche manuali in pf-deposito)
+    sb.from('stazione_cmp_storico').select('cmp_nuovo,data').eq('prodotto', prodotto).eq('sede', 'deposito_vibo').order('data', { ascending: true })
   ]);
 
   var benchDati = (benchRes.data || []).reverse(); // cronologico
@@ -39,6 +42,28 @@ async function caricaBenchmark() {
   var cisProd = (cisRes.data || []).filter(function(c) { return c.prodotto === prodotto && Number(c.livello_attuale) > 0; });
   var totLitri = cisProd.reduce(function(s, c) { return s + Number(c.livello_attuale); }, 0);
   var cmpCorrente = totLitri > 0 ? cisProd.reduce(function(s, c) { return s + Number(c.costo_medio || 0) * Number(c.livello_attuale); }, 0) / totLitri : 0;
+
+  // ═══ CMP GIORNALIERO da tabella canonica (v20260514b) ═══
+  // Legge da stazione_cmp_storico (popolata automaticamente da carichi,
+  // rettifiche e modifiche manuali CMP in pf-deposito.js). UNICA FONTE
+  // DI VERITÀ: se Rinaldo modifica un CMP da Deposito → Analisi, qui
+  // si riflette immediatamente al prossimo render del benchmark.
+  // Fallback: se nessuno storico esiste, usa cmpCorrente (comportamento
+  // legacy, nessun peggioramento).
+  var cmpStorico = cmpStorRes.data || [];
+
+  function _cmpAlGiorno(dataISO) {
+    if (!cmpStorico.length) return cmpCorrente > 0 ? cmpCorrente : null;
+    // Trova ultimo record storico con data <= dataISO (storico è ASC)
+    var ultimo = null;
+    for (var i = 0; i < cmpStorico.length; i++) {
+      if (cmpStorico[i].data <= dataISO) ultimo = Number(cmpStorico[i].cmp_nuovo);
+      else break;
+    }
+    // Per date PRIMA del primo record storico, fallback a cmpCorrente
+    // (assumiamo che il CMP corrente sia rappresentativo del passato)
+    return ultimo !== null ? ultimo : (cmpCorrente > 0 ? cmpCorrente : null);
+  }
 
   // Prezzo vendita medio ultimi 30 giorni
   var trentaGgFa = new Date(); trentaGgFa.setDate(trentaGgFa.getDate() - 30);
@@ -181,7 +206,8 @@ async function caricaBenchmark() {
         datasets: [
           { label: 'Benchmark', data: dataBench, borderColor: '#BA7517', backgroundColor: 'rgba(186,117,23,0.1)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2 },
           { label: 'MA7', data: dataMa7, borderColor: '#6B5FCC', borderWidth: 1.5, borderDash: [5, 3], fill: false, tension: 0.3, pointRadius: 0 },
-          { label: 'CMP', data: Array(labels.length).fill(cmpCorrente > 0 ? cmpCorrente : null), borderColor: '#639922', borderWidth: 1.5, borderDash: [3, 3], fill: false, pointRadius: 0 }
+          // CMP giornaliero ricostruito (non più costante)
+          { label: 'CMP', data: benchDati.map(function(b) { return _cmpAlGiorno(b.data); }), borderColor: '#639922', borderWidth: 1.5, borderDash: [3, 3], fill: false, pointRadius: 0, spanGaps: true }
         ]
       },
       options: { responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } }, scales: { y: { beginAtZero: false } } }
@@ -199,12 +225,13 @@ async function caricaBenchmark() {
     var varGg = prev !== null ? prezzo - prev : 0;
     var vGiorno = venditePerGiorno[b.data];
     var prezzoVendGiorno = vGiorno && vGiorno.litri > 0 ? vGiorno.fatt / vGiorno.litri : 0;
-    var spreadGiorno = prezzoVendGiorno > 0 && cmpCorrente > 0 ? prezzoVendGiorno - cmpCorrente : 0;
+    var cmpGiorno = _cmpAlGiorno(b.data);
+    var spreadGiorno = prezzoVendGiorno > 0 && cmpGiorno > 0 ? prezzoVendGiorno - cmpGiorno : 0;
 
     return '<tr' + (idx % 2 ? ' style="background:var(--bg)"' : '') + '>' +
       '<td style="font-weight:500">' + b.data.substring(5) + '</td>' +
       '<td style="text-align:right;font-family:var(--font-mono);color:#BA7517">' + prezzo.toFixed(6) + '</td>' +
-      '<td style="text-align:right;font-family:var(--font-mono);color:#639922">' + (cmpCorrente > 0 ? cmpCorrente.toFixed(6) : '—') + '</td>' +
+      '<td style="text-align:right;font-family:var(--font-mono);color:#639922">' + (cmpGiorno && cmpGiorno > 0 ? cmpGiorno.toFixed(6) : '—') + '</td>' +
       '<td style="text-align:right;font-family:var(--font-mono);color:#378ADD">' + (prezzoVendGiorno > 0 ? prezzoVendGiorno.toFixed(6) : '—') + '</td>' +
       '<td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:#6B5FCC">' + (spreadGiorno > 0 ? spreadGiorno.toFixed(6) : '—') + '</td>' +
       '<td style="text-align:right;font-family:var(--font-mono);font-size:10px">' + (ma7Val ? ma7Val.toFixed(6) : '—') + '</td>' +
