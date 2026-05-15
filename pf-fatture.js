@@ -607,22 +607,29 @@ async function caricaAllineamento() {
   }
 
   try {
-    // 1. Ordini senza fattura nel periodo
-    const { data: ord, error: errO } = await sb.from('ordini')
-      .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,destinazione,sede_scarico_id,sede_scarico_nome,stato,tipo_ordine,fattura_id,fattura_riga_id')
-      .eq('tipo_ordine','cliente')
-      .neq('stato','annullato')
-      .is('fattura_id', null)
-      .gte('data', dataMin).lte('data', dataMax)
-      .order('data');
-    if (errO) throw errO;
+    // ═══ v20260515g: Promise.all su tutte le query indipendenti ═══
+    // Prima: ordini → fatture → righe-chunk → ordini-link-chunk (tutto seriale).
+    // Ora: ordini + fatture in parallelo, poi righe-chunk in parallelo,
+    //      poi ordini-link-chunk in parallelo. ~4× più veloce su anno intero.
 
-    // 2. Fatture del periodo
-    const { data: fatt, error: errF } = await sb.from('fatture_emesse')
-      .select('id,numero,data,cessionario_piva,cessionario_denominazione')
-      .gte('data', dataMin).lte('data', dataMax)
-      .order('data');
-    if (errF) throw errF;
+    // 1+2. Ordini senza fattura + Fatture del periodo (parallelo)
+    const [ordRes, fattRes] = await Promise.all([
+      sb.from('ordini')
+        .select('id,data,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva,destinazione,sede_scarico_id,sede_scarico_nome,stato,tipo_ordine,fattura_id,fattura_riga_id')
+        .eq('tipo_ordine','cliente')
+        .neq('stato','annullato')
+        .is('fattura_id', null)
+        .gte('data', dataMin).lte('data', dataMax)
+        .order('data'),
+      sb.from('fatture_emesse')
+        .select('id,numero,data,cessionario_piva,cessionario_denominazione')
+        .gte('data', dataMin).lte('data', dataMax)
+        .order('data')
+    ]);
+    if (ordRes.error) throw ordRes.error;
+    if (fattRes.error) throw fattRes.error;
+    const ord = ordRes.data;
+    const fatt = fattRes.data;
 
     if (!fatt || fatt.length === 0) {
       window._allineamento.ordini = ord || [];
@@ -634,45 +641,58 @@ async function caricaAllineamento() {
     fatt.forEach(f => fattById.set(f.id, f));
     const fattIds = fatt.map(f => f.id);
 
-    // 3. Righe (paginate, oltre 1000)
-    let righe = [];
+    // 3. Righe fatture: chunk in PARALLELO (paginazione interna range seriale)
+    const chunkPromisesRighe = [];
     for (let i = 0; i < fattIds.length; i += 500) {
       const chunk = fattIds.slice(i, i + 500);
-      let from = 0, batch = 1000;
-      while (true) {
-        const { data: r, error: errR } = await sb.from('fatture_righe')
-          .select('id,fattura_id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
-          .in('fattura_id', chunk)
-          .range(from, from + batch - 1);
-        if (errR) throw errR;
-        if (!r || r.length === 0) break;
-        righe = righe.concat(r);
-        if (r.length < batch) break;
-        from += batch;
-      }
+      chunkPromisesRighe.push((async () => {
+        const acc = [];
+        let from = 0, batch = 1000;
+        while (true) {
+          const { data: r, error: errR } = await sb.from('fatture_righe')
+            .select('id,fattura_id,numero_linea,prodotto_normalizzato,quantita,prezzo_totale,ignora_match')
+            .in('fattura_id', chunk)
+            .range(from, from + batch - 1);
+          if (errR) throw errR;
+          if (!r || r.length === 0) break;
+          acc.push(...r);
+          if (r.length < batch) break;
+          from += batch;
+        }
+        return acc;
+      })());
     }
+    const righeArrays = await Promise.all(chunkPromisesRighe);
+    const righe = righeArrays.flat();
 
-    // 4. Identifico righe puntate da ordini in DB (e righe DOPPIE = >1 ordine sulla stessa riga)
+    // 4. Identifico righe puntate da ordini in DB — chunk in PARALLELO
     const righeIds = righe.map(r => r.id);
     const righeConOrdine = new Set();
     const conteggioPerRiga = {}; // rigaId → numero ordini collegati
+    const chunkPromisesLink = [];
     for (let i = 0; i < righeIds.length; i += 500) {
       const chunk = righeIds.slice(i, i + 500);
-      const { data: oLink } = await sb.from('ordini')
-        .select('fattura_riga_id')
-        .in('fattura_riga_id', chunk);
+      chunkPromisesLink.push(
+        sb.from('ordini').select('fattura_riga_id').in('fattura_riga_id', chunk)
+      );
+    }
+    const linkResults = await Promise.all(chunkPromisesLink);
+    linkResults.forEach(({ data: oLink }) => {
       (oLink || []).forEach(o => {
         if (o.fattura_riga_id) {
           righeConOrdine.add(o.fattura_riga_id);
           conteggioPerRiga[o.fattura_riga_id] = (conteggioPerRiga[o.fattura_riga_id] || 0) + 1;
         }
       });
-    }
+    });
+
     // Patch v20260503q: anomalie "doppia" = riga con 2+ ordini
+    // v20260515g: Map per lookup O(1) invece di find() O(n)
+    const righeById = new Map(righe.map(r => [r.id, r]));
     const fattureAnomale = new Set();
     Object.keys(conteggioPerRiga).forEach(rId => {
       if (conteggioPerRiga[rId] > 1) {
-        const r = righe.find(rr => rr.id === rId);
+        const r = righeById.get(rId);
         if (r) fattureAnomale.add(r.fattura_id);
       }
     });
