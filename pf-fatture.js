@@ -131,7 +131,8 @@ async function caricaFatture(){
         <td style="text-align:right;font-family:var(--font-mono);font-weight:600">${_fmtE(f.importo_totale)}</td>
         <td>${badgeMatch(f.match_status)}</td>
         <td>
-          <button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="apriDettaglioFattura('${f.id}')" title="Dettaglio">📄</button>
+          <button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="apriDettaglioFattura('${f.id}')" title="Dettaglio fattura">📄</button>
+          <button onclick="allDiagnosticaFattura('${f.id}')" title="Diagnostica: vedi ordini collegati e sganciali se sbagliati" style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:3px 6px;font-size:10px;cursor:pointer;margin-left:2px">🔍</button>
         </td>
       </tr>
     `;
@@ -863,11 +864,11 @@ async function allEditOrdine(ordineId) {
         <div><label style="font-size:10px;font-weight:600;color:#555">IVA %</label>
           <input type="number" id="ae-iva" value="${o.iva||22}" step="0.01" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Costo / L (€)</label>
-          <input type="number" id="ae-costo" value="${o.costo_litro||0}" step="0.000001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+          <input type="number" id="ae-costo" value="${o.costo_litro||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Trasporto / L (€)</label>
-          <input type="number" id="ae-trasp" value="${o.trasporto_litro||0}" step="0.000001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+          <input type="number" id="ae-trasp" value="${o.trasporto_litro||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Margine / L (€)</label>
-          <input type="number" id="ae-marg" value="${o.margine||0}" step="0.000001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
+          <input type="number" id="ae-marg" value="${o.margine||0}" step="0.0001" style="width:100%;padding:5px;border:1px solid #ccc;border-radius:3px;font-size:12px;font-family:monospace"></div>
         <div><label style="font-size:10px;font-weight:600;color:#555">Imponibile (auto)</label>
           <input type="text" id="ae-imp" readonly value="€ ${_fmtN((Number(o.costo_litro||0)+Number(o.trasporto_litro||0)+Number(o.margine||0))*Number(o.litri||0))}" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:3px;font-size:12px;font-family:monospace;background:#fafaf8"></div>
         <div style="grid-column:1/3"><label style="font-size:10px;font-weight:600;color:#555">Sede di scarico</label>
@@ -2364,14 +2365,15 @@ async function allDiagnosticaFattura(fatturaId) {
     if (errR) throw errR;
 
     // 3. Carica ordini che puntano alla fattura via fattura_id E ordini che puntano alla fattura via fattura_riga_id (anche se fattura_id NULL)
+    // v20260515f: include aggancio_manuale per badge "🔒 Manuale" e logica di protezione
     const rigaIds = (righe || []).map(r => r.id);
     let { data: ordPerFatturaId } = await sb.from('ordini')
-      .select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,fattura_id,fattura_riga_id,stato')
+      .select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,fattura_id,fattura_riga_id,stato,aggancio_manuale')
       .eq('fattura_id', fatturaId);
     let ordPerRiga = [];
     if (rigaIds.length) {
       const { data } = await sb.from('ordini')
-        .select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,fattura_id,fattura_riga_id,stato')
+        .select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,fattura_id,fattura_riga_id,stato,aggancio_manuale')
         .in('fattura_riga_id', rigaIds);
       ordPerRiga = data || [];
     }
@@ -2477,7 +2479,8 @@ function _allDiagRenderPopup(d) {
                 style="background:#7A5316;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;margin-top:3px;cursor:pointer">🚫 Marca come ignorata</button>`;
     } else if (r._stato === 'accoppiata') {
       const o = r._ordini[0];
-      badge = `<span style="background:#E8F3DE;color:#3F7D1F;padding:2px 6px;border-radius:3px;font-size:10px">✅ Accoppiata</span>`;
+      const lockBadge = o.aggancio_manuale ? ' <span title="Aggancio manuale protetto dal Ricalcola" style="background:#FDF3D0;color:#7A5316;padding:1px 4px;border-radius:3px;font-size:9px;font-weight:600">🔒 Manuale</span>' : '';
+      badge = `<span style="background:#E8F3DE;color:#3F7D1F;padding:2px 6px;border-radius:3px;font-size:10px">✅ Accoppiata</span>${lockBadge}`;
       azioni = `<div style="font-size:10px;color:#666;margin-top:3px">Ordine: ${_fmtD(o.data)} · ${_esc((o.cliente||'').substring(0,30))} · ${Number(o.litri||0).toLocaleString('it-IT')} L
         <button onclick="allDiagSganciaOrdine('${o.id}','${f.id}')" title="Sgancia ordine da questa riga"
                 style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:6px;cursor:pointer">🔓 Sgancia</button>
@@ -2489,8 +2492,9 @@ function _allDiagRenderPopup(d) {
       // Render: ogni ordine con 3 azioni (Sgancia, Riassegna a orfana, Apri)
       azioni = '<div style="font-size:10px;color:#666;margin-top:5px">';
       r._ordini.forEach(function(o, idx) {
+        const lockBadge = o.aggancio_manuale ? ' <span title="Aggancio manuale protetto" style="background:#FDF3D0;color:#7A5316;padding:1px 4px;border-radius:2px;font-size:9px;font-weight:600">🔒</span>' : '';
         azioni += '<div style="background:#FFF8F8;border:0.5px solid #E8B5B5;border-radius:4px;padding:5px 7px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">' +
-          '<span style="flex:1;min-width:0">Ord ' + (idx+1) + ': ' + _fmtD(o.data) + ' · ' + _esc((o.cliente||'').substring(0,28)) + ' · ' + Number(o.litri||0).toLocaleString('it-IT') + ' L</span>' +
+          '<span style="flex:1;min-width:0">Ord ' + (idx+1) + ': ' + _fmtD(o.data) + ' · ' + _esc((o.cliente||'').substring(0,28)) + ' · ' + Number(o.litri||0).toLocaleString('it-IT') + ' L' + lockBadge + '</span>' +
           '<span style="display:flex;gap:3px;flex-shrink:0">' +
             '<button onclick="allDiagRiassegnaOrdine(\'' + o.id + '\',\'' + r.id + '\',\'' + f.id + '\')" title="Sposta questo ordine su una riga orfana compatibile della stessa fattura" style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer;font-weight:600">↪ Riassegna</button>' +
             '<button onclick="allDiagSganciaOrdine(\'' + o.id + '\',\'' + f.id + '\')" title="Sgancia ordine dalla riga (torna orfano)" style="background:#A32D2D;color:white;border:0;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer">🔓 Sgancia</button>' +
@@ -2601,11 +2605,12 @@ function _allDiagRenderPopup(d) {
 // ─── INTERVENTI DIAGNOSTICI ──────────────────────────────────────────
 
 // Sgancia ordine da fattura/riga (mette a NULL fattura_id e fattura_riga_id)
+// v20260515f: resetta anche aggancio_manuale (lo sganci = perdi protezione, coerente)
 async function allDiagSganciaOrdine(ordineId, fatturaId) {
-  if (!confirm('Sganciare l\'ordine dalla fattura?\n\nL\'ordine tornerà visibile nel pannello allineamento per essere riaccoppiato.')) return;
+  if (!confirm('Sganciare l\'ordine dalla fattura?\n\nL\'ordine tornerà visibile nel pannello allineamento per essere riaccoppiato.\nSe era marcato come "aggancio manuale" la protezione viene rimossa.')) return;
   try {
     const { error } = await sb.from('ordini')
-      .update({ fattura_id: null, fattura_riga_id: null })
+      .update({ fattura_id: null, fattura_riga_id: null, aggancio_manuale: false })
       .eq('id', ordineId);
     if (error) throw error;
     toast('✅ Ordine sganciato');
