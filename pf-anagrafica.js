@@ -789,33 +789,41 @@ async function caricaVenditeAnnuali() {
   const da = inpDa.value;
   const a  = inpA.value;
 
-  // Ingrosso: ordini tipo_ordine='cliente'
-  let allIng = [];
-  let from = 0;
-  while (true) {
-    const { data: batch } = await sb.from('ordini').select('data,litri,costo_litro,trasporto_litro,margine,iva').gte('data', da).lte('data', a).neq('stato','annullato').eq('tipo_ordine','cliente').range(from, from + 999);
-    if (!batch || !batch.length) break;
-    allIng = allIng.concat(batch);
-    if (batch.length < 1000) break;
-    from += 1000;
+  // Ingrosso: ordini tipo_ordine='cliente'  +  Dettaglio: letture stazione
+  // ═══ v20260515b: 2 paginazioni in parallelo + 3 query post in parallelo ═══
+  // Prima: paginazione ordini → poi paginazione letture → poi 3 query.
+  // Ora: tutte le query indipendenti in parallelo (Promise.all).
+  const daPrev = new Date(anno, 0, 0).toISOString().split('T')[0];
+
+  async function _paginate(table, selectCols, dataInizio, dataFine, queryMods) {
+    let acc = [];
+    let from = 0;
+    while (true) {
+      let q = sb.from(table).select(selectCols).gte('data', dataInizio).lte('data', dataFine).range(from, from + 999);
+      if (queryMods) q = queryMods(q);
+      const { data: batch } = await q;
+      if (!batch || !batch.length) break;
+      acc = acc.concat(batch);
+      if (batch.length < 1000) break;
+      from += 1000;
+    }
+    return acc;
   }
 
-  // Dettaglio: letture stazione
-  const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
-  // Include giorno precedente a inizio anno per calcolare litri 1° gennaio
-  var daPrev = new Date(anno, 0, 0).toISOString().split('T')[0];
-  var allLetture = [];
-  var fromL = 0;
-  while (true) {
-    var { data: batchL } = await sb.from('stazione_letture').select('data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso').gte('data', daPrev).lte('data', a).order('data').range(fromL, fromL + 999);
-    if (!batchL || !batchL.length) break;
-    allLetture = allLetture.concat(batchL);
-    if (batchL.length < 1000) break;
-    fromL += 1000;
-  }
+  const [allIng, pompeRes, allLetture, prezziPRes, costiPRes] = await Promise.all([
+    _paginate('ordini', 'data,litri,costo_litro,trasporto_litro,margine,iva', da, a,
+      q => q.neq('stato','annullato').eq('tipo_ordine','cliente')),
+    sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true),
+    _paginate('stazione_letture', 'data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso', daPrev, a,
+      q => q.order('data')),
+    sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a),
+    sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a)
+  ]);
+
+  const pompe = pompeRes.data;
   const letture = allLetture;
-  const { data: prezziP } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a);
-  const { data: costiP } = await sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a);
+  const prezziP = prezziPRes.data;
+  const costiP = costiPRes.data;
 
   const pompeMap = {};
   (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
@@ -1682,8 +1690,11 @@ async function caricaSediCliente(clienteId) {
 async function salvaSediCliente(clienteId) {
   if (!clienteId) return;
   const righe = document.querySelectorAll('.cl-sede-row');
-  const idsPresenti = [];
 
+  // ═══ v20260515b: write parallele su righe DIVERSE (no race possibile) ═══
+  // Ogni riga modifica/inserisce una sede con id distinto. Promise.allSettled
+  // permette di non bloccare le altre se una fallisce (toast d'errore mirato).
+  const tasks = [];
   for (const row of righe) {
     const sedeId = row.dataset.id;
     const nome = row.querySelector('.sede-r-nome').value.trim();
@@ -1695,22 +1706,41 @@ async function salvaSediCliente(clienteId) {
     const record = { cliente_id: clienteId, nome, indirizzo, citta, is_default };
 
     if (sedeId && sedeId !== 'new') {
-      await sb.from('sedi_scarico').update(record).eq('id', sedeId);
-      idsPresenti.push(sedeId);
+      tasks.push(
+        sb.from('sedi_scarico').update(record).eq('id', sedeId)
+          .then(() => ({ ok: true, id: sedeId }))
+          .catch(e => ({ ok: false, err: e, sedeId, nome }))
+      );
     } else {
-      const { data: nuovo } = await sb.from('sedi_scarico').insert([record]).select().single();
-      if (nuovo) idsPresenti.push(nuovo.id);
+      tasks.push(
+        sb.from('sedi_scarico').insert([record]).select().single()
+          .then(({ data: nuovo }) => ({ ok: true, id: nuovo ? nuovo.id : null }))
+          .catch(e => ({ ok: false, err: e, sedeId: null, nome }))
+      );
     }
   }
 
-  // Disattiva sedi rimosse
+  const results = await Promise.allSettled(tasks);
+  const idsPresenti = [];
+  const errori = [];
+  results.forEach(r => {
+    if (r.status === 'fulfilled' && r.value.ok) {
+      if (r.value.id) idsPresenti.push(r.value.id);
+    } else {
+      const v = r.status === 'fulfilled' ? r.value : { err: r.reason };
+      errori.push(v.nome || 'sede');
+      console.warn('[salvaSediCliente] errore sede:', v);
+    }
+  });
+  if (errori.length) toast('Errore su ' + errori.length + ' sede/i: ' + errori.join(', '));
+
+  // Disattiva sedi rimosse (in parallelo)
   const { data: tuttiDb } = await sb.from('sedi_scarico').select('id').eq('cliente_id', clienteId).eq('attivo', true);
   if (tuttiDb) {
-    for (const s of tuttiDb) {
-      if (!idsPresenti.includes(s.id)) {
-        await sb.from('sedi_scarico').update({ attivo: false }).eq('id', s.id);
-      }
-    }
+    const disattivazioni = tuttiDb
+      .filter(s => !idsPresenti.includes(s.id))
+      .map(s => sb.from('sedi_scarico').update({ attivo: false }).eq('id', s.id));
+    if (disattivazioni.length) await Promise.allSettled(disattivazioni);
   }
 }
 

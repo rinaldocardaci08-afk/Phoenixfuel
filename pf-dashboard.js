@@ -470,17 +470,36 @@ async function caricaAlertOperativi() {
 let _chartFatturato=null, _chartProdotti=null, _chartMargine=null, _chartVenditeMese=null;
 
 async function caricaGraficiDashboard() {
-  // Fatturato ultimi 7 giorni
+  // ═══ v20260515b: 3 query (ord7, ordMese, ord30) unificate in 1 sola ═══
+  // Le 3 finestre temporali sono sovrapposte (7gg ⊂ mese-corrente, entrambe ⊂ 30gg).
+  // Una sola query a 30gg + filtraggio JS in memoria sostituisce 3 round-trip.
+  // SELECT mirato (6 campi) invece di SELECT * (25+ campi) → -70% trasferimento.
   const giorni = [];
   for (let i=6; i>=0; i--) {
     const d = new Date(oggi); d.setDate(d.getDate()-i);
     giorni.push(d.toISOString().split('T')[0]);
   }
-  const { data: ord7 } = await sb.from('ordini').select('*').gte('data', giorni[0]).lte('data', giorni[6]).neq('stato','annullato').eq('tipo_ordine','cliente');
+  const giorni30 = [];
+  for (let i=29; i>=0; i--) {
+    const d = new Date(oggi); d.setDate(d.getDate()-i);
+    giorni30.push(d.toISOString().split('T')[0]);
+  }
+  const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
+  // Range più ampio: min(30gg fa, inizio-mese)
+  const dataInizio = giorni30[0] < inizio ? giorni30[0] : inizio;
+
+  // UNA query sola con SELECT mirato
+  const { data: ord30 } = await sb.from('ordini')
+    .select('data,prodotto,litri,costo_litro,trasporto_litro,margine,iva')
+    .gte('data', dataInizio).neq('stato','annullato').eq('tipo_ordine','cliente');
+
+  // Filtri JS per le tre finestre (sottoinsiemi di ord30)
+  const ord7 = (ord30||[]).filter(r => r.data >= giorni[0] && r.data <= giorni[6]);
+  const ordMese = (ord30||[]).filter(r => r.data >= inizio);
 
   const fattPerGiorno = {};
   giorni.forEach(g => { fattPerGiorno[g]=0; });
-  (ord7||[]).forEach(r => {
+  ord7.forEach(r => {
     if (fattPerGiorno[r.data] !== undefined) {
       fattPerGiorno[r.data] += prezzoConIva(r) * Number(r.litri);
     }
@@ -498,14 +517,10 @@ async function caricaGraficiDashboard() {
     });
   }
 
-  // Dati mese corrente
-  const inizio = new Date(oggi.getFullYear(),oggi.getMonth(),1).toISOString().split('T')[0];
-  const { data: ordMese } = await sb.from('ordini').select('*').gte('data', inizio).neq('stato','annullato').eq('tipo_ordine','cliente');
-
   // Litri per prodotto (mese) — ISTOGRAMMA
   const perProd = {};
   const prodColori = getColoriProdotti();
-  (ordMese||[]).forEach(r => { perProd[r.prodotto] = (perProd[r.prodotto]||0) + Number(r.litri); });
+  ordMese.forEach(r => { perProd[r.prodotto] = (perProd[r.prodotto]||0) + Number(r.litri); });
   const prodLabels = Object.keys(perProd);
   const ctx2 = document.getElementById('chart-prodotti');
   if (ctx2) {
@@ -526,7 +541,7 @@ async function caricaGraficiDashboard() {
   }
   const vendPerGiorno = {};
   giorniMese.forEach(g => { vendPerGiorno[g] = 0; });
-  (ordMese||[]).forEach(r => {
+  ordMese.forEach(r => {
     if (vendPerGiorno[r.data] !== undefined) {
       vendPerGiorno[r.data] += prezzoConIva(r) * Number(r.litri);
     }
@@ -544,12 +559,6 @@ async function caricaGraficiDashboard() {
   }
 
   // Margine ultimi 30 giorni
-  const giorni30 = [];
-  for (let i=29; i>=0; i--) {
-    const d = new Date(oggi); d.setDate(d.getDate()-i);
-    giorni30.push(d.toISOString().split('T')[0]);
-  }
-  const { data: ord30 } = await sb.from('ordini').select('*').gte('data', giorni30[0]).neq('stato','annullato').eq('tipo_ordine','cliente');
   const marg30 = {};
   giorni30.forEach(g => { marg30[g]=0; });
   (ord30||[]).forEach(r => { if (marg30[r.data]!==undefined) marg30[r.data] += Number(r.margine)*Number(r.litri); });
