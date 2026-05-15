@@ -3153,19 +3153,42 @@ async function _apriAnalisiCMP(prodotto, sede) {
       return (a.created_at || '').localeCompare(b.created_at || '');
     });
 
+    // ═══ Performance v20260515a: pre-fetch parallelo giacenze ═══
+    // Prima della modifica: getGiacenzaAllaData chiamata seriale dentro
+    // al loop eventi → 15-30 eventi × 4-5 query SQL = 60-150 query → 8-30s.
+    // Ora: raccolgo TUTTE le date richieste, Promise.all parallelo, lookup
+    // in memoria nel loop → ~300ms totali (10-50× più veloce).
+    var dalPrevAnalisi = (function() {
+      var d = new Date(dalISO + 'T12:00:00');
+      d.setDate(d.getDate() - 1);
+      return d.toISOString().split('T')[0];
+    })();
+    var dateGiacenzaSet = new Set([dalPrevAnalisi]);
+    eventi.forEach(function(ev) {
+      var d = new Date(ev.data + 'T12:00:00');
+      d.setDate(d.getDate() - 1);
+      dateGiacenzaSet.add(d.toISOString().split('T')[0]);
+    });
+    var giacCache = {};
+    if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+      var giacPromises = Array.from(dateGiacenzaSet).map(function(d) {
+        return pfData.getGiacenzaAllaData(sede, prodotto, d)
+          .then(function(res) { return { d: d, res: res }; })
+          .catch(function(err) {
+            console.warn('[_apriAnalisiCMP] pre-fetch giac ' + d + ':', err);
+            return { d: d, res: null };
+          });
+      });
+      var giacResults = await Promise.all(giacPromises);
+      giacResults.forEach(function(r) { giacCache[r.d] = r.res; });
+    }
+
     // 3. Simulo nel tempo. Stato = giacenza prodotto + CMP prodotto
     var stato = { litri: 0, cmp: Number(cmpIniziale || 0), valore: 0 };
     // Giacenza prodotto al giorno PRECEDENTE a dalISO (= inizio dalISO)
     try {
-      if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
-        var dalPrev = (function() {
-          var d = new Date(dalISO + 'T12:00:00');
-          d.setDate(d.getDate() - 1);
-          return d.toISOString().split('T')[0];
-        })();
-        var giacIni = await pfData.getGiacenzaAllaData(sede, prodotto, dalPrev);
-        stato.litri = Math.max(0, Number((giacIni && giacIni.calcolata) || 0));
-      }
+      var giacIniRes = giacCache[dalPrevAnalisi];
+      stato.litri = Math.max(0, Number((giacIniRes && giacIniRes.calcolata) || 0));
     } catch (e) {
       console.warn('[_apriAnalisiCMP] errore giacenza iniziale:', e);
     }
@@ -3176,19 +3199,15 @@ async function _apriAnalisiCMP(prodotto, sede) {
       var e = eventi[ei];
 
       // Giacenza prodotto a INIZIO giornata dell'evento (= fine giornata precedente)
-      var litriInizioGiorno = stato.litri; // fallback se pfData non disponibile
-      try {
-        if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
-          var giornoPrec = (function() {
-            var d = new Date(e.data + 'T12:00:00');
-            d.setDate(d.getDate() - 1);
-            return d.toISOString().split('T')[0];
-          })();
-          var giacRes = await pfData.getGiacenzaAllaData(sede, prodotto, giornoPrec);
-          litriInizioGiorno = Math.max(0, Number((giacRes && giacRes.calcolata) || 0));
-        }
-      } catch (errGiac) {
-        console.warn('[_apriAnalisiCMP] errore giacenza giorno ' + e.data + ':', errGiac);
+      var litriInizioGiorno = stato.litri; // fallback
+      var giornoPrec = (function() {
+        var d = new Date(e.data + 'T12:00:00');
+        d.setDate(d.getDate() - 1);
+        return d.toISOString().split('T')[0];
+      })();
+      var giacRes = giacCache[giornoPrec];
+      if (giacRes && giacRes.calcolata !== undefined) {
+        litriInizioGiorno = Math.max(0, Number(giacRes.calcolata || 0));
       }
 
       // Sommo carichi precedenti nello stesso giorno (eventi multipli)
