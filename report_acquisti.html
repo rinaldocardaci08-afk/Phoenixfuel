@@ -113,6 +113,7 @@
     </div>
   </div>
   <button class="filtri-btn" onclick="generaReport()" style="margin-top:12px">Genera Report Acquisti</button>
+  <button class="filtri-btn" onclick="generaReportMassivo()" style="margin-top:8px;background:#639922">📊 Report acquisti fornitori massivo</button>
   <button onclick="window.close()" style="width:100%;margin-top:8px;padding:12px;border:1px solid #ccc;border-radius:8px;background:#fff;color:#666;font-size:14px;cursor:pointer;font-weight:bold">✕ Chiudi report</button>
 </div>
 
@@ -202,6 +203,16 @@
   </div>
 </div>
 
+<!-- REPORT MASSIVO OUTPUT -->
+<div class="report-container" id="massivo-container">
+  <div class="toolbar no-print">
+    <button class="btn-back" onclick="tornaFiltri()">← Modifica filtri</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Stampa / PDF</button>
+    <button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>
+  </div>
+  <div class="page" id="massivo-page"></div>
+</div>
+
 <script>
 const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
@@ -255,11 +266,12 @@ function destBadge(tipo) {
 const COLORI = ['#378ADD','#D4A017','#639922','#3B6D11','#D85A30','#6B5FCC','#BA7517','#E24B4A','#085041','#791F1F'];
 let COLORI_PROD = {};
 let _prodottiCache = [];
+let _fornitoriCache = [];
 
 async function caricaFiltri() {
   const [fornRes, prodRes] = await Promise.all([
     // Esclude fornitori "interni" (Phoenix Fuel = soggetto stesso, deposito/rientro = movimenti interni)
-    sb.from('fornitori').select('nome').eq('attivo',true)
+    sb.from('fornitori').select('nome,colore').eq('attivo',true)
       .not('nome','ilike','%phoenix%')
       .not('nome','ilike','%deposito%')
       .not('nome','ilike','%rientro%')
@@ -269,6 +281,7 @@ async function caricaFiltri() {
 
   const wrap = document.getElementById('f-fornitore-checks');
   const fornitori = fornRes.data || [];
+  _fornitoriCache = fornitori;
   if (!fornitori.length) { wrap.innerHTML = '<span style="color:#999;font-size:12px">Nessun fornitore</span>'; return; }
   wrap.innerHTML = fornitori.map(f =>
     '<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;background:#fff;border:1px solid #ddd;border-radius:6px;padding:5px 10px"><input type="checkbox" class="f-forn-check" value="'+esc(f.nome)+'" /> '+esc(f.nome)+'</label>'
@@ -513,6 +526,253 @@ async function generaReport() {
 function tornaFiltri() {
   document.getElementById('filtri-panel').style.display = 'block';
   document.getElementById('report-container').style.display = 'none';
+  document.getElementById('massivo-container').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// REPORT MASSIVO: aggregato per fornitore × prodotto × mese
+// ═══════════════════════════════════════════════════════════════════
+const COLORI_PROD_MASSIVO = {
+  'Gasolio Autotrazione':'#BA7517','Benzina':'#378ADD','Gasolio Agricolo':'#639922',
+  'HVO':'#6B5FCC','AdBlue':'#0088CC'
+};
+const COLORI_FALLBACK_MASSIVO = ['#D4A017','#378ADD','#639922','#6B5FCC','#BA7517','#D85A30','#1D9E75','#C0392B'];
+
+function _massColoreFornitore(nome, idx) {
+  const f = (_fornitoriCache||[]).find(x => x.nome === nome);
+  if (f && f.colore && f.colore !== '#FAEEDA') return f.colore;
+  return COLORI_FALLBACK_MASSIVO[idx % COLORI_FALLBACK_MASSIVO.length];
+}
+
+function _massMeseKey(data) { return String(data).substring(0,7); }
+function _massMeseLabel(yyyymm) {
+  const p = yyyymm.split('-');
+  return MESI_LABEL[parseInt(p[1])-1] + ' ' + p[0].substring(2);
+}
+
+async function generaReportMassivo() {
+  const da = document.getElementById('f-da').value;
+  const a = document.getElementById('f-a').value;
+  const prodottoFiltro = document.getElementById('f-prodotto').value;
+  const destinazione = document.getElementById('f-destinazione').value;
+  const fornSel = Array.from(document.querySelectorAll('.f-forn-check:checked')).map(cb => cb.value);
+
+  if (!da || !a) { alert('Seleziona le date'); return; }
+  destroyCharts();
+
+  let allOrdini = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato')
+      .not('fornitore','ilike','%phoenix%')
+      .not('fornitore','ilike','%deposito%')
+      .not('fornitore','ilike','%rientro%');
+    if (prodottoFiltro) q = q.eq('prodotto', prodottoFiltro);
+    if (fornSel.length) q = q.in('fornitore', fornSel);
+    if (destinazione) q = q.eq('tipo_ordine', destinazione);
+    const { data: batch } = await q.order('data').order('fornitore').range(from, from + pageSize - 1);
+    if (!batch || !batch.length) break;
+    allOrdini = allOrdini.concat(batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  const ordini = allOrdini;
+  if (!ordini.length) { alert('Nessun ordine trovato per il periodo selezionato'); return; }
+
+  const agg = {};
+  const fornSet = new Set();
+  const prodSet = new Set();
+
+  ordini.forEach(o => {
+    const f = o.fornitore || '—';
+    const p = o.prodotto || '—';
+    const m = _massMeseKey(o.data);
+    const lt = Number(o.litri) || 0;
+    const cl = Number(o.costo_litro) || 0;
+    fornSet.add(f); prodSet.add(p);
+    if (!agg[f]) agg[f] = {};
+    if (!agg[f][p]) agg[f][p] = {};
+    if (!agg[f][p][m]) agg[f][p][m] = { litri:0, costoTot:0 };
+    agg[f][p][m].litri += lt;
+    agg[f][p][m].costoTot += lt * cl;
+  });
+
+  const mesiKeys = [];
+  const dStart = new Date(da);
+  const dEnd = new Date(a);
+  let cur = new Date(dStart.getFullYear(), dStart.getMonth(), 1);
+  while (cur <= dEnd) {
+    mesiKeys.push(cur.getFullYear() + '-' + String(cur.getMonth()+1).padStart(2,'0'));
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  const mesiLabels = mesiKeys.map(_massMeseLabel);
+
+  const fornitori = Array.from(fornSet).sort((x,y) => {
+    const totX = Object.values(agg[x]||{}).reduce((s,pr)=>s+Object.values(pr).reduce((s2,m)=>s2+m.costoTot,0),0);
+    const totY = Object.values(agg[y]||{}).reduce((s,pr)=>s+Object.values(pr).reduce((s2,m)=>s2+m.costoTot,0),0);
+    return totY - totX;
+  });
+  const prodotti = Array.from(prodSet).sort();
+
+  let totLitri = 0, totCosto = 0;
+  fornitori.forEach(f => prodotti.forEach(p => mesiKeys.forEach(m => {
+    if (agg[f] && agg[f][p] && agg[f][p][m]) { totLitri += agg[f][p][m].litri; totCosto += agg[f][p][m].costoTot; }
+  })));
+
+  let html = '';
+  html += '<div class="report-header">';
+  html += '<div><div class="report-title">REPORT MASSIVO ACQUISTI</div>';
+  html += '<div class="report-sub">Periodo: ' + new Date(da).toLocaleDateString('it-IT') + ' — ' + new Date(a).toLocaleDateString('it-IT') + '</div>';
+  html += '<div class="report-sub">PhoenixFuel Srl</div></div>';
+  html += '<img src="logo_png.jpeg" class="report-logo" onerror="this.style.display=\'none\'" /></div>';
+
+  html += '<div class="report-filtri-info">';
+  html += '<span>Fornitori: <strong>' + (fornSel.length ? fornSel.map(esc).join(', ') : 'Tutti (' + fornitori.length + ')') + '</strong></span>';
+  if (prodottoFiltro) html += '<span>Prodotto: <strong>' + esc(prodottoFiltro) + '</strong></span>';
+  if (destinazione) html += '<span>Destinazione: <strong>' + (DEST_LABELS[destinazione]||destinazione) + '</strong></span>';
+  html += '<span>Mesi: <strong>' + mesiKeys.length + '</strong></span>';
+  html += '</div>';
+
+  html += '<div class="kpi-grid">';
+  html += '<div class="kpi-box"><div class="kpi-label">Litri totali</div><div class="kpi-val">' + fmtL(totLitri) + '</div></div>';
+  html += '<div class="kpi-box"><div class="kpi-label">Spesa totale</div><div class="kpi-val">' + fmtE(totCosto) + '</div></div>';
+  html += '<div class="kpi-box"><div class="kpi-label">€/L medio pond.</div><div class="kpi-val">' + (totLitri>0?fmt(totCosto/totLitri):'—') + '</div></div>';
+  html += '<div class="kpi-box"><div class="kpi-label">N. fornitori</div><div class="kpi-val">' + fornitori.length + '</div></div>';
+  html += '</div>';
+
+  fornitori.forEach((f, fi) => {
+    const colFor = _massColoreFornitore(f, fi);
+    html += '<div style="margin-top:18px;page-break-inside:avoid">';
+    html += '<div class="section-title" style="color:' + colFor + ';border-bottom-color:' + colFor + '">';
+    html += '<span style="display:inline-block;width:10px;height:10px;background:' + colFor + ';border-radius:2px;margin-right:6px;vertical-align:middle"></span>';
+    html += esc(f);
+    html += '</div>';
+
+    let totFornLitri = 0, totFornCosto = 0;
+    const prodFornit = prodotti.filter(p => agg[f] && agg[f][p]);
+
+    prodFornit.forEach((p, pi) => {
+      const colP = COLORI_PROD_MASSIVO[p] || '#888';
+      html += '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:bold;margin-bottom:6px;color:' + colP + '">' + esc(p) + '</div>';
+      html += '<div class="charts-grid" style="grid-template-columns:1.2fr 1fr;gap:10px">';
+      html += '<div><table style="margin-bottom:0">';
+      html += '<thead><tr><th>Mese</th><th>Litri</th><th>€/L</th><th>Costo tot.</th></tr></thead><tbody>';
+      let totProdLitri = 0, totProdCosto = 0;
+      mesiKeys.forEach((m, mi) => {
+        const d = (agg[f][p] && agg[f][p][m]) || {litri:0,costoTot:0};
+        if (d.litri === 0 && d.costoTot === 0) return;
+        const cl = d.litri>0 ? d.costoTot/d.litri : 0;
+        totProdLitri += d.litri; totProdCosto += d.costoTot;
+        html += '<tr><td>' + mesiLabels[mi] + '</td><td class="mono">' + fmtL(d.litri) + '</td><td class="mono">' + (cl>0?fmt(cl):'—') + '</td><td class="mono">' + fmtE(d.costoTot) + '</td></tr>';
+      });
+      html += '<tr class="totale"><td><strong>Tot</strong></td><td class="mono">' + fmtL(totProdLitri) + '</td><td class="mono">' + (totProdLitri>0?fmt(totProdCosto/totProdLitri):'—') + '</td><td class="mono">' + fmtE(totProdCosto) + '</td></tr>';
+      html += '</tbody></table></div>';
+      html += '<div class="chart-box" style="padding:8px"><canvas id="mass-' + fi + '-' + pi + '" height="160"></canvas></div>';
+      html += '</div></div>';
+      totFornLitri += totProdLitri;
+      totFornCosto += totProdCosto;
+    });
+
+    html += '<div style="background:#fafaf8;border:1px solid #e8e8e8;border-radius:8px;padding:10px 14px;margin-top:4px">';
+    html += '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px;font-size:11px">';
+    prodFornit.forEach(p => {
+      let lP=0,cP=0;
+      mesiKeys.forEach(m => { const d = (agg[f][p] && agg[f][p][m]) || {litri:0,costoTot:0}; lP+=d.litri; cP+=d.costoTot; });
+      html += '<div><div style="color:#888;font-size:10px;text-transform:uppercase">' + esc(p) + '</div><div><strong>' + fmtL(lP) + ' L</strong> · ' + fmtE(cP) + '</div></div>';
+    });
+    html += '<div style="border-left:3px solid ' + colFor + ';padding-left:10px"><div style="color:#888;font-size:10px;text-transform:uppercase">Totale ' + esc(f) + '</div><div><strong>' + fmtL(totFornLitri) + ' L</strong> · ' + fmtE(totFornCosto) + '</div></div>';
+    html += '</div></div></div>';
+  });
+
+  if (fornitori.length >= 2) {
+    html += '<div style="margin-top:22px"><div class="section-title">📈 Confronto fornitori</div>';
+    prodotti.forEach((p, pi) => {
+      html += '<div style="margin-bottom:18px;page-break-inside:avoid"><div style="font-size:12px;font-weight:bold;margin-bottom:6px;color:' + (COLORI_PROD_MASSIVO[p]||'#888') + '">' + esc(p) + '</div>';
+      html += '<div class="charts-grid">';
+      html += '<div class="chart-box"><div class="chart-title">Litri per mese — linee</div><canvas id="mass-cmp-line-' + pi + '" height="180"></canvas></div>';
+      html += '<div class="chart-box"><div class="chart-title">Litri per mese — barre raggruppate</div><canvas id="mass-cmp-bar-' + pi + '" height="180"></canvas></div>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<div style="margin-top:22px;page-break-inside:avoid"><div class="section-title">Matrice totali — fornitore × prodotto</div>';
+  html += '<table><thead><tr><th>Prodotto</th>';
+  fornitori.forEach(f => html += '<th>' + esc(f) + '</th>');
+  html += '<th style="border-left:2px solid #378ADD">Totale</th></tr></thead><tbody>';
+  prodotti.forEach(p => {
+    html += '<tr><td><strong>' + esc(p) + '</strong></td>';
+    let totRigaLitri = 0, totRigaCosto = 0;
+    fornitori.forEach(f => {
+      let lT=0,cT=0;
+      mesiKeys.forEach(m => { const d = (agg[f]&&agg[f][p]&&agg[f][p][m]) || {litri:0,costoTot:0}; lT+=d.litri; cT+=d.costoTot; });
+      totRigaLitri+=lT; totRigaCosto+=cT;
+      html += '<td class="mono">' + fmtL(lT) + ' L<br><span style="color:#888;font-weight:normal;font-size:10px">' + fmtE(cT) + '</span></td>';
+    });
+    html += '<td class="mono" style="border-left:2px solid #378ADD;background:#E6F1FB"><strong>' + fmtL(totRigaLitri) + ' L</strong><br><span style="color:#666;font-weight:normal;font-size:10px">' + fmtE(totRigaCosto) + '</span></td></tr>';
+  });
+  html += '<tr class="totale"><td><strong>TOTALE</strong></td>';
+  fornitori.forEach(f => {
+    let lT=0,cT=0;
+    prodotti.forEach(p => mesiKeys.forEach(m => { const d=(agg[f]&&agg[f][p]&&agg[f][p][m])||{litri:0,costoTot:0}; lT+=d.litri; cT+=d.costoTot; }));
+    html += '<td class="mono">' + fmtL(lT) + ' L<br><span style="color:#666;font-weight:normal;font-size:10px">' + fmtE(cT) + '</span></td>';
+  });
+  html += '<td class="mono" style="border-left:2px solid #378ADD;background:#E6F1FB"><strong>' + fmtL(totLitri) + ' L</strong><br><span style="color:#666;font-weight:normal;font-size:10px">' + fmtE(totCosto) + '</span></td></tr>';
+  html += '</tbody></table></div>';
+
+  html += '<div class="report-footer">PhoenixFuel Srl — Report massivo generato il ' + new Date().toLocaleDateString('it-IT') + ' — Documento interno</div>';
+
+  document.getElementById('massivo-page').innerHTML = html;
+
+  fornitori.forEach((f, fi) => {
+    const prodFornit = prodotti.filter(p => agg[f] && agg[f][p]);
+    prodFornit.forEach((p, pi) => {
+      const colP = COLORI_PROD_MASSIVO[p] || '#888';
+      const dati = mesiKeys.map(m => (agg[f][p] && agg[f][p][m]) ? agg[f][p][m].litri : 0);
+      const ctx = document.getElementById('mass-' + fi + '-' + pi);
+      if (!ctx) return;
+      _charts['mass-'+fi+'-'+pi] = new Chart(ctx.getContext('2d'), {
+        type:'bar',
+        data:{ labels:mesiLabels, datasets:[{ data:dati, backgroundColor:colP, borderRadius:3 }]},
+        options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v),font:{size:9}}}, x:{ticks:{font:{size:9}}}} }
+      });
+    });
+  });
+
+  if (fornitori.length >= 2) {
+    const dashStyles = [[], [6,4], [2,3], [10,5], [4,2,8,2]];
+    prodotti.forEach((p, pi) => {
+      const datasetsLine = fornitori.map((f, fi) => ({
+        label: f,
+        data: mesiKeys.map(m => (agg[f]&&agg[f][p]&&agg[f][p][m]) ? agg[f][p][m].litri : 0),
+        borderColor: _massColoreFornitore(f, fi),
+        backgroundColor: _massColoreFornitore(f, fi),
+        borderDash: dashStyles[fi % dashStyles.length] || [],
+        tension: 0.2, pointRadius: 3, borderWidth: 2
+      }));
+      const datasetsBar = fornitori.map((f, fi) => ({
+        label: f,
+        data: mesiKeys.map(m => (agg[f]&&agg[f][p]&&agg[f][p][m]) ? agg[f][p][m].litri : 0),
+        backgroundColor: _massColoreFornitore(f, fi),
+        borderRadius: 2
+      }));
+      const ctxLine = document.getElementById('mass-cmp-line-' + pi);
+      const ctxBar = document.getElementById('mass-cmp-bar-' + pi);
+      if (ctxLine) _charts['cmpL-'+pi] = new Chart(ctxLine.getContext('2d'), {
+        type:'line', data:{ labels:mesiLabels, datasets:datasetsLine },
+        options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:14}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v),font:{size:9}}}, x:{ticks:{font:{size:9}}}} }
+      });
+      if (ctxBar) _charts['cmpB-'+pi] = new Chart(ctxBar.getContext('2d'), {
+        type:'bar', data:{ labels:mesiLabels, datasets:datasetsBar },
+        options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:14}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v),font:{size:9}}}, x:{ticks:{font:{size:9}}}} }
+      });
+    });
+  }
+
+  document.getElementById('filtri-panel').style.display = 'none';
+  document.getElementById('report-container').style.display = 'none';
+  document.getElementById('massivo-container').style.display = 'block';
 }
 </script>
 </body>
