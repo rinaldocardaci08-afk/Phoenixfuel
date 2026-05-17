@@ -258,7 +258,12 @@ let _prodottiCache = [];
 
 async function caricaFiltri() {
   const [fornRes, prodRes] = await Promise.all([
-    sb.from('fornitori').select('nome').eq('attivo',true).order('nome'),
+    // Esclude fornitori "interni" (Phoenix Fuel = soggetto stesso, deposito/rientro = movimenti interni)
+    sb.from('fornitori').select('nome').eq('attivo',true)
+      .not('nome','ilike','%phoenix%')
+      .not('nome','ilike','%deposito%')
+      .not('nome','ilike','%rientro%')
+      .order('nome'),
     sb.from('prodotti').select('*').eq('attivo',true).order('ordine_visualizzazione')
   ]);
 
@@ -294,7 +299,10 @@ async function generaReport() {
   let from = 0;
   const pageSize = 1000;
   while (true) {
-    let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato');
+    let q = sb.from('ordini').select('*').gte('data', da).lte('data', a).neq('stato','annullato')
+      .not('fornitore','ilike','%phoenix%')
+      .not('fornitore','ilike','%deposito%')
+      .not('fornitore','ilike','%rientro%');
     if (prodotto) q = q.eq('prodotto', prodotto);
     if (fornitori.length) q = q.in('fornitore', fornitori);
     if (destinazione) q = q.eq('tipo_ordine', destinazione);
