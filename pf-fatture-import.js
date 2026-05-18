@@ -526,21 +526,22 @@ async function _caricaDatiPeriodo(dataMin, dataMax, logEl) {
   _ordiniPeriodo = ordini || [];
   if (logEl) _logAppend(logEl, 'ok', `✓ ${_ordiniPeriodo.length} ordini clienti caricati`);
 
-  // ─── In modalità revisione DB: escludo dai candidati gli ordini GIÀ LINKATI ───
-  // a fatture che NON sono nel batch corrente (_parsedData.fatture). Così il matcher
-  // non ricolloca lo stesso ordine "AP Petroli 5000L 25/02" a 2 righe diverse:
-  // l'ordine già attaccato a una fattura non torna disponibile per altre.
-  // Eccezione: se la fattura puntata è dentro al batch corrente, lascio l'ordine
-  // visibile (così sganci/rilinka all'interno della revisione).
-  if (_modoRevisioneDb && _parsedData && _parsedData.fatture) {
+  // ─── Filtro candidati: ESCLUDE ordini già linkati a fatture esterne al batch ───
+  // v20260517a: filtro attivo SEMPRE (non solo in modalità revisione DB) per evitare
+  // che un import nuovo (es. fatture maggio) "rubi" ordini già fatturati su periodi
+  // precedenti (es. aprile). Eccezione: se la fattura puntata è dentro al batch
+  // corrente (revisione DB), l'ordine resta candidato per consentire rilink interni.
+  // Inoltre: ordini con aggancio_manuale=true sono SEMPRE esclusi (blindati).
+  if (_parsedData && _parsedData.fatture) {
     const fattureBatch = new Set(_parsedData.fatture.map(f => f._db_id).filter(Boolean));
     const prima = _ordiniPeriodo.length;
     _ordiniPeriodo = _ordiniPeriodo.filter(o => {
-      if (!o.fattura_id) return true;                  // non linkato: sempre disponibile
-      return fattureBatch.has(o.fattura_id);            // linkato ma in batch: ok
-      // altrimenti: linkato a fattura esterna → escluso
+      if (o.aggancio_manuale === true) return false;     // blindato: mai candidabile
+      if (!o.fattura_id) return true;                     // libero: sempre disponibile
+      return fattureBatch.has(o.fattura_id);              // linkato a fattura del batch: ok
     });
-    if (logEl) _logAppend(logEl, 'info', `⚙ Modalità revisione: filtrati ${prima - _ordiniPeriodo.length} ordini già linkati ad altre fatture (${_ordiniPeriodo.length} disponibili)`);
+    const escl = prima - _ordiniPeriodo.length;
+    if (escl > 0 && logEl) _logAppend(logEl, 'info', `⚙ Filtrati ${escl} ordini già fatturati (${_ordiniPeriodo.length} candidati disponibili)`);
   }
 
   // Carica TUTTI i clienti (servono per lookup PIVA da cliente_id)
@@ -2336,9 +2337,10 @@ async function _importFatturaSingola(f, batchId) {
       fattura_id: fattId,
       fattura_riga_id: rigaIns.id,
       stato: 'consegnato',
+      // v20260517a: TUTTI i match (auto + forzati) sono blindati. Lo "Sgancia"
+      // manuale resetta il flag, restituendo l'ordine al pool dei candidabili.
+      aggancio_manuale: true,
     };
-    // v20260515f: marca come manuale se la riga era forzata via _apriForzaMatch
-    if (entry.forzato) updatePayload.aggancio_manuale = true;
 
     const { error: errU } = await sb.from('ordini')
       .update(updatePayload)
