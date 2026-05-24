@@ -126,7 +126,8 @@ async function caricaFinanze() {
 function renderCalendarioFinanze() {
   var filtro = document.getElementById('fin-cal-filtro')?.value || '';
   var giornoMap = _finCalDati || {};
-  var primoGiorno = new Date(_finCalAnno, _finCalMese, 1);
+  // Mezzogiorno locale per evitare shift UTC che sfaserebbe la griglia
+  var primoGiorno = new Date(_finCalAnno, _finCalMese, 1, 12, 0, 0);
   var inizioGriglia = new Date(primoGiorno);
   var offset = (primoGiorno.getDay() + 6) % 7;
   inizioGriglia.setDate(inizioGriglia.getDate() - offset);
