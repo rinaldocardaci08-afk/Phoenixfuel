@@ -25,7 +25,17 @@ var _pfpIstituti = [];
 function _pfpFmtE(v) { return '€ ' + Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function _pfpFmtD(d) { if(!d) return '—'; var p=String(d).split('-'); if(p.length<3) return d; return p[2]+'/'+p[1]+'/'+p[0]; }
 function _pfpEsc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function _pfpOggiISO() { return new Date().toISOString().split('T')[0]; }
+function _pfpOggiISO() {
+  // Versione locale: evita il bug di toISOString() che in fuso UTC+2 di notte ritorna giorno precedente
+  var d = new Date();
+  var y = d.getFullYear();
+  var m = String(d.getMonth()+1).padStart(2,'0');
+  var dd = String(d.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + dd;
+}
+
+// Flag race condition: previene doppio click su Conferma
+var _pfpInCorso = false;
 
 // Helper ordinamento banche (regola costituzionale PhoenixFuel)
 function _pfpPriorityBancaIstituto(nome) {
@@ -255,6 +265,8 @@ function _pfpSelModalita(modalita) {
 async function _pfpConferma() {
   var ctx = _pfpModaleCtx;
   if (!ctx) return;
+  // Guard race condition: previene doppio click sul bottone Conferma
+  if (_pfpInCorso) return;
 
   var importo = parseFloat(document.getElementById('pfp-importo').value);
   var data = document.getElementById('pfp-data').value;
@@ -269,11 +281,17 @@ async function _pfpConferma() {
     if (!confirm('L\'importo supera il saldo residuo di € ' + (importo - ctx.saldoResiduo).toFixed(2) + '. Procedere comunque?')) return;
   }
 
+  // Set flag SUBITO dopo le validazioni per chiudere la finestra race condition
+  _pfpInCorso = true;
   var btn = document.getElementById('pfp-conferma');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; btn.style.opacity = '0.6'; }
 
+  var pagamentoId = null;
+  var movId = null;
+  var saldata = false;
+
   try {
-    // 1. Insert pagamento su pagamenti_fornitori
+    // ─── STEP 1: Insert pagamento su pagamenti_fornitori (critico) ───
     var ins = await sb.from('pagamenti_fornitori').insert([{
       fattura_ricevuta_id: ctx.fattura.id,
       importo: importo,
@@ -283,64 +301,82 @@ async function _pfpConferma() {
       riferimento_esterno: riferimento || null
     }]).select().single();
     if (ins.error) throw ins.error;
-    var pagamentoId = ins.data.id;
+    pagamentoId = ins.data.id;
 
-    // 2. Crea movimento corrispondente in foglio_giornale_movimenti
-    //    (bidirezionalità scadenzario → foglio: il pagamento appare come uscita del giorno)
-    var conto = _pfpConti.find(function(c){ return c.id === conto_id; });
-    var bancaId = conto ? conto.istituto_id : null;
-    var fornNome = ctx.fattura.fornitore_nome || 'Fornitore';
-    var numFatt = ctx.fattura.numero_fattura || '';
+    // Da qui in poi: il pagamento è SALVATO. Errori successivi non devono far throw
+    // (altrimenti l'utente vede "errore" ma il pagamento è già nel DB).
+    // Calcolo se la fattura è ora saldata
     var nuovoTotalePagato = ctx.totalePagato + importo;
-    var saldata = nuovoTotalePagato >= Number(ctx.fattura.importo_dichiarato) - 0.01;
-    var isParziale = !saldata;
-    var descMov = 'Pagamento ' + fornNome + ' · FT ' + numFatt + (isParziale ? ' (parziale)' : '');
-    var noteMov = riferimento ? ('Rif: ' + riferimento) : null;
+    saldata = nuovoTotalePagato >= Number(ctx.fattura.importo_dichiarato || 0) - 0.01;
 
-    var movIns = await sb.from('foglio_giornale_movimenti').insert([{
-      data: data,
-      tipo: 'uscita',
-      importo: importo,
-      descrizione: descMov,
-      banca_id: bancaId,
-      cassa_tipo: null,
-      metodo: modalita,
-      origine: 'scadenzario_fornitori',
-      note: noteMov
-    }]).select('id').single();
+    // ─── STEP 2: Crea movimento foglio giornale (non-critico, errori solo log) ───
+    try {
+      var conto = _pfpConti.find(function(c){ return c.id === conto_id; });
+      var bancaId = conto ? conto.istituto_id : null;
+      var fornNome = ctx.fattura.fornitore_nome || 'Fornitore';
+      var numFatt = ctx.fattura.numero_fattura || '';
+      var isParziale = !saldata;
+      var descMov = 'Pagamento ' + fornNome + ' · FT ' + numFatt + (isParziale ? ' (parziale)' : '');
+      var noteMov = riferimento ? ('Rif: ' + riferimento) : null;
 
-    // Se il movimento è andato, crea riconciliazione + linka il pagamento al movimento
-    if (!movIns.error && movIns.data) {
-      var movId = movIns.data.id;
-      // 2b. Riconciliazione foglio ↔ fattura ricevuta
-      await sb.from('foglio_giornale_riconciliazioni').insert([{
-        movimento_id: movId,
-        fattura_emessa_id: null,
-        ordine_id: null,
-        fattura_ricevuta_id: ctx.fattura.id,
-        importo_imputato: importo
-      }]);
-      // 2c. Link pagamento → movimento
-      await sb.from('pagamenti_fornitori').update({ movimento_foglio_id: movId }).eq('id', pagamentoId);
-    } else if (movIns.error) {
-      console.warn('[pfp] pagamento salvato ma movimento foglio non creato:', movIns.error.message);
+      var movIns = await sb.from('foglio_giornale_movimenti').insert([{
+        data: data,
+        tipo: 'uscita',
+        importo: importo,
+        descrizione: descMov,
+        banca_id: bancaId,
+        cassa_tipo: null,
+        metodo: modalita,
+        origine: 'scadenzario_fornitori',
+        note: noteMov
+      }]).select('id').single();
+
+      if (movIns.error) {
+        console.warn('[pfp] pagamento salvato ma movimento foglio non creato:', movIns.error.message);
+      } else if (movIns.data) {
+        movId = movIns.data.id;
+        // 2b. Riconciliazione foglio ↔ fattura ricevuta
+        var ricIns = await sb.from('foglio_giornale_riconciliazioni').insert([{
+          movimento_id: movId,
+          fattura_emessa_id: null,
+          ordine_id: null,
+          fattura_ricevuta_id: ctx.fattura.id,
+          importo_imputato: importo
+        }]);
+        if (ricIns.error) console.warn('[pfp] riconciliazione foglio non creata:', ricIns.error.message);
+        // 2c. Link pagamento → movimento
+        var updPag = await sb.from('pagamenti_fornitori').update({ movimento_foglio_id: movId }).eq('id', pagamentoId);
+        if (updPag.error) console.warn('[pfp] link pagamento↔movimento non creato:', updPag.error.message);
+      }
+    } catch (e2) {
+      console.warn('[pfp] errore step movimento foglio (pagamento è comunque salvato):', e2);
     }
 
-    // 3. Se la fattura è ora saldata → propaga pagato_fornitore=true su tutti gli ordini collegati
+    // ─── STEP 3: Propaga pagato_fornitore sugli ordini se fattura saldata (non-critico) ───
     if (saldata) {
-      var upd = await sb.from('ordini')
-        .update({ pagato_fornitore: true, data_pagamento_fornitore: data })
-        .eq('fattura_ricevuta_id', ctx.fattura.id);
-      if (upd.error) throw upd.error;
+      try {
+        var upd = await sb.from('ordini')
+          .update({ pagato_fornitore: true, data_pagamento_fornitore: data })
+          .eq('fattura_ricevuta_id', ctx.fattura.id);
+        if (upd.error) {
+          console.warn('[pfp] propagazione pagato_fornitore non riuscita:', upd.error.message);
+          alert('Pagamento salvato ✓ ma la propagazione "pagato" sugli ordini ha fallito.\n\nVerifica manualmente nello scadenzario se necessario.\n\nDettaglio: ' + upd.error.message);
+        }
+      } catch (e3) {
+        console.warn('[pfp] errore step propagazione ordini:', e3);
+      }
     }
 
+    // Successo: chiudi modale e callback
     var cb = ctx.onSaved;
     chiudiModalePagamentoFornitore();
-    if (typeof cb === 'function') cb({ saldata: saldata, importo: importo });
+    if (typeof cb === 'function') cb({ saldata: saldata, importo: importo, pagamentoId: pagamentoId });
   } catch (e) {
     console.error('[pfp] errore conferma', e);
-    alert('Errore salvataggio: ' + (e.message || String(e)));
+    alert('Errore salvataggio pagamento: ' + (e.message || String(e)));
     if (btn) { btn.disabled = false; btn.textContent = 'Conferma'; btn.style.opacity = '1'; }
+  } finally {
+    _pfpInCorso = false;
   }
 }
 

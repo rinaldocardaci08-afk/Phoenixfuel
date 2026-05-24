@@ -35,7 +35,18 @@ function _sfFmtD(d){ if(!d) return '—'; var p=String(d).split('-'); if(p.lengt
 function _sfFmtMese(m, a){ var ms=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']; return ms[m]+' '+a; }
 function _sfEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function _sfChiave(data, fornId, fattId){ return data+'|'+(fornId||'_')+'|'+(fattId||'null'); }
-function _sfOggiISO(){ return new Date().toISOString().split('T')[0]; }
+function _sfOggiISO(){
+  // Versione locale: evita il bug di toISOString() che in fuso UTC+2 di notte ritorna giorno precedente
+  var d = new Date();
+  var y = d.getFullYear();
+  var m = String(d.getMonth()+1).padStart(2,'0');
+  var dd = String(d.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + dd;
+}
+function _sfDataMeseISO(anno, mese, giorno){
+  // Costruisce data ISO YYYY-MM-DD usando mezzogiorno locale per evitare shift UTC
+  return new Date(anno, mese, giorno, 12, 0, 0).toISOString().split('T')[0];
+}
 function _sfGiorniDaScadenza(dataISO){
   var oggi = new Date(); oggi.setHours(0,0,0,0);
   var s = new Date(dataISO + 'T12:00:00'); s.setHours(0,0,0,0);
@@ -70,8 +81,9 @@ async function caricaScadenzarioFornitori() {
   el.innerHTML = '<div class="loading" style="padding:20px;font-size:13px;color:var(--text-muted)">Caricamento scadenzario…</div>';
 
   // Range data: estendo ±3 mesi per coprire scadenze precedenti/successive
-  var inizio = new Date(_sfFiltroAnno, _sfFiltroMese - 3, 1).toISOString().split('T')[0];
-  var fine   = new Date(_sfFiltroAnno, _sfFiltroMese + 3, 0).toISOString().split('T')[0];
+  // Uso helper con mezzogiorno locale per evitare bug timezone (1° del mese a mezzanotte locale → giorno precedente in UTC)
+  var inizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese - 3, 1);
+  var fine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 3, 0);
 
   try {
     var [ordRes, fattRes, pagRes, fornRes, contiRes, istRes] = await Promise.all([
@@ -85,8 +97,11 @@ async function caricaScadenzarioFornitori() {
         .not('fornitore','ilike','%deposito%')
         .not('fornitore','ilike','%rientro%')
         .order('data',{ascending:false}),
-      sb.from('fatture_ricevute').select('*'),
-      sb.from('pagamenti_fornitori').select('*').order('data_pagamento',{ascending:true}),
+      // Filtro periodo esteso: fatture il cui data_fattura cade nella finestra ±3 mesi
+      // (evita SELECT * non scalabile a regime 5000+ fatture)
+      sb.from('fatture_ricevute').select('*').gte('data_fattura', inizio).lte('data_fattura', fine),
+      // Pagamenti: stesso filtro per coerenza
+      sb.from('pagamenti_fornitori').select('*').gte('data_pagamento', inizio).lte('data_pagamento', fine).order('data_pagamento',{ascending:true}),
       sb.from('fornitori').select('id,nome,giorni_pagamento,colore'),
       sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
       sb.from('banche_istituti').select('id,nome')
@@ -118,8 +133,8 @@ async function caricaScadenzarioFornitori() {
 // AGGREGAZIONE per (data, fornitore_nome, fattura_ricevuta_id)
 // ═════════════════════════════════════════════════════════════════════
 function _sfAggregaRighe() {
-  var meseInizio = new Date(_sfFiltroAnno, _sfFiltroMese, 1).toISOString().split('T')[0];
-  var meseFine   = new Date(_sfFiltroAnno, _sfFiltroMese + 1, 0).toISOString().split('T')[0];
+  var meseInizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese, 1);
+  var meseFine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 1, 0);
 
   var fattMap = {};
   _sfFatture.forEach(function(f){ fattMap[f.id] = f; });
@@ -221,8 +236,8 @@ function _sfAggregaRighe() {
 // ═════════════════════════════════════════════════════════════════════
 function _sfCalcolaKPI(righe) {
   var k = { senzaFattura:0, daPagare:0, scadute:0, pagatoMese:0 };
-  var meseInizio = new Date(_sfFiltroAnno, _sfFiltroMese, 1).toISOString().split('T')[0];
-  var meseFine   = new Date(_sfFiltroAnno, _sfFiltroMese + 1, 0).toISOString().split('T')[0];
+  var meseInizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese, 1);
+  var meseFine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 1, 0);
 
   righe.forEach(function(r){
     if (r.stato === 'senza_fattura' || r.stato === 'scaduta_no_fattura') {
