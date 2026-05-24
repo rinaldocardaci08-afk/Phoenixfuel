@@ -939,6 +939,15 @@ async function _fgConfermaMovimento() {
   if (importo <= 0) { alert('⚠ Inserisci un importo > 0'); return; }
   if (!conto) { alert('⚠ Seleziona il conto (banca o cassa)'); return; }
 
+  // Validazione metodo per imputazioni su fatture ricevute:
+  // pagamenti_fornitori.modalita accetta SOLO bonifico/riba/assegno (no contanti/pos/altro)
+  // Avviso ESPLICITO all'utente invece di mapping silenzioso a "bonifico" come prima
+  var haImputazFatturaRic = Object.keys(m.imputazioni).some(function(k){ return k.indexOf('fr:') === 0; });
+  if (haImputazFatturaRic && ['bonifico','riba','assegno'].indexOf(metodo) === -1) {
+    alert('⚠ Per pagamenti su fatture ricevute il metodo deve essere Bonifico, RIBA o Assegno (no contanti/POS/altro).\n\nSeleziona un metodo valido oppure imputa solo a documenti di tipo diverso.');
+    return;
+  }
+
   var banca_id = null, cassa_tipo = null;
   if (conto.indexOf('banca:') === 0) banca_id = conto.substring(6);
   else if (conto.indexOf('cassa:') === 0) cassa_tipo = conto.substring(6);
@@ -1021,13 +1030,21 @@ async function _fgConfermaMovimento() {
     }
 
     // Post-riconciliazione: integrazione scadenzario fornitori
-    // (mapping metodo foglio → modalita pagamento: solo bonifico/riba/assegno ammessi)
+    // Batch ottimizzato: evita loop O(n) di query sequenziali quando ci sono N imputazioni
+    // (utile soprattutto per Modo C cumulativo con più fatture/ordini)
     var modalitaPag = (metodo === 'riba' || metodo === 'assegno') ? metodo : 'bonifico';
-    for (var k = 0; k < imputazioni.length; k++) {
-      var imp = imputazioni[k];
-      if (imp.tipo === 'fattura_ricevuta') {
-        // Crea record pagamenti_fornitori collegato a questo movimento foglio
-        var pagIns = await sb.from('pagamenti_fornitori').insert([{
+
+    // 1) Raccolgo le imputazioni per tipo
+    var impFattRic = imputazioni.filter(function(i){ return i.tipo === 'fattura_ricevuta'; });
+    var impOrdModoD = (m.modo === 'D')
+      ? imputazioni.filter(function(i){ return i.tipo === 'ordine'; })
+      : [];
+
+    // 2) Batch insert pagamenti_fornitori (un'unica query invece di N)
+    var fattureSaldateIds = [];
+    if (impFattRic.length > 0) {
+      var pagamentiBatch = impFattRic.map(function(imp){
+        return {
           fattura_ricevuta_id: imp.id,
           importo: imp.importo,
           data_pagamento: m.data,
@@ -1035,24 +1052,36 @@ async function _fgConfermaMovimento() {
           conto_id: null,
           riferimento_esterno: null,
           movimento_foglio_id: movId
-        }]).select('id').single();
-        if (pagIns.error) {
-          console.warn('[fg] pagamenti_fornitori non creato:', pagIns.error.message);
-          continue;
+        };
+      });
+      var pagIns = await sb.from('pagamenti_fornitori').insert(pagamentiBatch);
+      if (pagIns.error) {
+        console.warn('[fg] batch insert pagamenti_fornitori fallito:', pagIns.error.message);
+      } else {
+        // 3) Verifico in una sola query quali fatture sono ora saldate
+        var fattIds = impFattRic.map(function(i){ return i.id; });
+        var saldiRes = await sb.from('v_fatture_ricevute_saldi').select('id,saldo_residuo').in('id', fattIds);
+        if (!saldiRes.error && saldiRes.data) {
+          fattureSaldateIds = saldiRes.data
+            .filter(function(s){ return Number(s.saldo_residuo) <= 0.01; })
+            .map(function(s){ return s.id; });
         }
-        // Se la fattura è ora saldata → propaga pagato_fornitore=true sugli ordini collegati
-        var saldoRes = await sb.from('v_fatture_ricevute_saldi').select('saldo_residuo').eq('id', imp.id).maybeSingle();
-        if (!saldoRes.error && saldoRes.data && Number(saldoRes.data.saldo_residuo) <= 0.01) {
-          await sb.from('ordini')
-            .update({ pagato_fornitore: true, data_pagamento_fornitore: m.data })
-            .eq('fattura_ricevuta_id', imp.id);
-        }
-      } else if (imp.tipo === 'ordine' && m.modo === 'D') {
-        // Modo D: pagamento anticipato → setta pagato_fornitore=true sull'ordine
-        await sb.from('ordini')
-          .update({ pagato_fornitore: true, data_pagamento_fornitore: m.data })
-          .eq('id', imp.id);
       }
+    }
+
+    // 4) Batch update ordini "pagato" — sia per fatture saldate (modo A/C) sia per modo D
+    if (fattureSaldateIds.length > 0) {
+      var updRic = await sb.from('ordini')
+        .update({ pagato_fornitore: true, data_pagamento_fornitore: m.data })
+        .in('fattura_ricevuta_id', fattureSaldateIds);
+      if (updRic.error) console.warn('[fg] propagazione pagato sugli ordini fatturati fallita:', updRic.error.message);
+    }
+    if (impOrdModoD.length > 0) {
+      var ordIds = impOrdModoD.map(function(i){ return i.id; });
+      var updOrd = await sb.from('ordini')
+        .update({ pagato_fornitore: true, data_pagamento_fornitore: m.data })
+        .in('id', ordIds);
+      if (updOrd.error) console.warn('[fg] propagazione pagato modo D fallita:', updOrd.error.message);
     }
   }
 

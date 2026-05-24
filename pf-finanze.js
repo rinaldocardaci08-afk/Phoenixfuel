@@ -5,7 +5,17 @@
 
 var _finCalAnno = new Date().getFullYear();
 var _finCalMese = new Date().getMonth();
-var _finCalAncora = new Date().toISOString().split('T')[0]; // ancora ISO per modo settimana
+
+// Helper "oggi" locale: evita il bug di toISOString() che in fuso UTC+2 di notte ritorna giorno precedente
+function _finOggiISO() {
+  var d = new Date();
+  var y = d.getFullYear();
+  var m = String(d.getMonth()+1).padStart(2,'0');
+  var dd = String(d.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + dd;
+}
+
+var _finCalAncora = _finOggiISO(); // ancora ISO per modo settimana
 var _finCalModo = 'mese';   // 'settimana' | 'mese' | 'anno'
 var _finCalDati = null;
 var _finForColori = {};
@@ -287,7 +297,7 @@ function _finCalRenderMese() {
   var inizioGriglia = new Date(primoGiorno);
   var offset = (primoGiorno.getDay() + 6) % 7;
   inizioGriglia.setDate(inizioGriglia.getDate() - offset);
-  var oggiStr = new Date().toISOString().split('T')[0];
+  var oggiStr = _finOggiISO();
 
   var html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
   ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(function(g) {
@@ -326,7 +336,7 @@ function _finCalRenderSettimana() {
   var giornoMap = _finCalDati || {};
   var rng = _finCalRange();
   var lun = new Date(rng.daISO + 'T12:00:00');
-  var oggiStr = new Date().toISOString().split('T')[0];
+  var oggiStr = _finOggiISO();
 
   var html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
   ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].forEach(function(g) {
