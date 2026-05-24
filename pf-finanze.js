@@ -20,6 +20,10 @@ async function caricaFinanze() {
   var fineMese = new Date(_finCalAnno, _finCalMese + 1, 0);
   var daISO = new Date(_finCalAnno, _finCalMese, -7).toISOString().split('T')[0];
   var aISO = new Date(_finCalAnno, _finCalMese + 1, 7).toISOString().split('T')[0];
+  // Finestra estesa per ordini fornitori: copre dilazioni fino a 90gg
+  // (Eni 30gg, Q8 45gg, fornitori a 60-90gg). Senza questa, le scadenze in mese
+  // di ordini emessi >7gg prima del mese visualizzato venivano nascoste.
+  var daISOForn = new Date(_finCalAnno, _finCalMese, -90).toISOString().split('T')[0];
   var inizioMeseISO = inizioMese.toISOString().split('T')[0];
   var fineMeseISO = fineMese.toISOString().split('T')[0];
 
@@ -28,7 +32,7 @@ async function caricaFinanze() {
       .eq('tipo_ordine','cliente').neq('stato','annullato').eq('pagato',false)
       .gte('data_scadenza',daISO).lte('data_scadenza',aISO),
     sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore')
-      .neq('stato','annullato').eq('pagato_fornitore',false).not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').not('fornitore','ilike','%rientro%').gte('data',daISO),
+      .neq('stato','annullato').eq('pagato_fornitore',false).not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').not('fornitore','ilike','%rientro%').gte('data',daISOForn),
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
       .gte('data',inizioMeseISO).lte('data',fineMeseISO).order('data'),
     sb.from('fornitori').select('nome,giorni_pagamento,colore')
