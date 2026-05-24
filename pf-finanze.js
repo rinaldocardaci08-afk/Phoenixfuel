@@ -363,7 +363,158 @@ function _finCalRenderSettimana() {
     corrente.setDate(corrente.getDate() + 1);
   }
   html += '</div>';
+  // Riepilogo settimana per voce/cliente/fornitore (espandibile)
+  html += _finCalRenderRiepilogoSettimana();
   document.getElementById('fin-calendario').innerHTML = html;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// RIEPILOGO SETTIMANALE — sotto la griglia 7-giorni
+// Aggregato per cliente (entrate), per fornitore (uscite), con dettaglio
+// transazioni espandibile da freccetta
+// ────────────────────────────────────────────────────────────────────────
+function _finCalRenderRiepilogoSettimana() {
+  var giornoMap = _finCalDati || {};
+  var rng = _finCalRange();
+
+  var perCliente = {};
+  var perFornitore = {};
+  var totStazione = 0;
+  var stazioneDett = [];
+
+  // Itera i 7 giorni della settimana
+  var cur = new Date(rng.daISO + 'T12:00:00');
+  for (var i = 0; i < 7; i++) {
+    var dataStr = cur.toISOString().split('T')[0];
+    var g = giornoMap[dataStr];
+    if (g) {
+      g.entrateDettaglio.forEach(function(e) {
+        var key = e.cliente || '—';
+        if (!perCliente[key]) perCliente[key] = { tot:0, dettagli:[] };
+        perCliente[key].tot += e.importo;
+        perCliente[key].dettagli.push({ data:dataStr, prodotto:e.prodotto, litri:e.litri, importo:e.importo });
+      });
+      g.usciteDettaglio.forEach(function(u) {
+        var key = u.fornitore || '—';
+        if (!perFornitore[key]) perFornitore[key] = { tot:0, dettagli:[] };
+        perFornitore[key].tot += u.importo;
+        perFornitore[key].dettagli.push({ data:dataStr, prodotto:u.prodotto, litri:u.litri, importo:u.importo });
+      });
+      if (g.stazione > 0) {
+        totStazione += g.stazione;
+        stazioneDett.push({
+          data: dataStr,
+          carte: g.stazioneDettaglio ? g.stazioneDettaglio.carte : 0,
+          contanti: g.stazioneDettaglio ? g.stazioneDettaglio.contanti : 0,
+          tot: g.stazione
+        });
+      }
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  var totClienti = Object.values(perCliente).reduce(function(s,c){ return s + c.tot; }, 0);
+  var totUscite  = Object.values(perFornitore).reduce(function(s,f){ return s + f.tot; }, 0);
+  var totIn      = totClienti + totStazione;
+  var netto      = totIn - totUscite;
+  var nettoColor = netto >= 0 ? '#27500A' : '#791F1F';
+
+  var h = '<div style="border-top:0.5px solid var(--border);padding-top:14px;margin-top:16px">';
+
+  // Header con totali strip
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
+  h += '<span>📊 Riepilogo settimana</span>';
+  h += '<div style="display:flex;gap:14px;font-family:var(--font-mono);font-size:12px;flex-wrap:wrap">';
+  h += '<span style="color:#639922">↑ ' + _fmtCompact(totClienti) + '</span>';
+  h += '<span style="color:#0C447C">↑ ' + _fmtCompact(totStazione) + '</span>';
+  h += '<span style="color:#A32D2D">↓ ' + _fmtCompact(totUscite) + '</span>';
+  h += '<span style="color:' + nettoColor + ';font-weight:700">= ' + (netto >= 0 ? '+' : '') + _fmtCompact(netto) + '</span>';
+  h += '</div></div>';
+
+  // Due colonne
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
+
+  // ── COLONNA SX: Entrate per cliente ──
+  h += '<div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:600">Entrate per cliente</div>';
+  var ordCli = Object.keys(perCliente).sort(function(a,b){ return perCliente[b].tot - perCliente[a].tot; });
+  if (ordCli.length === 0 && totStazione === 0) {
+    h += '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:6px">Nessuna entrata nella settimana</div>';
+  } else {
+    ordCli.forEach(function(nome, idx) {
+      h += _finSettRiga('cli-' + idx, nome, perCliente[nome], '#EAF3DE', '#27500A', '#639922');
+    });
+    // Stazione separata se presente
+    if (totStazione > 0) {
+      var stazId = 'fin-sett-staz';
+      h += '<div style="height:1px;background:#e8e7e3;margin:8px 0"></div>';
+      h += '<div onclick="_finSettToggle(\'' + stazId + '\',this)" style="cursor:pointer;background:#E6F1FB;color:#0C447C;border-left:3px solid #378ADD;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:3px;font-size:12px;font-weight:500">';
+      h += '<span style="display:flex;align-items:center;gap:6px;overflow:hidden">';
+      h += '<span class="caret" style="font-size:9px;transition:transform 0.15s;display:inline-block">▶</span>';
+      h += '<span>Stazione Oppido</span></span>';
+      h += '<span style="font-family:var(--font-mono);white-space:nowrap;margin-left:10px">' + fmtE(totStazione) + '</span>';
+      h += '</div>';
+      h += '<div id="' + stazId + '" style="display:none;padding:4px 0 8px 18px;font-size:11px">';
+      stazioneDett.forEach(function(s) {
+        var df = new Date(s.data + 'T12:00:00').toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
+        h += '<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--text-muted)">';
+        h += '<span>' + esc(df) + ' · Carte ' + fmtE(s.carte) + ' · Contanti ' + fmtE(s.contanti) + '</span>';
+        h += '<span style="font-family:var(--font-mono)">' + fmtE(s.tot) + '</span>';
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+  }
+  h += '</div>';
+
+  // ── COLONNA DX: Uscite per fornitore ──
+  h += '<div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:600">Uscite per fornitore</div>';
+  var ordForn = Object.keys(perFornitore).sort(function(a,b){ return perFornitore[b].tot - perFornitore[a].tot; });
+  if (ordForn.length === 0) {
+    h += '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:6px">Nessuna uscita nella settimana</div>';
+  } else {
+    ordForn.forEach(function(nome, idx) {
+      var col = _finForColori[nome] || '#FAEEDA';
+      h += _finSettRiga('forn-' + idx, nome, perFornitore[nome], col, '#791F1F', '#E24B4A');
+    });
+  }
+  h += '</div>';
+
+  h += '</div>'; // chiude grid
+  h += '</div>'; // chiude border-top
+  return h;
+}
+
+// Helper: render singola riga espandibile del riepilogo settimana
+function _finSettRiga(idSuffix, nome, data, bgColor, textColor, borderColor) {
+  var rowId = 'fin-sett-' + idSuffix;
+  var h = '<div onclick="_finSettToggle(\'' + rowId + '\',this)" style="cursor:pointer;background:' + bgColor + ';color:' + textColor + ';border-left:3px solid ' + borderColor + ';display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:3px;font-size:12px;font-weight:500">';
+  h += '<span style="display:flex;align-items:center;gap:6px;overflow:hidden">';
+  h += '<span class="caret" style="font-size:9px;transition:transform 0.15s;display:inline-block">▶</span>';
+  h += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(nome) + '</span></span>';
+  h += '<span style="font-family:var(--font-mono);white-space:nowrap;margin-left:10px">' + fmtE(data.tot) + '</span>';
+  h += '</div>';
+  h += '<div id="' + rowId + '" style="display:none;padding:4px 0 8px 18px;font-size:11px">';
+  data.dettagli.sort(function(a,b){ return a.data < b.data ? -1 : 1; }).forEach(function(d) {
+    var df = new Date(d.data + 'T12:00:00').toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
+    h += '<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--text-muted)">';
+    h += '<span>' + esc(df) + ' · ' + esc(d.prodotto || '—') + ' ' + fmtL(d.litri) + '</span>';
+    h += '<span style="font-family:var(--font-mono)">' + fmtE(d.importo) + '</span>';
+    h += '</div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+// Toggle espansione riga riepilogo
+function _finSettToggle(id, header) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var aperto = el.style.display !== 'none';
+  el.style.display = aperto ? 'none' : 'block';
+  var caret = header.querySelector('.caret');
+  if (caret) caret.style.transform = aperto ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -519,3 +670,4 @@ window.finCalVaiAlMese         = finCalVaiAlMese;
 window.caricaFinanze           = caricaFinanze;
 window.renderCalendarioFinanze = renderCalendarioFinanze;
 window.mostraDettaglioFinanze  = mostraDettaglioFinanze;
+window._finSettToggle          = _finSettToggle;
