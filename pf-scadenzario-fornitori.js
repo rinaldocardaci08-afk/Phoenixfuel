@@ -67,7 +67,7 @@ async function caricaScadenzarioFornitori() {
   try {
     var [ordRes, fattRes, pagRes, fornRes, contiRes, istRes] = await Promise.all([
       sb.from('ordini')
-        .select('id,data,fornitore,fornitore_id,prodotto,litri,costo_litro,trasporto_litro,iva,stato,fattura_ricevuta_id,giorni_pagamento,das_firmato_url')
+        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,fattura_ricevuta_id,giorni_pagamento,das_firmato_url')
         .eq('tipo_ordine','entrata_deposito')
         .neq('stato','annullato')
         .gte('data', inizio)
@@ -92,8 +92,11 @@ async function caricaScadenzarioFornitori() {
     _sfPagamenti = pagRes.data || [];
     _sfConti     = contiRes.data || [];
     _sfIstituti  = istRes.data || [];
+    // Mappa fornitori keyed by NOME lowercase (ordini.fornitore è testo, niente FK su ordini)
     _sfFornitoriMap = {};
-    (fornRes.data || []).forEach(function(f){ _sfFornitoriMap[f.id] = f; });
+    (fornRes.data || []).forEach(function(f){
+      if (f.nome) _sfFornitoriMap[f.nome.toLowerCase().trim()] = f;
+    });
 
     renderScadenzarioFornitori();
   } catch (e) {
@@ -103,7 +106,7 @@ async function caricaScadenzarioFornitori() {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// AGGREGAZIONE per (data, fornitore_id, fattura_ricevuta_id)
+// AGGREGAZIONE per (data, fornitore_nome, fattura_ricevuta_id)
 // ═════════════════════════════════════════════════════════════════════
 function _sfAggregaRighe() {
   var meseInizio = new Date(_sfFiltroAnno, _sfFiltroMese, 1).toISOString().split('T')[0];
@@ -120,13 +123,13 @@ function _sfAggregaRighe() {
   var raggruppati = {};
   _sfOrdini.forEach(function(o){
     if (o.data < meseInizio || o.data > meseFine) return;
-    var fornKey = o.fornitore_id || ('NOME_'+(o.fornitore||'?'));
-    var chiave  = _sfChiave(o.data, fornKey, o.fattura_ricevuta_id);
+    var nomeKey = (o.fornitore || '?').toLowerCase().trim();
+    var chiave  = _sfChiave(o.data, nomeKey, o.fattura_ricevuta_id);
     if (!raggruppati[chiave]) {
       raggruppati[chiave] = {
         chiave: chiave,
         data: o.data,
-        fornitoreId: o.fornitore_id || null,
+        fornitoreNomeKey: nomeKey,
         fornitoreNome: o.fornitore || '?',
         fatturaId: o.fattura_ricevuta_id || null,
         ordini: [],
@@ -152,7 +155,7 @@ function _sfAggregaRighe() {
     r.totPagato  = r.pagamenti.reduce(function(s,p){ return s + Number(p.importo||0); }, 0);
 
     // Scadenza calcolata: usa giorni_pagamento dal master fornitore (regola PF)
-    var forn = (r.fornitoreId && _sfFornitoriMap[r.fornitoreId]) || {};
+    var forn = _sfFornitoriMap[r.fornitoreNomeKey] || {};
     var ggPag = Number(forn.giorni_pagamento || (r.ordini[0] && r.ordini[0].giorni_pagamento) || 30);
     r.ggPagamento = ggPag;
     var d = new Date(r.data); d.setDate(d.getDate() + ggPag);
@@ -229,7 +232,7 @@ function renderScadenzarioFornitori() {
         case 'pagate':        if (r.stato !== 'pagata') return false; break;
       }
     }
-    if (_sfFiltroFornitore !== 'tutti' && r.fornitoreId !== _sfFiltroFornitore) return false;
+    if (_sfFiltroFornitore !== 'tutti' && r.fornitoreNomeKey !== _sfFiltroFornitore) return false;
     return true;
   });
 
@@ -248,14 +251,14 @@ function _sfHtmlToolbar() {
   var meseLabel = _sfFmtMese(_sfFiltroMese, _sfFiltroAnno);
   var meseVal = _sfFiltroAnno+'-'+String(_sfFiltroMese+1).padStart(2,'0');
 
-  var nomi = Object.keys(_sfFornitoriMap).map(function(id){
-    return { id: id, nome: _sfFornitoriMap[id].nome };
+  var nomi = Object.keys(_sfFornitoriMap).map(function(k){
+    return { key: k, nome: _sfFornitoriMap[k].nome };
   });
   nomi.sort(function(a,b){ return a.nome.localeCompare(b.nome); });
   var fornOpts = '<option value="tutti">Tutti i fornitori</option>';
   nomi.forEach(function(f){
-    var sel = (_sfFiltroFornitore===f.id) ? ' selected' : '';
-    fornOpts += '<option value="'+_sfEsc(f.id)+'"'+sel+'>'+_sfEsc(f.nome)+'</option>';
+    var sel = (_sfFiltroFornitore===f.key) ? ' selected' : '';
+    fornOpts += '<option value="'+_sfEsc(f.key)+'"'+sel+'>'+_sfEsc(f.nome)+'</option>';
   });
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">';
@@ -488,7 +491,7 @@ function _sfApriModaleInsFattura(chiaveRiga) {
   var righe = _sfAggregaRighe();
   var r = righe.find(function(x){ return x.chiave === chiaveRiga; });
   if (!r) { alert('Riga non trovata'); return; }
-  _sfModaleCtx = { chiaveRiga: chiaveRiga, totConIva: r.totConIva, fornitoreId: r.fornitoreId, fornitoreNome: r.fornitoreNome, data: r.data, ordiniIds: r.ordini.map(function(o){return o.id;}) };
+  _sfModaleCtx = { chiaveRiga: chiaveRiga, totConIva: r.totConIva, fornitoreNomeKey: r.fornitoreNomeKey, fornitoreNome: r.fornitoreNome, data: r.data, ordiniIds: r.ordini.map(function(o){return o.id;}) };
 
   var totDef = r.totConIva.toFixed(2);
   var nOrd = r.ordini.length;
@@ -603,8 +606,12 @@ async function _sfSalvaFattura() {
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; btn.style.opacity = '0.6'; }
 
   try {
+    // Risolvi fornitore_id dall'anagrafica via nome (ordini non ha fornitore_id)
+    var forn = _sfFornitoriMap[_sfModaleCtx.fornitoreNomeKey] || null;
+    var fornitoreId = forn ? forn.id : null;
+
     var ins = await sb.from('fatture_ricevute').insert([{
-      fornitore_id:        _sfModaleCtx.fornitoreId,
+      fornitore_id:        fornitoreId,
       fornitore_nome:      _sfModaleCtx.fornitoreNome,
       numero_fattura:      numero,
       data_fattura:        dataFatt,
