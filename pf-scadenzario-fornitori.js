@@ -323,6 +323,29 @@ function _sfHtmlTabella(righe) {
     h += '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:13px">Nessuna riga per il periodo e filtri selezionati.</div>';
   } else {
     righe.forEach(function(r){ h += _sfHtmlRiga(r); });
+
+    // Footer totali pagina (somme delle righe visibili dopo i filtri)
+    var totOrd = 0, totLit = 0, totImp = 0, totResiduo = 0;
+    righe.forEach(function(r){
+      totOrd += r.ordini.length;
+      totLit += r.totLitri;
+      totImp += r.totConIva;
+      if (r.fattura) {
+        totResiduo += Math.max(0, Number(r.fattura.importo_dichiarato) - r.totPagato);
+      } else {
+        totResiduo += r.totConIva;
+      }
+    });
+
+    h += '<div style="display:grid;grid-template-columns:24px 86px 1fr 130px 110px 160px 200px;align-items:center;gap:8px;padding:12px 14px;background:var(--bg);border-top:1px solid var(--border);font-size:12px;font-weight:600">';
+    h += '<span></span>';
+    h += '<span style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px">Totale pagina</span>';
+    h += '<span style="color:var(--text-muted)">'+righe.length+' righe</span>';
+    h += '<span style="color:var(--text-muted)"><strong style="color:var(--text)">'+totOrd+'</strong> ord · '+_sfFmtL(totLit)+'</span>';
+    h += '<span style="text-align:right;font-size:14px">'+_sfFmtE(totImp)+'</span>';
+    h += '<span></span>';
+    h += '<span style="font-size:11px;color:var(--text-muted)">Saldo da pagare: <strong style="color:#A32D2D;font-size:13px">'+_sfFmtE(totResiduo)+'</strong></span>';
+    h += '</div>';
   }
 
   h += '</div>';
