@@ -617,8 +617,10 @@ function _fgRenderModale() {
   var labelA = m.tipo === 'entrata' ? 'A · Cerca fattura cliente' : 'A · Cerca fattura fornitore';
   var labelB = m.tipo === 'entrata' ? 'B · Generica / no fattura' : 'B · Spesa generica / extra-fattura';
   var labelC = 'C · Cumulativo (split)';
-  html += '<div style="display:flex;gap:4px;margin-bottom:14px;padding-bottom:12px;border-bottom:0.5px solid var(--border)">';
+  var labelD = 'D · Cerca ordine da pagare';
+  html += '<div style="display:flex;gap:4px;margin-bottom:14px;padding-bottom:12px;border-bottom:0.5px solid var(--border);flex-wrap:wrap">';
   html += modoTab('A', labelA) + modoTab('B', labelB) + modoTab('C', labelC);
+  if (m.tipo === 'uscita') html += modoTab('D', labelD);
   html += '</div>';
 
   // Contenuto modo
@@ -644,6 +646,7 @@ function _fgCambiaModo(letterId) {
   _fgModale.contraenteSelezionato = null;
   _fgModale.fattureTrovate = [];
   _fgModale.ordiniTrovati = [];
+  _fgModale.fattureRicevuteTrovate = [];
   _fgModale.imputazioni = {};
   document.getElementById('fg-modo-content').innerHTML = _fgRenderModoContent();
 }
@@ -654,6 +657,7 @@ function _fgRenderModoContent() {
   if (m.modo === 'A') return _fgRenderModoA();
   if (m.modo === 'B') return _fgRenderModoB();
   if (m.modo === 'C') return _fgRenderModoC();
+  if (m.modo === 'D') return _fgRenderModoD();
   return '';
 }
 
@@ -672,6 +676,20 @@ function _fgRenderModoA() {
   html += '<div id="fg-risultati-cerca" style="max-height:300px;overflow-y:auto"></div>';
   html += '<div id="fg-fatture-trovate" style="margin-top:10px"></div>';
 
+  return html;
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// MODO D: cerca ordine fornitore SENZA fattura ricevuta (pagamento anticipato)
+// ────────────────────────────────────────────────────────────────────────
+function _fgRenderModoD() {
+  var html = '';
+  html += '<div style="font-size:11px;color:#854F0B;background:#FAEEDA;border-left:3px solid #BA7517;border-radius:4px;padding:8px 10px;margin-bottom:10px">Per pagare un ordine fornitore <strong>prima</strong> che arrivi la sua fattura ricevuta. L\'ordine sarà marcato come pagato anticipato.</div>';
+  html += '<div style="margin-bottom:10px"><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Cerca fornitore</label>';
+  html += '<input type="text" id="fg-cerca-contraente" oninput="_fgCercaContraente()" placeholder="Nome fornitore..." style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+  html += '<div id="fg-risultati-cerca" style="max-height:300px;overflow-y:auto"></div>';
+  html += '<div id="fg-fatture-trovate" style="margin-top:10px"></div>';
   return html;
 }
 
@@ -701,10 +719,14 @@ async function _fgCercaContraente() {
       });
     }
   } else {
-    // Cerco tra fornitori (campo testuale negli ordini)
-    var resF = await sb.from('ordini').select('fornitore').eq('tipo_ordine', 'entrata_deposito').ilike('fornitore', '%' + q + '%').limit(50);
+    // Uscite: cerco tra fornitori sia in fatture ricevute sia in ordini (deduplicato)
+    var [resF, resFR] = await Promise.all([
+      sb.from('ordini').select('fornitore').eq('tipo_ordine', 'entrata_deposito').ilike('fornitore', '%' + q + '%').limit(50),
+      sb.from('fatture_ricevute').select('fornitore_nome').ilike('fornitore_nome', '%' + q + '%').limit(50)
+    ]);
     var fornSet = {};
     (resF.data || []).forEach(function(o) { if (o.fornitore) fornSet[o.fornitore] = true; });
+    (resFR.data || []).forEach(function(fr) { if (fr.fornitore_nome) fornSet[fr.fornitore_nome] = true; });
     var fornitori = Object.keys(fornSet).slice(0, 8);
     if (fornitori.length === 0) {
       html = '<div style="font-size:11px;color:var(--text-muted);padding:6px;font-style:italic">Nessun fornitore trovato</div>';
@@ -731,10 +753,16 @@ async function _fgSelezionaContraente(id, nome, tipo) {
     var resV = await sb.from('estratto_conto_cliente').select('*').eq('cliente_id', id).gt('saldo_residuo', 0.01).order('data', { ascending: false }).limit(20);
     _fgModale.fattureTrovate = resV.data || [];
     elFatt.innerHTML = _fgRenderListaFatture();
-  } else {
-    var resO = await sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore').eq('tipo_ordine', 'entrata_deposito').eq('fornitore', nome).eq('pagato_fornitore', false).order('data', { ascending: false }).limit(20);
-    _fgModale.ordiniTrovati = resO.data || [];
+  } else if (_fgModale.modo === 'D') {
+    // Modo D: ordini SENZA fattura ricevuta (per pagamento anticipato)
+    var resOd = await sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore').eq('tipo_ordine', 'entrata_deposito').eq('fornitore', nome).eq('pagato_fornitore', false).is('fattura_ricevuta_id', null).order('data', { ascending: false }).limit(20);
+    _fgModale.ordiniTrovati = resOd.data || [];
     elFatt.innerHTML = _fgRenderListaOrdini();
+  } else {
+    // Modo A (uscita): fatture ricevute non saldate del fornitore
+    var resFR = await sb.from('v_fatture_ricevute_saldi').select('*').eq('fornitore_nome', nome).gt('saldo_residuo', 0.01).order('data_fattura', { ascending: false }).limit(20);
+    _fgModale.fattureRicevuteTrovate = resFR.data || [];
+    elFatt.innerHTML = _fgRenderListaFattureRicevute();
   }
 }
 
@@ -809,6 +837,39 @@ function _fgImputaOrdine(id, val) {
   var v = parseFloat(val) || 0;
   if (v <= 0) delete _fgModale.imputazioni['ord:' + id];
   else _fgModale.imputazioni['ord:' + id] = v;
+  _fgAggiornaStatusModale();
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// FATTURE RICEVUTE (Modo A uscite) — render + imputa
+// ────────────────────────────────────────────────────────────────────────
+function _fgRenderListaFattureRicevute() {
+  var f = _fgModale.fattureRicevuteTrovate || [];
+  if (!f.length) {
+    return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:4px">Nessuna fattura ricevuta aperta per questo fornitore. Per pagare un ordine non ancora fatturato usa il Modo D.</div>';
+  }
+  var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Fatture ricevute aperte (' + f.length + '):</div>';
+  html += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
+  html += '<thead><tr style="background:var(--bg)"><th style="text-align:left;padding:5px 6px">N°</th><th style="text-align:left;padding:5px 6px">Data</th><th style="text-align:right;padding:5px 6px">Totale</th><th style="text-align:right;padding:5px 6px">Saldo</th><th style="text-align:right;padding:5px 6px">Imputa €</th></tr></thead><tbody>';
+  f.forEach(function(fa) {
+    var imp = _fgModale.imputazioni['fr:' + fa.id] || '';
+    html += '<tr style="border-bottom:0.5px solid var(--border)">';
+    html += '<td style="padding:5px 6px;font-family:var(--font-mono);font-weight:500">' + esc(String(fa.numero_fattura || '—')) + '</td>';
+    html += '<td style="padding:5px 6px">' + _fgFmtData(fa.data_fattura) + '</td>';
+    html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + _fgFmtImporto(fa.importo_dichiarato) + '</td>';
+    html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:#BA7517;font-weight:500">' + _fgFmtImporto(fa.saldo_residuo) + '</td>';
+    html += '<td style="padding:5px 6px;text-align:right"><input type="number" step="0.01" min="0" max="' + fa.saldo_residuo + '" value="' + imp + '" placeholder="0,00" oninput="_fgImputaFatturaRicevuta(\'' + fa.id + '\',this.value)" style="width:90px;font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:3px;text-align:right"/></td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function _fgImputaFatturaRicevuta(id, val) {
+  var v = parseFloat(val) || 0;
+  if (v <= 0) delete _fgModale.imputazioni['fr:' + id];
+  else _fgModale.imputazioni['fr:' + id] = v;
   _fgAggiornaStatusModale();
 }
 
@@ -909,6 +970,8 @@ async function _fgConfermaMovimento() {
         imputazioni.push({ tipo: 'fattura', id: k.substring(5), importo: v });
       } else if (k.indexOf('ord:') === 0) {
         imputazioni.push({ tipo: 'ordine', id: k.substring(4), importo: v });
+      } else if (k.indexOf('fr:') === 0) {
+        imputazioni.push({ tipo: 'fattura_ricevuta', id: k.substring(3), importo: v });
       }
     });
     descrizione = (m.contraenteSelezionato ? m.contraenteSelezionato.nome : 'Movimento') + ' — ' + impKeys.length + (impKeys.length === 1 ? ' documento' : ' documenti');
@@ -943,6 +1006,7 @@ async function _fgConfermaMovimento() {
         movimento_id: movId,
         fattura_emessa_id: i.tipo === 'fattura' ? i.id : null,
         ordine_id: i.tipo === 'ordine' ? i.id : null,
+        fattura_ricevuta_id: i.tipo === 'fattura_ricevuta' ? i.id : null,
         importo_imputato: i.importo
       };
     });
@@ -954,6 +1018,41 @@ async function _fgConfermaMovimento() {
       caricaFoglioGiornale();
       if (typeof _fgFullscreenGiornoIso !== 'undefined' && _fgFullscreenGiornoIso) _fgRenderFullscreen();
       return;
+    }
+
+    // Post-riconciliazione: integrazione scadenzario fornitori
+    // (mapping metodo foglio → modalita pagamento: solo bonifico/riba/assegno ammessi)
+    var modalitaPag = (metodo === 'riba' || metodo === 'assegno') ? metodo : 'bonifico';
+    for (var k = 0; k < imputazioni.length; k++) {
+      var imp = imputazioni[k];
+      if (imp.tipo === 'fattura_ricevuta') {
+        // Crea record pagamenti_fornitori collegato a questo movimento foglio
+        var pagIns = await sb.from('pagamenti_fornitori').insert([{
+          fattura_ricevuta_id: imp.id,
+          importo: imp.importo,
+          data_pagamento: m.data,
+          modalita: modalitaPag,
+          conto_id: null,
+          riferimento_esterno: null,
+          movimento_foglio_id: movId
+        }]).select('id').single();
+        if (pagIns.error) {
+          console.warn('[fg] pagamenti_fornitori non creato:', pagIns.error.message);
+          continue;
+        }
+        // Se la fattura è ora saldata → propaga pagato_fornitore=true sugli ordini collegati
+        var saldoRes = await sb.from('v_fatture_ricevute_saldi').select('saldo_residuo').eq('id', imp.id).maybeSingle();
+        if (!saldoRes.error && saldoRes.data && Number(saldoRes.data.saldo_residuo) <= 0.01) {
+          await sb.from('ordini')
+            .update({ pagato_fornitore: true, data_pagamento_fornitore: m.data })
+            .eq('fattura_ricevuta_id', imp.id);
+        }
+      } else if (imp.tipo === 'ordine' && m.modo === 'D') {
+        // Modo D: pagamento anticipato → setta pagato_fornitore=true sull'ordine
+        await sb.from('ordini')
+          .update({ pagato_fornitore: true, data_pagamento_fornitore: m.data })
+          .eq('id', imp.id);
+      }
     }
   }
 
