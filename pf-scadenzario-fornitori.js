@@ -768,10 +768,19 @@ async function _sfRimuoviFattura(fatturaId) {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// PLACEHOLDER — modale pagamento (prossimo step)
+// MODALE PAGAMENTO — delega al modulo condiviso pf-pagamento-fornitore-modale.js
 // ═════════════════════════════════════════════════════════════════════
 function _sfApriModalePagamento(fatturaId) {
-  alert('Modale registrazione pagamento in arrivo nel prossimo step.\n\nFattura: ' + fatturaId);
+  if (typeof apriModalePagamentoFornitore !== 'function') {
+    alert('Modulo modale pagamento non caricato. Ricarica la pagina e riprova.');
+    return;
+  }
+  apriModalePagamentoFornitore(fatturaId, {
+    onSaved: function(result){
+      // result = { saldata: bool, importo: number }
+      caricaScadenzarioFornitori();
+    }
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════
