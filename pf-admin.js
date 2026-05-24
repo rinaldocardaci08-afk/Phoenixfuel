@@ -745,7 +745,11 @@ async function apriRipristinaSnapshot() {
   if (error) { toast('Errore lettura backup: ' + error.message); return; }
   if (!files || !files.length) { toast('Nessun snapshot disponibile'); return; }
 
-  var snapshotList = files.filter(function(f){ return /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(f.name); });
+  // v20260524: include sia legacy che cartelle
+  var snapshotList = files.filter(function(f){
+    return /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(f.name)
+        || /^\d{4}-\d{2}-\d{2}$/.test(f.name);
+  });
   if (!snapshotList.length) { toast('Nessun snapshot valido'); return; }
 
   var h = '<div style="font-size:18px;font-weight:600;margin-bottom:8px;color:#791F1F">⚠️ Ripristina database da snapshot</div>';
@@ -845,30 +849,64 @@ async function caricaListaSnapshot() {
   wrap.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:8px">Carico storico backup...</div>';
   try {
     var { data: files, error } = await sb.storage.from('backups').list('', {
-      limit: 50, sortBy: { column: 'created_at', order: 'desc' }
+      limit: 100, sortBy: { column: 'name', order: 'desc' }
     });
     if (error) throw error;
-    var snap = (files||[]).filter(function(f){ return /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(f.name); });
+
+    // ═══ v20260524: supporto sia legacy (backup-YYYY-MM-DD.json) che nuovo formato (cartelle YYYY-MM-DD/) ═══
+    var snap = [];
+    (files||[]).forEach(function(f) {
+      var mLegacy = f.name.match(/^backup-(\d{4}-\d{2}-\d{2})\.json$/);
+      if (mLegacy) {
+        snap.push({ dataStr: mLegacy[1], name: f.name, isFolder: false,
+          created_at: f.created_at, size: (f.metadata && f.metadata.size) || 0 });
+        return;
+      }
+      var mFolder = f.name.match(/^(\d{4}-\d{2}-\d{2})$/);
+      if (mFolder) {
+        snap.push({ dataStr: mFolder[1], name: f.name, isFolder: true,
+          created_at: f.created_at || null, size: 0, fileCount: 0 });
+      }
+    });
     if (!snap.length) {
       wrap.innerHTML = '<div style="padding:10px;background:var(--bg);border-radius:6px;font-size:11px;color:var(--text-muted)">Nessun backup ancora creato</div>';
       return;
     }
+    // Ordina DESC per data
+    snap.sort(function(a,b){ return b.dataStr.localeCompare(a.dataStr); });
+
+    // Calcola dimensione totale delle cartelle (Promise.all parallelo, top 10)
+    var sizeP = snap.slice(0, 10).map(function(s){
+      if (!s.isFolder) return Promise.resolve(s);
+      return sb.storage.from('backups').list(s.name, { limit: 100 }).then(function(res){
+        var fs = res.data || [];
+        s.size = fs.reduce(function(t,f){ return t + ((f.metadata && f.metadata.size) || 0); }, 0);
+        s.fileCount = fs.length;
+        if (fs.length && fs[0].created_at) s.created_at = fs[0].created_at;
+        return s;
+      }).catch(function(){ return s; });
+    });
+    await Promise.all(sizeP);
+
     var html = '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:500;margin-bottom:6px">📜 Storico backup (' + snap.length + ')</div>';
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;overflow:hidden">';
-    snap.slice(0, 10).forEach(function(f, i) {
-      var dataStr = f.name.replace('backup-','').replace('.json','');
-      var sizeMB = f.metadata && f.metadata.size ? (f.metadata.size/1024/1024).toFixed(2) : '—';
-      var created = f.created_at ? new Date(f.created_at).toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+    snap.slice(0, 10).forEach(function(s, i) {
+      var sizeMB = s.size ? (s.size/1024/1024).toFixed(2) : '—';
+      var created = s.created_at ? new Date(s.created_at).toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
       var bgRow = i === 0 ? 'background:#EAF3DE' : '';
       var badge = i === 0 ? '<span style="background:#27500A;color:#EAF3DE;padding:1px 6px;border-radius:4px;font-size:9px;margin-left:6px">PIÙ RECENTE</span>' : '';
+      var formatBadge = s.isFolder
+        ? '<span style="background:#0E6F8E;color:white;padding:1px 5px;border-radius:3px;font-size:9px;margin-left:4px" title="Formato nuovo (cartella per giorno)">v2</span>'
+        : '<span style="background:#888;color:white;padding:1px 5px;border-radius:3px;font-size:9px;margin-left:4px" title="Formato legacy (file singolo)">legacy</span>';
+      var dettaglioFiles = s.isFolder && s.fileCount ? s.fileCount + ' file · ' : '';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:0.5px solid var(--border);' + bgRow + '">';
-      html += '<div style="flex:1;font-size:12px"><span style="font-family:var(--font-mono);font-weight:500">' + esc(dataStr) + '</span>' + badge;
-      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + esc(created) + ' · ' + sizeMB + ' MB · <code style="font-size:9px">' + esc(f.name) + '</code></div></div>';
-      html += '<button class="btn-edit" style="font-size:11px;padding:4px 10px" onclick="ripristinaSnapshotDiretto(\'' + esc(f.name) + '\')" title="Ripristina questo backup">↶ Ripristina</button>';
+      html += '<div style="flex:1;font-size:12px"><span style="font-family:var(--font-mono);font-weight:500">' + esc(s.dataStr) + '</span>' + badge + formatBadge;
+      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + esc(created) + ' · ' + dettaglioFiles + sizeMB + ' MB</div></div>';
+      html += '<button class="btn-edit" style="font-size:11px;padding:4px 10px" onclick="ripristinaSnapshotDiretto(\'' + esc(s.name) + '\',' + (s.isFolder ? 'true' : 'false') + ')" title="Ripristina questo backup">↶ Ripristina</button>';
       html += '</div>';
     });
     html += '</div>';
-    if (snap.length > 10) html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">... e altri ' + (snap.length-10) + ' backup più vecchi (retention 30gg)</div>';
+    if (snap.length > 10) html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">... e altri ' + (snap.length-10) + ' backup più vecchi (retention 7gg)</div>';
     wrap.innerHTML = html;
   } catch(e) {
     wrap.innerHTML = '<div style="padding:10px;background:#FCEBEB;border-radius:6px;color:#791F1F;font-size:11px">❌ Errore lettura backup: ' + esc(e.message) + '</div>';
@@ -876,8 +914,22 @@ async function caricaListaSnapshot() {
 }
 
 // Wrapper per ripristino diretto da bottone lista (apre stessa modale ma con file pre-selezionato)
-async function ripristinaSnapshotDiretto(filename) {
+async function ripristinaSnapshotDiretto(filename, isFolder) {
   if (!_isAdmin()) { toast('Solo admin'); return; }
+
+  // ═══ v20260524: blocco temporaneo restore su formato cartella (v2) ═══
+  // La Edge Function 'restore-backup' legge solo file singolo legacy.
+  // Per ripristinare un backup cartella occorre prima aggiornare anche
+  // 'restore-backup' (sessione separata).
+  if (isFolder) {
+    var msgFolder = '⚠️ Backup nuovo formato (cartella ' + filename + '/).\n\n' +
+      'Il ripristino automatico di questo formato richiede l\'aggiornamento della\n' +
+      'Edge Function "restore-backup" che attualmente legge solo file singoli legacy.\n\n' +
+      'Operazione bloccata per evitare corruzioni. Contattare Claude per aggiornamento.';
+    alert(msgFolder);
+    return;
+  }
+
   var h = '<div style="font-size:18px;font-weight:600;margin-bottom:8px;color:#791F1F">⚠️ Ripristina backup: ' + esc(filename) + '</div>';
   h += '<div style="background:#FCEBEB;border:2px solid #E24B4A;padding:14px;border-radius:8px;margin-bottom:14px;font-size:13px;line-height:1.6">';
   h += '<strong style="color:#791F1F">⛔ ATTENZIONE — OPERAZIONE DISTRUTTIVA</strong><br><br>';
