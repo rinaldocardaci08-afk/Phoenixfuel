@@ -413,6 +413,9 @@ function _finCalRenderRiepilogoSettimana() {
     cur.setDate(cur.getDate() + 1);
   }
 
+  var ordCli  = Object.keys(perCliente).sort(function(a,b){ return perCliente[b].tot - perCliente[a].tot; });
+  var ordForn = Object.keys(perFornitore).sort(function(a,b){ return perFornitore[b].tot - perFornitore[a].tot; });
+
   var totClienti = Object.values(perCliente).reduce(function(s,c){ return s + c.tot; }, 0);
   var totUscite  = Object.values(perFornitore).reduce(function(s,f){ return s + f.tot; }, 0);
   var totIn      = totClienti + totStazione;
@@ -431,58 +434,56 @@ function _finCalRenderRiepilogoSettimana() {
   h += '<span style="color:' + nettoColor + ';font-weight:700">= ' + (netto >= 0 ? '+' : '') + _fmtCompact(netto) + '</span>';
   h += '</div></div>';
 
-  // Due colonne
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
-
-  // ── COLONNA SX: Entrate per cliente ──
-  h += '<div>';
-  h += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:600">Entrate per cliente</div>';
-  var ordCli = Object.keys(perCliente).sort(function(a,b){ return perCliente[b].tot - perCliente[a].tot; });
-  if (ordCli.length === 0 && totStazione === 0) {
-    h += '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:6px">Nessuna entrata nella settimana</div>';
-  } else {
+  // 3 sezioni master collassabili (default = collassate)
+  h += _finSettSezione('master-ent', 'Entrate per cliente', totClienti, ordCli.length, '#EAF3DE', '#27500A', '#639922', function() {
+    if (ordCli.length === 0) return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic">Nessuna entrata cliente</div>';
+    var inner = '';
     ordCli.forEach(function(nome, idx) {
-      h += _finSettRiga('cli-' + idx, nome, perCliente[nome], '#EAF3DE', '#27500A', '#639922');
+      inner += _finSettRiga('cli-' + idx, nome, perCliente[nome], '#EAF3DE', '#27500A', '#639922');
     });
-    // Stazione separata se presente
-    if (totStazione > 0) {
-      var stazId = 'fin-sett-staz';
-      h += '<div style="height:1px;background:#e8e7e3;margin:8px 0"></div>';
-      h += '<div onclick="_finSettToggle(\'' + stazId + '\',this)" style="cursor:pointer;background:#E6F1FB;color:#0C447C;border-left:3px solid #378ADD;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:3px;font-size:12px;font-weight:500">';
-      h += '<span style="display:flex;align-items:center;gap:6px;overflow:hidden">';
-      h += '<span class="caret" style="font-size:9px;transition:transform 0.15s;display:inline-block">▶</span>';
-      h += '<span>Stazione Oppido</span></span>';
-      h += '<span style="font-family:var(--font-mono);white-space:nowrap;margin-left:10px">' + fmtE(totStazione) + '</span>';
-      h += '</div>';
-      h += '<div id="' + stazId + '" style="display:none;padding:4px 0 8px 18px;font-size:11px">';
-      stazioneDett.forEach(function(s) {
-        var df = new Date(s.data + 'T12:00:00').toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
-        h += '<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--text-muted)">';
-        h += '<span>' + esc(df) + ' · Carte ' + fmtE(s.carte) + ' · Contanti ' + fmtE(s.contanti) + '</span>';
-        h += '<span style="font-family:var(--font-mono)">' + fmtE(s.tot) + '</span>';
-        h += '</div>';
-      });
-      h += '</div>';
-    }
-  }
-  h += '</div>';
+    return inner;
+  });
 
-  // ── COLONNA DX: Uscite per fornitore ──
-  h += '<div>';
-  h += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;font-weight:600">Uscite per fornitore</div>';
-  var ordForn = Object.keys(perFornitore).sort(function(a,b){ return perFornitore[b].tot - perFornitore[a].tot; });
-  if (ordForn.length === 0) {
-    h += '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:6px">Nessuna uscita nella settimana</div>';
-  } else {
+  h += _finSettSezione('master-staz', 'Stazione Oppido', totStazione, stazioneDett.length, '#E6F1FB', '#0C447C', '#378ADD', function() {
+    if (stazioneDett.length === 0) return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic">Nessun incasso stazione</div>';
+    var inner = '';
+    stazioneDett.forEach(function(s) {
+      var df = new Date(s.data + 'T12:00:00').toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
+      inner += '<div style="display:flex;justify-content:space-between;padding:4px 10px;color:var(--text-muted);font-size:11px;border-radius:4px;margin-bottom:2px">';
+      inner += '<span>' + esc(df) + ' · Carte ' + fmtE(s.carte) + ' · Contanti ' + fmtE(s.contanti) + '</span>';
+      inner += '<span style="font-family:var(--font-mono);color:var(--text)">' + fmtE(s.tot) + '</span>';
+      inner += '</div>';
+    });
+    return inner;
+  });
+
+  h += _finSettSezione('master-usc', 'Uscite per fornitore', totUscite, ordForn.length, '#FAEEDA', '#854F0B', '#BA7517', function() {
+    if (ordForn.length === 0) return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic">Nessuna uscita fornitore</div>';
+    var inner = '';
     ordForn.forEach(function(nome, idx) {
       var col = _finForColori[nome] || '#FAEEDA';
-      h += _finSettRiga('forn-' + idx, nome, perFornitore[nome], col, '#791F1F', '#E24B4A');
+      inner += _finSettRiga('forn-' + idx, nome, perFornitore[nome], col, '#791F1F', '#E24B4A');
     });
-  }
-  h += '</div>';
+    return inner;
+  });
 
-  h += '</div>'; // chiude grid
-  h += '</div>'; // chiude border-top
+  h += '</div>';
+  return h;
+}
+
+// Helper: sezione master collassabile (livello macro)
+function _finSettSezione(idSuffix, titolo, totale, conteggio, bgColor, textColor, borderColor, contentFn) {
+  var rowId = 'fin-sett-' + idSuffix;
+  var contConteggio = conteggio > 0 ? ' (' + conteggio + ')' : '';
+  var h = '<div onclick="_finSettToggle(\'' + rowId + '\',this)" style="cursor:pointer;background:' + bgColor + ';color:' + textColor + ';border-left:3px solid ' + borderColor + ';display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:0 8px 8px 0;margin-bottom:6px;font-size:13px;font-weight:600">';
+  h += '<span style="display:flex;align-items:center;gap:8px;overflow:hidden">';
+  h += '<span class="caret" style="font-size:10px;transition:transform 0.15s;display:inline-block">▶</span>';
+  h += '<span>' + esc(titolo) + '<span style="font-weight:400;opacity:0.7">' + contConteggio + '</span></span></span>';
+  h += '<span style="font-family:var(--font-mono);white-space:nowrap;margin-left:10px;font-size:14px">' + fmtE(totale) + '</span>';
+  h += '</div>';
+  h += '<div id="' + rowId + '" style="display:none;padding:4px 0 12px 14px">';
+  h += contentFn();
+  h += '</div>';
   return h;
 }
 
