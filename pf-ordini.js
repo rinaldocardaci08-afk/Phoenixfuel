@@ -7,7 +7,13 @@
 // ═══════════════════════════════════════════════════════════════════
 function _isClientePhoenix(nomeCliente) {
   if (!nomeCliente) return false;
-  return String(nomeCliente).toLowerCase().indexOf('phoenix') >= 0;
+  var n = String(nomeCliente).toLowerCase().trim();
+  // v20260524c: riconosci sia "Phoenix Fuel Srl" che i nomi convenzionali
+  // per tipi non-cliente. Servono tutti per forzare margine=0 (operazioni interne).
+  return n.indexOf('phoenix') >= 0
+      || n === 'deposito vibo'
+      || n === 'stazione oppido'
+      || n === 'autoconsumo';
 }
 
 // ── AREA CLIENTE ──────────────────────────────────────────────────
@@ -954,7 +960,13 @@ async function salvaOrdine() {
     if (!clienteId) { toast('Seleziona un cliente'); return; }
     clienteNome = cacheClienti.find(c=>c.id===clienteId)?.nome||'';
   } else {
-    clienteNome = 'Phoenix Fuel Srl';
+    // v20260524c: convenzione contabile per tipi non-cliente (operazioni interne)
+    var LABEL_CLIENTE_INTERNO = {
+      'entrata_deposito': 'Deposito Vibo',
+      'stazione_servizio': 'Stazione Oppido',
+      'autoconsumo': 'Autoconsumo'
+    };
+    clienteNome = LABEL_CLIENTE_INTERNO[tipo] || 'Phoenix Fuel Srl';
   }
   const trasporto = validaNumero(document.getElementById('ord-trasporto-custom').value || '0', 0, 1, 'Trasporto');
   if (trasporto === null) return;
@@ -2009,34 +2021,41 @@ async function apriModaleOrdine(id) {
   statiVisibili.forEach(s => { html += '<option value="' + s + '"' + (statoSel===s?' selected':'') + '>' + s + '</option>'; });
   html += '</select></div>';
 
-  // ═══ v20260524: Cliente modificabile (bloccato se fattura collegata) + fallback per nome ═══
-  // Bug: ordini vecchi possono avere cliente_id=NULL (campo popolato solo dai più recenti).
-  // Senza fallback, nessuna opzione del select sarebbe selected → il browser sceglie
-  // la PRIMA opzione → Erika salva e cambia inavvertitamente il cliente.
-  // Fix: se cliente_id è null, match per NOME nell'elenco clienti (case-insensitive, trim).
-  var hasFattura = !!(r.fattura_id);
-  var clienteLockReason = hasFattura ? '🔒 Fattura emessa' : '';
-  var clientePresenteInLista = clienti.some(c => c.id === r.cliente_id);
-  // Fallback: se cliente_id null/sconosciuto, cerco per nome (case-insensitive)
-  var clientePerNome = null;
-  if (!clientePresenteInLista && r.cliente) {
-    var nomeRicercato = String(r.cliente || '').trim().toLowerCase();
-    clientePerNome = clienti.find(c => String(c.nome||'').trim().toLowerCase() === nomeRicercato);
+  // ═══ v20260524c: Cliente modificabile SOLO per ordini tipo='cliente' ═══
+  // Bug v20260515c: per tipi stazione_servizio/entrata_deposito/autoconsumo il select
+  // Cliente esisteva ma nessuna opzione era selected (cliente_id=NULL, cliente='Stazione Oppido' etc
+  // non in lista clienti reali) → default browser = primo alfabetico → al salvataggio cliente sovrascritto.
+  // Fix: per tipi non-cliente il campo è readonly. Per tipo='cliente' resta select editabile con
+  // fallback per nome (caso ordini vecchi con cliente_id NULL).
+  var isOrdineCliente = (r.tipo_ordine === 'cliente');
+  if (!isOrdineCliente) {
+    // Per stazione_servizio / entrata_deposito / autoconsumo: campo readonly
+    html += '<div class="form-group"><label>Cliente <span style="font-size:10px;color:#666;font-weight:500">(tipo: ' + esc(r.tipo_ordine || '?') + ', non modificabile)</span></label>';
+    html += '<input type="text" id="mod-cliente-display" value="' + esc(r.cliente || '') + '" disabled style="font-size:13px;padding:7px 10px;background:#f5f5f5;color:#666" /></div>';
+  } else {
+    var hasFattura = !!(r.fattura_id);
+    var clienteLockReason = hasFattura ? '🔒 Fattura emessa' : '';
+    var clientePresenteInLista = clienti.some(c => c.id === r.cliente_id);
+    // Fallback: se cliente_id null/sconosciuto, cerco per nome (case-insensitive)
+    var clientePerNome = null;
+    if (!clientePresenteInLista && r.cliente) {
+      var nomeRicercato = String(r.cliente || '').trim().toLowerCase();
+      clientePerNome = clienti.find(c => String(c.nome||'').trim().toLowerCase() === nomeRicercato);
+    }
+    html += '<div class="form-group"><label>Cliente' + (clienteLockReason ? ' <span style="font-size:10px;color:#8B6A00;font-weight:500">' + clienteLockReason + '</span>' : '') + '</label>';
+    html += '<select id="mod-cliente"' + (hasFattura ? ' disabled title="Cliente bloccato: fattura Danea già emessa. Per cambiare cliente, scollega prima la fattura."' : ' onchange="_modSulCambioCliente()"') + ' style="font-size:13px;padding:7px 10px">';
+    // Opzione "orfana" SOLO se cliente non trovato né per id né per nome
+    if (!clientePresenteInLista && !clientePerNome && (r.cliente_id || r.cliente)) {
+      var orphanLabel = esc(r.cliente || '(cliente sconosciuto)') + ' (orfano)';
+      html += '<option value="' + (r.cliente_id || '') + '" data-nome="' + esc(r.cliente||'') + '" selected>' + orphanLabel + '</option>';
+    }
+    clienti.forEach(c => {
+      var isMatch = (c.id === r.cliente_id) || (clientePerNome && c.id === clientePerNome.id);
+      var sel = isMatch ? ' selected' : '';
+      html += '<option value="' + c.id + '" data-nome="' + esc(c.nome) + '"' + sel + '>' + esc(c.nome) + (c.piva ? ' · ' + c.piva : '') + '</option>';
+    });
+    html += '</select></div>';
   }
-  html += '<div class="form-group"><label>Cliente' + (clienteLockReason ? ' <span style="font-size:10px;color:#8B6A00;font-weight:500">' + clienteLockReason + '</span>' : '') + '</label>';
-  html += '<select id="mod-cliente"' + (hasFattura ? ' disabled title="Cliente bloccato: fattura Danea già emessa. Per cambiare cliente, scollega prima la fattura."' : ' onchange="_modSulCambioCliente()"') + ' style="font-size:13px;padding:7px 10px">';
-  // Opzione "orfana" SOLO se cliente non trovato né per id né per nome
-  if (!clientePresenteInLista && !clientePerNome && (r.cliente_id || r.cliente)) {
-    var orphanLabel = esc(r.cliente || '(cliente sconosciuto)') + ' (orfano)';
-    html += '<option value="' + (r.cliente_id || '') + '" data-nome="' + esc(r.cliente||'') + '" selected>' + orphanLabel + '</option>';
-  }
-  clienti.forEach(c => {
-    // Match per id (priorità) OPPURE match per nome (fallback)
-    var isMatch = (c.id === r.cliente_id) || (clientePerNome && c.id === clientePerNome.id);
-    var sel = isMatch ? ' selected' : '';
-    html += '<option value="' + c.id + '" data-nome="' + esc(c.nome) + '"' + sel + '>' + esc(c.nome) + (c.piva ? ' · ' + c.piva : '') + '</option>';
-  });
-  html += '</select></div>';
   // Data consegna: editabile per ordini in attesa/confermato/programmato. Bloccata se consegnato (dato storico fissato).
   var dataLocked = (r.stato === 'consegnato');
   html += '<div class="form-group"><label>Data consegna' + (dataLocked ? ' <span style="font-size:10px;color:#639922;font-weight:500">🔒 Consegnato</span>' : '') + '</label><input type="date" id="mod-data" value="' + (r.data || '') + '"' + (dataLocked ? ' disabled title="Data bloccata: ordine consegnato"' : '') + ' /></div>';
@@ -2180,16 +2199,19 @@ async function salvaModificaOrdine(id, bypassCheck) {
     }
   }
 
-  const { data: ordine } = await sb.from('ordini').select('data,cliente,cliente_id,fattura_id,das_firmato_url,caricato_deposito,stato').eq('id', id).single();
+  const { data: ordine } = await sb.from('ordini').select('data,cliente,cliente_id,fattura_id,das_firmato_url,caricato_deposito,stato,tipo_ordine').eq('id', id).single();
 
-  // ═══ v20260524: cliente modificabile con check sicurezza ═══
+  // ═══ v20260524c: cliente modificabile con check sicurezza ═══
   // Anti-falso-positivo: se ordine.cliente_id era NULL ma l'utente NON ha cambiato
   // il select (e il select punta al cliente cercato per nome), NON è un cambio reale.
+  // CRITICO: ignora completamente per ordini non-cliente (stazione/entrata/autoconsumo)
+  // perché in quei casi il select Cliente NON esiste nella modale (campo readonly).
   var modCliSel = document.getElementById('mod-cliente');
   var clienteIdNew = ordine.cliente_id;
   var clienteNomeNew = ordine.cliente;
   var clienteCambiato = false;
-  if (modCliSel && !modCliSel.disabled) {
+  var isOrdineCliente = (ordine.tipo_ordine === 'cliente');
+  if (isOrdineCliente && modCliSel && !modCliSel.disabled) {
     var newCliId = modCliSel.value;
     var optSel = modCliSel.options[modCliSel.selectedIndex];
     var newNome = optSel && optSel.dataset.nome ? optSel.dataset.nome : (optSel ? optSel.text.split(' · ')[0] : '');
