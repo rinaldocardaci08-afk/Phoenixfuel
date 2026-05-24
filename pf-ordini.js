@@ -2009,18 +2009,31 @@ async function apriModaleOrdine(id) {
   statiVisibili.forEach(s => { html += '<option value="' + s + '"' + (statoSel===s?' selected':'') + '>' + s + '</option>'; });
   html += '</select></div>';
 
-  // ═══ v20260515c: Cliente modificabile (bloccato se fattura collegata) ═══
+  // ═══ v20260524: Cliente modificabile (bloccato se fattura collegata) + fallback per nome ═══
+  // Bug: ordini vecchi possono avere cliente_id=NULL (campo popolato solo dai più recenti).
+  // Senza fallback, nessuna opzione del select sarebbe selected → il browser sceglie
+  // la PRIMA opzione → Erika salva e cambia inavvertitamente il cliente.
+  // Fix: se cliente_id è null, match per NOME nell'elenco clienti (case-insensitive, trim).
   var hasFattura = !!(r.fattura_id);
   var clienteLockReason = hasFattura ? '🔒 Fattura emessa' : '';
+  var clientePresenteInLista = clienti.some(c => c.id === r.cliente_id);
+  // Fallback: se cliente_id null/sconosciuto, cerco per nome (case-insensitive)
+  var clientePerNome = null;
+  if (!clientePresenteInLista && r.cliente) {
+    var nomeRicercato = String(r.cliente || '').trim().toLowerCase();
+    clientePerNome = clienti.find(c => String(c.nome||'').trim().toLowerCase() === nomeRicercato);
+  }
   html += '<div class="form-group"><label>Cliente' + (clienteLockReason ? ' <span style="font-size:10px;color:#8B6A00;font-weight:500">' + clienteLockReason + '</span>' : '') + '</label>';
   html += '<select id="mod-cliente"' + (hasFattura ? ' disabled title="Cliente bloccato: fattura Danea già emessa. Per cambiare cliente, scollega prima la fattura."' : ' onchange="_modSulCambioCliente()"') + ' style="font-size:13px;padding:7px 10px">';
-  // Opzione corrente (potrebbe non essere in lista se cliente disattivato): la metto in cima
-  var clientePresenteInLista = clienti.some(c => c.id === r.cliente_id);
-  if (!clientePresenteInLista && r.cliente_id) {
-    html += '<option value="' + r.cliente_id + '" data-nome="' + esc(r.cliente||'') + '" selected>' + esc(r.cliente||'(disattivato)') + '</option>';
+  // Opzione "orfana" SOLO se cliente non trovato né per id né per nome
+  if (!clientePresenteInLista && !clientePerNome && (r.cliente_id || r.cliente)) {
+    var orphanLabel = esc(r.cliente || '(cliente sconosciuto)') + ' (orfano)';
+    html += '<option value="' + (r.cliente_id || '') + '" data-nome="' + esc(r.cliente||'') + '" selected>' + orphanLabel + '</option>';
   }
   clienti.forEach(c => {
-    var sel = (c.id === r.cliente_id) ? ' selected' : '';
+    // Match per id (priorità) OPPURE match per nome (fallback)
+    var isMatch = (c.id === r.cliente_id) || (clientePerNome && c.id === clientePerNome.id);
+    var sel = isMatch ? ' selected' : '';
     html += '<option value="' + c.id + '" data-nome="' + esc(c.nome) + '"' + sel + '>' + esc(c.nome) + (c.piva ? ' · ' + c.piva : '') + '</option>';
   });
   html += '</select></div>';
@@ -2169,28 +2182,39 @@ async function salvaModificaOrdine(id, bypassCheck) {
 
   const { data: ordine } = await sb.from('ordini').select('data,cliente,cliente_id,fattura_id,das_firmato_url,caricato_deposito,stato').eq('id', id).single();
 
-  // ═══ v20260515c: cliente modificabile con check sicurezza ═══
+  // ═══ v20260524: cliente modificabile con check sicurezza ═══
+  // Anti-falso-positivo: se ordine.cliente_id era NULL ma l'utente NON ha cambiato
+  // il select (e il select punta al cliente cercato per nome), NON è un cambio reale.
   var modCliSel = document.getElementById('mod-cliente');
-  var clienteIdNew = ordine.cliente_id;  // default: non cambia
+  var clienteIdNew = ordine.cliente_id;
   var clienteNomeNew = ordine.cliente;
   var clienteCambiato = false;
   if (modCliSel && !modCliSel.disabled) {
     var newCliId = modCliSel.value;
-    if (newCliId && newCliId !== ordine.cliente_id) {
-      // Check anti-race: rileggo fattura_id (potrebbe essere stata collegata nel frattempo)
+    var optSel = modCliSel.options[modCliSel.selectedIndex];
+    var newNome = optSel && optSel.dataset.nome ? optSel.dataset.nome : (optSel ? optSel.text.split(' · ')[0] : '');
+
+    // Determina se il cliente è cambiato. Casi:
+    // 1. cliente_id non null e diverso → cambio reale
+    // 2. cliente_id null ma nome diverso (case-insensitive) → cambio reale
+    // 3. cliente_id null e nome uguale (fallback per-nome ha funzionato) → NO cambio
+    var nomeAttuale = String(ordine.cliente || '').trim().toLowerCase();
+    var nomeNuovo = String(newNome || '').trim().toLowerCase();
+    var idDiverso = ordine.cliente_id && newCliId && newCliId !== ordine.cliente_id;
+    var nomeDiverso = !ordine.cliente_id && newCliId && nomeAttuale !== nomeNuovo;
+    if (idDiverso || nomeDiverso) {
       if (ordine.fattura_id) {
         toast('Impossibile cambiare cliente: fattura Danea già emessa.');
         return;
       }
       clienteIdNew = newCliId;
-      var optSel = modCliSel.options[modCliSel.selectedIndex];
-      clienteNomeNew = optSel && optSel.dataset.nome ? optSel.dataset.nome : optSel.text.split(' · ')[0];
+      clienteNomeNew = newNome;
       clienteCambiato = true;
 
       // ═══ v20260515d: conferma esplicita per ordini consegnati ═══
-      // Lo stato 'consegnato' è un dato storico avvenuto fisicamente.
-      // Cambiare il cliente è eccezionale e va confermato.
-      if (ordine.stato === 'consegnato') {
+      var statoNorm = String(ordine.stato || '').trim().toLowerCase();
+      console.log('[modifica cliente] vecchio=' + ordine.cliente + ' → nuovo=' + clienteNomeNew + ' | stato=' + statoNorm + ' | fattura_id=' + (ordine.fattura_id || 'null'));
+      if (statoNorm === 'consegnato') {
         var msgConf = '⚠️ ATTENZIONE: stai cambiando il cliente di un ordine CONSEGNATO.\n\n' +
           '• Vecchio cliente: ' + (ordine.cliente || '?') + '\n' +
           '• Nuovo cliente:  ' + clienteNomeNew + '\n' +
@@ -2203,6 +2227,11 @@ async function salvaModificaOrdine(id, bypassCheck) {
           return;
         }
       }
+    } else if (!ordine.cliente_id && newCliId) {
+      // Backfill silenzioso: cliente_id era null, ora abbiamo l'id del match per nome.
+      // Aggiorniamo cliente_id ma non è un "cambio cliente" (no popup, no audit).
+      clienteIdNew = newCliId;
+      // Non setto clienteCambiato=true: niente audit né popup
     }
   }
 
@@ -2242,17 +2271,19 @@ async function salvaModificaOrdine(id, bypassCheck) {
     }
   }
   var updatePayload = { stato: statoDaSalvare, data: dataValida, litri, costo_litro:costo, trasporto_litro:trasporto, margine:margineFinale, iva, giorni_pagamento:ggPag, data_scadenza:dataScad.toISOString().split('T')[0], note:document.getElementById('mod-note').value, destinazione:modDest, sede_scarico_id:modSedeId, sede_scarico_nome:modSedeNome };
-  // ═══ v20260515c: includi cliente nel payload se cambiato ═══
+  // ═══ v20260524: includi cliente nel payload se cambiato (audit + popup gestiti sopra) ═══
   if (clienteCambiato) {
     updatePayload.cliente = clienteNomeNew;
     updatePayload.cliente_id = clienteIdNew;
     // Reset destinazione: le sedi del vecchio cliente non sono valide per il nuovo
-    // (se l'utente non ha già selezionato una sede del nuovo cliente nel select aggiornato)
     if (!modSedeId && !modDest) {
       updatePayload.destinazione = null;
       updatePayload.sede_scarico_id = null;
       updatePayload.sede_scarico_nome = null;
     }
+  } else if (!ordine.cliente_id && clienteIdNew) {
+    // Backfill silenzioso cliente_id (no audit): l'ordine aveva solo nome, ora popoliamo l'id
+    updatePayload.cliente_id = clienteIdNew;
   }
   // Se DAS firmato, blocca anche caricato_deposito a true (l'uscita deposito è stata fatta)
   if (hasDasOrd) {
