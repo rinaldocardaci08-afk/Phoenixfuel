@@ -38,7 +38,7 @@ function _sfChiave(data, fornId, fattId){ return data+'|'+(fornId||'_')+'|'+(fat
 function _sfOggiISO(){ return new Date().toISOString().split('T')[0]; }
 function _sfGiorniDaScadenza(dataISO){
   var oggi = new Date(); oggi.setHours(0,0,0,0);
-  var s = new Date(dataISO); s.setHours(0,0,0,0);
+  var s = new Date(dataISO + 'T12:00:00'); s.setHours(0,0,0,0);
   return Math.round((oggi - s) / 86400000);
 }
 function _sfContoLabel(conto_id){
@@ -47,6 +47,15 @@ function _sfContoLabel(conto_id){
   if (!c) return '—';
   var i = _sfIstituti.find(function(x){ return x.id===c.istituto_id; });
   return (i ? i.nome : '?') + (c.descrizione ? ' · '+c.descrizione : '');
+}
+// Stessa logica di pf-finanze.js spostaAlLunedi: sabato→lun, domenica→lun
+function _sfSpostaAlLunedi(dataStr){
+  if (!dataStr) return dataStr;
+  var d = new Date(dataStr + 'T12:00:00');
+  var g = d.getDay();
+  if (g === 6) d.setDate(d.getDate() + 2);
+  if (g === 0) d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -154,25 +163,29 @@ function _sfAggregaRighe() {
     r.pagamenti  = r.fatturaId ? (pagMap[r.fatturaId] || []) : [];
     r.totPagato  = r.pagamenti.reduce(function(s,p){ return s + Number(p.importo||0); }, 0);
 
-    // Scadenza calcolata: usa giorni_pagamento dal master fornitore (regola PF)
+    // Scadenza calcolata — STESSA LOGICA di pf-finanze.js (calendario):
+    // priorità ggPag: ordini.giorni_pagamento → fornitori.giorni_pagamento → 30
+    // costruzione data con T12:00:00 per evitare edge case timezone
     var forn = _sfFornitoriMap[r.fornitoreNomeKey] || {};
-    var ggPag = Number(forn.giorni_pagamento || (r.ordini[0] && r.ordini[0].giorni_pagamento) || 30);
+    var ggPag = Number((r.ordini[0] && r.ordini[0].giorni_pagamento) || forn.giorni_pagamento || 30);
     r.ggPagamento = ggPag;
 
-    // dataScadenzaPresunta = sempre calcolata da data ordine (per riga senza fattura)
-    var dPres = new Date(r.data); dPres.setDate(dPres.getDate() + ggPag);
-    r.dataScadenzaPresunta = dPres.toISOString().split('T')[0];
+    // dataScadenzaPresunta = calcolata da data ordine + ggPag, spostata al lunedì se cade sab/dom
+    var dPres = new Date(r.data + 'T12:00:00');
+    dPres.setDate(dPres.getDate() + ggPag);
+    r.dataScadenzaPresunta = _sfSpostaAlLunedi(dPres.toISOString().split('T')[0]);
 
     // dataScadenza effettiva:
-    //  - se c'è fattura con data_scadenza salvata → usa quella (override manuale)
-    //  - se c'è fattura senza data_scadenza → ricalcola da data_fattura + ggPag
-    //  - se non c'è fattura → presunta dalla data ordine
+    //  - se c'è fattura con data_scadenza salvata → usa quella (override manuale, anche lei spostata al lun se necessario)
+    //  - se c'è fattura senza data_scadenza → calcolata da data_fattura + ggPag, spostata al lun
+    //  - se non c'è fattura → presunta dalla data ordine (già spostata)
     if (r.fattura) {
       if (r.fattura.data_scadenza) {
-        r.dataScadenza = r.fattura.data_scadenza;
+        r.dataScadenza = _sfSpostaAlLunedi(r.fattura.data_scadenza);
       } else {
-        var dF = new Date(r.fattura.data_fattura); dF.setDate(dF.getDate() + ggPag);
-        r.dataScadenza = dF.toISOString().split('T')[0];
+        var dF = new Date(r.fattura.data_fattura + 'T12:00:00');
+        dF.setDate(dF.getDate() + ggPag);
+        r.dataScadenza = _sfSpostaAlLunedi(dF.toISOString().split('T')[0]);
       }
     } else {
       r.dataScadenza = r.dataScadenzaPresunta;
@@ -239,8 +252,14 @@ function renderScadenzarioFornitori() {
 
   var righeAll = _sfAggregaRighe();
 
-  // Applica filtri stato + fornitore
-  var righe = righeAll.filter(function(r){
+  // Pre-filtro fornitore: usato per i KPI (lo stato no, altrimenti si svuotano gli altri 3)
+  var righePerKpi = righeAll.filter(function(r){
+    if (_sfFiltroFornitore !== 'tutti' && r.fornitoreNomeKey !== _sfFiltroFornitore) return false;
+    return true;
+  });
+
+  // Applica filtri stato + fornitore (lista + footer pagina)
+  var righe = righePerKpi.filter(function(r){
     if (_sfFiltroStato !== 'tutti') {
       switch (_sfFiltroStato) {
         case 'senza-fattura': if (r.stato !== 'senza_fattura' && r.stato !== 'scaduta_no_fattura') return false; break;
@@ -249,11 +268,10 @@ function renderScadenzarioFornitori() {
         case 'pagate':        if (r.stato !== 'pagata') return false; break;
       }
     }
-    if (_sfFiltroFornitore !== 'tutti' && r.fornitoreNomeKey !== _sfFiltroFornitore) return false;
     return true;
   });
 
-  var kpi = _sfCalcolaKPI(righeAll);
+  var kpi = _sfCalcolaKPI(righePerKpi);
 
   var h = '';
   h += _sfHtmlToolbar();
@@ -624,9 +642,10 @@ function _sfRicalcolaScadenzaModale() {
   // Se l'utente ha già modificato a mano la scadenza, non sovrascrivere
   if (dataS.dataset.userModified === 'true') return;
   if (!dataF.value) return;
-  var d = new Date(dataF.value);
+  var d = new Date(dataF.value + 'T12:00:00');
   d.setDate(d.getDate() + (_sfModaleCtx.ggPagamento || 30));
-  dataS.value = d.toISOString().split('T')[0];
+  // Sposta al lunedì se cade sab/dom (allineato a pf-finanze.js calendario)
+  dataS.value = _sfSpostaAlLunedi(d.toISOString().split('T')[0]);
 }
 
 function _sfAggQuadratura() {  if (!_sfModaleCtx) return;
