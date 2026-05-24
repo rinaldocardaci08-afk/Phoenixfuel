@@ -158,8 +158,25 @@ function _sfAggregaRighe() {
     var forn = _sfFornitoriMap[r.fornitoreNomeKey] || {};
     var ggPag = Number(forn.giorni_pagamento || (r.ordini[0] && r.ordini[0].giorni_pagamento) || 30);
     r.ggPagamento = ggPag;
-    var d = new Date(r.data); d.setDate(d.getDate() + ggPag);
-    r.dataScadenza = d.toISOString().split('T')[0];
+
+    // dataScadenzaPresunta = sempre calcolata da data ordine (per riga senza fattura)
+    var dPres = new Date(r.data); dPres.setDate(dPres.getDate() + ggPag);
+    r.dataScadenzaPresunta = dPres.toISOString().split('T')[0];
+
+    // dataScadenza effettiva:
+    //  - se c'è fattura con data_scadenza salvata → usa quella (override manuale)
+    //  - se c'è fattura senza data_scadenza → ricalcola da data_fattura + ggPag
+    //  - se non c'è fattura → presunta dalla data ordine
+    if (r.fattura) {
+      if (r.fattura.data_scadenza) {
+        r.dataScadenza = r.fattura.data_scadenza;
+      } else {
+        var dF = new Date(r.fattura.data_fattura); dF.setDate(dF.getDate() + ggPag);
+        r.dataScadenza = dF.toISOString().split('T')[0];
+      }
+    } else {
+      r.dataScadenza = r.dataScadenzaPresunta;
+    }
 
     // Stato
     if (!r.fattura) {
@@ -402,9 +419,19 @@ function _sfHtmlRiga(r) {
     badge = '<span title="Override quadratura accettato" style="background:#FAEEDA;color:#854F0B;font-size:10px;padding:2px 6px;border-radius:8px;font-weight:600;margin-right:4px">⚠</span>' + badge;
   }
 
+  // Cella data: data ordine + scadenza presunta in rosso sotto
+  var scadCorta;
+  if (r.data.substring(0,4) === r.dataScadenza.substring(0,4)) {
+    scadCorta = _sfFmtD(r.dataScadenza).substring(0,5); // gg/mm
+  } else {
+    scadCorta = _sfFmtD(r.dataScadenza); // gg/mm/aaaa se anno diverso
+  }
+  var dataCell = '<span><span style="font-weight:600;display:block;line-height:1.2">'+_sfFmtD(r.data)+'</span>'+
+                 '<span style="font-size:10px;color:#A32D2D;display:block;margin-top:2px;line-height:1">scad. '+scadCorta+'</span></span>';
+
   var h = '<div onclick="_sfToggleEspandi(\''+r.chiave+'\')" style="display:grid;grid-template-columns:24px 86px 1fr 130px 110px 160px 200px;align-items:center;gap:8px;padding:11px 14px;border-bottom:0.5px solid var(--border);background:'+bgRow+';font-size:13px;cursor:pointer">';
   h += '<span style="color:var(--text-muted);font-size:13px">'+caret+'</span>';
-  h += '<span style="font-weight:600">'+_sfFmtD(r.data)+'</span>';
+  h += dataCell;
   h += '<span style="font-weight:600">'+_sfEsc(r.fornitoreNome)+'</span>';
   h += '<span style="color:var(--text-muted);font-size:12px"><strong style="color:var(--text)">'+r.ordini.length+'</strong> ord · '+_sfFmtL(r.totLitri)+'</span>';
   h += '<span style="text-align:right;font-weight:600">'+_sfFmtE(r.totConIva)+'</span>';
@@ -514,7 +541,16 @@ function _sfApriModaleInsFattura(chiaveRiga) {
   var righe = _sfAggregaRighe();
   var r = righe.find(function(x){ return x.chiave === chiaveRiga; });
   if (!r) { alert('Riga non trovata'); return; }
-  _sfModaleCtx = { chiaveRiga: chiaveRiga, totConIva: r.totConIva, fornitoreNomeKey: r.fornitoreNomeKey, fornitoreNome: r.fornitoreNome, data: r.data, ordiniIds: r.ordini.map(function(o){return o.id;}) };
+  _sfModaleCtx = {
+    chiaveRiga: chiaveRiga,
+    totConIva: r.totConIva,
+    fornitoreNomeKey: r.fornitoreNomeKey,
+    fornitoreNome: r.fornitoreNome,
+    data: r.data,
+    ggPagamento: r.ggPagamento || 30,
+    scadenzaPresunta: r.dataScadenzaPresunta,
+    ordiniIds: r.ordini.map(function(o){return o.id;})
+  };
 
   var totDef = r.totConIva.toFixed(2);
   var nOrd = r.ordini.length;
@@ -536,11 +572,15 @@ function _sfApriModaleInsFattura(chiaveRiga) {
   h += '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Numero fattura *</label>';
   h += '<input id="sf-mod-numero" type="text" placeholder="es. FT 2026/142" style="width:100%;padding:8px 10px;font-size:14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box" autofocus /></div>';
   h += '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Data fattura *</label>';
-  h += '<input id="sf-mod-data" type="date" value="'+r.data+'" style="width:100%;padding:8px 10px;font-size:14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box" /></div>';
+  h += '<input id="sf-mod-data" type="date" value="'+r.data+'" onchange="_sfRicalcolaScadenzaModale()" style="width:100%;padding:8px 10px;font-size:14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box" /></div>';
   h += '</div>';
 
-  h += '<div style="margin-bottom:14px"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Importo totale fattura (con IVA) *</label>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">';
+  h += '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Importo totale fattura c/IVA *</label>';
   h += '<input id="sf-mod-importo" type="number" step="0.01" min="0.01" value="'+totDef+'" oninput="_sfAggQuadratura()" style="width:100%;padding:8px 10px;font-size:15px;font-weight:600;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box" /></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Data scadenza * <span style="color:var(--text-muted);font-weight:400">('+(_sfModaleCtx.ggPagamento)+' gg)</span></label>';
+  h += '<input id="sf-mod-scadenza" type="date" value="'+_sfModaleCtx.scadenzaPresunta+'" oninput="this.dataset.userModified=\'true\'" style="width:100%;padding:8px 10px;font-size:14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box" /></div>';
+  h += '</div>';
 
   // Preview quadratura
   h += '<div id="sf-mod-quadratura" style="margin-bottom:14px"></div>';
@@ -576,8 +616,20 @@ function _sfChiudiModale() {
   _sfModaleCtx = null;
 }
 
-function _sfAggQuadratura() {
+function _sfRicalcolaScadenzaModale() {
   if (!_sfModaleCtx) return;
+  var dataF = document.getElementById('sf-mod-data');
+  var dataS = document.getElementById('sf-mod-scadenza');
+  if (!dataF || !dataS) return;
+  // Se l'utente ha già modificato a mano la scadenza, non sovrascrivere
+  if (dataS.dataset.userModified === 'true') return;
+  if (!dataF.value) return;
+  var d = new Date(dataF.value);
+  d.setDate(d.getDate() + (_sfModaleCtx.ggPagamento || 30));
+  dataS.value = d.toISOString().split('T')[0];
+}
+
+function _sfAggQuadratura() {  if (!_sfModaleCtx) return;
   var inp = document.getElementById('sf-mod-importo');
   var divEl = document.getElementById('sf-mod-quadratura');
   if (!inp || !divEl) return;
@@ -607,11 +659,13 @@ async function _sfSalvaFattura() {
   var numero = (document.getElementById('sf-mod-numero').value||'').trim();
   var importo = parseFloat(document.getElementById('sf-mod-importo').value);
   var dataFatt = document.getElementById('sf-mod-data').value;
+  var dataScad = document.getElementById('sf-mod-scadenza').value;
   var note = (document.getElementById('sf-mod-note').value||'').trim();
 
   if (!numero)   { alert('Inserisci il numero fattura'); return; }
   if (!importo || importo <= 0) { alert('Inserisci un importo valido'); return; }
   if (!dataFatt) { alert('Inserisci la data fattura'); return; }
+  if (!dataScad) { alert('Inserisci la data scadenza'); return; }
 
   var totAtt = _sfModaleCtx.totConIva;
   var diff = Math.abs(importo - totAtt);
@@ -638,6 +692,7 @@ async function _sfSalvaFattura() {
       fornitore_nome:      _sfModaleCtx.fornitoreNome,
       numero_fattura:      numero,
       data_fattura:        dataFatt,
+      data_scadenza:       dataScad,
       importo_dichiarato:  importo,
       override_quadratura: override,
       note:                note || null,
@@ -708,6 +763,7 @@ window.renderScadenzarioFornitori   = renderScadenzarioFornitori;
 window._sfApriModaleInsFattura      = _sfApriModaleInsFattura;
 window._sfChiudiModale              = _sfChiudiModale;
 window._sfAggQuadratura             = _sfAggQuadratura;
+window._sfRicalcolaScadenzaModale   = _sfRicalcolaScadenzaModale;
 window._sfSalvaFattura              = _sfSalvaFattura;
 window._sfRimuoviFattura            = _sfRimuoviFattura;
 window._sfApriModalePagamento       = _sfApriModalePagamento;
