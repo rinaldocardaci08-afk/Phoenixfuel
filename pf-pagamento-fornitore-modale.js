@@ -264,6 +264,7 @@ async function _pfpConferma() {
 
   if (!importo || importo <= 0) { alert('Inserisci un importo valido'); return; }
   if (!data) { alert('Inserisci la data pagamento'); return; }
+  if (!conto_id) { alert('Seleziona l\'istituto / c/c di addebito'); return; }
   if (importo > ctx.saldoResiduo + 0.01) {
     if (!confirm('L\'importo supera il saldo residuo di € ' + (importo - ctx.saldoResiduo).toFixed(2) + '. Procedere comunque?')) return;
   }
@@ -272,7 +273,7 @@ async function _pfpConferma() {
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; btn.style.opacity = '0.6'; }
 
   try {
-    // 1. Insert pagamento
+    // 1. Insert pagamento su pagamenti_fornitori
     var ins = await sb.from('pagamenti_fornitori').insert([{
       fattura_ricevuta_id: ctx.fattura.id,
       importo: importo,
@@ -282,12 +283,50 @@ async function _pfpConferma() {
       riferimento_esterno: riferimento || null
     }]).select().single();
     if (ins.error) throw ins.error;
+    var pagamentoId = ins.data.id;
 
-    // 2. Calcola se la fattura è ora saldata
+    // 2. Crea movimento corrispondente in foglio_giornale_movimenti
+    //    (bidirezionalità scadenzario → foglio: il pagamento appare come uscita del giorno)
+    var conto = _pfpConti.find(function(c){ return c.id === conto_id; });
+    var bancaId = conto ? conto.istituto_id : null;
+    var fornNome = ctx.fattura.fornitore_nome || 'Fornitore';
+    var numFatt = ctx.fattura.numero_fattura || '';
     var nuovoTotalePagato = ctx.totalePagato + importo;
     var saldata = nuovoTotalePagato >= Number(ctx.fattura.importo_dichiarato) - 0.01;
+    var isParziale = !saldata;
+    var descMov = 'Pagamento ' + fornNome + ' · FT ' + numFatt + (isParziale ? ' (parziale)' : '');
+    var noteMov = riferimento ? ('Rif: ' + riferimento) : null;
 
-    // 3. Se saldata → propaga pagato_fornitore=true su tutti gli ordini collegati
+    var movIns = await sb.from('foglio_giornale_movimenti').insert([{
+      data: data,
+      tipo: 'uscita',
+      importo: importo,
+      descrizione: descMov,
+      banca_id: bancaId,
+      cassa_tipo: null,
+      metodo: modalita,
+      origine: 'scadenzario_fornitori',
+      note: noteMov
+    }]).select('id').single();
+
+    // Se il movimento è andato, crea riconciliazione + linka il pagamento al movimento
+    if (!movIns.error && movIns.data) {
+      var movId = movIns.data.id;
+      // 2b. Riconciliazione foglio ↔ fattura ricevuta
+      await sb.from('foglio_giornale_riconciliazioni').insert([{
+        movimento_id: movId,
+        fattura_emessa_id: null,
+        ordine_id: null,
+        fattura_ricevuta_id: ctx.fattura.id,
+        importo_imputato: importo
+      }]);
+      // 2c. Link pagamento → movimento
+      await sb.from('pagamenti_fornitori').update({ movimento_foglio_id: movId }).eq('id', pagamentoId);
+    } else if (movIns.error) {
+      console.warn('[pfp] pagamento salvato ma movimento foglio non creato:', movIns.error.message);
+    }
+
+    // 3. Se la fattura è ora saldata → propaga pagato_fornitore=true su tutti gli ordini collegati
     if (saldata) {
       var upd = await sb.from('ordini')
         .update({ pagato_fornitore: true, data_pagamento_fornitore: data })
