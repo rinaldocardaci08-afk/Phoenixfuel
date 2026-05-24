@@ -1024,6 +1024,7 @@
           <button class="btn-primary fin-subtab active" data-tab="fin-tab-calendario" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px">📅 Calendario</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-foglio" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📓 Foglio giornale</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-sostenibilita" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Sostenibilità</button>
+          <button class="btn-primary fin-subtab" data-tab="fin-tab-scadenzario" onclick="switchFinanzeSubTab(this); caricaScadenzarioFornitori();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Scadenzario fornitori</button>
         </div>
 
         <!-- PANEL: CALENDARIO (esistente, immutato) -->
@@ -1071,6 +1072,11 @@
           <div class="card">
             <div id="sost-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento sostenibilità...</div></div>
           </div>
+        </div>
+
+        <!-- PANEL: SCADENZARIO FORNITORI (24/05/2026) -->
+        <div class="fin-subpanel" id="fin-tab-scadenzario" style="display:none">
+          <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento scadenzario fornitori...</div></div>
         </div>
       </div>
 
@@ -2912,6 +2918,7 @@
 <script src="pf-finanze.js?v=1775149951158"></script>
 <script src="pf-foglio-giornale.js?v=20260503d"></script>
 <script src="pf-finanze-sostenibilita.js?v=20260503l"></script>
+<script src="pf-scadenzario-fornitori.js?v=20260524a"></script>
 <script src="pf-allegati.js?v=20260416d"></script>
 <script src="pf-fatture.js?v=20260515g"></script>
 <script src="pf-fatture-import.js?v=20260517a"></script>

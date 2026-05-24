@@ -19,7 +19,9 @@ const SEZIONI_SISTEMA = [
     {id:'finanze.calendario',label:'Calendario entrate/uscite'},
     {id:'finanze.foglio-giornale',label:'Foglio giornale'},
     {id:'finanze.registra-movimento',label:'Registrare movimenti'},
-    {id:'finanze.sostenibilita',label:'Sostenibilità finanziaria'}
+    {id:'finanze.sostenibilita',label:'Sostenibilità finanziaria'},
+    {id:'finanze.scadenzario-fornitori',label:'Scadenzario fornitori'},
+    {id:'finanze.registra-pagamento-fornitore',label:'Registrare pagamento fornitore'}
   ]},
   {id:'fatture',label:'Fatture',icon:'🧾'},
   {id:'banche',label:'Banche & Mutui',icon:'🏛'},
