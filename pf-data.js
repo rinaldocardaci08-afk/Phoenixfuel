@@ -1,3 +1,4 @@
+// VERSIONE 25/05/2026 b - FIX BUG LIMIT 1000 RIGHE SUPABASE (drift 14k L giacenza Gas Auto)
 // ═══════════════════════════════════════════════════════════════════
 // pf-data.js — STRATO DATI CANONICO
 // ═══════════════════════════════════════════════════════════════════

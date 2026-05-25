@@ -1,3 +1,4 @@
+// VERSIONE 25/05/2026 b - FIX BUG LIMIT 1000 RIGHE SUPABASE
 // PhoenixFuel — Deposito: Giacenze mensili
 // ═══════════════════════════════════════════════════════════════════
 
