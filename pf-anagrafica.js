@@ -736,10 +736,12 @@ async function caricaVenditeDettaglio() {
   }
   const ctxM = document.getElementById('chart-dett-margine');
   if (ctxM) {
-    const costoG = costoApprovv / (dateOrdinate.length || 1);
     if (_chartDettMargine) _chartDettMargine.destroy();
+    // Margine giornaliero = ricavoNetto - costoNetto (già calcolato sopra in gg.margine)
+    // BUG fix 25/05: prima il grafico usava (incasso - costoMedio) che è errato
+    // (incasso include IVA → sovrastima 22%; costoMedio spalma i costi uniformi su tutti i giorni)
     _chartDettMargine = new Chart(ctxM.getContext('2d'), {
-      type:'line', data:{ labels:labelsG, datasets:[{ label:'Margine €', data:dateOrdinate.map(d=>Math.round((giorniMap[d].incasso-costoG)*100)/100), borderColor:'#639922', backgroundColor:'rgba(99,153,34,0.1)', fill:true, tension:0.3, pointRadius:2 }] },
+      type:'line', data:{ labels:labelsG, datasets:[{ label:'Margine €', data:dateOrdinate.map(d=>Math.round((giorniMap[d].margine || 0)*100)/100), borderColor:'#639922', backgroundColor:'rgba(99,153,34,0.1)', fill:true, tension:0.3, pointRadius:2 }] },
       options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:v=>'€ '+v}},x:{ticks:{maxTicksLimit:15,font:{size:9}}}} }
     });
   }
