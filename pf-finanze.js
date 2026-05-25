@@ -126,11 +126,11 @@ async function caricaFinanze() {
   }
 
   var [ordCliRes, ordForRes, cassaRes, fornitoriRes] = await Promise.all([
-    sb.from('ordini').select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,data_scadenza,giorni_pagamento,pagato')
-      .eq('tipo_ordine','cliente').neq('stato','annullato').eq('pagato',false)
+    sb.from('ordini').select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,data_scadenza,giorni_pagamento,pagato,data_pagamento')
+      .eq('tipo_ordine','cliente').neq('stato','annullato')
       .gte('data_scadenza',rng.daISO).lte('data_scadenza',rng.aISO),
-    sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore')
-      .neq('stato','annullato').eq('pagato_fornitore',false)
+    sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore,data_pagamento_fornitore')
+      .neq('stato','annullato')
       .not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').not('fornitore','ilike','%rientro%')
       .gte('data',daISOForn),
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
@@ -173,7 +173,9 @@ async function caricaFinanze() {
     var scadEffettiva = spostaAlLunedi(o.data_scadenza);
     getGiorno(scadEffettiva).entrateDettaglio.push({
       cliente: o.cliente, importo: prezzoConIva(o) * Number(o.litri),
-      prodotto: o.prodotto, litri: Number(o.litri)
+      prodotto: o.prodotto, litri: Number(o.litri),
+      pagato: !!o.pagato,
+      dataPagamento: o.data_pagamento || null
     });
   });
 
@@ -186,10 +188,13 @@ async function caricaFinanze() {
     var scad = new Date(o.data + 'T12:00:00');
     scad.setDate(scad.getDate() + ggPag);
     var scadEffettiva = spostaAlLunedi(scad.toISOString().split('T')[0]);
-    var importo = (Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * Number(o.litri) * (1 + Number(o.iva || 22) / 100);
+    // Solo costo_litro: il trasporto è fatturato dal vettore terzo, non dal fornitore carburante
+    var importo = Number(o.costo_litro) * Number(o.litri) * (1 + Number(o.iva || 22) / 100);
     getGiorno(scadEffettiva).usciteDettaglio.push({
       fornitore: o.fornitore, importo: importo,
-      prodotto: o.prodotto, litri: Number(o.litri)
+      prodotto: o.prodotto, litri: Number(o.litri),
+      pagato: !!o.pagato_fornitore,
+      dataPagamento: o.data_pagamento_fornitore || null
     });
   });
 
@@ -212,17 +217,23 @@ async function caricaFinanze() {
   Object.keys(giornoMap).forEach(function(data) {
     if (data >= rng.inizioMeseISO && data <= rng.fineMeseISO) {
       var g = giornoMap[data];
-      g.entrateDettaglio.forEach(function(e) { totFattCli += e.importo; });
+      g.entrateDettaglio.forEach(function(e) {
+        // KPI = SALDO netto previsto → escludo entrate già incassate
+        if (!e.pagato) totFattCli += e.importo;
+      });
       totStazione += g.stazione;
-      g.usciteDettaglio.forEach(function(u) { totUscite += u.importo; });
+      g.usciteDettaglio.forEach(function(u) {
+        // KPI = SALDO netto previsto → escludo uscite già pagate
+        if (!u.pagato) totUscite += u.importo;
+      });
     }
   });
   totEntrate = totFattCli + totStazione;
   var saldoColor = (totEntrate - totUscite) >= 0 ? '#639922' : '#E24B4A';
   document.getElementById('fin-kpi').innerHTML =
-    '<div class="kpi"><div class="kpi-label">Entrate ingrosso</div><div class="kpi-value" style="color:#639922">' + fmtE(totFattCli) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Da incassare ingrosso</div><div class="kpi-value" style="color:#639922">' + fmtE(totFattCli) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Entrate stazione</div><div class="kpi-value" style="color:#378ADD">' + fmtE(totStazione) + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Uscite fornitori</div><div class="kpi-value" style="color:#E24B4A">' + fmtE(totUscite) + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Da pagare fornitori</div><div class="kpi-value" style="color:#E24B4A">' + fmtE(totUscite) + '</div></div>' +
     '<div class="kpi" style="border:1px solid ' + saldoColor + '"><div class="kpi-label">Saldo netto previsto</div><div class="kpi-value" style="color:' + saldoColor + '">' + (totEntrate - totUscite >= 0 ? '+' : '') + ' ' + fmtE(totEntrate - totUscite) + '</div></div>';
 
   renderCalendarioFinanze();
@@ -241,20 +252,35 @@ function renderCalendarioFinanze() {
 function _finCalHtmlCellaContenuto(g, dataStr, filtro) {
   var html = '';
 
-  var uscitePerFor = {};
+  // Aggrega uscite per (fornitore, pagato) → max 2 pillole per fornitore (pagato vs no)
+  var uscitePerFor = {}; // { fornitore: { tot: 0, totPag: 0 } }
   g.usciteDettaglio.forEach(function(u) {
-    if (!uscitePerFor[u.fornitore]) uscitePerFor[u.fornitore] = 0;
-    uscitePerFor[u.fornitore] += u.importo;
+    if (!uscitePerFor[u.fornitore]) uscitePerFor[u.fornitore] = { tot: 0, totPag: 0 };
+    if (u.pagato) uscitePerFor[u.fornitore].totPag += u.importo;
+    else uscitePerFor[u.fornitore].tot += u.importo;
   });
-  var totEntrateGiorno = g.entrateDettaglio.reduce(function(s, e) { return s + e.importo; }, 0);
+  // Aggrega entrate per (pagato/no)
+  var totEntrateNonPag = 0, totEntratePag = 0;
+  g.entrateDettaglio.forEach(function(e) {
+    if (e.pagato) totEntratePag += e.importo;
+    else totEntrateNonPag += e.importo;
+  });
+  var totEntrateGiorno = totEntrateNonPag + totEntratePag;
 
   var mostraEntrate  = filtro === '' || filtro === 'entrate' || filtro === 'ingrosso';
   var mostraStazione = filtro === '' || filtro === 'entrate' || filtro === 'stazione';
   var mostraUscite   = filtro === '' || filtro === 'uscite';
 
-  if (mostraEntrate && totEntrateGiorno > 0) {
-    html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'entrate\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#EAF3DE;color:#27500A;border-left:2px solid #639922">';
-    html += '<span>Entrate</span><span style="font-family:var(--font-mono);font-weight:600">' + _fmtCompact(totEntrateGiorno) + '</span></div>';
+  if (mostraEntrate) {
+    if (totEntrateNonPag > 0) {
+      html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'entrate\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#EAF3DE;color:#27500A;border-left:2px solid #639922">';
+      html += '<span>Entrate</span><span style="font-family:var(--font-mono);font-weight:600">' + _fmtCompact(totEntrateNonPag) + '</span></div>';
+    }
+    if (totEntratePag > 0) {
+      // Pagate in anticipo: trasparenti con ✓
+      html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'entrate\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:#EAF3DE;color:#27500A;border-left:2px solid #639922;opacity:0.45">';
+      html += '<span>✓ Entrate</span><span style="font-family:var(--font-mono);font-weight:600;text-decoration:line-through">' + _fmtCompact(totEntratePag) + '</span></div>';
+    }
   }
 
   if (mostraStazione && g.stazione > 0) {
@@ -265,14 +291,27 @@ function _finCalHtmlCellaContenuto(g, dataStr, filtro) {
   if (mostraUscite) {
     Object.keys(uscitePerFor).forEach(function(fornitore) {
       var col = _finForColori[fornitore] || '#FAEEDA';
-      html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + col + ';color:#791F1F;border-left:2px solid #E24B4A">';
-      html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600">' + esc(fornitore) + '</span>';
-      html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + _fmtCompact(uscitePerFor[fornitore]) + '</span></div>';
+      var dati = uscitePerFor[fornitore];
+      if (dati.tot > 0) {
+        // Non pagata: pillola normale
+        html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + col + ';color:#791F1F;border-left:2px solid #E24B4A">';
+        html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600">' + esc(fornitore) + '</span>';
+        html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + _fmtCompact(dati.tot) + '</span></div>';
+      }
+      if (dati.totPag > 0) {
+        // Pagata in anticipo: trasparente + ✓ + strikethrough
+        html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + col + ';color:#791F1F;border-left:2px solid #E24B4A;opacity:0.45">';
+        html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600">✓ ' + esc(fornitore) + '</span>';
+        html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap;text-decoration:line-through">' + _fmtCompact(dati.totPag) + '</span></div>';
+      }
     });
   }
 
-  var totE = (mostraEntrate ? totEntrateGiorno : 0) + (mostraStazione ? g.stazione : 0);
-  var totU = mostraUscite ? Object.values(uscitePerFor).reduce(function(s, v) { return s + v; }, 0) : 0;
+  // Footer netto: conta SOLO il NON pagato (semantica "ancora da incassare/pagare")
+  var totUNonPag = 0;
+  Object.values(uscitePerFor).forEach(function(d){ totUNonPag += d.tot; });
+  var totE = (mostraEntrate ? totEntrateNonPag : 0) + (mostraStazione ? g.stazione : 0);
+  var totU = mostraUscite ? totUNonPag : 0;
   if (totE > 0 || totU > 0) {
     var netto = totE - totU;
     var nColor = netto >= 0 ? 'background:#EEEDFE;color:#26215C' : 'background:#FCEBEB;color:#791F1F';
@@ -390,15 +429,17 @@ function _finCalRenderRiepilogoSettimana() {
     if (g) {
       g.entrateDettaglio.forEach(function(e) {
         var key = e.cliente || '—';
-        if (!perCliente[key]) perCliente[key] = { tot:0, dettagli:[] };
-        perCliente[key].tot += e.importo;
-        perCliente[key].dettagli.push({ data:dataStr, prodotto:e.prodotto, litri:e.litri, importo:e.importo });
+        if (!perCliente[key]) perCliente[key] = { tot:0, totPag:0, dettagli:[] };
+        if (e.pagato) perCliente[key].totPag += e.importo;
+        else perCliente[key].tot += e.importo;
+        perCliente[key].dettagli.push({ data:dataStr, prodotto:e.prodotto, litri:e.litri, importo:e.importo, pagato:!!e.pagato });
       });
       g.usciteDettaglio.forEach(function(u) {
         var key = u.fornitore || '—';
-        if (!perFornitore[key]) perFornitore[key] = { tot:0, dettagli:[] };
-        perFornitore[key].tot += u.importo;
-        perFornitore[key].dettagli.push({ data:dataStr, prodotto:u.prodotto, litri:u.litri, importo:u.importo });
+        if (!perFornitore[key]) perFornitore[key] = { tot:0, totPag:0, dettagli:[] };
+        if (u.pagato) perFornitore[key].totPag += u.importo;
+        else perFornitore[key].tot += u.importo;
+        perFornitore[key].dettagli.push({ data:dataStr, prodotto:u.prodotto, litri:u.litri, importo:u.importo, pagato:!!u.pagato });
       });
       if (g.stazione > 0) {
         totStazione += g.stazione;
@@ -413,29 +454,34 @@ function _finCalRenderRiepilogoSettimana() {
     cur.setDate(cur.getDate() + 1);
   }
 
-  var ordCli  = Object.keys(perCliente).sort(function(a,b){ return perCliente[b].tot - perCliente[a].tot; });
-  var ordForn = Object.keys(perFornitore).sort(function(a,b){ return perFornitore[b].tot - perFornitore[a].tot; });
+  // Ordina per importo TOTALE (pagato + non pagato) decrescente
+  var ordCli  = Object.keys(perCliente).sort(function(a,b){ return (perCliente[b].tot + perCliente[b].totPag) - (perCliente[a].tot + perCliente[a].totPag); });
+  var ordForn = Object.keys(perFornitore).sort(function(a,b){ return (perFornitore[b].tot + perFornitore[b].totPag) - (perFornitore[a].tot + perFornitore[a].totPag); });
 
-  var totClienti = Object.values(perCliente).reduce(function(s,c){ return s + c.tot; }, 0);
-  var totUscite  = Object.values(perFornitore).reduce(function(s,f){ return s + f.tot; }, 0);
-  var totIn      = totClienti + totStazione;
-  var netto      = totIn - totUscite;
-  var nettoColor = netto >= 0 ? '#27500A' : '#791F1F';
+  // KPI strip in alto: SOLO da incassare/da pagare (esclude le già fatte) per coerenza coi KPI mese
+  var totClienti  = Object.values(perCliente).reduce(function(s,c){ return s + c.tot; }, 0);
+  var totUscite   = Object.values(perFornitore).reduce(function(s,f){ return s + f.tot; }, 0);
+  var totIn       = totClienti + totStazione;
+  var netto       = totIn - totUscite;
+  var nettoColor  = netto >= 0 ? '#27500A' : '#791F1F';
 
   var h = '<div style="border-top:0.5px solid var(--border);padding-top:14px;margin-top:16px">';
 
-  // Header con totali strip
+  // Header con totali strip (DA incassare / DA pagare)
   h += '<div style="font-size:13px;font-weight:600;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
   h += '<span>📊 Riepilogo settimana</span>';
   h += '<div style="display:flex;gap:14px;font-family:var(--font-mono);font-size:12px;flex-wrap:wrap">';
-  h += '<span style="color:#639922">↑ ' + _fmtCompact(totClienti) + '</span>';
-  h += '<span style="color:#0C447C">↑ ' + _fmtCompact(totStazione) + '</span>';
-  h += '<span style="color:#A32D2D">↓ ' + _fmtCompact(totUscite) + '</span>';
-  h += '<span style="color:' + nettoColor + ';font-weight:700">= ' + (netto >= 0 ? '+' : '') + _fmtCompact(netto) + '</span>';
+  h += '<span style="color:#639922" title="Da incassare ingrosso">↑ ' + _fmtCompact(totClienti) + '</span>';
+  h += '<span style="color:#0C447C" title="Stazione">↑ ' + _fmtCompact(totStazione) + '</span>';
+  h += '<span style="color:#A32D2D" title="Da pagare fornitori">↓ ' + _fmtCompact(totUscite) + '</span>';
+  h += '<span style="color:' + nettoColor + ';font-weight:700" title="Saldo netto previsto">= ' + (netto >= 0 ? '+' : '') + _fmtCompact(netto) + '</span>';
   h += '</div></div>';
 
   // 3 sezioni master collassabili (default = collassate)
-  h += _finSettSezione('master-ent', 'Entrate per cliente', totClienti, ordCli.length, '#EAF3DE', '#27500A', '#639922', function() {
+  var totClientiCompleto = Object.values(perCliente).reduce(function(s,c){ return s + c.tot + (c.totPag || 0); }, 0);
+  var totUsciteCompleto  = Object.values(perFornitore).reduce(function(s,f){ return s + f.tot + (f.totPag || 0); }, 0);
+
+  h += _finSettSezione('master-ent', 'Entrate per cliente', totClientiCompleto, ordCli.length, '#EAF3DE', '#27500A', '#639922', function() {
     if (ordCli.length === 0) return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic">Nessuna entrata cliente</div>';
     var inner = '';
     ordCli.forEach(function(nome, idx) {
@@ -457,7 +503,7 @@ function _finCalRenderRiepilogoSettimana() {
     return inner;
   });
 
-  h += _finSettSezione('master-usc', 'Uscite per fornitore', totUscite, ordForn.length, '#FAEEDA', '#854F0B', '#BA7517', function() {
+  h += _finSettSezione('master-usc', 'Uscite per fornitore', totUsciteCompleto, ordForn.length, '#FAEEDA', '#854F0B', '#BA7517', function() {
     if (ordForn.length === 0) return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic">Nessuna uscita fornitore</div>';
     var inner = '';
     ordForn.forEach(function(nome, idx) {
@@ -490,18 +536,33 @@ function _finSettSezione(idSuffix, titolo, totale, conteggio, bgColor, textColor
 // Helper: render singola riga espandibile del riepilogo settimana
 function _finSettRiga(idSuffix, nome, data, bgColor, textColor, borderColor) {
   var rowId = 'fin-sett-' + idSuffix;
-  var h = '<div onclick="_finSettToggle(\'' + rowId + '\',this)" style="cursor:pointer;background:' + bgColor + ';color:' + textColor + ';border-left:3px solid ' + borderColor + ';display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:3px;font-size:12px;font-weight:500">';
+  var totale = (data.tot || 0) + (data.totPag || 0);
+  // Se TUTTO è pagato → opacity ridotta sull'intera riga + ✓
+  var tuttoPagato = data.totPag > 0 && data.tot === 0;
+  var rowOpa = tuttoPagato ? 'opacity:0.55;' : '';
+  var checkIcon = tuttoPagato ? '<span style="margin-right:2px">✓</span>' : '';
+  var subInfo = '';
+  if (!tuttoPagato && data.totPag > 0) {
+    // Mix pagato+non pagato → mostra "di cui pagato"
+    subInfo = '<span style="font-size:10px;opacity:0.75;margin-left:8px;font-weight:400">(di cui pagato ' + fmtE(data.totPag) + ')</span>';
+  }
+  var totStrike = tuttoPagato ? 'text-decoration:line-through;' : '';
+
+  var h = '<div onclick="_finSettToggle(\'' + rowId + '\',this)" style="cursor:pointer;background:' + bgColor + ';color:' + textColor + ';border-left:3px solid ' + borderColor + ';display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:3px;font-size:12px;font-weight:500;' + rowOpa + '">';
   h += '<span style="display:flex;align-items:center;gap:6px;overflow:hidden">';
   h += '<span class="caret" style="font-size:9px;transition:transform 0.15s;display:inline-block">▶</span>';
-  h += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(nome) + '</span></span>';
-  h += '<span style="font-family:var(--font-mono);white-space:nowrap;margin-left:10px">' + fmtE(data.tot) + '</span>';
+  h += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + checkIcon + esc(nome) + subInfo + '</span></span>';
+  h += '<span style="font-family:var(--font-mono);white-space:nowrap;margin-left:10px;' + totStrike + '">' + fmtE(totale) + '</span>';
   h += '</div>';
   h += '<div id="' + rowId + '" style="display:none;padding:4px 0 8px 18px;font-size:11px">';
   data.dettagli.sort(function(a,b){ return a.data < b.data ? -1 : 1; }).forEach(function(d) {
     var df = new Date(d.data + 'T12:00:00').toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
-    h += '<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--text-muted)">';
-    h += '<span>' + esc(df) + ' · ' + esc(d.prodotto || '—') + ' ' + fmtL(d.litri) + '</span>';
-    h += '<span style="font-family:var(--font-mono)">' + fmtE(d.importo) + '</span>';
+    var detOpa = d.pagato ? 'opacity:0.55;' : '';
+    var detStrike = d.pagato ? 'text-decoration:line-through;' : '';
+    var detIcon = d.pagato ? '<span style="color:#27500A;margin-right:4px">✓</span>' : '';
+    h += '<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--text-muted);' + detOpa + '">';
+    h += '<span>' + detIcon + esc(df) + ' · ' + esc(d.prodotto || '—') + ' ' + fmtL(d.litri) + '</span>';
+    h += '<span style="font-family:var(--font-mono);' + detStrike + '">' + fmtE(d.importo) + '</span>';
     h += '</div>';
   });
   h += '</div>';
@@ -585,22 +646,29 @@ function mostraDettaglioFinanze(dataStr, tipo) {
 
   // ENTRATE
   if (tipo === 'entrate' || tipo === 'tutto') {
+    // Aggrega per (cliente, pagato) → max 2 voci per cliente
     var perCliente = {};
     g.entrateDettaglio.forEach(function(e) {
-      if (!perCliente[e.cliente]) perCliente[e.cliente] = { importo: 0, dettagli: [] };
-      perCliente[e.cliente].importo += e.importo;
-      perCliente[e.cliente].dettagli.push(e.prodotto + ' ' + fmtL(e.litri));
+      var key = e.cliente + '||' + (e.pagato ? 'P' : 'N');
+      if (!perCliente[key]) perCliente[key] = { cliente: e.cliente, pagato: !!e.pagato, importo: 0, dettagli: [], dataPag: e.dataPagamento };
+      perCliente[key].importo += e.importo;
+      perCliente[key].dettagli.push(e.prodotto + ' ' + fmtL(e.litri));
     });
     var totaleEnt = 0;
-    if (Object.keys(perCliente).length > 0) {
+    var keysCli = Object.keys(perCliente);
+    if (keysCli.length > 0) {
       if (tipo === 'tutto') html += '<div style="font-size:12px;font-weight:600;color:#27500A;margin:14px 0 6px">🟢 ENTRATE INGROSSO</div>';
       html += '<div style="max-height:300px;overflow-y:auto">';
-      Object.keys(perCliente).sort(function(a, b) { return perCliente[b].importo - perCliente[a].importo; }).forEach(function(cl) {
-        var c = perCliente[cl];
+      keysCli.sort(function(a, b) { return perCliente[b].importo - perCliente[a].importo; }).forEach(function(k) {
+        var c = perCliente[k];
         totaleEnt += c.importo;
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-left:3px solid #639922;border-radius:0 8px 8px 0;margin-bottom:4px">';
-        html += '<div><div style="font-weight:500">' + esc(cl) + '</div><div style="font-size:10px;color:var(--text-muted)">' + c.dettagli.join(' · ') + '</div></div>';
-        html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:14px;color:#639922;white-space:nowrap;margin-left:10px">' + fmtE(c.importo) + '</div></div>';
+        var opa = c.pagato ? 'opacity:0.5;' : '';
+        var strike = c.pagato ? 'text-decoration:line-through;' : '';
+        var checkIcon = c.pagato ? '<span style="color:#639922;margin-right:6px">✓</span>' : '';
+        var dataPagInfo = c.pagato && c.dataPag ? ' · pagato il ' + _fmtDataIt(c.dataPag) : (c.pagato ? ' · già pagato' : '');
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-left:3px solid #639922;border-radius:0 8px 8px 0;margin-bottom:4px;' + opa + '">';
+        html += '<div><div style="font-weight:500">' + checkIcon + esc(c.cliente) + '</div><div style="font-size:10px;color:var(--text-muted)">' + c.dettagli.join(' · ') + esc(dataPagInfo) + '</div></div>';
+        html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:14px;color:#639922;white-space:nowrap;margin-left:10px;' + strike + '">' + fmtE(c.importo) + '</div></div>';
       });
       html += '</div>';
       html += '<div style="display:flex;justify-content:space-between;padding:10px 12px;margin-top:6px;background:#EAF3DE;border-radius:8px;font-weight:700"><span>TOTALE ENTRATE</span><span style="font-family:var(--font-mono);color:#27500A;font-size:15px">' + fmtE(totaleEnt) + '</span></div>';
@@ -621,23 +689,30 @@ function mostraDettaglioFinanze(dataStr, tipo) {
 
   // USCITE
   if (tipo === 'uscite' || tipo === 'tutto') {
+    // Aggrega per (fornitore, pagato) → max 2 voci per fornitore
     var perFornitore = {};
     g.usciteDettaglio.forEach(function(u) {
-      if (!perFornitore[u.fornitore]) perFornitore[u.fornitore] = { importo: 0, dettagli: [] };
-      perFornitore[u.fornitore].importo += u.importo;
-      perFornitore[u.fornitore].dettagli.push(u.prodotto + ' ' + fmtL(u.litri));
+      var key = u.fornitore + '||' + (u.pagato ? 'P' : 'N');
+      if (!perFornitore[key]) perFornitore[key] = { fornitore: u.fornitore, pagato: !!u.pagato, importo: 0, dettagli: [], dataPag: u.dataPagamento };
+      perFornitore[key].importo += u.importo;
+      perFornitore[key].dettagli.push(u.prodotto + ' ' + fmtL(u.litri));
     });
     var totaleUsc = 0;
-    if (Object.keys(perFornitore).length > 0) {
+    var keysFor = Object.keys(perFornitore);
+    if (keysFor.length > 0) {
       if (tipo === 'tutto') html += '<div style="font-size:12px;font-weight:600;color:#791F1F;margin:14px 0 6px">🔴 USCITE FORNITORI</div>';
       html += '<div style="max-height:300px;overflow-y:auto">';
-      Object.keys(perFornitore).sort(function(a, b) { return perFornitore[b].importo - perFornitore[a].importo; }).forEach(function(fo) {
-        var f = perFornitore[fo];
+      keysFor.sort(function(a, b) { return perFornitore[b].importo - perFornitore[a].importo; }).forEach(function(k) {
+        var f = perFornitore[k];
         totaleUsc += f.importo;
-        var col = _finForColori[fo] || '#FAEEDA';
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:' + col + ';border-left:3px solid #E24B4A;border-radius:0 8px 8px 0;margin-bottom:4px">';
-        html += '<div><div style="font-weight:600">' + esc(fo) + '</div><div style="font-size:10px;color:var(--text-muted)">' + f.dettagli.join(' · ') + '</div></div>';
-        html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:14px;color:#E24B4A;white-space:nowrap;margin-left:10px">' + fmtE(f.importo) + '</div></div>';
+        var col = _finForColori[f.fornitore] || '#FAEEDA';
+        var opa = f.pagato ? 'opacity:0.5;' : '';
+        var strike = f.pagato ? 'text-decoration:line-through;' : '';
+        var checkIcon = f.pagato ? '<span style="color:#27500A;margin-right:6px">✓</span>' : '';
+        var dataPagInfo = f.pagato && f.dataPag ? ' · pagato il ' + _fmtDataIt(f.dataPag) : (f.pagato ? ' · già pagato' : '');
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:' + col + ';border-left:3px solid #E24B4A;border-radius:0 8px 8px 0;margin-bottom:4px;' + opa + '">';
+        html += '<div><div style="font-weight:600">' + checkIcon + esc(f.fornitore) + '</div><div style="font-size:10px;color:var(--text-muted)">' + f.dettagli.join(' · ') + esc(dataPagInfo) + '</div></div>';
+        html += '<div style="font-family:var(--font-mono);font-weight:600;font-size:14px;color:#E24B4A;white-space:nowrap;margin-left:10px;' + strike + '">' + fmtE(f.importo) + '</div></div>';
       });
       html += '</div>';
       html += '<div style="display:flex;justify-content:space-between;padding:10px 12px;margin-top:6px;background:#FCEBEB;border-radius:8px;font-weight:700"><span>TOTALE USCITE</span><span style="font-family:var(--font-mono);color:#791F1F;font-size:15px">' + fmtE(totaleUsc) + '</span></div>';
@@ -646,14 +721,14 @@ function mostraDettaglioFinanze(dataStr, tipo) {
     }
   }
 
-  // Netto in 'tutto'
+  // Netto in 'tutto' (considera SOLO non pagate per coerenza coi KPI)
   if (tipo === 'tutto') {
-    var tE = g.entrateDettaglio.reduce(function(s,e){return s+e.importo;},0) + g.stazione;
-    var tU = g.usciteDettaglio.reduce(function(s,u){return s+u.importo;},0);
+    var tE = g.entrateDettaglio.reduce(function(s,e){ return s + (e.pagato ? 0 : e.importo); },0) + g.stazione;
+    var tU = g.usciteDettaglio.reduce(function(s,u){ return s + (u.pagato ? 0 : u.importo); },0);
     var nettoG = tE - tU;
     var nettoColorG = nettoG >= 0 ? '#27500A' : '#791F1F';
     var nettoBgG = nettoG >= 0 ? '#EAF3DE' : '#FCEBEB';
-    html += '<div style="display:flex;justify-content:space-between;padding:12px;margin-top:14px;background:' + nettoBgG + ';border-radius:8px;font-weight:700;font-size:14px"><span>NETTO GIORNATA</span><span style="font-family:var(--font-mono);color:' + nettoColorG + ';font-size:16px">' + (nettoG >= 0 ? '+' : '') + fmtE(nettoG) + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between;padding:12px;margin-top:14px;background:' + nettoBgG + ';border-radius:8px;font-weight:700;font-size:14px"><span>NETTO GIORNATA (al netto delle già pagate)</span><span style="font-family:var(--font-mono);color:' + nettoColorG + ';font-size:16px">' + (nettoG >= 0 ? '+' : '') + fmtE(nettoG) + '</span></div>';
   }
 
   apriModal(html);
@@ -662,6 +737,14 @@ function mostraDettaglioFinanze(dataStr, tipo) {
 function _fmtCompact(n) {
   if (Math.abs(n) >= 1000) return '€' + Math.round(n / 1000) + 'k';
   return '€' + Math.round(n);
+}
+
+function _fmtDataIt(iso) {
+  // ISO YYYY-MM-DD → DD/MM/AAAA
+  if (!iso) return '';
+  var p = String(iso).split('T')[0].split('-');
+  if (p.length < 3) return iso;
+  return p[2] + '/' + p[1] + '/' + p[0];
 }
 
 // Export globals per onclick inline
