@@ -237,19 +237,23 @@ window.pfData = {
     var entrate = 0, uscite = 0;
 
     if (sede === 'deposito_vibo') {
+      // BUG FIX 25/05/2026: Supabase default limit = 1000 righe per .select().
+      // Senza .range() esplicito, le query su 5+ mesi di ordini cliente perdevano
+      // i record oltre il 1000-esimo → giacenza sovrastimata di N litri.
+      // Fix: paginazione esplicita fino a 50000 righe (sufficiente per 5+ anni di dati).
       var [entRes, uscCliRes, uscStaRes, uscAuRes] = await Promise.all([
         sb.from('ordini').select('litri')
           .eq('tipo_ordine','entrata_deposito').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data),
+          .gte('data', inizioAnno).lte('data', data).range(0, 49999),
         sb.from('ordini').select('litri,fornitore')
           .eq('tipo_ordine','cliente').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data),
+          .gte('data', inizioAnno).lte('data', data).range(0, 49999),
         sb.from('ordini').select('litri,fornitore')
           .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data),
+          .gte('data', inizioAnno).lte('data', data).range(0, 49999),
         sb.from('ordini').select('litri')
           .eq('tipo_ordine','autoconsumo').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data)
+          .gte('data', inizioAnno).lte('data', data).range(0, 49999)
       ]);
       function isPhoenix(o) {
         var f = (o.fornitore || '').toLowerCase();
