@@ -1,4 +1,4 @@
-// VERSIONE 25/05/2026 b - FIX BUG LIMIT 1000 RIGHE SUPABASE
+// VERSIONE 25/05/2026 c - FIX BUG LIMIT 1000 RIGHE SUPABASE con PAGINAZIONE VERA
 // PhoenixFuel — Deposito: Giacenze mensili
 // ═══════════════════════════════════════════════════════════════════
 
@@ -89,35 +89,42 @@ async function caricaGiacenzeMensiliDeposito() {
   // FIX 13/04 sera: usiamo STATI_VALIDI=['confermato','consegnato'] coerente con
   // pf-data.js, dashboard, giornaliera, settimanale. Prima usava .neq('annullato')
   // che includeva anche 'in_attesa' e 'programmato' gonfiando i totali.
-  // FIX 25/05/2026: aggiunto .range(0, 49999) per superare default Supabase 1000 righe
-  // (causava sottostima uscite cliente su periodo annuale).
+  // FIX 25/05/2026: PostgREST cappa a 1000 righe. Paginazione vera in batch da 1000.
   var STATI_VALIDI = ['confermato','consegnato'];
-  var [entrateRes, uscCliRes, uscStaRes, uscAutoRes] = await Promise.all([
-    sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','cliente').in('stato', STATI_VALIDI)
-      .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI)
-      .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('ordini').select('data,prodotto,litri')
-      .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999)
+  var [entrateArr, uscCliArr, uscStaArr, uscAutoArr] = await Promise.all([
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,prodotto,litri')
+        .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI)
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,prodotto,litri')
+        .eq('tipo_ordine','cliente').in('stato', STATI_VALIDI)
+        .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,prodotto,litri')
+        .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI)
+        .or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%')
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,prodotto,litri')
+        .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI)
+        .gte('data', daISO).lte('data', aISO);
+    })
   ]);
 
   // Aggrega per mese/prodotto
   var entrateMese = {}, usciteMese = {};
-  (entrateRes.data||[]).forEach(function(o){
+  entrateArr.forEach(function(o){
     var m = parseInt(o.data.substring(5,7));
     var k = o.prodotto+'_'+m;
     entrateMese[k] = (entrateMese[k]||0) + Number(o.litri);
   });
-  [uscCliRes.data, uscStaRes.data, uscAutoRes.data].forEach(function(arr){
-    (arr||[]).forEach(function(o){
+  [uscCliArr, uscStaArr, uscAutoArr].forEach(function(arr){
+    arr.forEach(function(o){
       var m = parseInt(o.data.substring(5,7));
       var k = o.prodotto+'_'+m;
       usciteMese[k] = (usciteMese[k]||0) + Number(o.litri);

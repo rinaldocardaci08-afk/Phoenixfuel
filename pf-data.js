@@ -1,4 +1,4 @@
-// VERSIONE 25/05/2026 b - FIX BUG LIMIT 1000 RIGHE SUPABASE (drift 14k L giacenza Gas Auto)
+// VERSIONE 25/05/2026 c - FIX BUG LIMIT 1000 RIGHE SUPABASE con PAGINAZIONE VERA
 // ═══════════════════════════════════════════════════════════════════
 // pf-data.js — STRATO DATI CANONICO
 // ═══════════════════════════════════════════════════════════════════
@@ -27,6 +27,31 @@
 // margini e altro possono cambiare; i litri seguiti dall'ordine al
 // movimento cisterna sono sempre la verità.
 // ═══════════════════════════════════════════════════════════════════
+
+// ───────────────────────────────────────────────────────────────────
+// HELPER PAGINAZIONE (FIX 25/05/2026)
+// PostgREST/Supabase ha hard cap a 1000 righe per richiesta, anche con
+// .range(0, 49999). Per superarlo, paginazione client-side in batch da 1000.
+// La queryFactory deve restituire un NUOVO QueryBuilder ad ogni invocazione
+// (perché QueryBuilder è single-use dopo await).
+// ───────────────────────────────────────────────────────────────────
+async function _pfFetchAllPages(queryFactory) {
+  var all = [];
+  var from = 0;
+  var PAGE = 1000;
+  var MAX_PAGES = 100; // safety: max 100k righe per evitare loop infinito
+  for (var i = 0; i < MAX_PAGES; i++) {
+    var res = await queryFactory().range(from, from + PAGE - 1);
+    if (res.error) { console.error('[_pfFetchAllPages] errore:', res.error); break; }
+    var batch = res.data || [];
+    if (batch.length === 0) break;
+    all = all.concat(batch);
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
+window._pfFetchAllPages = _pfFetchAllPages; // esposto globale per altri moduli
 
 window.pfData = {
 
@@ -238,32 +263,38 @@ window.pfData = {
     var entrate = 0, uscite = 0;
 
     if (sede === 'deposito_vibo') {
-      // BUG FIX 25/05/2026: Supabase default limit = 1000 righe per .select().
-      // Senza .range() esplicito, le query su 5+ mesi di ordini cliente perdevano
-      // i record oltre il 1000-esimo → giacenza sovrastimata di N litri.
-      // Fix: paginazione esplicita fino a 50000 righe (sufficiente per 5+ anni di dati).
-      var [entRes, uscCliRes, uscStaRes, uscAuRes] = await Promise.all([
-        sb.from('ordini').select('litri')
-          .eq('tipo_ordine','entrata_deposito').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data).range(0, 49999),
-        sb.from('ordini').select('litri,fornitore')
-          .eq('tipo_ordine','cliente').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data).range(0, 49999),
-        sb.from('ordini').select('litri,fornitore')
-          .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data).range(0, 49999),
-        sb.from('ordini').select('litri')
-          .eq('tipo_ordine','autoconsumo').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', inizioAnno).lte('data', data).range(0, 49999)
+      // FIX 25/05/2026: PostgREST cappa a 1000 righe anche con .range(0, 49999).
+      // Per superare serve PAGINAZIONE VERA in batch da 1000.
+      var [entArr, uscCliArr, uscStaArr, uscAuArr] = await Promise.all([
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri')
+            .eq('tipo_ordine','entrata_deposito').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', inizioAnno).lte('data', data);
+        }),
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri,fornitore')
+            .eq('tipo_ordine','cliente').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', inizioAnno).lte('data', data);
+        }),
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri,fornitore')
+            .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', inizioAnno).lte('data', data);
+        }),
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri')
+            .eq('tipo_ordine','autoconsumo').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', inizioAnno).lte('data', data);
+        })
       ]);
       function isPhoenix(o) {
         var f = (o.fornitore || '').toLowerCase();
         return f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0;
       }
-      entrate = (entRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      uscite += (uscCliRes.data || []).filter(isPhoenix).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      uscite += (uscStaRes.data || []).filter(isPhoenix).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      uscite += (uscAuRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      entrate = entArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      uscite += uscCliArr.filter(isPhoenix).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      uscite += uscStaArr.filter(isPhoenix).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      uscite += uscAuArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
     } else if (sede === 'stazione_oppido') {
       // Entrate: tipo_ordine='stazione_servizio'
       var entStaRes = await sb.from('ordini').select('litri')

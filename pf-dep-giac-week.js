@@ -1,4 +1,4 @@
-// VERSIONE 25/05/2026 b - FIX BUG LIMIT 1000 RIGHE SUPABASE
+// VERSIONE 25/05/2026 c - FIX BUG LIMIT 1000 RIGHE SUPABASE con PAGINAZIONE VERA
 // PhoenixFuel — Deposito: Vista settimanale giacenze calcolate
 // ═══════════════════════════════════════════════════════════════════
 // Vista alternativa al pannello "Singolo giorno" esistente.
@@ -199,25 +199,34 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
   // NOTA: includiamo sia 'confermato' che 'consegnato' come stati validi.
   // Il flusso DAS firmato porta gli ordini da 'confermato' a 'consegnato',
   // entrambi rappresentano uscite/entrate effettivamente avvenute.
-  // BUG FIX 25/05/2026: aggiunto .range(0, 49999) esplicito per superare il
-  // default Supabase di 1000 righe (causava sottostima uscite ~14k L).
+  // FIX 25/05/2026: PostgREST cappa a 1000 righe. Paginazione vera in batch da 1000.
   var STATI_VALIDI = ['confermato','consegnato'];
-  var [entRes, uscCliRes, uscStaRes, uscAuRes, rettRes] = await Promise.all([
-    sb.from('ordini').select('data,litri')
-      .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('ordini').select('data,litri,fornitore')
-      .eq('tipo_ordine','cliente').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('ordini').select('data,litri,fornitore')
-      .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('ordini').select('data,litri')
-      .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999),
-    sb.from('rettifiche_inventario').select('data,differenza,causale,origine,note')
-      .eq('tipo','deposito').eq('prodotto', prodotto).eq('confermata', true)
-      .gte('data', daISO).lte('data', aISO).range(0, 49999)
+  var [entArr, uscCliArr, uscStaArr, uscAuArr, rettArr] = await Promise.all([
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,litri')
+        .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,litri,fornitore')
+        .eq('tipo_ordine','cliente').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,litri,fornitore')
+        .eq('tipo_ordine','stazione_servizio').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,litri')
+        .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI).eq('prodotto', prodotto)
+        .gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('rettifiche_inventario').select('data,differenza,causale,origine,note')
+        .eq('tipo','deposito').eq('prodotto', prodotto).eq('confermata', true)
+        .gte('data', daISO).lte('data', aISO);
+    })
   ]);
 
   // 3. Aggregazione per data (Map<dateStr, {entrate, uscite, rettifica, rettDett}>)
@@ -226,24 +235,24 @@ async function _dgwCalcolaSerie(anno, prodotto, finoA) {
     if (!perGiorno[d]) perGiorno[d] = { entrate: 0, uscite: 0, rettifica: 0, rettDett: [] };
     return perGiorno[d];
   }
-  (entRes.data || []).forEach(function(o){
+  entArr.forEach(function(o){
     bucket(o.data).entrate += Number(o.litri || 0);
   });
   function isPhoenix(o) {
     var f = (o.fornitore || '').toLowerCase();
     return f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0;
   }
-  (uscCliRes.data || []).forEach(function(o){
+  uscCliArr.forEach(function(o){
     if (isPhoenix(o)) bucket(o.data).uscite += Number(o.litri || 0);
   });
-  (uscStaRes.data || []).forEach(function(o){
+  uscStaArr.forEach(function(o){
     if (isPhoenix(o)) bucket(o.data).uscite += Number(o.litri || 0);
   });
-  (uscAuRes.data || []).forEach(function(o){
+  uscAuArr.forEach(function(o){
     bucket(o.data).uscite += Number(o.litri || 0);
   });
   // Rettifiche confermate: entrano come movimento con segno
-  (rettRes.data || []).forEach(function(r){
+  rettArr.forEach(function(r){
     var b = bucket(r.data);
     b.rettifica += Number(r.differenza || 0);
     b.rettDett.push({
