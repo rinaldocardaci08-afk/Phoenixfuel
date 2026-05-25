@@ -1987,7 +1987,7 @@ async function caricaFornitori() {
           scad.setDate(scad.getDate() + ggPag);
           if (scad <= oggi) return; // Scaduta = pagata
         }
-        usato += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
+        usato += Number(o.costo_litro||0) * Number(o.litri);
       });
       residuo = fidoMax - usato;
     }
@@ -2045,7 +2045,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
   var ggPagFornitore = Number(fornitore.giorni_pagamento || 30);
   var fidoUsato = 0, totNonPagato = 0, totPagato = 0, totScaduto = 0;
   (ordini||[]).forEach(function(o) {
-    var costo = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri);
+    var costo = Number(o.costo_litro||0) * Number(o.litri);
     if (o.pagato_fornitore) { totPagato += costo; return; }
     var scad = new Date(o.data); scad.setDate(scad.getDate() + ggPagFornitore);
     var ggResidui = Math.floor((scad - oggi) / 86400000);
@@ -2087,7 +2087,7 @@ async function apriSchedaFornitore(fornitoreId, fornitoreNome) {
     html += '<tr><td colspan="9" class="loading">Nessun ordine</td></tr>';
   } else {
     ordini.forEach(function(o) {
-      var costoUnitario = Number(o.costo_litro||0) + Number(o.trasporto_litro||0);
+      var costoUnitario = Number(o.costo_litro||0);
       var tot = costoUnitario * Number(o.litri);
       var isPagato = o.pagato_fornitore === true;
       var scadData = new Date(o.data);

@@ -47,6 +47,13 @@ function _sfDataMeseISO(anno, mese, giorno){
   // Costruisce data ISO YYYY-MM-DD usando mezzogiorno locale per evitare shift UTC
   return new Date(anno, mese, giorno, 12, 0, 0).toISOString().split('T')[0];
 }
+function _sfMeseRange(){
+  // Range del mese corrente filtrato (riusato da aggregazione + KPI)
+  return {
+    inizio: _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese, 1),
+    fine:   _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 1, 0)
+  };
+}
 function _sfGiorniDaScadenza(dataISO){
   var oggi = new Date(); oggi.setHours(0,0,0,0);
   var s = new Date(dataISO + 'T12:00:00'); s.setHours(0,0,0,0);
@@ -133,8 +140,9 @@ async function caricaScadenzarioFornitori() {
 // AGGREGAZIONE per (data, fornitore_nome, fattura_ricevuta_id)
 // ═════════════════════════════════════════════════════════════════════
 function _sfAggregaRighe() {
-  var meseInizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese, 1);
-  var meseFine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 1, 0);
+  var rng = _sfMeseRange();
+  var meseInizio = rng.inizio;
+  var meseFine   = rng.fine;
 
   var fattMap = {};
   _sfFatture.forEach(function(f){ fattMap[f.id] = f; });
@@ -162,7 +170,7 @@ function _sfAggregaRighe() {
         totConIva: 0
       };
     }
-    var imponibile = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    var imponibile = Number(o.costo_litro||0) * Number(o.litri||0);
     var iva = Number(o.iva || 22) / 100;
     raggruppati[chiave].ordini.push(o);
     raggruppati[chiave].totLitri      += Number(o.litri||0);
@@ -236,8 +244,9 @@ function _sfAggregaRighe() {
 // ═════════════════════════════════════════════════════════════════════
 function _sfCalcolaKPI(righe) {
   var k = { senzaFattura:0, daPagare:0, scadute:0, pagatoMese:0 };
-  var meseInizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese, 1);
-  var meseFine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 1, 0);
+  var rng = _sfMeseRange();
+  var meseInizio = rng.inizio;
+  var meseFine   = rng.fine;
 
   righe.forEach(function(r){
     if (r.stato === 'senza_fattura' || r.stato === 'scaduta_no_fattura') {
@@ -486,7 +495,7 @@ function _sfHtmlRigaEspansa(r) {
   h += '</div>';
 
   r.ordini.forEach(function(o){
-    var imp = (Number(o.costo_litro||0)+Number(o.trasporto_litro||0))*Number(o.litri||0);
+    var imp = Number(o.costo_litro||0) * Number(o.litri||0);
     var iva = Number(o.iva||22)/100;
     var totRiga = imp * (1 + iva);
     var dasInfo = o.das_firmato_url ? '✓ DAS' : '○';
