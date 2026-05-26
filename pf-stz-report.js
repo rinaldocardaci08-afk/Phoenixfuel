@@ -1,3 +1,4 @@
+// VERSIONE 26/05/2026 a - FIX BUG LIMIT 1000: paginazione vera _pfFetchAllPages
 // PhoenixFuel — Stazione: Report mensili, Stampe, Export Excel
 function initReportStazione() {
   var annoCorr = new Date().getFullYear();
@@ -201,10 +202,13 @@ async function stampaReportMensileContatori() {
   if (!pompeIds.length) { toast('Nessuna pompa configurata'); return; }
 
   var giornoPre = new Date(new Date(da).getTime()-86400000).toISOString().split('T')[0];
-  var { data: letture } = await sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',giornoPre).lte('data',a).order('data');
+  // FIX 26/05/2026: paginazione vera per supportare report su range > 250 giorni
+  var letture = await _pfFetchAllPages(function() {
+    return sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',giornoPre).lte('data',a).order('data');
+  });
 
   var lettPerPompaData = {};
-  (letture||[]).forEach(function(l){
+  letture.forEach(function(l){
     if (!lettPerPompaData[l.pompa_id]) lettPerPompaData[l.pompa_id] = {};
     lettPerPompaData[l.pompa_id][l.data] = l;
   });
@@ -355,13 +359,20 @@ async function _caricaDatiVenditeMese(anno, mese) {
   var pompeIds = (pompe||[]).map(function(p){return p.id;});
   if (!pompeIds.length) return { righe:[], totali:{} };
   var giornoPre = new Date(new Date(da).getTime()-86400000).toISOString().split('T')[0];
-  var [lettRes, prezRes, costiRes, lettPreRes] = await Promise.all([
-    sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',da).lte('data',a).order('data'),
-    sb.from('stazione_prezzi').select('*').gte('data',da).lte('data',a),
-    sb.from('stazione_costi').select('*').gte('data',da).lte('data',a),
+  // FIX 26/05/2026: paginazione vera per range > 250 giorni
+  var [lettArr, prezArr, costiArr, lettPreRes] = await Promise.all([
+    _pfFetchAllPages(function() {
+      return sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).gte('data',da).lte('data',a).order('data');
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('stazione_prezzi').select('*').gte('data',da).lte('data',a);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('stazione_costi').select('*').gte('data',da).lte('data',a);
+    }),
     sb.from('stazione_letture').select('*').in('pompa_id',pompeIds).lte('data',giornoPre).order('data',{ascending:false}).limit(pompeIds.length)
   ]);
-  var letture=lettRes.data||[], prezzi=prezRes.data||[], costiDb=costiRes.data||[], lettPre=lettPreRes.data||[];
+  var letture=lettArr, prezzi=prezArr, costiDb=costiArr, lettPre=lettPreRes.data||[];
   var prezziMap={}; prezzi.forEach(function(p){prezziMap[p.data+'_'+p.prodotto]=p.prezzo_litro;});
   var costiMap={}; costiDb.forEach(function(c){costiMap[c.data+'_'+c.prodotto]=Number(c.costo_litro);});
   var tutteLetture=[...lettPre,...letture];

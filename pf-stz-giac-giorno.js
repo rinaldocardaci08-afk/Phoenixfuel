@@ -1,3 +1,4 @@
+// VERSIONE 26/05/2026 a - FIX BUG LIMIT 1000: paginazione vera _pfFetchAllPages
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Giacenza giornaliera stazione Oppido
 // Step B.3.a.1: guscio read-only (solo visualizzazione + log console).
@@ -419,17 +420,25 @@ async function _stzgAssicuraCatena(dataTarget) {
   if (dataTarget < DATA_INIZIO) return;
 
   // Carica in blocco TUTTO ciò che serve nel range [DATA_INIZIO, dataTarget]
-  var [pompeRes, giacRes, lettRes, ordRes] = await Promise.all([
+  // FIX 26/05/2026: paginazione vera con _pfFetchAllPages per le query cumulative
+  // (giacenze_giornaliere, stazione_letture, ordini) che possono superare 1000 righe.
+  var [pompeRes, giacArr, lettArr, ordArr] = await Promise.all([
     sb.from('stazione_pompe').select('id,nome,prodotto,attiva').eq('attiva', true),
-    sb.from('giacenze_giornaliere').select('*').eq('sede', 'stazione_oppido').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data'),
-    sb.from('stazione_letture').select('pompa_id,lettura,data').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data'),
-    sb.from('ordini').select('data,prodotto,litri,tipo_ordine,stato').eq('tipo_ordine', 'stazione_servizio').gte('data', DATA_INIZIO).lte('data', dataTarget).in('stato', ['confermato','consegnato']).eq('ricevuto_stazione', true)
+    _pfFetchAllPages(function() {
+      return sb.from('giacenze_giornaliere').select('*').eq('sede', 'stazione_oppido').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data');
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('stazione_letture').select('pompa_id,lettura,data').gte('data', DATA_INIZIO).lte('data', dataTarget).order('data');
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,prodotto,litri,tipo_ordine,stato').eq('tipo_ordine', 'stazione_servizio').gte('data', DATA_INIZIO).lte('data', dataTarget).in('stato', ['confermato','consegnato']).eq('ricevuto_stazione', true);
+    })
   ]);
 
   var pompe = pompeRes.data || [];
-  var giacEsistenti = giacRes.data || [];
-  var letture = lettRes.data || [];
-  var ordini = ordRes.data || [];
+  var giacEsistenti = giacArr;
+  var letture = lettArr;
+  var ordini = ordArr;
 
   // Indicizza
   var pompaProd = {};

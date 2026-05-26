@@ -1,3 +1,4 @@
+// VERSIONE 26/05/2026 a - FIX BUG LIMIT 1000: paginazione vera _pfFetchAllPages
 // PhoenixFuel — Stazione: Giacenze mensili
 
 // ═══════════════════════════════════════════════════════════════════
@@ -125,18 +126,24 @@ async function caricaGiacenzeMensili() {
   var daISO = anno + '-01-01';
   var aISO = anno + '-12-31';
 
-  var [ordiniRes, lettRes, lettPrecRes] = await Promise.all([
-    sb.from('ordini').select('data,prodotto,litri').eq('tipo_ordine', 'stazione_servizio')
-      .neq('stato', 'annullato').eq('ricevuto_stazione', true).gte('data', daISO).lte('data', aISO),
-    sb.from('stazione_letture').select('data,pompa_id,lettura')
-      .gte('data', daISO).lte('data', aISO).order('data'),
+  var [ordiniArr, lettArr, lettPrecRes] = await Promise.all([
+    // FIX 26/05/2026: paginazione vera (annuale supera 1000 righe)
+    _pfFetchAllPages(function() {
+      return sb.from('ordini').select('data,prodotto,litri').eq('tipo_ordine', 'stazione_servizio')
+        .neq('stato', 'annullato').eq('ricevuto_stazione', true).gte('data', daISO).lte('data', aISO);
+    }),
+    _pfFetchAllPages(function() {
+      return sb.from('stazione_letture').select('data,pompa_id,lettura')
+        .gte('data', daISO).lte('data', aISO).order('data');
+    }),
+    // lettPrecRes resta senza paginazione: usa .limit(50) esplicito → al massimo 50 righe
     sb.from('stazione_letture').select('pompa_id,lettura,data')
       .lt('data', daISO).order('data', { ascending: false }).limit(50)
   ]);
 
   // Entrate per mese/prodotto
   var entrateMese = {};
-  (ordiniRes.data || []).forEach(function(o) {
+  ordiniArr.forEach(function(o) {
     var m = parseInt(o.data.substring(5, 7));
     var k = o.prodotto + '_' + m;
     entrateMese[k] = (entrateMese[k] || 0) + Number(o.litri);
@@ -148,7 +155,7 @@ async function caricaGiacenzeMensili() {
   (pompe || []).forEach(function(p) { pompaMap[p.id] = p.prodotto; });
 
   // Costruisci mappa letture per pompa per data
-  var tutteLett = (lettRes.data || []).concat(lettPrecRes.data || []);
+  var tutteLett = lettArr.concat(lettPrecRes.data || []);
   // Ordina per pompa e data
   var lettPerPompa = {};
   tutteLett.forEach(function(l) {
