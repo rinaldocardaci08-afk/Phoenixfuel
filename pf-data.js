@@ -1,4 +1,4 @@
-// VERSIONE 25/05/2026 c - FIX BUG LIMIT 1000 RIGHE SUPABASE con PAGINAZIONE VERA
+// VERSIONE 26/05/2026 d - FIX BUG LIMIT 1000 esteso a branch stazione_oppido
 // ═══════════════════════════════════════════════════════════════════
 // pf-data.js — STRATO DATI CANONICO
 // ═══════════════════════════════════════════════════════════════════
@@ -297,24 +297,30 @@ window.pfData = {
       uscite += uscAuArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
     } else if (sede === 'stazione_oppido') {
       // Entrate: tipo_ordine='stazione_servizio'
-      var entStaRes = await sb.from('ordini').select('litri')
-        .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
-        .gte('data', inizioAnno).lte('data', data);
-      entrate = (entStaRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      // FIX 26/05/2026: paginazione vera (per coerenza e prevenzione, ad oggi <1000 ma futuro a rischio)
+      var entStaArr = await _pfFetchAllPages(function() {
+        return sb.from('ordini').select('litri')
+          .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+          .gte('data', inizioAnno).lte('data', data);
+      });
+      entrate = entStaArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
       // Uscite: differenze letture pompe
       // BUG-FIX 19/04/2026: la finestra letture ora parte dal 15/12 dell'anno
       // precedente per catturare la lettura di chiusura anno (es. 31/12/2025).
       // Senza questa base, il primo delta del 01/01 era perso.
       // I delta PRIMA del 01/01 non sono uscite dell'anno corrente e vengono
       // scartati nel loop via filtro su arr[j].data >= inizioAnno.
+      // FIX 26/05/2026: paginazione vera (4 pompe x 365 giorni = 1460 letture/anno → supera 1000)
       var inizioWindow = (anno - 1) + '-12-15';
       var pompeRes = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true);
       var ids = (pompeRes.data || []).filter(function(p){ return p.prodotto === prodotto; }).map(function(p){ return p.id; });
       if (ids.length) {
-        var lettRes = await sb.from('stazione_letture').select('pompa_id,data,lettura')
-          .in('pompa_id', ids).gte('data', inizioWindow).lte('data', data).order('data');
+        var lettArr = await _pfFetchAllPages(function() {
+          return sb.from('stazione_letture').select('pompa_id,data,lettura')
+            .in('pompa_id', ids).gte('data', inizioWindow).lte('data', data).order('data');
+        });
         var byPompa = {};
-        (lettRes.data || []).forEach(function(l) {
+        lettArr.forEach(function(l) {
           if (!byPompa[l.pompa_id]) byPompa[l.pompa_id] = [];
           byPompa[l.pompa_id].push(l);
         });
