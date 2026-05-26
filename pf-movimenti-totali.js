@@ -1,3 +1,4 @@
+// VERSIONE 26/05/2026 a - FIX BUG LIMIT 1000 RIGHE: paginazione vera con _pfFetchAllPages
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Movimenti totali ad oggi (riconciliazione contabile)
 // COMANDAMENTO: Giacenze = iniziale + entrate − uscite. FINE.
@@ -66,53 +67,68 @@ async function _pfMvtCalcola(sede, prefix) {
     var nEnt = 0, nCli = 0, nSta = 0, nAu = 0;
 
     if (sede === 'deposito_vibo') {
-      var [entRes, uscCliRes, uscStaRes, uscAuRes] = await Promise.all([
-        sb.from('ordini').select('litri')
-          .eq('tipo_ordine','entrata_deposito').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', da).lte('data', a),
-        sb.from('ordini').select('litri,fornitore')
-          .eq('tipo_ordine','cliente').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', da).lte('data', a),
-        sb.from('ordini').select('litri,fornitore')
-          .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', da).lte('data', a),
-        sb.from('ordini').select('litri')
-          .eq('tipo_ordine','autoconsumo').in('stato', STATI).eq('prodotto', prodotto)
-          .gte('data', da).lte('data', a)
+      // FIX 26/05/2026: paginazione vera per superare cap PostgREST 1000 righe
+      var [entArr, uscCliArr, uscStaArr, uscAuArr] = await Promise.all([
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri')
+            .eq('tipo_ordine','entrata_deposito').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', da).lte('data', a);
+        }),
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri,fornitore')
+            .eq('tipo_ordine','cliente').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', da).lte('data', a);
+        }),
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri,fornitore')
+            .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', da).lte('data', a);
+        }),
+        _pfFetchAllPages(function() {
+          return sb.from('ordini').select('litri')
+            .eq('tipo_ordine','autoconsumo').in('stato', STATI).eq('prodotto', prodotto)
+            .gte('data', da).lte('data', a);
+        })
       ]);
       function isPhoenix(o) {
         var f = (o.fornitore || '').toLowerCase();
         return f.indexOf('phoenix') >= 0 || f.indexOf('deposito') >= 0;
       }
-      entrate = (entRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      var cliFiltr = (uscCliRes.data || []).filter(isPhoenix);
-      var staFiltr = (uscStaRes.data || []).filter(isPhoenix);
+      entrate = entArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      var cliFiltr = uscCliArr.filter(isPhoenix);
+      var staFiltr = uscStaArr.filter(isPhoenix);
       uscCli = cliFiltr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
       uscSta = staFiltr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      uscAu = (uscAuRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      nEnt = (entRes.data || []).length;
+      uscAu = uscAuArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      nEnt = entArr.length;
       nCli = cliFiltr.length;
       nSta = staFiltr.length;
-      nAu = (uscAuRes.data || []).length;
+      nAu = uscAuArr.length;
     } else if (sede === 'stazione_oppido') {
       // Entrate: tipo_ordine='stazione_servizio' (ricezioni dal deposito)
       // FILTRO: solo ordini effettivamente ricevuti (ricevuto_stazione=true).
       // Ordini confermati ma non ancora ricevuti NON devono influire sulla giacenza.
-      var entStaRes = await sb.from('ordini').select('litri')
-        .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
-        .eq('ricevuto_stazione', true)
-        .gte('data', da).lte('data', a);
-      entrate = (entStaRes.data || []).reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
-      nEnt = (entStaRes.data || []).length;
+      // FIX 26/05/2026: paginazione vera
+      var entStaArr = await _pfFetchAllPages(function() {
+        return sb.from('ordini').select('litri')
+          .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+          .eq('ricevuto_stazione', true)
+          .gte('data', da).lte('data', a);
+      });
+      entrate = entStaArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
+      nEnt = entStaArr.length;
       // Uscite: differenze letture pompe del prodotto nel range
       var pompeRes = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true);
       var ids = (pompeRes.data || []).filter(function(p){ return p.prodotto === prodotto; }).map(function(p){ return p.id; });
       if (ids.length) {
         // Per il delta giornaliero servono lettura del giorno-1 per ogni pompa
-        var lettRes = await sb.from('stazione_letture').select('pompa_id,data,lettura')
-          .in('pompa_id', ids).gte('data', giornoPrima).lte('data', a).order('data');
+        // FIX 26/05/2026: paginazione vera (con 4 pompe × 365 giorni = ~1460 letture annue, supera 1000)
+        var lettArr = await _pfFetchAllPages(function() {
+          return sb.from('stazione_letture').select('pompa_id,data,lettura')
+            .in('pompa_id', ids).gte('data', giornoPrima).lte('data', a).order('data');
+        });
         var byPompa = {};
-        (lettRes.data || []).forEach(function(l) {
+        lettArr.forEach(function(l) {
           if (!byPompa[l.pompa_id]) byPompa[l.pompa_id] = [];
           byPompa[l.pompa_id].push(l);
         });
@@ -134,14 +150,16 @@ async function _pfMvtCalcola(sede, prefix) {
     // ─────── 3. RETTIFICHE CONFERMATE nel range [da, a] ───────
     // Le rettifiche sono movimenti a tutti gli effetti: differenza > 0 aumenta,
     // differenza < 0 diminuisce la giacenza. Il dettaglio per causale è nel popup info.
+    // FIX 26/05/2026: paginazione vera (preventiva — rettifiche oggi < 1000 ma per coerenza)
     var tipoRett = sede === 'deposito_vibo' ? 'deposito' : 'stazione';
-    var rettRes = await sb.from('rettifiche_inventario')
-      .select('id,data,differenza,causale,origine,note')
-      .eq('tipo', tipoRett).eq('prodotto', prodotto).eq('confermata', true)
-      .gte('data', da).lte('data', a)
-      .order('data', { ascending: false });
+    var rettDett = await _pfFetchAllPages(function() {
+      return sb.from('rettifiche_inventario')
+        .select('id,data,differenza,causale,origine,note')
+        .eq('tipo', tipoRett).eq('prodotto', prodotto).eq('confermata', true)
+        .gte('data', da).lte('data', a)
+        .order('data', { ascending: false });
+    });
     var rettifiche = 0, nRett = 0;
-    var rettDett = rettRes.data || [];
     rettDett.forEach(function(r){
       rettifiche += Number(r.differenza || 0);
       nRett++;
