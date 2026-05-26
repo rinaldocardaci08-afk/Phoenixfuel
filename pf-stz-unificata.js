@@ -1,4 +1,4 @@
-// VERSIONE 26/05/2026 a - FIX COSTO STAZIONE: CMP unico, popup conferma modifica
+// VERSIONE 26/05/2026 c - FIX COSTO STAZIONE: CMP unico, popup conferma modifica
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
 // Versione 01/05/2026 (v20260501b)
@@ -726,6 +726,24 @@ function _uniRenderGiorno(idx) {
   } else {
     _uniRenderPerPompa(data);
   }
+
+  // FIX 26/05/2026: auto-marca i pulsanti "Salvato" se per QUESTA data esistono
+  // già dati salvati in DB (almeno 1 lettura O 1 prezzo O 1 costo).
+  // Reset preventivo del flag (cambio giorno → ripristina stato pulito).
+  if (typeof _resetSaved === 'function') {
+    _resetSaved('uni-btn-salva');
+    _resetSaved('uni-btn-salva-pc');
+  }
+  setTimeout(function() {
+    if (!_uniData || typeof _markSaved !== 'function') return;
+    var hasLetture = (_uniData.lettureByData && _uniData.lettureByData[data] && _uniData.lettureByData[data].length > 0);
+    var hasPrezzi  = Object.keys(_uniData.prezziMap || {}).some(function(k){ return k.indexOf(data + '_') === 0; });
+    var hasCosti   = Object.keys(_uniData.costiMap  || {}).some(function(k){ return k.indexOf(data + '_') === 0; });
+    if (hasLetture || hasPrezzi || hasCosti) {
+      _markSaved('uni-btn-salva');
+      _markSaved('uni-btn-salva-pc');
+    }
+  }, 50);
 }
 
 // ── RENDER PER POMPA ──
@@ -2000,6 +2018,9 @@ async function _uniSalvaLetture() {
   _uniData.dirty = false;
   toast('✅ ' + daSalvare.length + ' letture salvate per il ' + data);
 
+  // FIX 26/05/2026: feedback visivo bottone (questa funzione legacy usa stesso btn 'uni-btn-salva')
+  if (typeof _markSaved === 'function') _markSaved('uni-btn-salva');
+
   // Ricarica tab per avere dati freschi
   caricaUnificata();
 }
@@ -2142,6 +2163,10 @@ async function _uniSalvaPrezziCosti() {
 
   _uniData.dirty = false;
   toast('✅ Salvati ' + nPrezzi + ' prezzi e ' + nCosti + ' costi per il ' + data);
+
+  // FIX 26/05/2026: feedback visivo bottone
+  if (typeof _markSaved === 'function') _markSaved('uni-btn-salva-pc');
+
   caricaUnificata();
 }
 
@@ -2290,6 +2315,9 @@ async function _uniSalvaTutto() {
   if (Object.keys(prezziMap).length) msg += ', ' + Object.keys(prezziMap).length + ' prezzi';
   if (Object.keys(costiMap).length) msg += ', ' + Object.keys(costiMap).length + ' costi';
   toast(msg + ' per il ' + data);
+
+  // FIX 26/05/2026: marca pulsante come salvato (feedback visivo coerente con altri pannelli)
+  if (typeof _markSaved === 'function') _markSaved('uni-btn-salva');
 
   caricaUnificata();
 }
