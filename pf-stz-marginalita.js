@@ -1,3 +1,4 @@
+// VERSIONE 26/05/2026 a - FIX COSTO STAZIONE: eliminata prop auto al "domani"
 // PhoenixFuel — Stazione: Marginalità e CMP
 // ══════════════════════════════════════════════════════════════
 // ── MARGINALITÀ STAZIONE ─────────────────────────────────────
@@ -741,50 +742,19 @@ async function salvaCostiMarg() {
   }
   // Toast viene mostrato alla fine della funzione
 
-  // ═══ Auto-crea costi per giorno successivo da CMP cisterne ═══
-  try {
-    // Trova la data dei costi salvati
-    var dataCorr = null;
-    var inputs2 = document.querySelectorAll('.marg-costo');
-    for (var j = 0; j < inputs2.length; j++) { if (inputs2[j].dataset.data) { dataCorr = inputs2[j].dataset.data; break; } }
-    if (dataCorr) {
-      var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
-      var { data: cisterne } = await sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido');
-      if (cisterne && cisterne.length) {
-        // Calcola CMP per prodotto
-        var cmpPerProdotto = {};
-        cisterne.forEach(function(c) {
-          if (!cmpPerProdotto[c.prodotto]) cmpPerProdotto[c.prodotto] = { litri:0, valore:0 };
-          cmpPerProdotto[c.prodotto].litri += Number(c.livello_attuale||0);
-          cmpPerProdotto[c.prodotto].valore += Number(c.livello_attuale||0) * Number(c.costo_medio||0);
-        });
-        var costiDomani = [];
-        Object.entries(cmpPerProdotto).forEach(function([prodotto, v]) {
-          var cmp = v.litri > 0 ? Math.round(v.valore / v.litri * 1000000) / 1000000 : 0;
-          if (cmp > 0) {
-            costiDomani.push(sb.from('stazione_costi').upsert({ data: domani, prodotto: prodotto, costo_litro: cmp }, { onConflict:'data,prodotto' }));
-          }
-        });
-        if (costiDomani.length) {
-          await Promise.all(costiDomani);
-          toast('Costi ' + domani + ' preparati da CMP');
-        }
-      }
-    }
-  } catch(e) { console.warn('Auto costi domani:', e); }
+  // FIX 26/05/2026: ELIMINATA propagazione automatica del CMP al "domani".
+  // La vecchia logica scriveva stazione_costi[domani]=CMP_corrente quando salvavi
+  // il giorno N, creando un valore "fantasma" che poi vinceva sul carry-forward
+  // standard e confondeva l'utente. Ora il costo del giorno N+1 viene letto
+  // direttamente dal CMP corrente delle cisterne (sempre aggiornato dalle consegne
+  // e dalle modifiche manuali confermate via popup). Niente più write speculativi.
 
   renderStoricoMarg();
 
-  // Auto-avanza: ricarica marginalità con i nuovi dati
-  if (dataCorr) {
-    var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
-    toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati! Dati ' + domani + ' preparati.');
-    _markSaved('btn-salva-costi');
-    await caricaMarginalita();
-  } else {
-    toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : count + ' costi salvati!');
-    _markSaved('btn-salva-costi');
-  }
+  // Ricarica marginalità con i dati appena salvati
+  toast(anyOffline ? '⚡ ' + count + ' costi salvati offline' : '✓ ' + count + ' costi salvati');
+  _markSaved('btn-salva-costi');
+  await caricaMarginalita();
 }
 
 // ── Prezzi pompa ──
@@ -859,27 +829,8 @@ async function _salvaAllCostiProdotto() {
   toast(count + ' cost' + (count === 1 ? 'o salvato' : 'i salvati') + '!');
   _markSaved('btn-salva-costi');
 
-  // Auto-prepara costi giorno successivo da CMP
-  try {
-    if (dataCorr) {
-      var domani = new Date(new Date(dataCorr).getTime() + 86400000).toISOString().split('T')[0];
-      var { data: cisterne } = await sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede','stazione_oppido');
-      if (cisterne && cisterne.length) {
-        var cmpPP = {};
-        cisterne.forEach(function(c) {
-          if (!cmpPP[c.prodotto]) cmpPP[c.prodotto] = { litri:0, valore:0 };
-          cmpPP[c.prodotto].litri += Number(c.livello_attuale||0);
-          cmpPP[c.prodotto].valore += Number(c.livello_attuale||0) * Number(c.costo_medio||0);
-        });
-        var costiD = [];
-        Object.entries(cmpPP).forEach(function([p, v]) {
-          var cmp = v.litri > 0 ? Math.round(v.valore / v.litri * 1000000) / 1000000 : 0;
-          if (cmp > 0) costiD.push(sb.from('stazione_costi').upsert({ data:domani, prodotto:p, costo_litro:cmp }, { onConflict:'data,prodotto' }));
-        });
-        if (costiD.length) await Promise.all(costiD);
-      }
-    }
-  } catch(e) { console.warn('auto costi domani:', e); }
+  // FIX 26/05/2026: ELIMINATA seconda propagazione automatica al "domani"
+  // (vedi sopra in salvaCosti per spiegazione).
 
   await caricaMarginalita();
 }

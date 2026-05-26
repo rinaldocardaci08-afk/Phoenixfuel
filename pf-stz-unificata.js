@@ -1,3 +1,4 @@
+// VERSIONE 26/05/2026 a - FIX COSTO STAZIONE: CMP unico, popup conferma modifica
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
 // Versione 01/05/2026 (v20260501b)
@@ -389,7 +390,13 @@ function _uniRenderModaleCambioPrezzo(data) {
     var cpKey = data + '_' + prodotto;
     var cpEsistente = (m.cambioPrezzoMap || {})[cpKey] || null;
     var cmpProd = m.cmpCorrente && m.cmpCorrente[prodotto] ? m.cmpCorrente[prodotto] : 0;
-    var costoInitial = (cpEsistente && cpEsistente.costo_netto_nuovo > 0) ? cpEsistente.costo_netto_nuovo : (cmpProd > 0 ? cmpProd : 0);
+    // FIX 26/05/2026: costo consigliato = SEMPRE CMP corrente cisterne stazione.
+    // Eliminato il fallback complesso che faceva vincere cambi prezzo vecchi.
+    // Se l'utente vuole modificare il costo, lo fa esplicitamente nel campo
+    // e al salvataggio viene chiesta conferma per aggiornare il CMP cisterne.
+    // Eccezione: se per QUESTO giorno c'è già un cpEsistente, lo riportiamo
+    // (l'utente sta modificando un cambio prezzo del giorno corrente).
+    var costoInitial = (cpEsistente && cpEsistente.costo_netto_nuovo > 0) ? cpEsistente.costo_netto_nuovo : cmpProd;
     var prezzoInitial = (cpEsistente && cpEsistente.prezzo_iva_nuovo > 0) ? cpEsistente.prezzo_iva_nuovo : '';
     var litriInitial = (cpEsistente && cpEsistente.litri_al_nuovo_prezzo > 0) ? cpEsistente.litri_al_nuovo_prezzo : '';
     var prezzoVecchio = Number(m.prezziMap[data + '_' + prodotto] || 0);
@@ -617,8 +624,30 @@ async function _uniSalvaModaleCambioPrezzo() {
   var btn = document.getElementById('uni-modale-cp-salva');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
 
-  var ops = [];
+  // FIX 26/05/2026: raccolta costi modificati per popup CMP
+  var costiCpMap = {};
   var cppDocs = document.querySelectorAll('#uni-modale-cp .uni-cpp-litri[data-prodotto]');
+  cppDocs.forEach(function(inpL) {
+    var prod = inpL.dataset.prodotto;
+    var inpC = document.querySelector('#uni-modale-cp .uni-cpp-costo[data-prodotto="' + prod + '"]');
+    var costo = inpC ? (parseFloat(inpC.value) || 0) : 0;
+    var litri = parseFloat(inpL.value) || 0;
+    if (litri > 0 && costo > 0) costiCpMap[prod] = costo;
+  });
+  if (Object.keys(costiCpMap).length) {
+    var cmpCheckCp = await _uniConfermaModificheCmp(costiCpMap);
+    if (cmpCheckCp.abort) {
+      toast('⚠ Salvataggio annullato (CMP non confermato per ' + (cmpCheckCp.prodottoAnnullato || '?') + ')');
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salva cambio prezzo'; }
+      return;
+    }
+    for (var iCmpCp = 0; iCmpCp < cmpCheckCp.aggiornareCmp.length; iCmpCp++) {
+      var aggCp = cmpCheckCp.aggiornareCmp[iCmpCp];
+      await _uniAggiornaCMPCisterneStazione(aggCp.prodotto, aggCp.nuovo, aggCp.vecchio);
+    }
+  }
+
+  var ops = [];
   cppDocs.forEach(function(inpL) {
     var prod = inpL.dataset.prodotto;
     var inpP = document.querySelector('#uni-modale-cp .uni-cpp-prezzo[data-prodotto="' + prod + '"]');
@@ -780,7 +809,13 @@ function _uniRenderPerPompa(data) {
 
       // Prezzo vendita + costo: eredita dal giorno corrente o dall'ultimo disponibile
       var prezzoSaved = Number(m.prezziMap[data + '_' + pompa.prodotto] || 0);
-      var costoSaved = Number(m.costiMap[data + '_' + pompa.prodotto] || 0);
+      // FIX 26/05/2026: costo consigliato = SEMPRE CMP corrente.
+      // Se per OGGI c'è un costo già salvato in stazione_costi (l'utente sta
+      // tornando sulla stessa giornata per modifiche), lo riportiamo. Altrimenti CMP.
+      // Niente più fallback su giorni precedenti / cambio prezzo vecchi.
+      var costoSavedOggi = Number(m.costiMap[data + '_' + pompa.prodotto] || 0);
+      var cmpProdPompa = m.cmpCorrente && m.cmpCorrente[pompa.prodotto] ? m.cmpCorrente[pompa.prodotto] : 0;
+      var costoSaved = costoSavedOggi > 0 ? costoSavedOggi : cmpProdPompa;
       // Patch 30/04 (c): il "prezzo standard" del giorno è influenzato dal cambio
       // prezzo dei giorni precedenti. Se nel giorno N c'è stato un cambio prezzo
       // per il prodotto e arriva il giorno N+1, il prezzo nuovo del giorno N
@@ -804,25 +839,9 @@ function _uniRenderPerPompa(data) {
           if (chiavi.length) prezzoSaved = Number(m.prezziMap[chiavi[0]] || 0);
         }
       }
-      if (!costoSaved) {
-        // Idem per il costo: il costo netto del cambio prezzo del giorno N
-        // diventa il costo standard del giorno N+1.
-        var chiaviCpC = Object.keys(m.cambioPrezzoMap || {}).filter(function(kk){ return kk.endsWith('_' + pompa.prodotto); }).sort().reverse();
-        var costoDaCambio = 0;
-        for (var iCpC = 0; iCpC < chiaviCpC.length; iCpC++) {
-          var dCpC = chiaviCpC[iCpC].split('_')[0];
-          if (dCpC < data) {
-            costoDaCambio = Number(m.cambioPrezzoMap[chiaviCpC[iCpC]].costo_netto_nuovo || 0);
-            break;
-          }
-        }
-        if (costoDaCambio > 0) {
-          costoSaved = costoDaCambio;
-        } else {
-          var chiaviC = Object.keys(m.costiMap).filter(function(kk){ return kk.endsWith('_' + pompa.prodotto); }).sort().reverse();
-          if (chiaviC.length) costoSaved = Number(m.costiMap[chiaviC[0]] || 0);
-        }
-      }
+      // FIX 26/05/2026: logica fallback costo eliminata. Il costo è SEMPRE CMP corrente
+      // (vedi costoSaved sopra). Il vecchio carry-forward su stazione_costi/cambio_prezzo
+      // creava bug archetipo (cambi prezzo vecchi vincevano su costi standard recenti).
       var prezzoVal = prezzoSaved > 0 ? prezzoSaved.toFixed(3) : '';
       var costoVal = costoSaved > 0 ? costoSaved.toFixed(6) : '';
       var cmpProd = m.cmpCorrente && m.cmpCorrente[pompa.prodotto] ? m.cmpCorrente[pompa.prodotto] : 0;
@@ -2091,6 +2110,20 @@ async function _uniSalvaPrezziCosti() {
   var btn = document.getElementById('uni-btn-salva-pc');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
 
+  // FIX 26/05/2026: Conferma modifica CMP per ogni prodotto con costo cambiato
+  if (nCosti) {
+    var cmpCheckPC = await _uniConfermaModificheCmp(costiMap);
+    if (cmpCheckPC.abort) {
+      toast('⚠ Salvataggio annullato (CMP non confermato per ' + (cmpCheckPC.prodottoAnnullato || '?') + ')');
+      if (btn) { btn.disabled = false; btn.textContent = '💰 Salva prezzi e costi ' + data; }
+      return;
+    }
+    for (var iCmpPC = 0; iCmpPC < cmpCheckPC.aggiornareCmp.length; iCmpPC++) {
+      var aggPC = cmpCheckPC.aggiornareCmp[iCmpPC];
+      await _uniAggiornaCMPCisterneStazione(aggPC.prodotto, aggPC.nuovo, aggPC.vecchio);
+    }
+  }
+
   var ops = [];
   Object.keys(prezziMap).forEach(function(p) {
     ops.push(sb.from('stazione_prezzi').upsert({ data: data, prodotto: p, prezzo_litro: prezziMap[p] }, { onConflict: 'data,prodotto' }));
@@ -2187,10 +2220,24 @@ async function _uniSalvaTutto() {
     }
   }
 
-  // ───── 5. Esegui upsert ─────
+  // ───── 5. FIX 26/05/2026: Conferma modifica CMP (popup per prodotto modificato) ─────
   var btn = document.getElementById('uni-btn-salva');
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
+  if (Object.keys(costiMap).length) {
+    var cmpCheck = await _uniConfermaModificheCmp(costiMap);
+    if (cmpCheck.abort) {
+      toast('⚠ Salvataggio annullato (CMP non confermato per ' + (cmpCheck.prodottoAnnullato || '?') + ')');
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salva giornata ' + data + ' (contatori + prezzi + costi + cambio prezzo)'; }
+      return;
+    }
+    // Per ogni prodotto confermato → UPDATE CMP cisterne uniforme + storico
+    for (var icmp = 0; icmp < cmpCheck.aggiornareCmp.length; icmp++) {
+      var agg = cmpCheck.aggiornareCmp[icmp];
+      await _uniAggiornaCMPCisterneStazione(agg.prodotto, agg.nuovo, agg.vecchio);
+    }
+  }
 
+  // ───── 6. Esegui upsert (letture + prezzi + costi storico) ─────
   var ops = [];
   daSalvareL.forEach(function(ds) {
     // Patch 30/04 (c): campi cambio prezzo per pompa NON più popolati (a 0).
@@ -2395,3 +2442,91 @@ function _uniReportLetture() {
   w.document.write(html);
   w.document.close();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// FIX 26/05/2026: Conferma modifica CMP cisterne stazione
+// ═══════════════════════════════════════════════════════════════════
+// Quando l'utente salva la giornata con un costo netto diverso dal CMP
+// attuale, mostra un popup per prodotto. Su conferma, aggiorna CMP
+// uniforme su tutte le cisterne stazione di quel prodotto (regola
+// costituzionale: il CMP è unico per prodotto per sede) + scrive
+// stazione_cmp_storico per audit.
+//
+// Se l'utente preme "Annulla" su anche un solo popup → blocca tutto
+// il salvataggio. L'utente poi decide manualmente.
+// ═══════════════════════════════════════════════════════════════════
+
+async function _uniConfermaModificheCmp(costiMap) {
+  // Input: { prodotto: costo_netto_inserito }
+  // Output: { abort: boolean, aggiornareCmp: [{prodotto, nuovo, vecchio}] }
+  if (!_uniData || !_uniData.cmpCorrente) return { abort: false, aggiornareCmp: [] };
+  var aggiornare = [];
+  var prodotti = Object.keys(costiMap);
+  for (var i = 0; i < prodotti.length; i++) {
+    var p = prodotti[i];
+    var nuovo = Number(costiMap[p]);
+    var attuale = Number(_uniData.cmpCorrente[p] || 0);
+    // Se CMP attuale è 0 (mai impostato), accetta il nuovo costo come CMP iniziale
+    // Se differenza < 0,0001 €/L (= 0,01 cent), considera uguale (rumore arrotondamento)
+    if (!attuale) {
+      aggiornare.push({ prodotto: p, vecchio: 0, nuovo: nuovo });
+      continue;
+    }
+    if (Math.abs(nuovo - attuale) < 0.0001) continue;
+    // Popup di conferma per questo prodotto
+    var msg = 'Modifica CMP — ' + p + '\n\n';
+    msg += 'Costo inserito: € ' + nuovo.toFixed(6) + ' / L (netto)\n';
+    msg += 'CMP attuale cisterne: € ' + attuale.toFixed(6) + ' / L\n';
+    msg += 'Differenza: € ' + (nuovo - attuale).toFixed(6) + ' / L\n\n';
+    msg += 'Confermi il nuovo CMP € ' + nuovo.toFixed(6) + ' / L?\n';
+    msg += '(Verrà aggiornato su tutte le cisterne stazione di ' + p + ')\n\n';
+    msg += 'OK = aggiorna CMP e prosegui salvataggio\n';
+    msg += 'Annulla = blocca tutto il salvataggio';
+    var ok = confirm(msg);
+    if (!ok) return { abort: true, prodottoAnnullato: p, aggiornareCmp: [] };
+    aggiornare.push({ prodotto: p, vecchio: attuale, nuovo: nuovo });
+  }
+  return { abort: false, aggiornareCmp: aggiornare };
+}
+
+async function _uniAggiornaCMPCisterneStazione(prodotto, nuovoCosto, cmpPrec) {
+  // 1. Carica cisterne stazione del prodotto
+  var cisRes = await sb.from('cisterne')
+    .select('id,nome,livello_attuale')
+    .eq('sede', 'stazione_oppido').eq('prodotto', prodotto);
+  if (cisRes.error || !cisRes.data || !cisRes.data.length) {
+    console.warn('[_uniAggiornaCMPCisterneStazione] nessuna cisterna per ' + prodotto, cisRes.error);
+    return false;
+  }
+  var cisterne = cisRes.data;
+  // 2. UPDATE costo_medio uniforme su TUTTE le cisterne del prodotto (regola CMP UNIFORME)
+  var ups = cisterne.map(function(c) {
+    return sb.from('cisterne').update({
+      costo_medio: nuovoCosto,
+      updated_at: new Date().toISOString()
+    }).eq('id', c.id);
+  });
+  var upsRes = await Promise.all(ups);
+  var errUp = upsRes.find(function(r){ return r && r.error; });
+  if (errUp) { console.error('[_uniAggiornaCMPCisterneStazione] UPDATE errore:', errUp.error); return false; }
+  // 3. INSERT stazione_cmp_storico (litri_caricati = 0 marca "modifica manuale")
+  var litriTot = cisterne.reduce(function(s,c){ return s + Number(c.livello_attuale||0); }, 0);
+  var oggi = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().split('T')[0];
+  var insRes = await sb.from('stazione_cmp_storico').insert([{
+    data: oggi,
+    prodotto: prodotto,
+    sede: 'stazione_oppido',
+    cmp_precedente: cmpPrec,
+    cmp_nuovo: nuovoCosto,
+    litri_precedenti: Math.round(litriTot),
+    litri_caricati: 0,
+    costo_carico: nuovoCosto,
+    ordine_id: null
+  }]);
+  if (insRes.error) {
+    console.warn('[_uniAggiornaCMPCisterneStazione] INSERT storico errore (non bloccante):', insRes.error);
+  }
+  console.log('[_uniAggiornaCMPCisterneStazione] ✓ ' + prodotto + ': CMP ' + cmpPrec.toFixed(6) + ' → ' + nuovoCosto.toFixed(6) + ' su ' + cisterne.length + ' cisterne');
+  return true;
+}
+
