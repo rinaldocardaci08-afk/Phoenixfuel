@@ -1,4 +1,4 @@
-// VERSIONE 26/05/2026 c - FIX COSTO STAZIONE: CMP unico, popup conferma modifica
+// VERSIONE 26/05/2026 d - Aggiunto tab Prezzi mese
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
 // Versione 01/05/2026 (v20260501b)
@@ -287,6 +287,7 @@ async function caricaUnificata() {
   }
   try { _uniRenderStoricoMarg(); } catch(e) { console.error('[_uniRenderStoricoMarg] crash:', e); }
   try { _uniRenderStoricoLett(idxIniziale); } catch(e) { console.error('[_uniRenderStoricoLett] crash:', e); }
+  try { _uniRenderPrezziMese(); } catch(e) { console.error('[_uniRenderPrezziMese] crash:', e); }
   try { _uniRenderStoricoCMP(); } catch(e) { console.error('[_uniRenderStoricoCMP] crash:', e); }
 }
 
@@ -2557,4 +2558,341 @@ async function _uniAggiornaCMPCisterneStazione(prodotto, nuovoCosto, cmpPrec) {
   console.log('[_uniAggiornaCMPCisterneStazione] ✓ ' + prodotto + ': CMP ' + cmpPrec.toFixed(6) + ' → ' + nuovoCosto.toFixed(6) + ' su ' + cisterne.length + ' cisterne');
   return true;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// FIX 26/05/2026 (d): Pannello "Prezzi e fatturato del mese"
+// ═══════════════════════════════════════════════════════════════════
+// Card sotto Letture & Marginalità con tabella giorno-per-giorno del mese
+// corrente. Per ogni giorno: litri/€/prezzo per Gasolio + Benzina + totale.
+// Se c'è un cambio prezzo nel giorno, riga divisa: litri pre-cambio al prezzo
+// vecchio + litri post-cambio al prezzo nuovo (= stazione_cambio_prezzo.litri_al_nuovo_prezzo).
+// Navigatore mese ◀▶ + PDF export.
+// ═══════════════════════════════════════════════════════════════════
+
+var _uniPMMese = null; // YYYY-MM corrente del pannello
+
+function _uniPMOggi() {
+  var d = new Date();
+  d.setHours(d.getHours() + 2);
+  return d.toISOString().substring(0, 7);
+}
+function _uniPMUltimoGiorno(meseISO) {
+  var anno = parseInt(meseISO.substring(0, 4));
+  var mese = parseInt(meseISO.substring(5, 7));
+  var ultDay = new Date(anno, mese, 0).getDate(); // mese 1-12, day 0 = ultimo del prec
+  return meseISO + '-' + String(ultDay).padStart(2, '0');
+}
+function _uniPMGiornoPrecedente(dataISO) {
+  var d = new Date(dataISO + 'T00:00:00');
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+function _uniPMNomeMese(meseISO) {
+  var nomi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  var m = parseInt(meseISO.substring(5, 7));
+  return nomi[m - 1] + ' ' + meseISO.substring(0, 4);
+}
+
+function _uniPrezziMeseGo(delta) {
+  if (!_uniPMMese) _uniPMMese = _uniPMOggi();
+  var anno = parseInt(_uniPMMese.substring(0, 4));
+  var mese = parseInt(_uniPMMese.substring(5, 7));
+  mese += delta;
+  if (mese < 1) { mese = 12; anno--; }
+  if (mese > 12) { mese = 1; anno++; }
+  _uniPMMese = anno + '-' + String(mese).padStart(2, '0');
+  _uniRenderPrezziMese();
+}
+
+function _uniPrezziMeseVaiA() {
+  var inp = document.getElementById('uni-pm-mese-input');
+  if (inp && inp.value) {
+    _uniPMMese = inp.value;
+    _uniRenderPrezziMese();
+  }
+}
+
+async function _uniRenderPrezziMese() {
+  if (!_uniPMMese) _uniPMMese = _uniPMOggi();
+  var meseISO = _uniPMMese;
+  var primoGiorno = meseISO + '-01';
+  var ultimoGiorno = _uniPMUltimoGiorno(meseISO);
+  // Per il delta del primo giorno servono le letture del giorno precedente
+  var giornoPre = _uniPMGiornoPrecedente(primoGiorno);
+
+  // Aggiorna label e input
+  var label = document.getElementById('uni-pm-label');
+  if (label) label.textContent = _uniPMNomeMese(meseISO);
+  var inp = document.getElementById('uni-pm-mese-input');
+  if (inp) inp.value = meseISO;
+
+  var tabBody = document.getElementById('uni-pm-tbody');
+  var stats = document.getElementById('uni-pm-stats');
+  if (!tabBody) return;
+  tabBody.innerHTML = '<tr><td colspan="8" class="loading" style="padding:24px;text-align:center">Caricamento...</td></tr>';
+
+  try {
+    // Carico in parallelo tutto ciò che serve, con paginazione vera dove necessario
+    var [pompeRes, lettArr, prezArr, cpArr] = await Promise.all([
+      sb.from('stazione_pompe').select('id,nome,prodotto,attiva').eq('attiva', true),
+      _pfFetchAllPages(function() {
+        return sb.from('stazione_letture').select('pompa_id,data,lettura').gte('data', giornoPre).lte('data', ultimoGiorno).order('data');
+      }),
+      _pfFetchAllPages(function() {
+        return sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', primoGiorno).lte('data', ultimoGiorno);
+      }),
+      _pfFetchAllPages(function() {
+        return sb.from('stazione_cambio_prezzo').select('data,prodotto,prezzo_iva_nuovo,costo_netto_nuovo,litri_al_nuovo_prezzo').gte('data', primoGiorno).lte('data', ultimoGiorno);
+      })
+    ]);
+
+    var pompe = pompeRes.data || [];
+    // Mappa pompa_id → prodotto
+    var pompaProdotto = {};
+    pompe.forEach(function(p) { pompaProdotto[p.id] = p.prodotto; });
+
+    // Mappa prezzi: { 'YYYY-MM-DD_Prodotto': prezzo }
+    var prezziMap = {};
+    prezArr.forEach(function(p) { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
+
+    // Mappa cambi prezzo: { 'YYYY-MM-DD_Prodotto': {prezzo_iva, costo, litri_nuovi} }
+    var cpMap = {};
+    cpArr.forEach(function(cp) {
+      cpMap[cp.data + '_' + cp.prodotto] = {
+        prezzo_iva: Number(cp.prezzo_iva_nuovo || 0),
+        costo: Number(cp.costo_netto_nuovo || 0),
+        litri_nuovi: Number(cp.litri_al_nuovo_prezzo || 0)
+      };
+    });
+
+    // Raggruppa letture per pompa, ordinate per data, e calcola delta giorno
+    var lettByPompa = {};
+    lettArr.forEach(function(l) {
+      if (!lettByPompa[l.pompa_id]) lettByPompa[l.pompa_id] = [];
+      lettByPompa[l.pompa_id].push(l);
+    });
+
+    // Litri venduti per giorno+prodotto: { 'YYYY-MM-DD_Prodotto': litri }
+    var litriPerGiornoProdotto = {};
+    Object.keys(lettByPompa).forEach(function(pid) {
+      var prodotto = pompaProdotto[pid];
+      if (!prodotto) return;
+      var arr = lettByPompa[pid];
+      for (var j = 1; j < arr.length; j++) {
+        var data = arr[j].data;
+        if (data < primoGiorno) continue; // skip lettura del giorno precedente (serve solo come base)
+        var delta = Number(arr[j].lettura) - Number(arr[j-1].lettura);
+        if (delta < 0) delta = 0;
+        var k = data + '_' + prodotto;
+        litriPerGiornoProdotto[k] = (litriPerGiornoProdotto[k] || 0) + delta;
+      }
+    });
+
+    // Costruisce elenco giorni con vendite (qualsiasi prodotto > 0)
+    var giorniConVendite = {};
+    Object.keys(litriPerGiornoProdotto).forEach(function(k) {
+      var data = k.substring(0, 10);
+      if (litriPerGiornoProdotto[k] > 0) giorniConVendite[data] = true;
+    });
+    var giorniOrdinati = Object.keys(giorniConVendite).sort();
+
+    if (!giorniOrdinati.length) {
+      tabBody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text-muted)">Nessuna vendita nel mese</td></tr>';
+      if (stats) stats.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:12px">Nessun dato</div>';
+      return;
+    }
+
+    // Helper per cercare l'ultimo prezzo standard valido prima di una data
+    function prezzoStandard(data, prodotto) {
+      var p = prezziMap[data + '_' + prodotto];
+      if (p) return p;
+      // Fallback: cerca il prezzo più recente prima della data nel mese
+      var chiavi = Object.keys(prezziMap).filter(function(k){ return k.endsWith('_' + prodotto) && k.substring(0,10) <= data; }).sort();
+      if (chiavi.length) return prezziMap[chiavi[chiavi.length - 1]];
+      return 0;
+    }
+
+    var totLitriGas = 0, totEurGas = 0, totLitriBen = 0, totEurBen = 0;
+    var html = '';
+
+    giorniOrdinati.forEach(function(data) {
+      var litriGas = litriPerGiornoProdotto[data + '_Gasolio Autotrazione'] || 0;
+      var litriBen = litriPerGiornoProdotto[data + '_Benzina'] || 0;
+      var cpGas = cpMap[data + '_Gasolio Autotrazione'] || null;
+      var cpBen = cpMap[data + '_Benzina'] || null;
+
+      // Calcolo righe per Gasolio
+      var righeGas = [];
+      if (cpGas && cpGas.litri_nuovi > 0 && cpGas.prezzo_iva > 0) {
+        var litriPreGas = Math.max(0, litriGas - cpGas.litri_nuovi);
+        var prezPreGas = prezzoStandard(data, 'Gasolio Autotrazione');
+        if (litriPreGas > 0 && prezPreGas > 0) {
+          righeGas.push({ litri: litriPreGas, prezzo: prezPreGas, euro: litriPreGas * prezPreGas, isCambio: false });
+        }
+        righeGas.push({ litri: cpGas.litri_nuovi, prezzo: cpGas.prezzo_iva, euro: cpGas.litri_nuovi * cpGas.prezzo_iva, isCambio: true });
+      } else if (litriGas > 0) {
+        var prezGas = prezzoStandard(data, 'Gasolio Autotrazione');
+        righeGas.push({ litri: litriGas, prezzo: prezGas, euro: litriGas * prezGas, isCambio: false });
+      }
+
+      // Calcolo righe per Benzina
+      var righeBen = [];
+      if (cpBen && cpBen.litri_nuovi > 0 && cpBen.prezzo_iva > 0) {
+        var litriPreBen = Math.max(0, litriBen - cpBen.litri_nuovi);
+        var prezPreBen = prezzoStandard(data, 'Benzina');
+        if (litriPreBen > 0 && prezPreBen > 0) {
+          righeBen.push({ litri: litriPreBen, prezzo: prezPreBen, euro: litriPreBen * prezPreBen, isCambio: false });
+        }
+        righeBen.push({ litri: cpBen.litri_nuovi, prezzo: cpBen.prezzo_iva, euro: cpBen.litri_nuovi * cpBen.prezzo_iva, isCambio: true });
+      } else if (litriBen > 0) {
+        var prezBen = prezzoStandard(data, 'Benzina');
+        righeBen.push({ litri: litriBen, prezzo: prezBen, euro: litriBen * prezBen, isCambio: false });
+      }
+
+      // Numero righe = max(righeGas, righeBen). Se uno ha meno righe, padding con vuote
+      var nRighe = Math.max(righeGas.length, righeBen.length, 1);
+      var dataFmt = data.substring(8,10) + '/' + data.substring(5,7) + '/' + data.substring(0,4);
+      var hasCambio = (righeGas.some(function(r){return r.isCambio;}) || righeBen.some(function(r){return r.isCambio;}));
+
+      // Totale giorno
+      var totGiornoGas = righeGas.reduce(function(s,r){return s+r.euro;},0);
+      var totGiornoBen = righeBen.reduce(function(s,r){return s+r.euro;},0);
+      var totGiorno = totGiornoGas + totGiornoBen;
+      totLitriGas += litriGas;
+      totEurGas += totGiornoGas;
+      totLitriBen += litriBen;
+      totEurBen += totGiornoBen;
+
+      for (var i = 0; i < nRighe; i++) {
+        var rg = righeGas[i] || null;
+        var rb = righeBen[i] || null;
+        var classRiga = (rg && rg.isCambio) || (rb && rb.isCambio) ? 'uni-pm-cp' : '';
+        var primaRiga = (i === 0);
+        var dataCell = primaRiga
+          ? '<td style="text-align:left;font-weight:500;color:var(--text)">' + dataFmt + (hasCambio ? ' <span style="font-size:9px;padding:1px 5px;background:#B5D4F4;color:#0C447C;border-radius:6px;font-weight:500;margin-left:4px">cambio</span>' : '') + '</td>'
+          : '<td style="text-align:left;color:var(--text-muted);font-size:11px;font-style:italic">↳ cambio</td>';
+        // Cell totale giorno: solo sulla prima riga, rowspan = nRighe
+        var totCell = primaRiga
+          ? '<td rowspan="' + nRighe + '" style="background:#F1EFE8;font-weight:500;text-align:right;vertical-align:middle">' + (nRighe > 1 ? '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">somma riga 1+2</div>' : '') + (totGiorno > 0 ? totGiorno.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €' : '—') + '</td>'
+          : '';
+        html += '<tr class="' + classRiga + '">' + dataCell;
+        // Gasolio cells
+        if (rg) {
+          html += '<td style="text-align:right">' + rg.litri.toLocaleString('it-IT',{maximumFractionDigits:2}) + '</td>';
+          html += '<td style="text-align:right">' + rg.prezzo.toFixed(3).replace('.', ',') + '</td>';
+          html += '<td style="text-align:right;background:rgba(255,221,140,0.10);color:#854F0B;font-weight:500">' + rg.euro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td>';
+        } else {
+          html += '<td style="text-align:right;color:var(--text-muted)">—</td><td style="text-align:right;color:var(--text-muted)">—</td><td style="text-align:right;color:var(--text-muted)">—</td>';
+        }
+        // Benzina cells
+        if (rb) {
+          html += '<td style="text-align:right">' + rb.litri.toLocaleString('it-IT',{maximumFractionDigits:2}) + '</td>';
+          html += '<td style="text-align:right">' + rb.prezzo.toFixed(3).replace('.', ',') + '</td>';
+          html += '<td style="text-align:right;background:rgba(133,183,235,0.10);color:#0C447C;font-weight:500">' + rb.euro.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td>';
+        } else {
+          html += '<td style="text-align:right;color:var(--text-muted)">—</td><td style="text-align:right;color:var(--text-muted)">—</td><td style="text-align:right;color:var(--text-muted)">—</td>';
+        }
+        html += totCell + '</tr>';
+      }
+    });
+
+    // Riga totale mese
+    var totMese = totEurGas + totEurBen;
+    html += '<tr style="background:#F1EFE8;border-top:1.5px solid var(--border);font-weight:500">';
+    html += '<td style="text-align:left;font-size:13px;padding:10px 8px">TOTALE MESE</td>';
+    html += '<td style="text-align:right;padding:10px 8px">' + totLitriGas.toLocaleString('it-IT',{maximumFractionDigits:2}) + '</td><td style="text-align:right;color:var(--text-muted)">—</td>';
+    html += '<td style="text-align:right;color:#854F0B;font-weight:500;padding:10px 8px">' + totEurGas.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €</td>';
+    html += '<td style="text-align:right;padding:10px 8px">' + totLitriBen.toLocaleString('it-IT',{maximumFractionDigits:2}) + '</td><td style="text-align:right;color:var(--text-muted)">—</td>';
+    html += '<td style="text-align:right;color:#0C447C;font-weight:500;padding:10px 8px">' + totEurBen.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €</td>';
+    html += '<td style="text-align:right;background:#F1EFE8;font-weight:500;padding:10px 8px;font-size:13px">' + totMese.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €</td>';
+    html += '</tr>';
+
+    tabBody.innerHTML = html;
+
+    // 4 stat card del mese
+    if (stats) {
+      stats.innerHTML = ''
+        + '<div style="background:var(--bg-soft);border-radius:8px;padding:8px 10px">'
+        +   '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">Gasolio mese (L)</div>'
+        +   '<div style="font-size:16px;font-weight:500;color:#854F0B">' + totLitriGas.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</div>'
+        + '</div>'
+        + '<div style="background:var(--bg-soft);border-radius:8px;padding:8px 10px">'
+        +   '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">Gasolio mese €</div>'
+        +   '<div style="font-size:16px;font-weight:500;color:#854F0B">' + totEurGas.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>'
+        + '</div>'
+        + '<div style="background:var(--bg-soft);border-radius:8px;padding:8px 10px">'
+        +   '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">Benzina mese (L)</div>'
+        +   '<div style="font-size:16px;font-weight:500;color:#0C447C">' + totLitriBen.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</div>'
+        + '</div>'
+        + '<div style="background:var(--bg-soft);border-radius:8px;padding:8px 10px">'
+        +   '<div style="font-size:10px;color:var(--text-muted);margin-bottom:2px">Benzina mese €</div>'
+        +   '<div style="font-size:16px;font-weight:500;color:#0C447C">' + totEurBen.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>'
+        + '</div>';
+    }
+
+    // Salva i totali correnti su variabile per export PDF
+    window._uniPMDatiCorrenti = {
+      meseISO: meseISO,
+      meseNome: _uniPMNomeMese(meseISO),
+      tabHtml: html,
+      totLitriGas: totLitriGas, totEurGas: totEurGas,
+      totLitriBen: totLitriBen, totEurBen: totEurBen,
+      totMese: totMese
+    };
+
+  } catch(e) {
+    console.error('[_uniRenderPrezziMese] crash:', e);
+    tabBody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:#A32D2D">Errore caricamento: ' + (e.message || e) + '</td></tr>';
+  }
+}
+
+function _uniPrezziMesePDF() {
+  var d = window._uniPMDatiCorrenti;
+  if (!d) { toast('Nessun dato da stampare'); return; }
+  // PDF semplice via window.print() sul DOM filtrato. Più sofisticato: jsPDF.
+  var w = window.open('', '_blank');
+  if (!w) { toast('Popup bloccato dal browser'); return; }
+  var dataStampa = new Date().toLocaleDateString('it-IT');
+  var html = '<!DOCTYPE html><html><head><title>Prezzi mese ' + d.meseNome + ' — Phoenix Fuel</title>';
+  html += '<style>body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#222}';
+  html += 'h1{font-size:16px;margin:0 0 4px}h2{font-size:13px;color:#555;margin:0 0 20px;font-weight:normal}';
+  html += 'table{width:100%;border-collapse:collapse;font-size:10px;margin-top:16px}';
+  html += 'th,td{padding:5px 6px;border-bottom:0.5px solid #ddd;text-align:right}';
+  html += 'th{background:#F1EFE8;font-weight:600;font-size:10px;text-align:right}';
+  html += 'th.data,td.data{text-align:left}';
+  html += '.gas-h{background:#FAEEDA;color:#854F0B}.ben-h{background:#E6F1FB;color:#0C447C}';
+  html += '.gas-c{background:rgba(255,221,140,0.10);color:#854F0B;font-weight:600}';
+  html += '.ben-c{background:rgba(133,183,235,0.10);color:#0C447C;font-weight:600}';
+  html += '.tot-c{background:#F1EFE8;font-weight:600}';
+  html += '.totale-row td{background:#F1EFE8;font-weight:bold;padding:8px 6px;border-top:1.5px solid #999}';
+  html += '.cp td{background:rgba(133,183,235,0.05);font-style:italic;color:#555}';
+  html += '.stats{display:flex;gap:10px;margin:16px 0}';
+  html += '.stat{background:#F1EFE8;padding:8px 12px;border-radius:6px;flex:1}';
+  html += '.stat .l{font-size:9px;color:#666;text-transform:uppercase}';
+  html += '.stat .v{font-size:14px;font-weight:bold;margin-top:2px}';
+  html += '.gas-stat .v{color:#854F0B}.ben-stat .v{color:#0C447C}</style></head><body>';
+  html += '<h1>Prezzi e fatturato del mese</h1>';
+  html += '<h2>' + d.meseNome + ' — Stazione Oppido — stampato ' + dataStampa + '</h2>';
+  html += '<div class="stats">';
+  html += '<div class="stat gas-stat"><div class="l">Gasolio (L)</div><div class="v">' + d.totLitriGas.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</div></div>';
+  html += '<div class="stat gas-stat"><div class="l">Gasolio €</div><div class="v">' + d.totEurGas.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div></div>';
+  html += '<div class="stat ben-stat"><div class="l">Benzina (L)</div><div class="v">' + d.totLitriBen.toLocaleString('it-IT',{maximumFractionDigits:0}) + '</div></div>';
+  html += '<div class="stat ben-stat"><div class="l">Benzina €</div><div class="v">' + d.totEurBen.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div></div>';
+  html += '<div class="stat"><div class="l">Fatturato totale</div><div class="v">' + d.totMese.toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €</div></div>';
+  html += '</div>';
+  html += '<table><thead><tr>';
+  html += '<th class="data" rowspan="2">Data</th>';
+  html += '<th class="gas-h" colspan="3">Gasolio</th>';
+  html += '<th class="ben-h" colspan="3">Benzina</th>';
+  html += '<th class="tot-c" rowspan="2">Totale<br/>giorno €</th>';
+  html += '</tr><tr>';
+  html += '<th class="gas-h">LT</th><th class="gas-h">€/LT</th><th class="gas-h">€</th>';
+  html += '<th class="ben-h">LT</th><th class="ben-h">€/LT</th><th class="ben-h">€</th>';
+  html += '</tr></thead><tbody>' + d.tabHtml + '</tbody></table>';
+  html += '<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>';
+  html += '</body></html>';
+  w.document.write(html);
+  w.document.close();
+}
+
 

@@ -1706,6 +1706,47 @@
               <tbody id="uni-storico-cmp-tabella"><tr><td colspan="6" class="loading">Caricamento...</td></tr></tbody></table>
             </div>
           </div>
+          <!-- PREZZI MESE (FIX 26/05/2026 d) -->
+          <div class="card" style="margin-top:16px">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📅 Prezzi e fatturato del mese</span>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <button onclick="_uniPrezziMeseGo(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;width:32px;height:32px;cursor:pointer;font-size:14px;font-weight:bold">◀</button>
+                <input type="month" id="uni-pm-mese-input" onchange="_uniPrezziMeseVaiA()" style="font-size:12px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);min-width:130px"/>
+                <span id="uni-pm-label" style="font-weight:500;min-width:130px;text-align:center;font-size:13px"></span>
+                <button onclick="_uniPrezziMeseGo(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;width:32px;height:32px;cursor:pointer;font-size:14px;font-weight:bold">▶</button>
+                <button onclick="_uniPrezziMesePDF()" class="btn-primary" style="font-size:12px;padding:6px 12px;background:#6B5FCC;color:#fff">📄 PDF</button>
+              </div>
+            </div>
+            <div id="uni-pm-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
+                <colgroup>
+                  <col style="width:90px"/>
+                  <col style="width:11%"/><col style="width:9%"/><col style="width:12%"/>
+                  <col style="width:11%"/><col style="width:9%"/><col style="width:12%"/>
+                  <col/>
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th rowspan="2" style="text-align:left;background:var(--bg-soft);font-size:11px">Data</th>
+                    <th colspan="3" style="background:#FAEEDA;color:#854F0B;font-size:11px;text-align:center">⛽ Gasolio</th>
+                    <th colspan="3" style="background:#E6F1FB;color:#0C447C;font-size:11px;text-align:center">⛽ Benzina</th>
+                    <th rowspan="2" style="background:#F1EFE8;text-align:right;font-size:11px">Totale<br/>giorno €</th>
+                  </tr>
+                  <tr>
+                    <th style="background:#FAEEDA;color:#854F0B;text-align:right;font-size:11px">LT</th>
+                    <th style="background:#FAEEDA;color:#854F0B;text-align:right;font-size:11px">€/LT</th>
+                    <th style="background:#FAEEDA;color:#854F0B;text-align:right;font-size:11px">€</th>
+                    <th style="background:#E6F1FB;color:#0C447C;text-align:right;font-size:11px">LT</th>
+                    <th style="background:#E6F1FB;color:#0C447C;text-align:right;font-size:11px">€/LT</th>
+                    <th style="background:#E6F1FB;color:#0C447C;text-align:right;font-size:11px">€</th>
+                  </tr>
+                </thead>
+                <tbody id="uni-pm-tbody"><tr><td colspan="8" class="loading" style="padding:24px;text-align:center">Caricamento...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
         </div>
         <div class="stz-panel" id="stz-letture" style="display:none">
           <div class="card" style="margin-bottom:16px">
@@ -2899,7 +2940,7 @@
 <script src="pf-stz-core.js?v=20260508f"></script>
 <script src="pf-stz-letture.js?v=20260419c"></script>
 <script src="pf-stz-marginalita.js?v=20260526a"></script>
-<script src="pf-stz-unificata.js?v=20260526c"></script>
+<script src="pf-stz-unificata.js?v=20260526d"></script>
 <script src="pf-stz-corrispettivi.js?v=20260508f"></script>
 <script src="pf-stz-magazzino.js?v=20260508f"></script>
 <script src="pf-stz-cassa.js?v=1775149951158"></script>
