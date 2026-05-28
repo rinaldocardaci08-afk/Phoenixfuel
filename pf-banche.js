@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Sezione Banche & Mutui
-// Versione 28/05/2026 (v20260528a) - Form esteso: Euribor+spread, costi una tantum, stati deliberato/inattivo
+// Versione 28/05/2026 (v20260528b) - Form esteso + Simulatore impatto (Gantt cumulativo)
 //
 // Patch 05/05 (a) — allineamento permessi alla Costituzione B.4:
 //   - _applicaPermessiTabBanche ora gating della tab "Storico Anticipi"
@@ -633,6 +633,7 @@ async function renderBancheFinanziamenti() {
       tabellaHtml += '<td style="padding:8px">' + _badgeStato(f.stato) + '</td>';
       tabellaHtml += '<td style="padding:8px;text-align:right;white-space:nowrap">';
       tabellaHtml += '<button onclick="apriPianoFinanziamento(\'' + f.id + '\')" title="Vedi piano di ammortamento" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">📋</button>';
+      tabellaHtml += ' <button onclick="simulaFinanziamento(\'' + f.id + '\')" title="Simula impatto sul cash flow" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">🧮</button>';
       if (_isAdminBanche()) {
         tabellaHtml += ' <button onclick="apriModalFinanziamento(\'' + f.id + '\')" title="Modifica" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
       }
@@ -1237,7 +1238,189 @@ function _generaRateFrancese(params) {
   return rate;
 }
 
-// Cancella il piano esistente e rigenera dal payload corrente
+// ═══════════════════════════════════════════════════════════════════════════
+// SIMULATORE IMPATTO FINANZIAMENTO (FASE 2 — 28/05/2026)
+// Mostra costi all-in del finanziamento + Gantt cumulativo (attivi + simulato)
+// per valutare l'aggravio sul cash flow prima della stipula.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Ritorna array rate {data_scadenza, rata, quota_interessi} per un finanziamento,
+// leggendo da DB se attivo con rate generate, altrimenti calcolando al volo.
+async function _simGetRate(f) {
+  // Prova a leggere le rate reali
+  try {
+    const rate = await _pfFetchAllPages(function() {
+      return sb.from('banche_finanziamenti_rate')
+        .select('data_scadenza,rata,quota_interessi')
+        .eq('finanziamento_id', f.id)
+        .order('data_scadenza');
+    });
+    if (rate && rate.length) return rate;
+  } catch(e) { /* fallback sotto */ }
+  // Fallback: calcola al volo con formula francese
+  return _generaRateFrancese({
+    capitale: f.capitale, tasso: f.tasso, durata_rate: f.durata_rate,
+    frequenza: f.frequenza, data_prima_rata: f.data_prima_rata
+  });
+}
+
+async function simulaFinanziamento(id) {
+  const fSel = _bancheFinanziamenti.find(x => x.id === id);
+  if (!fSel) { toast('Finanziamento non trovato'); return; }
+
+  apriModal('<div style="padding:30px;text-align:center;color:var(--text-muted)">⏳ Calcolo simulazione...</div>');
+
+  try {
+    // 1. Rate del finanziamento selezionato
+    const rateSel = await _simGetRate(fSel);
+    // 2. Rate di tutti i finanziamenti ATTIVI (esclusi il selezionato se già attivo)
+    const attivi = _bancheFinanziamenti.filter(x => x.stato === 'attivo' && x.id !== id);
+    const rateAttiviPerFin = await Promise.all(attivi.map(_simGetRate));
+
+    // 3. Aggrega per mese YYYY-MM
+    const meseAttivi = {};  // somma rate finanziamenti già attivi
+    const meseSel = {};     // rate del finanziamento simulato
+    rateAttiviPerFin.forEach(function(rate) {
+      rate.forEach(function(r) {
+        const m = (r.data_scadenza || '').substring(0, 7);
+        if (!m) return;
+        meseAttivi[m] = (meseAttivi[m] || 0) + Number(r.rata || 0);
+      });
+    });
+    rateSel.forEach(function(r) {
+      const m = (r.data_scadenza || '').substring(0, 7);
+      if (!m) return;
+      meseSel[m] = (meseSel[m] || 0) + Number(r.rata || 0);
+    });
+
+    // 4. Costi all-in del selezionato
+    const totInteressi = rateSel.reduce(function(s, r) { return s + Number(r.quota_interessi || 0); }, 0);
+    const capitale = Number(fSel.capitale || 0);
+    const costiUnaTantum = Number(fSel.spese_istruttoria_eur || 0) + Number(fSel.commissioni_eur || 0) + Number(fSel.altri_costi_eur || 0);
+    const rataSelMensile = _calcRataMensileEquivalente(fSel);
+    const montante = capitale + totInteressi;
+    const costoAllIn = totInteressi + costiUnaTantum;
+    const esborsoTotale = montante + costiUnaTantum;
+
+    // 5. Costruisci elenco mesi ordinato (unione attivi + selezionato)
+    const tuttiMesi = Array.from(new Set(Object.keys(meseAttivi).concat(Object.keys(meseSel)))).sort();
+    // Limita la finestra: dal primo mese del selezionato fino a fine selezionato + qualche mese
+    const mesiSel = Object.keys(meseSel).sort();
+    const primoMeseSel = mesiSel[0] || tuttiMesi[0];
+    const ultimoMeseSel = mesiSel[mesiSel.length - 1] || tuttiMesi[tuttiMesi.length - 1];
+    // Finestra = da primoMeseSel a ultimoMeseSel (i mesi rilevanti per l'impatto)
+    const mesiFinestra = tuttiMesi.filter(function(m) { return m >= primoMeseSel && m <= ultimoMeseSel; });
+
+    // 6. Metriche
+    const rataAttualeAttivi = attivi.reduce(function(s, f) { return s + _calcRataMensileEquivalente(f); }, 0);
+    // Picco: il mese con (attivi + sel) massimo nella finestra
+    let picco = 0, mesePicco = '';
+    mesiFinestra.forEach(function(m) {
+      const tot = (meseAttivi[m] || 0) + (meseSel[m] || 0);
+      if (tot > picco) { picco = tot; mesePicco = m; }
+    });
+
+    _renderSimulazione(fSel, {
+      meseAttivi: meseAttivi, meseSel: meseSel, mesiFinestra: mesiFinestra,
+      capitale: capitale, rataSelMensile: rataSelMensile, totInteressi: totInteressi,
+      costiUnaTantum: costiUnaTantum, montante: montante, costoAllIn: costoAllIn,
+      esborsoTotale: esborsoTotale, rataAttualeAttivi: rataAttualeAttivi,
+      picco: picco, mesePicco: mesePicco
+    });
+  } catch(e) {
+    console.error('[simulaFinanziamento] crash:', e);
+    apriModal('<div style="padding:30px;text-align:center;color:#A32D2D">Errore simulazione: ' + (e.message || e) + '</div>');
+  }
+}
+
+function _simFmtMese(m) {
+  const nomi = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  const mese = parseInt(m.substring(5, 7));
+  const anno = m.substring(2, 4);
+  return nomi[mese - 1] + "'" + anno;
+}
+
+function _renderSimulazione(f, d) {
+  const ist = _bancheIstituti.find(x => x.id === f.istituto_id);
+  const nomeIst = ist ? ist.nome : '—';
+  const tassoStr = (f.euribor_tipo && f.euribor_valore != null)
+    ? 'Euribor ' + f.euribor_tipo + ' ' + Number(f.euribor_valore).toFixed(3) + '% + spread ' + Number(f.spread || 0).toFixed(2) + ' = ' + Number(f.tasso || 0).toFixed(3) + '%'
+    : 'TAN ' + Number(f.tasso || 0).toFixed(3) + '%';
+
+  function eur(n) { return Math.round(n).toLocaleString('it-IT') + ' €'; }
+
+  let html = '<div style="max-width:760px">';
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><span style="font-size:18px">🧮</span><span style="font-size:18px;font-weight:600">Simulatore impatto</span></div>';
+  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">' + esc(nomeIst) + ' · ' + esc(f.descrizione || '') + ' · ' + eur(d.capitale) + ' · ' + f.durata_rate + ' rate · ' + tassoStr + ' · <strong>' + esc(f.stato) + '</strong></div>';
+
+  // Stat card costi all-in
+  html += '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Costi all-in</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">';
+  html += '<div style="background:var(--bg);border-radius:8px;padding:10px"><div style="font-size:11px;color:var(--text-muted)">Capitale</div><div style="font-size:18px;font-weight:600">' + eur(d.capitale) + '</div></div>';
+  html += '<div style="background:var(--bg);border-radius:8px;padding:10px"><div style="font-size:11px;color:var(--text-muted)">Rata mensile equiv.</div><div style="font-size:18px;font-weight:600">' + eur(d.rataSelMensile) + '</div></div>';
+  html += '<div style="background:var(--bg);border-radius:8px;padding:10px"><div style="font-size:11px;color:var(--text-muted)">Totale interessi</div><div style="font-size:18px;font-weight:600">' + eur(d.totInteressi) + '</div></div>';
+  html += '<div style="background:#FAEEDA;border-radius:8px;padding:10px"><div style="font-size:11px;color:#854F0B">Costo all-in</div><div style="font-size:18px;font-weight:600;color:#854F0B">' + eur(d.costoAllIn) + '</div></div>';
+  html += '</div>';
+
+  // Tabella sintetica
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 14px;margin-bottom:18px;font-size:13px">';
+  html += '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border)"><span style="color:var(--text-muted)">Montante restituito (capitale + interessi)</span><span>' + eur(d.montante) + '</span></div>';
+  html += '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border)"><span style="color:var(--text-muted)">Costi una tantum (istruttoria + commissioni + altri)</span><span>' + eur(d.costiUnaTantum) + '</span></div>';
+  html += '<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="color:var(--text-muted)">Esborso totale</span><span style="font-weight:600">' + eur(d.esborsoTotale) + '</span></div>';
+  html += '</div>';
+
+  // Gantt cumulativo
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+  html += '<span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Carico rate mensili — attivi + nuovo</span>';
+  html += '<div style="display:flex;gap:12px;font-size:11px"><span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:8px;background:#B4B2A9;border-radius:2px"></span>già attivi</span><span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:8px;background:#378ADD;border-radius:2px"></span>nuovo</span></div>';
+  html += '</div>';
+
+  // Calcola max per scalare le barre
+  let maxTot = 0;
+  d.mesiFinestra.forEach(function(m) {
+    const t = (d.meseAttivi[m] || 0) + (d.meseSel[m] || 0);
+    if (t > maxTot) maxTot = t;
+  });
+  if (maxTot === 0) maxTot = 1;
+
+  // Limita a max ~36 barre per leggibilità
+  let mesiPlot = d.mesiFinestra;
+  if (mesiPlot.length > 36) mesiPlot = mesiPlot.slice(0, 36);
+
+  html += '<div style="display:flex;align-items:flex-end;gap:2px;height:150px;border-bottom:1px solid var(--border);padding-bottom:0">';
+  mesiPlot.forEach(function(m) {
+    const att = d.meseAttivi[m] || 0;
+    const sel = d.meseSel[m] || 0;
+    const hAtt = (att / maxTot * 100);
+    const hSel = (sel / maxTot * 100);
+    const tot = att + sel;
+    html += '<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0" title="' + _simFmtMese(m) + ': ' + eur(tot) + ' (attivi ' + eur(att) + ' + nuovo ' + eur(sel) + ')">';
+    if (hSel > 0) html += '<div style="background:#378ADD;height:' + hSel.toFixed(1) + '%"></div>';
+    if (hAtt > 0) html += '<div style="background:#B4B2A9;height:' + hAtt.toFixed(1) + '%"></div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  // Etichette mesi (ogni 1 se pochi, altrimenti ogni 2-3)
+  const step = mesiPlot.length > 24 ? 3 : (mesiPlot.length > 12 ? 2 : 1);
+  html += '<div style="display:flex;gap:2px;padding-top:3px;font-size:9px;color:var(--text-muted)">';
+  mesiPlot.forEach(function(m, i) {
+    html += '<div style="flex:1;text-align:center;min-width:0;overflow:hidden">' + (i % step === 0 ? _simFmtMese(m) : '') + '</div>';
+  });
+  html += '</div>';
+
+  // Metriche di sintesi
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px">';
+  html += '<div style="background:var(--bg);border-radius:8px;padding:10px"><div style="font-size:11px;color:var(--text-muted)">Rata mensile attuale (attivi)</div><div style="font-size:17px;font-weight:600">' + eur(d.rataAttualeAttivi) + '</div></div>';
+  html += '<div style="background:#E6F1FB;border-radius:8px;padding:10px"><div style="font-size:11px;color:#0C447C">+ nuova rata</div><div style="font-size:17px;font-weight:600;color:#0C447C">+' + eur(d.rataSelMensile) + '</div></div>';
+  html += '<div style="background:#FCEBEB;border-radius:8px;padding:10px"><div style="font-size:11px;color:#A32D2D">Picco mensile' + (d.mesePicco ? ' (' + _simFmtMese(d.mesePicco) + ')' : '') + '</div><div style="font-size:17px;font-weight:600;color:#A32D2D">' + eur(d.picco) + '</div></div>';
+  html += '</div>';
+
+  html += '<div style="display:flex;justify-content:flex-end;margin-top:18px"><button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer">Chiudi</button></div>';
+  html += '</div>';
+
+  apriModal(html);
+}
+
 async function _rigeneraPianoFinanziamento(finId, payload) {
   // Cancella le rate esistenti
   const del = await sb.from('banche_finanziamenti_rate').delete().eq('finanziamento_id', finId);
