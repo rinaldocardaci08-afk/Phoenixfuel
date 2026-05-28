@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Sezione Banche & Mutui
-// Versione 05/05/2026 (v20260505a)
+// Versione 28/05/2026 (v20260528a) - Form esteso: Euribor+spread, costi una tantum, stati deliberato/inattivo
 //
 // Patch 05/05 (a) — allineamento permessi alla Costituzione B.4:
 //   - _applicaPermessiTabBanche ora gating della tab "Storico Anticipi"
@@ -566,6 +566,8 @@ async function renderBancheFinanziamenti() {
   tabellaHtml += '<label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
   tabellaHtml += '<select id="fin-filtro-stato" onchange="_aggiornaFiltroFinanziamenti(this.value)" onwheel="this.blur()" style="font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">';
   tabellaHtml += '<option value="attivo" ' + (_finFiltroStato === 'attivo' ? 'selected' : '') + '>Attivi</option>';
+  tabellaHtml += '<option value="deliberato" ' + (_finFiltroStato === 'deliberato' ? 'selected' : '') + '>Deliberati (in preparazione)</option>';
+  tabellaHtml += '<option value="inattivo" ' + (_finFiltroStato === 'inattivo' ? 'selected' : '') + '>Inattivi</option>';
   tabellaHtml += '<option value="estinto" ' + (_finFiltroStato === 'estinto' ? 'selected' : '') + '>Estinti</option>';
   tabellaHtml += '<option value="tutti" ' + (_finFiltroStato === 'tutti' ? 'selected' : '') + '>Tutti</option>';
   tabellaHtml += '</select>';
@@ -1439,17 +1441,77 @@ function apriModalFinanziamento(id) {
   html += '</select></div>';
   html += '</div>';
 
-  // Capitale + tasso + tipo tasso
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+  // Capitale + tipo tasso (NUOVO 28/05: capitale e tipo tasso, il TAN va nella sezione tasso sotto)
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += _campo('Capitale (€) *', 'mod-fin-capitale', f?.capitale ?? '', 'number', '0');
-  html += _campo('Tasso TAN %', 'mod-fin-tasso', f?.tasso ?? '', 'number', '0.00');
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Tipo tasso</label>';
-  html += '<select id="mod-fin-tipo-tasso" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<select id="mod-fin-tipo-tasso" onchange="_finToggleEuribor()" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['fisso','variabile','misto','zero_coupon'].forEach(t => {
     html += '<option value="' + t + '" ' + ((f?.tipo_tasso || 'fisso') === t ? 'selected' : '') + '>' + t + '</option>';
   });
   html += '</select></div>';
   html += '</div>';
+
+  // ── SEZIONE TASSO (NUOVO 28/05): Euribor + spread → TAN auto ──
+  html += '<div style="background:rgba(133,183,235,0.10);border:0.5px solid #85B7EB;border-radius:8px;padding:12px;margin-top:4px">';
+  html += '<div style="font-size:12px;font-weight:500;color:#0C447C;margin-bottom:10px">📈 Tasso d\'interesse</div>';
+  // Riga Euribor: visibile solo se variabile/misto
+  const tipoTassoIniz = f?.tipo_tasso || 'fisso';
+  const euriborVisibile = (tipoTassoIniz === 'variabile' || tipoTassoIniz === 'misto');
+  html += '<div id="mod-fin-euribor-box" style="display:' + (euriborVisibile ? 'block' : 'none') + '">';
+  html += '<div style="display:grid;grid-template-columns:1.2fr 1fr 0.3fr 1fr;gap:8px;align-items:end;margin-bottom:8px">';
+  html += '<div><label style="font-size:11px;color:#0C447C;font-weight:500">Euribor rif.</label>';
+  html += '<select id="mod-fin-euribor-tipo" onchange="_finRicalcolaTAN()" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  [['','—'],['1m','Euribor 1 mese'],['3m','Euribor 3 mesi'],['6m','Euribor 6 mesi']].forEach(o => {
+    html += '<option value="' + o[0] + '" ' + ((f?.euribor_tipo || '') === o[0] ? 'selected' : '') + '>' + o[1] + '</option>';
+  });
+  html += '</select></div>';
+  html += '<div><label style="font-size:11px;color:#0C447C;font-weight:500">Euribor (%)</label>';
+  html += '<input id="mod-fin-euribor-valore" type="number" step="0.001" value="' + esc(String(f?.euribor_valore ?? '')) + '" oninput="_finRicalcolaTAN()" placeholder="1,968" style="width:100%;padding:8px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px"></div>';
+  html += '<div style="text-align:center;color:#0C447C;font-size:14px;padding-bottom:9px">+</div>';
+  html += '<div><label style="font-size:11px;color:#0C447C;font-weight:500">Spread (%)</label>';
+  html += '<input id="mod-fin-spread" type="number" step="0.001" value="' + esc(String(f?.spread ?? '')) + '" oninput="_finRicalcolaTAN()" placeholder="2,00" style="width:100%;padding:8px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px"></div>';
+  html += '</div>';
+  html += '</div>';
+  // Campo TAN: editabile direttamente (se fisso) o auto-calcolato (se variabile, ma sovrascrivibile)
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:0.5px solid #85B7EB;border-radius:6px;padding:6px 10px">';
+  html += '<label style="font-size:12px;color:#0C447C;font-weight:500">TAN % <span id="mod-fin-tan-hint" style="font-weight:400;color:var(--text-muted);font-size:10px">' + (euriborVisibile ? '(auto: Euribor + spread)' : '(inserisci manuale)') + '</span></label>';
+  html += '<input id="mod-fin-tasso" type="number" step="0.001" value="' + esc(String(f?.tasso ?? '')) + '" placeholder="0.000" style="width:110px;padding:6px 8px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:#0C447C;font-size:15px;font-weight:500;text-align:right">';
+  html += '</div>';
+  html += '</div>';
+
+  // ── SEZIONE COSTI UNA TANTUM (NUOVO 28/05): % sul capitale ↔ € ──
+  html += '<div style="background:rgba(133,183,235,0.10);border:0.5px solid #85B7EB;border-radius:8px;padding:12px;margin-top:4px">';
+  html += '<div style="font-size:12px;font-weight:500;color:#0C447C;margin-bottom:4px">🧾 Costi una tantum</div>';
+  html += '<div style="font-size:10px;color:#0C447C;opacity:0.75;margin-bottom:10px">Inserisci la % oppure il valore €: l\'altro si calcola sul capitale.</div>';
+  // Spese istruttoria
+  html += '<div style="display:grid;grid-template-columns:1.4fr 1fr 0.3fr 1fr;gap:8px;align-items:end;margin-bottom:8px">';
+  html += '<div style="font-size:12px;color:#0C447C;padding-bottom:8px">Spese istruttoria</div>';
+  html += '<div><label style="font-size:10px;color:#0C447C">%</label><input id="mod-fin-istr-pct" type="number" step="0.01" value="' + esc(String(f?.spese_istruttoria_pct ?? '')) + '" oninput="_finCalcCosto(\'istr\',\'pct\')" placeholder="1,00" style="width:100%;padding:7px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:2px"></div>';
+  html += '<div style="text-align:center;color:#0C447C;padding-bottom:9px">→</div>';
+  html += '<div><label style="font-size:10px;color:#0C447C">€</label><input id="mod-fin-istr-eur" type="number" step="1" value="' + esc(String(f?.spese_istruttoria_eur ?? '')) + '" oninput="_finCalcCosto(\'istr\',\'eur\')" placeholder="3.000" style="width:100%;padding:7px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:2px"></div>';
+  html += '</div>';
+  // Commissioni
+  html += '<div style="display:grid;grid-template-columns:1.4fr 1fr 0.3fr 1fr;gap:8px;align-items:end;margin-bottom:8px">';
+  html += '<div style="font-size:12px;color:#0C447C;padding-bottom:8px">Commissioni</div>';
+  html += '<div><input id="mod-fin-comm-pct" type="number" step="0.01" value="' + esc(String(f?.commissioni_pct ?? '')) + '" oninput="_finCalcCosto(\'comm\',\'pct\')" placeholder="0,40" style="width:100%;padding:7px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
+  html += '<div style="text-align:center;color:#0C447C;padding-bottom:9px">→</div>';
+  html += '<div><input id="mod-fin-comm-eur" type="number" step="1" value="' + esc(String(f?.commissioni_eur ?? '')) + '" oninput="_finCalcCosto(\'comm\',\'eur\')" placeholder="1.200" style="width:100%;padding:7px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
+  html += '</div>';
+  // Altri costi (solo €)
+  html += '<div style="display:grid;grid-template-columns:1.4fr 1fr 0.3fr 1fr;gap:8px;align-items:end;margin-bottom:10px">';
+  html += '<div style="font-size:12px;color:#0C447C;padding-bottom:8px">Altri costi (bolli, perizie…)</div>';
+  html += '<div style="color:var(--text-muted);text-align:center;padding-bottom:9px;font-size:11px">—</div>';
+  html += '<div style="text-align:center;color:#0C447C;padding-bottom:9px"></div>';
+  html += '<div><input id="mod-fin-altri-eur" type="number" step="1" value="' + esc(String(f?.altri_costi_eur ?? '')) + '" oninput="_finAggiornaTotCosti()" placeholder="0" style="width:100%;padding:7px;border:0.5px solid #85B7EB;border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
+  html += '</div>';
+  // Totale
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:0.5px solid #85B7EB;border-radius:6px;padding:8px 12px">';
+  html += '<span style="font-size:12px;color:#0C447C;font-weight:500">Totale costi una tantum</span>';
+  html += '<span id="mod-fin-tot-costi" style="font-size:15px;font-weight:500;color:#0C447C">0 €</span>';
+  html += '</div>';
+  html += '</div>';
+
 
   // Durata + frequenza + data fine (sincronizzati)
   html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
@@ -1482,7 +1544,7 @@ function apriModalFinanziamento(id) {
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
   html += '<select id="mod-fin-stato" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
-  ['attivo','estinto','rinegoziato'].forEach(s => {
+  ['attivo','deliberato','inattivo','estinto','rinegoziato'].forEach(s => {
     html += '<option value="' + s + '" ' + ((f?.stato || 'attivo') === s ? 'selected' : '') + '>' + s + '</option>';
   });
   html += '</select></div>';
@@ -1505,6 +1567,62 @@ function apriModalFinanziamento(id) {
   html += '</div>';
 
   apriModal(html);
+  // Inizializza totale costi una tantum all'apertura
+  setTimeout(function(){ if (typeof _finAggiornaTotCosti === 'function') _finAggiornaTotCosti(); }, 50);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER FORM FINANZIAMENTO (NUOVO 28/05/2026)
+// Euribor+spread→TAN auto, costi una tantum %↔€, toggle visibilità Euribor
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _finToggleEuribor() {
+  const tipo = document.getElementById('mod-fin-tipo-tasso');
+  const box = document.getElementById('mod-fin-euribor-box');
+  const hint = document.getElementById('mod-fin-tan-hint');
+  if (!tipo || !box) return;
+  const variabile = (tipo.value === 'variabile' || tipo.value === 'misto');
+  box.style.display = variabile ? 'block' : 'none';
+  if (hint) hint.textContent = variabile ? '(auto: Euribor + spread)' : '(inserisci manuale)';
+  if (variabile) _finRicalcolaTAN();
+}
+
+function _finRicalcolaTAN() {
+  const eurEl = document.getElementById('mod-fin-euribor-valore');
+  const sprEl = document.getElementById('mod-fin-spread');
+  const tanEl = document.getElementById('mod-fin-tasso');
+  if (!eurEl || !sprEl || !tanEl) return;
+  const eur = parseFloat(eurEl.value);
+  const spr = parseFloat(sprEl.value);
+  // Calcola TAN solo se almeno uno dei due è valorizzato
+  if (!isNaN(eur) || !isNaN(spr)) {
+    const tan = (isNaN(eur) ? 0 : eur) + (isNaN(spr) ? 0 : spr);
+    tanEl.value = tan.toFixed(3);
+  }
+}
+
+function _finCalcCosto(voce, origine) {
+  // voce: 'istr' | 'comm' ; origine: 'pct' | 'eur' (quale campo l'utente ha appena toccato)
+  const capEl = document.getElementById('mod-fin-capitale');
+  const capitale = capEl ? (parseFloat(capEl.value) || 0) : 0;
+  const pctEl = document.getElementById('mod-fin-' + voce + '-pct');
+  const eurEl = document.getElementById('mod-fin-' + voce + '-eur');
+  if (!pctEl || !eurEl || capitale <= 0) { _finAggiornaTotCosti(); return; }
+  if (origine === 'pct') {
+    const pct = parseFloat(pctEl.value);
+    if (!isNaN(pct)) eurEl.value = Math.round(capitale * pct / 100);
+  } else {
+    const eur = parseFloat(eurEl.value);
+    if (!isNaN(eur) && capitale > 0) pctEl.value = (eur / capitale * 100).toFixed(3);
+  }
+  _finAggiornaTotCosti();
+}
+
+function _finAggiornaTotCosti() {
+  function v(id) { const el = document.getElementById(id); return el ? (parseFloat(el.value) || 0) : 0; }
+  const tot = v('mod-fin-istr-eur') + v('mod-fin-comm-eur') + v('mod-fin-altri-eur');
+  const totEl = document.getElementById('mod-fin-tot-costi');
+  if (totEl) totEl.textContent = tot.toLocaleString('it-IT') + ' €';
 }
 
 async function salvaFinanziamento(id) {
@@ -1530,6 +1648,14 @@ async function salvaFinanziamento(id) {
     capitale,
     tasso: Number(document.getElementById('mod-fin-tasso').value) || null,
     tipo_tasso: document.getElementById('mod-fin-tipo-tasso').value,
+    euribor_tipo: document.getElementById('mod-fin-euribor-tipo') ? (document.getElementById('mod-fin-euribor-tipo').value || null) : null,
+    euribor_valore: document.getElementById('mod-fin-euribor-valore') ? (Number(document.getElementById('mod-fin-euribor-valore').value) || null) : null,
+    spread: document.getElementById('mod-fin-spread') ? (Number(document.getElementById('mod-fin-spread').value) || null) : null,
+    spese_istruttoria_pct: document.getElementById('mod-fin-istr-pct') ? (Number(document.getElementById('mod-fin-istr-pct').value) || null) : null,
+    spese_istruttoria_eur: document.getElementById('mod-fin-istr-eur') ? (Number(document.getElementById('mod-fin-istr-eur').value) || null) : null,
+    commissioni_pct: document.getElementById('mod-fin-comm-pct') ? (Number(document.getElementById('mod-fin-comm-pct').value) || null) : null,
+    commissioni_eur: document.getElementById('mod-fin-comm-eur') ? (Number(document.getElementById('mod-fin-comm-eur').value) || null) : null,
+    altri_costi_eur: document.getElementById('mod-fin-altri-eur') ? (Number(document.getElementById('mod-fin-altri-eur').value) || null) : null,
     durata_rate: durata,
     frequenza: document.getElementById('mod-fin-frequenza').value,
     data_erogazione: dataErog,
