@@ -1,3 +1,4 @@
+// VERSIONE 08/06/2026 a - Fix versamenti a cavallo mese: filtro per giorni coperti (competenza)
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Corrispettivi & Versamenti bancari (vista mensile)
 // Legge dati da stazione_cassa (già compilata dal foglio giornaliero)
@@ -25,15 +26,30 @@ async function caricaCorrispettivi() {
   var ultimoGiorno = new Date(Number(anno), Number(mese), 0).getDate();
   var aISO = anno + '-' + mese + '-' + String(ultimoGiorno).padStart(2, '0');
 
+  // FIX 08/06/2026: i versamenti si filtrano per COMPETENZA (giorni coperti), non
+  // per data_versamento. Un versamento dei giorni di fine maggio può avere
+  // data_versamento a giugno (soldi portati in banca il mese dopo). Carico quindi
+  // una finestra ampia (da 31gg prima a 92gg dopo il mese) e filtro in JS sotto.
+  var daWin = new Date(daISO + 'T00:00:00'); daWin.setDate(daWin.getDate() - 31);
+  var daWinISO = daWin.toISOString().split('T')[0];
+  var aWin = new Date(aISO + 'T00:00:00'); aWin.setDate(aWin.getDate() + 92);
+  var aWinISO = aWin.toISOString().split('T')[0];
+
   var [cassaRes, speseRes, versRes] = await Promise.all([
     sb.from('stazione_cassa').select('*').gte('data', daISO).lte('data', aISO).order('data'),
     sb.from('stazione_spese_contanti').select('*').gte('data', daISO).lte('data', aISO),
-    sb.from('versamenti_banca').select('*').gte('data_versamento', daISO).lte('data_versamento', aISO).order('data_versamento')
+    sb.from('versamenti_banca').select('*').gte('data_versamento', daWinISO).lte('data_versamento', aWinISO).order('data_versamento')
   ]);
 
   var cassa = cassaRes.data || [];
   var spese = speseRes.data || [];
-  var versamenti = versRes.data || [];
+  // FIX 08/06/2026: tieni solo i versamenti che coprono almeno un giorno del mese visualizzato
+  var versamenti = (versRes.data || []).filter(function(v) {
+    return (v.giorni_coperti || []).some(function(g) {
+      var gs = (typeof g === 'string') ? g.substring(0, 10) : String(g).substring(0, 10);
+      return gs >= daISO && gs <= aISO;
+    });
+  });
 
   // Spese per giorno
   var spesePerGiorno = {};
