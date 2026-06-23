@@ -31,6 +31,10 @@ function _pfRegData(d) {
   try { return new Date(d + 'T12:00:00').toLocaleDateString('it-IT'); }
   catch (e) { return d; }
 }
+function _pfRegEsc(t) {
+  if (t === null || t === undefined) return '';
+  return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 // ── Auto-iniezione tab + pannello in Deposito ──────────────────────────
 function pfRegInit() {
@@ -230,7 +234,9 @@ function _pfRegTabella(rows, open15, openKg, tC15, tCkg, tS15, tSkg, fin15, finK
     var isCar = (r.direzione === 'E');
     var g15 = open15 + Number(r.delta_giac_15 || 0);
     var gkg = openKg + Number(r.delta_giac_kg || 0);
-    var docRef = r.riferimento ? '<div style="font-size:10px;color:var(--text-hint)">' + r.riferimento + '</div>' : '';
+    var docRef = r.riferimento ? '<div style="font-size:10px;color:var(--text-hint)">' + _pfRegEsc(r.riferimento) + '</div>' : '';
+    var dett = (r.controparte_dettaglio && r.controparte_dettaglio !== r.controparte)
+      ? '<div style="font-size:10px;color:#639922;margin-top:2px">📍 ' + _pfRegEsc(r.controparte_dettaglio) + '</div>' : '';
     var ambCar = (isCar && r.car_amb != null) ? '<div style="font-size:10px;color:var(--text-hint)">amb ' + _pfRegN(r.car_amb) + '</div>' : '';
     var ambSca = (!isCar && r.sca_amb != null) ? '<div style="font-size:10px;color:var(--text-hint)">amb ' + _pfRegN(r.sca_amb) + '</div>' : '';
     var zebra = (n % 2 === 0) ? ';background:rgba(0,0,0,0.02)' : '';
@@ -238,8 +244,8 @@ function _pfRegTabella(rows, open15, openKg, tC15, tCkg, tS15, tSkg, fin15, finK
     H += '<tr style="border-top:0.5px solid var(--border)' + zebra + '">'
       + '<td style="padding:7px 8px;color:var(--text-hint)">' + n + '</td>'
       + '<td style="padding:7px 8px;font-family:inherit">' + _pfRegData(r.data) + '</td>'
-      + '<td style="padding:7px 8px;font-family:inherit">' + (r.tipo_documento || 'e-DAS') + docRef + '</td>'
-      + '<td style="padding:7px 8px;font-family:inherit">' + (r.controparte || '—') + '</td>'
+      + '<td style="padding:7px 8px;font-family:inherit">' + _pfRegEsc(r.tipo_documento || 'e-DAS') + docRef + '</td>'
+      + '<td style="padding:7px 8px;font-family:inherit">' + (r.controparte ? _pfRegEsc(r.controparte) : '—') + dett + '</td>'
       + '<td style="padding:7px 8px;text-align:right;color:' + (isCar ? '#1D7A4D' : 'var(--text-hint)') + '">' + (isCar ? _pfRegN(r.car_15) + ambCar : '—') + '</td>'
       + '<td style="padding:7px 8px;text-align:right;color:' + (isCar ? '#1D7A4D' : 'var(--text-hint)') + '">' + (isCar ? _pfRegN(r.car_kg) : '—') + '</td>'
       + '<td style="padding:7px 8px;text-align:right;color:' + (!isCar ? '#A32D2D' : 'var(--text-hint)') + '">' + (!isCar ? _pfRegN(r.sca_15) + ambSca : '—') + '</td>'
