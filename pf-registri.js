@@ -1,5 +1,5 @@
 // PhoenixFuel — Registri di carico e scarico (prodotti energetici)
-// v20260623c — PUNTO 1: tab "Deposito → 📚 Registri", SOLA LETTURA.
+// v20260623d — PUNTO 1+2: tab "Deposito → 📚 Registri", SOLA LETTURA.
 // ─────────────────────────────────────────────────────────────────────────────
 // Cosa fa:
 //   - Si auto-inietta il tab "📚 Registri" + il pannello dentro #s-deposito,
@@ -64,7 +64,7 @@ function pfRegInit() {
     sec.appendChild(panel);
 
     if (typeof _PANEL_ORDERS_DEFAULT !== 'undefined') {
-      _PANEL_ORDERS_DEFAULT['registri'] = ['reg-riepilogo', 'reg-tabella'];
+      _PANEL_ORDERS_DEFAULT['registri'] = ['reg-apertura', 'reg-riepilogo', 'reg-tabella'];
     }
     if (typeof _PANEL_REFRESH_FN !== 'undefined') {
       _PANEL_REFRESH_FN['registri'] = function () { if (_pfRegCache) _pfRegDraw(); else _pfRegRenderPanels(); };
@@ -230,16 +230,34 @@ function _pfRegDraw() {
     + kpi('Giacenza finale', aFin15, aFinKg, '#185FA5')
     + '</div></div>';
 
+  // Chiusure mensili (giacenza fine mese) — sempre calcolate dai movimenti
+  var now = new Date();
+  var maxMonth = (anno < now.getFullYear()) ? 12 : (anno === now.getFullYear() ? (now.getMonth() + 1) : 0);
+  var lastDataM = 0;
+  rows.forEach(function (r) { if (r.data) { var mm = Number(r.data.substring(5, 7)); if (mm > lastDataM) lastDataM = mm; } });
+  if (lastDataM > maxMonth) maxMonth = lastDataM;
+  var cl15 = [], clkg = [];
+  for (var m = 1; m <= 12; m++) {
+    var last = null;
+    rows.forEach(function (r) { if (r.data && Number(r.data.substring(5, 7)) <= m) last = r; });
+    cl15[m] = last ? open15 + Number(last.delta_giac_15 || 0) : open15;
+    clkg[m] = last ? openKg + Number(last.delta_giac_kg || 0) : openKg;
+  }
+  var apBlock = _pfRegAperturaHtml(open15, openKg, apertura, cl15, clkg, maxMonth, prod, anno);
+
   // Pannello tabella (filtrata) con barra filtri integrata
   var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, open15, openKg, pOpen15, pOpenKg, pC15, pCkg, pS15, pSkg, prod, anno);
 
+  var blocks = { 'reg-apertura': apBlock, 'reg-riepilogo': riep, 'reg-tabella': tbl };
+  var def = ['reg-apertura', 'reg-riepilogo', 'reg-tabella'];
   var html;
   if (typeof _wrapPanel === 'function' && typeof _getPanelOrder === 'function') {
-    var order = _getPanelOrder('registri');
-    var blocks = { 'reg-riepilogo': riep, 'reg-tabella': tbl };
+    var order = _getPanelOrder('registri').slice();
+    order = order.filter(function (id) { return def.indexOf(id) >= 0; });          // scarta id sconosciuti
+    def.forEach(function (id, i) { if (order.indexOf(id) < 0) order.splice(Math.min(i, order.length), 0, id); }); // reintegra mancanti
     html = order.map(function (id) { return _wrapPanel('registri', id, blocks[id] || ''); }).join('');
   } else {
-    html = '<div style="margin-bottom:14px">' + riep + '</div>' + tbl;
+    html = def.map(function (id) { return '<div style="margin-bottom:14px">' + blocks[id] + '</div>'; }).join('');
   }
   body.innerHTML = html;
 }
@@ -265,8 +283,12 @@ function _pfRegFiltroHtml() {
     + '<input type="date" id="reg-al" value="' + (_pfRegState.al || '') + '" style="font-size:11px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
     + '<button onclick="_pfRegApplicaPeriodo()" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--accent,#D85A30);color:#fff;cursor:pointer">Applica</button>'
     + azzera + '</div>';
-  return '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
-    + '<div style="display:flex;gap:4px;flex-wrap:wrap">' + pills + '</div>' + periodo + '</div>';
+  // Riga 1: tag mesi (con padding-right per non finire sotto le freccette ▲▼ di _wrapPanel a top:6px/right:8px)
+  // Riga 2: periodo libero + azzera, su riga propria → nessuna sovrapposizione con i pulsanti di mobilità
+  return '<div style="margin-bottom:10px">'
+    + '<div style="display:flex;gap:4px;flex-wrap:wrap;padding-right:62px;margin-bottom:8px">' + pills + '</div>'
+    + '<div style="display:flex;justify-content:flex-end">' + periodo + '</div>'
+    + '</div>';
 }
 
 function _pfRegTabella(rows, open15, openKg, pOpen15, pOpenKg, pC15, pCkg, pS15, pSkg, prod, anno) {
@@ -340,6 +362,68 @@ function _pfRegTabella(rows, open15, openKg, pOpen15, pOpenKg, pC15, pCkg, pS15,
   H += '</table></div>';
   H += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint)">Giacenza progressiva = riporto + carichi − scarichi · litri a 15° e kg · il volume ambiente è indicato sotto al dato del movimento.</div>';
   return H;
+}
+
+// ── Pannello Apertura & chiusure (sola lettura) ────────────────────────
+function _pfRegModificaApertura() {
+  alert('Modifica apertura giacenza: la attiviamo allo step 3 (modal di scrittura). Per ora il pannello è in sola lettura.');
+}
+
+function _pfRegAperturaHtml(open15, openKg, apertura, cl15, clkg, maxMonth, prod, anno) {
+  var dens = (apertura && Number(apertura.giac_iniziale_15) > 0 && Number(apertura.giac_iniziale_kg) > 0)
+    ? (Number(apertura.giac_iniziale_kg) / Number(apertura.giac_iniziale_15) * 1000) : null;
+  var densTxt = (dens != null) ? dens.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+
+  var btn = '<button onclick="_pfRegModificaApertura()" style="font-size:12px;padding:7px 14px;border-radius:6px;border:0.5px solid var(--border);background:var(--accent,#D85A30);color:#fff;cursor:pointer">✏️ Modifica apertura</button>';
+
+  var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding-right:62px;margin-bottom:10px">'
+    + '<div style="font-size:14px;font-weight:600">📋 Apertura &amp; chiusure — ' + prod + ' · ' + anno + '</div>'
+    + btn + '</div>';
+
+  var box = function (label, val, sub, col) {
+    return '<div style="flex:1;min-width:120px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 10px">'
+      + '<div style="font-size:9px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px">' + label + '</div>'
+      + '<div style="font-size:15px;font-weight:600;font-family:monospace;color:' + (col || 'var(--text)') + '">' + val + (sub ? ' <span style="font-size:10px;color:var(--text-hint)">' + sub + '</span>' : '') + '</div></div>';
+  };
+
+  var apRow;
+  if (apertura) {
+    apRow = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'
+      + box('Giacenza iniziale', _pfRegN(open15), 'l@15', '#185FA5')
+      + box('In massa', _pfRegN(openKg), 'kg')
+      + box('Densità 15°', densTxt, 'kg/mc')
+      + box('Rif. Dogane', apertura.rif_documento ? _pfRegEsc(apertura.rif_documento) : '—', '')
+      + box('Data', apertura.data_apertura ? _pfRegData(apertura.data_apertura) : '—', '')
+      + '</div>';
+  } else {
+    apRow = '<div style="background:#FFF4E5;border:0.5px solid #E0A040;color:#8A5800;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px">'
+      + '⚠ Giacenza iniziale non impostata: i saldi del registro partono da zero. Usa “Modifica apertura” per inserirla dal documento di chiusura Dogane.</div>';
+  }
+
+  // Striscia chiusure mensili — sempre visibile
+  var thM = '';
+  for (var i = 0; i < 12; i++) {
+    var corr = (i + 1 === maxMonth);
+    thM += '<th style="padding:6px 8px;text-align:right;font-weight:500;font-size:10px;text-transform:uppercase;' + (corr ? 'color:var(--accent,#D85A30)' : 'color:var(--text-hint)') + '">' + _PF_REG_MESI[i] + '</th>';
+  }
+  var row15 = '', rowKg = '';
+  for (var m = 1; m <= 12; m++) {
+    var attivo = (m <= maxMonth);
+    row15 += '<td style="padding:6px 8px;text-align:right;' + (attivo ? '' : 'opacity:.35') + (m === maxMonth ? ';font-weight:700;color:#185FA5' : '') + '">' + (attivo ? _pfRegN(cl15[m]) : '—') + '</td>';
+    rowKg += '<td style="padding:6px 8px;text-align:right;color:var(--text-secondary,var(--text-hint));' + (attivo ? '' : 'opacity:.35') + (m === maxMonth ? ';font-weight:700' : '') + '">' + (attivo ? _pfRegN(clkg[m]) : '—') + '</td>';
+  }
+  var strip = '<div style="font-size:11px;color:var(--text-hint);margin-bottom:6px">Giacenza a fine mese (calcolata dai movimenti)</div>'
+    + '<div style="overflow-x:auto;border:0.5px solid var(--border);border-radius:8px">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:11px;min-width:640px;font-family:monospace">'
+    + '<thead><tr><th style="padding:6px 8px;text-align:left;font-weight:500;font-size:10px;text-transform:uppercase;color:var(--text-hint);font-family:var(--font-sans,sans-serif);min-width:90px"></th>' + thM + '</tr></thead>'
+    + '<tbody>'
+    + '<tr style="background:#F0F6FC"><td style="padding:6px 8px;font-family:var(--font-sans,sans-serif);color:#0C447C;font-size:11px">l@15</td>' + row15 + '</tr>'
+    + '<tr><td style="padding:6px 8px;font-family:var(--font-sans,sans-serif);color:var(--text-secondary,var(--text-hint));font-size:11px">kg</td>' + rowKg + '</tr>'
+    + '</tbody></table></div>'
+    + '<div style="margin-top:6px;font-size:10px;color:var(--text-hint)">La chiusura di dicembre diventa l\'apertura dell\'anno successivo.</div>';
+
+  return '<div style="background:var(--card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:14px">'
+    + head + apRow + strip + '</div>';
 }
 
 // ── Init ───────────────────────────────────────────────────────────────
