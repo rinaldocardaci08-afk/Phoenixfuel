@@ -1,4 +1,6 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
+// v20260625a — Allega DAS firmato/cartellino: link Google Drive come opzione
+//   principale (non occupa spazio); upload nel gestionale come ripiego.
 // ── CONSEGNE ─────────────────────────────────────────────────────
 async function caricaConsegne() {
   var filtroEl = document.getElementById('filtro-data-consegne');
@@ -180,17 +182,27 @@ async function annullaOrdine(ordineId) {
 
 function allegaDocConsegna(ordineId, tipoDoc) {
   var label = tipoDoc === 'das_firmato' ? 'DAS firmato' : 'Cartellino';
-  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:12px">📎 Allega ' + label + '</div>';
-  html += '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Scatta una foto o carica un file PDF del ' + label + ' firmato dal cliente.</div>';
-  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
-  html += '<button class="btn-primary" style="font-size:14px;padding:10px 20px;background:#378ADD" onclick="document.getElementById(\'doc-cons-file\').click()">📁 Scegli file</button>';
+  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:4px">📎 Allega ' + label + '</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Scansiona il ' + label + ' firmato, salvalo nella cartella <strong>Google Drive</strong> e incolla qui il link. Così non occupa spazio nel gestionale.</div>';
+
+  // ── PRINCIPALE: link Google Drive ──
+  html += '<div style="border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">';
+  html += '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text-hint);margin-bottom:8px">🔗 Link da Google Drive</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  html += '<input type="text" id="doc-cons-url" placeholder="https://drive.google.com/..." style="flex:1;min-width:200px;font-size:13px;padding:9px 12px;border:1px solid var(--accent,#D85A30);border-radius:8px;background:var(--bg);color:var(--text)" />';
+  html += '<button class="btn-primary" style="padding:9px 18px;background:var(--accent,#D85A30)" onclick="_salvaUrlDocConsegna(\'' + ordineId + '\',\'' + tipoDoc + '\')">Salva link</button>';
+  html += '</div>';
+  html += '<div style="font-size:11px;color:var(--text-hint);margin-top:8px">Su Drive: tasto destro sul file → Condividi → “Chiunque abbia il link” → Copia link.</div>';
+  html += '</div>';
+
+  // ── RIPIEGO: upload nel gestionale (occupa spazio) ──
+  html += '<details style="font-size:12px;color:var(--text-muted)">';
+  html += '<summary style="cursor:pointer;padding:6px 0">Oppure carica il file nel gestionale (occupa spazio, sconsigliato)</summary>';
+  html += '<div style="padding:8px 0">';
+  html += '<button style="font-size:13px;padding:9px 16px;background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:8px;cursor:pointer" onclick="document.getElementById(\'doc-cons-file\').click()">📁 Scegli file</button>';
   html += '<input type="file" id="doc-cons-file" accept="image/*,.pdf" style="display:none" onchange="_uploadDocConsegna(\'' + ordineId + '\',\'' + tipoDoc + '\',this)" />';
-  html += '</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted)">oppure incolla un URL:</div>';
-  html += '<div style="display:flex;gap:8px;margin-top:6px">';
-  html += '<input type="text" id="doc-cons-url" placeholder="https://..." style="flex:1;font-size:13px;padding:8px 12px" />';
-  html += '<button class="btn-primary" style="padding:8px 16px" onclick="_salvaUrlDocConsegna(\'' + ordineId + '\',\'' + tipoDoc + '\')">Salva</button>';
-  html += '</div>';
+  html += '</div></details>';
+
   apriModal(html);
 }
 
