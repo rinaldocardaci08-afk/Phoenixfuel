@@ -1,6 +1,6 @@
-// PhoenixFuel — Deposito
-// +v20260625 — Modulo entrate "Accetta carico" (DAS entrata: densità+litri reali,
-//   deposito sale in litri ambiente, scrive riga registro direzione E)., Rettifiche, Autoconsumo
+// PhoenixFuel — Deposito, Rettifiche, Autoconsumo
+// +v20260625b — Modulo entrate "Accetta carico" (deposito sale in litri ambiente,
+//   scrive registro E) + rettifiche confermate scrivono nel registro (E/U, dal 26/06).
 // ─────────────────────────────────────────────────────────────────────────────
 // Patch 29/04/2026 (v20260429a):
 //   CMP unificato per prodotto (regola Phoenix Fuel: tutte le cisterne dello
@@ -928,6 +928,50 @@ async function confermaRettifica(id, tipo) {
     confermata_il: new Date().toISOString()
   }).eq('id', id);
   if (errRett) { toast('Errore conferma: ' + errRett.message); return; }
+
+  // ── Alimenta il registro fiscale con la rettifica (solo deposito, dal 26/06) ──
+  // differenza in litri ambiente: >0 = eccedenza (E), <0 = calo/ammanco (U).
+  try {
+    var SOGLIA_REG_RETT = '2026-06-26';
+    if (tipo === 'deposito' && rett.data && rett.data >= SOGLIA_REG_RETT) {
+      var diff = Number(rett.differenza || 0);
+      if (Math.abs(diff) >= 1) {
+        var dir = diff > 0 ? 'E' : 'U';
+        var lamb = Math.abs(Math.round(diff));
+        // densità: ultima nota per il prodotto nel registro (per ricavare i kg)
+        var dRes = await sb.from('registro_movimenti')
+          .select('dens_amb,dens_15')
+          .eq('prodotto', rett.prodotto)
+          .not('dens_amb', 'is', null)
+          .order('data', { ascending: false }).limit(1);
+        var dAmb = (dRes.data && dRes.data[0] && Number(dRes.data[0].dens_amb)) || 0.835;
+        var d15 = (dRes.data && dRes.data[0] && Number(dRes.data[0].dens_15)) || dAmb;
+        // densità in kg/mc (es. 835) → porta a kg/L (0.835)
+        if (dAmb > 100) dAmb = dAmb / 1000;
+        if (d15 > 100) d15 = d15 / 1000;
+        var kg = Math.round(lamb * dAmb);
+        var l15 = d15 > 0 ? Math.round(lamb * dAmb / d15) : lamb;
+        await sb.from('registro_movimenti').insert([{
+          prodotto: rett.prodotto,
+          seq: 999999,
+          data: rett.data,
+          direzione: dir,
+          tipo_doc: 'RETT',
+          arc: null,
+          doc_data: rett.data,
+          progressivo: null,
+          controparte: 'Rettifica inventario' + (rett.note ? ' — ' + rett.note : ''),
+          dens_amb: dAmb,
+          dens_15: d15,
+          kg: kg,
+          lt_15: l15,
+          lt_amb: lamb,
+          is_apertura: false,
+          origine: 'phoenix'
+        }]);
+      }
+    }
+  } catch (eReg) { console.warn('registro rettifica non scritto:', eReg && eReg.message); }
 
   toast('Rettifica confermata — giacenza aggiornata!');
   caricaRettifiche(tipo);
