@@ -1,5 +1,5 @@
 // PhoenixFuel — Logistica
-// v20260625d — DAS giorno X+1 + modifica DAS + collegamento USCITE al registro
+// v20260625e — DAS X+1 + modifica DAS + collegamento USCITE registro + guardia anti-negativo
 //   deposito alla generazione) + modifica dati tecnici DAS nel dettaglio carico.
 // ── LOGISTICA ─────────────────────────────────────────────────────
 
@@ -1032,6 +1032,40 @@ async function _pfOrdiniCarico(caricoId) {
 }
 
 // Esegue: genera DAS + scarico deposito per UN carico, con densità già scelte.
+// Guardia anti-negativo: avvisa (non blocca) se la giacenza deposito di un
+// prodotto non basta a coprire le uscite che stanno per essere generate.
+// Ritorna true = procedi, false = annulla.
+async function _pfGuardiaGiacenza(ordiniCarico) {
+  try {
+    var ordDep = (ordiniCarico || []).filter(function (o) { return o.fornitore && o.fornitore.toLowerCase().includes('phoenix'); });
+    if (!ordDep.length) return true;
+    // litri in uscita per prodotto
+    var usciteProd = {};
+    ordDep.forEach(function (o) { usciteProd[o.prodotto] = (usciteProd[o.prodotto] || 0) + Number(o.litri || 0); });
+    var prodotti = Object.keys(usciteProd);
+    // giacenza fisica deposito per quei prodotti (litri ambiente)
+    var { data: cis } = await sb.from('cisterne').select('prodotto,livello_attuale').eq('sede', 'deposito_vibo').in('prodotto', prodotti);
+    var giacProd = {};
+    (cis || []).forEach(function (c) { giacProd[c.prodotto] = (giacProd[c.prodotto] || 0) + Number(c.livello_attuale || 0); });
+    // prodotti insufficienti
+    var manca = [];
+    prodotti.forEach(function (p) {
+      var disp = giacProd[p] || 0, esce = usciteProd[p];
+      if (esce > disp + 1) manca.push({ prodotto: p, disp: disp, esce: esce, deficit: esce - disp });
+    });
+    if (!manca.length) return true;
+    var msg = '⚠ GIACENZA DEPOSITO INSUFFICIENTE\n\n';
+    manca.forEach(function (m) {
+      msg += '• ' + m.prodotto + ': disponibili ' + Math.round(m.disp).toLocaleString('it-IT') + ' L, in uscita ' + Math.round(m.esce).toLocaleString('it-IT') + ' L (mancano ' + Math.round(m.deficit).toLocaleString('it-IT') + ' L)\n';
+    });
+    msg += '\nProbabilmente devi prima ACCETTARE il carico in entrata.\n\nGenerare comunque i DAS?';
+    return confirm(msg);
+  } catch (e) {
+    console.warn('guardia giacenza', e);
+    return true; // in caso di errore non blocco
+  }
+}
+
 async function _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto) {
   var { data: carico } = await sb.from('carichi').select('*').eq('id', caricoId).single();
   if (!carico) { toast('Carico non trovato'); return; }
@@ -1056,6 +1090,7 @@ async function pfGeneraDasViaggio(caricoId) {
   pfApriPopupDensita(
     ordiniCarico,
     async function (densitaByProdotto) {
+      if (!(await _pfGuardiaGiacenza(ordiniCarico))) { toast('Generazione annullata'); return; }
       var r = await _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto);
       toast('DAS generati (' + (r ? r.das : 0) + ')' + (r && r.scaricati ? ' · deposito scaricato (' + r.scaricati + ')' : ''));
       caricaCarichi();
@@ -1094,6 +1129,7 @@ async function pfGeneraDasGiornata(dataISO) {
   pfApriPopupDensita(
     tuttiOrdini,
     async function (densitaByProdotto) {
+      if (!(await _pfGuardiaGiacenza(tuttiOrdini))) { toast('Generazione annullata'); return; }
       var totDas = 0, totScar = 0;
       for (var k = 0; k < pendenti.length; k++) {
         var r = await _pfEseguiGeneraDas(pendenti[k], ordiniPerCarico[pendenti[k]], densitaByProdotto);
