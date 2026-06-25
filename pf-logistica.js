@@ -1,4 +1,7 @@
 // PhoenixFuel — Logistica
+// v20260625b — DAS giorno X+1: creazione viaggio senza DAS; semaforo 🔴/🟢 +
+//   pulsante "Genera DAS" per viaggio e "Genera DAS giornata"; il deposito si
+//   movimenta alla generazione DAS (non più alla creazione).
 // ── LOGISTICA ─────────────────────────────────────────────────────
 
 function switchLogisticaTab(btn) {
@@ -943,33 +946,16 @@ async function creaNuovoCarico() {
   // da usare sui DAS. Se annulla, NIENTE viene inserito in DB.
   const { data: ordiniCaricoPre } = await sb.from('ordini').select('*').in('id', ordiniSel);
 
-  // Guardia: il popup densità DEVE essere disponibile (regola costituzionale 20/04).
-  // Se manca (es. cache/Service Worker stale), blocco e istruisco l'operatore.
-  if (typeof pfApriPopupDensita !== 'function') {
-    alert('⚠ ATTENZIONE — Popup densità non disponibile\n\n' +
-          'Il programma non riesce a caricare la finestra delle densità DAS.\n' +
-          'Causa probabile: cache del browser obsoleta.\n\n' +
-          'COSA FARE:\n' +
-          '1. Premi il bottone 🔄 Aggiorna in alto a destra (svuota cache)\n' +
-          '2. Aspetta che la pagina ricarichi\n' +
-          '3. Riprova a creare il carico\n\n' +
-          'Il carico NON è stato creato. Riprova dopo l\'aggiornamento.');
-    return;
-  }
-  pfApriPopupDensita(
-    ordiniCaricoPre || [],
-    function(densitaByProdotto) {
-      _creaCaricoConDensita({
-        data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
-        ordiniSel: ordiniSel, mezzoId: mezzoId,
-        ordiniCarico: ordiniCaricoPre || [],
-        densitaByProdotto: densitaByProdotto
-      });
-    },
-    function() {
-      toast('Creazione carico annullata');
-    }
-  );
+  // NUOVO FLUSSO (giorno X+1): la creazione del viaggio NON genera più i DAS
+  // né chiede le densità. Crea solo il carico "programmato". I DAS (con le
+  // densità reali del carico arrivato) si generano il giorno della partenza
+  // dal pulsante "Genera DAS" nella card del viaggio.
+  _creaCaricoConDensita({
+    data: data, mezzoTarga: mezzoTarga, autista: autista, trId: trId,
+    ordiniSel: ordiniSel, mezzoId: mezzoId,
+    ordiniCarico: ordiniCaricoPre || [],
+    densitaByProdotto: null
+  });
 }
 
 // Fase 2 della creazione carico: dopo che l'operatore ha confermato
@@ -998,27 +984,9 @@ async function _creaCaricoConDensita(args) {
   }
   if (sedeUpdates.length) await Promise.all(sedeUpdates);
 
-  // ═══ GENERA DAS AUTOMATICI per ogni ordine del carico ═══
-  // Passa le densità raccolte dal popup (se presenti) per sovrascrivere i default tabellari
-  await _generaDasPerCarico(carico.id, ordiniCarico, mezzoTarga.split(' (')[0], autista, data, densitaByProdotto);
-
-  const ordiniDeposito = (ordiniCarico||[]).filter(o => o.fornitore && o.fornitore.toLowerCase().includes('phoenix'));
-  if (ordiniDeposito.length > 0) {
-    const totLitriDep = ordiniDeposito.reduce((s,o) => s + Number(o.litri), 0);
-    const prodottiDep = [...new Set(ordiniDeposito.map(o => o.prodotto))].join(', ');
-    // Mostra modale di conferma scarico deposito
-    let htmlModal = '<div style="font-size:15px;font-weight:500;margin-bottom:8px">🏗 Scarico deposito automatico</div>';
-    htmlModal += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Ci sono <strong>' + ordiniDeposito.length + ' ordini</strong> dal deposito PhoenixFuel per un totale di <strong>' + fmtL(totLitriDep) + '</strong> (' + prodottiDep + ').</div>';
-    htmlModal += '<div style="font-size:13px;margin-bottom:16px">Vuoi scaricare automaticamente le cisterne del deposito?</div>';
-    htmlModal += '<div style="display:flex;gap:8px">';
-    htmlModal += '<button class="btn-primary" style="flex:1" onclick="eseguiScaricaDeposito(\'' + ordiniDeposito.map(o=>o.id).join(',') + '\')">✅ Sì, scarica deposito</button>';
-    htmlModal += '<button onclick="chiudiModalePermessi();toast(\'Carico creato! Ricorda di scaricare il deposito manualmente.\')" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">No, lo faccio dopo</button>';
-    htmlModal += '</div>';
-    apriModal(htmlModal);
-  } else {
-    toast('Carico creato!');
-  }
-
+  // NUOVO FLUSSO: niente DAS e niente scarico deposito alla creazione.
+  // Entrambi avvengono alla generazione DAS (giorno X+1), dal pulsante nella card.
+  toast('Viaggio creato (programmato). Genera i DAS il giorno della partenza.');
   caricaCarichi();
   caricaOrdiniPerCarico();
 }
@@ -1045,8 +1013,102 @@ async function eseguiScaricaDeposito(ordiniIdsStr) {
   caricaOrdiniPerCarico();
 }
 
+// ── GENERAZIONE DAS GIORNO X+1 (nuovo flusso) ──────────────────────────
+// Conta i DAS già generati per un carico (per il semaforo).
+async function _pfCaricoHaDas(caricoId) {
+  var { data: righe } = await sb.from('carico_ordini').select('ordine_id').eq('carico_id', caricoId);
+  var ids = (righe || []).map(function (r) { return r.ordine_id; }).filter(Boolean);
+  if (!ids.length) return 0;
+  var { data: das } = await sb.from('das_documenti').select('id', { count: 'exact' }).in('ordine_id', ids);
+  return (das || []).length;
+}
+
+// Carica gli ordini "freschi" di un carico (servono a popup densità + generazione)
+async function _pfOrdiniCarico(caricoId) {
+  var { data: righe } = await sb.from('carico_ordini').select('ordine_id').eq('carico_id', caricoId);
+  var ids = (righe || []).map(function (r) { return r.ordine_id; }).filter(Boolean);
+  if (!ids.length) return [];
+  var { data: ord } = await sb.from('ordini').select('*').in('id', ids);
+  return ord || [];
+}
+
+// Esegue: genera DAS + scarico deposito per UN carico, con densità già scelte.
+async function _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto) {
+  var { data: carico } = await sb.from('carichi').select('*').eq('id', caricoId).single();
+  if (!carico) { toast('Carico non trovato'); return; }
+  var targa = (carico.mezzo_targa || '').split(' (')[0];
+  await _generaDasPerCarico(caricoId, ordiniCarico, targa, carico.autista, carico.data, densitaByProdotto);
+
+  // Scarico deposito per gli ordini dal deposito PhoenixFuel (movimenta le giacenze ORA)
+  var ordiniDeposito = (ordiniCarico || []).filter(function (o) { return o.fornitore && o.fornitore.toLowerCase().includes('phoenix'); });
+  var scaricati = 0;
+  for (var i = 0; i < ordiniDeposito.length; i++) {
+    try { await confermaUscitaDeposito(ordiniDeposito[i].id, true); scaricati++; }
+    catch (e) { console.error('scarico deposito ordine ' + ordiniDeposito[i].id, e); }
+  }
+  return { das: ordiniCarico.length, scaricati: scaricati };
+}
+
+// Pulsante "Genera DAS" su UN viaggio: apre popup densità → genera.
+async function pfGeneraDasViaggio(caricoId) {
+  var ordiniCarico = await _pfOrdiniCarico(caricoId);
+  if (!ordiniCarico.length) { toast('Nessun ordine in questo viaggio'); return; }
+  if (typeof pfApriPopupDensita !== 'function') { toast('Popup densità non disponibile — premi 🔄 Aggiorna'); return; }
+  pfApriPopupDensita(
+    ordiniCarico,
+    async function (densitaByProdotto) {
+      var r = await _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto);
+      toast('DAS generati (' + (r ? r.das : 0) + ')' + (r && r.scaricati ? ' · deposito scaricato (' + r.scaricati + ')' : ''));
+      caricaCarichi();
+      caricaOrdiniPerCarico();
+    },
+    function () { toast('Generazione DAS annullata'); }
+  );
+}
+
+// Pulsante "Genera DAS giornata": un solo popup densità per tutti i prodotti
+// del giorno, poi genera i DAS di TUTTI i viaggi senza DAS di quella data.
+async function pfGeneraDasGiornata(dataISO) {
+  var { data: carichi } = await sb.from('carichi').select('id').eq('data', dataISO);
+  var caricoIds = (carichi || []).map(function (c) { return c.id; });
+  if (!caricoIds.length) { toast('Nessun viaggio in questa data'); return; }
+
+  // tieni solo i carichi SENZA DAS
+  var pendenti = [];
+  for (var i = 0; i < caricoIds.length; i++) {
+    var n = await _pfCaricoHaDas(caricoIds[i]);
+    if (!n) pendenti.push(caricoIds[i]);
+  }
+  if (!pendenti.length) { toast('Tutti i viaggi del giorno hanno già i DAS'); return; }
+
+  // raccogli tutti gli ordini dei carichi pendenti (per popup densità unico)
+  var tuttiOrdini = [];
+  var ordiniPerCarico = {};
+  for (var j = 0; j < pendenti.length; j++) {
+    var ord = await _pfOrdiniCarico(pendenti[j]);
+    ordiniPerCarico[pendenti[j]] = ord;
+    tuttiOrdini = tuttiOrdini.concat(ord);
+  }
+  if (!tuttiOrdini.length) { toast('Nessun ordine da processare'); return; }
+  if (typeof pfApriPopupDensita !== 'function') { toast('Popup densità non disponibile — premi 🔄 Aggiorna'); return; }
+
+  pfApriPopupDensita(
+    tuttiOrdini,
+    async function (densitaByProdotto) {
+      var totDas = 0, totScar = 0;
+      for (var k = 0; k < pendenti.length; k++) {
+        var r = await _pfEseguiGeneraDas(pendenti[k], ordiniPerCarico[pendenti[k]], densitaByProdotto);
+        if (r) { totDas += r.das; totScar += r.scaricati; }
+      }
+      toast('Giornata: ' + totDas + ' DAS generati su ' + pendenti.length + ' viaggi' + (totScar ? ' · deposito scaricato (' + totScar + ')' : ''));
+      caricaCarichi();
+      caricaOrdiniPerCarico();
+    },
+    function () { toast('Generazione DAS giornata annullata'); }
+  );
+}
+
 // ── HELPER comune: render card carico stile elegante ──
-// Etichette in corsivo + sfondo grigio, valori in caselle, badge prodotto colorato.
 window._COL_PROD_BADGE = {
   'Gasolio Autotrazione': { bg:'#FDF3D0', col:'#7A5D00', border:'#D4A017' },
   'Benzina':              { bg:'#E6F1FB', col:'#0C447C', border:'#378ADD' },
@@ -1076,8 +1138,19 @@ function _renderCardCarico(c, opts) {
   html += '<div style="' + boxStyle + ';padding:10px 12px"><div style="height:8px;background:var(--bg);border-radius:999px;overflow:hidden"><div style="height:100%;width:' + Math.min(pct,100) + '%;background:' + barColor + ';border-radius:999px"></div></div></div></div>';
   html += '<div style="text-align:center"><span style="' + lblStyle + '">Stato</span><div style="margin-top:6px">' + (typeof badgeStato==='function' ? badgeStato(c.stato) : c.stato) + '</div>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;font-weight:500">' + ordini.length + ' consegne</div>';
+  // Semaforo DAS
+  var haDas = !!opts.haDas;
+  var semColor = haDas ? '#1D9E75' : '#E24B4A';
+  var semText = haDas ? 'DAS generati' : 'DAS da generare';
+  var semTextCol = haDas ? '#0F6E56' : '#A32D2D';
+  html += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px">'
+    + '<span style="width:9px;height:9px;border-radius:50%;background:' + semColor + ';display:inline-block"></span>'
+    + '<span style="font-size:10px;color:' + semTextCol + ';font-weight:500">' + semText + '</span></div>';
   if (opts.mostraAzioni) {
-    html += '<div style="display:flex;gap:4px;justify-content:center;margin-top:6px">';
+    html += '<div style="display:flex;gap:4px;justify-content:center;margin-top:6px;flex-wrap:wrap">';
+    if (!haDas) {
+      html += '<button class="btn-primary" title="Genera i DAS di questo viaggio" onclick="pfGeneraDasViaggio(\'' + c.id + '\')" style="padding:4px 10px;font-size:11px;background:#185FA5">📄 Genera DAS</button>';
+    }
     html += '<button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')" style="padding:4px 8px">🖨️</button>';
     html += '<button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')" style="padding:4px 8px">👁</button>';
     html += '<button class="btn-danger" onclick="eliminaRecord(\'carichi\',\'' + c.id + '\',caricaCarichi)" style="padding:4px 8px">×</button>';
@@ -1102,9 +1175,29 @@ function _renderCardCarico(c, opts) {
 }
 
 async function caricaCarichi() {
-  const { data } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordini(cliente,prodotto,litri,note)), mezzi(capacita_totale)').order('data',{ascending:false}).limit(50);
+  const { data } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordine_id, ordini(cliente,prodotto,litri,note)), mezzi(capacita_totale)').order('data',{ascending:false}).limit(50);
   const cont = document.getElementById('tabella-carichi');
   if (!data||!data.length) { cont.innerHTML = '<div class="loading">Nessun carico pianificato</div>'; return; }
+
+  // Semaforo DAS: quali carichi hanno già almeno un DAS generato?
+  // Una sola query: tutti gli ordine_id dei carichi → quali compaiono in das_documenti.
+  var ordToCarico = {};
+  data.forEach(function (c) {
+    (c.carico_ordini || []).forEach(function (co) { if (co.ordine_id) ordToCarico[co.ordine_id] = c.id; });
+  });
+  var ordIds = Object.keys(ordToCarico);
+  var carichiConDas = {};
+  if (ordIds.length) {
+    var dasRows = [];
+    var chunk = 800; // evita URL troppo lunghi su .in()
+    for (var s = 0; s < ordIds.length; s += chunk) {
+      var sub = ordIds.slice(s, s + chunk);
+      var r = await sb.from('das_documenti').select('ordine_id').in('ordine_id', sub);
+      if (r.data) dasRows = dasRows.concat(r.data);
+    }
+    dasRows.forEach(function (d) { var cId = ordToCarico[d.ordine_id]; if (cId) carichiConDas[cId] = true; });
+  }
+
   // Raggruppa per data
   var perData = {};
   data.forEach(function(c) {
@@ -1115,9 +1208,16 @@ async function caricaCarichi() {
   var date = Object.keys(perData).sort().reverse();
   var html = '';
   date.forEach(function(d) {
-    html += '<div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:6px;margin:14px 0 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">' + fmtD(d) + '</div>';
+    // pendenti del giorno (senza DAS) → bottone "Genera DAS giornata"
+    var pendenti = perData[d].filter(function (c) { return !carichiConDas[c.id]; }).length;
+    var btnGiornata = (pendenti > 0 && d !== '—')
+      ? '<button onclick="pfGeneraDasGiornata(\'' + d + '\')" style="font-size:11px;padding:5px 12px;border:0.5px solid var(--accent,#D85A30);border-radius:6px;background:var(--accent,#D85A30);color:#fff;cursor:pointer">📄 Genera DAS giornata (' + pendenti + ')</button>'
+      : '';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">'
+      + '<div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">' + fmtD(d) + '</div>'
+      + btnGiornata + '</div>';
     perData[d].forEach(function(c) {
-      html += _renderCardCarico(c, { mostraAzioni: true });
+      html += _renderCardCarico(c, { mostraAzioni: true, haDas: !!carichiConDas[c.id] });
     });
   });
   cont.innerHTML = html;
