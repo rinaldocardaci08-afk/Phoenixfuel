@@ -1,4 +1,6 @@
-// PhoenixFuel — Deposito, Rettifiche, Autoconsumo
+// PhoenixFuel — Deposito
+// +v20260625 — Modulo entrate "Accetta carico" (DAS entrata: densità+litri reali,
+//   deposito sale in litri ambiente, scrive riga registro direzione E)., Rettifiche, Autoconsumo
 // ─────────────────────────────────────────────────────────────────────────────
 // Patch 29/04/2026 (v20260429a):
 //   CMP unificato per prodotto (regola Phoenix Fuel: tutte le cisterne dello
@@ -3671,4 +3673,176 @@ async function _eseguiCaricoCisterneProdotto(sede, prodotto, distribuzione, cost
     litriPrec: litriPrec,
     litriCaricati: litriCaricati
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// MODULO ENTRATE — "💧 Accetta carico" (DAS in entrata)
+// Sostituisce il vecchio distribuisci-per-cisterna per le entrate deposito.
+// L'operatore inserisce i dati del DAS in entrata (densità + litri reali +
+// n° documento); il deposito sale (litri ambiente, distribuzione automatica),
+// e si scrive la riga nel registro fiscale (registro_movimenti, direzione E).
+// Regola: MAI distribuzione per cisterna lato UI.
+// ══════════════════════════════════════════════════════════════════════
+var _PF_ACC_DENS_DEF = { 'Gasolio Autotrazione': 835, 'Gasolio Agricolo': 835, 'Benzina': 750 };
+var _pfAcc = null;
+
+function _pfAccNum(v) {
+  if (v == null) return '';
+  v = String(v).trim(); if (!v) return '';
+  v = v.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  var n = Number(v); return isNaN(n) ? '' : n;
+}
+function _pfAccFmtInt(n) { return (n == null || isNaN(Number(n))) ? '—' : Math.round(Number(n)).toLocaleString('it-IT'); }
+function _pfAccDensFmt(n) { return (n == null || n === 0 || isNaN(Number(n))) ? '' : String(n).replace('.', ','); }
+
+async function apriAccettaCarico(ordineId) {
+  var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
+  if (!ordine) { toast('Ordine non trovato'); return; }
+  if (ordine.caricato_deposito) { toast('⚠ Carico già accettato. Usa ↩️ per annullare prima di riprovare.'); return; }
+  _pfAcc = {
+    ordineId: ordineId,
+    prodotto: ordine.prodotto,
+    fornitore: ordine.fornitore || '',
+    data: ordine.data,
+    costo: Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0),
+    litri: Number(ordine.litri) || 0,            // litri ambiente (editabile)
+    densAmb: _PF_ACC_DENS_DEF[ordine.prodotto] || 835,
+    dens15: _PF_ACC_DENS_DEF[ordine.prodotto] || 835,
+    densSugg: true,
+    numDoc: '',
+    kg: 0, litri15: 0
+  };
+  _pfAccCalc();
+  _pfAccRender();
+}
+
+function _pfAccCalc() {
+  var S = _pfAcc; if (!S) return;
+  if (S.densAmb > 0) S.kg = Math.round(S.litri * S.densAmb / 1000);
+  if (S.densAmb > 0 && S.dens15 > 0) S.litri15 = Math.round(S.litri * S.densAmb / S.dens15);
+}
+function _pfAccOnInput() {
+  var S = _pfAcc; if (!S) return;
+  S.litri = _pfAccNum(document.getElementById('acc-litri').value) || 0;
+  S.densAmb = _pfAccNum(document.getElementById('acc-densamb').value) || 0;
+  S.dens15 = _pfAccNum(document.getElementById('acc-dens15').value) || 0;
+  S.numDoc = document.getElementById('acc-numdoc').value || '';
+  _pfAccCalc();
+  var ek = document.getElementById('acc-kg'); if (ek) ek.textContent = _pfAccFmtInt(S.kg);
+  var e15 = document.getElementById('acc-litri15'); if (e15) e15.textContent = _pfAccFmtInt(S.litri15);
+  // densità toccata → non più suggerimento (tolgo stile tenue)
+  var da = document.getElementById('acc-densamb'), d15 = document.getElementById('acc-dens15');
+  if (da) { da.style.color = 'var(--text)'; da.style.fontStyle = 'normal'; }
+  if (d15) { d15.style.color = 'var(--text)'; d15.style.fontStyle = 'normal'; }
+  S.densSugg = false;
+}
+
+function _pfAccRender() {
+  var S = _pfAcc; if (!S) return;
+  var box = 'width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;background:var(--bg);color:var(--text)';
+  var boxAcc = 'width:100%;box-sizing:border-box;border:1px solid var(--accent,#D85A30);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;background:var(--bg);color:var(--text)';
+  var lbl = 'font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px';
+  var calc = 'border:0.5px dashed var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;color:var(--text-hint);background:var(--bg)';
+  var densStyle = S.densSugg ? 'color:var(--text-hint);font-style:italic' : 'color:var(--text);font-style:normal';
+
+  var h = '';
+  h += '<div style="font-size:16px;font-weight:600;margin-bottom:2px">💧 Accetta carico in deposito</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + (S.fornitore ? esc(S.fornitore) + ' · ' : '') + esc(S.prodotto) + ' · ' + (S.data ? fmtD(S.data) : '') + '</div>';
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div style="flex:1;min-width:130px"><div style="' + lbl + '">litri ambiente (reali DAS)</div><input id="acc-litri" type="text" inputmode="numeric" value="' + (S.litri ? Math.round(S.litri) : '') + '" oninput="_pfAccOnInput()" style="' + boxAcc + '"></div>';
+  h += '<div style="flex:1;min-width:130px"><div style="' + lbl + '">n° documento (RDR/e-DAS)</div><input id="acc-numdoc" type="text" value="' + esc(S.numDoc || '') + '" oninput="_pfAccOnInput()" placeholder="es. 26IT..." style="' + box + ';font-family:inherit;font-size:13px"></div>';
+  h += '</div>';
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">densità ambiente</div><input id="acc-densamb" type="text" inputmode="decimal" value="' + _pfAccDensFmt(S.densAmb) + '" oninput="_pfAccOnInput()" style="' + box + ';' + densStyle + '"></div>';
+  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">densità 15°</div><input id="acc-dens15" type="text" inputmode="decimal" value="' + _pfAccDensFmt(S.dens15) + '" oninput="_pfAccOnInput()" style="' + box + ';' + densStyle + '"></div>';
+  h += '</div>';
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">';
+  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">peso kg (calcolato)</div><div id="acc-kg" style="' + calc + '">' + _pfAccFmtInt(S.kg) + '</div></div>';
+  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">litri @15 (calcolato)</div><div id="acc-litri15" style="' + calc + '">' + _pfAccFmtInt(S.litri15) + '</div></div>';
+  h += '</div>';
+  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:16px">' + (S.densSugg ? '💡 densità suggerita — inserisci quella del DAS in entrata · ' : '') + 'kg = litri × densità amb / 1000 · il deposito sale di ' + _pfAccFmtInt(S.litri) + ' L (ambiente)</div>';
+
+  h += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1;background:#1D9E75" id="acc-salva" onclick="_confermaAccettaCarico()">💧 Accetta e carica deposito</button>';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
+  apriModal(h);
+}
+
+// Distribuzione automatica sulle cisterne del prodotto (riempi per spazio).
+async function _pfAccDistribuzioneAuto(prodotto, litri) {
+  var prodottoMap = (typeof getProdottoTipoCisterna === 'function') ? getProdottoTipoCisterna() : {};
+  var tipo = prodottoMap[prodotto] || null;
+  var q = sb.from('cisterne').select('*').eq('sede', 'deposito_vibo').eq('prodotto', prodotto);
+  var { data: cis } = await q;
+  if (!cis || !cis.length) return { ok: false, error: 'nessuna cisterna per ' + prodotto };
+  var rim = litri, dist = {};
+  var ordinate = cis.map(function (c) { return { id: c.id, spazio: Number(c.capacita_max) - Number(c.livello_attuale) }; })
+    .filter(function (c) { return c.spazio > 0; })
+    .sort(function (a, b) { return b.spazio - a.spazio; });
+  ordinate.forEach(function (c) {
+    if (rim <= 0) return;
+    var q2 = Math.min(rim, c.spazio);
+    dist[c.id] = q2; rim -= q2;
+  });
+  // se lo spazio non basta, metti il resto sulla prima cisterna (avviso, non bloccante)
+  if (rim > 0 && ordinate.length) { dist[ordinate[0].id] = (dist[ordinate[0].id] || 0) + rim; }
+  return { ok: true, distribuzione: dist };
+}
+
+async function _confermaAccettaCarico() {
+  var S = _pfAcc; if (!S) return;
+  _pfAccOnInput();
+  if (!(S.litri > 0)) { toast('Inserisci i litri reali (> 0)'); return; }
+  if (!(S.densAmb > 0) || !(S.dens15 > 0)) { toast('Inserisci densità valide (> 0)'); return; }
+  var btn = document.getElementById('acc-salva'); if (btn) { btn.disabled = true; btn.textContent = 'Carico in corso…'; }
+  try {
+    // 1. distribuzione automatica + carico deposito (litri ambiente)
+    var d = await _pfAccDistribuzioneAuto(S.prodotto, S.litri);
+    if (!d.ok) throw new Error(d.error);
+    var res = await _eseguiCaricoCisterneProdotto('deposito_vibo', S.prodotto, d.distribuzione, S.costo, S.ordineId, S.data);
+    if (!res.ok) throw new Error(res.error || 'carico cisterne fallito');
+
+    // 2. aggiorna ordine: litri reali + stato + flag caricato
+    await sb.from('ordini').update({
+      litri: Math.round(S.litri),
+      stato: 'confermato',
+      caricato_deposito: true
+    }).eq('id', S.ordineId);
+
+    // 3. riga nel registro fiscale (direzione E = entrata)
+    try {
+      await sb.from('registro_movimenti').insert([{
+        prodotto: S.prodotto,
+        seq: 999999,                         // movimenti phoenix in coda; ordinamento per data gestito a parte
+        data: S.data,
+        direzione: 'E',
+        tipo_doc: 'RDR',
+        arc: S.numDoc || null,
+        doc_data: S.data,
+        progressivo: null,
+        controparte: S.fornitore || null,
+        dens_amb: S.densAmb,
+        dens_15: S.dens15,
+        kg: Math.round(S.kg),
+        lt_15: Math.round(S.litri15),
+        lt_amb: Math.round(S.litri),
+        is_apertura: false,
+        origine: 'phoenix'
+      }]);
+    } catch (eReg) { console.warn('registro entrata non scritto:', eReg && eReg.message); }
+
+    if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
+    _auditLog('accetta_carico', 'cisterne', S.prodotto + ' ' + _pfAccFmtInt(S.litri) + ' L da ' + S.fornitore + ' · CMP ' + res.cmpNuovo.toFixed(6));
+    toast('💧 Carico accettato! Deposito +' + _pfAccFmtInt(S.litri) + ' L · CMP € ' + res.cmpNuovo.toFixed(6));
+    chiudiModalePermessi();
+    if (typeof caricaDeposito === 'function') caricaDeposito();
+    if (typeof caricaConsegne === 'function') caricaConsegne();
+    if (typeof caricaOrdini === 'function') caricaOrdini();
+  } catch (e) {
+    console.error('accetta carico', e);
+    if (btn) { btn.disabled = false; btn.textContent = '💧 Accetta e carica deposito'; }
+    toast('Errore: ' + (e && e.message ? e.message : e));
+  }
 }

@@ -45,7 +45,7 @@ async function caricaConsegne() {
       // Azioni in base al tipo ordine
       let azioniHtml = '';
       if (r.tipo_ordine === 'entrata_deposito' && !r.caricato_deposito && r.stato !== 'annullato') {
-        azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#639922" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">📦 Carica</button> ';
+        azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#1D9E75" onclick="apriAccettaCarico(\'' + r.id + '\')">💧 Accetta</button> ';
       } else if (r.stato === 'in attesa' || r.stato === 'programmato') {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" title="Conferma ordine (scarica cisterna)" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
       } else if (r.stato === 'consegnato') {
