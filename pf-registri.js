@@ -1,5 +1,5 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
-// v20260625a — specchio del registro fiscale depositato.
+// v20260625b — specchio del registro fiscale depositato. Mostra kg + l@15 + l amb.
 // ─────────────────────────────────────────────────────────────────────────────
 // FONTE UNICA: vista v_registro_movimenti (tabella registro_movimenti).
 //   Dato fiscale = KG. litri@15 e litri amb sono colonne di servizio.
@@ -134,6 +134,7 @@ async function _pfRegRenderPanels() {
     while (true) {
       var res = await sb.from('v_registro_movimenti').select('*')
         .eq('prodotto', prod).eq('anno', anno)
+        .order('data', { ascending: true })
         .order('seq', { ascending: true })
         .range(page * size, page * size + size - 1);
       if (res.error) throw res.error;
@@ -160,57 +161,60 @@ function _pfRegDraw() {
   var rows = c.rows, apertura = c.apertura, prod = c.prod, anno = c.anno;
   var openKg = apertura ? Number(apertura.giac_kg || 0) : 0;
   var open15 = apertura ? Number(apertura.giac_lt15 || 0) : 0;
+  var openAmb = apertura ? Number(apertura.giac_ltamb || 0) : 0;
 
-  var aCkg = 0, aC15 = 0, aSkg = 0, aS15 = 0;
+  var aCkg = 0, aC15 = 0, aSkg = 0, aS15 = 0, aCamb = 0, aSamb = 0;
   rows.forEach(function (r) {
-    aCkg += Number(r.car_kg || 0); aC15 += Number(r.car_lt15 || 0);
-    aSkg += Number(r.sca_kg || 0); aS15 += Number(r.sca_lt15 || 0);
+    aCkg += Number(r.car_kg || 0); aC15 += Number(r.car_lt15 || 0); aCamb += Number(r.car_ltamb || 0);
+    aSkg += Number(r.sca_kg || 0); aS15 += Number(r.sca_lt15 || 0); aSamb += Number(r.sca_ltamb || 0);
   });
   var aFinKg = rows.length ? Number(rows[rows.length - 1].giac_kg || 0) : openKg;
   var aFin15 = rows.length ? Number(rows[rows.length - 1].giac_lt15 || 0) : open15;
+  var aFinAmb = rows.length ? Number(rows[rows.length - 1].giac_ltamb || 0) : openAmb;
 
   var pred = _pfRegPredicato();
   var visible = [], firstIdx = -1;
   rows.forEach(function (r, i) { if (pred(r)) { if (firstIdx < 0) firstIdx = i; visible.push(r); } });
 
-  var pOpenKg = openKg, pOpen15 = open15;
+  var pOpenKg = openKg, pOpen15 = open15, pOpenAmb = openAmb;
   if (_pfRegFiltroAttivo()) {
     if (firstIdx > 0) {
       var prev = rows[firstIdx - 1];
-      pOpenKg = Number(prev.giac_kg || 0); pOpen15 = Number(prev.giac_lt15 || 0);
+      pOpenKg = Number(prev.giac_kg || 0); pOpen15 = Number(prev.giac_lt15 || 0); pOpenAmb = Number(prev.giac_ltamb || 0);
     } else if (firstIdx < 0) {
       var start = _pfRegPeriodStart(anno);
-      rows.forEach(function (r) { if (r.data < start) { pOpenKg = Number(r.giac_kg || 0); pOpen15 = Number(r.giac_lt15 || 0); } });
+      rows.forEach(function (r) { if (r.data < start) { pOpenKg = Number(r.giac_kg || 0); pOpen15 = Number(r.giac_lt15 || 0); pOpenAmb = Number(r.giac_ltamb || 0); } });
     }
   }
 
-  var pCkg = 0, pC15 = 0, pSkg = 0, pS15 = 0;
+  var pCkg = 0, pC15 = 0, pSkg = 0, pS15 = 0, pCamb = 0, pSamb = 0;
   visible.forEach(function (r) {
-    pCkg += Number(r.car_kg || 0); pC15 += Number(r.car_lt15 || 0);
-    pSkg += Number(r.sca_kg || 0); pS15 += Number(r.sca_lt15 || 0);
+    pCkg += Number(r.car_kg || 0); pC15 += Number(r.car_lt15 || 0); pCamb += Number(r.car_ltamb || 0);
+    pSkg += Number(r.sca_kg || 0); pS15 += Number(r.sca_lt15 || 0); pSamb += Number(r.sca_ltamb || 0);
   });
 
   var warn = apertura ? '' :
     '<div style="background:#FFF4E5;border:0.5px solid #E0A040;color:#8A5800;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:10px">'
     + '⚠ Nessuna giacenza iniziale per ' + _pfRegEsc(prod) + ' nel ' + anno + ': i saldi partono da zero.</div>';
-  function kpi(label, kg, l15, col) {
+  function kpi(label, kg, l15, col, lamb) {
     return '<div style="flex:1;min-width:130px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px">'
       + '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px">' + label + '</div>'
       + '<div style="font-size:18px;font-weight:600;color:' + (col || 'var(--text)') + ';font-family:monospace">' + _pfRegN(kg) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div>'
-      + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(l15) + ' l@15</div></div>';
+      + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(l15) + ' l@15</div>'
+      + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(lamb) + ' l amb</div></div>';
   }
   var riep = '<div style="background:var(--card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:14px">'
     + '<div style="font-size:14px;font-weight:600;margin-bottom:4px">Riepilogo ' + _pfRegEsc(prod) + ' · ' + anno + '</div>'
     + '<div style="font-size:11px;color:var(--text-hint);margin-bottom:10px">registro carburanti denaturati · dato fiscale: <strong>kg</strong></div>'
     + warn
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    + kpi('Giacenza iniziale', openKg, open15)
-    + kpi('Totale carico', aCkg, aC15, '#1D7A4D')
-    + kpi('Totale scarico', aSkg, aS15, '#A32D2D')
-    + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5')
+    + kpi('Giacenza iniziale', openKg, open15, null, openAmb)
+    + kpi('Totale carico', aCkg, aC15, '#1D7A4D', aCamb)
+    + kpi('Totale scarico', aSkg, aS15, '#A32D2D', aSamb)
+    + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb)
     + '</div></div>';
 
-  var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, pOpenKg, pOpen15, pCkg, pC15, pSkg, pS15, prod, anno);
+  var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno);
 
   var blocks = { 'reg-riepilogo': riep, 'reg-tabella': tbl };
   var def = ['reg-riepilogo', 'reg-tabella'];
@@ -251,38 +255,41 @@ function _pfRegFiltroHtml() {
     + '<div style="display:flex;justify-content:flex-end;gap:8px;align-items:center">' + stampa + periodo + '</div></div>';
 }
 
-function _pfRegTabella(rows, pOpenKg, pOpen15, pCkg, pC15, pSkg, pS15, prod, anno) {
+function _pfRegTabella(rows, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno) {
   var filtrato = _pfRegFiltroAttivo();
   var pCloseKg = pOpenKg + pCkg - pSkg;
   var pClose15 = pOpen15 + pC15 - pS15;
+  var pCloseAmb = pOpenAmb + pCamb - pSamb;
   var etPeriodo = _pfRegPeriodLabel(anno);
   function th(t, extra) {
     return '<th style="padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-hint);font-weight:600;' + (extra || '') + '">' + t + '</th>';
   }
   var H = '<div style="overflow-x:auto;border:0.5px solid var(--border);border-radius:10px">';
-  H += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:860px">';
+  H += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1040px">';
   H += '<thead><tr>'
     + '<th colspan="4" style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-hint);text-transform:uppercase">Movimento</th>'
-    + '<th colspan="2" style="padding:6px 8px;font-size:10px;text-transform:uppercase;color:#1D7A4D;background:#EAF3DE">Carico (entrata)</th>'
-    + '<th colspan="2" style="padding:6px 8px;font-size:10px;text-transform:uppercase;color:#A32D2D;background:#FAECE7">Scarico (uscita)</th>'
-    + '<th colspan="2" style="padding:6px 8px;font-size:10px;text-transform:uppercase;color:#185FA5;background:#E6F1FB">Giacenza</th></tr>';
+    + '<th colspan="3" style="padding:6px 8px;font-size:10px;text-transform:uppercase;color:#1D7A4D;background:#EAF3DE">Carico (entrata)</th>'
+    + '<th colspan="3" style="padding:6px 8px;font-size:10px;text-transform:uppercase;color:#A32D2D;background:#FAECE7">Scarico (uscita)</th>'
+    + '<th colspan="3" style="padding:6px 8px;font-size:10px;text-transform:uppercase;color:#185FA5;background:#E6F1FB">Giacenza</th></tr>';
   H += '<tr>' + th('N.') + th('Data') + th('Documento') + th('Controparte')
-    + th('kg', 'text-align:right;background:#F4FAEC') + th('l@15', 'text-align:right;background:#F4FAEC')
-    + th('kg', 'text-align:right;background:#FBF3EF') + th('l@15', 'text-align:right;background:#FBF3EF')
-    + th('kg', 'text-align:right;background:#F0F6FC') + th('l@15', 'text-align:right;background:#F0F6FC')
+    + th('kg', 'text-align:right;background:#F4FAEC') + th('l@15', 'text-align:right;background:#F4FAEC') + th('l amb', 'text-align:right;background:#F4FAEC')
+    + th('kg', 'text-align:right;background:#FBF3EF') + th('l@15', 'text-align:right;background:#FBF3EF') + th('l amb', 'text-align:right;background:#FBF3EF')
+    + th('kg', 'text-align:right;background:#F0F6FC') + th('l@15', 'text-align:right;background:#F0F6FC') + th('l amb', 'text-align:right;background:#F0F6FC')
     + '</tr></thead><tbody style="font-family:monospace">';
   var etRiporto = filtrato ? ('Riporto a inizio periodo (' + etPeriodo + ')') : ('Giacenza iniziale al 31/12/' + (anno - 1));
   H += '<tr><td colspan="4" style="padding:7px 8px;font-style:italic;color:var(--text-hint);border-top:0.5px solid var(--border);font-family:inherit">' + etRiporto + '</td>'
-    + '<td colspan="4"></td>'
+    + '<td colspan="6"></td>'
     + '<td style="padding:7px 8px;text-align:right;border-top:0.5px solid var(--border);font-weight:600">' + _pfRegN(pOpenKg) + '</td>'
-    + '<td style="padding:7px 8px;text-align:right;border-top:0.5px solid var(--border)">' + _pfRegN(pOpen15) + '</td></tr>';
+    + '<td style="padding:7px 8px;text-align:right;border-top:0.5px solid var(--border)">' + _pfRegN(pOpen15) + '</td>'
+    + '<td style="padding:7px 8px;text-align:right;border-top:0.5px solid var(--border)">' + _pfRegN(pOpenAmb) + '</td></tr>';
   if (!rows.length) {
-    H += '<tr><td colspan="10" style="padding:16px;text-align:center;color:var(--text-hint);font-family:inherit">Nessun movimento ' + (filtrato ? 'nel periodo selezionato' : 'per ' + _pfRegEsc(prod) + ' nel ' + anno) + '.</td></tr>';
+    H += '<tr><td colspan="13" style="padding:16px;text-align:center;color:var(--text-hint);font-family:inherit">Nessun movimento ' + (filtrato ? 'nel periodo selezionato' : 'per ' + _pfRegEsc(prod) + ' nel ' + anno) + '.</td></tr>';
   }
   rows.forEach(function (r) {
     var isCar = (r.direzione === 'E');
     var gkg = Number(r.giac_kg || 0);
     var g15 = Number(r.giac_lt15 || 0);
+    var gamb = Number(r.giac_ltamb || 0);
     var docTipo = r.tipo_doc || '—';
     var docRef = r.arc ? '<div style="font-size:10px;color:var(--text-hint)">' + _pfRegEsc(r.arc) + '</div>' : '';
     var prog = r.progressivo ? '<div style="font-size:10px;color:var(--text-hint)">' + _pfRegEsc(r.progressivo) + '</div>' : '';
@@ -294,10 +301,13 @@ function _pfRegTabella(rows, pOpenKg, pOpen15, pCkg, pC15, pSkg, pS15, prod, ann
       + '<td style="padding:7px 8px;font-family:inherit">' + (r.controparte ? _pfRegEsc(r.controparte) : '—') + dens + '</td>'
       + '<td style="padding:7px 8px;text-align:right;font-weight:600;color:' + (isCar ? '#1D7A4D' : 'var(--text-hint)') + '">' + (isCar ? _pfRegN(r.car_kg) : '—') + '</td>'
       + '<td style="padding:7px 8px;text-align:right;color:' + (isCar ? '#1D7A4D' : 'var(--text-hint)') + '">' + (isCar ? _pfRegN(r.car_lt15) : '—') + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;color:' + (isCar ? '#1D7A4D' : 'var(--text-hint)') + '">' + (isCar ? _pfRegN(r.car_ltamb) : '—') + '</td>'
       + '<td style="padding:7px 8px;text-align:right;font-weight:600;color:' + (!isCar ? '#A32D2D' : 'var(--text-hint)') + '">' + (!isCar ? _pfRegN(r.sca_kg) : '—') + '</td>'
       + '<td style="padding:7px 8px;text-align:right;color:' + (!isCar ? '#A32D2D' : 'var(--text-hint)') + '">' + (!isCar ? _pfRegN(r.sca_lt15) : '—') + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;color:' + (!isCar ? '#A32D2D' : 'var(--text-hint)') + '">' + (!isCar ? _pfRegN(r.sca_ltamb) : '—') + '</td>'
       + '<td style="padding:7px 8px;text-align:right;font-weight:600">' + _pfRegN(gkg) + '</td>'
-      + '<td style="padding:7px 8px;text-align:right;color:var(--text-hint)">' + _pfRegN(g15) + '</td></tr>';
+      + '<td style="padding:7px 8px;text-align:right;color:var(--text-hint)">' + _pfRegN(g15) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;color:var(--text-hint)">' + _pfRegN(gamb) + '</td></tr>';
   });
   H += '</tbody>';
   var etTot = filtrato ? ('Totali ' + etPeriodo) : ('Totali ' + anno);
@@ -305,12 +315,15 @@ function _pfRegTabella(rows, pOpenKg, pOpen15, pCkg, pC15, pSkg, pS15, prod, ann
     + '<td colspan="4" style="padding:8px;text-align:right;font-family:inherit;color:var(--text-hint)">' + etTot + '</td>'
     + '<td style="padding:8px;text-align:right;color:#1D7A4D">' + _pfRegN(pCkg) + '</td>'
     + '<td style="padding:8px;text-align:right;color:#1D7A4D;font-weight:400">' + _pfRegN(pC15) + '</td>'
+    + '<td style="padding:8px;text-align:right;color:#1D7A4D;font-weight:400">' + _pfRegN(pCamb) + '</td>'
     + '<td style="padding:8px;text-align:right;color:#A32D2D">' + _pfRegN(pSkg) + '</td>'
     + '<td style="padding:8px;text-align:right;color:#A32D2D;font-weight:400">' + _pfRegN(pS15) + '</td>'
+    + '<td style="padding:8px;text-align:right;color:#A32D2D;font-weight:400">' + _pfRegN(pSamb) + '</td>'
     + '<td style="padding:8px;text-align:right;color:#185FA5">' + _pfRegN(pCloseKg) + '</td>'
-    + '<td style="padding:8px;text-align:right;color:#185FA5;font-weight:400">' + _pfRegN(pClose15) + '</td></tr></tfoot>';
+    + '<td style="padding:8px;text-align:right;color:#185FA5;font-weight:400">' + _pfRegN(pClose15) + '</td>'
+    + '<td style="padding:8px;text-align:right;color:#185FA5;font-weight:400">' + _pfRegN(pCloseAmb) + '</td></tr></tfoot>';
   H += '</table></div>';
-  H += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint)">Dato fiscale = <strong>kg</strong> · giacenza progressiva in kg (ordine di stampa del registro depositato) · litri@15 indicativi.</div>';
+  H += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint)">Dato fiscale = <strong>kg</strong> · giacenza progressiva in kg · l@15 e l amb indicativi per controllo.</div>';
   return H;
 }
 
