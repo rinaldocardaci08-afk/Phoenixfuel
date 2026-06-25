@@ -1,5 +1,5 @@
 // PhoenixFuel — Logistica
-// v20260625c — DAS giorno X+1 (semaforo + genera per viaggio/giornata, scarico
+// v20260625d — DAS giorno X+1 + modifica DAS + collegamento USCITE al registro
 //   deposito alla generazione) + modifica dati tecnici DAS nel dettaglio carico.
 // ── LOGISTICA ─────────────────────────────────────────────────────
 
@@ -1646,9 +1646,42 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data, densi
   }
 
   if (dasInserts.length) {
-    var { error } = await sb.from('das_documenti').insert(dasInserts);
-    if (error) console.warn('Errore DAS:', error.message);
-    else _auditLog('genera_das', 'das_documenti', dasInserts.length + ' DAS generati per carico ' + caricoId);
+    var { data: dasCreati, error } = await sb.from('das_documenti').insert(dasInserts).select();
+    if (error) { console.warn('Errore DAS:', error.message); return; }
+    _auditLog('genera_das', 'das_documenti', dasInserts.length + ' DAS generati per carico ' + caricoId);
+
+    // ── Alimenta il registro fiscale (direzione U) dal 26/06 in poi ──
+    // Lo storico fino al 25/06 è già importato: non riscriviamo quelle date.
+    var SOGLIA_REGISTRO = '2026-06-26';
+    try {
+      var righeReg = (dasCreati || [])
+        .filter(function (d) { return d.data && d.data >= SOGLIA_REGISTRO; })
+        .map(function (d) {
+          return {
+            prodotto: d.prodotto,
+            seq: 999999,
+            data: d.data,
+            direzione: 'U',
+            tipo_doc: 'DAS',
+            arc: d.numero_progressivo ? ('DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4, '0')) : null,
+            doc_data: d.data,
+            progressivo: d.numero_progressivo ? String(d.numero_progressivo) : null,
+            controparte: d.dest_ragsoc || null,
+            dens_amb: d.densita_ambiente || null,
+            dens_15: d.densita_15 || null,
+            kg: Math.round(Number(d.peso_netto_kg || 0)),
+            lt_15: Math.round(Number(d.litri_15 || 0)),
+            lt_amb: Math.round(Number(d.litri_ambiente || 0)),
+            is_apertura: false,
+            origine: 'phoenix',
+            das_id: d.id
+          };
+        });
+      if (righeReg.length) {
+        var rReg = await sb.from('registro_movimenti').insert(righeReg);
+        if (rReg.error) console.warn('registro uscite non scritto:', rReg.error.message);
+      }
+    } catch (eReg) { console.warn('registro uscite errore:', eReg && eReg.message); }
   }
 }
 
