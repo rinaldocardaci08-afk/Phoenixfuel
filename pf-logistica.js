@@ -1,7 +1,6 @@
 // PhoenixFuel — Logistica
-// v20260625b — DAS giorno X+1: creazione viaggio senza DAS; semaforo 🔴/🟢 +
-//   pulsante "Genera DAS" per viaggio e "Genera DAS giornata"; il deposito si
-//   movimenta alla generazione DAS (non più alla creazione).
+// v20260625c — DAS giorno X+1 (semaforo + genera per viaggio/giornata, scarico
+//   deposito alla generazione) + modifica dati tecnici DAS nel dettaglio carico.
 // ── LOGISTICA ─────────────────────────────────────────────────────
 
 function switchLogisticaTab(btn) {
@@ -1108,6 +1107,104 @@ async function pfGeneraDasGiornata(dataISO) {
   );
 }
 
+// ── Modifica dati tecnici di un DAS già generato ───────────────────────
+// Campi editabili: densità ambiente, densità 15°, litri ambiente, litri@15, peso kg.
+// Ricalcolo live: peso = litri×densAmb/1000 ; litri15 = litri×densAmb/dens15.
+var _pfDasEdit = null;
+async function pfModificaDasTecnici(dasId, caricoId) {
+  var { data: d } = await sb.from('das_documenti').select('*').eq('id', dasId).single();
+  if (!d) { toast('DAS non trovato'); return; }
+  _pfDasEdit = {
+    id: dasId, caricoId: caricoId,
+    densAmb: Number(d.densita_ambiente) || 0,
+    dens15: Number(d.densita_15) || 0,
+    litri: Number(d.litri_ambiente) || 0,
+    litri15: Number(d.litri_15) || 0,
+    peso: Number(d.peso_netto_kg) || 0,
+    num: 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4, '0'),
+    prodotto: d.prodotto || ''
+  };
+  _pfDasEditRender();
+}
+function _pfDasEditNum(v) {
+  if (v == null) return '';
+  v = String(v).trim(); if (!v) return '';
+  v = v.replace(/\./g, '').replace(',', '.');
+  var n = Number(v); return isNaN(n) ? '' : n;
+}
+function _pfDasEditRicalc(from) {
+  var S = _pfDasEdit; if (!S) return;
+  // leggi valori correnti dagli input
+  S.densAmb = _pfDasEditNum(document.getElementById('dasx-densamb').value) || 0;
+  S.dens15 = _pfDasEditNum(document.getElementById('dasx-dens15').value) || 0;
+  S.litri = _pfDasEditNum(document.getElementById('dasx-litri').value) || 0;
+  // ricalcola peso e litri15 dai litri ambiente + densità
+  if (S.densAmb > 0) S.peso = Math.round(S.litri * S.densAmb / 1000);
+  if (S.densAmb > 0 && S.dens15 > 0) S.litri15 = Math.round(S.litri * S.densAmb / S.dens15);
+  var ep = document.getElementById('dasx-peso'); if (ep) ep.textContent = _pfDasN(S.peso);
+  var e15 = document.getElementById('dasx-litri15'); if (e15) e15.textContent = _pfDasN(S.litri15);
+}
+function _pfDasN(n) { return (n == null || isNaN(Number(n))) ? '—' : Math.round(Number(n)).toLocaleString('it-IT'); }
+function _pfDasEditRender() {
+  var S = _pfDasEdit; if (!S) return;
+  var box = 'width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;background:var(--bg);color:var(--text)';
+  var lbl = 'font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px';
+  var calc = 'border:0.5px dashed var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;color:var(--text-hint);background:var(--bg)';
+  var h = '';
+  h += '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Modifica dati tecnici DAS</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + S.num + ' · ' + _pfRegEscSafe(S.prodotto) + '</div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">densità ambiente</div><input id="dasx-densamb" type="text" inputmode="decimal" value="' + _pfDasFmt(S.densAmb) + '" oninput="_pfDasEditRicalc()" style="' + box + '"></div>';
+  h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">densità 15°</div><input id="dasx-dens15" type="text" inputmode="decimal" value="' + _pfDasFmt(S.dens15) + '" oninput="_pfDasEditRicalc()" style="' + box + '"></div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">litri ambiente</div><input id="dasx-litri" type="text" inputmode="numeric" value="' + (S.litri ? Math.round(S.litri) : '') + '" oninput="_pfDasEditRicalc()" style="' + box + '"></div>';
+  h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">litri @15 (calcolato)</div><div id="dasx-litri15" style="' + calc + '">' + _pfDasN(S.litri15) + '</div></div>';
+  h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">peso kg (calcolato)</div><div id="dasx-peso" style="' + calc + '">' + _pfDasN(S.peso) + '</div></div>';
+  h += '</div>';
+  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:16px">peso = litri × densità amb / 1000 · litri@15 = litri × densità amb / densità 15°</div>';
+  h += '<div style="display:flex;justify-content:flex-end;gap:10px">';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Annulla</button>';
+  h += '<button id="dasx-salva" onclick="_pfDasEditSalva()" style="padding:9px 20px;border:none;border-radius:8px;background:var(--accent,#D85A30);color:#fff;cursor:pointer;font-size:13px;font-weight:500">Salva</button>';
+  h += '</div>';
+  apriModal(h);
+}
+function _pfDasFmt(n) { return (n == null || n === 0 || isNaN(Number(n))) ? '' : String(n).replace('.', ','); }
+function _pfRegEscSafe(t) { return (t == null) ? '' : String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+async function _pfDasEditSalva() {
+  var S = _pfDasEdit; if (!S) return;
+  _pfDasEditRicalc();
+  if (!(S.densAmb > 0) || !(S.dens15 > 0) || !(S.litri > 0)) { toast('Inserisci densità e litri validi (> 0)'); return; }
+  var btn = document.getElementById('dasx-salva'); if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; }
+  try {
+    var upd = {
+      densita_ambiente: S.densAmb, densita_15: S.dens15,
+      litri_ambiente: Math.round(S.litri), litri_15: Math.round(S.litri15),
+      peso_netto_kg: Math.round(S.peso)
+    };
+    var r1 = await sb.from('das_documenti').update(upd).eq('id', S.id);
+    if (r1.error) throw r1.error;
+
+    // Se questo DAS ha già una riga nel registro (origine='phoenix'), riallineala.
+    // Aggancio per das_id se la colonna esiste; altrimenti nessun-op silenzioso.
+    try {
+      await sb.from('registro_movimenti').update({
+        kg: Math.round(S.peso), lt_15: Math.round(S.litri15), lt_amb: Math.round(S.litri),
+        dens_amb: S.densAmb, dens_15: S.dens15
+      }).eq('das_id', S.id).eq('origine', 'phoenix');
+    } catch (e2) { /* colonna das_id non presente: registro storico, niente da fare */ }
+
+    if (typeof toast === 'function') toast('✓ DAS aggiornato');
+    chiudiModalePermessi();
+    if (S.caricoId) apriDettaglioCarico(S.caricoId);
+  } catch (e) {
+    console.error('modifica DAS', e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Salva'; }
+    toast('Errore: ' + (e && e.message ? e.message : e));
+  }
+}
+
 // ── HELPER comune: render card carico stile elegante ──
 window._COL_PROD_BADGE = {
   'Gasolio Autotrazione': { bg:'#FDF3D0', col:'#7A5D00', border:'#D4A017' },
@@ -1365,6 +1462,7 @@ async function apriDettaglioCarico(caricoId) {
         var bgDas = nota.indexOf('NON SCORTA') >= 0 ? '#FCEBEB' : nota.indexOf('Vers.') >= 0 ? '#D85A30' : '#FAEEDA';
         var colDas = nota.indexOf('NON SCORTA') >= 0 ? '#791F1F' : nota.indexOf('Vers.') >= 0 ? '#fff' : '#854F0B';
         html += '<span style="font-size:10px;background:' + bgDas + ';color:' + colDas + ';padding:3px 10px;border-radius:6px;font-weight:500;cursor:pointer" onclick="stampaDas(\'' + d.id + '\')">' + numDas + (nota ? ' ' + nota : '') + '</span>';
+        html += '<button title="Modifica dati tecnici del DAS" onclick="pfModificaDasTecnici(\'' + d.id + '\',\'' + caricoId + '\')" style="font-size:10px;padding:3px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">✎ Modifica</button>';
       });
     } else {
       html += '<span style="font-size:10px;color:var(--text-hint)">Nessun DAS</span>';
