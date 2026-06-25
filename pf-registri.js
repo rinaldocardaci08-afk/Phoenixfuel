@@ -1,5 +1,5 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
-// v20260625b — specchio del registro fiscale depositato. Mostra kg + l@15 + l amb.
+// v20260625c — kg + l@15 + l amb + cruscotto coerenza giacenza registro vs deposito.
 // ─────────────────────────────────────────────────────────────────────────────
 // FONTE UNICA: vista v_registro_movimenti (tabella registro_movimenti).
 //   Dato fiscale = KG. litri@15 e litri amb sono colonne di servizio.
@@ -147,7 +147,18 @@ async function _pfRegRenderPanels() {
     var apertura = null, movimenti = [];
     rows.forEach(function (r) { if (r.is_apertura) apertura = r; else movimenti.push(r); });
     movimenti.forEach(function (r, i) { r._n = i + 1; });
-    _pfRegCache = { rows: movimenti, apertura: apertura, prod: prod, anno: anno };
+
+    // Giacenza fisica del deposito per il prodotto (somma cisterne, litri ambiente).
+    // Solo per l'anno corrente (il confronto ha senso sul saldo attuale).
+    var giacFisica = null;
+    try {
+      var cisRes = await sb.from('cisterne').select('livello_attuale').eq('sede', 'deposito_vibo').eq('prodotto', prod);
+      if (cisRes.data && cisRes.data.length) {
+        giacFisica = cisRes.data.reduce(function (s, c) { return s + Number(c.livello_attuale || 0); }, 0);
+      }
+    } catch (eCis) { /* niente cruscotto se non leggibile */ }
+
+    _pfRegCache = { rows: movimenti, apertura: apertura, prod: prod, anno: anno, giacFisica: giacFisica };
     _pfRegDraw();
   } catch (e) {
     console.error('registro', e);
@@ -212,7 +223,9 @@ function _pfRegDraw() {
     + kpi('Totale carico', aCkg, aC15, '#1D7A4D', aCamb)
     + kpi('Totale scarico', aSkg, aS15, '#A32D2D', aSamb)
     + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb)
-    + '</div></div>';
+    + '</div>'
+    + _pfRegCoerenzaHtml(aFinAmb, c.giacFisica, anno)
+    + '</div>';
 
   var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno);
 
@@ -228,6 +241,41 @@ function _pfRegDraw() {
     html = def.map(function (id) { return '<div style="margin-bottom:14px">' + blocks[id] + '</div>'; }).join('');
   }
   body.innerHTML = html;
+}
+
+// Cruscotto coerenza: giacenza registro (l amb) vs deposito fisico (cisterne).
+// Solo indicativo, non bloccante. Mostrato solo se la giacenza fisica è leggibile
+// e solo per l'anno corrente (il deposito fisico riflette l'oggi).
+function _pfRegCoerenzaHtml(giacRegAmb, giacFisica, anno) {
+  var annoCorrente = (new Date()).getFullYear();
+  if (giacFisica === null || giacFisica === undefined) return '';
+  if (anno !== annoCorrente) return '';
+  var reg = Math.round(Number(giacRegAmb || 0));
+  var fis = Math.round(Number(giacFisica || 0));
+  var scarto = reg - fis;
+  var base = Math.max(Math.abs(reg), Math.abs(fis), 1);
+  var pct = Math.abs(scarto) / base * 100;
+  var col, bg, txt, lab;
+  if (pct < 2) { col = '#639922'; bg = '#EAF3DE'; txt = '#27500A'; lab = 'ok'; }
+  else if (pct < 5) { col = '#EF9F27'; bg = '#FAEEDA'; txt = '#854F0B'; lab = 'da guardare'; }
+  else { col = '#E24B4A'; bg = '#FCEBEB'; txt = '#A32D2D'; lab = 'controlla densità/movimenti'; }
+  var nf = function (n) { return Math.round(n).toLocaleString('it-IT'); };
+
+  var h = '<div style="margin-top:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:12px 14px">';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+    + '<span style="font-size:13px;font-weight:600">⚖ Controllo coerenza giacenza</span>'
+    + '<span style="font-size:11px;color:var(--text-hint)">registro vs deposito fisico · solo indicativo</span></div>';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">';
+  h += '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza registro (l amb)</div><div style="font-size:17px;font-family:monospace">' + nf(reg) + '</div></div>';
+  h += '<div style="font-size:18px;color:var(--text-hint)">↔</div>';
+  h += '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza deposito (cisterne)</div><div style="font-size:17px;font-family:monospace">' + nf(fis) + '</div></div>';
+  h += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px;background:' + bg + ';padding:6px 12px;border-radius:8px">'
+    + '<span style="width:10px;height:10px;border-radius:50%;background:' + col + ';display:inline-block"></span>'
+    + '<span style="font-size:13px;color:' + txt + ';font-weight:500">scarto ' + nf(Math.abs(scarto)) + ' L (' + pct.toFixed(1).replace('.', ',') + '%) · ' + lab + '</span></div>';
+  h += '</div>';
+  h += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint)">verde &lt;2% · giallo 2–5% · rosso &gt;5% — confronto in litri ambiente</div>';
+  h += '</div>';
+  return h;
 }
 
 function _pfRegPill(active) {
