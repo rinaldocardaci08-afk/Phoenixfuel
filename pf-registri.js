@@ -363,3 +363,27 @@ function _pfRegStampa() {
   win.focus();
   setTimeout(function () { try { win.print(); } catch (e) {} }, 300);
 }
+
+// ── Auto-init: inietta il tab appena la sezione Deposito è nel DOM ──────
+(function _pfRegBootstrap() {
+  function tryInit() {
+    try {
+      var sec = document.getElementById('s-deposito');
+      var hasTabs = sec && sec.querySelector('.dep-tab');
+      if (hasTabs && !document.getElementById('dep-registri')) {
+        pfRegInit();
+      }
+      return !!document.getElementById('dep-registri');
+    } catch (e) { return false; }
+  }
+  if (tryInit()) return;
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryInit);
+  }
+  // retry breve finché la sezione Deposito non è pronta (max ~10s)
+  var tries = 0;
+  var iv = setInterval(function () {
+    tries++;
+    if (tryInit() || tries > 40) clearInterval(iv);
+  }, 250);
+})();
