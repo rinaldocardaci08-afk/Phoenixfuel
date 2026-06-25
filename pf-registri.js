@@ -1,5 +1,5 @@
 // PhoenixFuel — Registri di carico e scarico (prodotti energetici)
-// v20260623d — PUNTO 1+2: tab "Deposito → 📚 Registri", SOLA LETTURA.
+// v20260623e — PUNTO 1+2+3: tab "Deposito → 📚 Registri", lettura + apertura editabile.
 // ─────────────────────────────────────────────────────────────────────────────
 // Cosa fa:
 //   - Si auto-inietta il tab "📚 Registri" + il pannello dentro #s-deposito,
@@ -364,11 +364,142 @@ function _pfRegTabella(rows, open15, openKg, pOpen15, pOpenKg, pC15, pCkg, pS15,
   return H;
 }
 
-// ── Pannello Apertura & chiusure (sola lettura) ────────────────────────
-function _pfRegModificaApertura() {
-  alert('Modifica apertura giacenza: la attiviamo allo step 3 (modal di scrittura). Per ora il pannello è in sola lettura.');
+// ── Modal modifica apertura (UNICA scrittura su DB) ────────────────────
+var _pfRegApDef = { 'Gasolio Autotrazione': 835, 'Gasolio Agricolo': 835, 'Benzina': 750 };
+var _pfRegAp = null;
+
+function _pfRegApDensFmt(d) { if (d === '' || d == null) return ''; return String(d).replace('.', ','); }
+function _pfRegApParse(v) {
+  if (v == null) return '';
+  v = String(v).trim(); if (!v) return '';
+  v = v.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  var n = Number(v); return isNaN(n) ? '' : n;
 }
 
+function _pfRegModificaApertura() {
+  var prod = _pfRegState.prodotto, anno = _pfRegState.anno;
+  var ap = (_pfRegCache && _pfRegCache.apertura && _pfRegCache.prod === prod && _pfRegCache.anno === anno) ? _pfRegCache.apertura : null;
+  var densEdit = (ap && Number(ap.giac_iniziale_15) > 0 && Number(ap.giac_iniziale_kg) > 0)
+    ? Math.round(Number(ap.giac_iniziale_kg) / Number(ap.giac_iniziale_15) * 1000 * 100) / 100 : null;
+  _pfRegAp = {
+    prod: prod, anno: anno, mode: 'l15',
+    dens: (densEdit != null) ? densEdit : (_pfRegApDef[prod] || 835),
+    densSugg: !ap,
+    l15: ap ? Number(ap.giac_iniziale_15) : '',
+    kg: ap ? Number(ap.giac_iniziale_kg) : '',
+    rif: (ap && ap.rif_documento) ? ap.rif_documento : '',
+    data: (ap && ap.data_apertura) ? ap.data_apertura : (anno + '-01-01')
+  };
+  var ex = document.getElementById('reg-ap-overlay'); if (ex) ex.remove();
+  var div = document.createElement('div');
+  div.id = 'reg-ap-overlay';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1006;display:flex;align-items:center;justify-content:center;padding:16px';
+  div.innerHTML = '<div style="background:var(--bg-card,var(--bg));width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.3)"><div id="reg-ap-body" style="padding:22px"></div></div>';
+  div.addEventListener('click', function (e) { if (e.target === div) _pfRegApChiudi(); });
+  document.body.appendChild(div);
+  _pfRegApRender();
+}
+
+function _pfRegApChiudi() { var ex = document.getElementById('reg-ap-overlay'); if (ex) ex.remove(); _pfRegAp = null; }
+function _pfRegApSetMode(m) { if (_pfRegAp) { _pfRegAp.mode = m; _pfRegApRender(); } }
+function _pfRegApUpdDerived() {
+  var el = document.getElementById('reg-ap-derived');
+  if (el && _pfRegAp) el.textContent = _pfRegN(_pfRegAp.mode === 'l15' ? _pfRegAp.kg : _pfRegAp.l15);
+}
+function _pfRegApOnInput(v) {
+  if (!_pfRegAp) return;
+  var n = _pfRegApParse(v);
+  if (_pfRegAp.mode === 'l15') { _pfRegAp.l15 = n; _pfRegAp.kg = (n !== '' && _pfRegAp.dens > 0) ? Math.round(n * _pfRegAp.dens / 1000) : ''; }
+  else { _pfRegAp.kg = n; _pfRegAp.l15 = (n !== '' && _pfRegAp.dens > 0) ? Math.round(n * 1000 / _pfRegAp.dens) : ''; }
+  _pfRegApUpdDerived();
+}
+function _pfRegApOnDens(v) {
+  if (!_pfRegAp) return;
+  _pfRegAp.dens = _pfRegApParse(v); _pfRegAp.densSugg = false;
+  if (_pfRegAp.mode === 'l15') { _pfRegAp.kg = (_pfRegAp.l15 !== '' && _pfRegAp.dens > 0) ? Math.round(_pfRegAp.l15 * _pfRegAp.dens / 1000) : ''; }
+  else { _pfRegAp.l15 = (_pfRegAp.kg !== '' && _pfRegAp.dens > 0) ? Math.round(_pfRegAp.kg * 1000 / _pfRegAp.dens) : ''; }
+  _pfRegApUpdDerived();
+  var el = document.getElementById('reg-ap-dens'); if (el) { el.style.color = 'var(--text)'; el.style.fontStyle = 'normal'; }
+}
+
+function _pfRegApRender() {
+  var body = document.getElementById('reg-ap-body'); if (!body || !_pfRegAp) return;
+  var S = _pfRegAp;
+  var primVal = S.mode === 'l15' ? S.l15 : S.kg;
+  var derVal = S.mode === 'l15' ? S.kg : S.l15;
+  var primLabel = S.mode === 'l15' ? 'litri @15' : 'kg';
+  var derLabel = S.mode === 'l15' ? 'kg (calcolato)' : 'litri @15 (calcolato)';
+  var densStyle = S.densSugg ? 'color:var(--text-hint);font-style:italic' : 'color:var(--text);font-style:normal';
+
+  var h = '';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px">';
+  h += '<div><div style="font-size:17px;font-weight:700">Giacenza iniziale ' + S.anno + '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted,var(--text-hint))">' + _pfRegEsc(S.prod) + ' · dal documento di chiusura Dogane</div></div>';
+  h += '<button onclick="_pfRegApChiudi()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted,var(--text-hint));line-height:1;padding:2px 8px">×</button></div>';
+
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px"><span style="font-size:11px;color:var(--text-hint)">inserisco in:</span>';
+  h += '<button onclick="_pfRegApSetMode(\'l15\')" style="' + _pfRegPill(S.mode === 'l15') + '">litri @15</button>';
+  h += '<button onclick="_pfRegApSetMode(\'kg\')" style="' + _pfRegPill(S.mode === 'kg') + '">kg</button></div>';
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">';
+  h += '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' + primLabel + ' · inserito</div>';
+  h += '<input id="reg-ap-primary" type="text" inputmode="numeric" value="' + (primVal === '' ? '' : Math.round(primVal)) + '" oninput="_pfRegApOnInput(this.value)" style="width:100%;box-sizing:border-box;border:1px solid var(--accent,#D85A30);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;background:var(--bg);color:var(--text)"></div>';
+  h += '<div style="font-size:18px;color:var(--text-hint);padding-bottom:9px">→</div>';
+  h += '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' + derLabel + '</div>';
+  h += '<div id="reg-ap-derived" style="border:0.5px dashed var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;color:var(--text-hint);background:var(--bg)">' + _pfRegN(derVal) + '</div></div>';
+  h += '<div style="flex:1;min-width:100px"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">densità 15°</div>';
+  h += '<input id="reg-ap-dens" type="text" inputmode="decimal" value="' + _pfRegApDensFmt(S.dens) + '" oninput="_pfRegApOnDens(this.value)" style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;background:var(--bg);' + densStyle + '"></div>';
+  h += '</div>';
+
+  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:14px">' + (S.densSugg ? '💡 densità suggerita per il prodotto — sostituiscila col valore del documento · ' : '') + 'kg = litri@15 × densità / 1000</div>';
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">';
+  h += '<div style="flex:2;min-width:160px"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">riferimento documento Dogane</div>';
+  h += '<input id="reg-ap-rif" type="text" value="' + _pfRegEsc(S.rif) + '" oninput="_pfRegAp.rif=this.value" placeholder="es. Reg. chiusura 2025 n. ..." style="width:100%;box-sizing:border-box;border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;background:var(--bg);color:var(--text)"></div>';
+  h += '<div style="flex:1;min-width:130px"><div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">data apertura</div>';
+  h += '<input id="reg-ap-data" type="date" value="' + (S.data || '') + '" onchange="_pfRegAp.data=this.value" style="width:100%;box-sizing:border-box;border:0.5px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;background:var(--bg);color:var(--text)"></div>';
+  h += '</div>';
+
+  h += '<div style="display:flex;justify-content:flex-end;gap:10px">';
+  h += '<button onclick="_pfRegApChiudi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Annulla</button>';
+  h += '<button id="reg-ap-salva" onclick="_pfRegApSalva()" style="padding:9px 20px;border:none;border-radius:8px;background:var(--accent,#D85A30);color:#fff;cursor:pointer;font-size:13px;font-weight:500">Salva apertura</button>';
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+async function _pfRegApSalva() {
+  var S = _pfRegAp; if (!S) return;
+  var l15 = Number(S.l15), kg = Number(S.kg);
+  if (!(l15 > 0) || !(kg > 0)) {
+    if (typeof toast === 'function') toast('Inserisci un valore valido: litri@15 e kg devono essere maggiori di zero');
+    else alert('Valore non valido: litri@15 e kg devono essere > 0');
+    return;
+  }
+  var payload = {
+    anno: S.anno, prodotto: S.prod,
+    giac_iniziale_15: Math.round(l15),
+    giac_iniziale_kg: Math.round(kg),
+    giac_iniziale_amb: null,
+    data_apertura: S.data || (S.anno + '-01-01'),
+    rif_documento: S.rif || null
+  };
+  var btn = document.getElementById('reg-ap-salva');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; }
+  try {
+    var res = await sb.from('registro_apertura').upsert(payload, { onConflict: 'anno,prodotto' }).select();
+    if (res.error) throw res.error;
+    if (typeof toast === 'function') toast('✓ Giacenza iniziale salvata');
+    _pfRegApChiudi();
+    _pfRegCache = null;
+    pfRegCarica();
+  } catch (e) {
+    console.error('salva apertura', e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Salva apertura'; }
+    alert('Errore nel salvataggio: ' + (e && e.message ? e.message : e));
+  }
+}
+
+// ── Pannello Apertura & chiusure (sola lettura) ────────────────────────
 function _pfRegAperturaHtml(open15, openKg, apertura, cl15, clkg, maxMonth, prod, anno) {
   var dens = (apertura && Number(apertura.giac_iniziale_15) > 0 && Number(apertura.giac_iniziale_kg) > 0)
     ? (Number(apertura.giac_iniziale_kg) / Number(apertura.giac_iniziale_15) * 1000) : null;
