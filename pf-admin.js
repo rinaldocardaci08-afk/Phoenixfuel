@@ -1,4 +1,6 @@
 // PhoenixFuel — Admin, Permessi, Utenti, Giacenze
+// +v20260626 — Convalida chiusura fine anno (deposito) scrive nel registro:
+//   conguaglio inventario 31/12 + apertura anno successivo (giacenza reale).
 // ── PERMESSI ──────────────────────────────────────────────────────
 const SEZIONI_SISTEMA = [
   {id:'dashboard',label:'Dashboard',icon:'▦'},
@@ -531,6 +533,12 @@ async function convalidaGiacenze(sede) {
       }]);
       if (error) errori++;
     }
+
+    // ── Registro fiscale: solo deposito. Conguaglio 31/12 + apertura anno dopo ──
+    if (sede === 'deposito_vibo') {
+      try { await _pfChiusuraScriviRegistro(prodotto, anno, reale, diff); }
+      catch (eReg) { console.warn('registro chiusura', prodotto, eReg && eReg.message); }
+    }
   }
 
   if (errori) { toast('⚠ ' + errori + ' errori durante la convalida'); }
@@ -538,6 +546,71 @@ async function convalidaGiacenze(sede) {
 
   // Ricarica
   calcolaGiacenzeAnno(sede);
+}
+
+// Scrive nel registro la chiusura di fine anno per un prodotto (solo deposito):
+//   1) riga di CONGUAGLIO al 31/12 (E se eccedenza, U se calo) per allineare la
+//      giacenza-registro alla giacenza reale convalidata;
+//   2) riga di APERTURA (is_apertura) al 31/12 con la giacenza reale → diventa
+//      l'apertura del registro dell'anno successivo.
+// Idempotente: rimuove eventuali righe già scritte per lo stesso anno+prodotto
+// prima di riscriverle (riconvalida sicura).
+async function _pfChiusuraScriviRegistro(prodotto, anno, giacenzaReale, differenza) {
+  var dataChiusura = anno + '-12-31';
+  giacenzaReale = Math.round(Number(giacenzaReale) || 0);
+  differenza = Math.round(Number(differenza) || 0);
+
+  // densità più recente nota per il prodotto (per ricavare kg)
+  var dRes = await sb.from('registro_movimenti')
+    .select('dens_amb,dens_15')
+    .eq('prodotto', prodotto).not('dens_amb', 'is', null)
+    .order('data', { ascending: false }).limit(1);
+  var dAmb = (dRes.data && dRes.data[0] && Number(dRes.data[0].dens_amb)) || 0.835;
+  var d15 = (dRes.data && dRes.data[0] && Number(dRes.data[0].dens_15)) || dAmb;
+  if (dAmb > 100) dAmb = dAmb / 1000;
+  if (d15 > 100) d15 = d15 / 1000;
+  var kgDa = function (lamb) { return Math.round(Math.abs(lamb) * dAmb); };
+  var l15Da = function (lamb) { return d15 > 0 ? Math.round(Math.abs(lamb) * dAmb / d15) : Math.abs(lamb); };
+
+  // 1. rimuovi righe precedenti di chiusura/apertura per questo anno+prodotto
+  await sb.from('registro_movimenti').delete()
+    .eq('prodotto', prodotto).eq('origine', 'phoenix')
+    .in('tipo_doc', ['CONGUAGLIO', 'APERTURA']).eq('data', dataChiusura);
+
+  // Se esiste già un'apertura IMPORTATA per questa data (storico), non creo
+  // un'apertura phoenix doppia: scrivo solo il conguaglio.
+  var apImport = await sb.from('registro_movimenti').select('id')
+    .eq('prodotto', prodotto).eq('is_apertura', true)
+    .eq('data', dataChiusura).eq('origine', 'import').maybeSingle();
+  var aperturaGiaPresente = !!(apImport && apImport.data);
+
+  var righe = [];
+  // conguaglio (solo se c'è differenza)
+  if (Math.abs(differenza) >= 1) {
+    righe.push({
+      prodotto: prodotto, seq: 1000000, data: dataChiusura,
+      direzione: differenza > 0 ? 'E' : 'U',
+      tipo_doc: 'CONGUAGLIO', arc: null, doc_data: dataChiusura, progressivo: null,
+      controparte: 'Conguaglio inventario fine anno ' + anno,
+      dens_amb: dAmb, dens_15: d15,
+      kg: kgDa(differenza), lt_15: l15Da(differenza), lt_amb: Math.abs(differenza),
+      is_apertura: false, origine: 'phoenix'
+    });
+  }
+  // apertura anno successivo (giacenza reale) — solo se non già importata
+  if (!aperturaGiaPresente) {
+    righe.push({
+      prodotto: prodotto, seq: 0, data: dataChiusura,
+      direzione: 'E',
+      tipo_doc: 'APERTURA', arc: null, doc_data: dataChiusura, progressivo: null,
+      controparte: 'Giacenza iniziale al 31/12/' + anno + ' (convalidata)',
+      dens_amb: dAmb, dens_15: d15,
+      kg: kgDa(giacenzaReale), lt_15: l15Da(giacenzaReale), lt_amb: giacenzaReale,
+      is_apertura: true, origine: 'phoenix'
+    });
+  }
+
+  if (righe.length) await sb.from('registro_movimenti').insert(righe);
 }
 
 
