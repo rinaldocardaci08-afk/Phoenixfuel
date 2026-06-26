@@ -1,5 +1,5 @@
 // PhoenixFuel — Logistica
-// v20260625e — DAS X+1 + modifica DAS + collegamento USCITE registro + guardia anti-negativo
+// v20260625f — DAS X+1 + modifica DAS + collegamento USCITE registro + guardia anti-negativo
 //   deposito alla generazione) + modifica dati tecnici DAS nel dettaglio carico.
 // ── LOGISTICA ─────────────────────────────────────────────────────
 
@@ -1018,8 +1018,8 @@ async function _pfCaricoHaDas(caricoId) {
   var { data: righe } = await sb.from('carico_ordini').select('ordine_id').eq('carico_id', caricoId);
   var ids = (righe || []).map(function (r) { return r.ordine_id; }).filter(Boolean);
   if (!ids.length) return 0;
-  var { data: das } = await sb.from('das_documenti').select('id', { count: 'exact' }).in('ordine_id', ids);
-  return (das || []).length;
+  var { data: das } = await sb.from('das_documenti').select('id').in('ordine_id', ids).limit(1);
+  return (das && das.length) ? 1 : 0;
 }
 
 // Carica gli ordini "freschi" di un carico (servono a popup densità + generazione)
@@ -1107,22 +1107,16 @@ async function pfGeneraDasGiornata(dataISO) {
   var caricoIds = (carichi || []).map(function (c) { return c.id; });
   if (!caricoIds.length) { toast('Nessun viaggio in questa data'); return; }
 
-  // tieni solo i carichi SENZA DAS
-  var pendenti = [];
-  for (var i = 0; i < caricoIds.length; i++) {
-    var n = await _pfCaricoHaDas(caricoIds[i]);
-    if (!n) pendenti.push(caricoIds[i]);
-  }
+  // tieni solo i carichi SENZA DAS (check in parallelo)
+  var hasDasArr = await Promise.all(caricoIds.map(function (id) { return _pfCaricoHaDas(id); }));
+  var pendenti = caricoIds.filter(function (id, i) { return !hasDasArr[i]; });
   if (!pendenti.length) { toast('Tutti i viaggi del giorno hanno già i DAS'); return; }
 
-  // raccogli tutti gli ordini dei carichi pendenti (per popup densità unico)
+  // raccogli tutti gli ordini dei carichi pendenti (fetch in parallelo)
+  var ordArr = await Promise.all(pendenti.map(function (id) { return _pfOrdiniCarico(id); }));
   var tuttiOrdini = [];
   var ordiniPerCarico = {};
-  for (var j = 0; j < pendenti.length; j++) {
-    var ord = await _pfOrdiniCarico(pendenti[j]);
-    ordiniPerCarico[pendenti[j]] = ord;
-    tuttiOrdini = tuttiOrdini.concat(ord);
-  }
+  pendenti.forEach(function (id, i) { ordiniPerCarico[id] = ordArr[i]; tuttiOrdini = tuttiOrdini.concat(ordArr[i]); });
   if (!tuttiOrdini.length) { toast('Nessun ordine da processare'); return; }
   if (typeof pfApriPopupDensita !== 'function') { toast('Popup densità non disponibile — premi 🔄 Aggiorna'); return; }
 
@@ -1690,12 +1684,15 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data, densi
     // Lo storico fino al 25/06 è già importato: non riscriviamo quelle date.
     var SOGLIA_REGISTRO = '2026-06-26';
     try {
+      var _seqBase = Math.floor(Date.now() / 60000);
       var righeReg = (dasCreati || [])
         .filter(function (d) { return d.data && d.data >= SOGLIA_REGISTRO; })
-        .map(function (d) {
+        .map(function (d, _i) {
+          var _da = Number(d.densita_ambiente); if (_da > 100) _da = _da / 1000;
+          var _d15 = Number(d.densita_15); if (_d15 > 100) _d15 = _d15 / 1000;
           return {
             prodotto: d.prodotto,
-            seq: 999999,
+            seq: _seqBase + _i,                 // cronologico, univoco per ogni DAS della stessa generazione
             data: d.data,
             direzione: 'U',
             tipo_doc: 'DAS',
@@ -1703,8 +1700,8 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data, densi
             doc_data: d.data,
             progressivo: d.numero_progressivo ? String(d.numero_progressivo) : null,
             controparte: d.dest_ragsoc || null,
-            dens_amb: d.densita_ambiente || null,
-            dens_15: d.densita_15 || null,
+            dens_amb: isNaN(_da) ? null : _da,
+            dens_15: isNaN(_d15) ? null : _d15,
             kg: Math.round(Number(d.peso_netto_kg || 0)),
             lt_15: Math.round(Number(d.litri_15 || 0)),
             lt_amb: Math.round(Number(d.litri_ambiente || 0)),

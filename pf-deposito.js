@@ -1,5 +1,5 @@
 // PhoenixFuel — Deposito, Rettifiche, Autoconsumo
-// +v20260625b — Modulo entrate "Accetta carico" (deposito sale in litri ambiente,
+// +v20260625c — Modulo entrate "Accetta carico" (deposito sale in litri ambiente,
 //   scrive registro E) + rettifiche confermate scrivono nel registro (E/U, dal 26/06).
 // ─────────────────────────────────────────────────────────────────────────────
 // Patch 29/04/2026 (v20260429a):
@@ -953,7 +953,7 @@ async function confermaRettifica(id, tipo) {
         var l15 = d15 > 0 ? Math.round(lamb * dAmb / d15) : lamb;
         await sb.from('registro_movimenti').insert([{
           prodotto: rett.prodotto,
-          seq: 999999,
+          seq: Math.floor(Date.now() / 60000),
           data: rett.data,
           direzione: dir,
           tipo_doc: 'RETT',
@@ -3857,9 +3857,11 @@ async function _confermaAccettaCarico() {
 
     // 3. riga nel registro fiscale (direzione E = entrata)
     try {
+      var _densAmbReg = S.densAmb > 100 ? S.densAmb / 1000 : S.densAmb;
+      var _dens15Reg = S.dens15 > 100 ? S.dens15 / 1000 : S.dens15;
       await sb.from('registro_movimenti').insert([{
         prodotto: S.prodotto,
-        seq: 999999,                         // movimenti phoenix in coda; ordinamento per data gestito a parte
+        seq: Math.floor(Date.now() / 60000),
         data: S.data,
         direzione: 'E',
         tipo_doc: 'RDR',
@@ -3867,8 +3869,8 @@ async function _confermaAccettaCarico() {
         doc_data: S.data,
         progressivo: null,
         controparte: S.fornitore || null,
-        dens_amb: S.densAmb,
-        dens_15: S.dens15,
+        dens_amb: _densAmbReg,
+        dens_15: _dens15Reg,
         kg: Math.round(S.kg),
         lt_15: Math.round(S.litri15),
         lt_amb: Math.round(S.litri),

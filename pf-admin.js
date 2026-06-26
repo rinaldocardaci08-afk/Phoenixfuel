@@ -1,5 +1,5 @@
 // PhoenixFuel — Admin, Permessi, Utenti, Giacenze
-// +v20260626 — Convalida chiusura fine anno (deposito) scrive nel registro:
+// +v20260626a — Convalida chiusura fine anno (deposito) scrive nel registro:
 //   conguaglio inventario 31/12 + apertura anno successivo (giacenza reale).
 // ── PERMESSI ──────────────────────────────────────────────────────
 const SEZIONI_SISTEMA = [
