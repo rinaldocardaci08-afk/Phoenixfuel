@@ -1,5 +1,5 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
-// v20260625c — kg + l@15 + l amb + cruscotto coerenza giacenza registro vs deposito.
+// v20260625d — kg + l@15 + l amb + cruscotto coerenza con calo consentito 3‰ (auto).
 // ─────────────────────────────────────────────────────────────────────────────
 // FONTE UNICA: vista v_registro_movimenti (tabella registro_movimenti).
 //   Dato fiscale = KG. litri@15 e litri amb sono colonne di servizio.
@@ -224,7 +224,7 @@ function _pfRegDraw() {
     + kpi('Totale scarico', aSkg, aS15, '#A32D2D', aSamb)
     + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb)
     + '</div>'
-    + _pfRegCoerenzaHtml(aFinAmb, c.giacFisica, anno)
+    + _pfRegCoerenzaHtml({ regKg: aFinKg, regAmb: aFinAmb, caricoKg: aCkg, giacFisicaLamb: c.giacFisica, prodotto: prod, anno: anno, densita: _pfRegUltimaDensita(rows) })
     + '</div>';
 
   var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno);
@@ -243,37 +243,69 @@ function _pfRegDraw() {
   body.innerHTML = html;
 }
 
-// Cruscotto coerenza: giacenza registro (l amb) vs deposito fisico (cisterne).
-// Solo indicativo, non bloccante. Mostrato solo se la giacenza fisica è leggibile
-// e solo per l'anno corrente (il deposito fisico riflette l'oggi).
-function _pfRegCoerenzaHtml(giacRegAmb, giacFisica, anno) {
+// Densità più recente nota nei movimenti (per convertire litri deposito -> kg)
+function _pfRegUltimaDensita(rows) {
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var d = Number(rows[i].dens_amb);
+    if (d && !isNaN(d)) { return d > 100 ? d / 1000 : d; } // normalizza kg/mc -> kg/L
+  }
+  return 0.835;
+}
+
+// Cruscotto coerenza: confronto giacenza registro vs deposito fisico,
+// con il calo consentito di legge. Per Gasolio Autotrazione: 3‰ in peso (kg)
+// del totale carico dell'anno. (Benzina/agricolo: in litri@15, da attivare poi.)
+function _pfRegCoerenzaHtml(o) {
   var annoCorrente = (new Date()).getFullYear();
-  if (giacFisica === null || giacFisica === undefined) return '';
-  if (anno !== annoCorrente) return '';
-  var reg = Math.round(Number(giacRegAmb || 0));
-  var fis = Math.round(Number(giacFisica || 0));
-  var scarto = reg - fis;
-  var base = Math.max(Math.abs(reg), Math.abs(fis), 1);
-  var pct = Math.abs(scarto) / base * 100;
-  var col, bg, txt, lab;
-  if (pct < 2) { col = '#639922'; bg = '#EAF3DE'; txt = '#27500A'; lab = 'ok'; }
-  else if (pct < 5) { col = '#EF9F27'; bg = '#FAEEDA'; txt = '#854F0B'; lab = 'da guardare'; }
-  else { col = '#E24B4A'; bg = '#FCEBEB'; txt = '#A32D2D'; lab = 'controlla densità/movimenti'; }
+  if (o.giacFisicaLamb === null || o.giacFisicaLamb === undefined) return '';
+  if (o.anno !== annoCorrente) return '';
+
+  var isAuto = (o.prodotto.indexOf('Autotrazione') >= 0);
+  // per ora il cruscotto col calo è attivo solo su Autotrazione (kg)
+  if (!isAuto) return '';
+
+  var dens = o.densita || 0.835;
+  var regKg = Math.round(Number(o.regKg || 0));
+  var fisKg = Math.round(Number(o.giacFisicaLamb || 0) * dens);
+  var scarto = Math.abs(regKg - fisKg);
+  var caloMax = Math.round(Number(o.caricoKg || 0) * 0.003); // 3‰ del totale carico
+  var pctUso = caloMax > 0 ? (scarto / caloMax * 100) : 0;
+  var entro = scarto <= caloMax;
+
+  var col = entro ? '#639922' : '#E24B4A';
+  var bg = entro ? '#EAF3DE' : '#FCEBEB';
+  var txt = entro ? '#27500A' : '#A32D2D';
   var nf = function (n) { return Math.round(n).toLocaleString('it-IT'); };
+  var barW = Math.max(0, Math.min(100, pctUso));
 
   var h = '<div style="margin-top:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:12px 14px">';
-  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
     + '<span style="font-size:13px;font-weight:600">⚖ Controllo coerenza giacenza</span>'
-    + '<span style="font-size:11px;color:var(--text-hint)">registro vs deposito fisico · solo indicativo</span></div>';
-  h += '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">';
-  h += '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza registro (l amb)</div><div style="font-size:17px;font-family:monospace">' + nf(reg) + '</div></div>';
-  h += '<div style="font-size:18px;color:var(--text-hint)">↔</div>';
-  h += '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza deposito (cisterne)</div><div style="font-size:17px;font-family:monospace">' + nf(fis) + '</div></div>';
-  h += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px;background:' + bg + ';padding:6px 12px;border-radius:8px">'
+    + '<span style="font-size:11px;color:var(--text-hint)">registro vs deposito fisico · calo consentito D.M. 55/2000</span></div>';
+
+  h += '<div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center;margin-bottom:14px">'
+    + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza registro</div><div style="font-size:17px;font-family:monospace">' + nf(regKg) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div></div>'
+    + '<span style="font-size:18px;color:var(--text-hint)">↔</span>'
+    + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza deposito (cisterne)</div><div style="font-size:17px;font-family:monospace">' + nf(fisKg) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div></div>'
+    + '<div style="margin-left:auto;text-align:right"><div style="font-size:11px;color:var(--text-hint)">Scarto</div><div style="font-size:17px;font-family:monospace;font-weight:600">' + nf(scarto) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div></div>'
+    + '</div>';
+
+  h += '<div style="margin-bottom:6px;display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)">'
+    + '<span>Calo consentito (3‰ del carico ' + nf(o.caricoKg) + ' kg)</span>'
+    + '<span style="font-family:monospace">max ' + nf(caloMax) + ' kg</span></div>';
+  h += '<div style="position:relative;height:22px;background:var(--bg-card,var(--bg));border-radius:6px;overflow:hidden;border:0.5px solid var(--border)">'
+    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + barW + '%;background:' + col + ';opacity:.85"></div>'
+    + '<div style="position:absolute;left:0;top:0;bottom:0;width:100%;display:flex;align-items:center;padding-left:10px;font-size:11px;font-family:monospace;color:var(--text)">' + nf(scarto) + ' / ' + nf(caloMax) + ' kg</div>'
+    + '</div>';
+
+  h += '<div style="margin-top:12px;display:flex;align-items:center;gap:8px;background:' + bg + ';padding:8px 12px;border-radius:8px">'
     + '<span style="width:10px;height:10px;border-radius:50%;background:' + col + ';display:inline-block"></span>'
-    + '<span style="font-size:13px;color:' + txt + ';font-weight:500">scarto ' + nf(Math.abs(scarto)) + ' L (' + pct.toFixed(1).replace('.', ',') + '%) · ' + lab + '</span></div>';
-  h += '</div>';
-  h += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint)">verde &lt;2% · giallo 2–5% · rosso &gt;5% — confronto in litri ambiente</div>';
+    + '<span style="font-size:13px;color:' + txt + ';font-weight:500">'
+    + (entro ? 'Entro tolleranza — scarto ' + nf(scarto) + ' kg sotto il calo consentito di ' + nf(caloMax) + ' kg (' + pctUso.toFixed(1).replace('.', ',') + '% del massimo)'
+             : 'Oltre il calo consentito — scarto ' + nf(scarto) + ' kg supera il massimo di ' + nf(caloMax) + ' kg, da giustificare')
+    + '</span></div>';
+
+  h += '<div style="margin-top:8px;font-size:10px;color:var(--text-hint)">Gasolio autotrazione: calo 3‰ in peso del totale carico · deposito convertito in kg con densità ' + dens.toFixed(3).replace('.', ',') + ' · durante l\'anno è indicativo, la verifica fiscale si fa a fine anno con l\'inventario.</div>';
   h += '</div>';
   return h;
 }
