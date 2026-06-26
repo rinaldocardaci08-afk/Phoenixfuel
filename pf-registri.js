@@ -1,5 +1,5 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
-// v20260625d — kg + l@15 + l amb + cruscotto coerenza con calo consentito 3‰ (auto).
+// v20260626a — registro kg+l@15+l amb, cruscotto calo 3‰, REPORT PERIODO (totali + tolleranza rettifiche).
 // ─────────────────────────────────────────────────────────────────────────────
 // FONTE UNICA: vista v_registro_movimenti (tabella registro_movimenti).
 //   Dato fiscale = KG. litri@15 e litri amb sono colonne di servizio.
@@ -323,6 +323,7 @@ function _pfRegFiltroHtml() {
   var azzera = _pfRegFiltroAttivo()
     ? '<button onclick="_pfRegResetFiltro()" style="font-size:11px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">✕ azzera</button>' : '';
   var stampa = '<button onclick="_pfRegStampa()" title="Stampa registro del periodo" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">🖨 Stampa</button>';
+  var report = '<button onclick="_pfRegReportPeriodo()" title="Report sintetico del periodo" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--accent,#D85A30);border-radius:6px;background:var(--accent,#D85A30);color:#fff;cursor:pointer">📊 Report periodo</button>';
   var periodo = '<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">'
     + '<span style="font-size:10px;color:var(--text-hint)">periodo</span>'
     + '<input type="date" id="reg-dal" value="' + (_pfRegState.dal || '') + '" style="font-size:11px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
@@ -332,7 +333,7 @@ function _pfRegFiltroHtml() {
     + azzera + '</div>';
   return '<div style="margin-bottom:10px">'
     + '<div style="display:flex;gap:4px;flex-wrap:wrap;padding-right:62px;margin-bottom:8px">' + pills + '</div>'
-    + '<div style="display:flex;justify-content:flex-end;gap:8px;align-items:center">' + stampa + periodo + '</div></div>';
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;align-items:center">' + report + stampa + periodo + '</div></div>';
 }
 
 function _pfRegTabella(rows, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno) {
@@ -454,6 +455,205 @@ function _pfRegStampa() {
   win.document.write(html);
   win.document.close();
   win.focus();
+  setTimeout(function () { try { win.print(); } catch (e) {} }, 300);
+}
+
+// ── Report periodo: modale sintetico (totali + tolleranza rettifiche) ──
+var _pfRegReportData = null;
+function _pfRegReportPeriodo() {
+  var c = _pfRegCache;
+  if (!c) { if (typeof toast === 'function') toast('Apri prima un registro'); return; }
+  _pfRegReportData = c;
+  _pfRegReportRender('mese');
+}
+
+function _pfRegReportCalc(modo, mese, dal, al) {
+  var c = _pfRegReportData;
+  var rows = c.rows, apertura = c.apertura, anno = c.anno;
+  // predicato periodo
+  var pred;
+  if (modo === 'periodo' && (dal || al)) {
+    pred = function (r) { return r.data && (!dal || r.data >= dal) && (!al || r.data <= al); };
+  } else if (modo === 'mese' && mese) {
+    var mm = (mese < 10 ? '0' : '') + mese;
+    pred = function (r) { return r.data && r.data.substring(5, 7) === mm; };
+  } else {
+    pred = function () { return true; }; // anno intero
+  }
+  var vis = rows.filter(pred);
+
+  // giacenza iniziale del periodo = giac della riga precedente alla prima visibile
+  var openKg, open15, openAmb;
+  if (vis.length) {
+    var idx = rows.indexOf(vis[0]);
+    if (idx > 0) {
+      var p = rows[idx - 1];
+      openKg = Number(p.giac_kg || 0); open15 = Number(p.giac_lt15 || 0); openAmb = Number(p.giac_ltamb || 0);
+    } else {
+      openKg = apertura ? Number(apertura.giac_kg || 0) : 0;
+      open15 = apertura ? Number(apertura.giac_lt15 || 0) : 0;
+      openAmb = apertura ? Number(apertura.giac_ltamb || 0) : 0;
+    }
+  } else {
+    openKg = apertura ? Number(apertura.giac_kg || 0) : 0;
+    open15 = apertura ? Number(apertura.giac_lt15 || 0) : 0;
+    openAmb = apertura ? Number(apertura.giac_ltamb || 0) : 0;
+  }
+
+  var eKg = 0, e15 = 0, eAmb = 0, uKg = 0, u15 = 0, uAmb = 0, rKg = 0, r15 = 0, rAmb = 0;
+  vis.forEach(function (r) {
+    var isRett = (r.tipo_doc === 'RETT');
+    if (isRett) {
+      // rettifica: contributo netto (E somma, U sottrae) — campi car_/sca_ dalla vista
+      if (r.direzione === 'E') {
+        rKg += Number(r.car_kg || 0); r15 += Number(r.car_lt15 || 0); rAmb += Number(r.car_ltamb || 0);
+      } else {
+        rKg -= Number(r.sca_kg || 0); r15 -= Number(r.sca_lt15 || 0); rAmb -= Number(r.sca_ltamb || 0);
+      }
+    } else if (r.direzione === 'E') {
+      eKg += Number(r.car_kg || 0); e15 += Number(r.car_lt15 || 0); eAmb += Number(r.car_ltamb || 0);
+    } else {
+      uKg += Number(r.sca_kg || 0); u15 += Number(r.sca_lt15 || 0); uAmb += Number(r.sca_ltamb || 0);
+    }
+  });
+  var finKg = openKg + eKg - uKg + rKg;
+  var fin15 = open15 + e15 - u15 + r15;
+  var finAmb = openAmb + eAmb - uAmb + rAmb;
+
+  return {
+    openKg: openKg, open15: open15, openAmb: openAmb,
+    eKg: eKg, e15: e15, eAmb: eAmb, uKg: uKg, u15: u15, uAmb: uAmb,
+    rKg: rKg, r15: r15, rAmb: rAmb, finKg: finKg, fin15: fin15, finAmb: finAmb,
+    anno: anno
+  };
+}
+
+function _pfRegReportRender(modo) {
+  var c = _pfRegReportData; if (!c) return;
+  var prod = c.prod, anno = c.anno;
+  modo = modo || 'mese';
+  var mese = _pfRegReportState ? _pfRegReportState.mese : ((new Date()).getMonth() + 1);
+  var dal = _pfRegReportState ? _pfRegReportState.dal : '';
+  var al = _pfRegReportState ? _pfRegReportState.al : '';
+  _pfRegReportState = { modo: modo, mese: mese, dal: dal, al: al };
+
+  var d = _pfRegReportCalc(modo, mese, dal, al);
+  var isAuto = (prod.indexOf('Autotrazione') >= 0);
+  var nf = function (n) { return (n == null || isNaN(Number(n))) ? '—' : Math.round(Number(n)).toLocaleString('it-IT'); };
+  var nfS = function (n) { var v = Math.round(Number(n || 0)); return (v > 0 ? '+' : '') + v.toLocaleString('it-IT'); };
+
+  // selettori
+  var mesiOpt = '';
+  for (var i = 1; i <= 12; i++) mesiOpt += '<option value="' + i + '"' + (i === mese ? ' selected' : '') + '>' + _PF_REG_MESI_FULL[i - 1] + ' ' + anno + '</option>';
+  var btnMese = 'font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;border:0.5px solid var(--border);' + (modo === 'mese' ? 'background:var(--accent,#D85A30);color:#fff' : 'background:var(--bg);color:var(--text)');
+  var btnPer = 'font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;border:0.5px solid var(--border);' + (modo === 'periodo' ? 'background:var(--accent,#D85A30);color:#fff' : 'background:var(--bg);color:var(--text)');
+
+  var sel = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">'
+    + '<button onclick="_pfRegReportSetModo(\'mese\')" style="' + btnMese + '">Per mese</button>'
+    + '<button onclick="_pfRegReportSetModo(\'periodo\')" style="' + btnPer + '">Per periodo</button>';
+  if (modo === 'mese') {
+    sel += '<select onchange="_pfRegReportSetMese(this.value)" style="font-size:12px;padding:5px 8px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg);color:var(--text)">' + mesiOpt + '</select>';
+  } else {
+    sel += '<input type="date" id="rep-dal" value="' + (dal || '') + '" style="font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+      + '<span style="font-size:11px;color:var(--text-hint)">→</span>'
+      + '<input type="date" id="rep-al" value="' + (al || '') + '" style="font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+      + '<button onclick="_pfRegReportApplica()" style="font-size:12px;padding:5px 12px;border:none;border-radius:6px;background:var(--accent,#D85A30);color:#fff;cursor:pointer">Applica</button>';
+  }
+  sel += '</div>';
+
+  function rowT(label, kg, l15, lamb, col, segno) {
+    var fmt = segno ? nfS : nf;
+    return '<tr style="border-top:0.5px solid var(--border)">'
+      + '<td style="padding:7px 8px;font-family:inherit' + (col ? ';color:' + col : '') + '">' + label + '</td>'
+      + '<td style="padding:7px 8px;text-align:right' + (col ? ';color:' + col : '') + '">' + fmt(kg) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;color:var(--text-hint)">' + fmt(l15) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;color:var(--text-hint)">' + fmt(lamb) + '</td></tr>';
+  }
+  var tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;font-family:monospace">'
+    + '<thead><tr style="color:var(--text-hint)"><th></th>'
+    + '<th style="text-align:right;padding:6px 8px;font-size:10px;text-transform:uppercase">kg</th>'
+    + '<th style="text-align:right;padding:6px 8px;font-size:10px;text-transform:uppercase">l@15</th>'
+    + '<th style="text-align:right;padding:6px 8px;font-size:10px;text-transform:uppercase">l amb</th></tr></thead><tbody>'
+    + rowT('Giacenza iniziale', d.openKg, d.open15, d.openAmb)
+    + rowT('Totale entrate', d.eKg, d.e15, d.eAmb, '#1D7A4D')
+    + rowT('Totale uscite', d.uKg, d.u15, d.uAmb, '#A32D2D')
+    + rowT('Rettifiche', d.rKg, d.r15, d.rAmb, '#854F0B', true)
+    + '</tbody><tfoot><tr style="border-top:1px solid var(--border);font-weight:600">'
+    + '<td style="padding:8px;font-family:inherit">Totale periodo</td>'
+    + '<td style="padding:8px;text-align:right;color:#185FA5">' + nf(d.finKg) + '</td>'
+    + '<td style="padding:8px;text-align:right;color:#185FA5;font-weight:400">' + nf(d.fin15) + '</td>'
+    + '<td style="padding:8px;text-align:right;color:#185FA5;font-weight:400">' + nf(d.finAmb) + '</td></tr></tfoot></table>';
+
+  // tolleranza rettifiche (solo Autotrazione, in kg, 3‰ entrate)
+  var tol = '';
+  if (isAuto) {
+    var rettAbs = Math.abs(d.rKg);
+    var maxTol = Math.round(d.eKg * 0.003);
+    var pct = maxTol > 0 ? (rettAbs / maxTol * 100) : 0;
+    var entro = rettAbs <= maxTol;
+    var col = entro ? '#639922' : '#E24B4A', bg = entro ? '#EAF3DE' : '#FCEBEB', txt = entro ? '#27500A' : '#A32D2D';
+    var barW = Math.max(0, Math.min(100, pct));
+    tol = '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:14px">'
+      + '<div style="font-size:13px;font-weight:600;margin-bottom:4px">Se eseguo rettifiche — valore entro tolleranza</div>'
+      + '<div style="font-size:11px;color:var(--text-hint);margin-bottom:12px">rettifiche del periodo vs 3‰ del totale entrate (' + nf(d.eKg) + ' kg) = max ' + nf(maxTol) + ' kg</div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:4px"><span>rettificato ' + nf(rettAbs) + ' kg</span><span style="font-family:monospace">max ' + nf(maxTol) + ' kg · 100%</span></div>'
+      + '<div style="position:relative;height:24px;background:var(--bg-card,var(--bg));border-radius:6px;overflow:hidden;border:0.5px solid var(--border)">'
+      + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + barW + '%;background:' + col + ';opacity:.85"></div>'
+      + '<div style="position:absolute;left:0;top:0;bottom:0;width:100%;display:flex;align-items:center;padding-left:10px;font-size:12px;font-family:monospace;color:var(--text)">' + pct.toFixed(0) + '% del tollerabile</div></div>'
+      + '<div style="margin-top:12px;display:flex;align-items:center;gap:8px;background:' + bg + ';padding:8px 12px;border-radius:8px">'
+      + '<span style="width:10px;height:10px;border-radius:50%;background:' + col + ';display:inline-block"></span>'
+      + '<span style="font-size:13px;color:' + txt + ';font-weight:500">' + (entro ? 'Entro tolleranza — ' + nf(rettAbs) + ' kg rettificati sotto il massimo di ' + nf(maxTol) + ' kg' : 'Oltre tolleranza — ' + nf(rettAbs) + ' kg superano il massimo di ' + nf(maxTol) + ' kg') + '</span></div>'
+      + '</div>';
+  } else {
+    tol = '<div style="font-size:11px;color:var(--text-hint);padding:8px">Il controllo tolleranza in kg è attivo per il Gasolio Autotrazione. Per ' + _pfRegEsc(prod) + ' sarà calcolato in litri@15.</div>';
+  }
+
+  var periodoLbl = (modo === 'periodo') ? ((dal ? _pfRegData(dal) : 'inizio') + ' – ' + (al ? _pfRegData(al) : 'oggi')) : (_PF_REG_MESI_FULL[mese - 1] + ' ' + anno);
+
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">📊 Report periodo — ' + _pfRegEsc(prod) + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">' + periodoLbl + ' · dato fiscale: kg</div>'
+    + sel + tbl + tol
+    + '<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">'
+    + '<button onclick="_pfRegReportStampa()" style="font-size:12px;padding:8px 16px;border:0.5px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;cursor:pointer">🖨 Stampa report</button>'
+    + '<button onclick="chiudiModalePermessi&&chiudiModalePermessi()" style="font-size:12px;padding:8px 16px;border:none;background:var(--accent,#D85A30);color:#fff;border-radius:8px;cursor:pointer">Chiudi</button></div>';
+  apriModal(h);
+}
+
+var _pfRegReportState = null;
+function _pfRegReportSetModo(m) { if (_pfRegReportState) _pfRegReportState.modo = m; _pfRegReportRender(m); }
+function _pfRegReportSetMese(m) { if (_pfRegReportState) _pfRegReportState.mese = Number(m); _pfRegReportRender('mese'); }
+function _pfRegReportApplica() {
+  var dal = document.getElementById('rep-dal'), al = document.getElementById('rep-al');
+  if (_pfRegReportState) { _pfRegReportState.dal = dal ? dal.value : ''; _pfRegReportState.al = al ? al.value : ''; }
+  _pfRegReportRender('periodo');
+}
+function _pfRegReportStampa() {
+  var c = _pfRegReportData; if (!c) return;
+  var st = _pfRegReportState || { modo: 'mese', mese: 1 };
+  var d = _pfRegReportCalc(st.modo, st.mese, st.dal, st.al);
+  var prod = c.prod, anno = c.anno;
+  var isAuto = (prod.indexOf('Autotrazione') >= 0);
+  var nf = function (n) { return Math.round(Number(n || 0)).toLocaleString('it-IT'); };
+  var periodoLbl = (st.modo === 'periodo') ? ((st.dal ? _pfRegData(st.dal) : 'inizio') + ' – ' + (st.al ? _pfRegData(st.al) : 'oggi')) : (_PF_REG_MESI_FULL[st.mese - 1] + ' ' + anno);
+  var tolHtml = '';
+  if (isAuto) {
+    var rettAbs = Math.abs(d.rKg), maxTol = Math.round(d.eKg * 0.003);
+    var entro = rettAbs <= maxTol;
+    tolHtml = '<p><strong>Tolleranza rettifiche:</strong> rettificato ' + nf(rettAbs) + ' kg su max ' + nf(maxTol) + ' kg (3‰ entrate) — ' + (entro ? 'ENTRO tolleranza' : 'OLTRE tolleranza') + '</p>';
+  }
+  var win = window.open('', '_blank'); if (!win) return;
+  win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Report ' + _pfRegEsc(prod) + '</title>'
+    + '<style>body{font-family:Arial,sans-serif;font-size:12px;margin:20px}h1{font-size:15px;margin:0 0 2px}.sub{color:#555;margin:0 0 14px}'
+    + 'table{width:100%;border-collapse:collapse;margin-bottom:14px}th,td{border:0.5px solid #777;padding:5px 8px}th{background:#eee;text-transform:uppercase;font-size:10px}td.n{text-align:right;font-variant-numeric:tabular-nums}tfoot td{font-weight:bold}</style></head><body>'
+    + '<h1>Report periodo — ' + _pfRegEsc(prod) + '</h1><p class="sub">Phoenix Fuel S.r.l. · Deposito Vibo Valentia · ' + periodoLbl + ' · dato fiscale: kg</p>'
+    + '<table><thead><tr><th></th><th>kg</th><th>l@15</th><th>l amb</th></tr></thead><tbody>'
+    + '<tr><td>Giacenza iniziale</td><td class="n">' + nf(d.openKg) + '</td><td class="n">' + nf(d.open15) + '</td><td class="n">' + nf(d.openAmb) + '</td></tr>'
+    + '<tr><td>Totale entrate</td><td class="n">' + nf(d.eKg) + '</td><td class="n">' + nf(d.e15) + '</td><td class="n">' + nf(d.eAmb) + '</td></tr>'
+    + '<tr><td>Totale uscite</td><td class="n">' + nf(d.uKg) + '</td><td class="n">' + nf(d.u15) + '</td><td class="n">' + nf(d.uAmb) + '</td></tr>'
+    + '<tr><td>Rettifiche</td><td class="n">' + nf(d.rKg) + '</td><td class="n">' + nf(d.r15) + '</td><td class="n">' + nf(d.rAmb) + '</td></tr>'
+    + '</tbody><tfoot><tr><td>Totale periodo</td><td class="n">' + nf(d.finKg) + '</td><td class="n">' + nf(d.fin15) + '</td><td class="n">' + nf(d.finAmb) + '</td></tr></tfoot></table>'
+    + tolHtml + '</body></html>');
+  win.document.close(); win.focus();
   setTimeout(function () { try { win.print(); } catch (e) {} }, 300);
 }
 
