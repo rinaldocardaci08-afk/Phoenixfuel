@@ -1,4 +1,5 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260626a — entrata in Ordini: pulsante "💧 Accetta" → apriAccettaCarico (modale DAS entrata + registro)
 
 // ═══════════════════════════════════════════════════════════════════
 // Helper: determina se un nome cliente corrisponde a Phoenix Fuel
@@ -1070,7 +1071,7 @@ function _renderRigaOrdine(r) {
   // (es. ordini in stato 'in attesa' o 'programmato' che sono stati comunque scaricati).
   const isUscita = r.fornitore && r.fornitore.toLowerCase().includes('phoenix') && (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio') && r.stato!=='confermato' && r.stato!=='annullato' && r.stato!=='consegnato' && !r.cisterna_id;
   let btnCisterna = '';
-  if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px" onclick="apriModaleAssegnaCisterna(\'' + r.id + '\')">Carica</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
+  if (isApprov) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#1D9E75" onclick="apriAccettaCarico(\'' + r.id + '\')">💧 Accetta</button> <button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#D85A30" onclick="apriModaleSmistamento(\'' + r.id + '\')">Smista</button> ';
   else if (isUscita) btnCisterna = '<button class="btn-primary" style="font-size:11px;padding:3px 8px;background:#639922" onclick="confermaUscitaDeposito(\'' + r.id + '\')">Scarica</button> ';
   // Bottone annulla scarico/carico: visibile se operazione cisterna già fatta, stato non consegnato/annullato,
   // e SOPRATTUTTO se NON c'è nessun DAS allegato (con DAS l'ordine è confermato e non si tocca più).
