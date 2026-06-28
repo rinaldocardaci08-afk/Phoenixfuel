@@ -1,4 +1,5 @@
 // PhoenixFuel — Home / Bacheca con Drag & Drop + Lavagna + Orologio
+// v20260628a — bacheca: upload video file (mp4/mov/webm) + player <video>, avviso >100MB
 
 var _homeClockInterval = null;
 
@@ -140,11 +141,14 @@ async function caricaHome() {
         url = url.trim(); if (!url) return;
         var nome = (nomi[aidx] || '').trim() || url.split('/').pop().split('?')[0];
         var isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(nome) || /\.(jpg|jpeg|png|gif|webp)/i.test(url);
+        var isVideoFile = /\.(mp4|mov|m4v|webm|ogg)$/i.test(nome) || /\.(mp4|mov|m4v|webm)/i.test(url);
         var isVideo = /youtube\.com|youtu\.be|vimeo\.com/i.test(url);
         var isPdf = /\.pdf$/i.test(nome);
         var isExcel = /\.(xlsx?|csv)$/i.test(nome);
         if (isImg) {
           html += '<div style="margin-bottom:10px"><img src="' + esc(url) + '" alt="' + esc(nome) + '" style="max-width:100%;max-height:500px;border-radius:8px;border:0.5px solid var(--border);cursor:pointer" onclick="window.open(\'' + esc(url) + '\',\'_blank\')" /></div>';
+        } else if (isVideoFile) {
+          html += '<div style="margin-bottom:10px"><video controls preload="metadata" src="' + esc(url) + '" style="max-width:100%;max-height:500px;border-radius:8px;border:0.5px solid var(--border);background:#000"></video></div>';
         } else if (isVideo) {
           var m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]+)/);
           if (m) { html += '<div style="margin-bottom:10px;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px"><iframe src="https://www.youtube.com/embed/' + m[1] + '" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px" allowfullscreen></iframe></div>'; }
@@ -231,13 +235,13 @@ function apriFormPost(postId) {
   html += '<div class="form-group" style="flex:1;min-width:140px"><label>Dimensione</label><select id="post-dimensione" style="font-size:13px;padding:8px 10px"><option value="full"' + (dimensione==='full'?' selected':'') + '>⬜ Intero</option><option value="half"' + (dimensione==='half'?' selected':'') + '>◻ Metà</option></select></div>';
   html += '</div>';
   html += '<div class="form-group"><label>Contenuto</label><textarea id="post-contenuto" rows="6" placeholder="Scrivi il contenuto... (**grassetto**, *corsivo*)" style="font-size:14px;padding:10px 14px;line-height:1.5">' + esc(contenuto) + '</textarea></div>';
-  html += '<div class="form-group"><label>Allegati (foto, PDF, Excel, video YouTube)</label>';
+  html += '<div class="form-group"><label>Allegati (foto, video, PDF, Excel, link YouTube)</label>';
   html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
   html += '<button type="button" class="btn-primary" style="font-size:13px;padding:8px 16px;background:#378ADD" onclick="document.getElementById(\'post-file-input\').click()">📁 Carica file</button>';
   html += '<input type="text" id="post-url-manual" placeholder="oppure incolla URL..." style="flex:1;min-width:160px;font-size:13px;padding:8px 12px" />';
   html += '<button type="button" class="btn-primary" style="font-size:13px;padding:8px 14px" onclick="aggiungiUrlManuale()">+ Aggiungi</button>';
   html += '</div>';
-  html += '<input type="file" id="post-file-input" accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx" multiple style="display:none" onchange="uploadAllegatiPost(this)" />';
+  html += '<input type="file" id="post-file-input" accept="image/*,video/*,.mp4,.mov,.m4v,.webm,.pdf,.xlsx,.xls,.csv,.doc,.docx" multiple style="display:none" onchange="uploadAllegatiPost(this)" />';
   html += '<div id="post-allegati-lista"></div></div>';
   html += '</div>';
   html += '<div style="display:flex;gap:8px;margin-top:16px">';
@@ -255,7 +259,7 @@ function _renderAllegatiLista() {
   if (!allegati.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Nessun allegato</div>'; return; }
   el.innerHTML = allegati.map(function(a, i) {
     var isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(a.nome);
-    var icon = isImg ? '🖼️' : /\.pdf$/i.test(a.nome) ? '📄' : /\.(xlsx?|csv)$/i.test(a.nome) ? '📊' : /youtube|youtu\.be/i.test(a.url) ? '🎬' : '📎';
+    var icon = isImg ? '🖼️' : /\.(mp4|mov|m4v|webm|ogg)$/i.test(a.nome) ? '🎬' : /\.pdf$/i.test(a.nome) ? '📄' : /\.(xlsx?|csv)$/i.test(a.nome) ? '📊' : /youtube|youtu\.be/i.test(a.url) ? '🎬' : '📎';
     return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg);border-radius:6px;margin-bottom:4px">' +
       '<span>' + icon + '</span><span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(a.nome) + '</span>' +
       (isImg ? '<img src="' + esc(a.url) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px" />' : '') +
@@ -278,6 +282,10 @@ async function uploadAllegatiPost(input) {
   if (!input.files || !input.files.length) return;
   for (var i = 0; i < input.files.length; i++) {
     var file = input.files[i], nome = file.name;
+    if (file.size > 100 * 1024 * 1024) {
+      var mb = Math.round(file.size / (1024 * 1024));
+      if (!confirm('⚠️ "' + nome + '" pesa ' + mb + ' MB. I file grossi sono lenti da aprire per chi guarda la bacheca. Caricarlo comunque?')) continue;
+    }
     var path = 'post/' + Date.now() + '_' + nome.replace(/[^a-zA-Z0-9._-]/g, '_');
     toast('⏳ Caricamento ' + nome + '...');
     var { data, error } = await sb.storage.from('bacheca').upload(path, file, { upsert: true });
