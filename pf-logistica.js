@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica
+// v20260628a — modifica/elimina viaggio (solo senza DAS): vettore/camion/autista/quantità,
+//   togli consegna → ordine torna confermato, elimina sicuro con conferma + blocco se DAS
 // v20260625f — DAS X+1 + modifica DAS + collegamento USCITE registro + guardia anti-negativo
 //   deposito alla generazione) + modifica dati tecnici DAS nel dettaglio carico.
 // ── LOGISTICA ─────────────────────────────────────────────────────
@@ -1277,10 +1279,11 @@ function _renderCardCarico(c, opts) {
     html += '<div style="display:flex;gap:4px;justify-content:center;margin-top:6px;flex-wrap:wrap">';
     if (!haDas) {
       html += '<button class="btn-primary" title="Genera i DAS di questo viaggio" onclick="pfGeneraDasViaggio(\'' + c.id + '\')" style="padding:4px 10px;font-size:11px;background:#185FA5">📄 Genera DAS</button>';
+      html += '<button class="btn-edit" title="Modifica viaggio (vettore, camion, autista, quantità, consegne)" onclick="pfApriModificaViaggio(\'' + c.id + '\')" style="padding:4px 8px">✏️</button>';
     }
     html += '<button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')" style="padding:4px 8px">🖨️</button>';
     html += '<button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')" style="padding:4px 8px">👁</button>';
-    html += '<button class="btn-danger" onclick="eliminaRecord(\'carichi\',\'' + c.id + '\',caricaCarichi)" style="padding:4px 8px">×</button>';
+    html += '<button class="btn-danger" title="Elimina viaggio" onclick="pfEliminaViaggio(\'' + c.id + '\')" style="padding:4px 8px">×</button>';
     html += '</div>';
   }
   html += '</div></div>';
@@ -2056,4 +2059,135 @@ async function eseguiDirottamento() {
   chiudiModalePermessi();
   if (d.caricoId) apriDettaglioCarico(d.caricoId);
   else caricaConsegne();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MODIFICA / ELIMINA VIAGGIO — solo viaggi SENZA DAS (v20260628a)
+// Sfilare una consegna o eliminare un viaggio NON cancella gli ordini:
+// li riporta a stato='confermato' (= "da organizzare"), pronti per
+// essere riprogrammati. I viaggi con DAS già generati sono bloccati
+// (gestione fiscale separata, da definire).
+// ═══════════════════════════════════════════════════════════════════
+async function pfApriModificaViaggio(caricoId) {
+  var nDas = await _pfCaricoHaDas(caricoId);
+  if (nDas > 0) {
+    alert('⚠️ Questo viaggio ha già DAS generati: i dati non sono modificabili da qui.\nLa gestione dei viaggi con DAS sarà definita nella fase fiscale.');
+    return;
+  }
+  var carRes = await sb.from('carichi').select('*').eq('id', caricoId).single();
+  var carico = carRes.data;
+  if (!carico) { toast('Viaggio non trovato'); return; }
+  var ordini = await _pfOrdiniCarico(caricoId);
+  var traspRes = await sb.from('trasportatori').select('id,nome').eq('attivo', true).order('nome');
+  var trasp = traspRes.data || [];
+
+  var html = '<div style="font-size:16px;font-weight:500;margin-bottom:14px">✏️ Modifica viaggio</div>';
+  html += '<div class="form-group"><label>Vettore</label><select id="modv-trasp" style="font-size:14px;padding:9px 12px">';
+  html += '<option value="">— nessuno / proprio —</option>';
+  trasp.forEach(function(t){
+    html += '<option value="' + t.id + '"' + (String(carico.trasportatore_id)===String(t.id)?' selected':'') + '>' + esc(t.nome) + '</option>';
+  });
+  html += '</select></div>';
+  html += '<div style="display:flex;gap:10px">';
+  html += '<div class="form-group" style="flex:1"><label>Camion (targa)</label><input type="text" id="modv-targa" value="' + esc(carico.mezzo_targa||'') + '" style="font-size:14px;padding:9px 12px" /></div>';
+  html += '<div class="form-group" style="flex:1"><label>Autista</label><input type="text" id="modv-autista" value="' + esc(carico.autista||'') + '" style="font-size:14px;padding:9px 12px" /></div>';
+  html += '</div>';
+
+  html += '<div style="font-size:13px;font-weight:500;margin:8px 0 6px">Consegne (' + ordini.length + ')</div>';
+  if (!ordini.length) {
+    html += '<div style="font-size:12px;color:var(--text-muted);padding:8px">Nessuna consegna nel viaggio. Conviene eliminarlo.</div>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:6px">';
+    ordini.forEach(function(o){
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border-radius:8px">';
+      html += '<span style="flex:1;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(o.cliente||'') + '">' + esc(o.cliente||'—') + '</span>';
+      html += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap">' + esc(o.prodotto||'') + '</span>';
+      html += '<input type="number" id="modv-litri-' + o.id + '" value="' + (Number(o.litri)||0) + '" style="width:100px;font-size:13px;padding:6px 8px;text-align:right;font-family:var(--font-mono)" /> <span style="font-size:11px;color:var(--text-muted)">L</span>';
+      html += '<button class="btn-danger" title="Togli dal viaggio (torna da organizzare)" onclick="pfTogliConsegnaDaViaggio(\'' + caricoId + '\',\'' + o.id + '\')" style="font-size:11px;padding:4px 9px">Togli</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<div style="display:flex;gap:8px;margin-top:16px">';
+  html += '<button class="btn-primary" style="flex:1;padding:11px;font-size:14px;background:#185FA5" onclick="pfSalvaModificaViaggio(\'' + caricoId + '\')">💾 Salva modifiche</button>';
+  html += '<button onclick="chiudiModalePermessi()" style="padding:11px 18px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer;font-size:14px">Chiudi</button>';
+  html += '</div>';
+  apriModal(html);
+}
+
+async function pfSalvaModificaViaggio(caricoId) {
+  // ricontrollo DAS: nessuna modifica se nel frattempo sono stati generati
+  var nDas = await _pfCaricoHaDas(caricoId);
+  if (nDas > 0) { toast('Viaggio con DAS: modifica annullata'); chiudiModalePermessi(); caricaCarichi(); return; }
+
+  var trId = document.getElementById('modv-trasp').value || null;
+  var targa = (document.getElementById('modv-targa').value || '').trim();
+  var autista = (document.getElementById('modv-autista').value || '').trim();
+
+  var upd = await sb.from('carichi').update({ trasportatore_id: trId, mezzo_targa: targa, autista: autista }).eq('id', caricoId);
+  if (upd.error) { toast('Errore: ' + upd.error.message); return; }
+
+  // quantità consegne: aggiorno solo quelle cambiate
+  var ordini = await _pfOrdiniCarico(caricoId);
+  var updates = [];
+  ordini.forEach(function(o){
+    var inp = document.getElementById('modv-litri-' + o.id);
+    if (!inp) return;
+    var nuovo = Math.round(Number(inp.value) || 0);
+    if (nuovo > 0 && nuovo !== Math.round(Number(o.litri)||0)) {
+      updates.push(sb.from('ordini').update({ litri: nuovo }).eq('id', o.id));
+    }
+  });
+  if (updates.length) await Promise.all(updates);
+
+  toast('✅ Viaggio aggiornato' + (updates.length ? ' (' + updates.length + ' quantità)' : ''));
+  chiudiModalePermessi();
+  caricaCarichi();
+  if (typeof caricaOrdiniPerCarico === 'function') caricaOrdiniPerCarico();
+}
+
+async function pfTogliConsegnaDaViaggio(caricoId, ordineId) {
+  var nDas = await _pfCaricoHaDas(caricoId);
+  if (nDas > 0) { toast('Viaggio con DAS: operazione bloccata'); return; }
+  if (!confirm('Togliere questa consegna dal viaggio?\nL\'ordine NON viene eliminato: torna "da organizzare" e potrai riprogrammarlo con la densità che vuoi.')) return;
+
+  var del = await sb.from('carico_ordini').delete().eq('carico_id', caricoId).eq('ordine_id', ordineId);
+  if (del.error) { toast('Errore: ' + del.error.message); return; }
+  await sb.from('ordini').update({ stato: 'confermato' }).eq('id', ordineId);
+
+  toast('✅ Consegna rimessa da organizzare');
+  caricaCarichi();
+  if (typeof caricaOrdiniPerCarico === 'function') caricaOrdiniPerCarico();
+
+  // riapre il modale aggiornato; se non restano consegne, avvisa
+  var rimaste = await _pfOrdiniCarico(caricoId);
+  if (!rimaste.length) {
+    chiudiModalePermessi();
+    if (confirm('Il viaggio è rimasto senza consegne. Vuoi eliminarlo?')) pfEliminaViaggio(caricoId);
+  } else {
+    pfApriModificaViaggio(caricoId);
+  }
+}
+
+async function pfEliminaViaggio(caricoId) {
+  var nDas = await _pfCaricoHaDas(caricoId);
+  if (nDas > 0) {
+    alert('⚠️ Questo viaggio ha DAS già generati.\n\nEliminarlo lascerebbe nel registro fiscale le righe di uscita (U) e lo scarico del deposito relativi a un viaggio inesistente, creando un disallineamento.\n\nL\'eliminazione dei viaggi con DAS sarà gestita nella fase fiscale dedicata. Operazione non disponibile da qui.');
+    return;
+  }
+  var righeRes = await sb.from('carico_ordini').select('ordine_id').eq('carico_id', caricoId);
+  var ids = (righeRes.data || []).map(function(r){ return r.ordine_id; }).filter(Boolean);
+
+  if (!confirm('Eliminare questo viaggio?\n\n' + ids.length + ' consegne torneranno DA ORGANIZZARE (gli ordini NON vengono eliminati).\nNessun DAS è stato generato per questo viaggio.')) return;
+
+  // 1) sgancio le consegne  2) riporto ordini a confermato  3) elimino il viaggio
+  await sb.from('carico_ordini').delete().eq('carico_id', caricoId);
+  if (ids.length) await sb.from('ordini').update({ stato: 'confermato' }).in('id', ids);
+  var del = await sb.from('carichi').delete().eq('id', caricoId);
+  if (del.error) { toast('Errore eliminazione: ' + del.error.message); return; }
+
+  toast('✅ Viaggio eliminato — ' + ids.length + ' consegne da organizzare');
+  caricaCarichi();
+  if (typeof caricaOrdiniPerCarico === 'function') caricaOrdiniPerCarico();
 }
