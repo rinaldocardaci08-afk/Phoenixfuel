@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Analisi fornitori
-// v20260630a — colonne Imponibile + Totale IVA incl. (aliquota per prodotto, agricolo 10%);
-//   fido e pagamenti del fornitore PRODOTTO sul solo prodotto IVA inclusa: il trasporto
-//   è debito verso il VETTORE e NON viene più imputato al fornitore del prodotto.
+// v20260630b — Prossime scadenze raggruppate per data (totale del giorno + dettaglio
+//   espandibile al click); colonne Imponibile + Totale IVA incl. (aliquota per prodotto);
+//   fido e pagamenti sul solo prodotto IVA inclusa (trasporto = debito verso il vettore).
 // Modulo dedicato all'analisi avanzata di uno o più fornitori:
 // • Scheda singolo fornitore: KPI + acquisti per mese per prodotto +
 //   distribuzione basi + prezzi medi per prodotto × base + scadenze
@@ -30,6 +30,16 @@ function _afTotaleIva(o) {
 // Solo la quota trasporto (debito verso il vettore), tenuta separata.
 function _afTrasporto(o) {
   return Number(o.trasporto_litro || 0) * Number(o.litri || 0);
+}
+
+// Apre/chiude il dettaglio consegne di una data nella sezione "Prossime scadenze".
+function _afToggleScadenza(id) {
+  var det = document.getElementById(id);
+  var arr = document.getElementById(id + '-arr');
+  if (!det) return;
+  var aperto = det.style.display !== 'none';
+  det.style.display = aperto ? 'none' : 'table-row';
+  if (arr) arr.textContent = aperto ? '▸' : '▾';
 }
 
 function _afColoreFornitore(nome, idx, fornitori) {
@@ -448,30 +458,50 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   if (nonPagatiOrdini.length === 0) {
     h += '<div style="padding:16px;text-align:center;color:#639922;background:#EAF3DE;border-radius:8px;font-size:12px;font-weight:600">✅ Nessuna fattura aperta. Tutto pagato.</div>';
   } else {
-    nonPagatiOrdini.sort(function(a,b){ return a.scadenza - b.scadenza; });
-    h += '<table><thead><tr><th>Data ord.</th><th>Prodotto</th><th class="m">Litri</th><th class="m">Importo</th><th>Scadenza</th><th class="m">Giorni</th><th>Stato</th></tr></thead><tbody>';
-    nonPagatiOrdini.slice(0,15).forEach(function(p) {
+    // Raggruppa le consegne aperte per DATA di scadenza: si vede subito
+    // quanto si deve affrontare ogni giorno; click sulla data → dettaglio.
+    var perScad = {};
+    nonPagatiOrdini.forEach(function(p) {
+      var k = p.scadenza.toISOString().split('T')[0];
+      if (!perScad[k]) perScad[k] = { data: k, ggResidui: p.ggResidui, totale: 0, righe: [] };
+      perScad[k].totale += p.importo;
+      perScad[k].righe.push(p);
+    });
+    var gruppi = Object.keys(perScad).sort().map(function(k){ return perScad[k]; });
+
+    h += '<div style="font-size:11px;color:#888;margin-bottom:8px">Tocca una data per vedere le consegne di quel giorno.</div>';
+    h += '<table><thead><tr><th>Scadenza</th><th class="m">Giorni</th><th class="m">Consegne</th><th class="m">Totale giorno</th><th></th></tr></thead><tbody>';
+    gruppi.forEach(function(g) {
       var sem, col, label;
-      if (p.ggResidui <= 7) { sem = '🟠'; col = '#D85A30'; label = 'critica'; }
-      else if (p.ggResidui <= 15) { sem = '🟡'; col = '#BA7517'; label = 'imminente'; }
+      if (g.ggResidui <= 7) { sem = '🟠'; col = '#D85A30'; label = 'critica'; }
+      else if (g.ggResidui <= 15) { sem = '🟡'; col = '#BA7517'; label = 'imminente'; }
       else { sem = '🟢'; col = '#639922'; label = 'ok'; }
-      h += '<tr>';
-      h += '<td>' + fmtD(p.ordine.data) + '</td>';
-      h += '<td style="font-size:10px">' + _esc(p.ordine.prodotto) + '</td>';
-      h += '<td class="m">' + fmtL(p.ordine.litri) + '</td>';
-      h += '<td class="m"><strong>' + fmtE(p.importo) + '</strong></td>';
-      h += '<td>' + fmtD(p.scadenza.toISOString().split('T')[0]) + '</td>';
-      h += '<td class="m" style="color:' + col + ';font-weight:700">+' + p.ggResidui + '</td>';
-      h += '<td style="color:' + col + ';font-weight:600">' + sem + ' ' + label + '</td>';
+      var idDet = 'af-scad-' + g.data.replace(/-/g, '');
+      h += '<tr style="cursor:pointer;background:#faf9f6" onclick="_afToggleScadenza(\'' + idDet + '\')" title="Mostra/nascondi le consegne di questo giorno">';
+      h += '<td style="font-weight:700">' + sem + ' ' + fmtD(g.data) + '</td>';
+      h += '<td class="m" style="color:' + col + ';font-weight:700">+' + g.ggResidui + ' <span style="font-size:9px;font-weight:600">' + label + '</span></td>';
+      h += '<td class="m">' + g.righe.length + '</td>';
+      h += '<td class="m"><strong>' + fmtE(g.totale) + '</strong></td>';
+      h += '<td class="m" style="color:#888"><span id="' + idDet + '-arr">▸</span></td>';
       h += '</tr>';
+      // riga dettaglio (nascosta)
+      h += '<tr id="' + idDet + '" style="display:none"><td colspan="5" style="padding:0;background:#fff">';
+      h += '<table style="width:100%"><tbody>';
+      g.righe.forEach(function(p) {
+        h += '<tr>';
+        h += '<td style="padding-left:24px;font-size:11px;color:#666">' + fmtD(p.ordine.data) + '</td>';
+        h += '<td style="font-size:11px">' + _esc(p.ordine.prodotto) + '</td>';
+        h += '<td class="m" style="font-size:11px">' + fmtL(p.ordine.litri) + ' L</td>';
+        h += '<td class="m" style="font-size:11px;font-weight:600">' + fmtE(p.importo) + '</td>';
+        h += '</tr>';
+      });
+      h += '</tbody></table>';
+      h += '</td></tr>';
     });
     h += '</tbody></table>';
-    if (nonPagatiOrdini.length > 15) {
-      h += '<div style="font-size:10px;color:#888;margin-top:6px;text-align:right">... e altre ' + (nonPagatiOrdini.length - 15) + ' scadenze più lontane</div>';
-    }
     // Totali
     h += '<div style="display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid #eee;font-size:11px">';
-    h += '<div><strong>' + nonPagatiOrdini.length + '</strong> fatture aperte (non scadute)</div>';
+    h += '<div><strong>' + nonPagatiOrdini.length + '</strong> fatture aperte in <strong>' + gruppi.length + '</strong> date</div>';
     h += '<div>Totale aperto: <strong>' + fmtE(fidoUsato) + '</strong></div>';
     h += '</div>';
   }
