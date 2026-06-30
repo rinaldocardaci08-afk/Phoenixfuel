@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Analisi fornitori
+// v20260630a — colonne Imponibile + Totale IVA incl. (aliquota per prodotto, agricolo 10%);
+//   fido e pagamenti del fornitore PRODOTTO sul solo prodotto IVA inclusa: il trasporto
+//   è debito verso il VETTORE e NON viene più imputato al fornitore del prodotto.
 // Modulo dedicato all'analisi avanzata di uno o più fornitori:
 // • Scheda singolo fornitore: KPI + acquisti per mese per prodotto +
 //   distribuzione basi + prezzi medi per prodotto × base + scadenze
@@ -12,6 +15,22 @@
 // Colori fornitore coerenti (fallback se il fornitore non ha colore proprio)
 var _afColoriFallback = ['#D4A017','#378ADD','#639922','#6B5FCC','#BA7517','#D85A30','#1D9E75','#C0392B'];
 var _afChartsAttivi = []; // per distruggere i chart prima di rerender
+
+// Imponibile e totale IVA inclusa di un ordine, riferiti al FORNITORE DEL PRODOTTO.
+// SOLO prodotto (costo_litro): il trasporto_litro è un debito verso il VETTORE
+// (Costa/Tallarico o mezzo proprio), NON verso il fornitore del prodotto, quindi
+// non va imputato al suo fido né ai suoi pagamenti.
+// IVA con l'aliquota dell'ordine (10% gasolio agricolo, 22% resto).
+function _afImponibile(o) {
+  return Number(o.costo_litro || 0) * Number(o.litri || 0);
+}
+function _afTotaleIva(o) {
+  return _afImponibile(o) * (1 + Number(o.iva != null ? o.iva : 22) / 100);
+}
+// Solo la quota trasporto (debito verso il vettore), tenuta separata.
+function _afTrasporto(o) {
+  return Number(o.trasporto_litro || 0) * Number(o.litri || 0);
+}
 
 function _afColoreFornitore(nome, idx, fornitori) {
   var f = (fornitori||[]).find(function(x){ return x.nome === nome; });
@@ -55,7 +74,7 @@ async function apriAnalisiFornitore() {
     if (!stats[o.fornitore]) stats[o.fornitore] = { ordini: 0, litri: 0, importo: 0 };
     stats[o.fornitore].ordini++;
     stats[o.fornitore].litri += Number(o.litri||0);
-    stats[o.fornitore].importo += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    stats[o.fornitore].importo += _afImponibile(o);
   });
 
   var h = '<div style="font-size:17px;font-weight:600;margin-bottom:6px">📊 Analisi fornitori</div>';
@@ -202,19 +221,21 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   var oggi = new Date(); oggi.setHours(0,0,0,0);
   var ggPagDefault = Number(fornitore.giorni_pagamento || 30);
 
-  var tot = { litri: 0, importo: 0, ordini: ordini.length };
+  var tot = { litri: 0, importo: 0, importoIva: 0, ordini: ordini.length };
   ordini.forEach(function(o) {
     tot.litri += Number(o.litri||0);
-    tot.importo += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    tot.importo += _afImponibile(o);
+    tot.importoIva += _afTotaleIva(o);
   });
 
   // Aggrega per prodotto
   var perProdotto = {};
   ordini.forEach(function(o) {
     var p = o.prodotto;
-    if (!perProdotto[p]) perProdotto[p] = { litri: 0, importo: 0, ordini: 0 };
+    if (!perProdotto[p]) perProdotto[p] = { litri: 0, importo: 0, importoIva: 0, ordini: 0 };
     perProdotto[p].litri += Number(o.litri||0);
-    perProdotto[p].importo += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    perProdotto[p].importo += _afImponibile(o);
+    perProdotto[p].importoIva += _afTotaleIva(o);
     perProdotto[p].ordini++;
   });
 
@@ -222,9 +243,10 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   var perBase = {};
   ordini.forEach(function(o) {
     var bKey = o.base_carico_id ? (basiMap[o.base_carico_id] ? basiMap[o.base_carico_id].nome : 'Base sconosciuta') : 'Senza base';
-    if (!perBase[bKey]) perBase[bKey] = { litri: 0, importo: 0, ordini: 0 };
+    if (!perBase[bKey]) perBase[bKey] = { litri: 0, importo: 0, importoIva: 0, ordini: 0 };
     perBase[bKey].litri += Number(o.litri||0);
-    perBase[bKey].importo += (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    perBase[bKey].importo += _afImponibile(o);
+    perBase[bKey].importoIva += _afTotaleIva(o);
     perBase[bKey].ordini++;
   });
 
@@ -242,7 +264,9 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
     var ggResidui = Math.floor((scad - oggi) / 86400000);
     // Scaduta = considerata pagata (Opzione A): salta dal calcolo fido
     if (ggResidui < 0) return;
-    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    // ESPOSIZIONE = totale IVA inclusa: è l'importo che si paga davvero al
+    // fornitore e che consuma il fido (aliquota per prodotto: agricolo 10%, resto 22%).
+    var imp = _afTotaleIva(o);
     fidoUsato += imp;
     nonPagatiOrdini.push({ ordine: o, scadenza: scad, ggResidui: ggResidui, importo: imp });
     if (ggResidui <= 15) segmenti.f0_15 += imp;
@@ -261,7 +285,7 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
     var scad = new Date(o.data); scad.setDate(scad.getDate() + ggOrdine);
     var dataPag = new Date(o.data_pagamento_fornitore);
     var delta = Math.floor((dataPag - scad) / 86400000); // negativo=anticipo, positivo=ritardo
-    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * Number(o.litri||0);
+    var imp = _afTotaleIva(o);
     pagamenti.push({ ordine: o, scadenza: scad, dataPag: dataPag, delta: delta, importo: imp, ggContratto: ggOrdine });
   });
   var statsPag = null;
@@ -303,7 +327,8 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
   h += '<div class="kpi"><div class="kpi-label">Ordini</div><div class="kpi-value">' + tot.ordini + '</div></div>';
   h += '<div class="kpi"><div class="kpi-label">Litri totali</div><div class="kpi-value">' + fmtL(tot.litri) + '</div></div>';
-  h += '<div class="kpi"><div class="kpi-label">Importo totale</div><div class="kpi-value">' + fmtE(tot.importo) + '</div></div>';
+  h += '<div class="kpi"><div class="kpi-label">Imponibile</div><div class="kpi-value">' + fmtE(tot.importo) + '</div></div>';
+  h += '<div class="kpi"><div class="kpi-label">Totale IVA incl.</div><div class="kpi-value">' + fmtE(tot.importoIva) + '</div></div>';
   h += '<div class="kpi"><div class="kpi-label">Ticket medio</div><div class="kpi-value">' + fmtE(ticketMedio) + '</div></div>';
   h += '</div></div>';
 
@@ -365,20 +390,20 @@ function _afRenderSingolo(nome, fornitore, ordini, basiMap) {
   h += '<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">';
   h += '<div style="width:220px;height:220px;flex-shrink:0"><canvas id="af-chart-prodotti"></canvas></div>';
   h += '<div style="flex:1;min-width:260px"><table>';
-  h += '<thead><tr><th>Prodotto</th><th class="m">Litri</th><th class="m">Importo</th><th class="m">%</th></tr></thead><tbody>';
+  h += '<thead><tr><th>Prodotto</th><th class="m">Litri</th><th class="m">Imponibile</th><th class="m">Totale IVA</th><th class="m">%</th></tr></thead><tbody>';
   Object.keys(perProdotto).sort(function(a,b){ return perProdotto[b].litri - perProdotto[a].litri; }).forEach(function(p) {
     var d = perProdotto[p];
     var pct = tot.litri > 0 ? (d.litri / tot.litri * 100) : 0;
-    h += '<tr><td><strong>' + _esc(p) + '</strong></td><td class="m">' + fmtL(d.litri) + '</td><td class="m">' + fmtE(d.importo) + '</td><td class="m">' + pct.toFixed(1) + '%</td></tr>';
+    h += '<tr><td><strong>' + _esc(p) + '</strong></td><td class="m">' + fmtL(d.litri) + '</td><td class="m">' + fmtE(d.importo) + '</td><td class="m" style="font-weight:600">' + fmtE(d.importoIva) + '</td><td class="m">' + pct.toFixed(1) + '%</td></tr>';
   });
   h += '</tbody></table></div></div></div>';
 
   // ── ACQUISTI PER BASE DI CARICO ───────────────────────────────
   h += '<div class="card section"><div class="card-title">📍 Acquisti per base di carico</div>';
-  h += '<table><thead><tr><th>Base</th><th class="m">Ordini</th><th class="m">Litri</th><th class="m">Importo</th><th class="m">Litri/ordine</th></tr></thead><tbody>';
+  h += '<table><thead><tr><th>Base</th><th class="m">Ordini</th><th class="m">Litri</th><th class="m">Imponibile</th><th class="m">Totale IVA</th><th class="m">Litri/ordine</th></tr></thead><tbody>';
   Object.keys(perBase).sort(function(a,b){ return perBase[b].litri - perBase[a].litri; }).forEach(function(b) {
     var d = perBase[b];
-    h += '<tr><td><strong>' + _esc(b) + '</strong></td><td class="m">' + d.ordini + '</td><td class="m">' + fmtL(d.litri) + '</td><td class="m">' + fmtE(d.importo) + '</td><td class="m">' + fmtL(d.litri/d.ordini) + '</td></tr>';
+    h += '<tr><td><strong>' + _esc(b) + '</strong></td><td class="m">' + d.ordini + '</td><td class="m">' + fmtL(d.litri) + '</td><td class="m">' + fmtE(d.importo) + '</td><td class="m" style="font-weight:600">' + fmtE(d.importoIva) + '</td><td class="m">' + fmtL(d.litri/d.ordini) + '</td></tr>';
   });
   h += '</tbody></table></div>';
 
@@ -486,7 +511,7 @@ function _afRenderConfronto(nomi, fornitori, ordini, basiMap) {
   ordini.forEach(function(o) {
     var f = perForn[o.fornitore]; if (!f) return;
     var l = Number(o.litri||0);
-    var imp = (Number(o.costo_litro||0) + Number(o.trasporto_litro||0)) * l;
+    var imp = _afImponibile(o);
     f.litri += l;
     f.importo += imp;
     f.ordini++;
