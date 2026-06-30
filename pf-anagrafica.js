@@ -1,4 +1,7 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
+// v20260630a — confronto annuale: filtro vista (ingrosso/dettaglio/totale) applicato anche
+//   al confronto (tabella+grafici); filtro come segmented control; badge vista in alto a destra
+//   nel confronto e nel PDF.
 // v20260625b — Allega DAS firmato/cartellino: upload su Supabase (come prima).
 //   Pulsante entrate deposito: 💧 Accetta (apriAccettaCarico).
 // ── CONSEGNE ─────────────────────────────────────────────────────
@@ -772,6 +775,7 @@ async function caricaVenditeAnnuali() {
     selC1.value = annoCorr;
     selC2.value = annoCorr - 1;
   }
+  _pfInitSegmentVista();
   const anno = parseInt(selAnno.value);
   if (!anno) return;
 
@@ -961,7 +965,45 @@ function _renderTabellaAnnuale() {
   }
 }
 
-function filtraVistaAnnuale() { _renderTabellaAnnuale(); }
+function filtraVistaAnnuale() {
+  _renderTabellaAnnuale();
+  if (_ultimoConfronto) _renderConfronto();
+}
+
+// Segmented control (stile pill) che sostituisce visivamente il <select id="vann-vista">,
+// senza toccare index.html: il select resta come "stato" nascosto e viene pilotato dai pulsanti.
+function _pfInitSegmentVista() {
+  var sel = document.getElementById('vann-vista');
+  if (!sel || document.getElementById('vann-seg')) return;
+  if (!document.getElementById('vann-seg-css')) {
+    var st = document.createElement('style'); st.id = 'vann-seg-css';
+    st.textContent = '#vann-seg{display:inline-flex;background:var(--bg-kpi);border-radius:9px;padding:3px;gap:2px}'
+      + '#vann-seg button{font-family:var(--font,sans-serif);font-size:12px;font-weight:500;border:0;background:transparent;color:var(--text-muted);padding:7px 14px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .12s}'
+      + '#vann-seg button.on{background:var(--bg-card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,0.08)}'
+      + '#vann-seg .dot{width:8px;height:8px;border-radius:50%}';
+    document.head.appendChild(st);
+  }
+  var opts = [
+    { k:'totale',    label:'Totale',    col:'#D85A30' },
+    { k:'ingrosso',  label:'Ingrosso',  col:'#D4A017' },
+    { k:'dettaglio', label:'Dettaglio', col:'#6B5FCC' }
+  ];
+  var seg = document.createElement('div'); seg.id = 'vann-seg';
+  opts.forEach(function(o) {
+    var b = document.createElement('button');
+    b.innerHTML = '<span class="dot" style="background:' + o.col + '"></span>' + o.label;
+    if ((sel.value || 'totale') === o.k) b.classList.add('on');
+    b.onclick = function() {
+      sel.value = o.k;
+      seg.querySelectorAll('button').forEach(function(x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      filtraVistaAnnuale();
+    };
+    seg.appendChild(b);
+  });
+  sel.style.display = 'none';
+  sel.parentNode.insertBefore(seg, sel);
+}
 
 // Cambio anno: azzera i campi data così caricaVenditeAnnuali ripristina i default per il nuovo anno
 function cambiaAnnoVenditeAnnuali() {
@@ -1119,9 +1161,33 @@ async function confrontaAnni() {
 
   const [mesi1, mesi2] = await Promise.all([_caricaDatiAnno(anno1), _caricaDatiAnno(anno2)]);
   _ultimoConfronto = { anno1, anno2, mesi1, mesi2 };
+  _renderConfronto();
+}
 
-  // Tabella confronto
-  let html = '<div style="overflow-x:auto"><table><thead><tr>';
+// Rendering del confronto: legge _ultimoConfronto + il filtro vista corrente
+// (ingrosso / dettaglio / totale). Separato da confrontaAnni così il filtro
+// si applica senza ricaricare i dati dal database.
+function _renderConfronto() {
+  if (!_ultimoConfronto) return;
+  const anno1 = _ultimoConfronto.anno1, anno2 = _ultimoConfronto.anno2;
+  const mesi1 = _ultimoConfronto.mesi1, mesi2 = _ultimoConfronto.mesi2;
+  const wrap = document.getElementById('confronto-anni-content');
+  if (!wrap) return;
+
+  var vista = (document.getElementById('vann-vista') || {}).value || 'totale';
+  function _vL(mm) { return vista === 'ingrosso' ? mm.ingLitri : vista === 'dettaglio' ? mm.dettLitri : mm.totLitri; }
+  function _vF(mm) { return vista === 'ingrosso' ? mm.ingFatt : vista === 'dettaglio' ? mm.dettInc : mm.totFatt; }
+  var vistaLabel = vista === 'ingrosso' ? 'Ingrosso' : vista === 'dettaglio' ? 'Dettaglio' : 'Totale';
+
+  _ultimoConfronto.vista = vista;
+  var vCol = vista === 'ingrosso' ? '#D4A017' : vista === 'dettaglio' ? '#6B5FCC' : '#D85A30';
+
+  // Intestazione: titolo a sinistra, badge VISTA ben visibile in alto a destra
+  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">';
+  html += '<div style="font-size:14px;font-weight:600">Confronto ' + anno1 + ' vs ' + anno2 + '</div>';
+  html += '<div style="display:inline-flex;align-items:center;gap:7px;background:' + vCol + ';color:#fff;padding:7px 14px;border-radius:20px;font-size:12px;font-weight:700"><span style="width:8px;height:8px;border-radius:50%;background:#fff;opacity:.85"></span>Vista: ' + vistaLabel + '</div>';
+  html += '</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr>';
   html += '<th>Mese</th>';
   html += '<th>Litri ' + anno1 + '</th><th>Litri ' + anno2 + '</th><th>Diff. litri</th><th>Δ %</th>';
   html += '<th>Fatt. ' + anno1 + '</th><th>Fatt. ' + anno2 + '</th><th>Diff. fatt.</th><th>Δ %</th>';
@@ -1129,8 +1195,8 @@ async function confrontaAnni() {
 
   let tot1L=0,tot2L=0,tot1F=0,tot2F=0;
   for (let m = 0; m < 12; m++) {
-    const l1 = mesi1[m].totLitri, l2 = mesi2[m].totLitri;
-    const f1 = mesi1[m].totFatt, f2 = mesi2[m].totFatt;
+    const l1 = _vL(mesi1[m]), l2 = _vL(mesi2[m]);
+    const f1 = _vF(mesi1[m]), f2 = _vF(mesi2[m]);
     const diffL = l1 - l2, diffF = f1 - f2;
     const pctL = l2 > 0 ? ((l1 - l2) / l2 * 100) : (l1 > 0 ? 100 : 0);
     const pctF = f2 > 0 ? ((f1 - f2) / f2 * 100) : (f1 > 0 ? 100 : 0);
@@ -1172,8 +1238,8 @@ async function confrontaAnni() {
 
   // Canvas per grafici
   html += '<div class="grid2" style="margin-top:16px">';
-  html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Litri totali — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-litri" height="250"></canvas></div>';
-  html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato imponibile — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-fatt" height="250"></canvas></div>';
+  html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Litri (' + vistaLabel + ') — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-litri" height="250"></canvas></div>';
+  html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato (' + vistaLabel + ') — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-fatt" height="250"></canvas></div>';
   html += '</div>';
 
   wrap.innerHTML = html;
@@ -1186,8 +1252,8 @@ async function confrontaAnni() {
     if (_chartConfLitri) _chartConfLitri.destroy();
     _chartConfLitri = new Chart(ctxL.getContext('2d'), {
       type:'bar', data:{ labels:labelsM, datasets:[
-        { label:String(anno1), data:mesi1.map(m=>Math.round(m.totLitri)), backgroundColor:'#D4A017', borderRadius:4 },
-        { label:String(anno2), data:mesi2.map(m=>Math.round(m.totLitri)), backgroundColor:'rgba(212,160,23,0.35)', borderRadius:4 }
+        { label:String(anno1), data:mesi1.map(m=>Math.round(_vL(m))), backgroundColor:'#D4A017', borderRadius:4 },
+        { label:String(anno2), data:mesi2.map(m=>Math.round(_vL(m))), backgroundColor:'rgba(212,160,23,0.35)', borderRadius:4 }
       ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtL(v)}}} }
     });
   }
@@ -1197,8 +1263,8 @@ async function confrontaAnni() {
     if (_chartConfFatt) _chartConfFatt.destroy();
     _chartConfFatt = new Chart(ctxF.getContext('2d'), {
       type:'bar', data:{ labels:labelsM, datasets:[
-        { label:String(anno1), data:mesi1.map(m=>Math.round(m.totFatt)), backgroundColor:'#378ADD', borderRadius:4 },
-        { label:String(anno2), data:mesi2.map(m=>Math.round(m.totFatt)), backgroundColor:'rgba(55,138,221,0.35)', borderRadius:4 }
+        { label:String(anno1), data:mesi1.map(m=>Math.round(_vF(m))), backgroundColor:'#378ADD', borderRadius:4 },
+        { label:String(anno2), data:mesi2.map(m=>Math.round(_vF(m))), backgroundColor:'rgba(55,138,221,0.35)', borderRadius:4 }
       ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
     });
   }
@@ -1207,6 +1273,9 @@ async function confrontaAnni() {
 function stampaConfrontoAnni() {
   if (!_ultimoConfronto) { toast('Prima esegui un confronto'); return; }
   const { anno1, anno2 } = _ultimoConfronto;
+  var vista = _ultimoConfronto.vista || 'totale';
+  var vistaLabel = vista === 'ingrosso' ? 'Ingrosso' : vista === 'dettaglio' ? 'Dettaglio' : 'Totale (Ingrosso + Dettaglio)';
+  var vCol = vista === 'ingrosso' ? '#D4A017' : vista === 'dettaglio' ? '#6B5FCC' : '#D85A30';
   const wrap = document.getElementById('confronto-anni-content');
   const tbl = wrap.querySelector('table');
   if (!tbl) { toast('Nessun dato da stampare'); return; }
@@ -1222,9 +1291,10 @@ function stampaConfrontoAnni() {
     '</style></head><body>';
   html += '<div class="rpt-header" style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #378ADD;padding-bottom:10px;margin-bottom:14px">';
   html += '<div><div style="font-size:18px;font-weight:bold;color:#378ADD">CONFRONTO VENDITE ' + anno1 + ' vs ' + anno2 + '</div>';
-  html += '<div style="font-size:12px;color:#666;margin-top:3px">Litri e fatturato imponibile — Ingrosso + Dettaglio</div></div>';
+  html += '<div style="font-size:12px;color:#666;margin-top:3px">Litri e fatturato imponibile</div></div>';
   html += '<div style="text-align:right"><div style="font-size:16px;font-weight:bold;letter-spacing:1px">PHOENIX FUEL SRL</div>';
-  html += '<div style="font-size:10px;color:#666">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
+  html += '<div style="display:inline-block;margin-top:5px;background:' + vCol + ';color:#fff;padding:5px 13px;border-radius:16px;font-size:12px;font-weight:bold">Vista: ' + vistaLabel + '</div>';
+  html += '<div style="font-size:10px;color:#666;margin-top:4px">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
   html += '<table>' + righeHtml + '</table>';
   html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">🖨️ Stampa / PDF</button>';
