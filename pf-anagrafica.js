@@ -1,6 +1,7 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
-// v20260630c — confronto annuale: riga "mesi completi" (raffronto omogeneo sui soli mesi
-//   conclusi) in tabella + banner sopra i grafici + PDF; archivio storico (vendite_storiche).
+// v20260630d — archivio storico: riempie SOLO le categorie/mesi senza dati reali
+//   (no doppio conteggio dell'ingrosso 2025 già importato negli ordini).
+// v20260630c — confronto annuale: riga "mesi completi" in tabella + banner + PDF.
 // v20260630b — confronto annuale legge anche l'archivio storico (vendite_storiche).
 // v20260625b — Allega DAS firmato/cartellino: upload su Supabase (come prima).
 //   Pulsante entrate deposito: 💧 Accetta (apriAccettaCarico).
@@ -1148,20 +1149,27 @@ async function _caricaDatiAnno(anno) {
     mesi.push({ ingLitri, ingFatt, ingMarg, dettLitri, dettInc, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc });
   }
 
-  // Integra l'ARCHIVIO storico (anni caricati come totali mensili, es. 2025 da Access).
-  // Per gli anni con dati reali (ordini) l'archivio è vuoto → nessun effetto;
-  // per gli anni solo-archivio i mesi reali sono a 0 e qui prendono i valori storici.
+  // Integra l'ARCHIVIO storico SOLO per le categorie/mesi SENZA dati reali.
+  // Esempio 2025: l'ingrosso è già negli ordini importati → l'archivio ingrosso
+  // NON va sommato (sarebbe doppio conteggio); il dettaglio invece manca → l'archivio
+  // dettaglio lo riempie. Per il 2026 i dati reali ci sono → archivio ignorato.
   const { data: arch } = await sb.from('vendite_storiche').select('*').eq('anno', parseInt(anno));
   (arch || []).forEach(s => {
     const m = Number(s.mese) - 1;
     if (m < 0 || m > 11) return;
-    mesi[m].ingLitri  += Number(s.ing_litri || 0);
-    mesi[m].ingFatt   += Number(s.ing_fatturato || 0);
-    mesi[m].ingMarg   += Number(s.ing_margine || 0);
-    mesi[m].dettLitri += Number(s.dett_litri || 0);
-    mesi[m].dettInc   += Number(s.dett_incasso || 0);
-    mesi[m].totLitri   = mesi[m].ingLitri + mesi[m].dettLitri;
-    mesi[m].totFatt    = mesi[m].ingFatt + mesi[m].dettInc;
+    // Ingrosso: usa l'archivio solo se NON ci sono dati reali di ingrosso in quel mese
+    if (mesi[m].ingLitri === 0 && mesi[m].ingFatt === 0) {
+      mesi[m].ingLitri = Number(s.ing_litri || 0);
+      mesi[m].ingFatt  = Number(s.ing_fatturato || 0);
+      mesi[m].ingMarg  = Number(s.ing_margine || 0);
+    }
+    // Dettaglio: idem, solo se mancano i dati reali di dettaglio
+    if (mesi[m].dettLitri === 0 && mesi[m].dettInc === 0) {
+      mesi[m].dettLitri = Number(s.dett_litri || 0);
+      mesi[m].dettInc   = Number(s.dett_incasso || 0);
+    }
+    mesi[m].totLitri = mesi[m].ingLitri + mesi[m].dettLitri;
+    mesi[m].totFatt  = mesi[m].ingFatt + mesi[m].dettInc;
   });
 
   return mesi;
