@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Popup densità per generazione DAS
+// v20260630a — validazione e densità proposta a prova di unità (kg/L→kg/m³, ×1000 se <100)
 //
 // FLUSSO:
 //   pfApriPopupDensita(ordiniCarico, onConfirm, onCancel)
@@ -79,9 +80,15 @@
     results.forEach(function(r, i) {
       var p = prodotti[i];
       if (r && r.data) {
+        // Lo storico può essere salvato in kg/L (0,82). Riporto a kg/m³ per
+        // coerenza con l'etichetta del campo e con i range di validazione.
+        var aSt = Number(r.data.densita_ambiente);
+        var qSt = Number(r.data.densita_15);
+        if (aSt && aSt < 100) aSt = aSt * 1000;
+        if (qSt && qSt < 100) qSt = qSt * 1000;
         out[p] = {
-          amb: Number(r.data.densita_ambiente),
-          d15: Number(r.data.densita_15),
+          amb: aSt,
+          d15: qSt,
           dataUltimo: r.data.data,
           fonte: 'storico'
         };
@@ -102,6 +109,12 @@
     if (!isFinite(amb) || amb <= 0) errors.push('Densità ambiente non valida');
     if (!isFinite(d15) || d15 <= 0) errors.push('Densità 15°C non valida');
     if (errors.length) return { errors: errors, warnings: warnings };
+
+    // A prova di unità: i range sono in kg/m³ (780–880). Se il valore arriva
+    // in kg/L (es. 0,8219 — come salvato nel registro) lo riporto a kg/m³
+    // moltiplicando ×1000, coerente con la regola ">100 = kg/m³, <100 = kg/L".
+    if (amb < 100) amb = amb * 1000;
+    if (d15 < 100) d15 = d15 * 1000;
 
     if (amb < r.hard[0] || amb > r.hard[1]) errors.push('Densità ambiente fuori range plausibile (' + r.hard[0] + '–' + r.hard[1] + ')');
     if (d15 < r.hard[0] || d15 > r.hard[1]) errors.push('Densità 15°C fuori range plausibile (' + r.hard[0] + '–' + r.hard[1] + ')');
