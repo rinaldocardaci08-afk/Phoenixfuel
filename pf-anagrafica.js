@@ -1,7 +1,7 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
-// v20260630a — confronto annuale: filtro vista (ingrosso/dettaglio/totale) applicato anche
-//   al confronto (tabella+grafici); filtro come segmented control; badge vista in alto a destra
-//   nel confronto e nel PDF.
+// v20260630b — confronto annuale legge anche l'archivio storico (vendite_storiche)
+//   per anni caricati a mano (es. 2025); filtro segmented + badge vista (confronto/PDF).
+// v20260630a — confronto annuale: filtro vista applicato anche al confronto.
 // v20260625b — Allega DAS firmato/cartellino: upload su Supabase (come prima).
 //   Pulsante entrate deposito: 💧 Accetta (apriAccettaCarico).
 // ── CONSEGNE ─────────────────────────────────────────────────────
@@ -1147,6 +1147,23 @@ async function _caricaDatiAnno(anno) {
     Object.entries(dettPerGiorno).forEach(([d,v]) => { if (d.startsWith(prefix)) { dettLitri += v.litri; dettInc += v.incasso; } });
     mesi.push({ ingLitri, ingFatt, ingMarg, dettLitri, dettInc, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc });
   }
+
+  // Integra l'ARCHIVIO storico (anni caricati come totali mensili, es. 2025 da Access).
+  // Per gli anni con dati reali (ordini) l'archivio è vuoto → nessun effetto;
+  // per gli anni solo-archivio i mesi reali sono a 0 e qui prendono i valori storici.
+  const { data: arch } = await sb.from('vendite_storiche').select('*').eq('anno', parseInt(anno));
+  (arch || []).forEach(s => {
+    const m = Number(s.mese) - 1;
+    if (m < 0 || m > 11) return;
+    mesi[m].ingLitri  += Number(s.ing_litri || 0);
+    mesi[m].ingFatt   += Number(s.ing_fatturato || 0);
+    mesi[m].ingMarg   += Number(s.ing_margine || 0);
+    mesi[m].dettLitri += Number(s.dett_litri || 0);
+    mesi[m].dettInc   += Number(s.dett_incasso || 0);
+    mesi[m].totLitri   = mesi[m].ingLitri + mesi[m].dettLitri;
+    mesi[m].totFatt    = mesi[m].ingFatt + mesi[m].dettInc;
+  });
+
   return mesi;
 }
 
