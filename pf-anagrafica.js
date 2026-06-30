@@ -1,7 +1,7 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
-// v20260630b — confronto annuale legge anche l'archivio storico (vendite_storiche)
-//   per anni caricati a mano (es. 2025); filtro segmented + badge vista (confronto/PDF).
-// v20260630a — confronto annuale: filtro vista applicato anche al confronto.
+// v20260630c — confronto annuale: riga "mesi completi" (raffronto omogeneo sui soli mesi
+//   conclusi) in tabella + banner sopra i grafici + PDF; archivio storico (vendite_storiche).
+// v20260630b — confronto annuale legge anche l'archivio storico (vendite_storiche).
 // v20260625b — Allega DAS firmato/cartellino: upload su Supabase (come prima).
 //   Pulsante entrate deposito: 💧 Accetta (apriAccettaCarico).
 // ── CONSEGNE ─────────────────────────────────────────────────────
@@ -1251,7 +1251,59 @@ function _renderConfronto() {
   html += '<td style="font-family:var(--font-mono)">' + fmtE(tot2F) + '</td>';
   html += '<td style="font-family:var(--font-mono);color:' + tcF + '">' + (tdF>0?'▲':'▼') + ' ' + fmtE(Math.abs(tdF)) + '</td>';
   html += '<td style="font-family:var(--font-mono);color:' + tcF + '">' + (tpF>0?'+':'') + tpF.toFixed(1) + '%</td>';
-  html += '</tr></tbody></table></div>';
+  html += '</tr>';
+
+  // ── RIGA "MESI COMPLETI" ──────────────────────────────────────────
+  // Confronta solo i mesi interamente conclusi di ENTRAMBI gli anni, per
+  // un raffronto omogeneo non falsato dall'anno in corso (incompleto).
+  // L'ultimo mese con dati dell'anno in corso è considerato PARZIALE.
+  var annoCorr = new Date().getFullYear();
+  var mesiCorr = (anno1 === annoCorr) ? mesi1 : (anno2 === annoCorr) ? mesi2 : null;
+  var nCompleti = 12;
+  if (mesiCorr) {
+    var ultimoConDati = -1;
+    for (var k = 0; k < 12; k++) { if (_vL(mesiCorr[k]) > 0 || _vF(mesiCorr[k]) > 0) ultimoConDati = k; }
+    nCompleti = Math.max(0, ultimoConDati); // escludo l'ultimo mese (parziale)
+  }
+  // Mostro la riga solo se ha senso: anno in corso coinvolto e meno di 12 mesi pieni
+  _ultimoConfronto.mesiCompleti = (mesiCorr && nCompleti >= 1 && nCompleti < 12) ? nCompleti : 0;
+  if (_ultimoConfronto.mesiCompleti) {
+    var n = nCompleti;
+    var c1L=0,c2L=0,c1F=0,c2F=0;
+    for (var j = 0; j < n; j++) { c1L+=_vL(mesi1[j]); c2L+=_vL(mesi2[j]); c1F+=_vF(mesi1[j]); c2F+=_vF(mesi2[j]); }
+    var cdL=c1L-c2L, cdF=c1F-c2F;
+    var cpL = c2L>0 ? (cdL/c2L*100) : 0, cpF = c2F>0 ? (cdF/c2F*100) : 0;
+    var ccL = cdL>0?'#639922':cdL<0?'#A32D2D':'var(--text-muted)';
+    var ccF = cdF>0?'#639922':cdF<0?'#A32D2D':'var(--text-muted)';
+    var range = MESI_NOMI[0].substring(0,3) + '–' + MESI_NOMI[n-1].substring(0,3);
+    html += '<tr style="background:#fbeee7;font-weight:700;border-top:1px dashed var(--accent)">';
+    html += '<td>▸ Primi ' + n + ' mesi completi<br><span style="font-weight:400;font-size:9px;color:#9b6a3a">' + range + ', dati reali su entrambi</span></td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtL(c1L) + '</td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtL(c2L) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + ccL + '">' + (cdL>0?'▲':cdL<0?'▼':'—') + ' ' + fmtL(Math.abs(cdL)) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + ccL + '">' + (cpL>0?'+':'') + cpL.toFixed(1) + '%</td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtE(c1F) + '</td>';
+    html += '<td style="font-family:var(--font-mono)">' + fmtE(c2F) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + ccF + '">' + (cdF>0?'▲':cdF<0?'▼':'—') + ' ' + fmtE(Math.abs(cdF)) + '</td>';
+    html += '<td style="font-family:var(--font-mono);color:' + ccF + '">' + (cpF>0?'+':'') + cpF.toFixed(1) + '%</td>';
+    html += '</tr>';
+    _ultimoConfronto.rangeCompleti = range;
+    _ultimoConfronto.deltaCompleti = { cpL: cpL, cpF: cpF, n: n };
+  }
+  html += '</tbody></table></div>';
+
+  // Banner mesi completi sopra i grafici (raffronto omogeneo, ben visibile)
+  if (_ultimoConfronto.mesiCompleti) {
+    var dc = _ultimoConfronto.deltaCompleti;
+    var bcL = dc.cpL >= 0 ? '#639922' : '#A32D2D';
+    var bcF = dc.cpF >= 0 ? '#639922' : '#A32D2D';
+    html += '<div style="margin-top:16px;background:#fbeee7;border:1px solid var(--accent);border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">';
+    html += '<div style="font-weight:700;font-size:13px;color:#9b6a3a">Raffronto reale<br><span style="font-weight:400;font-size:11px">primi ' + dc.n + ' mesi (' + _ultimoConfronto.rangeCompleti + ')</span></div>';
+    html += '<div style="font-size:12px">Litri <strong style="color:' + bcL + ';font-size:15px">' + (dc.cpL>0?'+':'') + dc.cpL.toFixed(1) + '%</strong></div>';
+    html += '<div style="font-size:12px">Fatturato <strong style="color:' + bcF + ';font-size:15px">' + (dc.cpF>0?'+':'') + dc.cpF.toFixed(1) + '%</strong></div>';
+    html += '<div style="font-size:10px;color:#9b6a3a;flex:1;min-width:160px;text-align:right">' + anno1 + ' vs ' + anno2 + ' sui soli mesi conclusi — il totale a 12 mesi non è confrontabile finché l\'anno è in corso</div>';
+    html += '</div>';
+  }
 
   // Canvas per grafici
   html += '<div class="grid2" style="margin-top:16px">';
