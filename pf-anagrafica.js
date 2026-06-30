@@ -1,5 +1,7 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
-// v20260630e — filtro vista anche accanto al pulsante Confronta (sincronizzato con quello sopra).
+// v20260630f — confronto annuale: sezione marginalità (tabella litri+margine+€/L, grafico, PDF);
+//   margine dettaglio calcolato dai costi (2026) o da archivio (anni storici).
+// v20260630e — filtro vista anche accanto al pulsante Confronta (sincronizzato).
 // v20260630d — archivio storico: riempie SOLO le categorie/mesi senza dati reali.
 // v20260630c — confronto annuale: riga "mesi completi" in tabella + banner + PDF.
 // v20260630b — confronto annuale legge anche l'archivio storico (vendite_storiche).
@@ -1132,7 +1134,7 @@ async function stampaReportAnnuale() {
 }
 
 // ── CONFRONTO ANNO SU ANNO ───────────────────────────────────────
-let _chartConfLitri=null, _chartConfFatt=null;
+let _chartConfLitri=null, _chartConfFatt=null, _chartConfMarg=null;
 let _ultimoConfronto = null;
 
 async function _caricaDatiAnno(anno) {
@@ -1150,13 +1152,15 @@ async function _caricaDatiAnno(anno) {
   const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
   const { data: letture } = await sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', da).lte('data', a).order('data');
   const { data: prezziP } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a);
+  const { data: costiP } = await sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a);
   const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
   const prezziMap = {}; (prezziP||[]).forEach(p => { prezziMap[p.data+'_'+p.prodotto] = Number(p.prezzo_litro); });
+  const costiMap = {}; (costiP||[]).forEach(c => { costiMap[c.data+'_'+c.prodotto] = Number(c.costo_litro); });
   const lettPerData = {}; (letture||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
   const dateOrd = Object.keys(lettPerData).sort();
   const dettPerGiorno = {};
   dateOrd.forEach(data => {
-    let litriG=0, incassoG=0;
+    let litriG=0, incassoG=0, margineG=0;
     lettPerData[data].forEach(l => {
       const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
       const prev = dateOrd.filter(d => d < data);
@@ -1165,18 +1169,22 @@ async function _caricaDatiAnno(anno) {
       if (prevD && lettPerData[prevD]) { const pl = lettPerData[prevD].find(x => x.pompa_id === l.pompa_id); if (pl) precL = Number(pl.lettura); }
       if (precL === null) return;
       const lv = Number(l.lettura) - precL; if (lv <= 0) return;
-      litriG += lv; incassoG += lv * (prezziMap[data+'_'+pompa.prodotto] || 0);
+      const prezzoNetto = (prezziMap[data+'_'+pompa.prodotto] || 0) / 1.22;
+      const costo = costiMap[data+'_'+pompa.prodotto] || 0;
+      litriG += lv;
+      incassoG += lv * (prezziMap[data+'_'+pompa.prodotto] || 0);
+      margineG += lv * (prezzoNetto - costo);
     });
-    dettPerGiorno[data] = { litri: litriG, incasso: incassoG };
+    dettPerGiorno[data] = { litri: litriG, incasso: incassoG, margine: margineG };
   });
   // Aggrega per mese
   const mesi = [];
   for (let m = 0; m < 12; m++) {
-    let ingLitri=0, ingFatt=0, ingMarg=0, dettLitri=0, dettInc=0;
+    let ingLitri=0, ingFatt=0, ingMarg=0, dettLitri=0, dettInc=0, dettMarg=0;
     const prefix = anno + '-' + String(m+1).padStart(2,'0');
     allIng.forEach(r => { if (r.data.startsWith(prefix)) { ingLitri += Number(r.litri); ingFatt += prezzoNoIva(r)*Number(r.litri); ingMarg += Number(r.margine)*Number(r.litri); } });
-    Object.entries(dettPerGiorno).forEach(([d,v]) => { if (d.startsWith(prefix)) { dettLitri += v.litri; dettInc += v.incasso; } });
-    mesi.push({ ingLitri, ingFatt, ingMarg, dettLitri, dettInc, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc });
+    Object.entries(dettPerGiorno).forEach(([d,v]) => { if (d.startsWith(prefix)) { dettLitri += v.litri; dettInc += v.incasso; dettMarg += v.margine; } });
+    mesi.push({ ingLitri, ingFatt, ingMarg, dettLitri, dettInc, dettMarg, totLitri: ingLitri+dettLitri, totFatt: ingFatt+dettInc, totMarg: ingMarg+dettMarg });
   }
 
   // Integra l'ARCHIVIO storico SOLO per le categorie/mesi SENZA dati reali.
@@ -1191,15 +1199,19 @@ async function _caricaDatiAnno(anno) {
     if (mesi[m].ingLitri === 0 && mesi[m].ingFatt === 0) {
       mesi[m].ingLitri = Number(s.ing_litri || 0);
       mesi[m].ingFatt  = Number(s.ing_fatturato || 0);
-      mesi[m].ingMarg  = Number(s.ing_margine || 0);
     }
     // Dettaglio: idem, solo se mancano i dati reali di dettaglio
     if (mesi[m].dettLitri === 0 && mesi[m].dettInc === 0) {
       mesi[m].dettLitri = Number(s.dett_litri || 0);
       mesi[m].dettInc   = Number(s.dett_incasso || 0);
     }
+    // MARGINE: per gli anni in archivio usa SEMPRE il margine ufficiale (Access),
+    // anche se ci sono ordini reali — scelta deliberata (i numeri di bilancio).
+    mesi[m].ingMarg  = Number(s.ing_margine || 0);
+    mesi[m].dettMarg = Number(s.dett_margine || 0);
     mesi[m].totLitri = mesi[m].ingLitri + mesi[m].dettLitri;
     mesi[m].totFatt  = mesi[m].ingFatt + mesi[m].dettInc;
+    mesi[m].totMarg  = mesi[m].ingMarg + mesi[m].dettMarg;
   });
 
   return mesi;
@@ -1232,6 +1244,7 @@ function _renderConfronto() {
   var vista = (document.getElementById('vann-vista') || {}).value || 'totale';
   function _vL(mm) { return vista === 'ingrosso' ? mm.ingLitri : vista === 'dettaglio' ? mm.dettLitri : mm.totLitri; }
   function _vF(mm) { return vista === 'ingrosso' ? mm.ingFatt : vista === 'dettaglio' ? mm.dettInc : mm.totFatt; }
+  function _vM(mm) { return vista === 'ingrosso' ? mm.ingMarg : vista === 'dettaglio' ? mm.dettMarg : mm.totMarg; }
   var vistaLabel = vista === 'ingrosso' ? 'Ingrosso' : vista === 'dettaglio' ? 'Dettaglio' : 'Totale';
 
   _ultimoConfronto.vista = vista;
@@ -1349,6 +1362,65 @@ function _renderConfronto() {
   html += '<div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Fatturato (' + vistaLabel + ') — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-fatt" height="250"></canvas></div>';
   html += '</div>';
 
+  // ── SEZIONE MARGINALITÀ ──────────────────────────────────────────
+  html += '<div class="card section" style="margin-top:18px"><div class="card-title">📊 Litri e marginalità (' + vistaLabel + ')</div>';
+  html += '<div style="overflow-x:auto"><table><thead><tr>';
+  html += '<th>Mese</th><th>Litri ' + anno1 + '</th><th>Litri ' + anno2 + '</th>';
+  html += '<th>Margine ' + anno1 + '</th><th>Margine ' + anno2 + '</th><th>Diff. margine</th><th>Δ %</th>';
+  html += '<th>€/L ' + anno1 + '</th><th>€/L ' + anno2 + '</th>';
+  html += '</tr></thead><tbody>';
+  var tm1=0,tm2=0,tml1=0,tml2=0;
+  for (var mm=0; mm<12; mm++) {
+    var L1=_vL(mesi1[mm]), L2=_vL(mesi2[mm]);
+    var M1=_vM(mesi1[mm]), M2=_vM(mesi2[mm]);
+    var dM=M1-M2, pM=M2>0?(dM/M2*100):(M1>0?100:0);
+    tm1+=M1; tm2+=M2; tml1+=L1; tml2+=L2;
+    var cM=dM>0?'#639922':dM<0?'#A32D2D':'var(--text-muted)';
+    var epl1=L1>0?(M1/L1):0, epl2=L2>0?(M2/L2):0;
+    var hd=L1>0||L2>0;
+    html += '<tr'+(!hd?' style="opacity:0.35"':'')+'>';
+    html += '<td><strong>'+MESI_NOMI[mm]+'</strong></td>';
+    html += '<td style="font-family:var(--font-mono)">'+fmtL(L1)+'</td>';
+    html += '<td style="font-family:var(--font-mono)">'+fmtL(L2)+'</td>';
+    html += '<td style="font-family:var(--font-mono)">'+fmtE(M1)+'</td>';
+    html += '<td style="font-family:var(--font-mono)">'+fmtE(M2)+'</td>';
+    html += '<td style="font-family:var(--font-mono);color:'+cM+'">'+(dM>0?'▲':dM<0?'▼':'—')+' '+fmtE(Math.abs(dM))+'</td>';
+    html += '<td style="font-family:var(--font-mono);color:'+cM+'">'+(pM>0?'+':'')+pM.toFixed(1)+'%</td>';
+    html += '<td style="font-family:var(--font-mono)">'+epl1.toFixed(4)+'</td>';
+    html += '<td style="font-family:var(--font-mono)">'+epl2.toFixed(4)+'</td>';
+    html += '</tr>';
+  }
+  var tdM=tm1-tm2, tpM=tm2>0?(tdM/tm2*100):0;
+  var tcM=tdM>0?'#639922':tdM<0?'#A32D2D':'var(--text-muted)';
+  var tepl1=tml1>0?(tm1/tml1):0, tepl2=tml2>0?(tm2/tml2):0;
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600">';
+  html += '<td>TOTALE</td><td style="font-family:var(--font-mono)">'+fmtL(tml1)+'</td><td style="font-family:var(--font-mono)">'+fmtL(tml2)+'</td>';
+  html += '<td style="font-family:var(--font-mono)">'+fmtE(tm1)+'</td><td style="font-family:var(--font-mono)">'+fmtE(tm2)+'</td>';
+  html += '<td style="font-family:var(--font-mono);color:'+tcM+'">'+(tdM>0?'▲':'▼')+' '+fmtE(Math.abs(tdM))+'</td>';
+  html += '<td style="font-family:var(--font-mono);color:'+tcM+'">'+(tpM>0?'+':'')+tpM.toFixed(1)+'%</td>';
+  html += '<td style="font-family:var(--font-mono)">'+tepl1.toFixed(4)+'</td><td style="font-family:var(--font-mono)">'+tepl2.toFixed(4)+'</td>';
+  html += '</tr>';
+  if (_ultimoConfronto.mesiCompleti) {
+    var nc=_ultimoConfronto.mesiCompleti;
+    var cm1=0,cm2=0,cl1=0,cl2=0;
+    for (var jj=0;jj<nc;jj++){cm1+=_vM(mesi1[jj]);cm2+=_vM(mesi2[jj]);cl1+=_vL(mesi1[jj]);cl2+=_vL(mesi2[jj]);}
+    var cdM=cm1-cm2, cpM=cm2>0?(cdM/cm2*100):0;
+    var ccM=cdM>0?'#639922':cdM<0?'#A32D2D':'var(--text-muted)';
+    var ce1=cl1>0?(cm1/cl1):0, ce2=cl2>0?(cm2/cl2):0;
+    var rng=MESI_NOMI[0].substring(0,3)+'–'+MESI_NOMI[nc-1].substring(0,3);
+    html += '<tr style="background:#fbeee7;font-weight:700;border-top:1px dashed var(--accent)">';
+    html += '<td>▸ Primi '+nc+' mesi completi<br><span style="font-weight:400;font-size:9px;color:#9b6a3a">'+rng+'</span></td>';
+    html += '<td style="font-family:var(--font-mono)">'+fmtL(cl1)+'</td><td style="font-family:var(--font-mono)">'+fmtL(cl2)+'</td>';
+    html += '<td style="font-family:var(--font-mono)">'+fmtE(cm1)+'</td><td style="font-family:var(--font-mono)">'+fmtE(cm2)+'</td>';
+    html += '<td style="font-family:var(--font-mono);color:'+ccM+'">'+(cdM>0?'▲':cdM<0?'▼':'—')+' '+fmtE(Math.abs(cdM))+'</td>';
+    html += '<td style="font-family:var(--font-mono);color:'+ccM+'">'+(cpM>0?'+':'')+cpM.toFixed(1)+'%</td>';
+    html += '<td style="font-family:var(--font-mono)">'+ce1.toFixed(4)+'</td><td style="font-family:var(--font-mono)">'+ce2.toFixed(4)+'</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+  html += '<div style="margin-top:14px"><div style="font-size:13px;font-weight:500;margin-bottom:8px">Marginalità (' + vistaLabel + ') — ' + anno1 + ' vs ' + anno2 + '</div><canvas id="chart-conf-marg" height="200"></canvas></div>';
+  html += '</div>';
+
   wrap.innerHTML = html;
 
   // Grafici
@@ -1375,6 +1447,17 @@ function _renderConfronto() {
       ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
     });
   }
+
+  const ctxM = document.getElementById('chart-conf-marg');
+  if (ctxM) {
+    if (_chartConfMarg) _chartConfMarg.destroy();
+    _chartConfMarg = new Chart(ctxM.getContext('2d'), {
+      type:'bar', data:{ labels:labelsM, datasets:[
+        { label:String(anno1), data:mesi1.map(m=>Math.round(_vM(m))), backgroundColor:'#639922', borderRadius:4 },
+        { label:String(anno2), data:mesi2.map(m=>Math.round(_vM(m))), backgroundColor:'rgba(99,153,34,0.35)', borderRadius:4 }
+      ] }, options:{ responsive:true, plugins:{legend:{position:'top',labels:{font:{size:11}}}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>fmtE(v)}}} }
+    });
+  }
 }
 
 function stampaConfrontoAnni() {
@@ -1384,9 +1467,11 @@ function stampaConfrontoAnni() {
   var vistaLabel = vista === 'ingrosso' ? 'Ingrosso' : vista === 'dettaglio' ? 'Dettaglio' : 'Totale (Ingrosso + Dettaglio)';
   var vCol = vista === 'ingrosso' ? '#D4A017' : vista === 'dettaglio' ? '#6B5FCC' : '#D85A30';
   const wrap = document.getElementById('confronto-anni-content');
-  const tbl = wrap.querySelector('table');
-  if (!tbl) { toast('Nessun dato da stampare'); return; }
-  let righeHtml = tbl.innerHTML.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--text-muted\)/g,'#666').replace(/var\(--accent\)/g,'#D85A30');
+  const tbls = wrap.querySelectorAll('table');
+  if (!tbls.length) { toast('Nessun dato da stampare'); return; }
+  function _pulisci(h){ return h.replace(/var\(--font-mono\)/g,'Courier New,monospace').replace(/var\(--text-muted\)/g,'#666').replace(/var\(--accent\)/g,'#D85A30'); }
+  let righeHtml = _pulisci(tbls[0].innerHTML);
+  let margHtml = tbls.length > 1 ? _pulisci(tbls[1].innerHTML) : '';
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confronto ' + anno1 + ' vs ' + anno2 + '</title>' +
     '<style>body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:12mm}' +
@@ -1403,6 +1488,10 @@ function stampaConfrontoAnni() {
   html += '<div style="display:inline-block;margin-top:5px;background:' + vCol + ';color:#fff;padding:5px 13px;border-radius:16px;font-size:12px;font-weight:bold">Vista: ' + vistaLabel + '</div>';
   html += '<div style="font-size:10px;color:#666;margin-top:4px">Generato il: ' + new Date().toLocaleDateString('it-IT') + '</div></div></div>';
   html += '<table>' + righeHtml + '</table>';
+  if (margHtml) {
+    html += '<div style="font-size:14px;font-weight:bold;color:#639922;margin:18px 0 8px">LITRI E MARGINALITÀ — ' + anno1 + ' vs ' + anno2 + '</div>';
+    html += '<table>' + margHtml + '</table>';
+  }
   html += '<div class="no-print rpt-actions" style="position:fixed;bottom:20px;right:20px;display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#378ADD;color:#fff">🖨️ Stampa / PDF</button>';
   html += '<button onclick="window.close()" style="border:none;padding:10px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:bold;background:#E24B4A;color:#fff">✕ Chiudi</button>';
