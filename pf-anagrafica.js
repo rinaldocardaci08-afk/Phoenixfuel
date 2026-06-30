@@ -1,6 +1,7 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
-// v20260630f — confronto annuale: sezione marginalità (tabella litri+margine+€/L, grafico, PDF);
-//   margine dettaglio calcolato dai costi (2026) o da archivio (anni storici).
+// v20260630g — fix: la card marginalità usava la classe 'section' (nascosta di default);
+//   ora usa solo 'card' e si vede sempre dopo il confronto.
+// v20260630f — confronto annuale: sezione marginalità (tabella litri+margine+€/L, grafico, PDF).
 // v20260630e — filtro vista anche accanto al pulsante Confronta (sincronizzato).
 // v20260630d — archivio storico: riempie SOLO le categorie/mesi senza dati reali.
 // v20260630c — confronto annuale: riga "mesi completi" in tabella + banner + PDF.
@@ -1363,7 +1364,7 @@ function _renderConfronto() {
   html += '</div>';
 
   // ── SEZIONE MARGINALITÀ ──────────────────────────────────────────
-  html += '<div class="card section" style="margin-top:18px"><div class="card-title">📊 Litri e marginalità (' + vistaLabel + ')</div>';
+  html += '<div class="card" style="margin-top:18px"><div class="card-title">📊 Litri e marginalità (' + vistaLabel + ')</div>';
   html += '<div style="overflow-x:auto"><table><thead><tr>';
   html += '<th>Mese</th><th>Litri ' + anno1 + '</th><th>Litri ' + anno2 + '</th>';
   html += '<th>Margine ' + anno1 + '</th><th>Margine ' + anno2 + '</th><th>Diff. margine</th><th>Δ %</th>';
