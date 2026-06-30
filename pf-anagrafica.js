@@ -1,6 +1,6 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
-// v20260630d — archivio storico: riempie SOLO le categorie/mesi senza dati reali
-//   (no doppio conteggio dell'ingrosso 2025 già importato negli ordini).
+// v20260630e — filtro vista anche accanto al pulsante Confronta (sincronizzato con quello sopra).
+// v20260630d — archivio storico: riempie SOLO le categorie/mesi senza dati reali.
 // v20260630c — confronto annuale: riga "mesi completi" in tabella + banner + PDF.
 // v20260630b — confronto annuale legge anche l'archivio storico (vendite_storiche).
 // v20260625b — Allega DAS firmato/cartellino: upload su Supabase (come prima).
@@ -975,35 +975,65 @@ function filtraVistaAnnuale() {
 // senza toccare index.html: il select resta come "stato" nascosto e viene pilotato dai pulsanti.
 function _pfInitSegmentVista() {
   var sel = document.getElementById('vann-vista');
-  if (!sel || document.getElementById('vann-seg')) return;
+  if (!sel) return;
   if (!document.getElementById('vann-seg-css')) {
     var st = document.createElement('style'); st.id = 'vann-seg-css';
-    st.textContent = '#vann-seg{display:inline-flex;background:var(--bg-kpi);border-radius:9px;padding:3px;gap:2px}'
-      + '#vann-seg button{font-family:var(--font,sans-serif);font-size:12px;font-weight:500;border:0;background:transparent;color:var(--text-muted);padding:7px 14px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .12s}'
-      + '#vann-seg button.on{background:var(--bg-card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,0.08)}'
-      + '#vann-seg .dot{width:8px;height:8px;border-radius:50%}';
+    st.textContent = '.vann-seg-ctl{display:inline-flex;background:var(--bg-kpi);border-radius:9px;padding:3px;gap:2px}'
+      + '.vann-seg-ctl button{font-family:var(--font,sans-serif);font-size:12px;font-weight:500;border:0;background:transparent;color:var(--text-muted);padding:7px 14px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .12s}'
+      + '.vann-seg-ctl button.on{background:var(--bg-card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,0.08)}'
+      + '.vann-seg-ctl .dot{width:8px;height:8px;border-radius:50%}';
     document.head.appendChild(st);
   }
+  // Segmento sopra il riepilogo (sostituisce il select, che resta nascosto come stato)
+  if (!document.getElementById('vann-seg')) {
+    var seg1 = _pfBuildSegment(sel);
+    seg1.id = 'vann-seg';
+    sel.style.display = 'none';
+    sel.parentNode.insertBefore(seg1, sel);
+  }
+  // Secondo segmento accanto al pulsante "Confronta", così non si deve risalire
+  if (!document.getElementById('vann-seg2')) {
+    var btnConf = document.querySelector('[onclick="confrontaAnni()"]');
+    if (btnConf) {
+      var seg2 = _pfBuildSegment(sel);
+      seg2.id = 'vann-seg2';
+      seg2.style.marginRight = '4px';
+      btnConf.parentNode.insertBefore(seg2, btnConf);
+    }
+  }
+  _pfSyncSegmenti(sel.value || 'totale');
+}
+
+// Costruisce un segmented control collegato al select condiviso vann-vista.
+function _pfBuildSegment(sel) {
   var opts = [
     { k:'totale',    label:'Totale',    col:'#D85A30' },
     { k:'ingrosso',  label:'Ingrosso',  col:'#D4A017' },
     { k:'dettaglio', label:'Dettaglio', col:'#6B5FCC' }
   ];
-  var seg = document.createElement('div'); seg.id = 'vann-seg';
+  var seg = document.createElement('div');
+  seg.className = 'vann-seg-ctl';
   opts.forEach(function(o) {
     var b = document.createElement('button');
+    b.dataset.k = o.k;
     b.innerHTML = '<span class="dot" style="background:' + o.col + '"></span>' + o.label;
-    if ((sel.value || 'totale') === o.k) b.classList.add('on');
     b.onclick = function() {
       sel.value = o.k;
-      seg.querySelectorAll('button').forEach(function(x) { x.classList.remove('on'); });
-      b.classList.add('on');
-      filtraVistaAnnuale();
+      _pfSyncSegmenti(o.k);   // allinea entrambi i segmenti
+      filtraVistaAnnuale();   // aggiorna riepilogo + confronto
     };
     seg.appendChild(b);
   });
-  sel.style.display = 'none';
-  sel.parentNode.insertBefore(seg, sel);
+  return seg;
+}
+
+// Tiene allineati tutti i segmenti (sopra e vicino a Confronta) sullo stesso valore.
+function _pfSyncSegmenti(val) {
+  document.querySelectorAll('.vann-seg-ctl').forEach(function(seg) {
+    seg.querySelectorAll('button').forEach(function(b) {
+      b.classList.toggle('on', b.dataset.k === val);
+    });
+  });
 }
 
 // Cambio anno: azzera i campi data così caricaVenditeAnnuali ripristina i default per il nuovo anno
