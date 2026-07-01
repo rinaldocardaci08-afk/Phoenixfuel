@@ -300,7 +300,9 @@ window.pfData = {
       // FIX 26/05/2026: paginazione vera (per coerenza e prevenzione, ad oggi <1000 ma futuro a rischio)
       var entStaArr = await _pfFetchAllPages(function() {
         return sb.from('ordini').select('litri')
-          .eq('tipo_ordine','stazione_servizio').in('stato', STATI).eq('prodotto', prodotto)
+          .eq('tipo_ordine','stazione_servizio').in('stato', STATI)
+          .eq('ricevuto_stazione', true)   // FIX 01/07/2026: la cisterna si carica SOLO alla ricezione fisica ("Ricevi"). Prima contava anche gli ordini confermati-ma-non-ricevuti -> carico fantasma + doppio conteggio all'accettazione.
+          .eq('prodotto', prodotto)
           .gte('data', inizioAnno).lte('data', data);
       });
       entrate = entStaArr.reduce(function(s,o){ return s + Number(o.litri || 0); }, 0);
