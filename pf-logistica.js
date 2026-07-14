@@ -846,13 +846,23 @@ async function caricaOrdiniPerCarico() {
   const wrap = document.getElementById('ordini-per-carico');
   if (!data) { wrap.innerHTML = '<div class="loading">Seleziona una data</div>'; return; }
   try {
-    const [assegnatiRes, ordiniRes] = await Promise.all([
-      sb.from('carico_ordini').select('ordine_id'),
-      sb.from('ordini').select('*').eq('data', data).neq('stato','annullato').order('cliente')
-    ]);
-    const idsInCarico = new Set((assegnatiRes.data||[]).map(o=>o.ordine_id));
-    const ordini = ordiniRes.data;
-    if (ordiniRes.error) { console.error('Errore ordini:', ordiniRes.error); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
+    // FIX 14/07/2026 — BUG 1000 RIGHE: `carico_ordini` era letto senza paginazione né filtro.
+    // PostgREST tronca a 1000 righe: superata quella soglia, le assegnazioni più RECENTI
+    // restavano fuori e gli ordini già in un carico (con DAS!) ricomparivano qui come liberi.
+    // Ora: prima gli ordini del giorno, poi SOLO le assegnazioni di quegli ordini (.in) con
+    // paginazione vera via _pfFetchAllPages. Query piccola e completa per costruzione.
+    const { data: ordini, error: ordiniErr } = await sb.from('ordini').select('*')
+      .eq('data', data).neq('stato','annullato').order('cliente');
+    if (ordiniErr) { console.error('Errore ordini:', ordiniErr); wrap.innerHTML = '<div class="loading">Errore nel caricamento</div>'; return; }
+
+    const idsGiorno = (ordini||[]).map(o => o.id);
+    let idsInCarico = new Set();
+    if (idsGiorno.length) {
+      const assegnati = await _pfFetchAllPages(function(){
+        return sb.from('carico_ordini').select('ordine_id').in('ordine_id', idsGiorno);
+      });
+      idsInCarico = new Set((assegnati||[]).map(o => o.ordine_id));
+    }
 
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
