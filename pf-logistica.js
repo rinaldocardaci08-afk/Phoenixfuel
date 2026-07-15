@@ -933,7 +933,19 @@ function aggiornaTotaleOrdiniCarico() {
   document.getElementById('car-tot-ordini').innerHTML = html;
 }
 
-async function creaNuovoCarico() {
+// Helper anti-doppio-clic (14/07/2026): disabilita il bottone che ha lanciato
+// l'azione finché non finisce, così un secondo clic non parte. È la barriera
+// immediata; le guardie DB sopra sono la rete definitiva.
+async function _pfConBottone(fn) {
+  var btn = (typeof event !== 'undefined' && event) ? event.currentTarget : null;
+  var testo = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerHTML = '⏳ Attendere…'; }
+  try { return await fn(); }
+  finally { if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.innerHTML = testo; } }
+}
+
+async function creaNuovoCarico() { return _pfConBottone(_creaNuovoCaricoImpl); }
+async function _creaNuovoCaricoImpl() {
   const data = document.getElementById('car-data').value;
   const mezzoVal = document.getElementById('car-mezzo').value;
   const mezzoTarga = document.getElementById('car-mezzo').options[document.getElementById('car-mezzo').selectedIndex]?.text || '';
@@ -973,6 +985,18 @@ async function creaNuovoCarico() {
 // le densità nel popup (o senza popup in modalità fallback).
 async function _creaCaricoConDensita(args) {
   const { data, mezzoTarga, autista, trId, ordiniSel, mezzoId, ordiniCarico, densitaByProdotto } = args;
+
+  // GUARDIA CARICO GEMELLO (14/07/2026): se anche UNO solo degli ordini selezionati
+  // è già in un carico, blocco e avviso — invece di creare un carico gemello (bug 16/06,
+  // 2 carichi a 22 secondi). Paginato: la tabella carico_ordini cresce oltre le 1000 righe.
+  const giaAssegnati = await _pfFetchAllPages(function () {
+    return sb.from('carico_ordini').select('ordine_id').in('ordine_id', ordiniSel);
+  });
+  if (giaAssegnati && giaAssegnati.length) {
+    toast('Bloccato: ' + giaAssegnati.length + ' di questi ordini sono già in un carico. Aggiorna la lista (🔄) e riseleziona.');
+    caricaOrdiniPerCarico();
+    return;
+  }
 
   const record = {data, mezzo_id:mezzoId, mezzo_targa:mezzoTarga.split(' (')[0], autista, trasportatore_id:trId, stato:'programmato'};
   const { data: carico, error } = await sb.from('carichi').insert([record]).select().single();
@@ -1095,7 +1119,8 @@ async function _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto) {
 }
 
 // Pulsante "Genera DAS" su UN viaggio: apre popup densità → genera.
-async function pfGeneraDasViaggio(caricoId) {
+async function pfGeneraDasViaggio(caricoId) { return _pfConBottone(function () { return _pfGeneraDasViaggioImpl(caricoId); }); }
+async function _pfGeneraDasViaggioImpl(caricoId) {
   var ordiniCarico = await _pfOrdiniCarico(caricoId);
   if (!ordiniCarico.length) { toast('Nessun ordine in questo viaggio'); return; }
   if (typeof pfApriPopupDensita !== 'function') { toast('Popup densità non disponibile — premi 🔄 Aggiorna'); return; }
@@ -1604,6 +1629,29 @@ var _dasDescrProdotti = {
 
 async function _generaDasPerCarico(caricoId, ordini, targa, autista, data, densitaByProdotto) {
   if (!ordini || !ordini.length) return;
+
+  // GUARDIA ANTI-DOPPIONE (14/07/2026) — regola: un ordine = un DAS.
+  // Controlla nel DB se questi ordini hanno GIÀ dei DAS. Se sì, chiede se sostituire;
+  // se l'operatore conferma cancella i vecchi (di QUESTI ordini) prima di reinserire.
+  // Battuta 22-secondi del 16/06 + rigenerazioni del 01/07 non possono più accodare.
+  var idsOrdini = ordini.map(function (o) { return o.id; });
+  var esistentiRes = await _pfFetchAllPages(function () {
+    return sb.from('das_documenti').select('id,ordine_id').in('ordine_id', idsOrdini);
+  });
+  var esistenti = esistentiRes || [];
+  if (esistenti.length) {
+    var nOrdiniConDas = new Set(esistenti.map(function (d) { return d.ordine_id; })).size;
+    var ok = confirm('DAS già presenti per ' + nOrdiniConDas + ' ordine/i di questo carico.\n\n'
+      + 'Vuoi SOSTITUIRLI? (i vecchi verranno cancellati e rigenerati con le densità appena inserite)\n\n'
+      + 'Annulla = non tocco nulla.');
+    if (!ok) { toast('Generazione annullata — DAS esistenti mantenuti'); return { das: 0, scaricati: 0, annullato: true }; }
+    // Sostituzione: elimino i DAS pregressi SOLO di questi ordini (e le righe registro collegate).
+    var idsDasVecchi = esistenti.map(function (d) { return d.id; });
+    await sb.from('registro_movimenti').delete().in('das_id', idsDasVecchi);
+    await sb.from('das_documenti').delete().in('ordine_id', idsOrdini);
+    _auditLog('sostituisci_das', 'das_documenti', idsDasVecchi.length + ' DAS sostituiti per carico ' + caricoId);
+  }
+
   var anno = new Date(data).getFullYear();
   var dasInserts = [];
 
