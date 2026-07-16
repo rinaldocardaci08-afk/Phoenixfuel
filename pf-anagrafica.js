@@ -35,10 +35,17 @@ async function caricaConsegne() {
     const elI=document.getElementById('tot-fatt-iva-cons'); if(elI) elI.textContent=fmtE(tIva);
     const elM=document.getElementById('tot-margine-cons'); if(elM) elM.innerHTML=fmtMe(tMargine);
 
-    // ── N° FATTURA — Tappa 1 (16/07/2026): sola lettura + gating ──
-    // Mappa fattura_id → numero (mostrato LISCIO, senza /anno, come Danea).
-    var _fattNumMap = {};
+    // ── N° FATTURA — Tappa 1 (16/07/2026, fix): sola lettura + gating ──
+    // Il numero delle consegne Danea vive in fatture_emesse, raggiunta via fattura_riga_id → fatture_righe.
+    // (Le eventuali fatture interne stanno in fatture via fattura_id: tenuto come fallback.)
+    var _rigaNumMap = {};   // fattura_riga_id -> numero (fatture_emesse)
+    var _fattNumMap = {};   // fattura_id      -> numero (fatture, fallback)
+    var _rigaIds = Array.from(new Set((data||[]).map(function(r){return r.fattura_riga_id;}).filter(Boolean)));
     var _fattIds = Array.from(new Set((data||[]).map(function(r){return r.fattura_id;}).filter(Boolean)));
+    if (_rigaIds.length) {
+      var _rr = await _pfFetchAllPages(function(){ return sb.from('fatture_righe').select('id,fatture_emesse(numero)').in('id', _rigaIds); });
+      (_rr||[]).forEach(function(rg){ if (rg && rg.fatture_emesse) _rigaNumMap[rg.id] = rg.fatture_emesse.numero; });
+    }
     if (_fattIds.length) {
       var _ff = await _pfFetchAllPages(function(){ return sb.from('fatture').select('id,numero').in('id', _fattIds); });
       (_ff||[]).forEach(function(f){ _fattNumMap[f.id] = f.numero; });
@@ -72,12 +79,15 @@ async function caricaConsegne() {
       // Regola: compare solo con DAS firmato E cartellino allegati (ordine davvero processato).
       var nFattCell;
       var _fatturabile = (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio');
+      var _numFatt = null;
+      if (r.fattura_riga_id && _rigaNumMap[r.fattura_riga_id] != null) _numFatt = _rigaNumMap[r.fattura_riga_id];
+      else if (r.fattura_id && _fattNumMap[r.fattura_id] != null) _numFatt = _fattNumMap[r.fattura_id];
       if (!_fatturabile) {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9">—</div>';
       } else if (!hasDas || !hasCart) {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">In attesa di<br>DAS + cartellino</div>';
-      } else if (r.fattura_id && _fattNumMap[r.fattura_id] != null) {
-        nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_fattNumMap[r.fattura_id])) + '</span></div>';
+      } else if (_numFatt != null) {
+        nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_numFatt)) + '</span></div>';
       } else {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#888780">da inserire</div>';
       }
