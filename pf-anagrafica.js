@@ -204,7 +204,7 @@ async function pfSalvaFatturaManuale(ordineId){
     var cl = null;
     if (o.cliente_id) { var rc = await sb.from('clienti').select('*').eq('id', o.cliente_id).single(); cl = rc.data; }
     var recFatt = {
-      numero: numero, data: dataIso, anno: anno, tipo_documento: 'TD24', divisa: 'EUR',
+      numero: numero, data: dataIso, tipo_documento: 'TD24', divisa: 'EUR',   // anno = colonna generata dal DB (da data), NON inserirla
       cedente_piva: _PF_CEDENTE_PIVA, cedente_denominazione: _PF_CEDENTE_DENOM,
       cessionario_piva: cl ? (cl.piva||null) : null,
       cessionario_codfiscale: cl ? (cl.codice_fiscale||null) : null,
