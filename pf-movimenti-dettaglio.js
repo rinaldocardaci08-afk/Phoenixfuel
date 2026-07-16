@@ -342,61 +342,58 @@
     var STATI = ['confermato','consegnato'];
     var prods = cfg.prodotti;
 
-    var qAcquisti = sb.from('ordini')
-      .select('id,data,fornitore,prodotto,litri,basi_carico(nome)')
-      .eq('tipo_ordine','entrata_deposito').in('stato', STATI).in('prodotto', prods)
-      .neq('fornitore', 'Rientro merce')
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
-    var qRientri = sb.from('ordini')
-      .select('id,data,prodotto,litri,cliente,note')
-      .eq('tipo_ordine','entrata_deposito').in('stato', STATI).in('prodotto', prods)
-      .eq('fornitore', 'Rientro merce')
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
-    var qRettPlus = sb.from('rettifiche_inventario')
-      .select('id,data,differenza,causale,note,prodotto,origine')
-      .eq('tipo','deposito').eq('confermata', true).in('prodotto', prods)
-      .gt('differenza', 0)
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
-    var qVendite = sb.from('ordini')
-      .select('id,data,cliente,fornitore,prodotto,litri')
-      .eq('tipo_ordine','cliente').in('stato', STATI).in('prodotto', prods)
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
-    var qStazione = sb.from('ordini')
-      .select('id,data,fornitore,prodotto,litri')
-      .eq('tipo_ordine','stazione_servizio').in('stato', STATI).in('prodotto', prods)
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
-    var qAuto = sb.from('ordini')
-      .select('id,data,prodotto,litri,note')
-      .eq('tipo_ordine','autoconsumo').in('stato', STATI).in('prodotto', prods)
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
-    var qRettMinus = sb.from('rettifiche_inventario')
-      .select('id,data,differenza,causale,note,prodotto,origine')
-      .eq('tipo','deposito').eq('confermata', true).in('prodotto', prods)
-      .lt('differenza', 0)
-      .gte('data', cfg.da).lte('data', cfg.a).order('data');
-
+    // FIX 16/07/2026 — BUG 1000 RIGHE (fiume dei litri): queste query giravano grezze,
+    // PostgREST troncava a 1000 → uscite cliente (1398 righe) tagliate, totali sballati e
+    // il paradosso "un prodotto > tutti i prodotti". Ora paginazione vera con _pfFetchAllPages,
+    // STESSA fonte/regola di Movimenti totali e giacenza (filtro isPhoenix = solo ramo deposito Vibo).
+    var _da = cfg.da, _a = cfg.a;
     var [rAcq, rRie, rRp, rVen, rSta, rAut, rRm] = await Promise.all([
-      qAcquisti, qRientri, qRettPlus, qVendite, qStazione, qAuto, qRettMinus
+      _pfFetchAllPages(function(){ return sb.from('ordini')
+        .select('id,data,fornitore,prodotto,litri,basi_carico(nome)')
+        .eq('tipo_ordine','entrata_deposito').in('stato', STATI).in('prodotto', prods)
+        .neq('fornitore', 'Rientro merce')
+        .gte('data', _da).lte('data', _a).order('data'); }),
+      _pfFetchAllPages(function(){ return sb.from('ordini')
+        .select('id,data,prodotto,litri,cliente,note')
+        .eq('tipo_ordine','entrata_deposito').in('stato', STATI).in('prodotto', prods)
+        .eq('fornitore', 'Rientro merce')
+        .gte('data', _da).lte('data', _a).order('data'); }),
+      _pfFetchAllPages(function(){ return sb.from('rettifiche_inventario')
+        .select('id,data,differenza,causale,note,prodotto,origine')
+        .eq('tipo','deposito').eq('confermata', true).in('prodotto', prods)
+        .gt('differenza', 0)
+        .gte('data', _da).lte('data', _a).order('data'); }),
+      _pfFetchAllPages(function(){ return sb.from('ordini')
+        .select('id,data,cliente,fornitore,prodotto,litri')
+        .eq('tipo_ordine','cliente').in('stato', STATI).in('prodotto', prods)
+        .gte('data', _da).lte('data', _a).order('data'); }),
+      _pfFetchAllPages(function(){ return sb.from('ordini')
+        .select('id,data,fornitore,prodotto,litri')
+        .eq('tipo_ordine','stazione_servizio').in('stato', STATI).in('prodotto', prods)
+        .gte('data', _da).lte('data', _a).order('data'); }),
+      _pfFetchAllPages(function(){ return sb.from('ordini')
+        .select('id,data,prodotto,litri,note')
+        .eq('tipo_ordine','autoconsumo').in('stato', STATI).in('prodotto', prods)
+        .gte('data', _da).lte('data', _a).order('data'); }),
+      _pfFetchAllPages(function(){ return sb.from('rettifiche_inventario')
+        .select('id,data,differenza,causale,note,prodotto,origine')
+        .eq('tipo','deposito').eq('confermata', true).in('prodotto', prods)
+        .lt('differenza', 0)
+        .gte('data', _da).lte('data', _a).order('data'); })
     ]);
 
-    // Filtro Phoenix/Deposito lato client per vendite e stazione
-    var vendite = (rVen.data || []).filter(function(o){ return _isPhoenixFornitore(o.fornitore); });
-    var stazione = (rSta.data || []).filter(function(o){ return _isPhoenixFornitore(o.fornitore); });
+    // Filtro Phoenix/Deposito lato client per vendite e stazione (ramo deposito del fiume)
+    var vendite = (rVen || []).filter(function(o){ return _isPhoenixFornitore(o.fornitore); });
+    var stazione = (rSta || []).filter(function(o){ return _isPhoenixFornitore(o.fornitore); });
 
     return {
-      acquisti:     rAcq.data || [],
-      rientri:      rRie.data || [],
-      rettEccedenze: rRp.data || [],
+      acquisti:     rAcq || [],
+      rientri:      rRie || [],
+      rettEccedenze: rRp || [],
       vendite:      vendite,
       stazione:     stazione,
-      autoconsumo:  rAut.data || [],
-      rettCali:     rRm.data || []
+      autoconsumo:  rAut || [],
+      rettCali:     rRm || []
     };
   }
 
