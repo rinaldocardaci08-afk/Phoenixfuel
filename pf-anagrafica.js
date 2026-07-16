@@ -35,6 +35,25 @@ async function caricaConsegne() {
     const elI=document.getElementById('tot-fatt-iva-cons'); if(elI) elI.textContent=fmtE(tIva);
     const elM=document.getElementById('tot-margine-cons'); if(elM) elM.innerHTML=fmtMe(tMargine);
 
+    // ── N° FATTURA — Tappa 1 (16/07/2026): sola lettura + gating ──
+    // Mappa fattura_id → numero (mostrato LISCIO, senza /anno, come Danea).
+    var _fattNumMap = {};
+    var _fattIds = Array.from(new Set((data||[]).map(function(r){return r.fattura_id;}).filter(Boolean)));
+    if (_fattIds.length) {
+      var _ff = await _pfFetchAllPages(function(){ return sb.from('fatture').select('id,numero').in('id', _fattIds); });
+      (_ff||[]).forEach(function(f){ _fattNumMap[f.id] = f.numero; });
+    }
+    // Intestazione colonna via self-bootstrap (index.html intoccabile): inserita prima di "Azioni", una sola volta.
+    (function(){
+      var tbl = tbody.closest ? tbody.closest('table') : null;
+      var htr = tbl ? tbl.querySelector('thead tr') : null;
+      if (htr && !htr.querySelector('th[data-col="nfattura"]')) {
+        var th = document.createElement('th'); th.textContent = 'N° Fattura'; th.setAttribute('data-col','nfattura');
+        var ths = htr.querySelectorAll('th');
+        if (ths.length) htr.insertBefore(th, ths[ths.length-1]); else htr.appendChild(th);
+      }
+    })();
+
     // Render consegne con semafori DAS/Cartellino
     tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
@@ -48,6 +67,20 @@ async function caricaConsegne() {
       var cartSemaforo = hasCart
         ? '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#639922"></div><span style="font-size:9px;color:#27500A;font-weight:500">Allegato</span></div><a href="' + esc(r.cartellino_url) + '" target="_blank" style="font-size:9px;color:#639922;text-decoration:none">Apri</a></div>'
         : '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#E24B4A"></div><span style="font-size:9px;color:#791F1F;font-weight:500">Mancante</span></div><button style="font-size:9px;padding:2px 8px;background:#FCEBEB;color:#791F1F;border:0.5px solid #F09595;border-radius:5px;cursor:pointer" onclick="allegaDocConsegna(\'' + r.id + '\',\'cartellino\')">Allega</button></div>';
+
+      // ── N° Fattura — cella (Tappa 1: sola lettura) ──
+      // Regola: compare solo con DAS firmato E cartellino allegati (ordine davvero processato).
+      var nFattCell;
+      var _fatturabile = (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio');
+      if (!_fatturabile) {
+        nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9">—</div>';
+      } else if (!hasDas || !hasCart) {
+        nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">In attesa di<br>DAS + cartellino</div>';
+      } else if (r.fattura_id && _fattNumMap[r.fattura_id] != null) {
+        nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_fattNumMap[r.fattura_id])) + '</span></div>';
+      } else {
+        nFattCell = '<div style="text-align:center;font-size:9px;color:#888780">da inserire</div>';
+      }
 
       // Azioni in base al tipo ordine
       let azioniHtml = '';
@@ -65,7 +98,7 @@ async function caricaConsegne() {
         azioniHtml += '<button style="font-size:10px;padding:3px 10px;background:#D85A30;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:500" onclick="apriDirottamento(\'' + r.id + '\',null)">Dirotta</button>';
       }
 
-      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.destinazione ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + dasSemaforo + '</td><td>' + cartSemaforo + '</td><td>' + azioniHtml + '</td></tr>';
+      return '<tr><td><strong>' + esc(r.cliente) + '</strong> ' + (r.tipo_ordine !== 'cliente' ? badgeStato(r.tipo_ordine) : '') + (r.destinazione ? '<div style="font-size:10px;color:#6B5FCC">📍 ' + esc(r.destinazione) + '</div>' : '') + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + dasSemaforo + '</td><td>' + cartSemaforo + '</td><td>' + nFattCell + '</td><td>' + azioniHtml + '</td></tr>';
     }).join('');
   }
 
