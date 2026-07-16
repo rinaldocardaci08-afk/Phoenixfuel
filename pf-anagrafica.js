@@ -50,6 +50,35 @@ async function caricaConsegne() {
       var _ff = await _pfFetchAllPages(function(){ return sb.from('fatture').select('id,numero').in('id', _fattIds); });
       (_ff||[]).forEach(function(f){ _fattNumMap[f.id] = f.numero; });
     }
+    // ── Pannello fatturazione del giorno (16/07/2026, sola lettura) ──
+    // Solo clienti/stazione. Stessa regola del campo: "da agganciare" conta solo con DAS+cartellino.
+    (function(){
+      var presenti=0, fatturate=0, daAgganciare=0, inLavorazione=0;
+      (data||[]).forEach(function(r){
+        if (r.tipo_ordine!=='cliente' && r.tipo_ordine!=='stazione_servizio') return;
+        presenti++;
+        var hd=!!r.das_firmato_url, hc=!!r.cartellino_url;
+        if (!hd || !hc) { inLavorazione++; return; }
+        var num = (r.fattura_riga_id && _rigaNumMap[r.fattura_riga_id]!=null) ? _rigaNumMap[r.fattura_riga_id]
+                : (r.fattura_id && _fattNumMap[r.fattura_id]!=null) ? _fattNumMap[r.fattura_id] : null;
+        if (num!=null) fatturate++; else daAgganciare++;
+      });
+      function _pill(label,val,color){ return '<span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:0.5px solid #E4D4C2;border-radius:20px;padding:4px 12px;font-size:11px;color:'+color+'"><b style="font-size:15px">'+val+'</b> '+label+'</span>'; }
+      var html = '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#FDF7EF;border:1px solid #F0C9A8;border-radius:10px;padding:9px 13px;margin:0 0 10px">'
+        + '<span style="font-size:12px;font-weight:600;color:#8A5A2E;margin-right:2px">📋 Fatturazione del giorno</span>'
+        + _pill('presenti', presenti, '#5F5E5A')
+        + _pill('con fattura', fatturate, '#27500A')
+        + _pill('da agganciare', daAgganciare, daAgganciare>0 ? '#B02A1A' : '#888780')
+        + _pill('in lavorazione', inLavorazione, '#888780')
+        + '</div>';
+      var tbl = tbody.closest ? tbody.closest('table') : null;
+      if (tbl && tbl.parentNode) {
+        var ex = document.getElementById('pannello-fatt-consegne');
+        if (!ex) { ex = document.createElement('div'); ex.id = 'pannello-fatt-consegne'; tbl.parentNode.insertBefore(ex, tbl); }
+        ex.innerHTML = html;
+      }
+    })();
+
     // Intestazione colonna via self-bootstrap (index.html intoccabile): inserita prima di "Azioni", una sola volta.
     (function(){
       var tbl = tbody.closest ? tbody.closest('table') : null;
