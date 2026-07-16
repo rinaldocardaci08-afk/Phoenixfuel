@@ -208,9 +208,9 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
         .gte('data', dataMin).lte('data', dataMax); }),
-      // Tutti gli ordini clienti consegnati dell'ANNO (per riepilogo mensile)
+      // Tutti gli ordini clienti consegnati dell'ANNO (per riepilogo mensile) — con aggancio fattura
       _pfFetchAllPages(function(){ return sb.from('ordini')
-        .select('id, data')
+        .select('id, data, fattura_id, fattura_riga_id')
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
         .gte('data', annoMin).lte('data', annoMax); }),
@@ -258,12 +258,15 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     for (let m = 1; m <= 12; m++) {
       const mPad = String(m).padStart(2,'0');
       const prefix = `${annoInt}-${mPad}`;
-      const nOrd = ordiniAnno.filter(o => o.data && o.data.startsWith(prefix)).length;
+      const ordMese = ordiniAnno.filter(o => o.data && o.data.startsWith(prefix));
+      const nOrd = ordMese.length;
+      // Ordini del mese SENZA aggancio a una fattura (né fattura_id né fattura_riga_id) — FIX 16/07
+      const nNonAgg = ordMese.filter(o => !o.fattura_id && !o.fattura_riga_id).length;
       // Conto le RIGHE fattura del mese (non i documenti) — 1 fattura Danea può aggregare più consegne
       const nFatt = righeAnno.filter(r => r.data && r.data.startsWith(prefix)).length;
       // Skip mesi completamente vuoti (futuri)
       if (nOrd === 0 && nFatt === 0) continue;
-      riepMesi.push({ mese: m, label: meseLabel[m-1], ordini: nOrd, fatture: nFatt });
+      riepMesi.push({ mese: m, label: meseLabel[m-1], ordini: nOrd, fatture: nFatt, nonAgganciati: nNonAgg });
     }
 
     // ── 4b. Ultimo mese con fatture importate (per banner promemoria) ──
@@ -371,9 +374,11 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
                 <tbody>
                   ${riepMesi.map(r => {
                     const diff = r.ordini - r.fatture;
+                    const nonAgg = r.nonAgganciati || 0;
                     let stato, colore;
                     if (r.ordini === 0 && r.fatture === 0) { stato = '—'; colore = '#888'; }
                     else if (r.fatture === 0 && r.ordini > 0) { stato = '⏳ Non importato'; colore = '#6B5FCC'; }
+                    else if (nonAgg > 0) { stato = `⚠ ${nonAgg} da agganciare`; colore = '#B02A1A'; }
                     else if (diff === 0) { stato = '✓ Chiuso'; colore = '#639922'; }
                     else if (diff > 0) { stato = `⚠ ${diff} da fatturare`; colore = '#D4A017'; }
                     else { stato = `+${-diff} extra`; colore = '#8B6A00'; }
