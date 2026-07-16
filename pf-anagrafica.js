@@ -55,13 +55,14 @@ async function caricaConsegne() {
     (function(){
       var presenti=0, fatturate=0, daAgganciare=0, inLavorazione=0;
       (data||[]).forEach(function(r){
-        if (r.tipo_ordine!=='cliente' && r.tipo_ordine!=='stazione_servizio') return;
+        if (r.tipo_ordine!=='cliente') return;   // solo vere consegne cliente (stazione=spostamento interno, deposito=entrata)
         presenti++;
-        var hd=!!r.das_firmato_url, hc=!!r.cartellino_url;
-        if (!hd || !hc) { inLavorazione++; return; }
         var num = (r.fattura_riga_id && _rigaNumMap[r.fattura_riga_id]!=null) ? _rigaNumMap[r.fattura_riga_id]
                 : (r.fattura_id && _fattNumMap[r.fattura_id]!=null) ? _fattNumMap[r.fattura_id] : null;
-        if (num!=null) fatturate++; else daAgganciare++;
+        if (num!=null) { fatturate++; return; }   // già fatturato conta come con-fattura anche senza allegati
+        var hd=!!r.das_firmato_url, hc=!!r.cartellino_url;
+        if (!hd || !hc) { inLavorazione++; return; }
+        daAgganciare++;
       });
       function _pill(label,val,color){ return '<span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:0.5px solid #E4D4C2;border-radius:20px;padding:4px 12px;font-size:11px;color:'+color+'"><b style="font-size:15px">'+val+'</b> '+label+'</span>'; }
       var html = '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#FDF7EF;border:1px solid #F0C9A8;border-radius:10px;padding:9px 13px;margin:0 0 10px">'
@@ -107,16 +108,18 @@ async function caricaConsegne() {
       // ── N° Fattura — cella (Tappa 1: sola lettura) ──
       // Regola: compare solo con DAS firmato E cartellino allegati (ordine davvero processato).
       var nFattCell;
-      var _fatturabile = (r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio');
       var _numFatt = null;
       if (r.fattura_riga_id && _rigaNumMap[r.fattura_riga_id] != null) _numFatt = _rigaNumMap[r.fattura_riga_id];
       else if (r.fattura_id && _fattNumMap[r.fattura_id] != null) _numFatt = _fattNumMap[r.fattura_id];
-      if (!_fatturabile) {
+      if (r.tipo_ordine === 'stazione_servizio') {
+        nFattCell = '<div style="text-align:center;font-size:9px;color:#8A8780;font-style:italic;line-height:1.2">Spostamento<br>interno</div>';
+      } else if (r.tipo_ordine !== 'cliente') {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9">—</div>';
+      } else if (_numFatt != null) {
+        // FIX 17/07: già fatturato → numero SEMPRE visibile, anche senza DAS/cartellino (le fatture Danea vecchie non erano bloccate da quella regola).
+        nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_numFatt)) + '</span></div>';
       } else if (!hasDas || !hasCart) {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">In attesa di<br>DAS + cartellino</div>';
-      } else if (_numFatt != null) {
-        nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_numFatt)) + '</span></div>';
       } else {
         nFattCell = '<div style="text-align:center;display:flex;gap:4px;justify-content:center;align-items:center">'
           + '<input id="nf-inp-'+r.id+'" type="text" placeholder="numero" style="width:62px;font-size:11px;padding:3px 6px;border:0.5px solid #C9B79E;border-radius:5px;font-family:var(--font-mono)" onkeydown="if(event.key===\'Enter\')pfSalvaFatturaManuale(\''+r.id+'\')">'
@@ -168,7 +171,7 @@ async function pfSalvaFatturaManuale(ordineId){
     .eq('id', ordineId).single();
   var o = res.data;
   if (res.error || !o) { toast('Ordine non trovato'); return; }
-  if (o.tipo_ordine !== 'cliente' && o.tipo_ordine !== 'stazione_servizio') { toast('Solo consegne a cliente/stazione'); return; }
+  if (o.tipo_ordine !== 'cliente') { toast('Solo consegne a cliente'); return; }
   if (!o.das_firmato_url || !o.cartellino_url) { toast('Servono DAS firmato e cartellino prima della fattura'); return; }
   if (o.fattura_riga_id) { toast('Questa consegna ha già una fattura'); return; }
 
