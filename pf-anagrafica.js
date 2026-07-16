@@ -221,7 +221,10 @@ async function pfSalvaFatturaManuale(ordineId){
     };
     var ins = await sb.from('fatture_emesse').insert(recFatt).select('id').single();
     if (ins.error || !ins.data) { toast('Errore creazione fattura: ' + (ins.error ? ins.error.message : '')); return; }
-    if (!(await _pfAggiungiRigaEAggancia(ins.data.id, o, prezzoUnit, imponibile, aliquota))) return;
+    if (!(await _pfAggiungiRigaEAggancia(ins.data.id, o, prezzoUnit, imponibile, aliquota))) {
+      await sb.from('fatture_emesse').delete().eq('id', ins.data.id);   // rollback: nessuna fattura orfana
+      return;
+    }
   }
 
   toast('✓ Fattura ' + numero + ' agganciata alla consegna');
@@ -234,6 +237,7 @@ async function _pfAggiungiRigaEAggancia(fatturaId, o, prezzoUnit, imponibile, al
   var numLinea = ((rr.data && rr.data.numero_linea) ? rr.data.numero_linea : 0) + 1;
   var recRiga = {
     fattura_id: fatturaId, numero_linea: numLinea,
+    descrizione: o.prodotto || 'Carburante',
     prodotto_normalizzato: o.prodotto, codice_articolo: null,
     quantita: Number(o.litri||0), unita_misura: 'L',
     prezzo_unitario: prezzoUnit, prezzo_totale: imponibile, aliquota_iva: aliquota,
