@@ -118,7 +118,10 @@ async function caricaConsegne() {
       } else if (_numFatt != null) {
         nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_numFatt)) + '</span></div>';
       } else {
-        nFattCell = '<div style="text-align:center;font-size:9px;color:#888780">da inserire</div>';
+        nFattCell = '<div style="text-align:center;display:flex;gap:4px;justify-content:center;align-items:center">'
+          + '<input id="nf-inp-'+r.id+'" type="text" placeholder="numero" style="width:62px;font-size:11px;padding:3px 6px;border:0.5px solid #C9B79E;border-radius:5px;font-family:var(--font-mono)" onkeydown="if(event.key===\'Enter\')pfSalvaFatturaManuale(\''+r.id+'\')">'
+          + '<button title="Salva numero fattura" style="font-size:11px;padding:3px 8px;background:#639922;color:#fff;border:none;border-radius:5px;cursor:pointer" onclick="pfSalvaFatturaManuale(\''+r.id+'\')">✓</button>'
+          + '</div>';
       }
 
       // Azioni in base al tipo ordine
@@ -143,6 +146,111 @@ async function caricaConsegne() {
 
   // Ordini non processati (in attesa, qualsiasi data passata o oggi)
   await caricaNonProcessati();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TAPPA 2 (16/07/2026) — Inserimento manuale numero fattura da Consegne.
+// Scrive in fatture_emesse + fatture_righe (STESSA tabella di Danea; chiave univoca
+// cedente_piva+anno+numero → se poi importi il vero XML si FONDE, non si sdoppia).
+// Cedente costante Phoenix. Importi ereditati dagli ordini (mai digitati).
+// ══════════════════════════════════════════════════════════════════
+var _PF_CEDENTE_PIVA = '02744150802';
+var _PF_CEDENTE_DENOM = 'Phoenix Fuel S.r.l.';
+
+function _pfAliquotaProdotto(p){ return (String(p||'').toLowerCase().indexOf('agricolo') >= 0) ? 10 : 22; }
+function _pfPrezzoUnitOrdine(o){ return Number(o.costo_litro||0) + Number(o.trasporto_litro||0) + Number(o.margine||0); }
+function _pfIsoToIt(iso){ if(!iso) return ''; var p=String(iso).slice(0,10).split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : String(iso); }
+function _pfItToIso(it){ var p=String(it||'').trim().split('/'); if(p.length!==3) return null; var g=p[0].padStart(2,'0'), m=p[1].padStart(2,'0'), a=p[2]; return /^\d{4}$/.test(a) ? a+'-'+m+'-'+g : null; }
+
+async function pfSalvaFatturaManuale(ordineId){
+  var res = await sb.from('ordini')
+    .select('id,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,data,das_firmato_url,cartellino_url,tipo_ordine,fattura_riga_id')
+    .eq('id', ordineId).single();
+  var o = res.data;
+  if (res.error || !o) { toast('Ordine non trovato'); return; }
+  if (o.tipo_ordine !== 'cliente' && o.tipo_ordine !== 'stazione_servizio') { toast('Solo consegne a cliente/stazione'); return; }
+  if (!o.das_firmato_url || !o.cartellino_url) { toast('Servono DAS firmato e cartellino prima della fattura'); return; }
+  if (o.fattura_riga_id) { toast('Questa consegna ha già una fattura'); return; }
+
+  var inp = document.getElementById('nf-inp-' + ordineId);
+  var numero = inp ? String(inp.value||'').trim() : '';
+  if (!numero) { toast('Scrivi il numero fattura'); return; }
+
+  var dataIn = prompt('Data della fattura ' + numero + ' (GG/MM/AAAA):', _pfIsoToIt(o.data));
+  if (!dataIn) return;
+  var dataIso = _pfItToIso(dataIn);
+  if (!dataIso) { toast('Data non valida — usa GG/MM/AAAA'); return; }
+  var anno = parseInt(dataIso.slice(0,4), 10);
+
+  var prezzoUnit = _pfPrezzoUnitOrdine(o);
+  var imponibile = prezzoUnit * Number(o.litri||0);
+  var aliquota = _pfAliquotaProdotto(o.prodotto);
+  var iva = imponibile * aliquota / 100;
+
+  var fx = await sb.from('fatture_emesse')
+    .select('id,cliente_id,cessionario_denominazione')
+    .eq('cedente_piva', _PF_CEDENTE_PIVA).eq('anno', anno).eq('numero', numero).maybeSingle();
+  var fatt = fx.data;
+
+  if (fatt) {
+    if (fatt.cliente_id && o.cliente_id && fatt.cliente_id !== o.cliente_id) {
+      if (!confirm('⚠️ La fattura ' + numero + ' è intestata a "' + (fatt.cessionario_denominazione||'?') + '", ma questa consegna è di "' + o.cliente + '".\n\nProbabile errore di numero. Agganciare lo stesso?')) return;
+    } else if (!confirm('La fattura ' + numero + ' esiste già (' + (fatt.cessionario_denominazione||o.cliente) + ').\n\nAgganci anche questa consegna alla stessa fattura?')) {
+      return;
+    }
+    if (!(await _pfAggiungiRigaEAggancia(fatt.id, o, prezzoUnit, imponibile, aliquota))) return;
+    await _pfRicalcolaTotaliFattura(fatt.id);
+  } else {
+    var cl = null;
+    if (o.cliente_id) { var rc = await sb.from('clienti').select('*').eq('id', o.cliente_id).single(); cl = rc.data; }
+    var recFatt = {
+      numero: numero, data: dataIso, anno: anno, tipo_documento: 'TD24', divisa: 'EUR',
+      cedente_piva: _PF_CEDENTE_PIVA, cedente_denominazione: _PF_CEDENTE_DENOM,
+      cessionario_piva: cl ? (cl.piva||null) : null,
+      cessionario_codfiscale: cl ? (cl.codice_fiscale||null) : null,
+      cessionario_denominazione: cl ? (cl.nome||o.cliente) : o.cliente,
+      cessionario_indirizzo: cl ? (cl.indirizzo||null) : null,
+      cessionario_cap: cl ? (cl.cap||null) : null,
+      cessionario_comune: cl ? (cl.citta||null) : null,
+      cessionario_provincia: cl ? (cl.provincia||null) : null,
+      cessionario_nazione: 'IT',
+      importo_totale: imponibile + iva, imponibile_totale: imponibile, iva_totale: iva,
+      cliente_id: o.cliente_id || null,
+      match_status: 'matched', match_score: 5, match_details: null,
+      note: 'Inserita manualmente da Consegne'
+    };
+    var ins = await sb.from('fatture_emesse').insert(recFatt).select('id').single();
+    if (ins.error || !ins.data) { toast('Errore creazione fattura: ' + (ins.error ? ins.error.message : '')); return; }
+    if (!(await _pfAggiungiRigaEAggancia(ins.data.id, o, prezzoUnit, imponibile, aliquota))) return;
+  }
+
+  toast('✓ Fattura ' + numero + ' agganciata alla consegna');
+  if (typeof _auditLog === 'function') _auditLog('fattura_manuale', 'fatture_emesse', 'Numero ' + numero + ' → ordine ' + ordineId);
+  await caricaConsegne();
+}
+
+async function _pfAggiungiRigaEAggancia(fatturaId, o, prezzoUnit, imponibile, aliquota){
+  var rr = await sb.from('fatture_righe').select('numero_linea').eq('fattura_id', fatturaId).order('numero_linea', {ascending:false}).limit(1).maybeSingle();
+  var numLinea = ((rr.data && rr.data.numero_linea) ? rr.data.numero_linea : 0) + 1;
+  var recRiga = {
+    fattura_id: fatturaId, numero_linea: numLinea,
+    prodotto_normalizzato: o.prodotto, codice_articolo: null,
+    quantita: Number(o.litri||0), unita_misura: 'L',
+    prezzo_unitario: prezzoUnit, prezzo_totale: imponibile, aliquota_iva: aliquota,
+    ordine_id: o.id, ignora_match: false
+  };
+  var ri = await sb.from('fatture_righe').insert(recRiga).select('id').single();
+  if (ri.error || !ri.data) { toast('Errore riga fattura: ' + (ri.error ? ri.error.message : '')); return false; }
+  var up = await sb.from('ordini').update({ fattura_id: fatturaId, fattura_riga_id: ri.data.id, aggancio_manuale: true, stato: 'consegnato' }).eq('id', o.id);
+  if (up.error) { toast('Errore aggancio ordine: ' + up.error.message); return false; }
+  return true;
+}
+
+async function _pfRicalcolaTotaliFattura(fatturaId){
+  var righe = await _pfFetchAllPages(function(){ return sb.from('fatture_righe').select('prezzo_totale,aliquota_iva').eq('fattura_id', fatturaId); });
+  var imp = 0, iva = 0;
+  (righe||[]).forEach(function(r){ var pt = Number(r.prezzo_totale||0); imp += pt; iva += pt * Number(r.aliquota_iva||0) / 100; });
+  await sb.from('fatture_emesse').update({ imponibile_totale: imp, iva_totale: iva, importo_totale: imp + iva }).eq('id', fatturaId);
 }
 
 async function confermaOrdineConsegna(ordineId) {
