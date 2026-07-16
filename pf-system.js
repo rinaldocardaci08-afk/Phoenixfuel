@@ -63,7 +63,7 @@ async function caricaBacheca() {
     if (a.chiave_dedup) contaDedup[a.chiave_dedup] = (contaDedup[a.chiave_dedup] || 0) + 1;
   });
   // Carica chiavi silenziate
-  var { data: silList } = await sb.from('avvisi_silenziati').select('chiave');
+  var silList = await _pfFetchAllPages(function(){ return sb.from('avvisi_silenziati').select('chiave'); });
   var silKeys = {};
   (silList || []).forEach(function(s) { silKeys[s.chiave] = true; });
 
@@ -150,7 +150,7 @@ async function silenziaAvviso(chiave, esempio) {
 }
 
 async function riattivaAvvisi() {
-  var { data: sil } = await sb.from('avvisi_silenziati').select('*').order('created_at', { ascending: false });
+  var sil = await _pfFetchAllPages(function(){ return sb.from('avvisi_silenziati').select('*').order('created_at', { ascending: false }); });
   if (!sil || !sil.length) { toast('Nessun avviso silenziato'); return; }
   var h = '<div style="font-size:15px;font-weight:500;margin-bottom:12px">Avvisi silenziati (' + sil.length + ')</div>';
   h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">Clicca 🔔 per riattivare un avviso</div>';

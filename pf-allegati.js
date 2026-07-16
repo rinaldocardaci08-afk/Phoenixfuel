@@ -55,13 +55,13 @@ async function aggiornaIndicatoreStorage() {
   if (!container) return;
 
   var [resAll, resDoc] = await Promise.all([
-    sb.from('allegati').select('dimensione_bytes'),
-    sb.from('documenti_ordine').select('id')
+    _pfFetchAllPages(function(){ return sb.from('allegati').select('dimensione_bytes'); }),
+    _pfFetchAllPages(function(){ return sb.from('documenti_ordine').select('id'); })
   ]);
 
   var totBytes = 0;
-  (resAll.data || []).forEach(function(r) { totBytes += Number(r.dimensione_bytes || 0); });
-  var nDocOrdine = (resDoc.data || []).length;
+  (resAll || []).forEach(function(r) { totBytes += Number(r.dimensione_bytes || 0); });
+  var nDocOrdine = (resDoc || []).length;
   totBytes += nDocOrdine * 300000;
 
   var usatoMB = totBytes / (1024 * 1024);

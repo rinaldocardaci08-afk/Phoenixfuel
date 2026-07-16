@@ -203,34 +203,34 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     const [ordiniRes, ordiniAnnoRes, fattureAnnoRes, righeAnnoRes] = await Promise.all([
       // Ordini clienti consegnati nel periodo selezionato.
       // fattura_id popolato = già fatturato. IS NULL = da fatturare.
-      sb.from('ordini')
+      _pfFetchAllPages(function(){ return sb.from('ordini')
         .select('id, data, cliente, cliente_id, prodotto, litri, costo_litro, trasporto_litro, margine, iva, stato, fattura_id')
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
-        .gte('data', dataMin).lte('data', dataMax),
+        .gte('data', dataMin).lte('data', dataMax); }),
       // Tutti gli ordini clienti consegnati dell'ANNO (per riepilogo mensile)
-      sb.from('ordini')
+      _pfFetchAllPages(function(){ return sb.from('ordini')
         .select('id, data')
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
-        .gte('data', annoMin).lte('data', annoMax),
+        .gte('data', annoMin).lte('data', annoMax); }),
       // Tutte le fatture dell'ANNO (per riepilogo mensile)
-      sb.from('fatture_emesse')
+      _pfFetchAllPages(function(){ return sb.from('fatture_emesse')
         .select('id, data')
-        .gte('data', annoMin).lte('data', annoMax),
-      // Tutte le righe fattura "vere" (con prodotto+quantità) dell'ANNO
+        .gte('data', annoMin).lte('data', annoMax); }),
+      // Tutte le righe fattura "vere" (con prodotto+quantità) dell'ANNO — FIX 16/07 paginazione (bug 1000 righe)
       // Il riepilogo deve confrontare ordini ↔ righe fattura, non documenti fattura,
       // perché 1 fattura Danea può aggregare più consegne (più ordini PhoenixFuel).
-      sb.from('fatture_righe')
+      _pfFetchAllPages(function(){ return sb.from('fatture_righe')
         .select('id, fattura_id, prodotto_normalizzato, quantita, ignora_match')
         .not('prodotto_normalizzato', 'is', null)
-        .gt('quantita', 0),
+        .gt('quantita', 0); }),
     ]);
 
-    const ordini = ordiniRes.data || [];
-    const ordiniAnno = ordiniAnnoRes.data || [];
-    const fattureAnno = fattureAnnoRes.data || [];
-    const righeAnnoTutte = righeAnnoRes.data || [];
+    const ordini = ordiniRes || [];
+    const ordiniAnno = ordiniAnnoRes || [];
+    const fattureAnno = fattureAnnoRes || [];
+    const righeAnnoTutte = righeAnnoRes || [];
 
     // Indicizzo righe per fattura_id e mese (la riga eredita la data dalla fattura)
     const fattDataById = new Map();

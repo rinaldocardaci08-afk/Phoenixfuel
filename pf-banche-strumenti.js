@@ -74,10 +74,10 @@ async function _strLoadData() {
   // Strumenti + movimenti in parallelo
   const [rs, rm] = await Promise.all([
     sb.from('banche_strumenti_finanziari').select('*').order('codice'),
-    sb.from('banche_strumenti_movimenti').select('*').order('data', {ascending:true})
+    _pfFetchAllPages(function(){ return sb.from('banche_strumenti_movimenti').select('*').order('data', {ascending:true}); })
   ]);
   _strStrumentiCache = rs.data || [];
-  _strMovimentiCache = rm.data || [];
+  _strMovimentiCache = rm || [];
 }
 
 // ── HELPERS DATI ───────────────────────────────────────────────────────────
