@@ -134,7 +134,7 @@ async function caricaConsegne() {
       } else if (r.stato === 'in attesa' || r.stato === 'programmato') {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" title="Conferma ordine (scarica cisterna)" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
       } else if (r.stato === 'consegnato') {
-        azioniHtml += '<button class="btn-edit" style="color:#D85A30" title="Annulla consegna (rimuove DAS firmato)" onclick="annullaConsegnaOrdine(\'' + r.id + '\')">↩️</button> ';
+        azioniHtml += '<button class="btn-edit" style="color:#D85A30" title="Annulla consegna (rimuove DAS firmato)" onclick="annullaConsegnaOrdine(\'' + r.id + '\')">❌</button> ';
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
       azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
