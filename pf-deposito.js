@@ -2637,14 +2637,42 @@ function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale) {
   html += '⚠️ Questa operazione modifica il costo medio ponderato su tutte le cisterne del gruppo. ';
   html += 'Usare solo per correggere valori errati.</div>';
   html += '<div class="form-group"><label>Nuovo CMP (€/L)</label>';
-  html += '<input type="number" id="cmp-nuovo-val" value="' + Number(cmpAttuale).toFixed(6) + '" step="0.000001" ';
+  html += '<input type="number" id="cmp-nuovo-val" value="' + Number(cmpAttuale).toFixed(6) + '" step="0.000001" oninput="_cmpModAggiornaPrezzi()" ';
   html += 'style="font-family:var(--font-mono);font-size:18px;font-weight:600;padding:10px 14px;width:100%" /></div>';
+  html += '<div style="display:flex;gap:8px;margin-top:14px">';
+  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:8px 10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#185FA5;font-weight:500">Prezzo · ultima marg.</div><div id="cmp-mod-ultima" style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#185FA5">—</div></div>';
+  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:8px 10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#0C447C;font-weight:500">Prezzo · marg. cercata</div><div id="cmp-mod-cercata" style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#0C447C">—</div></div>';
+  html += '</div>';
   html += '<div style="display:flex;gap:8px;margin-top:16px">';
   html += '<button class="btn-primary" style="flex:1;background:#D85A30;padding:12px" ';
   html += 'onclick="_confermaCMPDeposito(\'' + cisterneIds + '\',\'' + esc(prodNome) + '\')" >💾 Salva nuovo CMP</button>';
   html += '</div>';
   apriModal(html);
+  // Indicazione prezzo live sul nuovo CMP che stai digitando
+  var _piM = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti.find(function(p){ return p.nome === prodNome; }) : null;
+  window._cmpModObiettivo = (_piM && _piM.margine_obiettivo != null) ? Number(_piM.margine_obiettivo) : null;
+  window._cmpModUltimoMarg = null;
+  _cmpModAggiornaPrezzi();
+  (async function(){
+    try {
+      var _pz = await sb.from('stazione_prezzi').select('prezzo_litro,data').eq('prodotto', prodNome).order('data',{ascending:false}).limit(1).maybeSingle();
+      var _co = await sb.from('stazione_costi').select('costo_litro,data').eq('prodotto', prodNome).order('data',{ascending:false}).limit(1).maybeSingle();
+      if (_pz.data && _co.data) window._cmpModUltimoMarg = (Number(_pz.data.prezzo_litro)/1.22) - Number(_co.data.costo_litro);
+      _cmpModAggiornaPrezzi();
+    } catch(e){}
+  })();
 }
+
+function _cmpModAggiornaPrezzi(){
+  var inp = document.getElementById('cmp-nuovo-val');
+  if (!inp) return;
+  var cmp = parseFloat(inp.value);
+  var bu = document.getElementById('cmp-mod-ultima');
+  var bc = document.getElementById('cmp-mod-cercata');
+  if (bu) bu.textContent = (!isNaN(cmp) && window._cmpModUltimoMarg != null) ? '€ ' + (cmp + window._cmpModUltimoMarg).toFixed(4).replace('.', ',') : '—';
+  if (bc) bc.textContent = (!isNaN(cmp) && window._cmpModObiettivo != null) ? '€ ' + (cmp + window._cmpModObiettivo).toFixed(4).replace('.', ',') : '—';
+}
+window._cmpModAggiornaPrezzi = _cmpModAggiornaPrezzi;
 
 async function _confermaCMPDeposito(cisterneIdsStr, prodNome) {
   // Guardia: stesso controllo permesso anche al commit (difesa in profondità)
