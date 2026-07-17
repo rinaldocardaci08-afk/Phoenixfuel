@@ -260,6 +260,56 @@ async function _pfRicalcolaTotaliFattura(fatturaId){
   await sb.from('fatture_emesse').update({ imponibile_totale: imp, iva_totale: iva, importo_totale: imp + iva }).eq('id', fatturaId);
 }
 
+// Recupera il numero fattura agganciato a un ordine (per i messaggi).
+async function _pfNumeroFatturaOrdine(ordine){
+  try {
+    if (ordine.fattura_riga_id) {
+      var rg = await sb.from('fatture_righe').select('fatture_emesse(numero)').eq('id', ordine.fattura_riga_id).maybeSingle();
+      if (rg.data && rg.data.fatture_emesse) return rg.data.fatture_emesse.numero;
+    }
+    if (ordine.fattura_id) {
+      var fe = await sb.from('fatture_emesse').select('numero').eq('id', ordine.fattura_id).maybeSingle();
+      if (fe.data) return fe.data.numero;
+    }
+  } catch(e){}
+  return '?';
+}
+
+// STORNO NOTA CREDITO (17/07): sgancia la consegna dalla fattura e brucia il numero.
+// Se la fattura conteneva solo questa consegna → marcata "stornata" (annullata), totali a 0.
+// Se aggregava altre consegne → tolgo solo questa riga, ricalcolo i totali, la fattura resta attiva.
+// In entrambi i casi il record fattura_emesse PERSISTE → il numero resta occupato, non riusabile.
+async function _pfStornaConsegnaFatturata(ordine, num){
+  var fattId = ordine.fattura_id || null;
+  if (ordine.fattura_riga_id) {
+    var rg = await sb.from('fatture_righe').select('id,fattura_id').eq('id', ordine.fattura_riga_id).maybeSingle();
+    if (rg.data) {
+      fattId = fattId || rg.data.fattura_id;
+      await sb.from('fatture_righe').delete().eq('id', ordine.fattura_riga_id);
+    }
+  }
+  // Sgancia l'ordine (i null su allegati/stato li fa il flusso principale subito dopo).
+  await sb.from('ordini').update({ fattura_id: null, fattura_riga_id: null, aggancio_manuale: false }).eq('id', ordine.id);
+  if (fattId) {
+    var oggiIt = _pfIsoToIt(new Date().toISOString().slice(0,10));
+    var rimaste = await _pfFetchAllPages(function(){ return sb.from('fatture_righe').select('prezzo_totale,aliquota_iva').eq('fattura_id', fattId); });
+    if (!rimaste || rimaste.length === 0) {
+      await sb.from('fatture_emesse').update({
+        match_status: 'annullata', importo_totale: 0, imponibile_totale: 0, iva_totale: 0,
+        note: 'STORNATA con nota di credito il ' + oggiIt + ' — consegna ' + (ordine.cliente || '')
+      }).eq('id', fattId);
+    } else {
+      var imp = 0, iva = 0;
+      rimaste.forEach(function(r){ var pt = Number(r.prezzo_totale||0); imp += pt; iva += pt * Number(r.aliquota_iva||0) / 100; });
+      await sb.from('fatture_emesse').update({
+        imponibile_totale: imp, iva_totale: iva, importo_totale: imp + iva,
+        note: 'Nota di credito parziale il ' + oggiIt + ' — sganciata consegna ' + (ordine.cliente || '')
+      }).eq('id', fattId);
+    }
+  }
+  if (typeof _auditLog === 'function') _auditLog('storno_nota_credito', 'fatture_emesse', 'Numero ' + num + ' — sganciata consegna ordine ' + ordine.id + ' (numero bruciato)');
+}
+
 async function confermaOrdineConsegna(ordineId) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) { toast('Ordine non trovato'); return; }
@@ -297,7 +347,15 @@ async function annullaConsegnaOrdine(ordineId) {
   if (!ordine) { toast('Ordine non trovato'); return; }
   if (ordine.stato !== 'consegnato') { toast('L\'ordine non è in stato consegnato'); return; }
 
-  if (!confirm('Annullare la consegna?\n\nVerranno rimossi:\n• DAS firmato\n• Cartellino (se presente)\n\nL\'ordine tornerà in stato \'confermato\' e non sarà più fatturabile finché non carichi un nuovo DAS firmato.\n\nContinuare?')) return;
+  // GUARDIA NOTA CREDITO (17/07): se la consegna è GIÀ FATTURATA non si annulla alla leggera.
+  var _giaFatt = ordine.fattura_id || ordine.fattura_riga_id;
+  if (_giaFatt) {
+    var _numF = await _pfNumeroFatturaOrdine(ordine);
+    if (!confirm('⚠ Questa consegna è GIÀ FATTURATA (numero ' + _numF + ').\n\nSi può annullare SOLO se hai già emesso una NOTA DI CREDITO.\n\nProseguendo: rimuovo DAS e cartellino, la consegna torna \'confermato\' e viene sganciata, e il numero ' + _numF + ' resta BRUCIATO (la fattura viene marcata "stornata", non riutilizzabile).\n\nHai emesso la nota di credito? Continuare?')) return;
+    await _pfStornaConsegnaFatturata(ordine, _numF);
+  } else {
+    if (!confirm('Annullare la consegna?\n\nVerranno rimossi:\n• DAS firmato\n• Cartellino (se presente)\n\nL\'ordine tornerà in stato \'confermato\' e non sarà più fatturabile finché non carichi un nuovo DAS firmato.\n\nContinuare?')) return;
+  }
 
   // Rimuovi file DAS firmato dallo Storage (se presente)
   if (ordine.das_firmato_url) {
