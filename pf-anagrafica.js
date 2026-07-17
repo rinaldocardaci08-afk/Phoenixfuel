@@ -50,6 +50,13 @@ async function caricaConsegne() {
       var _ff = await _pfFetchAllPages(function(){ return sb.from('fatture').select('id,numero').in('id', _fattIds); });
       (_ff||[]).forEach(function(f){ _fattNumMap[f.id] = f.numero; });
     }
+    // Numero fattura FORNITORE (entrate deposito) via fattura_ricevuta_id → fatture_ricevute.numero_fattura
+    var _fornNumMap = {};
+    var _fornIds = Array.from(new Set((data||[]).map(function(r){return r.fattura_ricevuta_id;}).filter(Boolean)));
+    if (_fornIds.length) {
+      var _fr = await _pfFetchAllPages(function(){ return sb.from('fatture_ricevute').select('id,numero_fattura').in('id', _fornIds); });
+      (_fr||[]).forEach(function(f){ _fornNumMap[f.id] = f.numero_fattura; });
+    }
     // ── Pannello fatturazione del giorno (16/07/2026, sola lettura) ──
     // Solo clienti/stazione. Stessa regola del campo: "da agganciare" conta solo con DAS+cartellino.
     (function(){
@@ -113,6 +120,13 @@ async function caricaConsegne() {
       else if (r.fattura_id && _fattNumMap[r.fattura_id] != null) _numFatt = _fattNumMap[r.fattura_id];
       if (r.tipo_ordine === 'stazione_servizio') {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#8A8780;font-style:italic;line-height:1.2">Spostamento<br>interno</div>';
+      } else if (r.tipo_ordine === 'entrata_deposito') {
+        var _numForn = (r.fattura_ricevuta_id && _fornNumMap[r.fattura_ricevuta_id] != null) ? _fornNumMap[r.fattura_ricevuta_id] : null;
+        if (_numForn != null) {
+          nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#7A1F1F;background:#FCEBEB;padding:3px 9px;border-radius:5px">' + esc(String(_numForn)) + '</span><div style="font-size:8px;color:#A32D2D;margin-top:1px;line-height:1">fatt. fornitore</div></div>';
+        } else {
+          nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">fornitore<br>—</div>';
+        }
       } else if (r.tipo_ordine !== 'cliente') {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9">—</div>';
       } else if (_numFatt != null) {
