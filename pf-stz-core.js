@@ -123,19 +123,39 @@ async function caricaOrdiniDaCaricare() {
   if (!el) return;
   if (!ordini || !ordini.length) { el.innerHTML = ''; return; }
 
+  // Ultimo margine per prodotto = (ultimo prezzo vendita ÷ 1,22) − ultimo costo, dall'ultimo giorno registrato di quel prodotto
+  var _umMarg = {};
+  try {
+    var _pz = await sb.from('stazione_prezzi').select('prodotto,prezzo_litro,data').order('data',{ascending:false}).limit(60);
+    var _co = await sb.from('stazione_costi').select('prodotto,costo_litro,data').order('data',{ascending:false}).limit(60);
+    var _lastPz = {}, _lastCo = {};
+    (_pz.data||[]).forEach(function(p){ if(_lastPz[p.prodotto]==null) _lastPz[p.prodotto]=Number(p.prezzo_litro); });
+    (_co.data||[]).forEach(function(c){ if(_lastCo[c.prodotto]==null) _lastCo[c.prodotto]=Number(c.costo_litro); });
+    Object.keys(_lastPz).forEach(function(prod){ if(_lastCo[prod]!=null) _umMarg[prod] = (_lastPz[prod]/1.22) - _lastCo[prod]; });
+  } catch(e){}
+
   let html = '<div class="card" style="border-left:4px solid #6B5FCC">';
   html += '<div class="card-title" style="color:#6B5FCC">📦 Ordini in arrivo — da ricevere in cisterna (' + ordini.length + ')</div>';
-  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Stato</th><th></th></tr></thead><tbody>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Stato</th><th>Costo sbarcato</th><th>Prezzo (ultimo marg.)</th><th>Prezzo (marg. cercata)</th><th></th></tr></thead><tbody>';
   ordini.forEach(function(r) {
     const dataFmt = new Date(r.data).toLocaleDateString('it-IT');
     const _pi = cacheProdotti.find(function(p) { return p.nome === r.prodotto; });
     const colore = _pi ? _pi.colore : '#888';
+    var _cs = Number(r.costo_litro||0) + Number(r.trasporto_litro||0);
+    var _csStr = _cs > 0 ? '€ ' + _cs.toFixed(3).replace('.', ',') : '—';
+    var _mo = (_pi && _pi.margine_obiettivo != null) ? Number(_pi.margine_obiettivo) : null;
+    var _ptStr = (_mo != null && _cs > 0) ? '€ ' + (_cs + _mo).toFixed(4).replace('.', ',') : '—';
+    var _umm = _umMarg[r.prodotto];
+    var _pumStr = (_umm != null && _cs > 0) ? '€ ' + (_cs + _umm).toFixed(4).replace('.', ',') : '—';
     html += '<tr>' +
       '<td>' + dataFmt + '</td>' +
       '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
       '<td>' + esc(r.fornitore) + '</td>' +
       '<td>' + badgeStato(r.stato) + '</td>' +
+      '<td style="font-family:var(--font-mono)">' + _csStr + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#3B6D11;font-weight:600">' + _pumStr + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#B45309;font-weight:600">' + _ptStr + '</td>' +
       '<td><button class="btn-primary" style="font-size:11px;padding:4px 12px;background:#639922" onclick="riceviOrdineStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto) + '\')">📦 Ricevi</button></td>' +
       '</tr>';
   });
