@@ -1,5 +1,64 @@
 // VERSIONE 26/05/2026 a - FIX BUG LIMIT 1000: paginazione vera _pfFetchAllPages
 // PhoenixFuel — Stazione: Report mensili, Stampe, Export Excel
+// ── Grafici Report Stazione: CMP netto vs prezzo di vendita netto (mese + anno) ──
+var _stzGrafCharts = {};
+var _stzGrafProdotto = 'Gasolio Autotrazione';
+
+async function _stzGraficiPrezzi(prodotto){
+  if (prodotto) _stzGrafProdotto = prodotto;
+  var panel = document.getElementById('stz-report');
+  if (!panel) return;
+  var cont = document.getElementById('stz-graf-prezzi');
+  if (!cont) {
+    cont = document.createElement('div');
+    cont.id = 'stz-graf-prezzi';
+    cont.className = 'card';
+    cont.style.marginTop = '16px';
+    panel.appendChild(cont);
+  }
+  var isG = _stzGrafProdotto.toLowerCase().indexOf('gasolio') >= 0;
+  cont.innerHTML =
+    '<div class="card-title">📈 CMP e prezzo di vendita (netto IVA)</div>'
+    + '<div style="display:flex;gap:8px;margin-bottom:14px">'
+    + '<button onclick="_stzGraficiPrezzi(\'Gasolio Autotrazione\')" style="font-size:12px;padding:6px 16px;border-radius:8px;cursor:pointer;border:0.5px solid var(--border);background:' + (isG?'#B45309':'transparent') + ';color:' + (isG?'#fff':'var(--text)') + ';font-weight:500">Gasolio</button>'
+    + '<button onclick="_stzGraficiPrezzi(\'Benzina\')" style="font-size:12px;padding:6px 16px;border-radius:8px;cursor:pointer;border:0.5px solid var(--border);background:' + (!isG?'#185FA5':'transparent') + ';color:' + (!isG?'#fff':'var(--text)') + ';font-weight:500">Benzina</button>'
+    + '</div>'
+    + '<div style="font-size:12px;font-weight:500;margin-bottom:6px;color:var(--text)">Mese corrente</div>'
+    + '<div style="position:relative;height:220px;margin-bottom:22px"><canvas id="stz-graf-mese"></canvas></div>'
+    + '<div style="font-size:12px;font-weight:500;margin-bottom:6px;color:var(--text)">Anno in corso</div>'
+    + '<div style="position:relative;height:220px"><canvas id="stz-graf-anno"></canvas></div>';
+  var anno = new Date().getFullYear();
+  var inizio = anno + '-01-01', fine = anno + '-12-31';
+  var cmpRes = await sb.from('stazione_cmp_storico').select('data,cmp_nuovo').eq('sede','stazione_oppido').eq('prodotto', _stzGrafProdotto).gte('data', inizio).lte('data', fine).order('data',{ascending:true});
+  var przRes = await sb.from('stazione_prezzi').select('data,prezzo_litro').eq('prodotto', _stzGrafProdotto).gte('data', inizio).lte('data', fine).order('data',{ascending:true});
+  var cmpByDate = {}; (cmpRes.data||[]).forEach(function(r){ if(r.data) cmpByDate[r.data] = Number(r.cmp_nuovo); });
+  var przByDate = {}; (przRes.data||[]).forEach(function(r){ if(r.data) przByDate[r.data] = Number(r.prezzo_litro)/1.22; });
+  var dateSet = {}; Object.keys(cmpByDate).forEach(function(d){dateSet[d]=1;}); Object.keys(przByDate).forEach(function(d){dateSet[d]=1;});
+  var dates = Object.keys(dateSet).sort();
+  function serie(map){ var last=null; return dates.map(function(d){ if(map[d]!=null) last=map[d]; return last; }); }
+  var cmpSerie = serie(cmpByDate), przSerie = serie(przByDate);
+  var prefMese = anno + '-' + String(new Date().getMonth()+1).padStart(2,'0');
+  var idxM = []; dates.forEach(function(d,i){ if(d.indexOf(prefMese)===0) idxM.push(i); });
+  _stzRenderGrafico('stz-graf-mese', idxM.map(function(i){return dates[i];}), idxM.map(function(i){return cmpSerie[i];}), idxM.map(function(i){return przSerie[i];}));
+  _stzRenderGrafico('stz-graf-anno', dates, cmpSerie, przSerie);
+}
+
+function _stzRenderGrafico(canvasId, labels, cmp, vendita){
+  var ctx = document.getElementById(canvasId);
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (_stzGrafCharts[canvasId]) { _stzGrafCharts[canvasId].destroy(); }
+  var lab = labels.map(function(d){ var p=String(d).split('-'); return p[2]+'/'+p[1]; });
+  _stzGrafCharts[canvasId] = new Chart(ctx.getContext('2d'), {
+    type:'line',
+    data:{ labels:lab, datasets:[
+      { label:'CMP netto', data:cmp, borderColor:'#185FA5', backgroundColor:'transparent', tension:0.2, pointRadius:2, borderWidth:2, spanGaps:true },
+      { label:'Vendita netta', data:vendita, borderColor:'#639922', backgroundColor:'transparent', tension:0.2, pointRadius:2, borderWidth:2, spanGaps:true }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' } }, scales:{ y:{ ticks:{ callback:function(v){ return '€ '+Number(v).toFixed(3); } } } } }
+  });
+}
+window._stzGraficiPrezzi = _stzGraficiPrezzi;
+
 function initReportStazione() {
   var annoCorr = new Date().getFullYear();
   var meseCorr = String(new Date().getMonth()+1).padStart(2,'0');
@@ -20,6 +79,7 @@ function initReportStazione() {
   });
   var fgData = document.getElementById('fg-data');
   if (fgData && !fgData.value) fgData.value = oggiISO;
+  if (typeof _stzGraficiPrezzi === 'function') _stzGraficiPrezzi();
 }
 
 async function _caricaDatiCassaMese(anno, mese) {
