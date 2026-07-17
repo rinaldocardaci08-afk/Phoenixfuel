@@ -208,7 +208,7 @@ async function caricaUtentiCompleto() {
   tbody.innerHTML=data.map(r => {
     const post = r.postazione || 'ufficio';
     const postSelect = r.ruolo==='cliente' ? '<span style="font-size:11px;color:var(--text-muted)">—</span>' : '<select onchange="cambiaPostazione(\''+r.id+'\',this.value)" style="font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + postOptions.replace('value="'+post+'"','value="'+post+'" selected') + '</select>';
-    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td>' + postSelect + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>';
+    return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.email) + '</td><td>' + badgeRuolo(r.ruolo) + '</td><td>' + postSelect + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.clienti?.nome||'—') + '</td><td>' + (r.attivo?'<span class="badge green">Attivo</span>':'<span class="badge red">Disattivo</span>') + '</td><td>' + (r.ruolo!=='admin'&&r.ruolo!=='cliente'?'<button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriModalePermessi(\'' + r.id + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">Permessi</button>':'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px;background:#6B5FCC" onclick="_rigeneraPasswordUtente(\'' + esc(r.email) + '\',\'' + esc(r.nome).replace(/'/g,"\\'") + '\')">🔑 Reset</button> <button class="btn-danger" onclick="eliminaRecord(\'utenti\',\'' + r.id + '\',caricaUtentiCompleto)">x</button></td></tr>';
   }).join('');
   caricaAuditLog();
 }
@@ -755,6 +755,39 @@ async function stampaStoricoChiusure(sede) {
 const _SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
 const _BACKUP_FN_URL = _SUPABASE_URL + '/functions/v1/quick-responder';
 const _RESTORE_FN_URL = _SUPABASE_URL + '/functions/v1/restore-backup';
+const _RESET_PW_FN_URL = _SUPABASE_URL + '/functions/v1/reset-password';
+
+function _generaPasswordCasuale(){
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  var p = '';
+  for (var i=0;i<10;i++) p += chars.charAt(Math.floor(Math.random()*chars.length));
+  return p;
+}
+
+async function _rigeneraPasswordUtente(email, nome){
+  if (!(utenteCorrente && utenteCorrente.ruolo === 'admin')) { toast('Solo un admin può rigenerare le password'); return; }
+  if (!email) { toast('Email mancante'); return; }
+  if (!confirm('Rigenerare la password per ' + (nome||email) + '?\n\nVerrà creata una password NUOVA da comunicare all\'utente. La vecchia smetterà di funzionare.')) return;
+  var nuova = _generaPasswordCasuale();
+  try {
+    var resp = await fetch(_RESET_PW_FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ azione: 'reset_password', email: email, password: nuova })
+    });
+    var data = await resp.json();
+    if (!data.ok) { toast('Errore: ' + (data.error || 'sconosciuto')); return; }
+    var html = '<div style="font-size:16px;font-weight:600;margin-bottom:10px">🔑 Password rigenerata</div>'
+      + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Comunica questa password a <strong>' + esc(nome||email) + '</strong>. La precedente non è più valida.</div>'
+      + '<div style="background:#F1EFE8;border:0.5px solid var(--border);border-radius:8px;padding:14px;text-align:center;font-family:var(--font-mono);font-size:22px;font-weight:700;letter-spacing:1px;user-select:all">' + esc(nuova) + '</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:center">Seleziona e copia la password qui sopra</div>';
+    if (typeof apriModal === 'function') apriModal(html); else alert('Nuova password: ' + nuova);
+    if (typeof _auditLog === 'function') _auditLog('reset_password', 'utenti', 'Password rigenerata per ' + email);
+  } catch(e) {
+    toast('Errore chiamata funzione: ' + (e.message || e));
+  }
+}
+window._rigeneraPasswordUtente = _rigeneraPasswordUtente;
 
 function _isAdmin() {
   return utenteCorrente && utenteCorrente.ruolo === 'admin';
