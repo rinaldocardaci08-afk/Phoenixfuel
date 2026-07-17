@@ -153,9 +153,9 @@ async function caricaOrdiniDaCaricare() {
       '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
       '<td>' + esc(r.fornitore) + '</td>' +
       '<td>' + badgeStato(r.stato) + '</td>' +
-      '<td style="font-family:var(--font-mono)">' + _csStr + '</td>' +
-      '<td style="font-family:var(--font-mono);color:#3B6D11;font-weight:600">' + _pumStr + '</td>' +
-      '<td style="font-family:var(--font-mono);color:#B45309;font-weight:600">' + _ptStr + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#A32D2D;font-weight:600">' + _csStr + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#185FA5;font-weight:600">' + _pumStr + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#0C447C;font-weight:600">' + _ptStr + '</td>' +
       '<td><button class="btn-primary" style="font-size:11px;padding:4px 12px;background:#639922" onclick="riceviOrdineStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto) + '\')">📦 Ricevi</button></td>' +
       '</tr>';
   });

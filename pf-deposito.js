@@ -3584,12 +3584,38 @@ function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn) {
   }
   html += '</div>';
 
+  // Prezzi consigliati sul CMP: ultima marginalità (blu medio) + marginalità cercata (blu scuro)
+  var _piCmp = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti.find(function(p){ return p.nome === prodotto; }) : null;
+  var _moCmp = (_piCmp && _piCmp.margine_obiettivo != null) ? Number(_piCmp.margine_obiettivo) : null;
+  html += '<div style="display:flex;gap:8px;margin-top:12px">';
+  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:10px 12px">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#185FA5;font-weight:500;margin-bottom:3px">Prezzo · ultima marginalità</div>'
+    + '<div id="cmp-box-ultima" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#185FA5">—</div></div>';
+  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:10px 12px">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#0C447C;font-weight:500;margin-bottom:3px">Prezzo · marginalità cercata</div>'
+    + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#0C447C">' + (_moCmp != null ? '€ ' + (cn + _moCmp).toFixed(4).replace('.', ',') : '<span style="font-size:11px;font-weight:400;color:var(--text-muted)">imposta in Magazzino</span>') + '</div></div>';
+  html += '</div>';
+
   // Nota finale
   html += '<div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:center;font-style:italic">Media ponderata: i litri vecchi e i nuovi pesano in proporzione</div>';
 
   html += '</div></div>';
 
   document.body.insertAdjacentHTML('beforeend', html);
+
+  // Riempimento asincrono "ultima marginalità" = CMP + (ultimo prezzo netto − ultimo costo) del prodotto
+  (async function(){
+    try {
+      var _pz = await sb.from('stazione_prezzi').select('prezzo_litro,data').eq('prodotto', prodotto).order('data',{ascending:false}).limit(1).maybeSingle();
+      var _co = await sb.from('stazione_costi').select('costo_litro,data').eq('prodotto', prodotto).order('data',{ascending:false}).limit(1).maybeSingle();
+      var _el = document.getElementById('cmp-box-ultima');
+      if (!_el) return;
+      if (_pz.data && _co.data) {
+        var _um = (Number(_pz.data.prezzo_litro)/1.22) - Number(_co.data.costo_litro);
+        _el.textContent = '€ ' + (cn + _um).toFixed(4).replace('.', ',');
+      }
+    } catch(e){}
+  })();
 }
 
 // ═══════════════════════════════════════════════════════════════════
