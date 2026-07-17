@@ -2524,6 +2524,7 @@ async function caricaFornitori() {
     const basi=r.fornitori_basi?r.fornitori_basi.map(fb=>fb.basi_carico?.nome).filter(Boolean).join(', '):'—';
     return '<tr><td><strong>' + esc(r.nome) + '</strong></td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.piva||'—') + '</td><td>' + esc(r.citta||'—') + '</td><td>' + esc(r.contatto||'—') + '</td><td>' + esc(r.telefono||'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(fidoMax):'—') + '</td><td style="font-family:var(--font-mono)">' + (fidoMax>0?fmtE(usato):'—') + '</td><td>' + (fidoMax>0?fidoBar(usato,fidoMax)+' <span style="font-size:11px;font-family:var(--font-mono);color:'+(residuo<0?'#A32D2D':'inherit')+';font-weight:'+(residuo<0?'600':'normal')+'">'+fmtE(residuo)+'</span>':'—') + '</td><td>' + ggPag + ' gg</td><td style="font-size:11px;color:var(--text-muted)">' + esc(basi) + '</td><td style="font-size:11px;color:var(--text-muted)">' + esc(r.note||'—') + '</td><td><button class="btn-primary" style="font-size:11px;padding:4px 10px" onclick="apriSchedaFornitore(\'' + r.id + '\',\'' + String(r.nome||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">📋 Scheda</button> <button class="btn-edit" onclick="apriModaleFornitore(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'fornitori\',\'' + r.id + '\',caricaFornitori)">x</button></td></tr>';
   }).join('');
+  if (typeof caricaScadenzarioFornitori === 'function' && document.getElementById('sf-content')) caricaScadenzarioFornitori();
 }
 
 function filtraFornitori() {

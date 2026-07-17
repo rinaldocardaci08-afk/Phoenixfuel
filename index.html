@@ -1026,7 +1026,6 @@
           <button class="btn-primary fin-subtab active" data-tab="fin-tab-calendario" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px">📅 Calendario</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-foglio" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📓 Foglio giornale</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-sostenibilita" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Sostenibilità</button>
-          <button class="btn-primary fin-subtab" data-tab="fin-tab-scadenzario" onclick="switchFinanzeSubTab(this); caricaScadenzarioFornitori();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Fatture Fornitori</button>
         </div>
 
         <!-- PANEL: CALENDARIO (esistente, immutato) -->
@@ -1082,9 +1081,7 @@
         </div>
 
         <!-- PANEL: SCADENZARIO FORNITORI (24/05/2026) -->
-        <div class="fin-subpanel" id="fin-tab-scadenzario" style="display:none">
-          <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento scadenzario fornitori...</div></div>
-        </div>
+        <div class="fin-subpanel" id="fin-tab-scadenzario-rimosso" style="display:none"></div>
       </div>
 
 
@@ -1512,6 +1509,10 @@
           <table><thead><tr><th>Nome</th><th>P.IVA</th><th>Città</th><th>Contatto</th><th>Telefono</th><th>Fido max</th><th>Fido usato</th><th>Fido residuo</th><th>Gg pag.</th><th>Basi carico</th><th>Note</th><th></th></tr></thead>
           <tbody id="tabella-fornitori"><tr><td colspan="12" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">📋 Fatture Fornitori</div>
+          <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento fatture fornitori...</div></div>
         </div>
       </div>
 
@@ -2936,7 +2937,7 @@
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260524c"></script>
 <script src="pf-deposito.js?v=20260515a"></script>
-<script src="pf-anagrafica.js?v=20260717e"></script>
+<script src="pf-anagrafica.js?v=20260717f"></script>
 <script src="pf-data.js?v=20260526d"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
 <script src="pf-stz-core.js?v=20260508f"></script>
