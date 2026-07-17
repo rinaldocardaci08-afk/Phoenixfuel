@@ -308,6 +308,9 @@ async function _caricaDasOrdini(tipoOrdine, containerId, filtroStatoId) {
     html += '<div style="display:flex;gap:6px;align-items:center">';
     html += '<input type="file" id="' + inputId + '" accept="image/*,.pdf" style="display:none" onchange="uploadDasOrdine(\'' + o.id + '\',\'' + inputId + '\',\'' + tipoOrdine + '\')" />';
     html += '<button class="btn-primary" style="font-size:12px;padding:7px 14px;white-space:nowrap" onclick="document.getElementById(\'' + inputId + '\').click()">' + (hasDas ? '📎 Aggiungi altro' : '📷 Allega DAS') + '</button>';
+    if (tipoOrdine === 'entrata_deposito') {
+      html += '<button style="font-size:12px;padding:7px 14px;white-space:nowrap;background:#FAEEDA;border:0.5px solid #EF9F27;color:#854F0B;border-radius:6px;cursor:pointer;font-weight:500" onclick="_sfApriInsFatturaDaOrdine(\'' + o.id + '\')">🧾 Inserisci fattura</button>';
+    }
     html += '</div>';
 
     html += '</div>';

@@ -79,60 +79,75 @@ function _sfSpostaAlLunedi(dataStr){
 // ═════════════════════════════════════════════════════════════════════
 // ENTRY POINT — chiamato dal click sub-tab di Finanze
 // ═════════════════════════════════════════════════════════════════════
-async function caricaScadenzarioFornitori() {
+// Carica SOLO i dati dello Scadenzario nei globali (senza render) — così è richiamabile
+// anche da fuori (es. Ricezione DAS) senza dipendere dal contenitore sf-content.
+async function _sfCaricaDati() {
   if (_sfFiltroAnno === null) _sfFiltroAnno = new Date().getFullYear();
   if (_sfFiltroMese === null) _sfFiltroMese = new Date().getMonth();
+  var inizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese - 3, 1);
+  var fine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 3, 0);
+  var [ordRes, fattRes, pagRes, fornRes, contiRes, istRes] = await Promise.all([
+    sb.from('ordini')
+      .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,fattura_ricevuta_id,giorni_pagamento,das_firmato_url')
+      .eq('tipo_ordine','entrata_deposito')
+      .neq('stato','annullato')
+      .gte('data', inizio)
+      .lte('data', fine)
+      .not('fornitore','ilike','%phoenix%')
+      .not('fornitore','ilike','%deposito%')
+      .not('fornitore','ilike','%rientro%')
+      .order('data',{ascending:false}),
+    sb.from('fatture_ricevute').select('*').gte('data_fattura', inizio).lte('data_fattura', fine),
+    sb.from('pagamenti_fornitori').select('*').gte('data_pagamento', inizio).lte('data_pagamento', fine).order('data_pagamento',{ascending:true}),
+    sb.from('fornitori').select('id,nome,giorni_pagamento,colore'),
+    sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
+    sb.from('banche_istituti').select('id,nome')
+  ]);
+  if (ordRes.error)  throw ordRes.error;
+  if (fattRes.error) throw fattRes.error;
+  if (pagRes.error)  throw pagRes.error;
+  _sfOrdini    = ordRes.data || [];
+  _sfFatture   = fattRes.data || [];
+  _sfPagamenti = pagRes.data || [];
+  _sfConti     = contiRes.data || [];
+  _sfIstituti  = istRes.data || [];
+  _sfFornitoriMap = {};
+  (fornRes.data || []).forEach(function(f){
+    if (f.nome) _sfFornitoriMap[f.nome.toLowerCase().trim()] = f;
+  });
+}
 
+async function caricaScadenzarioFornitori() {
   var el = document.getElementById('sf-content');
   if (!el) return;
   el.innerHTML = '<div class="loading" style="padding:20px;font-size:13px;color:var(--text-muted)">Caricamento scadenzario…</div>';
-
-  // Range data: estendo ±3 mesi per coprire scadenze precedenti/successive
-  // Uso helper con mezzogiorno locale per evitare bug timezone (1° del mese a mezzanotte locale → giorno precedente in UTC)
-  var inizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese - 3, 1);
-  var fine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 3, 0);
-
   try {
-    var [ordRes, fattRes, pagRes, fornRes, contiRes, istRes] = await Promise.all([
-      sb.from('ordini')
-        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,fattura_ricevuta_id,giorni_pagamento,das_firmato_url')
-        .eq('tipo_ordine','entrata_deposito')
-        .neq('stato','annullato')
-        .gte('data', inizio)
-        .lte('data', fine)
-        .not('fornitore','ilike','%phoenix%')
-        .not('fornitore','ilike','%deposito%')
-        .not('fornitore','ilike','%rientro%')
-        .order('data',{ascending:false}),
-      // Filtro periodo esteso: fatture il cui data_fattura cade nella finestra ±3 mesi
-      // (evita SELECT * non scalabile a regime 5000+ fatture)
-      sb.from('fatture_ricevute').select('*').gte('data_fattura', inizio).lte('data_fattura', fine),
-      // Pagamenti: stesso filtro per coerenza
-      sb.from('pagamenti_fornitori').select('*').gte('data_pagamento', inizio).lte('data_pagamento', fine).order('data_pagamento',{ascending:true}),
-      sb.from('fornitori').select('id,nome,giorni_pagamento,colore'),
-      sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
-      sb.from('banche_istituti').select('id,nome')
-    ]);
-
-    if (ordRes.error)  throw ordRes.error;
-    if (fattRes.error) throw fattRes.error;
-    if (pagRes.error)  throw pagRes.error;
-
-    _sfOrdini    = ordRes.data || [];
-    _sfFatture   = fattRes.data || [];
-    _sfPagamenti = pagRes.data || [];
-    _sfConti     = contiRes.data || [];
-    _sfIstituti  = istRes.data || [];
-    // Mappa fornitori keyed by NOME lowercase (ordini.fornitore è testo, niente FK su ordini)
-    _sfFornitoriMap = {};
-    (fornRes.data || []).forEach(function(f){
-      if (f.nome) _sfFornitoriMap[f.nome.toLowerCase().trim()] = f;
-    });
-
+    await _sfCaricaDati();
     renderScadenzarioFornitori();
   } catch (e) {
     console.error('[sf] errore caricamento', e);
     el.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Errore caricamento: '+_sfEsc(e.message||String(e))+'</div>';
+  }
+}
+
+// Apre la modale "Inserisci fattura" per un ordine entrata (chiamabile dalla Ricezione DAS).
+// Riusa l'aggregazione e il salvataggio esistenti; non tocca _sfSalvaFattura.
+async function _sfApriInsFatturaDaOrdine(ordineId) {
+  try {
+    var oq = await sb.from('ordini').select('id,data,fornitore,fattura_ricevuta_id').eq('id', ordineId).single();
+    var ord = oq.data;
+    if (!ord) { toast('Ordine non trovato'); return; }
+    if (ord.fattura_ricevuta_id) { toast('Questa entrata ha già una fattura fornitore'); return; }
+    // Porto il filtro sul mese dell'ordine e carico i dati dello Scadenzario per quel periodo
+    var d = new Date(ord.data + 'T12:00:00');
+    _sfFiltroAnno = d.getFullYear();
+    _sfFiltroMese = d.getMonth();
+    await _sfCaricaDati();
+    var nomeKey = (ord.fornitore || '?').toLowerCase().trim();
+    var chiave = _sfChiave(ord.data, nomeKey, ord.fattura_ricevuta_id);
+    _sfApriModaleInsFattura(chiave);
+  } catch (e) {
+    toast('Errore apertura fattura: ' + (e.message || e));
   }
 }
 
@@ -813,6 +828,7 @@ function _sfApriModalePagamento(fatturaId) {
 window.caricaScadenzarioFornitori   = caricaScadenzarioFornitori;
 window.renderScadenzarioFornitori   = renderScadenzarioFornitori;
 window._sfApriModaleInsFattura      = _sfApriModaleInsFattura;
+window._sfApriInsFatturaDaOrdine    = _sfApriInsFatturaDaOrdine;
 window._sfChiudiModale              = _sfChiudiModale;
 window._sfAggQuadratura             = _sfAggQuadratura;
 window._sfRicalcolaScadenzaModale   = _sfRicalcolaScadenzaModale;
