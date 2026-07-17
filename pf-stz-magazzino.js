@@ -91,6 +91,23 @@ async function eliminaVersamento(id) {
   caricaStoricoVersamenti();
 }
 
+// ── Marginalità cercata (obiettivo prezzo per prodotto) ──
+async function _stzImpostaMargineObiettivo(prodNome){
+  var pi = cacheProdotti.find(function(p){ return p.nome === prodNome; });
+  if (!pi) { toast('Prodotto non trovato'); return; }
+  var attuale = pi.margine_obiettivo != null ? String(pi.margine_obiettivo).replace('.', ',') : '';
+  var inp = prompt('Marginalità cercata per ' + prodNome + ' (€/L) — es. 0,105:', attuale);
+  if (inp === null) return;
+  var val = parseFloat(String(inp).replace(',', '.').trim());
+  if (isNaN(val) || val < 0) { toast('Valore non valido'); return; }
+  var up = await sb.from('prodotti').update({ margine_obiettivo: val }).eq('id', pi.id);
+  if (up.error) { toast('Errore: ' + up.error.message); return; }
+  pi.margine_obiettivo = val;
+  toast('✓ Marginalità cercata aggiornata');
+  caricaMagazzinoStazione();
+}
+window._stzImpostaMargineObiettivo = _stzImpostaMargineObiettivo;
+
 // ── Magazzino stazione ──
 async function caricaMagazzinoStazione() {
   await caricaTabelaPompe();
@@ -260,6 +277,11 @@ async function caricaGiacenzeStazione() {
       var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
       var cmpAnalisiBtn = ' <button onclick="_apriAnalisiCMP(\'' + esc(prodNome) + '\',\'stazione_oppido\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Analisi CMP">🔍 Analisi</button>';
       const cmpLabel = cmpGruppo > 0 ? '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(6) + '</strong> · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' + cmpEditBtn + cmpAnalisiBtn + '</div>' : '';
+      // Marginalità cercata (obiettivo per prodotto) + prezzo consigliato su CMP
+      var _margOb = (prodInfo && prodInfo.margine_obiettivo != null) ? Number(prodInfo.margine_obiettivo) : null;
+      var _margObStr = _margOb != null ? String(_margOb).replace('.', ',') : '—';
+      var _prezzoCmp = (_margOb != null && cmpGruppo > 0) ? ' · <span style="color:#B45309">Prezzo su CMP:</span> <strong style="font-family:var(--font-mono);color:#B45309">€ ' + (cmpGruppo + _margOb).toFixed(4).replace('.', ',') + '</strong>' : '';
+      const margObLabel = '<div class="cmp-riga" style="margin-top:2px">Marginalità cercata: <strong style="font-family:var(--font-mono)">' + _margObStr + '</strong> €/L <button onclick="_stzImpostaMargineObiettivo(\'' + esc(prodNome) + '\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Imposta marginalità cercata">✏️</button>' + _prezzoCmp + '</div>';
       const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
       const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
       const pctTotHtml = '<div class="tot-pct"><span class="val">' + pctGruppo + '%</span> della capacità totale</div>';
@@ -268,6 +290,7 @@ async function caricaGiacenzeStazione() {
           '<div class="titolo-row"><div class="pallino"></div><div class="titolo">' + esc(prodNome) + '</div></div>' +
           '<div class="sub">' + subLabel + '</div>' +
           cmpLabel +
+          margObLabel +
           '<div class="azioni">' + distBtn +
             '<div class="tot-wrap"><div class="tot-litri">' + totG.toLocaleString('it-IT') + '<span class="u">L</span></div>' + pctTotHtml + '</div>' +
           '</div>' +
