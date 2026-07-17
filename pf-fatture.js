@@ -65,6 +65,35 @@ function switchFattureTab(btn){
 // TAB 1 — ELENCO FATTURE
 // ═════════════════════════════════════════════════════════════
 
+// STEP 3b (17/07): elimina una fattura per intero. Distinta dallo storno nota credito
+// (che invece TIENE la fattura marcata annullata e brucia il numero). Qui il numero
+// torna LIBERO — è per correggere una fattura inserita per errore.
+async function eliminaFattura(fatturaId){
+  var fx = await sb.from('fatture_emesse').select('numero,anno,cessionario_denominazione').eq('id', fatturaId).maybeSingle();
+  var f = fx.data;
+  if (!f) { toast('Fattura non trovata'); return; }
+  var righe = await _pfFetchAllPages(function(){ return sb.from('fatture_righe').select('id').eq('fattura_id', fatturaId); });
+  var rigaIds = (righe||[]).map(function(r){ return r.id; });
+  var ordCollegati = await _pfFetchAllPages(function(){ return sb.from('ordini').select('id').eq('fattura_id', fatturaId); });
+  var nOrd = (ordCollegati||[]).length;
+  if (!confirm('Eliminare la fattura ' + f.numero + '/' + (f.anno||'') + ' (' + (f.cessionario_denominazione||'') + ')?\n\n'
+    + '• ' + rigaIds.length + ' righe fattura eliminate\n'
+    + '• ' + nOrd + ' consegne sganciate → torneranno "da fatturare"\n'
+    + '• il numero ' + f.numero + ' tornerà LIBERO e riutilizzabile\n\n'
+    + 'Da usare per una fattura inserita per errore. Se invece è una fattura vera da stornare, usa la nota di credito. Procedere?')) return;
+  // 1) Sgancia gli ordini (per fattura_id e per riga)
+  await sb.from('ordini').update({ fattura_id: null, fattura_riga_id: null, aggancio_manuale: false }).eq('fattura_id', fatturaId);
+  if (rigaIds.length) await sb.from('ordini').update({ fattura_id: null, fattura_riga_id: null, aggancio_manuale: false }).in('fattura_riga_id', rigaIds);
+  // 2) Elimina le righe
+  await sb.from('fatture_righe').delete().eq('fattura_id', fatturaId);
+  // 3) Elimina la fattura
+  var del = await sb.from('fatture_emesse').delete().eq('id', fatturaId);
+  if (del.error) { toast('Errore eliminazione: ' + del.error.message); return; }
+  if (typeof _auditLog === 'function') _auditLog('elimina_fattura', 'fatture_emesse', 'Eliminata fattura ' + f.numero + '/' + (f.anno||'') + ' — ' + nOrd + ' ordini sganciati');
+  toast('🗑️ Fattura ' + f.numero + ' eliminata · ' + nOrd + ' consegne liberate');
+  if (typeof caricaFatture === 'function') caricaFatture();
+}
+
 async function caricaFatture(){
   const anno     = document.getElementById('fatt-filtro-anno')?.value || new Date().getFullYear();
   const mese     = document.getElementById('fatt-filtro-mese')?.value || '';
@@ -133,6 +162,7 @@ async function caricaFatture(){
         <td>
           <button class="btn-primary" style="font-size:10px;padding:3px 8px" onclick="apriDettaglioFattura('${f.id}')" title="Dettaglio fattura">📄</button>
           <button onclick="allDiagnosticaFattura('${f.id}')" title="Diagnostica: vedi ordini collegati e sganciali se sbagliati" style="background:#0E6F8E;color:white;border:0;border-radius:3px;padding:3px 6px;font-size:10px;cursor:pointer;margin-left:2px">🔍</button>
+          <button onclick="eliminaFattura('${f.id}')" title="Elimina fattura (sgancia le consegne, il numero torna riutilizzabile)" style="background:#FCEBEB;color:#A32D2D;border:0.5px solid #F09595;border-radius:3px;padding:3px 7px;font-size:10px;cursor:pointer;margin-left:2px">🗑️</button>
         </td>
       </tr>
     `;
