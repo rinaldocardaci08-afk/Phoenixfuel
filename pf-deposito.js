@@ -120,10 +120,12 @@ async function caricaDeposito() {
     var prodSet = {};
     (prodRes.data || []).forEach(function(c){ if(c.prodotto) prodSet[c.prodotto] = true; });
     var prodList = Object.keys(prodSet);
-    for (var i = 0; i < prodList.length; i++) {
-      if (typeof pfDepositoRicalcolaCisterne === 'function') {
-        try { await pfDepositoRicalcolaCisterne(prodList[i]); } catch(e) { console.warn('auto-heal deposito errore ' + prodList[i] + ':', e); }
-      }
+    // Perf 20/07: auto-heal per prodotto IN PARALLELO (era in fila = apertura lenta).
+    // Ogni prodotto lavora su cisterne diverse (filtro .eq('prodotto')), nessuna contesa.
+    if (typeof pfDepositoRicalcolaCisterne === 'function') {
+      await Promise.all(prodList.map(function(p){
+        return pfDepositoRicalcolaCisterne(p).catch(function(e){ console.warn('auto-heal deposito errore ' + p + ':', e); });
+      }));
     }
   } catch (e) { console.warn('caricaDeposito auto-heal errore:', e); }
 

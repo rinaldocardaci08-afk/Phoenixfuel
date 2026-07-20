@@ -211,10 +211,12 @@ async function caricaGiacenzeStazione() {
     var prodSet = {};
     (prodRes.data || []).forEach(function(c){ if(c.prodotto) prodSet[c.prodotto] = true; });
     var prodList = Object.keys(prodSet);
-    for (var i = 0; i < prodList.length; i++) {
-      if (typeof pfStzRicalcolaCisterne === 'function') {
-        try { await pfStzRicalcolaCisterne(prodList[i]); } catch(e) { console.warn('auto-heal stazione errore ' + prodList[i] + ':', e); }
-      }
+    // Perf 20/07: auto-heal per prodotto IN PARALLELO (era in fila = apertura lenta).
+    // Ogni prodotto lavora su cisterne diverse (filtro .eq('prodotto')), nessuna contesa.
+    if (typeof pfStzRicalcolaCisterne === 'function') {
+      await Promise.all(prodList.map(function(p){
+        return pfStzRicalcolaCisterne(p).catch(function(e){ console.warn('auto-heal stazione errore ' + p + ':', e); });
+      }));
     }
   } catch (e) { console.warn('caricaGiacenzeStazione auto-heal errore:', e); }
 

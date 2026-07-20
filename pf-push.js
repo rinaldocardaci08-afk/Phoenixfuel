@@ -36,7 +36,7 @@ function _aggiornaPushStato() {
 function _avviaPushPolling() {
   if (!_pushRegistrato) return;
   // Controlla nuovi avvisi ogni 2 minuti
-  setInterval(_controllaAvvisiPush, 120000);
+  setInterval(_controllaAvvisiPush, 300000); // 5 min (era 120s)
   // Prima esecuzione dopo 10 secondi
   setTimeout(_controllaAvvisiPush, 10000);
 }
