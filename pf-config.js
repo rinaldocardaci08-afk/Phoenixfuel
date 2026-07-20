@@ -225,6 +225,7 @@ function switchVenditeTab(btn) {
   if (btn.dataset.tab === 'vend-ingrosso') caricaVenditeIngrosso();
   else if (btn.dataset.tab === 'vend-dettaglio') caricaVenditeDettaglio();
   else if (btn.dataset.tab === 'vend-annuale') caricaVenditeAnnuali();
+  else if (btn.dataset.tab === 'vend-per-prodotto') { if (typeof caricaVenditePerProdotto === 'function') caricaVenditePerProdotto(); }
 }
 
 function switchClientiTab(btn) {

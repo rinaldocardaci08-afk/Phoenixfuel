@@ -132,23 +132,6 @@
               <div id="home-giorno" style="font-family:'Dancing Script',cursive;font-size:40px;font-weight:700;color:#D4A017;line-height:1.1"></div>
               <div id="home-data" style="font-family:'Playfair Display',serif;font-size:20px;color:#6B5FCC;margin-top:4px;letter-spacing:1px"></div>
             </div>
-            <!-- TERMOMETRO SISTEMA (solo admin) -->
-            <div id="home-termometro" style="display:none;background:#12151a;border-radius:20px;padding:14px 18px 12px;min-width:210px;text-align:center">
-              <div style="font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:#7d848d;font-weight:700;margin-bottom:2px">Stato sistema</div>
-              <svg viewBox="0 0 200 116" style="width:170px;height:auto;overflow:visible">
-                <path d="M24 92 A76 76 0 0 1 176 92" fill="none" stroke="#23272e" stroke-width="12"/>
-                <path id="term-zG" fill="none" stroke="#2bbd6b" stroke-width="12"/>
-                <path id="term-zA" fill="none" stroke="#e6a336" stroke-width="12"/>
-                <path id="term-zR" fill="none" stroke="#e5484d" stroke-width="12"/>
-                <g id="term-needle" style="transition:transform .7s cubic-bezier(.34,1.2,.5,1);transform-origin:100px 92px">
-                  <polygon points="100,92 96,92 100,26 104,92" fill="#e9ecef"/>
-                  <polygon points="100,26 97,39 103,39" fill="#e5484d"/>
-                </g>
-                <circle cx="100" cy="92" r="7" fill="#e9ecef"/><circle cx="100" cy="92" r="3" fill="#12151a"/>
-              </svg>
-              <div style="font-family:'Courier New',monospace;color:#fff;font-size:22px;font-weight:700;line-height:1;margin-top:-6px"><span id="term-ms">&mdash;</span><small style="font-size:12px;color:#7d848d;font-weight:400"> ms</small></div>
-              <div id="term-st" style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;margin-top:3px">&mdash;</div>
-            </div>
           </div>
         </div>
         <div id="utenti-online-wrap" style="display:none;margin-bottom:12px;padding:10px 16px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px">
@@ -874,6 +857,7 @@
           <button class="btn-primary vend-tab" data-tab="vend-dettaglio" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Dettaglio</button>
           <button class="btn-primary vend-tab" data-tab="vend-annuale" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📅 Riepilogo annuale</button>
           <button class="btn-primary vend-tab" data-tab="vend-margine-cliente" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">💰 Margine per cliente</button>
+          <button class="btn-primary vend-tab" data-tab="vend-per-prodotto" onclick="switchVenditeTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Vendite per prodotto</button>
         </div>
 
         <!-- ═══ TAB INGROSSO ═══ -->
@@ -1034,6 +1018,17 @@
               <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Top 10 clienti per margine</div><canvas id="chart-mrc-margine" height="250"></canvas></div>
               <div><div style="font-size:13px;font-weight:500;margin-bottom:8px">Margine medio per litro</div><canvas id="chart-mrc-marginelitro" height="250"></canvas></div>
             </div>
+          </div>
+        </div>
+
+        <!-- PANEL: VENDITE PER PRODOTTO -->
+        <div class="vend-panel" id="vend-per-prodotto" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📦 Vendite per prodotto</span>
+              <select id="vpp-prodotto" onchange="vppCambiaProdotto()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:200px"><option value="">— scegli un prodotto —</option></select>
+            </div>
+            <div id="vpp-body"><div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un prodotto per vedere tabella e grafici.</div></div>
           </div>
         </div>
       </div>
@@ -2966,13 +2961,14 @@
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
 <script src="pf-keyboard-decimal.js?v=20260512d"></script>
-<script src="pf-config.js?v=20260720a"></script>
+<script src="pf-config.js?v=20260720b"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260524c"></script>
 <script src="pf-deposito.js?v=20260717c"></script>
 <script src="pf-anagrafica.js?v=20260720b"></script>
 <script src="pf-vendite-cliente.js?v=20260720b"></script>
+<script src="pf-vendite-prodotto.js?v=20260720a"></script>
 <script src="pf-data.js?v=20260526d"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
 <script src="pf-stz-core.js?v=20260717c"></script>
@@ -3020,7 +3016,6 @@
 <script src="pf-dep-giac-week.js?v=20260525c"></script>
 <script src="pf-registri.js?v=20260717a"></script>
 <script src="pf-system.js?v=20260716a"></script>
-<script src="pf-termometro.js?v=20260720a"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // forzaAggiornamentoApp — Svuota CACHE del browser + SW e ricarica da zero.
