@@ -1764,7 +1764,6 @@ let _chartMrcMargine = null, _chartMrcMargineLitro = null;
 let _mrcCache = null;
 let _mrcClientiEsclusi = new Set();
 let _mrcSelectPop = false;
-let _mrcSingolo = '';
 
 async function caricaMargineCliente() {
   var selAnno = document.getElementById('mrc-anno');
@@ -1818,94 +1817,59 @@ async function caricaMargineCliente() {
   _mrcDisegnaMargineCliente();
 }
 
-function mrcCambiaSottogruppo() { _mrcClientiEsclusi.clear(); _mrcSingolo=''; var s=document.getElementById('mrc-search'); if(s) s.value=''; caricaMargineCliente(); }
-function _mrcClienteSingolo() { return _mrcSingolo || ''; }
+function mrcCambiaSottogruppo() { _mrcClientiEsclusi.clear(); var s=document.getElementById('mrc-search'); if(s) s.value=''; caricaMargineCliente(); }
 function _mrcResetEsclusi() { _mrcClientiEsclusi.clear(); _mrcDisegnaMargineCliente(); }
 function _mrcToggleCliente(idx, cb) { if (!_mrcCache || !_mrcCache.lista[idx]) return; var nome = _mrcCache.lista[idx].cliente; if (cb && cb.checked) _mrcClientiEsclusi.delete(nome); else _mrcClientiEsclusi.add(nome); _mrcDisegnaMargineCliente(); }
-function mrcOnSearch() { _mrcRenderListaClienti(); }
-function mrcIsolaCliente(idx) { if (!_mrcCache || !_mrcCache.lista[idx]) return; _mrcSingolo = _mrcCache.lista[idx].cliente; var s=document.getElementById('mrc-search'); if(s) s.value=''; _mrcDisegnaMargineCliente(); }
-function mrcMostraTutti() { _mrcSingolo=''; var s=document.getElementById('mrc-search'); if(s) s.value=''; _mrcDisegnaMargineCliente(); }
-function _mrcListaVisibile() {
-  if (!_mrcCache) return [];
-  if (_mrcSingolo) return _mrcCache.lista.filter(function(c){ return c.cliente === _mrcSingolo; });
-  return _mrcCache.lista.filter(function(c){ return !_mrcClientiEsclusi.has(c.cliente); });
-}
-
-function _mrcRenderListaClienti() {
-  var wrap = document.getElementById('mrc-flag-clienti');
-  if (!wrap || !_mrcCache) return;
-  var sottogruppo = _mrcCache.sottogruppo;
-  var search = (document.getElementById('mrc-search') ? document.getElementById('mrc-search').value : '').trim().toLowerCase();
-
-  if (_mrcSingolo) {
-    wrap.style.display = 'block';
-    wrap.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">' +
-      '<span style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px">Cliente singolo: <strong>' + esc(_mrcSingolo) + '</strong></span>' +
-      '<button onclick="mrcMostraTutti()" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Mostra tutti</button></div>';
-    return;
-  }
-
-  if (search) {
-    var matches = _mrcCache.lista.map(function(c,ci){ return {c:c, ci:ci}; })
-      .filter(function(o){ return o.c.cliente.toLowerCase().indexOf(search) >= 0; }).slice(0, 40);
-    wrap.style.display = 'block';
-    if (!matches.length) { wrap.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 0">Nessun cliente trovato per "' + esc(search) + '"</div>'; return; }
-    wrap.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Clicca un cliente per vederlo da solo</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto">' +
-      matches.map(function(o){ return '<button onclick="mrcIsolaCliente(' + o.ci + ')" style="font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;color:var(--text)">' + esc(o.c.cliente) + '</button>'; }).join('') +
-      '</div>';
-    return;
-  }
-
-  if (sottogruppo === 'rete' || sottogruppo === 'consumo') {
-    var nEsclusi = _mrcCache.lista.filter(function(c){ return _mrcClientiEsclusi.has(c.cliente); }).length;
-    var chips = _mrcCache.lista.map(function(c, ci) {
-      var on = !_mrcClientiEsclusi.has(c.cliente);
-      return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 9px;cursor:pointer' + (on?'':';opacity:0.45') + '">' +
-        '<input type="checkbox"' + (on?' checked':'') + ' onclick="_mrcToggleCliente(' + ci + ', this)" style="margin:0;cursor:pointer" />' + esc(c.cliente) + '</label>';
-    }).join('');
-    wrap.style.display = 'block';
-    wrap.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">' +
-        '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Clienti nel report — deseleziona per escludere' + (nEsclusi?(' · '+nEsclusi+' esclusi'):'') + '</div>' +
-        (nEsclusi?'<button onclick="_mrcResetEsclusi()" style="font-size:11px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Riattiva tutti</button>':'') +
-      '</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto">' + chips + '</div>';
-  } else {
-    wrap.style.display = 'none';
-    wrap.innerHTML = '';
-  }
-}
+function mrcOnSearch() { _mrcDisegnaMargineCliente(); }
 
 function _mrcDisegnaMargineCliente() {
   if (!_mrcCache) return;
-  _mrcRenderListaClienti();
-  var lista = _mrcListaVisibile();
+  var search = (document.getElementById('mrc-search') ? document.getElementById('mrc-search').value : '').trim().toLowerCase();
+
+  var entries = _mrcCache.lista.map(function(c, idx){ return { c:c, idx:idx }; });
+  if (search) entries = entries.filter(function(e){ return e.c.cliente.toLowerCase().indexOf(search) >= 0; });
+  var incluse = entries.filter(function(e){ return !_mrcClientiEsclusi.has(e.c.cliente); });
+
+  var statusWrap = document.getElementById('mrc-flag-clienti');
+  if (statusWrap) {
+    var nEscl = _mrcCache.lista.filter(function(c){ return _mrcClientiEsclusi.has(c.cliente); }).length;
+    if (nEscl > 0) {
+      statusWrap.style.display = 'flex';
+      statusWrap.style.alignItems = 'center';
+      statusWrap.style.gap = '10px';
+      statusWrap.innerHTML = '<span style="font-size:12px;color:var(--text-muted)">' + nEscl + ' cliente/i escluso/i dal totale e dalla stampa</span>' +
+        '<button onclick="_mrcResetEsclusi()" style="font-size:11px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Riattiva tutti</button>';
+    } else { statusWrap.style.display = 'none'; statusWrap.innerHTML = ''; }
+  }
+
   var totale = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
-  lista.forEach(function(c) { totale.ordini+=c.ordini; totale.litri+=c.litri; totale.fatturato+=c.fatturato; totale.costo+=c.costo; totale.margine+=c.margine; });
+  incluse.forEach(function(e) { var c=e.c; totale.ordini+=c.ordini; totale.litri+=c.litri; totale.fatturato+=c.fatturato; totale.costo+=c.costo; totale.margine+=c.margine; });
 
   var kpiWrap = document.getElementById('mrc-kpi');
   var margMedio = totale.litri > 0 ? totale.margine / totale.litri : 0;
   var pctMarg = totale.fatturato > 0 ? (totale.margine / totale.fatturato) * 100 : 0;
-  if (kpiWrap) kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + lista.length + '</div></div>' +
+  if (kpiWrap) kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + incluse.length + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" style="color:#639922">' + fmtMe(totale.margine) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value">€ ' + margMedio.toFixed(6) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">% margine su fatt.</div><div class="kpi-value">' + pctMarg.toFixed(1) + '%</div></div>';
 
   var tbody = document.getElementById('mrc-tabella');
   if (!tbody) return;
-  if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun dato</td></tr>';
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="loading">Nessun dato</td></tr>';
     if (_chartMrcMargine) { _chartMrcMargine.destroy(); _chartMrcMargine=null; }
     if (_chartMrcMargineLitro) { _chartMrcMargineLitro.destroy(); _chartMrcMargineLitro=null; }
     return;
   }
 
-  var html = lista.map(function(c, idx) {
+  var html = entries.map(function(e, i) {
+    var c = e.c; var incl = !_mrcClientiEsclusi.has(c.cliente);
     var ml = c.litri > 0 ? c.margine / c.litri : 0;
     var pct = c.fatturato > 0 ? (c.margine / c.fatturato) * 100 : 0;
     var mColor = c.margine >= 0 ? '#639922' : '#E24B4A';
-    return '<tr' + (idx % 2 ? ' style="background:var(--bg)"' : '') + '>' +
+    var rowStyle = (i % 2 ? 'background:var(--bg);' : '') + (incl ? '' : 'opacity:0.4;');
+    return '<tr' + (rowStyle?(' style="'+rowStyle+'"'):'') + '>' +
+      '<td style="text-align:center"><input type="checkbox"' + (incl?' checked':'') + ' onclick="_mrcToggleCliente(' + e.idx + ', this)" title="Includi/escludi dal totale e dalla stampa" style="cursor:pointer;margin:0" /></td>' +
       '<td><strong>' + esc(c.cliente) + '</strong></td>' +
       '<td><span class="badge ' + (c.cliente_rete ? 'purple' : 'gray') + '" style="font-size:9px">' + (c.cliente_rete ? 'Rete' : 'Consumo') + '</span></td>' +
       '<td style="text-align:center">' + c.ordini + '</td>' +
@@ -1917,10 +1881,10 @@ function _mrcDisegnaMargineCliente() {
       '<td style="font-family:var(--font-mono);color:' + mColor + '">' + pct.toFixed(1) + '%</td></tr>';
   }).join('');
   var tmColor = totale.margine >= 0 ? '#639922' : '#E24B4A';
-  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtMe(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(6) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
+  html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td></td><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtMe(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(6) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
   tbody.innerHTML = html;
 
-  var top10 = lista.slice(0, 10);
+  var top10 = incluse.slice(0, 10).map(function(e){ return e.c; });
   var labels = top10.map(function(c) { return c.cliente.length > 15 ? c.cliente.substring(0,15) + '…' : c.cliente; });
   if (_chartMrcMargine) _chartMrcMargine.destroy();
   var ctx1 = document.getElementById('chart-mrc-margine');
