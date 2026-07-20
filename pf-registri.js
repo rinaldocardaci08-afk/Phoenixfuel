@@ -158,7 +158,17 @@ async function _pfRegRenderPanels() {
       }
     } catch (eCis) { /* niente cruscotto se non leggibile */ }
 
-    _pfRegCache = { rows: movimenti, apertura: apertura, prod: prod, anno: anno, giacFisica: giacFisica };
+    // Giacenza dalla QUERY MADRE (getGiacenzaAllaData) — terza gamba del doppio calcolo, per TUTTI i prodotti.
+    var qmGiac = null;
+    try {
+      if (typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+        var _oggiISO = new Date().toISOString().slice(0, 10);
+        var _qm = await pfData.getGiacenzaAllaData('deposito_vibo', prod, _oggiISO);
+        if (_qm && _qm.calcolata != null) qmGiac = Number(_qm.calcolata);
+      }
+    } catch (eQm) { /* niente confronto se non leggibile */ }
+
+    _pfRegCache = { rows: movimenti, apertura: apertura, prod: prod, anno: anno, giacFisica: giacFisica, qmGiac: qmGiac };
     _pfRegDraw();
   } catch (e) {
     console.error('registro', e);
@@ -225,6 +235,7 @@ function _pfRegDraw() {
     + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb)
     + '</div>'
     + _pfRegCoerenzaHtml({ regKg: aFinKg, regAmb: aFinAmb, caricoKg: aCkg, giacFisicaLamb: c.giacFisica, prodotto: prod, anno: anno, densita: _pfRegUltimaDensita(rows) })
+    + _pfRegQueryMadreHtml(c.qmGiac, aFinAmb, prod, anno)
     + '</div>';
 
   var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno);
@@ -255,6 +266,31 @@ function _pfRegUltimaDensita(rows) {
 // Cruscotto coerenza: confronto giacenza registro vs deposito fisico,
 // con il calo consentito di legge. Per Gasolio Autotrazione: 3‰ in peso (kg)
 // del totale carico dell'anno. (Benzina/agricolo: in litri@15, da attivare poi.)
+// Doppio calcolo: giacenza del REGISTRO vs giacenza della QUERY MADRE (getGiacenzaAllaData).
+// Read-only, per TUTTI i prodotti (a differenza del cruscotto calo, solo autotrazione).
+// Se divergono, il registro non riflette tutti i movimenti del deposito (es. agricolo giugno).
+function _pfRegQueryMadreHtml(qmGiac, regAmb, prod, anno) {
+  var annoCorrente = (new Date()).getFullYear();
+  if (anno !== annoCorrente) return '';
+  if (qmGiac === null || qmGiac === undefined) return '';
+  var reg = Math.round(Number(regAmb || 0));
+  var qm = Math.round(Number(qmGiac));
+  var scarto = qm - reg;
+  var ok = Math.abs(scarto) < 1;
+  var col = ok ? '#1D7A4D' : '#A32D2D';
+  return '<div style="margin-top:10px;background:var(--bg);border:0.5px solid ' + (ok ? 'var(--border)' : '#E0A0A0') + ';border-radius:10px;padding:12px 14px">'
+    + '<div style="font-size:12px;font-weight:600;margin-bottom:2px">Doppio calcolo · registro vs query madre deposito</div>'
+    + '<div style="font-size:11px;color:var(--text-hint);margin-bottom:8px">La query madre conta tutte le entrate/uscite del deposito per il prodotto (autoconsumo incluso). Registro e query madre devono coincidere.</div>'
+    + '<div style="display:flex;gap:16px;flex-wrap:wrap">'
+    + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza query madre</div><div style="font-size:17px;font-family:monospace">' + _pfRegN(qm) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza registro</div><div style="font-size:17px;font-family:monospace">' + _pfRegN(reg) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-hint)">Scarto</div><div style="font-size:17px;font-family:monospace;color:' + col + '">' + (scarto > 0 ? '+' : '') + _pfRegN(scarto) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
+    + '</div>'
+    + (ok ? '<div style="margin-top:8px;font-size:11px;color:#1D7A4D">✓ Registro e query madre coincidono: i movimenti camminano insieme.</div>'
+          : '<div style="margin-top:8px;font-size:11px;color:#A32D2D">⚠ Il registro non riflette tutti i movimenti del deposito per questo prodotto: scarto di ' + _pfRegN(Math.abs(scarto)) + ' L (probabili uscite/entrate non scritte nel registro fiscale — es. consegne senza DAS ≥26/06 o prodotto non inizializzato).</div>')
+    + '</div>';
+}
+
 function _pfRegCoerenzaHtml(o) {
   var annoCorrente = (new Date()).getFullYear();
   if (o.giacFisicaLamb === null || o.giacFisicaLamb === undefined) return '';
