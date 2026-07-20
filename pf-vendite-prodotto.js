@@ -37,12 +37,13 @@ async function vppCambiaProdotto() {
   if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">⏳ Caricamento vendite...</div>';
 
   var flds = 'data,litri,costo_litro,trasporto_litro,margine';
-  var { data: raw } = await sb.from('ordini').select(flds).eq('tipo_ordine','cliente').eq('prodotto', _vppProdotto).neq('stato','annullato').order('data').range(0,999);
+  var _daData = (new Date().getFullYear() - 1) + '-01-01'; // solo anno corrente + precedente (grafici/tabella usano 2 anni)
+  var { data: raw } = await sb.from('ordini').select(flds).eq('tipo_ordine','cliente').eq('prodotto', _vppProdotto).neq('stato','annullato').gte('data', _daData).order('data').range(0,999);
   var ord = raw || [];
   if (ord.length === 1000) {
     var from = 1000;
     while (true) {
-      var { data: b } = await sb.from('ordini').select(flds).eq('tipo_ordine','cliente').eq('prodotto', _vppProdotto).neq('stato','annullato').order('data').range(from, from+999);
+      var { data: b } = await sb.from('ordini').select(flds).eq('tipo_ordine','cliente').eq('prodotto', _vppProdotto).neq('stato','annullato').gte('data', _daData).order('data').range(from, from+999);
       if (!b || !b.length) break; ord = ord.concat(b); if (b.length < 1000) break; from += 1000;
     }
   }
