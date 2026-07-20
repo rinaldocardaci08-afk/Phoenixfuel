@@ -60,10 +60,10 @@ async function inizializza() {
     }
     // Controlla avvisi non letti (badge pulsante)
     aggiornaBadgeBacheca();
-    setInterval(aggiornaBadgeBacheca, 300000); // 5 min (era 60s) - meno letture bacheca_avvisi
+    setInterval(aggiornaBadgeBacheca, 60000);
     // Heartbeat presenza online
     _heartbeat();
-    setInterval(_heartbeat, 300000); // 5 min (era 60s) - meno scritture utenti.last_seen
+    setInterval(_heartbeat, 60000);
     // Scarica dati in cache per uso offline
     _aggiornaDataCacheOffline();
   }
@@ -235,6 +235,9 @@ function switchClientiTab(btn) {
   if (btn.dataset.tab === 'cli-scadenzario') caricaScadenzario();
   if (btn.dataset.tab === 'cli-estratto') {
     if (typeof renderEstrattoConto === 'function') renderEstrattoConto();
+  }
+  if (btn.dataset.tab === 'cli-vendite') {
+    if (typeof caricaVenditePerCliente === 'function') caricaVenditePerCliente();
   }
 }
 
@@ -520,8 +523,8 @@ async function _heartbeat() {
 async function caricaUtentiOnline() {
   var wrap = document.getElementById('utenti-online');
   if (!wrap) return;
-  var finestraOnline = new Date(Date.now() - 10 * 60000).toISOString(); // online = ultimi 10 min (heartbeat ora ogni 5)
-  var { data: online } = await sb.from('utenti').select('nome,ruolo,last_seen').gte('last_seen', finestraOnline).order('nome');
+  var treMinFa = new Date(Date.now() - 3 * 60000).toISOString();
+  var { data: online } = await sb.from('utenti').select('nome,ruolo,last_seen').gte('last_seen', treMinFa).order('nome');
   var { data: tutti } = await sb.from('utenti').select('nome,ruolo,last_seen').order('nome');
   if (!tutti || !tutti.length) { wrap.innerHTML = ''; return; }
   var onlineIds = (online || []).map(function(u) { return u.nome; });

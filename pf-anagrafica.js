@@ -1764,6 +1764,7 @@ let _chartMrcMargine = null, _chartMrcMargineLitro = null;
 let _mrcCache = null;
 let _mrcClientiEsclusi = new Set();
 let _mrcSelectPop = false;
+let _mrcSingolo = '';
 
 async function caricaMargineCliente() {
   var selAnno = document.getElementById('mrc-anno');
@@ -1794,13 +1795,6 @@ async function caricaMargineCliente() {
   var clientiMap = {};
   (clientiInfo||[]).forEach(function(c) { clientiMap[c.id] = c; clientiMap[c.nome] = c; });
 
-  var selCli = document.getElementById('mrc-cliente');
-  if (selCli && !_mrcSelectPop) {
-    var nomi = (clientiInfo||[]).map(function(c){return c.nome;}).filter(Boolean).sort(function(x,z){return x.localeCompare(z);});
-    selCli.innerHTML = '<option value="">Tutti i clienti</option>' + nomi.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
-    _mrcSelectPop = true;
-  }
-
   var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
   var ordiniFiltrati = (ordini||[]);
   if (sottogruppo === 'rete') {
@@ -1824,44 +1818,68 @@ async function caricaMargineCliente() {
   _mrcDisegnaMargineCliente();
 }
 
-function mrcCambiaSottogruppo() { _mrcClientiEsclusi.clear(); caricaMargineCliente(); }
-function _mrcClienteSingolo() { var s = document.getElementById('mrc-cliente'); return s ? (s.value || '') : ''; }
+function mrcCambiaSottogruppo() { _mrcClientiEsclusi.clear(); _mrcSingolo=''; var s=document.getElementById('mrc-search'); if(s) s.value=''; caricaMargineCliente(); }
+function _mrcClienteSingolo() { return _mrcSingolo || ''; }
 function _mrcResetEsclusi() { _mrcClientiEsclusi.clear(); _mrcDisegnaMargineCliente(); }
 function _mrcToggleCliente(idx, cb) { if (!_mrcCache || !_mrcCache.lista[idx]) return; var nome = _mrcCache.lista[idx].cliente; if (cb && cb.checked) _mrcClientiEsclusi.delete(nome); else _mrcClientiEsclusi.add(nome); _mrcDisegnaMargineCliente(); }
+function mrcOnSearch() { _mrcRenderListaClienti(); }
+function mrcIsolaCliente(idx) { if (!_mrcCache || !_mrcCache.lista[idx]) return; _mrcSingolo = _mrcCache.lista[idx].cliente; var s=document.getElementById('mrc-search'); if(s) s.value=''; _mrcDisegnaMargineCliente(); }
+function mrcMostraTutti() { _mrcSingolo=''; var s=document.getElementById('mrc-search'); if(s) s.value=''; _mrcDisegnaMargineCliente(); }
 function _mrcListaVisibile() {
   if (!_mrcCache) return [];
-  var singolo = _mrcClienteSingolo();
-  if (singolo) return _mrcCache.lista.filter(function(c){ return c.cliente === singolo; });
+  if (_mrcSingolo) return _mrcCache.lista.filter(function(c){ return c.cliente === _mrcSingolo; });
   return _mrcCache.lista.filter(function(c){ return !_mrcClientiEsclusi.has(c.cliente); });
+}
+
+function _mrcRenderListaClienti() {
+  var wrap = document.getElementById('mrc-flag-clienti');
+  if (!wrap || !_mrcCache) return;
+  var sottogruppo = _mrcCache.sottogruppo;
+  var search = (document.getElementById('mrc-search') ? document.getElementById('mrc-search').value : '').trim().toLowerCase();
+
+  if (_mrcSingolo) {
+    wrap.style.display = 'block';
+    wrap.innerHTML = '<div style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">' +
+      '<span style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px">Cliente singolo: <strong>' + esc(_mrcSingolo) + '</strong></span>' +
+      '<button onclick="mrcMostraTutti()" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Mostra tutti</button></div>';
+    return;
+  }
+
+  if (search) {
+    var matches = _mrcCache.lista.map(function(c,ci){ return {c:c, ci:ci}; })
+      .filter(function(o){ return o.c.cliente.toLowerCase().indexOf(search) >= 0; }).slice(0, 40);
+    wrap.style.display = 'block';
+    if (!matches.length) { wrap.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 0">Nessun cliente trovato per "' + esc(search) + '"</div>'; return; }
+    wrap.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Clicca un cliente per vederlo da solo</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto">' +
+      matches.map(function(o){ return '<button onclick="mrcIsolaCliente(' + o.ci + ')" style="font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;color:var(--text)">' + esc(o.c.cliente) + '</button>'; }).join('') +
+      '</div>';
+    return;
+  }
+
+  if (sottogruppo === 'rete' || sottogruppo === 'consumo') {
+    var nEsclusi = _mrcCache.lista.filter(function(c){ return _mrcClientiEsclusi.has(c.cliente); }).length;
+    var chips = _mrcCache.lista.map(function(c, ci) {
+      var on = !_mrcClientiEsclusi.has(c.cliente);
+      return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 9px;cursor:pointer' + (on?'':';opacity:0.45') + '">' +
+        '<input type="checkbox"' + (on?' checked':'') + ' onclick="_mrcToggleCliente(' + ci + ', this)" style="margin:0;cursor:pointer" />' + esc(c.cliente) + '</label>';
+    }).join('');
+    wrap.style.display = 'block';
+    wrap.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">' +
+        '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Clienti nel report — deseleziona per escludere' + (nEsclusi?(' · '+nEsclusi+' esclusi'):'') + '</div>' +
+        (nEsclusi?'<button onclick="_mrcResetEsclusi()" style="font-size:11px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Riattiva tutti</button>':'') +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto">' + chips + '</div>';
+  } else {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+  }
 }
 
 function _mrcDisegnaMargineCliente() {
   if (!_mrcCache) return;
-  var sottogruppo = _mrcCache.sottogruppo;
-  var singolo = _mrcClienteSingolo();
-
-  var flagWrap = document.getElementById('mrc-flag-clienti');
-  if (flagWrap) {
-    if ((sottogruppo === 'rete' || sottogruppo === 'consumo') && !singolo) {
-      var nEsclusi = _mrcCache.lista.filter(function(c){ return _mrcClientiEsclusi.has(c.cliente); }).length;
-      var chips = _mrcCache.lista.map(function(c, ci) {
-        var on = !_mrcClientiEsclusi.has(c.cliente);
-        return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 9px;cursor:pointer' + (on?'':';opacity:0.45') + '">' +
-          '<input type="checkbox"' + (on?' checked':'') + ' onclick="_mrcToggleCliente(' + ci + ', this)" style="margin:0;cursor:pointer" />' + esc(c.cliente) + '</label>';
-      }).join('');
-      flagWrap.style.display = 'block';
-      flagWrap.innerHTML =
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">' +
-          '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Clienti nel report — deseleziona per escludere' + (nEsclusi?(' · '+nEsclusi+' esclusi'):'') + '</div>' +
-          (nEsclusi?'<button onclick="_mrcResetEsclusi()" style="font-size:11px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Riattiva tutti</button>':'') +
-        '</div>' +
-        '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto">' + chips + '</div>';
-    } else {
-      flagWrap.style.display = 'none';
-      flagWrap.innerHTML = '';
-    }
-  }
-
+  _mrcRenderListaClienti();
   var lista = _mrcListaVisibile();
   var totale = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
   lista.forEach(function(c) { totale.ordini+=c.ordini; totale.litri+=c.litri; totale.fatturato+=c.fatturato; totale.costo+=c.costo; totale.margine+=c.margine; });

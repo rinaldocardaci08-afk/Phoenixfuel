@@ -1002,7 +1002,7 @@
                   <option value="rete">Solo Rete</option>
                   <option value="consumo">Solo Consumo</option>
                 </select>
-                <select id="mrc-cliente" onchange="_mrcDisegnaMargineCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;max-width:200px"><option value="">Tutti i clienti</option></select>
+                <input id="mrc-search" type="text" placeholder="Cerca cliente..." autocomplete="off" oninput="mrcOnSearch()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500;max-width:180px" />
                 <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#6B5FCC" onclick="stampaMargineCliente()">🖨️ Stampa</button>
                 <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#639922" onclick="esportaMargineClienteExcel()">📊 Excel</button>
               </div>
@@ -1500,7 +1500,10 @@
           <div class="card">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📈 Vendite per cliente</span>
-              <select id="vpc-cliente" onchange="vpcCambiaCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:200px"><option value="">— scegli un cliente —</option></select>
+              <div style="position:relative;min-width:220px">
+                <input id="vpc-search" type="text" placeholder="Cerca cliente..." autocomplete="off" oninput="vpcOnSearch()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:500;width:100%;box-sizing:border-box" />
+                <div id="vpc-results" style="display:none;position:absolute;top:40px;left:0;right:0;z-index:30;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;max-height:260px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,0.14)"></div>
+              </div>
             </div>
             <div id="vpc-body"><div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un cliente per vedere le analisi.</div></div>
           </div>
@@ -2951,8 +2954,8 @@
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260524c"></script>
 <script src="pf-deposito.js?v=20260717c"></script>
-<script src="pf-anagrafica.js?v=20260720a"></script>
-<script src="pf-vendite-cliente.js?v=20260720a"></script>
+<script src="pf-anagrafica.js?v=20260720b"></script>
+<script src="pf-vendite-cliente.js?v=20260720b"></script>
 <script src="pf-data.js?v=20260526d"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
 <script src="pf-stz-core.js?v=20260717c"></script>
