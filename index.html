@@ -997,15 +997,17 @@
                   <option value="07">Luglio</option><option value="08">Agosto</option><option value="09">Settembre</option>
                   <option value="10">Ottobre</option><option value="11">Novembre</option><option value="12">Dicembre</option>
                 </select>
-                <select id="mrc-sottogruppo" onchange="caricaMargineCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
+                <select id="mrc-sottogruppo" onchange="mrcCambiaSottogruppo()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600">
                   <option value="">Rete + Consumo</option>
                   <option value="rete">Solo Rete</option>
                   <option value="consumo">Solo Consumo</option>
                 </select>
+                <select id="mrc-cliente" onchange="_mrcDisegnaMargineCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;max-width:200px"><option value="">Tutti i clienti</option></select>
                 <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#6B5FCC" onclick="stampaMargineCliente()">🖨️ Stampa</button>
                 <button class="btn-primary" style="font-size:11px;padding:6px 14px;background:#639922" onclick="esportaMargineClienteExcel()">📊 Excel</button>
               </div>
             </div>
+            <div id="mrc-flag-clienti" style="display:none;margin-bottom:12px"></div>
             <div class="grid4" style="margin-bottom:12px" id="mrc-kpi"></div>
             <div style="overflow-x:auto">
               <table><thead><tr><th>Cliente</th><th>Tipo</th><th>Ordini</th><th>Litri</th><th>Fatturato</th><th>Costo</th><th>Margine €</th><th>Margine/L</th><th>% Margine</th></tr></thead>
@@ -1434,6 +1436,7 @@
           <button class="btn-primary cli-tab active" data-tab="cli-elenco" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px">👥 Elenco clienti</button>
           <button class="btn-primary cli-tab" data-tab="cli-scadenzario" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Scadenzario crediti</button>
           <button class="btn-primary cli-tab" data-tab="cli-estratto" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📋 Estratto Conto</button>
+          <button class="btn-primary cli-tab" data-tab="cli-vendite" onclick="switchClientiTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📈 Vendite per cliente</button>
         </div>
 
         <!-- PANEL: ELENCO CLIENTI -->
@@ -1489,6 +1492,17 @@
         <div class="cli-panel" id="cli-estratto" style="display:none">
           <div id="ec-content" style="padding:14px">
             <div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">⏳ Caricamento estratto conto...</div>
+          </div>
+        </div>
+
+        <!-- PANEL: VENDITE PER CLIENTE -->
+        <div class="cli-panel" id="cli-vendite" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📈 Vendite per cliente</span>
+              <select id="vpc-cliente" onchange="vpcCambiaCliente()" style="font-size:13px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:200px"><option value="">— scegli un cliente —</option></select>
+            </div>
+            <div id="vpc-body"><div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un cliente per vedere le analisi.</div></div>
           </div>
         </div>
       </div>
@@ -2932,12 +2946,13 @@
   <img id="lightbox-img" src="" style="max-width:92%;max-height:90vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
 </div>
 <script src="pf-keyboard-decimal.js?v=20260512d"></script>
-<script src="pf-config.js?v=20260503k"></script>
+<script src="pf-config.js?v=20260720a"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260524c"></script>
 <script src="pf-deposito.js?v=20260717c"></script>
-<script src="pf-anagrafica.js?v=20260717f"></script>
+<script src="pf-anagrafica.js?v=20260720a"></script>
+<script src="pf-vendite-cliente.js?v=20260720a"></script>
 <script src="pf-data.js?v=20260526d"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
 <script src="pf-stz-core.js?v=20260717c"></script>

@@ -1761,15 +1761,16 @@ function stampaConfrontoAnni() {
 
 // ── MARGINALITÀ PER CLIENTE ─────────────────────────────────────
 let _chartMrcMargine = null, _chartMrcMargineLitro = null;
+let _mrcCache = null;
+let _mrcClientiEsclusi = new Set();
+let _mrcSelectPop = false;
 
 async function caricaMargineCliente() {
-  // Popola selettori
   var selAnno = document.getElementById('mrc-anno');
   if (selAnno && selAnno.options.length === 0) {
     var ac = new Date().getFullYear();
     for (var y = ac; y >= ac - 5; y--) selAnno.innerHTML += '<option value="' + y + '"' + (y===ac?' selected':'') + '>' + y + '</option>';
   }
-
   var anno = selAnno ? selAnno.value : new Date().getFullYear();
   var mese = document.getElementById('mrc-mese')?.value || '';
   var da = anno + '-' + (mese || '01') + '-01';
@@ -1777,7 +1778,6 @@ async function caricaMargineCliente() {
   var a = anno + '-' + (mese || '12') + '-' + String(ultimoGg).padStart(2,'0');
 
   var { data: ordiniRaw } = await sb.from('ordini').select('cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,iva').eq('tipo_ordine','cliente').neq('stato','annullato').gte('data',da).lte('data',a).range(0,999);
-  // Paginazione: carica TUTTI gli ordini (fix >1000 righe)
   var ordini = ordiniRaw || [];
   if (ordini.length === 1000) {
     var from = 1000;
@@ -1790,12 +1790,17 @@ async function caricaMargineCliente() {
     }
   }
 
-  // Carica info clienti per tipo
   var { data: clientiInfo } = await sb.from('clienti').select('id,nome,tipo,cliente_rete');
   var clientiMap = {};
   (clientiInfo||[]).forEach(function(c) { clientiMap[c.id] = c; clientiMap[c.nome] = c; });
 
-  // Filtra per sottogruppo rete/consumo
+  var selCli = document.getElementById('mrc-cliente');
+  if (selCli && !_mrcSelectPop) {
+    var nomi = (clientiInfo||[]).map(function(c){return c.nome;}).filter(Boolean).sort(function(x,z){return x.localeCompare(z);});
+    selCli.innerHTML = '<option value="">Tutti i clienti</option>' + nomi.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
+    _mrcSelectPop = true;
+  }
+
   var sottogruppo = document.getElementById('mrc-sottogruppo')?.value || '';
   var ordiniFiltrati = (ordini||[]);
   if (sottogruppo === 'rete') {
@@ -1804,48 +1809,87 @@ async function caricaMargineCliente() {
     ordiniFiltrati = ordiniFiltrati.filter(function(o) { var info = clientiMap[o.cliente_id] || clientiMap[o.cliente]; return !info || !info.cliente_rete; });
   }
 
-  // Aggrega per cliente
   var perCliente = {};
   ordiniFiltrati.forEach(function(o) {
     var key = o.cliente || '—';
-    if (!perCliente[key]) perCliente[key] = { cliente:key, cliente_id:o.cliente_id, ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
+    if (!perCliente[key]) { var _i = clientiMap[o.cliente_id] || clientiMap[o.cliente] || {}; perCliente[key] = { cliente:key, cliente_id:o.cliente_id, cliente_rete: !!_i.cliente_rete, ordini:0, litri:0, fatturato:0, costo:0, margine:0 }; }
     var p = perCliente[key];
     var fatt = prezzoNoIva(o) * Number(o.litri);
     var marg = Number(o.margine) * Number(o.litri);
     var costo = (Number(o.costo_litro) + Number(o.trasporto_litro)) * Number(o.litri);
-    p.ordini++;
-    p.litri += Number(o.litri);
-    p.fatturato += fatt;
-    p.costo += costo;
-    p.margine += marg;
+    p.ordini++; p.litri += Number(o.litri); p.fatturato += fatt; p.costo += costo; p.margine += marg;
   });
 
-  var lista = Object.values(perCliente).sort(function(a,b) { return b.margine - a.margine; });
+  _mrcCache = { lista: Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;}), sottogruppo: sottogruppo };
+  _mrcDisegnaMargineCliente();
+}
+
+function mrcCambiaSottogruppo() { _mrcClientiEsclusi.clear(); caricaMargineCliente(); }
+function _mrcClienteSingolo() { var s = document.getElementById('mrc-cliente'); return s ? (s.value || '') : ''; }
+function _mrcResetEsclusi() { _mrcClientiEsclusi.clear(); _mrcDisegnaMargineCliente(); }
+function _mrcToggleCliente(idx, cb) { if (!_mrcCache || !_mrcCache.lista[idx]) return; var nome = _mrcCache.lista[idx].cliente; if (cb && cb.checked) _mrcClientiEsclusi.delete(nome); else _mrcClientiEsclusi.add(nome); _mrcDisegnaMargineCliente(); }
+function _mrcListaVisibile() {
+  if (!_mrcCache) return [];
+  var singolo = _mrcClienteSingolo();
+  if (singolo) return _mrcCache.lista.filter(function(c){ return c.cliente === singolo; });
+  return _mrcCache.lista.filter(function(c){ return !_mrcClientiEsclusi.has(c.cliente); });
+}
+
+function _mrcDisegnaMargineCliente() {
+  if (!_mrcCache) return;
+  var sottogruppo = _mrcCache.sottogruppo;
+  var singolo = _mrcClienteSingolo();
+
+  var flagWrap = document.getElementById('mrc-flag-clienti');
+  if (flagWrap) {
+    if ((sottogruppo === 'rete' || sottogruppo === 'consumo') && !singolo) {
+      var nEsclusi = _mrcCache.lista.filter(function(c){ return _mrcClientiEsclusi.has(c.cliente); }).length;
+      var chips = _mrcCache.lista.map(function(c, ci) {
+        var on = !_mrcClientiEsclusi.has(c.cliente);
+        return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 9px;cursor:pointer' + (on?'':';opacity:0.45') + '">' +
+          '<input type="checkbox"' + (on?' checked':'') + ' onclick="_mrcToggleCliente(' + ci + ', this)" style="margin:0;cursor:pointer" />' + esc(c.cliente) + '</label>';
+      }).join('');
+      flagWrap.style.display = 'block';
+      flagWrap.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">' +
+          '<div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Clienti nel report — deseleziona per escludere' + (nEsclusi?(' · '+nEsclusi+' esclusi'):'') + '</div>' +
+          (nEsclusi?'<button onclick="_mrcResetEsclusi()" style="font-size:11px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Riattiva tutti</button>':'') +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:132px;overflow-y:auto">' + chips + '</div>';
+    } else {
+      flagWrap.style.display = 'none';
+      flagWrap.innerHTML = '';
+    }
+  }
+
+  var lista = _mrcListaVisibile();
   var totale = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
   lista.forEach(function(c) { totale.ordini+=c.ordini; totale.litri+=c.litri; totale.fatturato+=c.fatturato; totale.costo+=c.costo; totale.margine+=c.margine; });
 
-  // KPI
   var kpiWrap = document.getElementById('mrc-kpi');
   var margMedio = totale.litri > 0 ? totale.margine / totale.litri : 0;
   var pctMarg = totale.fatturato > 0 ? (totale.margine / totale.fatturato) * 100 : 0;
-  kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + lista.length + '</div></div>' +
+  if (kpiWrap) kpiWrap.innerHTML = '<div class="kpi"><div class="kpi-label">Clienti attivi</div><div class="kpi-value">' + lista.length + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Margine totale</div><div class="kpi-value" style="color:#639922">' + fmtMe(totale.margine) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Margine medio/L</div><div class="kpi-value">€ ' + margMedio.toFixed(6) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">% margine su fatt.</div><div class="kpi-value">' + pctMarg.toFixed(1) + '%</div></div>';
 
-  // Tabella
   var tbody = document.getElementById('mrc-tabella');
-  if (!lista.length) { tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun dato</td></tr>'; return; }
+  if (!tbody) return;
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="loading">Nessun dato</td></tr>';
+    if (_chartMrcMargine) { _chartMrcMargine.destroy(); _chartMrcMargine=null; }
+    if (_chartMrcMargineLitro) { _chartMrcMargineLitro.destroy(); _chartMrcMargineLitro=null; }
+    return;
+  }
 
   var html = lista.map(function(c, idx) {
-    var info = clientiMap[c.cliente_id] || clientiMap[c.cliente] || {};
-    var tipo = info.tipo || '—';
     var ml = c.litri > 0 ? c.margine / c.litri : 0;
     var pct = c.fatturato > 0 ? (c.margine / c.fatturato) * 100 : 0;
     var mColor = c.margine >= 0 ? '#639922' : '#E24B4A';
     return '<tr' + (idx % 2 ? ' style="background:var(--bg)"' : '') + '>' +
       '<td><strong>' + esc(c.cliente) + '</strong></td>' +
-      '<td><span class="badge ' + (info.cliente_rete ? 'purple' : 'gray') + '" style="font-size:9px">' + (info.cliente_rete ? 'Rete' : 'Consumo') + '</span></td>' +
+      '<td><span class="badge ' + (c.cliente_rete ? 'purple' : 'gray') + '" style="font-size:9px">' + (c.cliente_rete ? 'Rete' : 'Consumo') + '</span></td>' +
       '<td style="text-align:center">' + c.ordini + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtL(c.litri) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtE(c.fatturato) + '</td>' +
@@ -1854,36 +1898,21 @@ async function caricaMargineCliente() {
       '<td style="font-family:var(--font-mono);color:' + mColor + '">€ ' + ml.toFixed(6) + '</td>' +
       '<td style="font-family:var(--font-mono);color:' + mColor + '">' + pct.toFixed(1) + '%</td></tr>';
   }).join('');
-
-  // Riga totale
   var tmColor = totale.margine >= 0 ? '#639922' : '#E24B4A';
   html += '<tr style="border-top:2px solid var(--accent);font-weight:600"><td>TOTALE</td><td></td><td style="text-align:center">' + totale.ordini + '</td><td style="font-family:var(--font-mono)">' + fmtL(totale.litri) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.fatturato) + '</td><td style="font-family:var(--font-mono)">' + fmtE(totale.costo) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + fmtMe(totale.margine) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">€ ' + margMedio.toFixed(6) + '</td><td style="font-family:var(--font-mono);color:' + tmColor + '">' + pctMarg.toFixed(1) + '%</td></tr>';
   tbody.innerHTML = html;
 
-  // Grafici
   var top10 = lista.slice(0, 10);
   var labels = top10.map(function(c) { return c.cliente.length > 15 ? c.cliente.substring(0,15) + '…' : c.cliente; });
-
   if (_chartMrcMargine) _chartMrcMargine.destroy();
   var ctx1 = document.getElementById('chart-mrc-margine');
   if (ctx1) {
-    _chartMrcMargine = new Chart(ctx1, {
-      type: 'bar', data: {
-        labels: labels,
-        datasets: [{ label: 'Margine €', data: top10.map(function(c){return Math.round(c.margine*100)/100;}), backgroundColor: top10.map(function(c){return c.margine>=0?'rgba(99,153,34,0.7)':'rgba(226,75,74,0.7)';}) }]
-      }, options: { responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
-    });
+    _chartMrcMargine = new Chart(ctx1, { type:'bar', data:{ labels:labels, datasets:[{ label:'Margine €', data:top10.map(function(c){return Math.round(c.margine*100)/100;}), backgroundColor:top10.map(function(c){return c.margine>=0?'rgba(99,153,34,0.7)':'rgba(226,75,74,0.7)';}) }] }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} } });
   }
-
   if (_chartMrcMargineLitro) _chartMrcMargineLitro.destroy();
   var ctx2 = document.getElementById('chart-mrc-marginelitro');
   if (ctx2) {
-    _chartMrcMargineLitro = new Chart(ctx2, {
-      type: 'bar', data: {
-        labels: labels,
-        datasets: [{ label: '€/L', data: top10.map(function(c){return c.litri>0?Math.round((c.margine/c.litri)*10000)/10000:0;}), backgroundColor: 'rgba(55,138,221,0.7)' }]
-      }, options: { responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
-    });
+    _chartMrcMargineLitro = new Chart(ctx2, { type:'bar', data:{ labels:labels, datasets:[{ label:'€/L', data:top10.map(function(c){return c.litri>0?Math.round((c.margine/c.litri)*10000)/10000:0;}), backgroundColor:'rgba(55,138,221,0.7)' }] }, options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} } });
   }
 }
 
@@ -1925,6 +1954,9 @@ async function stampaMargineCliente() {
     p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=(Number(o.costo_litro)+Number(o.trasporto_litro))*Number(o.litri); p.margine+=marg;
   });
   var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
+  var _mrcSing = document.getElementById("mrc-cliente") ? (document.getElementById("mrc-cliente").value||"") : "";
+  if (_mrcSing) lista = lista.filter(function(c){ return c.cliente === _mrcSing; });
+  else if (typeof _mrcClientiEsclusi !== "undefined") lista = lista.filter(function(c){ return !_mrcClientiEsclusi.has(c.cliente); });
   var tot = { ordini:0, litri:0, fatturato:0, costo:0, margine:0 };
   lista.forEach(function(c){tot.ordini+=c.ordini;tot.litri+=c.litri;tot.fatturato+=c.fatturato;tot.costo+=c.costo;tot.margine+=c.margine;});
 
@@ -1981,6 +2013,9 @@ async function esportaMargineClienteExcel() {
     p.litri+=Number(o.litri); p.fatturato+=fatt; p.costo+=(Number(o.costo_litro)+Number(o.trasporto_litro))*Number(o.litri); p.margine+=marg;
   });
   var lista = Object.values(perCliente).sort(function(a,b){return b.margine-a.margine;});
+  var _mrcSing = document.getElementById("mrc-cliente") ? (document.getElementById("mrc-cliente").value||"") : "";
+  if (_mrcSing) lista = lista.filter(function(c){ return c.cliente === _mrcSing; });
+  else if (typeof _mrcClientiEsclusi !== "undefined") lista = lista.filter(function(c){ return !_mrcClientiEsclusi.has(c.cliente); });
 
   var rows = [['Cliente','Ordini','Litri','Fatturato','Costo','Margine','€/L','% Margine']];
   lista.forEach(function(c) {

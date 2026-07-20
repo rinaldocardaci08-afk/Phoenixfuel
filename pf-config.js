@@ -236,6 +236,9 @@ function switchClientiTab(btn) {
   if (btn.dataset.tab === 'cli-estratto') {
     if (typeof renderEstrattoConto === 'function') renderEstrattoConto();
   }
+  if (btn.dataset.tab === 'cli-vendite') {
+    if (typeof caricaVenditePerCliente === 'function') caricaVenditePerCliente();
+  }
 }
 
 // ── SIDEBAR MOBILE ───────────────────────────────────────────────
