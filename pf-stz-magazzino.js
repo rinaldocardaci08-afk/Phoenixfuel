@@ -282,7 +282,7 @@ async function caricaGiacenzeStazione() {
       // Marginalità cercata (obiettivo per prodotto) + prezzo consigliato su CMP
       var _margOb = (prodInfo && prodInfo.margine_obiettivo != null) ? Number(prodInfo.margine_obiettivo) : null;
       var _margObStr = _margOb != null ? String(_margOb).replace('.', ',') : '—';
-      var _prezzoCmp = (_margOb != null && cmpGruppo > 0) ? ' · <span style="color:#0C447C">Prezzo su CMP:</span> <strong style="font-family:var(--font-mono);color:#0C447C">€ ' + (cmpGruppo + _margOb).toFixed(4).replace('.', ',') + '</strong>' : '';
+      var _prezzoCmp = (_margOb != null && cmpGruppo > 0) ? ' · <span style="color:#0C447C">Prezzo su CMP:</span> <strong style="font-family:var(--font-mono);color:#0C447C">€ ' + (cmpGruppo + _margOb).toFixed(4).replace('.', ',') + '</strong> <span style="color:#BA7517;font-family:var(--font-mono);font-size:11px">IVA inc. € ' + ((cmpGruppo + _margOb) * 1.22).toFixed(4).replace('.', ',') + '</span>' : '';
       const margObLabel = '<div class="cmp-riga" style="margin-top:2px">Marginalità cercata: <strong style="font-family:var(--font-mono)">' + _margObStr + '</strong> €/L <button onclick="_stzImpostaMargineObiettivo(\'' + esc(prodNome) + '\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Imposta marginalità cercata">✏️</button>' + _prezzoCmp + '</div>';
       const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'stazione_oppido\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
       const pctGruppo = capGruppo > 0 ? Math.round((totG / capGruppo) * 100) : 0;
