@@ -1237,7 +1237,7 @@ function _uniRenderPerProdotto(data) {
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
     // Header
     html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(prod) + '</strong>';
-    if (hasCpProd) html += '<span style="background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:0.3px;margin-left:4px">CAMBIO PREZZO</span>';
+    if (hasCpProd) html += '<span style="background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:0.3px;margin-left:4px">CAMBIO PREZZO</span><span onclick="_uniApriPopupMargine(this.getAttribute(\'data-p\'))" data-p="' + esc(prod) + '" title="Dettaglio marginalità due fasce" style="cursor:pointer;margin-left:6px;font-size:15px;user-select:none">ℹ️</span>';
     html += '<span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + gruppo.length + ' pompe — ' + fmtL(totLitriProd) + ' L totali</span></div>';
 
     // Dettaglio pompe
@@ -1268,6 +1268,11 @@ function _uniRenderPerProdotto(data) {
       var totFatt = fattStd + fattPD;
       var totCosto = costoStdTot + costoPDTot;
       var totMarg = margStdTot + margPDTot;
+      _uniPopupMargine[prod] = {
+        litriStd: litriStdProdR, prezzoStdNet: prezzoN, prezzoStdIva: prezzo, costoStd: costoN, margStdL: (prezzoN - costoN), margStd: margStdTot,
+        litriPD: litriPDProd, prezzoPDNet: prezzoPDNetR, prezzoPDIva: prezzoPDProd, costoPD: costoPDProd, margPDL: (prezzoPDNetR - costoPDProd), margPD: margPDTot,
+        totLitri: totLitriProd, totMarg: totMarg
+      };
 
       // 1° prezzo
       html += '<tr style="border-top:0.5px solid var(--border)">';
@@ -2896,3 +2901,46 @@ function _uniPrezziMesePDF() {
 }
 
 
+
+// ── Pop-up dettaglio marginalità due fasce (solo giorni con cambio prezzo) ──
+// Alimentato dal render "Marginalità live" (_uniPopupMargine[prodotto]). Solo lettura.
+var _uniPopupMargine = {};
+function _uniApriPopupMargine(prod) {
+  var d = _uniPopupMargine[prod];
+  if (!d) return;
+  var mCol = function (v) { return v >= 0 ? '#3B6D11' : '#C0392B'; };
+  var n4 = function (v) { return Number(v).toFixed(4).replace('.', ','); };
+  var riga = function (label, dot, litri, pNet, pIva, costo, margL, margTot) {
+    return '<tr style="border-top:0.5px solid var(--border)">' +
+      '<td style="padding:8px 6px"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + dot + ';margin-right:6px;vertical-align:middle"></span>' + label + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono)">' + fmtL(litri) + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono)">' + n4(pNet) + '<div style="font-size:11px;color:#BA7517">IVA ' + n4(pIva) + '</div></td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + n4(costo) + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);color:' + mCol(margL) + '">' + n4(margL) + '</td>' +
+      '<td style="padding:8px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + mCol(margTot) + '">' + fmtE(margTot) + '</td></tr>';
+  };
+  var html = '<div id="uni-popup-marg-ov" onclick="if(event.target===this)this.remove()" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px">' +
+    '<div style="width:100%;max-width:560px;background:var(--bg-card,#fff);border:0.5px solid var(--border);border-radius:12px;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:0.5px solid var(--border)">' +
+        '<div><div style="font-size:14px;font-weight:600">Dettaglio cambio prezzo · ' + esc(prod) + '</div><div style="font-size:12px;color:var(--text-muted)">due fasce nella stessa giornata</div></div>' +
+        '<span onclick="var o=document.getElementById(\'uni-popup-marg-ov\');if(o)o.remove()" style="cursor:pointer;font-size:18px;color:var(--text-muted)">&times;</span>' +
+      '</div>' +
+      '<div style="padding:8px 12px 14px">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+          '<thead><tr style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">' +
+            '<th style="text-align:left;padding:6px">Fascia</th><th style="text-align:right;padding:6px">Litri</th><th style="text-align:right;padding:6px">Prezzo €/l</th><th style="text-align:right;padding:6px;color:#A32D2D">Costo €/l</th><th style="text-align:right;padding:6px">Marg. €/l</th><th style="text-align:right;padding:6px">Margine</th></tr></thead>' +
+          '<tbody>' +
+            riga('Prezzo vecchio', 'var(--text-tertiary,#888)', d.litriStd, d.prezzoStdNet, d.prezzoStdIva, d.costoStd, d.margStdL, d.margStd) +
+            riga('Prezzo nuovo', '#378ADD', d.litriPD, d.prezzoPDNet, d.prezzoPDIva, d.costoPD, d.margPDL, d.margPD) +
+          '</tbody>' +
+        '</table>' +
+        '<div style="margin-top:12px;background:var(--bg);border-radius:8px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between">' +
+          '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Marginalità totale giornata</div><div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + fmtL(d.totLitri) + ' L</div></div>' +
+          '<div style="font-size:22px;font-weight:600;font-family:var(--font-mono);color:' + mCol(d.totMarg) + '">' + fmtE(d.totMarg) + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div></div>';
+  var wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  document.body.appendChild(wrap.firstChild);
+}
