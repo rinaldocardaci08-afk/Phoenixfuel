@@ -750,6 +750,7 @@ function _uniRenderGiorno(idx) {
 // ── RENDER PER POMPA ──
 function _uniRenderPerPompa(data) {
   var m = _uniData;
+  var _fascePop = {};
   var lettureGiorno = (m.lettureByData[data] || []).slice().sort(function(a, b) {
     return ((m.pompeMap[a.pompa_id] || {}).ordine || 99) - ((m.pompeMap[b.pompa_id] || {}).ordine || 99);
   });
@@ -1075,6 +1076,7 @@ function _uniRenderPerPompa(data) {
       }
 
       // Riquadri scalari "2° prezzo"
+      if (pompa.ordine === 1 || pompa.ordine === 2) html += '<div style="margin-top:8px"><span onclick="_uniApriPopupMargine(this.getAttribute(\'data-p\'))" data-p="' + esc(pompa.prodotto) + '" title="Dettaglio marginalità due fasce" style="cursor:pointer;font-size:12px;color:#0C447C;font-weight:600;user-select:none">ℹ️ dettaglio marginalità (due fasce)</span></div>';
       html += '<div style="font-size:10px;color:#0C447C;letter-spacing:0.4px;margin-top:8px;margin-bottom:4px;text-transform:uppercase;font-weight:500">2° prezzo</div>';
       html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:start;padding:8px 12px;background:#F5FAFE;border:0.5px solid #B5D4F4;border-radius:8px;margin-bottom:6px">';
       // 2° prezzo €/L IVA
@@ -1091,7 +1093,25 @@ function _uniRenderPerPompa(data) {
       html += '</div>';
     }
 
+    if (typeof litriStd === 'number') {
+      if (!_fascePop[pompa.prodotto]) _fascePop[pompa.prodotto] = { litriStd:0, margStd:0, prezzoStdNet:prezzoN, costoStd:costoN, litriPD:0, margPD:0, prezzoPDNet:0, costoPD:0, hasCp:false };
+      var _fp = _fascePop[pompa.prodotto];
+      _fp.litriStd += litriStd; _fp.margStd += (typeof margTot === 'number' ? margTot : 0);
+      _fp.prezzoStdNet = prezzoN; _fp.costoStd = costoN;
+      if (hasCambio && typeof litriPD === 'number' && litriPD > 0) { _fp.hasCp = true; _fp.litriPD += litriPD; _fp.margPD += (typeof margTotCP === 'number' ? margTotCP : 0); _fp.prezzoPDNet = prezzoPDN; _fp.costoPD = costoCP; }
+    }
+
     html += '</div>'; // chiudi card pompa
+  });
+
+  Object.keys(_fascePop).forEach(function(_pr) {
+    var f = _fascePop[_pr];
+    if (!f.hasCp || f.litriPD <= 0) return;
+    _uniPopupMargine[_pr] = {
+      litriStd: f.litriStd, prezzoStdNet: f.prezzoStdNet, prezzoStdIva: f.prezzoStdNet * 1.22, costoStd: f.costoStd, margStdL: (f.prezzoStdNet - f.costoStd), margStd: f.margStd,
+      litriPD: f.litriPD, prezzoPDNet: f.prezzoPDNet, prezzoPDIva: f.prezzoPDNet * 1.22, costoPD: f.costoPD, margPDL: (f.prezzoPDNet - f.costoPD), margPD: f.margPD,
+      totLitri: f.litriStd + f.litriPD, totMarg: f.margStd + f.margPD
+    };
   });
 
   // Bottone "Salva prezzi/costi" del giorno (sticky) - Fase 2
@@ -1237,7 +1257,7 @@ function _uniRenderPerProdotto(data) {
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + colore + ';border-radius:10px;padding:14px;margin-bottom:10px">';
     // Header
     html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><div style="width:10px;height:10px;border-radius:50%;background:' + colore + '"></div><strong style="font-size:16px">' + esc(prod) + '</strong>';
-    if (hasCpProd) html += '<span style="background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:0.3px;margin-left:4px">CAMBIO PREZZO</span><span onclick="_uniApriPopupMargine(this.getAttribute(\'data-p\'))" data-p="' + esc(prod) + '" title="Dettaglio marginalità due fasce" style="cursor:pointer;margin-left:6px;font-size:15px;user-select:none">ℹ️</span>';
+    if (hasCpProd) html += '<span style="background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:0.3px;margin-left:4px">CAMBIO PREZZO</span>';
     html += '<span style="font-size:13px;color:var(--text-muted);margin-left:auto">' + gruppo.length + ' pompe — ' + fmtL(totLitriProd) + ' L totali</span></div>';
 
     // Dettaglio pompe
