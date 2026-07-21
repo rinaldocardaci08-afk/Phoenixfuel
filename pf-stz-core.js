@@ -147,6 +147,8 @@ async function caricaOrdiniDaCaricare() {
     var _ptStr = (_mo != null && _cs > 0) ? '€ ' + (_cs + _mo).toFixed(4).replace('.', ',') : '—';
     var _umm = _umMarg[r.prodotto];
     var _pumStr = (_umm != null && _cs > 0) ? '€ ' + (_cs + _umm).toFixed(4).replace('.', ',') : '—';
+    var _ptIva = (_mo != null && _cs > 0) ? '<div style="font-size:11px;font-weight:600;color:#BA7517">IVA inc. € ' + ((_cs + _mo) * 1.22).toFixed(4).replace('.', ',') + '</div>' : '';
+    var _pumIva = (_umm != null && _cs > 0) ? '<div style="font-size:11px;font-weight:600;color:#BA7517">IVA inc. € ' + ((_cs + _umm) * 1.22).toFixed(4).replace('.', ',') + '</div>' : '';
     html += '<tr>' +
       '<td>' + dataFmt + '</td>' +
       '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
@@ -154,8 +156,8 @@ async function caricaOrdiniDaCaricare() {
       '<td>' + esc(r.fornitore) + '</td>' +
       '<td>' + badgeStato(r.stato) + '</td>' +
       '<td style="font-family:var(--font-mono);color:#A32D2D;font-weight:600">' + _csStr + '</td>' +
-      '<td style="font-family:var(--font-mono);color:#185FA5;font-weight:600">' + _pumStr + '</td>' +
-      '<td style="font-family:var(--font-mono);color:#0C447C;font-weight:600">' + _ptStr + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#185FA5;font-weight:600">' + _pumStr + _pumIva + '</td>' +
+      '<td style="font-family:var(--font-mono);color:#0C447C;font-weight:600">' + _ptStr + _ptIva + '</td>' +
       '<td><button class="btn-primary" style="font-size:11px;padding:4px 12px;background:#639922" onclick="riceviOrdineStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto) + '\')">📦 Ricevi</button></td>' +
       '</tr>';
   });
