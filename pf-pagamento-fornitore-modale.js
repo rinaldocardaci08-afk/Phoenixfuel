@@ -152,7 +152,11 @@ function _pfpRenderModale() {
   // Importo + Data pagamento
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">';
   h += '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Importo</label>';
-  h += '<input id="pfp-importo" type="number" step="0.01" min="0.01" value="'+importoSugg+'"'+readonlyImp+' style="width:100%;padding:8px 10px;font-size:15px;font-weight:600;border:0.5px solid var(--border);border-radius:6px;background:'+bgImp+';color:var(--text);box-sizing:border-box" /></div>';
+  h += '<input id="pfp-importo" type="number" step="0.01" min="0.01" value="'+importoSugg+'"'+readonlyImp+' oninput="_pfpAggiornaFido()" style="width:100%;padding:8px 10px;font-size:15px;font-weight:600;border:0.5px solid var(--border);border-radius:6px;background:'+bgImp+';color:var(--text);box-sizing:border-box" /></div>';
+  // Barra fido del fornitore, aggiornata in diretta con l'importo digitato
+  if (window._ecfFidoCtx && Number(window._ecfFidoCtx.fido) > 0) {
+    h += '<div id="pfp-fido-box" style="margin:4px 0 12px;padding:10px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg)"></div>';
+  }
   h += '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;font-weight:600">Data pagamento</label>';
   h += '<input id="pfp-data" type="date" value="'+_pfpOggiISO()+'" style="width:100%;padding:8px 10px;font-size:14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);box-sizing:border-box" /></div>';
   h += '</div>';
@@ -209,6 +213,7 @@ function _pfpRenderModale() {
   var existing = document.getElementById('pfp-modale-bg');
   if (existing) existing.remove();
   document.body.insertAdjacentHTML('beforeend', h);
+  if (typeof _pfpAggiornaFido === 'function') setTimeout(_pfpAggiornaFido, 0);
 
   // Focus su importo se parziale
   if (ctx.tipo === 'parziale') {

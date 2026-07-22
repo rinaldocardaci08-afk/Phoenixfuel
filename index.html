@@ -1541,6 +1541,12 @@
 
       <!-- FORNITORI -->
       <div class="section" id="s-fornitori">
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn-primary forn-tab active" data-tab="forn-elenco" onclick="switchFornitoriTab(this)" style="font-size:12px;padding:8px 14px">🏭 Elenco fornitori</button>
+          <button class="btn-primary forn-tab" data-tab="forn-estratto" onclick="switchFornitoriTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📑 Estratto conto fornitore</button>
+        </div>
+
+        <div class="forn-panel" id="forn-elenco">
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco fornitori</span>
@@ -1559,6 +1565,18 @@
         <div class="card" style="margin-top:12px">
           <div class="card-title">📋 Fatture Fornitori</div>
           <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento fatture fornitori...</div></div>
+        </div>
+        </div>
+
+        <!-- ESTRATTO CONTO FORNITORE -->
+        <div class="forn-panel" id="forn-estratto" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📑 Estratto conto fornitore</span>
+              <select id="ecf-fornitore" onchange="ecfCambiaFornitore()" style="font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:280px"><option value="">— scegli un fornitore —</option></select>
+            </div>
+            <div id="ecf-body"><div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un fornitore per vedere l'estratto conto.</div></div>
+          </div>
         </div>
       </div>
 
@@ -3015,8 +3033,9 @@
 <script src="pf-finanze.js?v=20260525a"></script>
 <script src="pf-foglio-giornale.js?v=20260524c"></script>
 <script src="pf-finanze-sostenibilita.js?v=20260503l"></script>
-<script src="pf-pagamento-fornitore-modale.js?v=20260524c"></script>
+<script src="pf-pagamento-fornitore-modale.js?v=20260722a"></script>
 <script src="pf-scadenzario-fornitori.js?v=20260717a"></script>
+<script src="pf-estratto-fornitore.js?v=20260722a"></script>
 <script src="pf-allegati.js?v=20260722a"></script>
 <script src="pf-fatture.js?v=20260717d"></script>
 <script src="pf-fatture-import.js?v=20260517a"></script>
