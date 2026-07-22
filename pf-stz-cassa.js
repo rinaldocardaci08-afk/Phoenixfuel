@@ -20,6 +20,7 @@ async function caricaCassa() {
   if (cassa) _markSaved('btn-salva-cassa');
   var spese = speseRes.data;
   document.getElementById('cassa-tot-vendite').textContent = fmtE(totVendite);
+  _cassaColora('cassa-tot-vendite', totVendite, true);
 
   // Popola campi
   document.getElementById('cassa-bancomat').value = cassa ? cassa.bancomat || '' : '';
@@ -119,10 +120,12 @@ function calcolaCassa() {
   // Somma incassi carte
   var totCarte = Math.round((bancomat + nexi + aziendali) * 100) / 100;
   document.getElementById('cassa-tot-incassi').textContent = fmtE(totCarte);
+  _cassaColora('cassa-tot-incassi', totCarte, false);
 
   // Contanti = vendite - carte (sempre auto)
   var contanti = Math.max(0, Math.round((totVendite - totCarte) * 100) / 100);
   document.getElementById('cassa-val-contanti').textContent = fmtE(contanti);
+  _cassaColora('cassa-val-contanti', contanti, false);
 
   // KPI: carte non devono superare vendite
   var kpiQ = document.getElementById('cassa-kpi-quadra');
@@ -144,20 +147,34 @@ function calcolaCassa() {
   var daVersare = Math.round((contanti + creditiEmessi - rimborsi - rimborsiPrec - totSpese) * 100) / 100;
   document.getElementById('cassa-da-versare').textContent = fmtE(daVersare);
   document.getElementById('cassa-kpi-daversare').textContent = fmtE(daVersare);
+  _cassaColora('cassa-da-versare', daVersare, false);
+  _cassaColora('cassa-kpi-daversare', daVersare, true);
 
   // Differenza versamento
   var differenza = Math.round((versato - daVersare) * 100) / 100;
   document.getElementById('cassa-differenza').textContent = fmtE(differenza);
+  _cassaColora('cassa-differenza', differenza, false);
   var kpiDiff = document.getElementById('cassa-kpi-diff');
   if (Math.abs(differenza) < 0.01 && versato > 0) {
     kpiDiff.style.background = '#EAF3DE'; kpiDiff.style.borderColor = '#639922';
-    document.getElementById('cassa-differenza').style.color = '#639922';
   } else if (versato > 0) {
     kpiDiff.style.background = '#FCEBEB'; kpiDiff.style.borderColor = '#E24B4A';
-    document.getElementById('cassa-differenza').style.color = '#A32D2D';
   } else {
     kpiDiff.style.background = ''; kpiDiff.style.borderColor = '';
-    document.getElementById('cassa-differenza').style.color = '';
+  }
+}
+
+// ── Colore per segno: positivo verde, negativo rosso (valore + pannello KPI) ──
+function _cassaColora(id, val, coloraPannello) {
+  var el = document.getElementById(id); if (!el) return;
+  var pos = Number(val) > 0.005, neg = Number(val) < -0.005;
+  el.style.color = pos ? '#639922' : neg ? '#A32D2D' : '';
+  if (coloraPannello && el.closest) {
+    var box = el.closest('.kpi');
+    if (box) {
+      box.style.background = pos ? '#EAF3DE' : neg ? '#FCEBEB' : '';
+      box.style.borderColor = pos ? '#639922' : neg ? '#E24B4A' : '';
+    }
   }
 }
 
