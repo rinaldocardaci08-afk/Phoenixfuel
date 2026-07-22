@@ -143,11 +143,8 @@ async function ecfCambiaFornitore() {
   _ecfRender();
 }
 
-function _ecfAddGiorni(dataISO, gg) {
-  if (!dataISO) return null;
-  var d = new Date(String(dataISO).slice(0, 10));
-  d.setDate(d.getDate() + Number(gg || 0));
-  return d.toISOString().slice(0, 10);
+function _ecfAddGiorni(dataISO, gg, scadFattura) {
+  return pfScadenzaFornitore(dataISO, gg, scadFattura);
 }
 
 async function _ecfCarica() {
@@ -575,4 +572,28 @@ function vaiEstrattoFornitore(id) {
     if (tab) switchFornitoriTab(tab);
     setTimeout(function () { ecfApriFornitore(id); }, 120);
   }, 120);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// REGOLA UNICA SCADENZA FORNITORE (22/07/2026) — matrice per TUTTO
+// Deve essere usata ovunque (estratto conto, calendario, foglio giornale):
+//   1. i giorni sono SEMPRE quelli del FORNITORE, mai quelli salvati sull'ordine
+//      (non esistono deroghe per singolo ordine);
+//   2. UNICA eccezione: se l'ordine è su una fattura cumulativa con una data di
+//      scadenza propria, comanda quella (il fornitore ha unificato più giorni);
+//   3. le scadenze di sabato e domenica slittano al lunedì (giorno bancabile).
+// ══════════════════════════════════════════════════════════════════
+function pfScadenzaFornitore(dataOrdine, ggFornitore, dataScadenzaFattura) {
+  var base = dataScadenzaFattura ? String(dataScadenzaFattura).slice(0, 10) : null;
+  if (!base) {
+    if (!dataOrdine) return null;
+    var d = new Date(String(dataOrdine).slice(0, 10) + 'T12:00:00');
+    d.setDate(d.getDate() + Number(ggFornitore || 30));
+    base = d.toISOString().slice(0, 10);
+  }
+  var x = new Date(base + 'T12:00:00');
+  var g = x.getDay();
+  if (g === 6) x.setDate(x.getDate() + 2);
+  if (g === 0) x.setDate(x.getDate() + 1);
+  return x.toISOString().slice(0, 10);
 }

@@ -755,7 +755,8 @@ async function _fgSelezionaContraente(id, nome, tipo) {
     elFatt.innerHTML = _fgRenderListaFatture();
   } else if (_fgModale.modo === 'D') {
     // Modo D: ordini SENZA fattura ricevuta (per pagamento anticipato)
-    var resOd = await sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore').eq('tipo_ordine', 'entrata_deposito').eq('fornitore', nome).eq('pagato_fornitore', false).is('fattura_ricevuta_id', null).order('data', { ascending: false }).limit(20);
+    // TUTTI gli ordini al fornitore (deposito e non), non solo le entrate deposito
+    var resOd = await sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore').ilike('fornitore', nome).neq('stato', 'annullato').eq('pagato_fornitore', false).is('fattura_ricevuta_id', null).order('data', { ascending: false }).limit(200);
     _fgModale.ordiniTrovati = resOd.data || [];
     elFatt.innerHTML = _fgRenderListaOrdini();
   } else {

@@ -125,18 +125,21 @@ async function caricaFinanze() {
     daISOForn = new Date(_finCalAnno, _finCalMese, -90, 12, 0, 0).toISOString().split('T')[0];
   }
 
-  var [ordCliRes, ordForRes, cassaRes, fornitoriRes] = await Promise.all([
+  var [ordCliRes, ordForRes, cassaRes, fornitoriRes, fattScadRes] = await Promise.all([
     sb.from('ordini').select('id,data,cliente,prodotto,litri,costo_litro,trasporto_litro,margine,iva,data_scadenza,giorni_pagamento,pagato,data_pagamento')
       .eq('tipo_ordine','cliente').neq('stato','annullato')
       .gte('data_scadenza',rng.daISO).lte('data_scadenza',rng.aISO),
-    sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore,data_pagamento_fornitore')
+    sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore,data_pagamento_fornitore,fattura_ricevuta_id')
       .neq('stato','annullato')
       .not('fornitore','ilike','%phoenix%').not('fornitore','ilike','%deposito%').not('fornitore','ilike','%rientro%')
       .gte('data',daISOForn),
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
       .gte('data',rng.inizioMeseISO).lte('data',rng.fineMeseISO).order('data'),
-    sb.from('fornitori').select('nome,giorni_pagamento,colore')
+    sb.from('fornitori').select('nome,giorni_pagamento,colore'),
+    sb.from('fatture_ricevute').select('id,data_scadenza')
   ]);
+  var _finScadFatture = {};
+  (fattScadRes && fattScadRes.data ? fattScadRes.data : []).forEach(function (f) { _finScadFatture[f.id] = f.data_scadenza; });
 
   var ordClienti = ordCliRes.data || [];
   var ordFornitori = ordForRes.data || [];
@@ -184,10 +187,13 @@ async function caricaFinanze() {
     if (!o.data || !o.fornitore) return;
     var fn = o.fornitore.toLowerCase();
     if (fn.indexOf('phoenix') >= 0 || fn.indexOf('deposito') >= 0) return;
-    var ggPag = o.giorni_pagamento || (fornitoriMap[o.fornitore] ? fornitoriMap[o.fornitore].giorni_pagamento : 30) || 30;
-    var scad = new Date(o.data + 'T12:00:00');
-    scad.setDate(scad.getDate() + ggPag);
-    var scadEffettiva = spostaAlLunedi(scad.toISOString().split('T')[0]);
+    // REGOLA UNICA (pfScadenzaFornitore): giorni SEMPRE del fornitore, mai dell'ordine;
+    // se l'ordine sta su una fattura cumulativa comanda la scadenza della fattura.
+    var ggPag = (fornitoriMap[o.fornitore] ? fornitoriMap[o.fornitore].giorni_pagamento : 30) || 30;
+    var scadFatt = (o.fattura_ricevuta_id && _finScadFatture) ? _finScadFatture[o.fattura_ricevuta_id] : null;
+    var scadEffettiva = (typeof pfScadenzaFornitore === 'function')
+      ? pfScadenzaFornitore(o.data, ggPag, scadFatt)
+      : spostaAlLunedi(o.data);
     // Solo costo_litro: il trasporto è fatturato dal vettore terzo, non dal fornitore carburante
     var importo = Number(o.costo_litro) * Number(o.litri) * (1 + Number(o.iva || 22) / 100);
     getGiorno(scadEffettiva).usciteDettaglio.push({
