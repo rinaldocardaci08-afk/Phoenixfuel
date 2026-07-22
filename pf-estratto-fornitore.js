@@ -113,7 +113,10 @@ function _ecfDisegnaOverview(body, cards) {
           + '<div style="font-size:11px;color:var(--text-muted);margin:2px 0 10px">acquistato ' + fmtE(c.acq) + '</div>'
           + (c.fido > 0 ? _ecfBarra(c.esp, c.fido, false)
                         : '<div style="font-size:11px;color:var(--text-muted)">Esposizione ' + fmtE(c.esp) + ' · nessun fido assegnato</div>')
-          + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:9px">'
+          + (c.fido > 0 ? '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:7px">'
+              + '<span style="color:var(--text-muted)">Fido disponibile</span>'
+              + '<span style="font-family:var(--font-mono);font-weight:700;color:' + ((c.fido - c.esp) < 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(c.fido - c.esp) + '</span></div>' : '')
+          + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:7px">'
             + '<span style="color:var(--text-muted)">' + c.nAperti + ' ordini aperti</span>'
             + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
                          : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
@@ -612,7 +615,13 @@ async function caricaFidoFornitoriDashboard() {
               + '<span style="font-size:14px;font-weight:700">' + esc(c.nome) + '</span>'
               + '<span style="font-size:11px;color:var(--text-muted)">' + c.gg + ' gg</span></div>'
             + _ecfBarra(c.esp, c.fido, false)
-            + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:8px">'
+            + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:8px">'
+              + '<span style="color:var(--text-muted)">Acquistato ' + new Date().getFullYear() + '</span>'
+              + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(c.acq) + '</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:4px">'
+              + '<span style="color:var(--text-muted)">Fido disponibile</span>'
+              + '<span style="font-family:var(--font-mono);font-weight:700;color:' + ((c.fido - c.esp) < 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(c.fido - c.esp) + '</span></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px">'
               + '<span style="color:var(--text-muted)">' + c.nAperti + ' ordini aperti</span>'
               + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
                            : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
@@ -704,16 +713,25 @@ function _ecfTimelineHtml() {
   var entro7 = new Date(); entro7.setDate(entro7.getDate() + 7);
   var entro7ISO = entro7.toISOString().slice(0, 10);
 
+  // Troppe scadenze o troppo ravvicinate → niente etichette: solo pallini,
+  // i valori compaiono passando sopra col mouse (altrimenti non si capisce nulla)
+  var minGap = 999;
+  for (var k = 1; k < sc.length; k++) minGap = Math.min(minGap, pos(sc[k].data) - pos(sc[k - 1].data));
+  var etichette = !(sc.length > 8 || minGap < 6);
+
   var pallini = sc.map(function (s, i) {
     var scaduta = s.data < oggi, vicina = !scaduta && s.data <= entro7ISO;
     var c = scaduta ? '#E5342F' : vicina ? '#F5921E' : '#4CAF2E';
     var colTxt = scaduta ? '#A32D2D' : (s === maxImp ? '#0C447C' : 'var(--text)');
     var dy = liv[i] * 20;
-    return '<div style="position:absolute;left:' + pos(s.data) + '%;top:48px;width:14px;margin-left:-7px;z-index:4" title="' + s.n + ' ordini">'
-      + '<div style="width:14px;height:14px;border-radius:50%;background:' + c + ';border:3px solid var(--bg-card,#fff);box-shadow:0 1px 3px rgba(0,0,0,.25)"></div>'
-      + '<div style="position:absolute;bottom:' + (26 + dy) + 'px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10.5px;font-weight:700;white-space:nowrap;color:' + colTxt + '">' + _pfIsoToIt(s.data) + '</div>'
-      + '<div style="position:absolute;top:' + (20 + dy) + 'px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:11.5px;font-weight:700;white-space:nowrap;color:' + colTxt + '">' + fmtE(s.importo) + '</div>'
-      + '</div>';
+    var tip = _pfIsoToIt(s.data) + ' · ' + fmtE(s.importo) + ' · ' + s.n + (s.n === 1 ? ' ordine' : ' ordini');
+    var h = '<div style="position:absolute;left:' + pos(s.data) + '%;top:48px;width:' + (etichette ? 14 : 16) + 'px;margin-left:-' + (etichette ? 7 : 8) + 'px;z-index:4;cursor:help" title="' + esc(tip) + '">'
+      + '<div style="width:' + (etichette ? 14 : 16) + 'px;height:' + (etichette ? 14 : 16) + 'px;border-radius:50%;background:' + c + ';border:3px solid var(--bg-card,#fff);box-shadow:0 1px 3px rgba(0,0,0,.25)"></div>';
+    if (etichette) {
+      h += '<div style="position:absolute;bottom:' + (26 + dy) + 'px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10.5px;font-weight:700;white-space:nowrap;color:' + colTxt + '">' + _pfIsoToIt(s.data) + '</div>'
+        + '<div style="position:absolute;top:' + (20 + dy) + 'px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:11.5px;font-weight:700;white-space:nowrap;color:' + colTxt + '">' + fmtE(s.importo) + '</div>';
+    }
+    return h + '</div>';
   }).join('');
 
   var box = function (lab, data, imp, tipo) {
@@ -730,8 +748,9 @@ function _ecfTimelineHtml() {
   var pctScad = pos(oggi);
   return '<div class="card" style="margin-bottom:18px">'
     + '<div class="card-title">Scadenze aperte</div>'
-    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:26px">' + sc.length + ' pagamenti dal ' + _pfIsoToIt(primo.data) + ' al ' + _pfIsoToIt(ultimoP.data) + ' · dilazione ' + _ecfSel.gg + ' giorni</div>'
-    + '<div style="position:relative;height:' + (118 + Math.max.apply(null, liv) * 20) + 'px;margin:0 14px">'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:' + (etichette ? 26 : 10) + 'px">' + sc.length + ' pagamenti dal ' + _pfIsoToIt(primo.data) + ' al ' + _pfIsoToIt(ultimoP.data) + ' · dilazione ' + _ecfSel.gg + ' giorni'
+      + (etichette ? '' : ' · <strong>passa sui pallini per data e importo</strong>') + '</div>'
+    + '<div style="position:relative;height:' + (etichette ? (118 + Math.max.apply(null, liv) * 20) : 88) + 'px;margin:0 14px">'
       + '<div style="position:absolute;left:0;right:0;top:54px;height:14px;border-radius:7px;background:#EDEAE4;border:0.5px solid var(--border);overflow:hidden">'
         + (pctScad > 0 ? '<div style="position:absolute;left:0;width:' + pctScad + '%;height:100%;background:linear-gradient(90deg,#F0564F,#E5342F)"></div>' : '')
         + '<div style="position:absolute;left:' + pctScad + '%;right:0;height:100%;background:linear-gradient(90deg,#5DC33A,#4CAF2E)"></div>'
