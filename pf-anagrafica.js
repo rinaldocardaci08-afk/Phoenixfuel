@@ -18,11 +18,26 @@ async function caricaConsegne() {
   const { data } = await sb.from('ordini').select('*').eq('data', dataFiltro).neq('stato','annullato').order('cliente');
   const tbody = document.getElementById('tabella-consegne');
 
+  // ── Litri dei DAS generati, per l'alert "DAS ≠ ordine" ──
+  window._consDasLitri = {};
+  try {
+    var _ids = (data || []).map(function (r) { return r.id; });
+    if (_ids.length) {
+      var _dd = await sb.from('das_documenti').select('ordine_id,litri_ambiente,numero_progressivo').in('ordine_id', _ids);
+      (_dd.data || []).forEach(function (d) {
+        if (!d.ordine_id) return;
+        var cur = window._consDasLitri[d.ordine_id] || { litri: 0, num: d.numero_progressivo };
+        cur.litri += Number(d.litri_ambiente || 0);
+        window._consDasLitri[d.ordine_id] = cur;
+      });
+    }
+  } catch (e) { /* nessun DAS: nessun alert */ }
+
   if (!data||!data.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="loading">Nessun ordine per questa data</td></tr>';
     ['tot-consegne','tot-completate','tot-inattesa','tot-programmati','tot-litri-cons','tot-fatt-netto-cons','tot-fatt-iva-cons','tot-margine-cons'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='0'; });
   } else {
-    const consegnabili = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito');
+    const consegnabili = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='autoconsumo' || r.tipo_ordine==='entrata_deposito');
     document.getElementById('tot-consegne').textContent = consegnabili.length;
     document.getElementById('tot-completate').textContent = consegnabili.filter(r=>r.stato==='confermato').length;
     document.getElementById('tot-inattesa').textContent = consegnabili.filter(r=>r.stato==='in attesa').length;
@@ -99,8 +114,20 @@ async function caricaConsegne() {
     })();
 
     // Render consegne con semafori DAS/Cartellino
-    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='entrata_deposito').map(r => {
+    tbody.innerHTML = data.filter(r=>r.tipo_ordine==='cliente' || r.tipo_ordine==='stazione_servizio' || r.tipo_ordine==='autoconsumo' || r.tipo_ordine==='entrata_deposito').map(r => {
       const tot = prezzoConIva(r) * Number(r.litri);
+
+      // ── ALERT: litri del DAS diversi dall'ordine ──
+      var _alertDas = '';
+      var _dasInfo = (window._consDasLitri || {})[r.id];
+      if (_dasInfo && _dasInfo.litri > 0 && Math.round(_dasInfo.litri) !== Math.round(Number(r.litri || 0))) {
+        var _m = 'DAS ' + fmtL(Math.round(_dasInfo.litri)) + ' L contro ordine ' + fmtL(Math.round(Number(r.litri))) + ' L'
+               + ' · differenza ' + fmtL(Math.abs(Math.round(_dasInfo.litri) - Math.round(Number(r.litri))))
+               + ' · fornitore ordine: ' + (r.fornitore || '—')
+               + '. Controlla il DAS firmato e correggi il documento in Logistica.';
+        _alertDas = '<div title="' + esc(_m) + '" onclick="alert(\'' + esc(_m).replace(/'/g,'&#39;') + '\')" '
+          + 'style="margin-top:3px;display:inline-flex;align-items:center;gap:3px;background:#FCEBEB;color:#791F1F;border:1px solid #C0392B;border-radius:5px;padding:1px 6px;font-size:9px;font-weight:600;cursor:pointer">⚠️ DAS ≠ ordine</div>';
+      }
 
       // Semafori DAS firmato e Cartellino
       var hasDas = !!r.das_firmato_url;
@@ -108,6 +135,7 @@ async function caricaConsegne() {
       var dasSemaforo = hasDas
         ? '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#639922"></div><span style="font-size:9px;color:#27500A;font-weight:500">Allegato</span></div><a href="' + esc(r.das_firmato_url) + '" target="_blank" style="font-size:9px;color:#639922;text-decoration:none">Apri</a></div>'
         : '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#E24B4A"></div><span style="font-size:9px;color:#791F1F;font-weight:500">Mancante</span></div><button style="font-size:9px;padding:2px 8px;background:#FCEBEB;color:#791F1F;border:0.5px solid #F09595;border-radius:5px;cursor:pointer" onclick="allegaDocConsegna(\'' + r.id + '\',\'das_firmato\')">Allega</button></div>';
+      dasSemaforo = dasSemaforo + _alertDas;
       var cartSemaforo = hasCart
         ? '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#639922"></div><span style="font-size:9px;color:#27500A;font-weight:500">Allegato</span></div><a href="' + esc(r.cartellino_url) + '" target="_blank" style="font-size:9px;color:#639922;text-decoration:none">Apri</a></div>'
         : '<div style="text-align:center"><div style="display:flex;align-items:center;gap:3px;justify-content:center"><div style="width:9px;height:9px;border-radius:50%;background:#E24B4A"></div><span style="font-size:9px;color:#791F1F;font-weight:500">Mancante</span></div><button style="font-size:9px;padding:2px 8px;background:#FCEBEB;color:#791F1F;border:0.5px solid #F09595;border-radius:5px;cursor:pointer" onclick="allegaDocConsegna(\'' + r.id + '\',\'cartellino\')">Allega</button></div>';
@@ -544,7 +572,7 @@ async function caricaStoricoConsegne() {
     document.getElementById('filtro-a-consegne').value = a;
   }
   tbody.innerHTML = '<tr><td colspan="8" class="loading">Caricamento...</td></tr>';
-  var q = sb.from('ordini').select('*').in('tipo_ordine',['cliente','stazione_servizio']).neq('stato','annullato').order('data',{ascending:false}).order('cliente');
+  var q = sb.from('ordini').select('*').in('tipo_ordine',['cliente','stazione_servizio','autoconsumo']).neq('stato','annullato').order('data',{ascending:false}).order('cliente');
   if (da) q = q.gte('data', da);
   if (a) q = q.lte('data', a);
   q = q.limit(1000);

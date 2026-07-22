@@ -1339,10 +1339,12 @@ function _renderCardCarico(c, opts) {
   return html;
 }
 
-async function caricaCarichi() {
-  const { data } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordine_id, ordini(cliente,prodotto,litri,note)), mezzi(capacita_totale)').order('data',{ascending:false}).limit(50);
+async function caricaCarichi(dataFiltro) {
+  var _q = sb.from('carichi').select('*, carico_ordini(sequenza, ordine_id, ordini(cliente,prodotto,litri,note)), mezzi(capacita_totale)').order('data',{ascending:false});
+  _q = dataFiltro ? _q.eq('data', dataFiltro) : _q.limit(50);
+  const { data } = await _q;
   const cont = document.getElementById('tabella-carichi');
-  if (!data||!data.length) { cont.innerHTML = '<div class="loading">Nessun carico pianificato</div>'; return; }
+  if (!data||!data.length) { cont.innerHTML = '<div class="loading">Nessun carico pianificato' + (dataFiltro ? ' per questa data' : '') + '</div>'; return; }
 
   // Semaforo DAS: quali carichi hanno già almeno un DAS generato?
   // Una sola query: tutti gli ordine_id dei carichi → quali compaiono in das_documenti.
@@ -2269,7 +2271,7 @@ async function pfVaiAlGiornoCarichi(dataISO) {
   if (!dataISO) return;
   var el = document.getElementById('carichi-giorno-' + dataISO);
   if (!el) {
-    try { await caricaCarichi(); } catch (e) {}
+    try { await caricaCarichi(dataISO); } catch (e) {}
     el = document.getElementById('carichi-giorno-' + dataISO);
   }
   if (!el) { if (typeof toast === 'function') toast('Nessun carico pianificato per ' + (typeof fmtD === 'function' ? fmtD(dataISO) : dataISO)); return; }
