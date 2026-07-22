@@ -866,7 +866,7 @@ async function caricaOrdiniPerCarico() {
 
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
-      if (o.tipo_ordine === 'cliente') return true;
+      if (o.tipo_ordine === 'cliente' || o.tipo_ordine === 'autoconsumo') return true;
       if ((o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') && Number(o.trasporto_litro||0) > 0) return true;
       return false;
     });
@@ -1378,7 +1378,7 @@ async function caricaCarichi() {
     var btnGiornata = (pendenti > 0 && d !== '—')
       ? '<button onclick="pfGeneraDasGiornata(\'' + d + '\')" style="font-size:11px;padding:5px 12px;border:0.5px solid var(--accent,#D85A30);border-radius:6px;background:var(--accent,#D85A30);color:#fff;cursor:pointer">📄 Genera DAS giornata (' + pendenti + ')</button>'
       : '';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">'
+    html += '<div id="carichi-giorno-' + d + '" data-giorno="' + d + '" style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">'
       + '<div style="font-size:11px;color:var(--text-muted);padding:8px 12px;background:var(--bg);border-radius:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">' + fmtD(d) + '</div>'
       + btnGiornata + '</div>';
     perData[d].forEach(function(c) {
@@ -1716,6 +1716,7 @@ async function _generaDasPerCarico(caricoId, ordini, targa, autista, data, densi
       ordine_id: o.id,
       carico_id: caricoId,
       data: data,
+      direzione: (o.tipo_ordine === 'entrata_deposito' ? 'E' : 'U'),
       dest_piva: dest.piva,
       dest_ragsoc: dest.ragsoc,
       dest_indirizzo: dest.indirizzo,
@@ -2248,4 +2249,24 @@ async function pfEliminaViaggio(caricoId) {
   toast('✅ Viaggio eliminato — ' + ids.length + ' consegne da organizzare');
   caricaCarichi();
   if (typeof caricaOrdiniPerCarico === 'function') caricaOrdiniPerCarico();
+}
+
+// ── Calendario pianificazione → porta il pannello "Carichi pianificati" al giorno scelto ──
+// Chiamata dall'onchange di #car-data: scorre al gruppo di quella data e lo evidenzia.
+async function pfVaiAlGiornoCarichi(dataISO) {
+  if (!dataISO) return;
+  var el = document.getElementById('carichi-giorno-' + dataISO);
+  if (!el) {
+    try { await caricaCarichi(); } catch (e) {}
+    el = document.getElementById('carichi-giorno-' + dataISO);
+  }
+  if (!el) { if (typeof toast === 'function') toast('Nessun carico pianificato per ' + (typeof fmtD === 'function' ? fmtD(dataISO) : dataISO)); return; }
+  try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { el.scrollIntoView(); }
+  var box = el.firstElementChild;
+  if (box) {
+    var prev = box.style.boxShadow;
+    box.style.transition = 'box-shadow .3s';
+    box.style.boxShadow = '0 0 0 2px var(--accent,#D85A30)';
+    setTimeout(function () { box.style.boxShadow = prev || ''; }, 1800);
+  }
 }
