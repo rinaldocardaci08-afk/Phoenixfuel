@@ -65,7 +65,7 @@ async function _ecfCalcolaFornitori() {
   var da = (new Date().getFullYear() - 1) + '-01-01';
   var r = await Promise.all([
     _pfFetchAllPages(function () {
-      return sb.from('ordini').select('fornitore,data,litri,costo_litro,pagato_fornitore,fattura_ricevuta_id')
+      return sb.from('ordini').select('fornitore,data,litri,costo_litro,iva,pagato_fornitore,fattura_ricevuta_id')
         .neq('stato','annullato').gte('data', da).order('data', { ascending: false });
     }),
     sb.from('fatture_ricevute').select('id,fornitore_nome,importo_dichiarato'),
@@ -85,7 +85,7 @@ async function _ecfCalcolaFornitori() {
     var nome = String(f.nome || ''), gg = Number(f.giorni_pagamento || 30), fido = Number(f.fido_massimo || 0);
     var suoi = ordini.filter(function (o) { return String(o.fornitore || '').toLowerCase() === nome.toLowerCase(); });
     var aperti = suoi.filter(function (o) { return !o.pagato_fornitore && !o.fattura_ricevuta_id; });
-    var esp = aperti.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0); }, 0)
+    var esp = aperti.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0) * (1 + Number(o.iva == null ? 22 : o.iva) / 100); }, 0)
             + (residuoPerForn[nome.toLowerCase()] || 0);
     esp = Math.round(esp * 100) / 100;
     var scad = aperti.map(function (o) { return _ecfAddGiorni(o.data, gg); }).filter(Boolean).sort();
@@ -214,7 +214,7 @@ async function _ecfCarica() {
   var da = (new Date().getFullYear() - 1) + '-01-01';
   var qd = await _pfFetchAllPages(function () {
     return sb.from('ordini')
-      .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,stato,pagato_fornitore,fattura_ricevuta_id')
+      .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,pagato_fornitore,fattura_ricevuta_id')
       .ilike('fornitore', _ecfSel.nome).neq('stato', 'annullato').gte('data', da).order('data', { ascending: false });
   });
   var q = { data: qd };
@@ -223,6 +223,7 @@ async function _ecfCarica() {
       id: o.id, data: o.data, prodotto: o.prodotto, litri: Number(o.litri || 0),
       costoL: Number(o.costo_litro || 0),
       imponibile: Math.round(Number(o.costo_litro || 0) * Number(o.litri || 0) * 100) / 100,
+      totale: Math.round(Number(o.costo_litro || 0) * Number(o.litri || 0) * (1 + Number(o.iva == null ? 22 : o.iva) / 100) * 100) / 100,
       scadenza: _ecfAddGiorni(o.data, _ecfSel.gg),
       pagato: !!o.pagato_fornitore, fatturaId: o.fattura_ricevuta_id || null
     };
@@ -245,7 +246,7 @@ async function _ecfCarica() {
     });
     _ecfFatture = (rf[0].data || []).map(function (x) {
       var ords = _ecfOrdini.filter(function (o) { return o.fatturaId === x.id; });
-      var tot = Number(x.importo_dichiarato || 0) || ords.reduce(function (s, o) { return s + o.imponibile; }, 0);
+      var tot = Number(x.importo_dichiarato || 0) || ords.reduce(function (s, o) { return s + o.totale; }, 0);
       var pg = pag[x.id] || { tot: 0, n: 0, ultima: null };
       var residuo = Math.round((tot - pg.tot) * 100) / 100;
       return {
@@ -260,7 +261,7 @@ async function _ecfCarica() {
 // Esposizione = ordini senza fattura non pagati + residui delle fatture aperte
 function ecfEsposizione() {
   var a = _ecfOrdini.filter(function (o) { return !o.fatturaId && !o.pagato; })
-                    .reduce(function (s, o) { return s + o.imponibile; }, 0);
+                    .reduce(function (s, o) { return s + o.totale; }, 0);
   var b = _ecfFatture.reduce(function (s, f) { return s + (f.saldata ? 0 : f.residuo); }, 0);
   return Math.round((a + b) * 100) / 100;
 }
@@ -290,6 +291,7 @@ function _ecfRender() {
 
   var ordAnno = _ecfOrdini.filter(function (o) { return String(o.data).slice(0, 4) === String(anno); });
   var acquistato = ordAnno.reduce(function (s, o) { return s + o.imponibile; }, 0);
+  var acquistatoIva = ordAnno.reduce(function (s, o) { return s + o.totale; }, 0);
   var pagatoTot = _ecfFatture.reduce(function (s, f) { return s + f.pagato; }, 0);
   var nSaldate = _ecfFatture.filter(function (f) { return f.saldata; }).length;
   var daPagare = ecfEsposizione();
@@ -309,7 +311,7 @@ function _ecfRender() {
   };
 
   var selIds = Object.keys(_ecfSelezione);
-  var totSel = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; }).reduce(function (s, o) { return s + o.imponibile; }, 0);
+  var totSel = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; }).reduce(function (s, o) { return s + o.totale; }, 0);
 
   var righeOrd = senzaFatt.map(function (o) {
     var scaduto = !o.pagato && o.scadenza && o.scadenza < oggi;
@@ -324,10 +326,11 @@ function _ecfRender() {
       + '<td>' + esc(o.prodotto || '—') + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono);font-size:12px">' + o.costoL.toFixed(4).replace('.', ',') + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:600">' + fmtE(o.imponibile) + '</td>'
-      + '<td style="font-family:var(--font-mono);' + (scaduto ? 'color:#A32D2D;font-weight:700' : '') + '">' + (o.scadenza ? _pfIsoToIt(o.scadenza) : '—') + '</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtE(o.imponibile) + '</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(o.totale) + '</td>'
+      + '<td style="font-family:var(--font-mono);font-size:14.5px;font-weight:700;color:' + (scaduto ? '#7F1D1D' : '#C0392B') + '">' + (o.scadenza ? _pfIsoToIt(o.scadenza) : '—') + '</td>'
       + '<td>' + badge + '</td></tr>';
-  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
 
   var righeFatt = _ecfFatture.map(function (f) {
     var badge = f.saldata
@@ -353,7 +356,7 @@ function _ecfRender() {
 
   body.innerHTML =
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
-      + kpi('Acquistato ' + anno, acquistato, ordAnno.length + ' ordini · dilazione ' + _ecfSel.gg + ' gg', '')
+      + kpi('Acquistato ' + anno, acquistato, 'imponibile · IVA inc. ' + fmtE(acquistatoIva) + ' · ' + ordAnno.length + ' ordini · dilazione ' + _ecfSel.gg + ' gg', '')
       + kpi('Pagato', pagatoTot, nSaldate + ' fatture saldate', 'ok')
       + kpi('Da pagare', daPagare, nAperti + ' documenti aperti', 'ko')
     + '</div>'
@@ -380,7 +383,7 @@ function _ecfRender() {
     + '<div style="overflow-x:auto;margin-bottom:22px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
       + '<th style="' + th + ';width:52px">Sel.</th><th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
       + '<th style="' + th + ';text-align:right">Litri</th><th style="' + th + ';text-align:right">€/L</th>'
-      + '<th style="' + th + ';text-align:right">Imponibile</th><th style="' + th + ';text-align:left">Scadenza</th>'
+      + '<th style="' + th + ';text-align:right">Imponibile</th><th style="' + th + ';text-align:right">Tot. IVA inc.</th><th style="' + th + ';text-align:left">Scadenza</th>'
       + '<th style="' + th + ';text-align:left">Stato</th></tr></thead><tbody>' + righeOrd + '</tbody></table></div>'
 
     + '<div style="font-size:13px;font-weight:600;margin-bottom:6px">Fatture registrate</div>'
@@ -420,7 +423,7 @@ function _ecfNum(v) {
 function ecfApriRegistra() {
   var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; });
   if (!ords.length) { toast('Seleziona almeno un ordine'); return; }
-  var tot = Math.round(ords.reduce(function (s, o) { return s + o.imponibile; }, 0) * 100) / 100;
+  var tot = Math.round(ords.reduce(function (s, o) { return s + o.totale; }, 0) * 100) / 100;
   _ecfMod = { tipo: 'nuova', ordini: ords, totale: tot, modo: 'totale', importo: tot, fatturaId: null };
   _ecfRenderModale();
 }
@@ -683,7 +686,7 @@ function _ecfScadenzeAperte() {
     var d = o.fatturaId && f ? _ecfAddGiorni(o.data, _ecfSel.gg, f.scadenza) : o.scadenza;
     if (!d) return;
     if (!perData[d]) perData[d] = { data: d, importo: 0, n: 0 };
-    perData[d].importo += o.imponibile;
+    perData[d].importo += o.totale;
     perData[d].n++;
   });
   return Object.keys(perData).sort().map(function (k) { return perData[k]; });
