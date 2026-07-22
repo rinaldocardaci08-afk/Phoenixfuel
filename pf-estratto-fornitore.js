@@ -47,7 +47,73 @@ async function caricaEstrattoFornitore() {
       _ecfFornitori.map(function (f) { return '<option value="' + f.id + '">' + esc(f.nome) + '</option>'; }).join('');
     _ecfPop = true;
   }
-  if (_ecfSel) ecfCambiaFornitore();
+  if (_ecfSel) ecfCambiaFornitore(); else _ecfOverview();
+}
+
+// ── Colpo d'occhio: un pannello per fornitore attivo con fido e dilazione ──
+async function _ecfOverview() {
+  var body = document.getElementById('ecf-body');
+  if (!body) return;
+  body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:30px;font-size:12px">⏳ Caricamento fornitori...</div>';
+  var da = (new Date().getFullYear() - 1) + '-01-01';
+  var r = await Promise.all([
+    sb.from('ordini').select('fornitore,data,litri,costo_litro,pagato_fornitore,fattura_ricevuta_id')
+      .neq('stato','annullato').gte('data', da),
+    sb.from('fatture_ricevute').select('id,fornitore_nome,importo_dichiarato'),
+    sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo')
+  ]);
+  var ordini = r[0].data || [], fatture = r[1].data || [], pagam = r[2].data || [];
+  var pagPerFatt = {};
+  pagam.forEach(function (p) { pagPerFatt[p.fattura_ricevuta_id] = (pagPerFatt[p.fattura_ricevuta_id] || 0) + Number(p.importo || 0); });
+  var residuoPerForn = {};
+  fatture.forEach(function (f) {
+    var res = Number(f.importo_dichiarato || 0) - (pagPerFatt[f.id] || 0);
+    if (res > 0.01) residuoPerForn[String(f.fornitore_nome || '').toLowerCase()] = (residuoPerForn[String(f.fornitore_nome || '').toLowerCase()] || 0) + res;
+  });
+
+  var oggi = new Date().toISOString().slice(0, 10);
+  var cards = _ecfFornitori.map(function (f) {
+    var nome = String(f.nome || ''), gg = Number(f.giorni_pagamento || 30), fido = Number(f.fido_massimo || 0);
+    var suoi = ordini.filter(function (o) { return String(o.fornitore || '').toLowerCase() === nome.toLowerCase(); });
+    var aperti = suoi.filter(function (o) { return !o.pagato_fornitore && !o.fattura_ricevuta_id; });
+    var esp = aperti.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0); }, 0)
+            + (residuoPerForn[nome.toLowerCase()] || 0);
+    esp = Math.round(esp * 100) / 100;
+    var scad = aperti.map(function (o) { return _ecfAddGiorni(o.data, gg); }).filter(Boolean).sort();
+    var prossima = scad.length ? scad[0] : null;
+    var scadute = scad.filter(function (d) { return d < oggi; }).length;
+    var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0,4) === String(new Date().getFullYear()); });
+    var acq = annoOrd.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0); }, 0);
+    return { id: f.id, nome: nome, gg: gg, fido: fido, esp: esp, nAperti: aperti.length, prossima: prossima, scadute: scadute, acq: acq };
+  }).filter(function (c) { return c.fido > 0 || c.nAperti > 0 || c.acq > 0; })
+    .sort(function (a, b) { return b.esp - a.esp; });
+
+  if (!cards.length) { body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Nessun fornitore con movimenti.</div>'; return; }
+
+  body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Clicca un fornitore per aprire il suo estratto conto.</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px">'
+    + cards.map(function (c) {
+        var pct = c.fido > 0 ? Math.min(100, (c.esp / c.fido) * 100) : 0;
+        var bordo = c.fido > 0 ? (pct >= 85 ? '#C0392B' : pct >= 60 ? '#F5921E' : '#639922') : 'var(--border)';
+        return '<div onclick="ecfApriFornitore(\'' + c.id + '\')" style="cursor:pointer;border:1px solid ' + bordo + ';border-left:5px solid ' + bordo + ';border-radius:12px;padding:14px 15px;background:var(--bg)">'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'
+            + '<div style="font-size:15px;font-weight:700">' + esc(c.nome) + '</div>'
+            + '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap">' + c.gg + ' gg</div></div>'
+          + '<div style="font-size:11px;color:var(--text-muted);margin:2px 0 10px">acquistato ' + fmtE(c.acq) + '</div>'
+          + (c.fido > 0 ? _ecfBarra(c.esp, c.fido, false)
+                        : '<div style="font-size:11px;color:var(--text-muted)">Esposizione ' + fmtE(c.esp) + ' · nessun fido assegnato</div>')
+          + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:9px">'
+            + '<span style="color:var(--text-muted)">' + c.nAperti + ' ordini aperti</span>'
+            + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
+                         : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
+          + '</div></div>';
+      }).join('') + '</div>';
+}
+
+function ecfApriFornitore(id) {
+  var sel = document.getElementById('ecf-fornitore');
+  if (sel) sel.value = id;
+  ecfCambiaFornitore();
 }
 
 async function ecfCambiaFornitore() {
@@ -57,7 +123,7 @@ async function ecfCambiaFornitore() {
   _ecfSelezione = {};
   if (!id) {
     _ecfSel = null;
-    if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un fornitore per vedere l\'estratto conto.</div>';
+    _ecfOverview();
     return;
   }
   var f = _ecfFornitori.filter(function (x) { return x.id === id; })[0] || {};
@@ -214,7 +280,7 @@ function _ecfRender() {
 
   body.innerHTML =
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
-      + kpi('Acquistato ' + anno, acquistato, ordAnno.length + ' ordini', '')
+      + kpi('Acquistato ' + anno, acquistato, ordAnno.length + ' ordini · dilazione ' + _ecfSel.gg + ' gg', '')
       + kpi('Pagato', pagatoTot, nSaldate + ' fatture saldate', 'ok')
       + kpi('Da pagare', daPagare, nAperti + ' documenti aperti', 'ko')
     + '</div>'
