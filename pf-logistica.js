@@ -1531,6 +1531,18 @@ async function apriDettaglioCarico(caricoId) {
         var colDas = nota.indexOf('NON SCORTA') >= 0 ? '#791F1F' : nota.indexOf('Vers.') >= 0 ? '#fff' : '#854F0B';
         html += '<span style="font-size:10px;background:' + bgDas + ';color:' + colDas + ';padding:3px 10px;border-radius:6px;font-weight:500;cursor:pointer" onclick="stampaDas(\'' + d.id + '\')">' + numDas + (nota ? ' ' + nota : '') + '</span>';
         html += '<button title="Modifica dati tecnici del DAS" onclick="pfModificaDasTecnici(\'' + d.id + '\',\'' + caricoId + '\')" style="font-size:10px;padding:3px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">✎ Modifica</button>';
+        // ── ALERT retroattivo: litri DAS ≠ litri ordine ──
+        var _lDas = Math.round(Number(d.litri_ambiente || 0));
+        var _lOrd = Math.round(Number(r.litri || 0));
+        if (_lDas > 0 && _lOrd > 0 && _lDas !== _lOrd) {
+          var _msg = 'Litri DAS (' + fmtL(_lDas) + ') diversi dall\'ordine (' + fmtL(_lOrd) + ')'
+                   + ' · differenza ' + fmtL(Math.abs(_lDas - _lOrd))
+                   + ' · fornitore ordine: ' + (r.fornitore || '—')
+                   + '. Verifica il DAS firmato e correggi con ✎ Modifica.';
+          html += '<span title="' + esc(_msg) + '" onclick="alert(\'' + esc(_msg).replace(/'/g, '&#39;') + '\')" '
+               + 'style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:#FCEBEB;color:#791F1F;border:1px solid #C0392B;padding:3px 9px;border-radius:6px;font-weight:600;cursor:pointer">'
+               + '<span style="font-size:12px">⚠️</span>DAS ≠ ordine (' + fmtL(_lDas) + ' vs ' + fmtL(_lOrd) + ')</span>';
+        }
       });
     } else {
       html += '<span style="font-size:10px;color:var(--text-hint)">Nessun DAS</span>';
