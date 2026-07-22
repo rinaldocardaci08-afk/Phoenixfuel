@@ -1,17 +1,23 @@
 // ═══════════════════════════════════════════════════════════════════
-// pf-estratto-fornitore.js — Estratto conto fornitore (sezione Fornitori)
-// Scegli il fornitore → dashboard (acquistato anno, pagate, da pagare),
-// barra del fido utilizzato/assegnato (verde→arancio→rosso) e elenco fatture
-// con spunta "pagata" che apre il modale pagamento già esistente
-// (apriModalePagamentoFornitore: totale/parziale, data, banca).
-// Dopo il salvataggio si ridisegna restando NELLO STESSO PUNTO della pagina.
-// Residuo fattura = importo_dichiarato − somma pagamenti.
+// pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260722b — IBRIDO su ORDINI (decisione Rinaldo 22/07):
+//   • l'estratto si popola dagli ORDINI di acquisto: la scadenza è nota subito
+//     (data ordine + giorni pagamento) e il FIDO è preciso senza aspettare la fattura;
+//   • l'ordine "diventa fattura" quando si registra il pagamento e si inserisce
+//     il n° fattura: UNA fattura può raggruppare PIÙ ordini e ne somma i totali;
+//   • tasto (i) sulla riga fattura → dettaglio degli ordini che la compongono;
+//   • pagamento totale o PARZIALE (acconto): la fattura resta aperta col residuo;
+//   • nel modale barra fido in piccolo, aggiornata mentre si digita l'importo.
+// Imponibile ordine = costo_litro × litri (stessa formula del fido in anagrafica).
 // ═══════════════════════════════════════════════════════════════════
-let _ecfFornitori = [];
-let _ecfPop = false;
-let _ecfSel = null;        // { id, nome, fido, gg }
-let _ecfFatture = [];      // fatture del fornitore con residuo calcolato
-let _ecfFiltro = 'aperte'; // 'aperte' | 'tutte'
+let _ecfFornitori = [], _ecfPop = false;
+let _ecfSel = null;          // { id, nome, fido, gg }
+let _ecfOrdini = [];         // ordini del fornitore (con imponibile e scadenza)
+let _ecfFatture = [];        // fatture con totale/pagato/residuo e ordini collegati
+let _ecfSelezione = {};      // ordini spuntati per la nuova fattura
+let _ecfFiltro = 'aperti';   // 'aperti' | 'tutti'
+let _ecfConti = [], _ecfIstituti = {};
+let _ecfMod = null;          // stato del modale
 
 function switchFornitoriTab(btn) {
   document.querySelectorAll('.forn-tab').forEach(function (t) {
@@ -29,8 +35,14 @@ function switchFornitoriTab(btn) {
 async function caricaEstrattoFornitore() {
   var sel = document.getElementById('ecf-fornitore');
   if (sel && !_ecfPop) {
-    var { data } = await sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').order('nome');
-    _ecfFornitori = data || [];
+    var r = await Promise.all([
+      sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').order('nome'),
+      sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
+      sb.from('banche_istituti').select('id,nome')
+    ]);
+    _ecfFornitori = r[0].data || [];
+    _ecfConti = r[1].data || [];
+    (r[2].data || []).forEach(function (i) { _ecfIstituti[i.id] = i.nome; });
     sel.innerHTML = '<option value="">— scegli un fornitore —</option>' +
       _ecfFornitori.map(function (f) { return '<option value="' + f.id + '">' + esc(f.nome) + '</option>'; }).join('');
     _ecfPop = true;
@@ -42,50 +54,76 @@ async function ecfCambiaFornitore() {
   var sel = document.getElementById('ecf-fornitore');
   var id = sel ? sel.value : '';
   var body = document.getElementById('ecf-body');
+  _ecfSelezione = {};
   if (!id) {
     _ecfSel = null;
     if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un fornitore per vedere l\'estratto conto.</div>';
     return;
   }
-  var f = _ecfFornitori.filter(function (x) { return x.id === id; })[0];
-  _ecfSel = { id: id, nome: f ? f.nome : '', fido: Number(f && f.fido_massimo || 0), gg: Number(f && f.giorni_pagamento || 30) };
-  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">⏳ Caricamento fatture...</div>';
+  var f = _ecfFornitori.filter(function (x) { return x.id === id; })[0] || {};
+  _ecfSel = { id: id, nome: f.nome || '', fido: Number(f.fido_massimo || 0), gg: Number(f.giorni_pagamento || 30) };
+  if (body) body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">⏳ Caricamento ordini...</div>';
   await _ecfCarica();
   _ecfRender();
 }
 
+function _ecfAddGiorni(dataISO, gg) {
+  if (!dataISO) return null;
+  var d = new Date(String(dataISO).slice(0, 10));
+  d.setDate(d.getDate() + Number(gg || 0));
+  return d.toISOString().slice(0, 10);
+}
+
 async function _ecfCarica() {
-  var q = await sb.from('fatture_ricevute').select('*').eq('fornitore_id', _ecfSel.id).order('data_fattura', { ascending: false });
-  var fatt = q.data || [];
-  if (!fatt.length) {
-    var q2 = await sb.from('fatture_ricevute').select('*').eq('fornitore_nome', _ecfSel.nome).order('data_fattura', { ascending: false });
-    fatt = q2.data || [];
-  }
-  var ids = fatt.map(function (x) { return x.id; });
-  var pagMap = {};
-  if (ids.length) {
-    var qp = await sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo,data_pagamento').in('fattura_ricevuta_id', ids);
-    (qp.data || []).forEach(function (p) {
-      if (!pagMap[p.fattura_ricevuta_id]) pagMap[p.fattura_ricevuta_id] = { tot: 0, n: 0, ultima: null };
-      var m = pagMap[p.fattura_ricevuta_id];
+  var da = (new Date().getFullYear() - 1) + '-01-01';
+  var q = await sb.from('ordini')
+    .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,stato,pagato_fornitore,fattura_ricevuta_id')
+    .ilike('fornitore', _ecfSel.nome).neq('stato', 'annullato').gte('data', da).order('data', { ascending: false });
+  _ecfOrdini = (q.data || []).map(function (o) {
+    return {
+      id: o.id, data: o.data, prodotto: o.prodotto, litri: Number(o.litri || 0),
+      costoL: Number(o.costo_litro || 0),
+      imponibile: Math.round(Number(o.costo_litro || 0) * Number(o.litri || 0) * 100) / 100,
+      scadenza: _ecfAddGiorni(o.data, _ecfSel.gg),
+      pagato: !!o.pagato_fornitore, fatturaId: o.fattura_ricevuta_id || null
+    };
+  });
+
+  var fIds = [];
+  _ecfOrdini.forEach(function (o) { if (o.fatturaId && fIds.indexOf(o.fatturaId) < 0) fIds.push(o.fatturaId); });
+  _ecfFatture = [];
+  if (fIds.length) {
+    var rf = await Promise.all([
+      sb.from('fatture_ricevute').select('*').in('id', fIds),
+      sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo,data_pagamento').in('fattura_ricevuta_id', fIds)
+    ]);
+    var pag = {};
+    (rf[1].data || []).forEach(function (p) {
+      if (!pag[p.fattura_ricevuta_id]) pag[p.fattura_ricevuta_id] = { tot: 0, n: 0, ultima: null };
+      var m = pag[p.fattura_ricevuta_id];
       m.tot += Number(p.importo || 0); m.n++;
       if (!m.ultima || String(p.data_pagamento) > String(m.ultima)) m.ultima = p.data_pagamento;
     });
+    _ecfFatture = (rf[0].data || []).map(function (x) {
+      var ords = _ecfOrdini.filter(function (o) { return o.fatturaId === x.id; });
+      var tot = Number(x.importo_dichiarato || 0) || ords.reduce(function (s, o) { return s + o.imponibile; }, 0);
+      var pg = pag[x.id] || { tot: 0, n: 0, ultima: null };
+      var residuo = Math.round((tot - pg.tot) * 100) / 100;
+      return {
+        id: x.id, numero: x.numero_fattura, data: x.data_fattura, scadenza: x.data_scadenza,
+        totale: tot, pagato: pg.tot, nPag: pg.n, ultimoPag: pg.ultima,
+        residuo: residuo, saldata: residuo <= 0.01, ordini: ords
+      };
+    }).sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
   }
-  _ecfFatture = fatt.map(function (x) {
-    var tot = Number(x.importo_dichiarato || 0);
-    var pg = pagMap[x.id] || { tot: 0, n: 0, ultima: null };
-    var residuo = Math.round((tot - pg.tot) * 100) / 100;
-    return {
-      id: x.id, numero: x.numero_fattura, data: x.data_fattura, scadenza: x.data_scadenza,
-      totale: tot, pagato: pg.tot, nPag: pg.n, ultimoPag: pg.ultima,
-      residuo: residuo, saldata: residuo <= 0.01
-    };
-  });
 }
 
-function ecfFidoUsato() {
-  return _ecfFatture.reduce(function (s, f) { return s + (f.saldata ? 0 : f.residuo); }, 0);
+// Esposizione = ordini senza fattura non pagati + residui delle fatture aperte
+function ecfEsposizione() {
+  var a = _ecfOrdini.filter(function (o) { return !o.fatturaId && !o.pagato; })
+                    .reduce(function (s, o) { return s + o.imponibile; }, 0);
+  var b = _ecfFatture.reduce(function (s, f) { return s + (f.saldata ? 0 : f.residuo); }, 0);
+  return Math.round((a + b) * 100) / 100;
 }
 
 function _ecfBarra(usato, fido, alta) {
@@ -101,20 +139,24 @@ function _ecfBarra(usato, fido, alta) {
     + '<div style="height:100%;width:' + pct + '%;border-radius:' + (h / 2) + 'px;background:' + col + '"></div></div>';
 }
 
-function ecfSetFiltro(v) { _ecfFiltro = v; _ecfRender(true); }
+function ecfSetFiltro(v) { _ecfFiltro = v; _ecfRender(); }
+function ecfToggleOrdine(id, cb) { if (cb && cb.checked) _ecfSelezione[id] = true; else delete _ecfSelezione[id]; _ecfRender(); }
+function ecfDeseleziona() { _ecfSelezione = {}; _ecfRender(); }
 
-function _ecfRender(mantieniPosizione) {
+function _ecfRender() {
   var body = document.getElementById('ecf-body');
   if (!body || !_ecfSel) return;
   var scrollY = window.scrollY;
+  var anno = new Date().getFullYear(), oggi = new Date().toISOString().slice(0, 10);
 
-  var anno = new Date().getFullYear();
-  var delAnno = _ecfFatture.filter(function (f) { return String(f.data).slice(0, 4) === String(anno); });
-  var acquistato = delAnno.reduce(function (s, f) { return s + f.totale; }, 0);
-  var pagate = delAnno.reduce(function (s, f) { return s + f.pagato; }, 0);
-  var nSaldate = delAnno.filter(function (f) { return f.saldata; }).length;
-  var daPagare = _ecfFatture.reduce(function (s, f) { return s + (f.saldata ? 0 : f.residuo); }, 0);
-  var nAperte = _ecfFatture.filter(function (f) { return !f.saldata; }).length;
+  var ordAnno = _ecfOrdini.filter(function (o) { return String(o.data).slice(0, 4) === String(anno); });
+  var acquistato = ordAnno.reduce(function (s, o) { return s + o.imponibile; }, 0);
+  var pagatoTot = _ecfFatture.reduce(function (s, f) { return s + f.pagato; }, 0);
+  var nSaldate = _ecfFatture.filter(function (f) { return f.saldata; }).length;
+  var daPagare = ecfEsposizione();
+  var senzaFatt = _ecfOrdini.filter(function (o) { return !o.fatturaId && (_ecfFiltro === 'tutti' || !o.pagato); });
+  var nAperti = _ecfOrdini.filter(function (o) { return !o.fatturaId && !o.pagato; }).length
+              + _ecfFatture.filter(function (f) { return !f.saldata; }).length;
 
   var kpi = function (lab, val, sub, tipo) {
     var bg = tipo === 'ok' ? '#EAF3DE' : tipo === 'ko' ? '#FCEBEB' : 'var(--bg)';
@@ -127,30 +169,44 @@ function _ecfRender(mantieniPosizione) {
       + '<div style="font-size:11px;margin-top:3px;color:' + cl + '">' + sub + '</div></div>';
   };
 
-  var lista = _ecfFiltro === 'aperte' ? _ecfFatture.filter(function (f) { return !f.saldata; }) : _ecfFatture;
-  var oggi = new Date().toISOString().slice(0, 10);
+  var selIds = Object.keys(_ecfSelezione);
+  var totSel = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; }).reduce(function (s, o) { return s + o.imponibile; }, 0);
 
-  var righe = lista.map(function (f) {
-    var scaduta = !f.saldata && f.scadenza && String(f.scadenza) < oggi;
+  var righeOrd = senzaFatt.map(function (o) {
+    var scaduto = !o.pagato && o.scadenza && o.scadenza < oggi;
+    var gg = scaduto ? Math.round((new Date(oggi) - new Date(o.scadenza)) / 86400000) : 0;
+    var badge = o.pagato
+      ? '<span style="background:#EAF3DE;color:#27500A;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">pagato</span>'
+      : (scaduto ? '<span style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">scaduto ' + gg + ' gg</span>'
+                 : '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">da pagare</span>');
+    return '<tr>'
+      + '<td style="text-align:center">' + (o.pagato ? '' : '<input type="checkbox"' + (_ecfSelezione[o.id] ? ' checked' : '') + ' onclick="ecfToggleOrdine(\'' + o.id + '\',this)" style="width:17px;height:17px;cursor:pointer;accent-color:#639922">') + '</td>'
+      + '<td style="font-family:var(--font-mono)">' + _pfIsoToIt(o.data) + '</td>'
+      + '<td>' + esc(o.prodotto || '—') + '</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono);font-size:12px">' + o.costoL.toFixed(4).replace('.', ',') + '</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:600">' + fmtE(o.imponibile) + '</td>'
+      + '<td style="font-family:var(--font-mono);' + (scaduto ? 'color:#A32D2D;font-weight:700' : '') + '">' + (o.scadenza ? _pfIsoToIt(o.scadenza) : '—') + '</td>'
+      + '<td>' + badge + '</td></tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
+
+  var righeFatt = _ecfFatture.map(function (f) {
     var badge = f.saldata
       ? '<span style="background:#EAF3DE;color:#27500A;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">pagata</span>'
-      : (scaduta ? '<span style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">scaduta</span>'
-                 : '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">aperta</span>');
-    var nota = (f.nPag > 0 && !f.saldata)
-      ? '<div style="font-size:10px;color:#8A4F06;margin-top:2px">acconto ' + fmtE(f.pagato) + (f.ultimoPag ? ' del ' + _pfIsoToIt(f.ultimoPag) : '') + '</div>'
-      : '';
+      : (f.nPag > 0 ? '<span style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">acconto' + (f.ultimoPag ? ' ' + _pfIsoToIt(f.ultimoPag) : '') + '</span>'
+                    : '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">aperta</span>');
     return '<tr>'
-      + '<td style="text-align:center"><input type="checkbox"' + (f.saldata ? ' checked disabled' : '') + ' onclick="ecfPaga(\'' + f.id + '\')" title="Registra pagamento" style="width:17px;height:17px;cursor:pointer;accent-color:#639922"></td>'
-      + '<td style="font-family:var(--font-mono)">' + _pfIsoToIt(f.data) + '</td>'
+      + '<td style="text-align:center"><input type="checkbox"' + (f.saldata ? ' checked disabled' : '') + ' onclick="ecfPagaFattura(\'' + f.id + '\')" title="Registra pagamento" style="width:17px;height:17px;cursor:pointer;accent-color:#639922"></td>'
       + '<td style="font-family:var(--font-mono)">' + esc(f.numero || '—') + '</td>'
-      + '<td style="font-family:var(--font-mono);' + (scaduta ? 'color:#A32D2D;font-weight:600' : '') + '">' + (f.scadenza ? _pfIsoToIt(f.scadenza) : '—') + '</td>'
+      + '<td style="font-family:var(--font-mono)">' + (f.data ? _pfIsoToIt(f.data) : '—') + '</td>'
+      + '<td>' + f.ordini.length + ' ordini <span onclick="ecfInfoFattura(\'' + f.id + '\')" title="Dettaglio ordini" style="display:inline-block;width:19px;height:19px;line-height:19px;text-align:center;border-radius:50%;background:#85B7EB;color:#fff;font-size:11px;font-weight:700;cursor:pointer;user-select:none">i</span></td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtE(f.totale) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono);color:#3B6D11">' + (f.pagato > 0 ? fmtE(f.pagato) : '—') + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:' + (f.saldata ? 'var(--text-muted)' : '#A32D2D') + '">' + (f.saldata ? '—' : fmtE(f.residuo)) + '</td>'
-      + '<td>' + badge + nota + '</td></tr>';
-  }).join('');
-  if (!righe) righe = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px;font-size:12px">Nessuna fattura</td></tr>';
+      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:' + (f.saldata ? 'var(--text-muted)' : '#A32D2D') + '">' + (f.saldata ? '—' : fmtE(f.residuo)) + '</td>'
+      + '<td>' + badge + '</td></tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessuna fattura registrata</td></tr>';
 
+  var th = 'padding:9px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;background:var(--bg)';
   var btnF = function (v, t) {
     var on = _ecfFiltro === v;
     return '<button onclick="ecfSetFiltro(\'' + v + '\')" style="font-size:11.5px;padding:6px 14px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#0C447C' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer">' + t + '</button>';
@@ -158,56 +214,234 @@ function _ecfRender(mantieniPosizione) {
 
   body.innerHTML =
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
-    + kpi('Acquistato ' + anno, acquistato, delAnno.length + ' fatture', '')
-    + kpi('Pagate', pagate, nSaldate + ' fatture saldate', 'ok')
-    + kpi('Da pagare', daPagare, nAperte + ' fatture aperte', 'ko')
+      + kpi('Acquistato ' + anno, acquistato, ordAnno.length + ' ordini', '')
+      + kpi('Pagato', pagatoTot, nSaldate + ' fatture saldate', 'ok')
+      + kpi('Da pagare', daPagare, nAperti + ' documenti aperti', 'ko')
     + '</div>'
     + (_ecfSel.fido > 0
-        ? '<div style="margin-bottom:18px">' + _ecfBarra(ecfFidoUsato(), _ecfSel.fido, true) + '</div>'
-        : '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Nessun fido assegnato a questo fornitore (impostalo nella scheda anagrafica).</div>')
-    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
-    + '<div style="font-size:13px;font-weight:600">Fatture</div>'
-    + '<div style="display:flex;gap:8px">' + btnF('aperte', 'Solo da pagare') + btnF('tutte', 'Tutte') + '</div></div>'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
-    + '<thead><tr style="background:var(--bg);color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">'
-    + '<th style="padding:9px 8px;width:70px">Pagata</th><th style="padding:9px 8px;text-align:left">Data</th><th style="padding:9px 8px;text-align:left">Numero</th>'
-    + '<th style="padding:9px 8px;text-align:left">Scadenza</th><th style="padding:9px 8px;text-align:right">Totale</th>'
-    + '<th style="padding:9px 8px;text-align:right">Pagato</th><th style="padding:9px 8px;text-align:right">Residuo</th>'
-    + '<th style="padding:9px 8px;text-align:left">Stato</th></tr></thead><tbody>' + righe + '</tbody>'
-    + '<tfoot><tr style="border-top:2px solid var(--accent)"><td colspan="6" style="padding:12px 8px;font-weight:700">Totale da pagare</td>'
-    + '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:#A32D2D">' + fmtE(daPagare) + '</td><td></td></tr></tfoot>'
-    + '</table></div>';
+        ? '<div style="margin-bottom:20px">' + _ecfBarra(ecfEsposizione(), _ecfSel.fido, true)
+          + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:5px">calcolato sugli ordini non pagati e sui residui delle fatture</div></div>'
+        : '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Nessun fido assegnato a questo fornitore.</div>')
 
-  if (mantieniPosizione !== false) window.scrollTo(0, scrollY);
+    + (selIds.length
+        ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#E6F1FB;border:1px solid #378ADD;border-radius:10px;padding:11px 14px;margin-bottom:12px">'
+          + '<div style="font-size:13px">Selezionati <strong style="font-family:var(--font-mono)">' + selIds.length + ' ordini</strong> · totale <strong style="font-family:var(--font-mono)">' + fmtE(totSel) + '</strong></div>'
+          + '<div style="display:flex;gap:8px"><button onclick="ecfApriRegistra()" style="font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">＋ Registra fattura e pagamento</button>'
+          + '<button onclick="ecfDeseleziona()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">Deseleziona</button></div></div>'
+        : '')
+
+    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">'
+      + '<div style="font-size:13px;font-weight:600">Ordini da pagare — senza fattura</div>'
+      + '<div style="display:flex;gap:8px">' + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti') + '</div></div>'
+    + '<div style="overflow-x:auto;margin-bottom:22px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
+      + '<th style="' + th + ';width:52px">Sel.</th><th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
+      + '<th style="' + th + ';text-align:right">Litri</th><th style="' + th + ';text-align:right">€/L</th>'
+      + '<th style="' + th + ';text-align:right">Imponibile</th><th style="' + th + ';text-align:left">Scadenza</th>'
+      + '<th style="' + th + ';text-align:left">Stato</th></tr></thead><tbody>' + righeOrd + '</tbody></table></div>'
+
+    + '<div style="font-size:13px;font-weight:600;margin-bottom:6px">Fatture registrate</div>'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
+      + '<th style="' + th + ';width:52px">Pagata</th><th style="' + th + ';text-align:left">N° fattura</th><th style="' + th + ';text-align:left">Data</th>'
+      + '<th style="' + th + ';text-align:left">Ordini</th><th style="' + th + ';text-align:right">Totale</th>'
+      + '<th style="' + th + ';text-align:right">Pagato</th><th style="' + th + ';text-align:right">Residuo</th>'
+      + '<th style="' + th + ';text-align:left">Stato</th></tr></thead><tbody>' + righeFatt + '</tbody></table></div>';
+
+  window.scrollTo(0, scrollY);
 }
 
-// Spunta → modale pagamento esistente (totale/parziale, data, banca)
-function ecfPaga(fatturaId) {
-  if (typeof apriModalePagamentoFornitore !== 'function') { toast('Modale pagamento non caricato: ricarica la pagina'); return; }
+// ── Banche: ordine costituzionale Intesa → MPS → BNL → BCC → altri ──
+function _ecfPrioBanca(n) {
+  n = String(n || '').toLowerCase();
+  if (n.indexOf('intesa') >= 0) return 1;
+  if (n.indexOf('mps') >= 0 || n.indexOf('monte') >= 0) return 2;
+  if (n.indexOf('bnl') >= 0 || n.indexOf('bnp') >= 0) return 3;
+  if (n.indexOf('bcc') >= 0 || n.indexOf('credito coop') >= 0) return 4;
+  return 9;
+}
+function _ecfOpzioniConti(sel) {
+  var l = _ecfConti.map(function (c) {
+    return { id: c.id, nome: (_ecfIstituti[c.istituto_id] || 'Banca') + (c.descrizione ? ' · ' + c.descrizione : (c.iban ? ' · ' + String(c.iban).slice(-6) : '')) };
+  }).sort(function (a, b) { return _ecfPrioBanca(a.nome) - _ecfPrioBanca(b.nome) || a.nome.localeCompare(b.nome); });
+  return l.map(function (c) { return '<option value="' + c.id + '"' + (sel === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>'; }).join('');
+}
+function _ecfOggi() { return new Date().toISOString().slice(0, 10); }
+function _ecfNum(v) {
+  if (v == null) return 0;
+  v = String(v).trim().replace(/\s/g, '').replace(/€/g, ''); if (!v) return 0;
+  if (v.indexOf(',') >= 0) v = v.replace(/\./g, '').replace(',', '.');
+  var n = Number(v); return isNaN(n) ? 0 : n;
+}
+
+// Nuova fattura sugli ordini selezionati
+function ecfApriRegistra() {
+  var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; });
+  if (!ords.length) { toast('Seleziona almeno un ordine'); return; }
+  var tot = Math.round(ords.reduce(function (s, o) { return s + o.imponibile; }, 0) * 100) / 100;
+  _ecfMod = { tipo: 'nuova', ordini: ords, totale: tot, modo: 'totale', importo: tot, fatturaId: null };
+  _ecfRenderModale();
+}
+
+// Pagamento su fattura già registrata (saldo o nuovo acconto)
+function ecfPagaFattura(fatturaId) {
   var f = _ecfFatture.filter(function (x) { return x.id === fatturaId; })[0];
-  window._ecfFidoCtx = _ecfSel ? { fido: _ecfSel.fido, usato: ecfFidoUsato(), nome: _ecfSel.nome, residuo: f ? f.residuo : 0 } : null;
-  apriModalePagamentoFornitore(fatturaId, {
-    onSaved: async function () {
-      await _ecfCarica();
-      _ecfRender();   // ridisegna restando nello stesso punto
-    }
-  });
+  if (!f) return;
+  if (f.saldata) { toast('Fattura già saldata'); return; }
+  _ecfMod = { tipo: 'esistente', fattura: f, ordini: f.ordini, totale: f.residuo, modo: 'totale', importo: f.residuo, fatturaId: f.id };
+  _ecfRenderModale();
 }
 
-// ── Barra fido dentro il modale di pagamento, in diretta ──
-// Mostra quanto si rientra nel fido del fornitore mentre si digita l'importo
-// (o si sceglie il saldo totale). Alimentata da window._ecfFidoCtx.
-function _pfpAggiornaFido() {
-  var box = document.getElementById('pfp-fido-box');
-  var ctx = window._ecfFidoCtx;
-  if (!box || !ctx || !(Number(ctx.fido) > 0)) return;
-  var inp = document.getElementById('pfp-importo');
-  var importo = inp ? (parseFloat(inp.value) || 0) : 0;
-  if (importo < 0) importo = 0;
-  var usatoDopo = Math.max(0, Number(ctx.usato || 0) - importo);
-  var pct = Math.min(100, (usatoDopo / Number(ctx.fido)) * 100);
-  var pctPrima = Math.min(100, (Number(ctx.usato || 0) / Number(ctx.fido)) * 100);
-  box.innerHTML = '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:6px">Fido ' + (ctx.nome || '') + '</div>'
-    + _ecfBarra(usatoDopo, Number(ctx.fido), false)
-    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:5px">prima del pagamento ' + Math.round(pctPrima) + '% · dopo ' + Math.round(pct) + '% · rientri di ' + fmtE(importo) + '</div>';
+function ecfSetModo(m) {
+  if (!_ecfMod) return;
+  _ecfMod.modo = m;
+  if (m === 'totale') _ecfMod.importo = _ecfMod.totale;
+  _ecfRenderModale();
+}
+function ecfOnImporto() {
+  if (!_ecfMod) return;
+  var el = document.getElementById('ecf-imp');
+  _ecfMod.importo = el ? _ecfNum(el.value) : 0;
+  _ecfAggiornaFidoBox();
+}
+function _ecfAggiornaFidoBox() {
+  var box = document.getElementById('ecf-fidobox');
+  if (!box || !_ecfSel || !(_ecfSel.fido > 0)) return;
+  var usato = ecfEsposizione();
+  var imp = Math.max(0, Number(_ecfMod && _ecfMod.importo || 0));
+  var dopo = Math.max(0, usato - imp);
+  var pPrima = Math.min(100, (usato / _ecfSel.fido) * 100);
+  var pDopo = Math.min(100, (dopo / _ecfSel.fido) * 100);
+  box.innerHTML = '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:6px">Fido ' + esc(_ecfSel.nome) + '</div>'
+    + _ecfBarra(dopo, _ecfSel.fido, false)
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:5px">prima del pagamento ' + Math.round(pPrima) + '% · dopo ' + Math.round(pDopo) + '% · rientri di ' + fmtE(imp) + '</div>';
+}
+
+function _ecfRenderModale() {
+  var S = _ecfMod; if (!S) return;
+  var box = 'width:100%;box-sizing:border-box;padding:8px 10px;font-size:14px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:var(--font-mono)';
+  var lbl = 'display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:4px';
+  var esistente = S.tipo === 'esistente';
+
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">' + (esistente ? 'Pagamento fattura ' + esc(S.fattura.numero || '') : 'Registra fattura e pagamento') + ' — ' + esc(_ecfSel.nome) + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + S.ordini.length + ' ordini · ' + (esistente ? 'residuo ' : 'totale ') + fmtE(S.totale) + '</div>';
+
+  if (!esistente) {
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">n° fattura</label><input id="ecf-nfatt" type="text" placeholder="es. 64920" style="' + box + '"></div>'
+      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="ecf-dfatt" type="date" value="' + _ecfOggi() + '" style="' + box + '"></div>'
+      + '</div>';
+  }
+
+  h += '<div style="display:inline-flex;border:0.5px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">'
+    + '<span onclick="ecfSetModo(\'totale\')" style="padding:7px 18px;font-size:13px;cursor:pointer;' + (S.modo === 'totale' ? 'background:#0C447C;color:#fff;font-weight:600' : 'color:var(--text)') + '">Totale</span>'
+    + '<span onclick="ecfSetModo(\'parziale\')" style="padding:7px 18px;font-size:13px;cursor:pointer;' + (S.modo === 'parziale' ? 'background:#0C447C;color:#fff;font-weight:600' : 'color:var(--text)') + '">Parziale</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">importo' + (S.modo === 'parziale' ? ' (acconto)' : '') + '</label>'
+    + '<input id="ecf-imp" type="text" inputmode="decimal" value="' + String(S.importo).replace('.', ',') + '"' + (S.modo === 'totale' ? ' readonly' : '') + ' oninput="ecfOnImporto()" style="' + box + (S.modo === 'totale' ? ';opacity:.7' : '') + '"></div>'
+    + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data pagamento</label><input id="ecf-dpag" type="date" value="' + _ecfOggi() + '" style="' + box + '"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">modalità</label><select id="ecf-mod" style="' + box + ';font-family:inherit"><option>Bonifico</option><option>RIBA</option><option>Assegno</option></select></div>'
+    + '<div style="flex:1;min-width:180px"><label style="' + lbl + '">banca</label><select id="ecf-conto" style="' + box + ';font-family:inherit">' + _ecfOpzioniConti() + '</select></div>'
+    + '</div>';
+
+  if (_ecfSel.fido > 0) h += '<div id="ecf-fidobox" style="border:0.5px solid var(--border);border-radius:9px;padding:10px 12px;background:var(--bg);margin-bottom:14px"></div>';
+
+  h += '<div style="display:flex;justify-content:flex-end;gap:10px">'
+    + '<button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Annulla</button>'
+    + '<button id="ecf-conferma" onclick="ecfConferma()" style="padding:9px 20px;border:none;border-radius:8px;background:#0C447C;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Conferma</button></div>';
+
+  apriModal(h);
+  setTimeout(_ecfAggiornaFidoBox, 0);
+}
+
+async function ecfConferma() {
+  var S = _ecfMod; if (!S) return;
+  var btn = document.getElementById('ecf-conferma');
+  var importo = _ecfNum(document.getElementById('ecf-imp').value);
+  var dataPag = document.getElementById('ecf-dpag').value || _ecfOggi();
+  var modalita = document.getElementById('ecf-mod').value;
+  var contoId = document.getElementById('ecf-conto').value || null;
+  if (!(importo > 0)) { toast('Inserisci un importo valido'); return; }
+  if (importo > S.totale + 0.01) { toast('L\'importo supera il totale da pagare'); return; }
+
+  var nFatt = null, dFatt = null;
+  if (S.tipo === 'nuova') {
+    nFatt = (document.getElementById('ecf-nfatt').value || '').trim();
+    dFatt = document.getElementById('ecf-dfatt').value || _ecfOggi();
+    if (!nFatt) { toast('Inserisci il numero della fattura'); return; }
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; }
+
+  try {
+    var fatturaId = S.fatturaId;
+    if (S.tipo === 'nuova') {
+      var ins = await sb.from('fatture_ricevute').insert([{
+        fornitore_id: _ecfSel.id,
+        fornitore_nome: _ecfSel.nome,
+        numero_fattura: nFatt,
+        data_fattura: dFatt,
+        data_scadenza: _ecfAddGiorni(dFatt, _ecfSel.gg),
+        importo_dichiarato: S.totale,
+        tipo_ingresso: 'estratto_conto'
+      }]).select().single();
+      if (ins.error) throw ins.error;
+      fatturaId = ins.data.id;
+      var ids = S.ordini.map(function (o) { return o.id; });
+      var up = await sb.from('ordini').update({ fattura_ricevuta_id: fatturaId }).in('id', ids);
+      if (up.error) throw up.error;
+    }
+
+    var insP = await sb.from('pagamenti_fornitori').insert([{
+      fattura_ricevuta_id: fatturaId,
+      importo: importo,
+      data_pagamento: dataPag,
+      modalita: modalita,
+      conto_id: contoId,
+      riferimento_esterno: (importo < S.totale - 0.01) ? 'acconto su fattura' : null
+    }]);
+    if (insP.error) throw insP.error;
+
+    // Saldo totale → gli ordini della fattura risultano pagati
+    if (importo >= S.totale - 0.01) {
+      var idsOk = S.ordini.map(function (o) { return o.id; });
+      await sb.from('ordini').update({ pagato_fornitore: true }).in('id', idsOk);
+    }
+
+    if (typeof _auditLog === 'function') _auditLog('pagamento_fornitore', 'pagamenti_fornitori', _ecfSel.nome + ' ' + fmtE(importo) + ' · fattura ' + (nFatt || (S.fattura && S.fattura.numero) || '—'));
+    toast('✓ ' + (importo >= S.totale - 0.01 ? 'Pagamento registrato' : 'Acconto registrato'));
+    chiudiModalePermessi();
+    _ecfSelezione = {};
+    await _ecfCarica();
+    _ecfRender();
+  } catch (e) {
+    console.error('ecfConferma', e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Conferma'; }
+    toast('Errore: ' + (e && e.message ? e.message : e));
+  }
+}
+
+// Tasto (i) — ordini che compongono la fattura
+function ecfInfoFattura(fatturaId) {
+  var f = _ecfFatture.filter(function (x) { return x.id === fatturaId; })[0];
+  if (!f) return;
+  var th = 'padding:8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;background:var(--bg)';
+  var righe = f.ordini.map(function (o) {
+    return '<tr><td style="padding:9px 8px;border-top:0.5px solid var(--border);font-family:var(--font-mono)">' + _pfIsoToIt(o.data) + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border)">' + esc(o.prodotto || '—') + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + o.costoL.toFixed(4).replace('.', ',') + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono);font-weight:600">' + fmtE(o.imponibile) + '</td></tr>';
+  }).join('');
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Fattura ' + esc(f.numero || '—') + ' — ' + esc(_ecfSel.nome) + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + (f.data ? _pfIsoToIt(f.data) : '—') + ' · ' + f.ordini.length + ' ordini · ' + fmtE(f.totale) + '</div>'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
+    + '<th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
+    + '<th style="' + th + ';text-align:right">Litri</th><th style="' + th + ';text-align:right">€/L</th>'
+    + '<th style="' + th + ';text-align:right">Imponibile</th></tr></thead><tbody>' + righe + '</tbody>'
+    + '<tfoot><tr><td colspan="4" style="padding:11px 8px;border-top:2px solid var(--accent);font-weight:700">Totale fattura</td>'
+    + '<td style="padding:11px 8px;border-top:2px solid var(--accent);text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(f.totale) + '</td></tr></tfoot></table></div>'
+    + (f.pagato > 0 ? '<div style="font-size:12px;color:#3B6D11;margin-top:10px">Pagato ' + fmtE(f.pagato) + (f.saldata ? ' — saldata' : ' · residuo ' + fmtE(f.residuo)) + '</div>' : '')
+    + '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Chiudi</button></div>';
+  apriModal(h);
 }
