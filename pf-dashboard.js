@@ -9,6 +9,7 @@ const COLORI_DASH = {
 };
 
 async function caricaDashboard() {
+  if (typeof caricaFidoFornitoriDashboard === 'function') { try { caricaFidoFornitoriDashboard(); } catch (e) { console.warn('fido fornitori', e); } }
   var ieri = new Date(oggi); ieri.setDate(ieri.getDate()-1);
   var ieriISO = ieri.toISOString().split('T')[0];
   var meseInizio = oggiISO.substring(0,8) + '01';

@@ -55,14 +55,23 @@ async function _ecfOverview() {
   var body = document.getElementById('ecf-body');
   if (!body) return;
   body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:30px;font-size:12px">⏳ Caricamento fornitori...</div>';
+  var cards = await _ecfCalcolaFornitori();
+  if (!cards.length) { body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Nessun fornitore con movimenti.</div>'; return; }
+  _ecfDisegnaOverview(body, cards);
+}
+
+// Calcolo CONDIVISO (panoramica + dashboard): un solo posto, dati sempre uguali
+async function _ecfCalcolaFornitori() {
   var da = (new Date().getFullYear() - 1) + '-01-01';
   var r = await Promise.all([
-    sb.from('ordini').select('fornitore,data,litri,costo_litro,pagato_fornitore,fattura_ricevuta_id')
-      .neq('stato','annullato').gte('data', da),
+    _pfFetchAllPages(function () {
+      return sb.from('ordini').select('fornitore,data,litri,costo_litro,pagato_fornitore,fattura_ricevuta_id')
+        .neq('stato','annullato').gte('data', da).order('data', { ascending: false });
+    }),
     sb.from('fatture_ricevute').select('id,fornitore_nome,importo_dichiarato'),
     sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo')
   ]);
-  var ordini = r[0].data || [], fatture = r[1].data || [], pagam = r[2].data || [];
+  var ordini = r[0] || [], fatture = r[1].data || [], pagam = r[2].data || [];
   var pagPerFatt = {};
   pagam.forEach(function (p) { pagPerFatt[p.fattura_ricevuta_id] = (pagPerFatt[p.fattura_ricevuta_id] || 0) + Number(p.importo || 0); });
   var residuoPerForn = {};
@@ -87,9 +96,10 @@ async function _ecfOverview() {
     return { id: f.id, nome: nome, gg: gg, fido: fido, esp: esp, nAperti: aperti.length, prossima: prossima, scadute: scadute, acq: acq };
   }).filter(function (c) { return c.fido > 0 || c.nAperti > 0 || c.acq > 0; })
     .sort(function (a, b) { return b.esp - a.esp; });
+  return cards;
+}
 
-  if (!cards.length) { body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Nessun fornitore con movimenti.</div>'; return; }
-
+function _ecfDisegnaOverview(body, cards) {
   body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Clicca un fornitore per aprire il suo estratto conto.</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px">'
     + cards.map(function (c) {
@@ -142,9 +152,12 @@ function _ecfAddGiorni(dataISO, gg) {
 
 async function _ecfCarica() {
   var da = (new Date().getFullYear() - 1) + '-01-01';
-  var q = await sb.from('ordini')
-    .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,stato,pagato_fornitore,fattura_ricevuta_id')
-    .ilike('fornitore', _ecfSel.nome).neq('stato', 'annullato').gte('data', da).order('data', { ascending: false });
+  var qd = await _pfFetchAllPages(function () {
+    return sb.from('ordini')
+      .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,stato,pagato_fornitore,fattura_ricevuta_id')
+      .ilike('fornitore', _ecfSel.nome).neq('stato', 'annullato').gte('data', da).order('data', { ascending: false });
+  });
+  var q = { data: qd };
   _ecfOrdini = (q.data || []).map(function (o) {
     return {
       id: o.id, data: o.data, prodotto: o.prodotto, litri: Number(o.litri || 0),
@@ -514,4 +527,52 @@ function ecfInfoFattura(fatturaId) {
     + (f.pagato > 0 ? '<div style="font-size:12px;color:#3B6D11;margin-top:10px">Pagato ' + fmtE(f.pagato) + (f.saldata ? ' — saldata' : ' · residuo ' + fmtE(f.residuo)) + '</div>' : '')
     + '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Chiudi</button></div>';
   apriModal(h);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FIDO FORNITORI IN DASHBOARD (22/07/2026)
+// Stessi identici dati dell'Estratto conto fornitore: un solo calcolo,
+// così dashboard, panoramica e scheda del singolo fornitore non divergono.
+// ══════════════════════════════════════════════════════════════════
+async function caricaFidoFornitoriDashboard() {
+  var el = document.getElementById('dash-fido-fornitori');
+  if (!el) return;
+  try {
+    if (!_ecfPop) {
+      var r0 = await sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').order('nome');
+      _ecfFornitori = r0.data || [];
+    }
+    var cards = await _ecfCalcolaFornitori();
+    var conFido = cards.filter(function (c) { return c.fido > 0; });
+    if (!conFido.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Nessun fornitore con fido assegnato.</div>'; return; }
+    el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">'
+      + conFido.map(function (c) {
+          var pct = Math.min(100, (c.esp / c.fido) * 100);
+          var bordo = pct >= 85 ? '#C0392B' : pct >= 60 ? '#F5921E' : '#639922';
+          return '<div onclick="vaiEstrattoFornitore(\'' + c.id + '\')" style="cursor:pointer;border:1px solid ' + bordo + ';border-left:5px solid ' + bordo + ';border-radius:11px;padding:12px 14px;background:var(--bg)">'
+            + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">'
+              + '<span style="font-size:14px;font-weight:700">' + esc(c.nome) + '</span>'
+              + '<span style="font-size:11px;color:var(--text-muted)">' + c.gg + ' gg</span></div>'
+            + _ecfBarra(c.esp, c.fido, false)
+            + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:8px">'
+              + '<span style="color:var(--text-muted)">' + c.nAperti + ' ordini aperti</span>'
+              + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
+                           : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
+            + '</div></div>';
+        }).join('') + '</div>';
+  } catch (e) {
+    console.warn('fido fornitori dashboard', e);
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Dati non disponibili.</div>';
+  }
+}
+
+// Dalla dashboard: apre Fornitori → Estratto conto sul fornitore scelto
+function vaiEstrattoFornitore(id) {
+  var nav = document.querySelector('.nav-item[onclick*="fornitori"]');
+  if (typeof setSection === 'function') { try { setSection('fornitori', nav); } catch (e) {} }
+  setTimeout(function () {
+    var tab = document.querySelector('.forn-tab[data-tab="forn-estratto"]');
+    if (tab) switchFornitoriTab(tab);
+    setTimeout(function () { ecfApriFornitore(id); }, 120);
+  }, 120);
 }
