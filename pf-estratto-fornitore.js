@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723a — barre mensili AFFIANCATE (non impilate) e solo fornitori anagrafica
+//   (niente Phoenix, che siamo noi); Fido disponibile grande nella scheda singola.
 // v20260722b — IBRIDO su ORDINI (decisione Rinaldo 22/07):
 //   • l'estratto si popola dagli ORDINI di acquisto: la scadenza è nota subito
 //     (data ordine + giorni pagamento) e il FIDO è preciso senza aspettare la fattura;
@@ -366,6 +368,9 @@ function _ecfRender() {
     + '</div>'
     + (_ecfSel.fido > 0
         ? '<div style="margin-bottom:20px">' + _ecfBarra(ecfEsposizione(), _ecfSel.fido, true)
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:11px;padding-top:11px;border-top:0.5px solid var(--border)">'
+            + '<span style="font-size:13px;color:var(--text-secondary);font-weight:600">Fido disponibile da usare</span>'
+            + '<span style="font-family:var(--font-mono);font-size:21px;font-weight:700;color:' + ((_ecfSel.fido - ecfEsposizione()) < 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(_ecfSel.fido - ecfEsposizione()) + '</span></div>'
           + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:5px">calcolato sugli ordini non pagati e sui residui delle fatture</div></div>'
         : '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Nessun fido assegnato a questo fornitore.</div>')
 
@@ -822,10 +827,15 @@ function _ecfDisegnaMesi(cards) {
   var anno = new Date().getFullYear();
   var col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3', '#B4B2A9'];
 
+  // SOLO i fornitori dell'anagrafica (come la torta e le card). Phoenix siamo NOI,
+  // non è un fornitore: leggendo il nome grezzo dell'ordine ci finiva dentro.
+  var _ammessi = {};
+  _ecfFornitori.forEach(function (f) { _ammessi[String(f.nome || '').toLowerCase().trim()] = true; });
   var nomi = {};
   _ecfOrdiniTutti.forEach(function (o) {
     if (String(o.data).slice(0, 4) !== String(anno)) return;
     var n = String(o.fornitore || '').trim(); if (!n) return;
+    if (!_ammessi[n.toLowerCase()]) return;
     if (!nomi[n]) nomi[n] = { euro: new Array(12).fill(0), litri: new Array(12).fill(0), tot: 0 };
     var m = Number(String(o.data).slice(5, 7)) - 1; if (m < 0 || m > 11) return;
     var l = Number(o.litri || 0);
@@ -846,15 +856,15 @@ function _ecfDisegnaMesi(cards) {
         return {
           label: f.nome,
           data: (isEuro ? f.d.euro : f.d.litri).map(function (v) { return Math.round(v); }),
-          backgroundColor: col[i % col.length], borderRadius: 4, maxBarThickness: 34
+          backgroundColor: col[i % col.length], borderRadius: 4, maxBarThickness: 22
         };
       })
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       scales: {
-        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
-        y: { stacked: true, beginAtZero: true, ticks: { font: { size: 11 }, callback: function (v) {
+        x: { stacked: false, grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { stacked: false, beginAtZero: true, ticks: { font: { size: 11 }, callback: function (v) {
           return isEuro ? ('€' + Math.round(v / 1000) + 'k') : (Math.round(v / 1000) + 'k L');
         } } }
       },
