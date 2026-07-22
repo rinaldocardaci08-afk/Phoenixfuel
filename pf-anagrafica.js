@@ -2542,7 +2542,7 @@ async function caricaFornitori() {
     const nomi = fornConFido.map(f => f.nome);
     var limiteAnno = new Date(); limiteAnno.setFullYear(limiteAnno.getFullYear()-1);
     var limiteAnnoISO = limiteAnno.toISOString().split('T')[0];
-    const { data: ordTutti } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,litri,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi).gte('data',limiteAnnoISO);
+    const { data: ordTutti } = await sb.from('ordini').select('fornitore,data,costo_litro,trasporto_litro,litri,iva,giorni_pagamento,pagato_fornitore').neq('stato','annullato').in('fornitore', nomi).gte('data',limiteAnnoISO);
     (ordTutti||[]).forEach(o => {
       if (!ordFornMap[o.fornitore]) ordFornMap[o.fornitore] = [];
       ordFornMap[o.fornitore].push(o);
@@ -2555,15 +2555,12 @@ async function caricaFornitori() {
     const ggPag = r.giorni_pagamento || 30;
     if (fidoMax > 0) {
       const ords = ordFornMap[r.nome] || [];
+      // REGOLA UNICA (22/07/2026): fido sul TOTALE IVA COMPRESA di ciò che non è
+      // ancora pagato. Niente più "scaduta = pagata": finché pagato_fornitore è
+      // false quell'importo impegna il fido, esattamente come nell'estratto conto.
       ords.forEach(o => {
         if (o.pagato_fornitore) return;
-        // SEMPRE ggPag del fornitore, non quello salvato sull'ordine
-        if (o.data) {
-          var scad = new Date(o.data);
-          scad.setDate(scad.getDate() + ggPag);
-          if (scad <= oggi) return; // Scaduta = pagata
-        }
-        usato += Number(o.costo_litro||0) * Number(o.litri);
+        usato += Number(o.costo_litro||0) * Number(o.litri) * (1 + Number(o.iva == null ? 22 : o.iva) / 100);
       });
       residuo = fidoMax - usato;
     }

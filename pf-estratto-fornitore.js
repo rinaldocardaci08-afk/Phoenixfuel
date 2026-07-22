@@ -18,6 +18,8 @@ let _ecfSelezione = {};      // ordini spuntati per la nuova fattura
 let _ecfFiltro = 'aperti';   // 'aperti' | 'tutti'
 let _ecfConti = [], _ecfIstituti = {};
 let _ecfMod = null;          // stato del modale
+let _ecfOrdiniTutti = [];    // tutti gli ordini caricati (per il grafico mensile)
+let _ecfMeseUnit = 'euro';   // 'euro' | 'litri'
 
 function switchFornitoriTab(btn) {
   document.querySelectorAll('.forn-tab').forEach(function (t) {
@@ -72,6 +74,7 @@ async function _ecfCalcolaFornitori() {
     sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo')
   ]);
   var ordini = r[0] || [], fatture = r[1].data || [], pagam = r[2].data || [];
+  _ecfOrdiniTutti = ordini;
   var pagPerFatt = {};
   pagam.forEach(function (p) { pagPerFatt[p.fattura_ricevuta_id] = (pagPerFatt[p.fattura_ricevuta_id] || 0) + Number(p.importo || 0); });
   var residuoPerForn = {};
@@ -122,8 +125,9 @@ function _ecfDisegnaOverview(body, cards) {
                          : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
           + '</div></div>';
       }).join('') + '</div>'
-    + _ecfTortaHtml(cards);
-  setTimeout(function () { _ecfDisegnaTorta(cards); }, 0);
+    + _ecfTortaHtml(cards)
+    + _ecfMesiHtml(cards);
+  setTimeout(function () { _ecfDisegnaTorta(cards); _ecfDisegnaMesi(cards); }, 0);
 }
 
 // ── Torta acquisti dell'anno per fornitore (litri ed euro) ──
@@ -767,4 +771,99 @@ function _ecfTimelineHtml() {
       + box('Ultimo pagamento', ultimoP.data, ultimoP.importo, '')
       + box('Giorno più alto', maxImp.data, maxImp.importo, 'max')
     + '</div></div>';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ACQUISTI PER MESE (22/07/2026) — anno corrente, un colore per fornitore.
+// Pulsante per passare da € a litri. Gli euro sono SEMPRE il totale
+// IVA compresa, come il fido e l'esposizione.
+// ══════════════════════════════════════════════════════════════════
+const _ECF_MESI = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+
+function _ecfMesiHtml(cards) {
+  var attivi = cards.filter(function (c) { return c.acq > 0; });
+  if (!attivi.length) return '';
+  var b = function (u, t) {
+    var on = _ecfMeseUnit === u;
+    return '<button onclick="ecfSetMeseUnit(\'' + u + '\')" style="font-size:12px;padding:6px 16px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#0C447C' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '400') + '">' + t + '</button>';
+  };
+  return '<div class="card" style="margin-top:18px">'
+    + '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      + '<span>Acquisti per mese ' + new Date().getFullYear() + '</span>'
+      + '<div style="display:flex;gap:8px">' + b('euro', '€ IVA inc.') + b('litri', 'Litri') + '</div></div>'
+    + '<div style="position:relative;width:100%;height:300px"><canvas id="ecf-mesi"></canvas></div></div>';
+}
+
+function ecfSetMeseUnit(u) {
+  _ecfMeseUnit = u;
+  var wrap = document.getElementById('ecf-mesi');
+  if (!wrap) return;
+  // ridisegna solo i pulsanti e il grafico, senza ricaricare i dati
+  var card = wrap.closest('.card');
+  if (card) {
+    var btns = card.querySelectorAll('.card-title button');
+    if (btns && btns.length === 2) {
+      var set = function (el, on) {
+        el.style.background = on ? '#0C447C' : 'var(--bg)';
+        el.style.color = on ? '#fff' : 'var(--text)';
+        el.style.borderColor = on ? '#0C447C' : 'var(--border)';
+        el.style.fontWeight = on ? '600' : '400';
+      };
+      set(btns[0], u === 'euro'); set(btns[1], u === 'litri');
+    }
+  }
+  _ecfDisegnaMesi();
+}
+
+var _ecfChartMesi = null;
+function _ecfDisegnaMesi(cards) {
+  var ctx = document.getElementById('ecf-mesi');
+  if (!ctx || typeof Chart === 'undefined') return;
+  var anno = new Date().getFullYear();
+  var col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3', '#B4B2A9'];
+
+  var nomi = {};
+  _ecfOrdiniTutti.forEach(function (o) {
+    if (String(o.data).slice(0, 4) !== String(anno)) return;
+    var n = String(o.fornitore || '').trim(); if (!n) return;
+    if (!nomi[n]) nomi[n] = { euro: new Array(12).fill(0), litri: new Array(12).fill(0), tot: 0 };
+    var m = Number(String(o.data).slice(5, 7)) - 1; if (m < 0 || m > 11) return;
+    var l = Number(o.litri || 0);
+    var e = Number(o.costo_litro || 0) * l * (1 + Number(o.iva == null ? 22 : o.iva) / 100);
+    nomi[n].euro[m] += e; nomi[n].litri[m] += l; nomi[n].tot += e;
+  });
+  var lista = Object.keys(nomi).map(function (n) { return { nome: n, d: nomi[n] }; })
+    .sort(function (a, b) { return b.d.tot - a.d.tot; }).slice(0, 7);
+  if (!lista.length) return;
+
+  var isEuro = _ecfMeseUnit === 'euro';
+  if (_ecfChartMesi) _ecfChartMesi.destroy();
+  _ecfChartMesi = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: _ECF_MESI,
+      datasets: lista.map(function (f, i) {
+        return {
+          label: f.nome,
+          data: (isEuro ? f.d.euro : f.d.litri).map(function (v) { return Math.round(v); }),
+          backgroundColor: col[i % col.length], borderRadius: 4, maxBarThickness: 34
+        };
+      })
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { stacked: true, beginAtZero: true, ticks: { font: { size: 11 }, callback: function (v) {
+          return isEuro ? ('€' + Math.round(v / 1000) + 'k') : (Math.round(v / 1000) + 'k L');
+        } } }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: function (c) {
+          return c.dataset.label + ': ' + (isEuro ? fmtE(c.parsed.y) : (fmtL(c.parsed.y) + ' L'));
+        } } }
+      }
+    }
+  });
 }
