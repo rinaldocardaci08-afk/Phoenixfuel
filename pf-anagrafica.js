@@ -23,11 +23,12 @@ async function caricaConsegne() {
   try {
     var _ids = (data || []).map(function (r) { return r.id; });
     if (_ids.length) {
-      var _dd = await sb.from('das_documenti').select('ordine_id,litri_ambiente,numero_progressivo').in('ordine_id', _ids);
+      var _dd = await sb.from('das_documenti').select('id,ordine_id,carico_id,litri_ambiente,numero_progressivo').in('ordine_id', _ids);
       (_dd.data || []).forEach(function (d) {
         if (!d.ordine_id) return;
-        var cur = window._consDasLitri[d.ordine_id] || { litri: 0, num: d.numero_progressivo };
+        var cur = window._consDasLitri[d.ordine_id] || { litri: 0, num: d.numero_progressivo, id: d.id, carico_id: d.carico_id };
         cur.litri += Number(d.litri_ambiente || 0);
+        if (!cur.id) { cur.id = d.id; cur.carico_id = d.carico_id; cur.num = d.numero_progressivo; }
         window._consDasLitri[d.ordine_id] = cur;
       });
     }
@@ -130,6 +131,8 @@ async function caricaConsegne() {
       }
 
       // Semafori DAS firmato e Cartellino
+      window._consOrdRow = window._consOrdRow || {};
+      window._consOrdRow[r.id] = { id:r.id, cliente:r.cliente, prodotto:r.prodotto, litri:r.litri, stato:r.stato, das:r.das_firmato_url };
       var hasDas = !!r.das_firmato_url;
       var hasCart = !!r.cartellino_url;
       var dasSemaforo = hasDas
@@ -160,8 +163,8 @@ async function caricaConsegne() {
       } else if (_numFatt != null) {
         // FIX 17/07: già fatturato → numero SEMPRE visibile, anche senza DAS/cartellino (le fatture Danea vecchie non erano bloccate da quella regola).
         nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_numFatt)) + '</span></div>';
-      } else if (!hasDas || !hasCart) {
-        nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">In attesa di<br>DAS + cartellino</div>';
+      } else if (!hasDas) {
+        nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">In attesa di<br>DAS firmato</div>';
       } else {
         nFattCell = '<div style="text-align:center;display:flex;gap:4px;justify-content:center;align-items:center">'
           + '<input id="nf-inp-'+r.id+'" type="text" placeholder="numero" style="width:62px;font-size:11px;padding:3px 6px;border:0.5px solid #C9B79E;border-radius:5px;font-family:var(--font-mono)" onkeydown="if(event.key===\'Enter\')pfSalvaFatturaManuale(\''+r.id+'\')">'
@@ -175,11 +178,9 @@ async function caricaConsegne() {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px;background:#1D9E75" onclick="apriAccettaCarico(\'' + r.id + '\')">💧 Accetta</button> ';
       } else if (r.stato === 'in attesa' || r.stato === 'programmato') {
         azioniHtml += '<button class="btn-primary" style="font-size:10px;padding:3px 8px" title="Conferma ordine (scarica cisterna)" onclick="confermaOrdineConsegna(\'' + r.id + '\')">✅</button> ';
-      } else if (r.stato === 'consegnato') {
-        azioniHtml += '<button class="btn-edit" style="color:#D85A30" title="Annulla consegna (rimuove DAS firmato)" onclick="annullaConsegnaOrdine(\'' + r.id + '\')">❌</button> ';
       }
       azioniHtml += '<button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button>';
-      azioniHtml += '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button>';
+      azioniHtml += '<button class="btn-edit" title="DAS della consegna" onclick="pfDasOrdinePopup(\'' + r.id + '\')">🚛</button>';
       if (r.stato !== 'consegnato' && r.stato !== 'annullato'
           && !(r.tipo_ordine === 'entrata_deposito' && r.caricato_deposito === true)) {
         azioniHtml += '<button style="font-size:10px;padding:3px 10px;background:#D85A30;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:500" onclick="apriDirottamento(\'' + r.id + '\',null)">Dirotta</button>';
@@ -2993,4 +2994,115 @@ function _intestazionePopupOrdini(clienteId, clienteNome, filtroAttivo, contenut
   html += contenuto;
   html += '<div style="display:flex;gap:8px;margin-top:14px"><button onclick="chiudiModal()" style="flex:1;padding:8px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
   return html;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DOCUMENTI ORDINE (22/07/2026) — popup unico da Consegne:
+// allega/apri DAS firmato e cartellino + ✎ Modifica DAS (validazione dati
+// del documento: litri, densità, kg → riallinea anche il registro).
+// Il numero fattura resta in tabella. Per fatturare basta il DAS firmato:
+// il cartellino manca quando si consegna con la kilolitra (niente misuratore).
+// ══════════════════════════════════════════════════════════════════
+function pfDocumentiOrdine(ordineId) {
+  var r = (window._consOrdRow || {})[ordineId];
+  if (!r) { if (typeof toast === 'function') toast('Ordine non trovato'); return; }
+  var das = (window._consDasLitri || {})[ordineId];
+  var e = function (t) { return (t == null) ? '' : String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); };
+
+  var riga = function (titolo, ok, url, tipo, nota) {
+    var h = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border:0.5px solid var(--border);border-radius:8px;margin-bottom:8px">'
+      + '<div><div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500">'
+      + '<span style="width:9px;height:9px;border-radius:50%;background:' + (ok ? '#639922' : '#E24B4A') + '"></span>' + titolo + '</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (ok ? 'Allegato' : (nota || 'Mancante')) + '</div></div>'
+      + '<div style="display:flex;gap:6px">';
+    if (ok) h += '<a href="' + e(url) + '" target="_blank" style="font-size:11px;padding:5px 12px;border:0.5px solid var(--border);border-radius:6px;text-decoration:none;color:var(--text);background:var(--bg)">Apri</a>';
+    h += '<button onclick="chiudiModalePermessi();allegaDocConsegna(\'' + ordineId + '\',\'' + tipo + '\')" style="font-size:11px;padding:5px 12px;border:none;border-radius:6px;background:' + (ok ? 'var(--bg)' : '#D85A30') + ';color:' + (ok ? 'var(--text)' : '#fff') + ';border:0.5px solid var(--border);cursor:pointer">' + (ok ? 'Sostituisci' : 'Allega') + '</button>';
+    return h + '</div></div>';
+  };
+
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Documenti ordine</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + e(r.cliente) + ' · ' + e(r.prodotto) + ' · ' + (typeof fmtL === 'function' ? fmtL(r.litri) : r.litri) + ' L</div>';
+
+  h += riga('DAS firmato', !!r.das, r.das, 'das_firmato', 'Serve per poter inserire la fattura');
+  h += riga('Cartellino', !!r.cart, r.cart, 'cartellino', 'Non obbligatorio (consegna con kilolitra)');
+
+  // ── DAS di Phoenix: dati tecnici da validare ──
+  if (das && das.id) {
+    var diff = Math.round(Number(das.litri || 0)) !== Math.round(Number(r.litri || 0));
+    h += '<div style="border:0.5px solid ' + (diff ? '#C0392B' : 'var(--border)') + ';border-radius:8px;padding:11px 12px;margin-bottom:8px;background:' + (diff ? '#FCEBEB' : 'transparent') + '">'
+      + '<div style="font-size:13px;font-weight:500">Dati del DAS' + (das.num ? ' n. ' + e(das.num) : '') + '</div>'
+      + '<div style="font-size:11px;color:' + (diff ? '#791F1F' : 'var(--text-muted)') + ';margin-top:3px">'
+      + 'DAS ' + (typeof fmtL === 'function' ? fmtL(Math.round(das.litri)) : das.litri) + ' L · ordine ' + (typeof fmtL === 'function' ? fmtL(Math.round(r.litri)) : r.litri) + ' L'
+      + (diff ? ' — <strong>non coincidono</strong>: allinea il registro ai valori del documento' : ' — coincidono') + '</div>'
+      + '<button onclick="chiudiModalePermessi();pfModificaDasTecnici(\'' + das.id + '\',\'' + (das.carico_id || '') + '\')" style="margin-top:8px;font-size:11px;padding:6px 14px;border:none;border-radius:6px;background:#0C447C;color:#fff;cursor:pointer;font-weight:500">✎ Modifica dati DAS</button>'
+      + '</div>';
+  } else {
+    h += '<div style="font-size:11px;color:var(--text-muted);padding:9px 12px;border:0.5px dashed var(--border);border-radius:8px;margin-bottom:8px">Nessun DAS generato da Phoenix per questo ordine.</div>';
+  }
+
+  h += '<div style="display:flex;justify-content:flex-end;margin-top:12px">'
+    + '<button onclick="chiudiModalePermessi()" style="padding:8px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Chiudi</button></div>';
+
+  if (typeof apriModal === 'function') apriModal(h);
+  else if (typeof toast === 'function') toast('Modale non disponibile');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DAS DELLA CONSEGNA (22/07/2026) — popup unico aperto dall'icona 🚛.
+// Disponibile su TUTTI gli ordini, anche non ancora consegnati.
+// Contiene: ✎ Modifica dati DAS (litri/densità/kg del documento firmato,
+// riallinea il registro) e — solo se già consegnato — l'annullamento
+// della consegna, con doppia conferma perché rimette il prodotto in cisterna.
+// ══════════════════════════════════════════════════════════════════
+function _pfDasPopEsc(t) { return (t == null) ? '' : String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+function pfDasOrdinePopup(ordineId) {
+  var r = (window._consOrdRow || {})[ordineId];
+  if (!r) { if (typeof toast === 'function') toast('Ordine non trovato'); return; }
+  var das = (window._consDasLitri || {})[ordineId];
+  var L = function (n) { return (typeof fmtL === 'function') ? fmtL(Math.round(Number(n||0))) : String(n); };
+
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">DAS della consegna</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">'
+    + _pfDasPopEsc(r.cliente) + ' · ' + _pfDasPopEsc(r.prodotto) + ' · ' + L(r.litri) + ' L</div>';
+
+  if (das && das.id) {
+    var diff = Math.round(Number(das.litri||0)) !== Math.round(Number(r.litri||0));
+    h += '<div style="border:' + (diff ? '1px solid #C0392B' : '0.5px solid var(--border)') + ';background:' + (diff ? '#FCEBEB' : 'transparent') + ';border-radius:9px;padding:12px 13px;margin-bottom:10px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">'
+      + '<div><div style="font-size:13px;font-weight:600' + (diff ? ';color:#791F1F' : '') + '">Correggi i dati del DAS' + (das.num ? ' n. ' + _pfDasPopEsc(das.num) : '') + '</div>'
+      + '<div style="font-size:11.5px;color:' + (diff ? '#791F1F' : 'var(--text-secondary)') + ';margin-top:3px;line-height:1.45">'
+      + 'DAS ' + L(das.litri) + ' L · ordine ' + L(r.litri) + ' L' + (diff ? ' — <strong>non coincidono</strong>' : ' — coincidono')
+      + '<br>Litri, densità e kg del documento firmato. Aggiorna anche il registro.</div></div>'
+      + '<button onclick="chiudiModalePermessi();pfModificaDasTecnici(\'' + das.id + '\',\'' + (das.carico_id || '') + '\')" style="white-space:nowrap;font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#0C447C;color:#fff;cursor:pointer;font-weight:500">✎ Modifica DAS</button>'
+      + '</div></div>';
+  } else {
+    h += '<div style="font-size:11.5px;color:var(--text-muted);padding:11px 13px;border:0.5px dashed var(--border);border-radius:9px;margin-bottom:10px">Nessun DAS generato da Phoenix per questo ordine. Viene creato quando l\'ordine entra in un carico e generi il DAS in Logistica.</div>';
+  }
+
+  if (r.stato === 'consegnato') {
+    h += '<div id="pfdas-annulla-box" style="border:1px solid #C0392B;background:#FCEBEB;border-radius:9px;padding:12px 13px;display:flex;justify-content:space-between;align-items:center;gap:12px">'
+      + '<div><div style="font-size:13px;font-weight:600;color:#791F1F">Annulla la consegna</div>'
+      + '<div style="font-size:11.5px;color:#791F1F;margin-top:3px;line-height:1.45">Elimina il DAS allegato, riporta l\'ordine a "confermato" e rimette il prodotto in cisterna.</div></div>'
+      + '<button onclick="pfDasOrdineConferma(\'' + ordineId + '\')" style="white-space:nowrap;font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#C0392B;color:#fff;cursor:pointer;font-weight:500">Elimina e annulla</button>'
+      + '</div>';
+  }
+
+  h += '<div style="display:flex;justify-content:flex-end;margin-top:14px">'
+    + '<button onclick="chiudiModalePermessi()" style="padding:8px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Chiudi</button></div>';
+
+  apriModal(h);
+}
+
+// Seconda conferma: sostituisce il riquadro rosso, non chiude il popup.
+function pfDasOrdineConferma(ordineId) {
+  var box = document.getElementById('pfdas-annulla-box');
+  if (!box) return;
+  box.innerHTML = '<div style="width:100%">'
+    + '<div style="font-size:13px;font-weight:600;color:#791F1F">Sei sicuro?</div>'
+    + '<div style="font-size:11.5px;color:#791F1F;margin-top:3px;line-height:1.45">Il DAS allegato viene eliminato e i litri rientrano in cisterna. L\'operazione non si annulla.</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
+    + '<button onclick="pfDasOrdinePopup(\'' + ordineId + '\')" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">No, torna indietro</button>'
+    + '<button onclick="chiudiModalePermessi();annullaConsegnaOrdine(\'' + ordineId + '\')" style="font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#C0392B;color:#fff;cursor:pointer;font-weight:500">Sì, elimina e annulla</button>'
+    + '</div></div>';
 }
