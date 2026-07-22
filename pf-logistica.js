@@ -1189,7 +1189,11 @@ async function pfModificaDasTecnici(dasId, caricoId) {
     litri15: Number(d.litri_15) || 0,
     peso: Number(d.peso_netto_kg) || 0,
     num: 'DAS-' + d.anno + '/' + String(d.numero_progressivo).padStart(4, '0'),
-    prodotto: d.prodotto || ''
+    prodotto: d.prodotto || '',
+    litriIniz: Number(d.litri_ambiente) || 0,
+    ordineId: d.ordine_id || null,
+    data: d.data,
+    dogane: d.numero_dogane || ''
   };
   _pfDasEditRender();
 }
@@ -1237,7 +1241,10 @@ function _pfDasEditRender() {
   h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">litri @15 (calcolato)</div><div id="dasx-litri15" style="' + calc + '">' + _pfDasN(S.litri15) + '</div></div>';
   h += '<div style="flex:1;min-width:120px"><div style="' + lbl + '">peso kg (calcolato)</div><div id="dasx-peso" style="' + calc + '">' + _pfDasN(S.peso) + '</div></div>';
   h += '</div>';
-  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:16px">peso = litri × densità amb / 1000 · litri@15 = litri × densità amb / densità 15°</div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div style="flex:1;min-width:180px"><div style="' + lbl + '">numero dogane</div><input id="dasx-dogane" type="text" value="' + _pfRegEscSafe(S.dogane) + '" placeholder="come in Access" style="' + box + ';font-family:inherit;font-size:13px"></div>';
+  h += '</div>';
+  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:16px">peso = litri × densità amb / 1000 · litri@15 = litri × densità amb / densità 15° · cambiando i litri si muove anche la cisterna (il CMP resta invariato)</div>';
   h += '<div style="display:flex;justify-content:flex-end;gap:10px">';
   h += '<button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Annulla</button>';
   h += '<button id="dasx-salva" onclick="_pfDasEditSalva()" style="padding:9px 20px;border:none;border-radius:8px;background:var(--accent,#D85A30);color:#fff;cursor:pointer;font-size:13px;font-weight:500">Salva</button>';
@@ -1261,7 +1268,8 @@ async function _pfDasEditSalva() {
     var upd = {
       densita_ambiente: S.densAmb, densita_15: S.dens15,
       litri_ambiente: Math.round(S.litri), litri_15: Math.round(S.litri15),
-      peso_netto_kg: Math.round(S.peso)
+      peso_netto_kg: Math.round(S.peso),
+      numero_dogane: (document.getElementById('dasx-dogane') ? document.getElementById('dasx-dogane').value.trim() : S.dogane) || null
     };
     var r1 = await sb.from('das_documenti').update(upd).eq('id', S.id);
     if (r1.error) throw r1.error;
@@ -1271,10 +1279,18 @@ async function _pfDasEditSalva() {
     try {
       await sb.from('registro_movimenti').update({
         kg: Math.round(S.peso), lt_15: Math.round(S.litri15), lt_amb: Math.round(S.litri),
-        dens_amb: S.densAmb, dens_15: S.dens15
+        dens_amb: S.densAmb / 1000, dens_15: S.dens15 / 1000,
+        progressivo: (document.getElementById('dasx-dogane') ? document.getElementById('dasx-dogane').value.trim() : '') || null
       }).eq('das_id', S.id).eq('origine', 'phoenix');
     } catch (e2) { /* colonna das_id non presente: registro storico, niente da fare */ }
 
+    // ── I litri cambiati muovono anche la cisterna (CMP invariato) ──
+    var _delta = Math.round(S.litri) - Math.round(S.litriIniz || 0);
+    if (_delta !== 0 && S.ordineId) {
+      var _msgCis = await pfRettificaCisternaOrdine(S.ordineId, _delta, 'uscita', S.data);
+      if (typeof toast === 'function' && _msgCis) toast(_msgCis);
+    }
+    S.litriIniz = Math.round(S.litri);
     if (typeof toast === 'function') toast('✓ DAS aggiornato');
     chiudiModalePermessi();
     if (S.caricoId) apriDettaglioCarico(S.caricoId);
@@ -2295,5 +2311,38 @@ async function pfVaiAlGiornoCarichi(dataISO) {
     box.style.transition = 'box-shadow .3s';
     box.style.boxShadow = '0 0 0 2px var(--accent,#D85A30)';
     setTimeout(function () { box.style.boxShadow = prev || ''; }, 1800);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RETTIFICA CISTERNA SU DELTA LITRI (22/07/2026)
+// Quando si corregge un DAS a posteriori e i litri cambiano, la giacenza
+// della cisterna deve seguire, così registro e deposito restano allineati.
+// Il CMP NON viene ricalcolato (scelta di Rinaldo): il costo medio è già
+// stato usato in fatture e marginalità, e su pochi litri l'effetto è nullo.
+// verso: 'uscita' per le consegne (più litri usciti = giacenza giù),
+//        'entrata' per i carichi da fornitore (più litri entrati = giacenza su).
+// ══════════════════════════════════════════════════════════════════
+async function pfRettificaCisternaOrdine(ordineId, deltaLitri, verso, data) {
+  try {
+    if (!ordineId || !deltaLitri) return '';
+    var cisId = null;
+    var mv = await sb.from('movimenti_cisterne').select('cisterna_id').eq('ordine_id', ordineId).limit(1);
+    if (mv.data && mv.data.length) cisId = mv.data[0].cisterna_id;
+    if (!cisId) {
+      var o = await sb.from('ordini').select('cisterna_id').eq('id', ordineId).single();
+      if (o.data) cisId = o.data.cisterna_id;
+    }
+    if (!cisId) return '⚠ Litri aggiornati, ma la cisterna non è stata trovata: correggi la giacenza a mano';
+    // verso 'uscita': +delta litri usciti → giacenza scende; delta negativo → rientra
+    var tipo, litri;
+    if (verso === 'uscita') { tipo = deltaLitri > 0 ? 'uscita' : 'entrata'; }
+    else { tipo = deltaLitri > 0 ? 'entrata' : 'uscita'; }
+    litri = Math.abs(deltaLitri);
+    await aggiornaCisterna(cisId, litri, tipo, ordineId, (data || new Date().toISOString().slice(0,10)));
+    return 'Cisterna aggiornata di ' + (deltaLitri > 0 ? '+' : '−') + litri + ' L';
+  } catch (e) {
+    console.warn('rettifica cisterna', e);
+    return '⚠ Litri aggiornati, ma la cisterna non è stata mossa: verificala';
   }
 }

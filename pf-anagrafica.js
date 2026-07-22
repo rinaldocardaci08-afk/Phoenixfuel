@@ -132,7 +132,7 @@ async function caricaConsegne() {
 
       // Semafori DAS firmato e Cartellino
       window._consOrdRow = window._consOrdRow || {};
-      window._consOrdRow[r.id] = { id:r.id, cliente:r.cliente, prodotto:r.prodotto, litri:r.litri, stato:r.stato, das:r.das_firmato_url };
+      window._consOrdRow[r.id] = { id:r.id, cliente:r.cliente, prodotto:r.prodotto, litri:r.litri, stato:r.stato, das:r.das_firmato_url, tipo:r.tipo_ordine, data:r.data, caricato:r.caricato_deposito, fornitore:r.fornitore };
       var hasDas = !!r.das_firmato_url;
       var hasCart = !!r.cartellino_url;
       var dasSemaforo = hasDas
@@ -3066,6 +3066,24 @@ function pfDasOrdinePopup(ordineId) {
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">'
     + _pfDasPopEsc(r.cliente) + ' · ' + _pfDasPopEsc(r.prodotto) + ' · ' + L(r.litri) + ' L</div>';
 
+  // ── ENTRATA da fornitore: i dati del DAS stanno direttamente a registro ──
+  if (r.tipo === 'entrata_deposito') {
+    if (r.caricato) {
+      h += '<div style="border:0.5px solid var(--border);border-radius:9px;padding:12px 13px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px">'
+        + '<div><div style="font-size:13px;font-weight:600">Dati del DAS fornitore</div>'
+        + '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:3px;line-height:1.45">'
+        + 'Litri, densità e kg presi dal documento di ' + _pfDasPopEsc(r.fornitore || 'fornitore') + '.<br>'
+        + 'Correggili se il DAS riporta valori diversi da quelli inseriti (es. 9.998 invece di 10.000).</div></div>'
+        + '<button onclick="pfEntrataDasModifica(\'' + ordineId + '\')" style="white-space:nowrap;font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#0C447C;color:#fff;cursor:pointer;font-weight:500">✎ Modifica DAS</button>'
+        + '</div>';
+    } else {
+      h += '<div style="font-size:11.5px;color:var(--text-muted);padding:11px 13px;border:0.5px dashed var(--border);border-radius:9px;margin-bottom:10px">Carico non ancora accettato: i dati del DAS si inseriscono con 💧 Accetta.</div>';
+    }
+    h += '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button onclick="chiudiModalePermessi()" style="padding:8px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Chiudi</button></div>';
+    apriModal(h);
+    return;
+  }
+
   if (das && das.id) {
     var diff = Math.round(Number(das.litri||0)) !== Math.round(Number(r.litri||0));
     h += '<div style="border:' + (diff ? '1px solid #C0392B' : '0.5px solid var(--border)') + ';background:' + (diff ? '#FCEBEB' : 'transparent') + ';border-radius:9px;padding:12px 13px;margin-bottom:10px">'
@@ -3105,4 +3123,124 @@ function pfDasOrdineConferma(ordineId) {
     + '<button onclick="pfDasOrdinePopup(\'' + ordineId + '\')" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">No, torna indietro</button>'
     + '<button onclick="chiudiModalePermessi();annullaConsegnaOrdine(\'' + ordineId + '\')" style="font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#C0392B;color:#fff;cursor:pointer;font-weight:500">Sì, elimina e annulla</button>'
     + '</div></div>';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DAS IN ENTRATA (22/07/2026) — correzione dati del documento fornitore.
+// Le entrate non hanno riga in das_documenti: i valori del DAS finiscono
+// direttamente in registro_movimenti (direzione E, origine 'phoenix') quando
+// si accetta il carico. Qui si rileggono e si correggono, così il registro
+// segue il documento (es. Eni scrive 9.998 e non i 10.000 dell'ordine).
+// Densità mostrate in kg/mc come sul DAS; a registro vanno in kg/litro.
+// ══════════════════════════════════════════════════════════════════
+var _pfEntDas = null;
+
+async function pfEntrataDasModifica(ordineId) {
+  var r = (window._consOrdRow || {})[ordineId];
+  if (!r) { toast('Ordine non trovato'); return; }
+  var q = await sb.from('registro_movimenti').select('*')
+    .eq('direzione','E').eq('origine','phoenix')
+    .eq('prodotto', r.prodotto).eq('data', String(r.data).slice(0,10));
+  var righe = q.data || [];
+  if (!righe.length) { toast('Nessuna riga di registro per questa entrata'); return; }
+  var riga = righe[0];
+  if (righe.length > 1) {
+    var esatta = righe.filter(function (x) { return Math.round(Number(x.lt_amb)) === Math.round(Number(r.litri)); });
+    if (esatta.length === 1) riga = esatta[0];
+    else { toast('Più entrate nello stesso giorno: correggile da Registri'); return; }
+  }
+  _pfEntDas = {
+    id: riga.id, ordineId: ordineId, prodotto: r.prodotto, data: riga.data, arc: riga.arc,
+    litri: Number(riga.lt_amb || 0),
+    densAmb: Number(riga.dens_amb || 0) * 1000,
+    dens15: Number(riga.dens_15 || 0) * 1000,
+    kg: Number(riga.kg || 0), litri15: Number(riga.lt_15 || 0),
+    litriOrdine: Number(r.litri || 0),
+    litriIniz: Number(riga.lt_amb || 0),
+    dogane: riga.progressivo || ''
+  };
+  _pfEntDasRender();
+}
+
+function _pfEntDasNum(v) {
+  if (v == null) return 0;
+  v = String(v).trim().replace(/\s/g,''); if (!v) return 0;
+  if (v.indexOf(',') >= 0) v = v.replace(/\./g,'').replace(',','.');
+  else { var p = v.split('.'); if (!(p.length === 2 && p[1].length > 0 && p[1].length <= 2)) v = v.replace(/\./g,''); }
+  var n = Number(v); return isNaN(n) ? 0 : n;
+}
+
+function _pfEntDasRicalc() {
+  var S = _pfEntDas; if (!S) return;
+  S.densAmb = _pfEntDasNum(document.getElementById('entdas-densamb').value);
+  S.dens15  = _pfEntDasNum(document.getElementById('entdas-dens15').value);
+  S.litri   = _pfEntDasNum(document.getElementById('entdas-litri').value);
+  if (S.densAmb > 0) S.kg = Math.round(S.litri * S.densAmb / 1000);
+  if (S.densAmb > 0 && S.dens15 > 0) S.litri15 = Math.round(S.litri * S.densAmb / S.dens15);
+  var a = document.getElementById('entdas-kg'); if (a) a.textContent = Math.round(S.kg).toLocaleString('it-IT');
+  var b = document.getElementById('entdas-lt15'); if (b) b.textContent = Math.round(S.litri15).toLocaleString('it-IT');
+}
+
+function _pfEntDasRender() {
+  var S = _pfEntDas; if (!S) return;
+  var box = 'width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;background:var(--bg);color:var(--text)';
+  var lbl = 'font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px';
+  var calc = 'border:0.5px dashed var(--border);border-radius:8px;padding:9px 10px;font-family:monospace;font-size:15px;color:var(--text-muted);background:var(--bg)';
+  var fmtv = function (n) { return (!n || isNaN(Number(n))) ? '' : String(n).replace('.', ','); };
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Dati del DAS fornitore</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">' + _pfDasPopEsc(S.prodotto) + ' · ' + _pfIsoToIt(S.data) + (S.arc ? ' · doc. ' + _pfDasPopEsc(S.arc) : '') + '</div>'
+    + '<div style="font-size:11.5px;color:var(--text-secondary);margin-bottom:14px">Ordine: ' + Math.round(S.litriOrdine).toLocaleString('it-IT') + ' L — scrivi qui i valori del documento.</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div style="flex:1;min-width:120px"><div style="' + lbl + '">litri ambiente</div><input id="entdas-litri" type="text" inputmode="decimal" value="' + Math.round(S.litri) + '" oninput="_pfEntDasRicalc()" style="' + box + '"></div>'
+    + '<div style="flex:1;min-width:120px"><div style="' + lbl + '">densità ambiente</div><input id="entdas-densamb" type="text" inputmode="decimal" value="' + fmtv(S.densAmb) + '" oninput="_pfEntDasRicalc()" style="' + box + '"></div>'
+    + '<div style="flex:1;min-width:120px"><div style="' + lbl + '">densità 15°</div><input id="entdas-dens15" type="text" inputmode="decimal" value="' + fmtv(S.dens15) + '" oninput="_pfEntDasRicalc()" style="' + box + '"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<div style="flex:1;min-width:170px"><div style="' + lbl + '">numero dogane</div><input id="entdas-dogane" type="text" value="' + _pfDasPopEsc(S.dogane) + '" placeholder="come in Access" style="' + box + ';font-family:inherit;font-size:13px"></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<div style="flex:1;min-width:120px"><div style="' + lbl + '">peso kg (calcolato)</div><div id="entdas-kg" style="' + calc + '">' + Math.round(S.kg).toLocaleString('it-IT') + '</div></div>'
+    + '<div style="flex:1;min-width:120px"><div style="' + lbl + '">litri @15 (calcolato)</div><div id="entdas-lt15" style="' + calc + '">' + Math.round(S.litri15).toLocaleString('it-IT') + '</div></div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:16px">Densità in kg/mc come sul DAS (es. 822,40). Modifica solo il registro: l\'ordine e la fattura restano invariati.</div>'
+    + '<div style="display:flex;justify-content:flex-end;gap:10px">'
+    + '<button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Annulla</button>'
+    + '<button id="entdas-salva" onclick="_pfEntDasSalva()" style="padding:9px 20px;border:none;border-radius:8px;background:#0C447C;color:#fff;cursor:pointer;font-size:13px;font-weight:500">Salva</button>'
+    + '</div>';
+  apriModal(h);
+}
+
+async function _pfEntDasSalva() {
+  var S = _pfEntDas; if (!S) return;
+  _pfEntDasRicalc();
+  if (!(S.litri > 0) || !(S.densAmb > 0) || !(S.dens15 > 0)) { toast('Inserisci litri e densità validi'); return; }
+  if (S.densAmb < 700 || S.densAmb > 1000 || S.dens15 < 700 || S.dens15 > 1000) {
+    toast('Densità fuori scala (' + S.densAmb + ' / ' + S.dens15 + '): valori in kg/mc, es. 822,40');
+    return;
+  }
+  var btn = document.getElementById('entdas-salva'); if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; }
+  try {
+    var _dog = document.getElementById('entdas-dogane');
+    var up = await sb.from('registro_movimenti').update({
+      lt_amb: Math.round(S.litri), lt_15: Math.round(S.litri15), kg: Math.round(S.kg),
+      dens_amb: S.densAmb / 1000, dens_15: S.dens15 / 1000,
+      progressivo: (_dog ? _dog.value.trim() : S.dogane) || null
+    }).eq('id', S.id);
+    if (up.error) throw up.error;
+
+    // I litri cambiati muovono anche la cisterna (CMP invariato)
+    var _delta = Math.round(S.litri) - Math.round(S.litriIniz || 0);
+    if (_delta !== 0 && typeof pfRettificaCisternaOrdine === 'function') {
+      var _m = await pfRettificaCisternaOrdine(S.ordineId, _delta, 'entrata', S.data);
+      if (_m) toast(_m);
+    }
+    if (typeof _auditLog === 'function') _auditLog('modifica_das_entrata', 'registro_movimenti', S.prodotto + ' ' + S.data + ' → ' + Math.round(S.litri) + ' L / ' + Math.round(S.kg) + ' kg');
+    toast('✓ Registro aggiornato');
+    chiudiModalePermessi();
+    if (typeof caricaConsegne === 'function') caricaConsegne();
+  } catch (e) {
+    console.error('modifica DAS entrata', e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Salva'; }
+    toast('Errore: ' + (e && e.message ? e.message : e));
+  }
 }
