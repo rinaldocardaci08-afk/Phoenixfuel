@@ -223,11 +223,15 @@ function _ecfRender() {
           + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:5px">calcolato sugli ordini non pagati e sui residui delle fatture</div></div>'
         : '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Nessun fido assegnato a questo fornitore.</div>')
 
+    // Banner laterale FISSO: resta visibile anche scorrendo in fondo all'elenco
     + (selIds.length
-        ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#E6F1FB;border:1px solid #378ADD;border-radius:10px;padding:11px 14px;margin-bottom:12px">'
-          + '<div style="font-size:13px">Selezionati <strong style="font-family:var(--font-mono)">' + selIds.length + ' ordini</strong> · totale <strong style="font-family:var(--font-mono)">' + fmtE(totSel) + '</strong></div>'
-          + '<div style="display:flex;gap:8px"><button onclick="ecfApriRegistra()" style="font-size:12px;padding:7px 15px;border:none;border-radius:7px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">＋ Registra fattura e pagamento</button>'
-          + '<button onclick="ecfDeseleziona()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">Deseleziona</button></div></div>'
+        ? '<div style="position:fixed;right:18px;top:120px;z-index:900;width:230px;background:#E6F1FB;border:1px solid #378ADD;border-radius:12px;padding:13px 14px;box-shadow:0 6px 18px rgba(0,0,0,.16)">'
+          + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#0C447C;font-weight:700;margin-bottom:6px">Selezione</div>'
+          + '<div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:#0C447C">' + selIds.length + ' ordini</div>'
+          + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700;margin:2px 0 10px">' + fmtE(totSel) + '</div>'
+          + '<button onclick="ecfApriRegistra()" style="width:100%;font-size:12px;padding:9px 10px;border:none;border-radius:8px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">＋ Registra fattura e pagamento</button>'
+          + '<button onclick="ecfDeseleziona()" style="width:100%;margin-top:6px;font-size:12px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Deseleziona</button>'
+          + '</div>'
         : '')
 
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">'
