@@ -93,7 +93,8 @@ async function _ecfCalcolaFornitori() {
     var scadute = scad.filter(function (d) { return d < oggi; }).length;
     var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0,4) === String(new Date().getFullYear()); });
     var acq = annoOrd.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0); }, 0);
-    return { id: f.id, nome: nome, gg: gg, fido: fido, esp: esp, nAperti: aperti.length, prossima: prossima, scadute: scadute, acq: acq };
+    var litriAnno = annoOrd.reduce(function (s, o) { return s + Number(o.litri || 0); }, 0);
+    return { id: f.id, nome: nome, gg: gg, fido: fido, esp: esp, nAperti: aperti.length, prossima: prossima, scadute: scadute, acq: acq, litri: litriAnno };
   }).filter(function (c) { return c.fido > 0 || c.nAperti > 0 || c.acq > 0; })
     .sort(function (a, b) { return b.esp - a.esp; });
   return cards;
@@ -117,7 +118,66 @@ function _ecfDisegnaOverview(body, cards) {
             + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
                          : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
           + '</div></div>';
-      }).join('') + '</div>';
+      }).join('') + '</div>'
+    + _ecfTortaHtml(cards);
+  setTimeout(function () { _ecfDisegnaTorta(cards); }, 0);
+}
+
+// ── Torta acquisti dell'anno per fornitore (litri ed euro) ──
+function _ecfTortaHtml(cards) {
+  var anno = new Date().getFullYear();
+  var conAcq = cards.filter(function (c) { return c.acq > 0; });
+  if (!conAcq.length) return '';
+  var totE = conAcq.reduce(function (s, c) { return s + c.acq; }, 0);
+  var totL = conAcq.reduce(function (s, c) { return s + c.litri; }, 0);
+  var col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3', '#B4B2A9'];
+  var righe = conAcq.slice().sort(function (a, b) { return b.acq - a.acq; }).map(function (c, i) {
+    var pct = totE > 0 ? (c.acq / totE) * 100 : 0;
+    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:0.5px solid var(--border)">'
+      + '<span style="width:11px;height:11px;border-radius:3px;background:' + col[i % col.length] + ';flex:none"></span>'
+      + '<span style="flex:1;font-size:12.5px;font-weight:600">' + esc(c.nome) + '</span>'
+      + '<span style="font-family:var(--font-mono);font-size:12px;min-width:96px;text-align:right">' + fmtL(c.litri) + ' L</span>'
+      + '<span style="font-family:var(--font-mono);font-size:12px;font-weight:700;min-width:104px;text-align:right">' + fmtE(c.acq) + '</span>'
+      + '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);min-width:44px;text-align:right">' + pct.toFixed(1) + '%</span>'
+      + '</div>';
+  }).join('');
+  return '<div class="card" style="margin-top:18px">'
+    + '<div class="card-title">Acquisti ' + anno + ' per fornitore</div>'
+    + '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:center">'
+      + '<div style="flex:0 0 240px;max-width:240px"><canvas id="ecf-torta" height="240"></canvas></div>'
+      + '<div style="flex:1;min-width:300px">' + righe
+        + '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-top:2px solid var(--accent);font-weight:700">'
+        + '<span style="width:11px;flex:none"></span><span style="flex:1;font-size:12.5px">Totale</span>'
+        + '<span style="font-family:var(--font-mono);font-size:12px;min-width:96px;text-align:right">' + fmtL(totL) + ' L</span>'
+        + '<span style="font-family:var(--font-mono);font-size:12.5px;min-width:104px;text-align:right">' + fmtE(totE) + '</span>'
+        + '<span style="min-width:44px"></span></div>'
+      + '</div></div></div>';
+}
+
+var _ecfChartTorta = null;
+function _ecfDisegnaTorta(cards) {
+  var ctx = document.getElementById('ecf-torta');
+  if (!ctx || typeof Chart === 'undefined') return;
+  var conAcq = cards.filter(function (c) { return c.acq > 0; }).sort(function (a, b) { return b.acq - a.acq; });
+  if (!conAcq.length) return;
+  var col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3', '#B4B2A9'];
+  if (_ecfChartTorta) _ecfChartTorta.destroy();
+  _ecfChartTorta = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: conAcq.map(function (c) { return c.nome; }),
+      datasets: [{ data: conAcq.map(function (c) { return Math.round(c.acq); }),
+                   backgroundColor: conAcq.map(function (c, i) { return col[i % col.length]; }),
+                   borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true, cutout: '52%',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) {
+        var f = conAcq[c.dataIndex];
+        return f.nome + ': ' + fmtE(f.acq) + ' · ' + fmtL(f.litri) + ' L';
+      } } } }
+    }
+  });
 }
 
 function ecfApriFornitore(id) {
@@ -300,6 +360,7 @@ function _ecfRender() {
         : '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Nessun fido assegnato a questo fornitore.</div>')
 
     // Banner laterale FISSO: resta visibile anche scorrendo in fondo all'elenco
+    + _ecfTimelineHtml()
     + (selIds.length
         ? '<div style="position:fixed;right:18px;top:120px;z-index:900;width:230px;background:#E6F1FB;border:1px solid #378ADD;border-radius:12px;padding:13px 14px;box-shadow:0 6px 18px rgba(0,0,0,.16)">'
           + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#0C447C;font-weight:700;margin-bottom:6px">Selezione</div>'
@@ -596,4 +657,92 @@ function pfScadenzaFornitore(dataOrdine, ggFornitore, dataScadenzaFattura) {
   if (g === 6) x.setDate(x.getDate() + 2);
   if (g === 0) x.setDate(x.getDate() + 1);
   return x.toISOString().slice(0, 10);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TIMELINE SCADENZE (22/07/2026) — variante compatta a barra unica.
+// Un pallino per data di scadenza: data sopra, importo sotto.
+// Le etichette vicine vengono disposte su livelli sfalsati, così non
+// si accavallano mai; sotto: primo pagamento, ultimo e giorno più alto.
+// ══════════════════════════════════════════════════════════════════
+function _ecfScadenzeAperte() {
+  var perData = {};
+  _ecfOrdini.forEach(function (o) {
+    if (o.pagato) return;
+    var f = o.fatturaId ? _ecfFatture.filter(function (x) { return x.id === o.fatturaId; })[0] : null;
+    if (f && f.saldata) return;
+    var d = o.fatturaId && f ? _ecfAddGiorni(o.data, _ecfSel.gg, f.scadenza) : o.scadenza;
+    if (!d) return;
+    if (!perData[d]) perData[d] = { data: d, importo: 0, n: 0 };
+    perData[d].importo += o.imponibile;
+    perData[d].n++;
+  });
+  return Object.keys(perData).sort().map(function (k) { return perData[k]; });
+}
+
+function _ecfTimelineHtml() {
+  var sc = _ecfScadenzeAperte();
+  if (!sc.length) return '';
+  var oggi = new Date().toISOString().slice(0, 10);
+  var giorni = function (a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); };
+  var minD = sc[0].data < oggi ? sc[0].data : oggi;
+  var maxD = sc[sc.length - 1].data > oggi ? sc[sc.length - 1].data : oggi;
+  var span = Math.max(1, giorni(minD, maxD));
+  var pos = function (d) { return Math.min(100, Math.max(0, (giorni(minD, d) / span) * 100)); };
+  var pOggi = pos(oggi);
+
+  // livelli sfalsati: se due etichette distano meno di 11% le alterno
+  var liv = [], ultimo = -99;
+  sc.forEach(function (s, i) {
+    var p = pos(s.data);
+    if (p - ultimo < 11) liv[i] = (liv[i - 1] === 0 ? 1 : 0);
+    else liv[i] = 0;
+    ultimo = p;
+  });
+
+  var maxImp = sc.reduce(function (m, s) { return s.importo > m.importo ? s : m; }, sc[0]);
+  var entro7 = new Date(); entro7.setDate(entro7.getDate() + 7);
+  var entro7ISO = entro7.toISOString().slice(0, 10);
+
+  var pallini = sc.map(function (s, i) {
+    var scaduta = s.data < oggi, vicina = !scaduta && s.data <= entro7ISO;
+    var c = scaduta ? '#E5342F' : vicina ? '#F5921E' : '#4CAF2E';
+    var colTxt = scaduta ? '#A32D2D' : (s === maxImp ? '#0C447C' : 'var(--text)');
+    var dy = liv[i] * 20;
+    return '<div style="position:absolute;left:' + pos(s.data) + '%;top:48px;width:14px;margin-left:-7px;z-index:4" title="' + s.n + ' ordini">'
+      + '<div style="width:14px;height:14px;border-radius:50%;background:' + c + ';border:3px solid var(--bg-card,#fff);box-shadow:0 1px 3px rgba(0,0,0,.25)"></div>'
+      + '<div style="position:absolute;bottom:' + (26 + dy) + 'px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:10.5px;font-weight:700;white-space:nowrap;color:' + colTxt + '">' + _pfIsoToIt(s.data) + '</div>'
+      + '<div style="position:absolute;top:' + (20 + dy) + 'px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:11.5px;font-weight:700;white-space:nowrap;color:' + colTxt + '">' + fmtE(s.importo) + '</div>'
+      + '</div>';
+  }).join('');
+
+  var box = function (lab, data, imp, tipo) {
+    var bg = tipo === 'first' ? '#FCEBEB' : tipo === 'max' ? '#E6F1FB' : 'var(--bg)';
+    var bd = tipo === 'first' ? '#C0392B' : tipo === 'max' ? '#0C447C' : 'var(--border)';
+    var cv = tipo === 'first' ? '#A32D2D' : tipo === 'max' ? '#0C447C' : 'var(--text)';
+    return '<div style="flex:1;min-width:190px;border:1px solid ' + bd + ';border-radius:11px;padding:12px 14px;background:' + bg + '">'
+      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:600;color:' + cv + ';opacity:.85">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:14px;font-weight:700;margin-top:5px;color:' + cv + '">' + _pfIsoToIt(data) + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700;color:' + cv + '">' + fmtE(imp) + '</div></div>';
+  };
+
+  var primo = sc[0], ultimoP = sc[sc.length - 1];
+  var pctScad = pos(oggi);
+  return '<div class="card" style="margin-bottom:18px">'
+    + '<div class="card-title">Scadenze aperte</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:26px">' + sc.length + ' pagamenti dal ' + _pfIsoToIt(primo.data) + ' al ' + _pfIsoToIt(ultimoP.data) + ' · dilazione ' + _ecfSel.gg + ' giorni</div>'
+    + '<div style="position:relative;height:' + (118 + Math.max.apply(null, liv) * 20) + 'px;margin:0 14px">'
+      + '<div style="position:absolute;left:0;right:0;top:54px;height:14px;border-radius:7px;background:#EDEAE4;border:0.5px solid var(--border);overflow:hidden">'
+        + (pctScad > 0 ? '<div style="position:absolute;left:0;width:' + pctScad + '%;height:100%;background:linear-gradient(90deg,#F0564F,#E5342F)"></div>' : '')
+        + '<div style="position:absolute;left:' + pctScad + '%;right:0;height:100%;background:linear-gradient(90deg,#5DC33A,#4CAF2E)"></div>'
+      + '</div>'
+      + '<div style="position:absolute;left:' + pOggi + '%;top:40px;height:42px;width:2px;background:#111;z-index:5">'
+        + '<b style="position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:9px;background:#111;color:#fff;padding:1px 6px;border-radius:8px">oggi</b></div>'
+      + pallini
+    + '</div>'
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:18px">'
+      + box('Primo pagamento', primo.data, primo.importo, 'first')
+      + box('Ultimo pagamento', ultimoP.data, ultimoP.importo, '')
+      + box('Giorno più alto', maxImp.data, maxImp.importo, 'max')
+    + '</div></div>';
 }
