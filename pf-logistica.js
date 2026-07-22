@@ -1195,8 +1195,16 @@ async function pfModificaDasTecnici(dasId, caricoId) {
 }
 function _pfDasEditNum(v) {
   if (v == null) return '';
-  v = String(v).trim(); if (!v) return '';
-  v = v.replace(/\./g, '').replace(',', '.');
+  v = String(v).trim().replace(/\s/g, ''); if (!v) return '';
+  if (v.indexOf(',') >= 0) {
+    // formato italiano: punto = migliaia, virgola = decimali
+    v = v.replace(/\./g, '').replace(',', '.');
+  } else {
+    // niente virgola: un solo punto con 1-2 decimali = separatore decimale (822.40),
+    // altrimenti è separatore di migliaia (1.500 → 1500)
+    var p = v.split('.');
+    if (!(p.length === 2 && p[1].length > 0 && p[1].length <= 2)) v = v.replace(/\./g, '');
+  }
   var n = Number(v); return isNaN(n) ? '' : n;
 }
 function _pfDasEditRicalc(from) {
@@ -1243,6 +1251,11 @@ async function _pfDasEditSalva() {
   var S = _pfDasEdit; if (!S) return;
   _pfDasEditRicalc();
   if (!(S.densAmb > 0) || !(S.dens15 > 0) || !(S.litri > 0)) { toast('Inserisci densità e litri validi (> 0)'); return; }
+  // Guardia: densità in kg/mc, per i carburanti sta fra 700 e 1000 (es. 822,40).
+  if (S.densAmb < 700 || S.densAmb > 1000 || S.dens15 < 700 || S.dens15 > 1000) {
+    toast('Densità fuori scala (' + S.densAmb + ' / ' + S.dens15 + '): usa i valori del DAS in kg/mc, es. 822,40 — con la virgola');
+    return;
+  }
   var btn = document.getElementById('dasx-salva'); if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; }
   try {
     var upd = {
