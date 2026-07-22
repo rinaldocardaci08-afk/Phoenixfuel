@@ -229,7 +229,7 @@ async function _caricaDasOrdini(tipoOrdine, containerId, filtroStatoId) {
   daData.setDate(daData.getDate() - 60);
   var daISO = daData.toISOString().split('T')[0];
 
-  var query = sb.from('ordini').select('id,data,fornitore,prodotto,litri,stato,note')
+  var query = sb.from('ordini').select('id,data,fornitore,prodotto,litri,stato,note,caricato_deposito,tipo_ordine')
     .eq('tipo_ordine', tipoOrdine).neq('stato', 'annullato')
     .gte('data', daISO).order('data', { ascending: false });
 
@@ -284,6 +284,11 @@ async function _caricaDasOrdini(tipoOrdine, containerId, filtroStatoId) {
     html += '<span class="badge blue" style="font-size:9px">' + esc(o.prodotto) + '</span>';
     html += '<span style="font-family:var(--font-mono);font-size:13px;font-weight:500">' + fmtL(o.litri) + '</span>';
     html += badgeStato(o.stato);
+    // ✎ Modifica dati DAS — solo entrate già accettate: corregge litri/densità/kg
+    // del documento fornitore a registro e muove la cisterna del delta.
+    if (o.tipo_ordine === 'entrata_deposito' && o.caricato_deposito === true) {
+      html += '<button onclick="pfEntrataDasModifica(\'' + o.id + '\')" title="Correggi i dati del DAS fornitore (litri, densità, kg)" style="font-size:10px;padding:3px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:#0C447C;cursor:pointer;font-weight:600">✎ Modifica DAS</button>';
+    }
     html += '</div>';
 
     // DAS già allegati

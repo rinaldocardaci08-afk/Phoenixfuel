@@ -3137,7 +3137,15 @@ var _pfEntDas = null;
 
 async function pfEntrataDasModifica(ordineId) {
   var r = (window._consOrdRow || {})[ordineId];
-  if (!r) { toast('Ordine non trovato'); return; }
+  if (!r) {
+    // Aperto fuori da Consegne (es. Deposito → Ricezione DAS): leggo l'ordine dal DB
+    var o = await sb.from('ordini').select('id,cliente,prodotto,litri,data,stato,fornitore,caricato_deposito,tipo_ordine').eq('id', ordineId).single();
+    if (!o.data) { toast('Ordine non trovato'); return; }
+    r = { id:o.data.id, cliente:o.data.cliente || o.data.fornitore, prodotto:o.data.prodotto, litri:o.data.litri,
+          data:o.data.data, stato:o.data.stato, tipo:o.data.tipo_ordine, caricato:o.data.caricato_deposito, fornitore:o.data.fornitore };
+    window._consOrdRow = window._consOrdRow || {};
+    window._consOrdRow[ordineId] = r;
+  }
   var q = await sb.from('registro_movimenti').select('*')
     .eq('direzione','E').eq('origine','phoenix')
     .eq('prodotto', r.prodotto).eq('data', String(r.data).slice(0,10));
