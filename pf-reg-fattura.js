@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723f — ORDINAMENTO (Rinaldo): prima gli ordini NON PAGATI per scadenza
+//   crescente (la più vicina in cima), i PAGATI tutti IN FONDO all'elenco
+//   (anch'essi per scadenza). Vale nell'elenco piatto e dentro i gruppi.
 // v20260723e — legge i fornitori dalla QUERY MADRE e invalida la cache al salvataggio.
 // v20260723d — FIX "Deseleziona" che non faceva nulla. Causa: svuotava la
 //   selezione SOSTITUENDO l'oggetto (c.sel = {}), ma l'estratto conto passa il
@@ -166,8 +169,10 @@ function pfRfTabella(ns) {
           : badge(o)) + '</td></tr>';
   };
 
-  // SEMPRE per scadenza crescente: qui comanda la data di scadenza
+  // ORDINE: prima i NON PAGATI per scadenza crescente (la più vicina in cima),
+  // i PAGATI tutti in fondo, anch'essi per scadenza. Qui comanda la scadenza.
   var perScadenza = function (a, b) {
+    if (!!a.pagato !== !!b.pagato) return a.pagato ? 1 : -1;
     var sa = String(a.scadenza || '9999-12-31'), sb2 = String(b.scadenza || '9999-12-31');
     if (sa !== sb2) return sa < sb2 ? -1 : 1;
     return String(a.data || '').localeCompare(String(b.data || ''));
