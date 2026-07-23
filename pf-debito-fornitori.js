@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-debito-fornitori.js — QUERY MADRE del DEBITO FORNITORI
+// v20260723b — ogni ordine è arricchito anche con numeroFattura e fattSaldata
+//   della fattura a cui è agganciato: così le viste mostrano il numero in riga
+//   (come in Consegne clienti) senza un elenco fatture separato.
 // v20260723a
 //
 // REGOLA QUERY MADRE (costituzionale, Rinaldo): una sola query per dominio,
@@ -109,6 +112,7 @@ async function pfDebitoDati(force) {
   });
   fatture.forEach(function (f) {
     var ords = ordini.filter(function (o) { return o.fatturaId === f.id; });
+    ords.forEach(function (o) { o.numeroFattura = f.numero_fattura || null; });
     var tot = Number(f.importo_dichiarato || 0) || ords.reduce(function (s, o) { return s + o.totale; }, 0);
     var pg = pagPerFatt[f.id] || { tot: 0, n: 0, ultima: null };
     f.numero = f.numero_fattura;
@@ -119,6 +123,7 @@ async function pfDebitoDati(force) {
     f.residuo = Math.round((tot - pg.tot) * 100) / 100;
     f.saldata = f.residuo <= 0.01;
     f.ordini = ords;
+    ords.forEach(function (o) { o.fattSaldata = f.saldata; o.fattAcconti = f.nPag > 0 && !f.saldata; });
   });
 
   _dfCache = { fornitori: fornitori, fornitoriMap: fornitoriMap, ordini: ordini, fatture: fatture, pagamenti: pagamenti };

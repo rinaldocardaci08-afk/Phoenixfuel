@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723g — ELENCO UNICO nell'estratto conto (Rinaldo): un solo elenco di
+//   TUTTI gli ordini per scadenza PURA crescente — pagati e no, con e senza
+//   fattura, la prima riga è la prima scadenza da affrontare. Il numero
+//   fattura sta in riga (cliccabile → dettaglio); la tabella separata
+//   "Fatture registrate" NON esiste più. Le azioni sulla fattura (pagamento,
+//   ✎ numero) vivono nella modale di dettaglio del numero.
 // v20260723f — TRE FIX dal collaudo: (1) modalità pagamento coi CODICI
 //   minuscoli bonifico/riba/assegno come nel resto del programma — il check
 //   a DB li pretende e il modale mandava le etichette maiuscole; (2) la data
@@ -256,7 +262,9 @@ function _ecfRender() {
   var pagatoTot = _ecfFatture.reduce(function (s, f) { return s + f.pagato; }, 0);
   var nSaldate = _ecfFatture.filter(function (f) { return f.saldata; }).length;
   var daPagare = ecfEsposizione();
-  var senzaFatt = _ecfOrdini.filter(function (o) { return !o.fatturaId && (_ecfFiltro === 'tutti' || !o.pagato); });
+  // ELENCO UNICO: tutti gli ordini. "Solo da pagare" = debito ancora vivo
+  // (né ordine flag-pagato né fattura saldata).
+  var elenco = _ecfOrdini.filter(function (o) { return _ecfFiltro === 'tutti' || (!o.pagato && !o.fattSaldata); });
   var nAperti = _ecfOrdini.filter(function (o) { return !o.fatturaId && !o.pagato; }).length
               + _ecfFatture.filter(function (f) { return !f.saldata; }).length;
 
@@ -273,40 +281,24 @@ function _ecfRender() {
 
   // Motore condiviso di registrazione fattura (pf-reg-fattura.js): stessa
   // tabella e stesso modale della linguetta "Senza fattura" in Fatture Fornitori.
-  var nDaPagare = senzaFatt.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato; }).length;
-  var nGiaPagati = senzaFatt.filter(function (o) { return _ecfSelezione[o.id] && o.pagato; }).length;
+  var nDaPagare = elenco.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato; }).length;
+  var nGiaPagati = elenco.filter(function (o) { return _ecfSelezione[o.id] && o.pagato; }).length;
   var btnPag = nDaPagare
     ? '<button onclick="ecfApriRegistra()" style="width:100%;margin-top:6px;font-size:12px;padding:8px 10px;border:0.5px solid #0C447C;border-radius:8px;background:var(--bg-card,#fff);color:#0C447C;font-weight:600;cursor:pointer">＋ Pagamento' + (nGiaPagati ? ' (' + nDaPagare + ')' : '') + '</button>'
     : '<div style="margin-top:6px;font-size:10.5px;color:#0C447C;line-height:1.45">Selezione di soli ordini già pagati: puoi agganciare la fattura, non il pagamento.</div>';
 
   if (typeof pfRfCtx === 'function') {
     pfRfCtx('ecf', {
-      ordini: senzaFatt,
+      ordini: elenco,
       sel: _ecfSelezione,
       fornitore: _ecfSel,
       selezionabile: true,
+      pagatiInFondo: false,   // scadenza PURA: la prima riga è la prossima scadenza
       onChange: _ecfRender,
       onSaved: async function () { _ecfSelezione = {}; await _ecfCarica(); _ecfRender(); },
       extraBtn: btnPag
     });
   }
-
-  var righeFatt = _ecfFatture.map(function (f) {
-    var badge = f.saldata
-      ? '<span style="background:#EAF3DE;color:#27500A;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">pagata</span>'
-      : (f.nPag > 0 ? '<span style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">acconto' + (f.ultimoPag ? ' ' + _pfIsoToIt(f.ultimoPag) : '') + '</span>'
-                    : '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">aperta</span>');
-    return '<tr>'
-      + '<td style="text-align:center"><input type="checkbox"' + (f.saldata ? ' checked disabled' : '') + ' onclick="ecfPagaFattura(\'' + f.id + '\')" title="Registra pagamento" style="width:17px;height:17px;cursor:pointer;accent-color:#639922"></td>'
-      + '<td style="font-family:var(--font-mono)">' + (f.numero ? esc(f.numero)
-          : '<button onclick="ecfNumeraFattura(\'' + f.id + '\')" title="La fattura è arrivata: inserisci il numero" style="font-size:11px;padding:4px 9px;border:0.5px solid #F5921E;border-radius:6px;background:#FFF1DC;color:#8A4F06;cursor:pointer;font-family:inherit;font-weight:600">✎ inserisci n°</button>') + '</td>'
-      + '<td style="font-family:var(--font-mono)">' + (f.data ? _pfIsoToIt(f.data) : '—') + '</td>'
-      + '<td>' + f.ordini.length + ' ordini <span onclick="ecfInfoFattura(\'' + f.id + '\')" title="Dettaglio ordini" style="display:inline-block;width:19px;height:19px;line-height:19px;text-align:center;border-radius:50%;background:#85B7EB;color:#fff;font-size:11px;font-weight:700;cursor:pointer;user-select:none">i</span></td>'
-      + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtE(f.totale) + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono);color:#3B6D11">' + (f.pagato > 0 ? fmtE(f.pagato) : '—') + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;color:' + (f.saldata ? 'var(--text-muted)' : '#A32D2D') + '">' + (f.saldata ? '—' : fmtE(f.residuo)) + '</td>'
-      + '<td>' + badge + '</td></tr>';
-  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessuna fattura registrata</td></tr>';
 
   var th = 'padding:9px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;background:var(--bg)';
   var btnF = function (v, t) {
@@ -333,17 +325,11 @@ function _ecfRender() {
     + (typeof pfRfBox === 'function' ? pfRfBox('ecf') : '')
 
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">'
-      + '<div style="font-size:13px;font-weight:600">Ordini da pagare — senza fattura</div>'
+      + '<div style="font-size:13px;font-weight:600">Ordini e fatture — per scadenza</div>'
       + '<div style="display:flex;gap:8px;flex-wrap:wrap">' + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti')
         + (typeof pfRfBtnVista === 'function' ? pfRfBtnVista('ecf') : '') + '</div></div>'
     + '<div style="margin-bottom:22px">' + (typeof pfRfTabella === 'function' ? pfRfTabella('ecf') : '') + '</div>'
-
-    + '<div style="font-size:13px;font-weight:600;margin-bottom:6px">Fatture registrate</div>'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
-      + '<th style="' + th + ';width:52px">Pagata</th><th style="' + th + ';text-align:left">N° fattura</th><th style="' + th + ';text-align:left">Data</th>'
-      + '<th style="' + th + ';text-align:left">Ordini</th><th style="' + th + ';text-align:right">Totale</th>'
-      + '<th style="' + th + ';text-align:right">Pagato</th><th style="' + th + ';text-align:right">Residuo</th>'
-      + '<th style="' + th + ';text-align:left">Stato</th></tr></thead><tbody>' + righeFatt + '</tbody></table></div>';
+    + '<div style="font-size:10.5px;color:var(--text-muted)">Clicca il numero fattura in riga per il dettaglio, il pagamento o la modifica del numero.</div>';
 
   window.scrollTo(0, scrollY);
 }
@@ -431,7 +417,7 @@ function _ecfRenderModale() {
       + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="ecf-dfatt" type="date" value="' + (S.dataOrdine || _ecfOggi()) + '" style="' + box + '"></div>'
       + '</div>'
       + '<div style="background:#E6F1FB;color:#0C447C;padding:8px 12px;border-radius:7px;font-size:11.5px;line-height:1.5;margin-bottom:12px">'
-        + 'Puoi pagare anche senza fattura: l\'ordine esce dal fido subito e il numero si inserisce dopo, dal tasto ✎ nella tabella Fatture registrate.</div>';
+        + 'Puoi pagare anche senza fattura: l\'ordine esce dal fido subito e il numero si inserisce dopo dal tasto ✎ nella riga dell\'elenco.</div>';
   }
 
   h += '<div style="display:inline-flex;border:0.5px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">'
@@ -578,7 +564,10 @@ function ecfInfoFattura(fatturaId) {
     + '<tfoot><tr><td colspan="4" style="padding:11px 8px;border-top:2px solid var(--accent);font-weight:700">Totale fattura</td>'
     + '<td style="padding:11px 8px;border-top:2px solid var(--accent);text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(f.totale) + '</td></tr></tfoot></table></div>'
     + (f.pagato > 0 ? '<div style="font-size:12px;color:#3B6D11;margin-top:10px">Pagato ' + fmtE(f.pagato) + (f.saldata ? ' — saldata' : ' · residuo ' + fmtE(f.residuo)) + '</div>' : '')
-    + '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button onclick="chiudiModalePermessi()" style="padding:9px 18px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px">Chiudi</button></div>';
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">'
+      + (!f.numero ? '<button onclick="ecfNumeraFattura(\'' + f.id + '\')" style="padding:8px 14px;font-size:12px;border:0.5px solid #F5921E;border-radius:8px;background:#FFF1DC;color:#8A4F06;font-weight:600;cursor:pointer">✎ Inserisci numero</button>' : '')
+      + (!f.saldata ? '<button onclick="ecfPagaFattura(\'' + f.id + '\')" style="padding:8px 16px;font-size:12px;border:none;border-radius:8px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">Registra pagamento</button>' : '')
+    + '</div>';
   apriModal(h);
 }
 

@@ -1,5 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723h — ELENCO UNICO (Rinaldo): colonna "N. fattura" in riga per ogni
+//   ordine (numero cliccabile → dettaglio fattura; "da numerare" in ambra),
+//   niente sottogruppi. Ordinamento parametrico: ctx.pagatiInFondo=true tiene
+//   i PAGATI in fondo (linguetta Senza fattura); false = scadenza PURA, pagate
+//   comprese (estratto conto: la prima riga è la prima scadenza da affrontare).
+//   Nella vista Σ per scadenza, se tutto il gruppo condivide la stessa fattura
+//   il numero compare UNA volta sulla riga aggregata.
 // v20260723g — data fattura proposta = data dell'ORDINE più recente, mai oggi.
 // v20260723f — ORDINAMENTO (Rinaldo): prima gli ordini NON PAGATI per scadenza
 //   crescente (la più vicina in cima), i PAGATI tutti IN FONDO all'elenco
@@ -134,16 +141,28 @@ function pfRfTabella(ns) {
     + '<th style="' + th + ';width:52px">Sel.</th><th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
     + '<th style="' + th + ';text-align:right">Litri</th><th style="' + th + ';text-align:right">€/L</th>'
     + '<th style="' + th + ';text-align:right">Imponibile</th><th style="' + th + ';text-align:right">Tot. IVA inc.</th>'
+    + '<th style="' + th + ';text-align:left">N. fattura</th>'
     + '<th style="' + th + ';text-align:left">Scadenza</th><th style="' + th + ';text-align:left">Stato</th></tr></thead>';
 
   var badge = function (o) {
-    if (o.pagato) return '<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px">PAGATO</span>';
+    if (o.pagato || o.fattSaldata) return '<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px">PAGATO</span>';
+    if (o.fattAcconti) return '<span style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">acconto</span>';
     var scaduto = o.scadenza && o.scadenza < oggi;
     if (scaduto) {
       var gg = Math.round((new Date(oggi) - new Date(o.scadenza)) / 86400000);
       return '<span style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">scaduto ' + gg + ' gg</span>';
     }
     return '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">da pagare</span>';
+  };
+
+  var cellaFatt = function (o) {
+    if (!o.fatturaId) return '<td style="color:var(--text-muted);font-size:11.5px">—</td>';
+    if (o.numeroFattura) {
+      return '<td><span onclick="if(typeof ecfInfoFattura===\'function\')ecfInfoFattura(\'' + o.fatturaId + '\')" title="Dettaglio fattura"'
+        + ' style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">' + _rfEsc(o.numeroFattura) + '</span></td>';
+    }
+    return '<td><button onclick="if(typeof ecfNumeraFattura===\'function\')ecfNumeraFattura(\'' + o.fatturaId + '\')"'
+      + ' style="font-size:11px;padding:4px 9px;border:0.5px solid #F5921E;border-radius:6px;background:#FFF1DC;color:#8A4F06;cursor:pointer;font-weight:600;white-space:nowrap">✎ da numerare</button></td>';
   };
 
   var cellaSel = function (o) {
@@ -164,16 +183,19 @@ function pfRfTabella(ns) {
       + '<td style="text-align:right;font-family:var(--font-mono);font-size:12px">' + Number(o.costoL || 0).toFixed(4).replace('.', ',') + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + _rfE(o.imponibile) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700">' + _rfE(o.totale) + '</td>'
+      + cellaFatt(o)
       + '<td style="font-family:var(--font-mono);font-size:14.5px;font-weight:700;color:' + ((o.scadenza && o.scadenza < oggi) ? '#7F1D1D' : '#C0392B') + '">' + (o.scadenza ? _rfD(o.scadenza) : '—') + '</td>'
       + '<td>' + (figlio && c.sel[o.id]
           ? '<button onclick="pfRfSgancia(\'' + ns + '\',\'' + o.id + '\')" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:3px 9px;cursor:pointer">✕ sgancia</button>'
           : badge(o)) + '</td></tr>';
   };
 
-  // ORDINE: prima i NON PAGATI per scadenza crescente (la più vicina in cima),
-  // i PAGATI tutti in fondo, anch'essi per scadenza. Qui comanda la scadenza.
+  // ORDINE: scadenza crescente (la più vicina in cima). Se ctx.pagatiInFondo,
+  // i PAGATI vanno tutti in fondo (anch'essi per scadenza); altrimenti scadenza
+  // PURA, pagati compresi — la prima riga è la prima scadenza da affrontare.
+  var _pagatoEff = function (o) { return !!o.pagato || !!o.fattSaldata; };
   var perScadenza = function (a, b) {
-    if (!!a.pagato !== !!b.pagato) return a.pagato ? 1 : -1;
+    if (c.pagatiInFondo && _pagatoEff(a) !== _pagatoEff(b)) return _pagatoEff(a) ? 1 : -1;
     var sa = String(a.scadenza || '9999-12-31'), sb2 = String(b.scadenza || '9999-12-31');
     if (sa !== sb2) return sa < sb2 ? -1 : 1;
     return String(a.data || '').localeCompare(String(b.data || ''));
@@ -195,6 +217,16 @@ function pfRfTabella(ns) {
       var tot = g.reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
       var aperto = !!_rfAperti[ns][s];
       var scaduto = s && s < oggi;
+      // Numero UNICO sulla riga aggregata solo se tutti gli ordini del gruppo
+      // sono sulla stessa fattura (Rinaldo 23/07).
+      var fattIds = []; g.forEach(function (o) { var v = o.fatturaId || ''; if (fattIds.indexOf(v) < 0) fattIds.push(v); });
+      var numGruppo = '';
+      if (fattIds.length === 1 && fattIds[0]) {
+        var n0 = g[0].numeroFattura;
+        numGruppo = n0
+          ? '<span onclick="event.stopPropagation();if(typeof ecfInfoFattura===\'function\')ecfInfoFattura(\'' + fattIds[0] + '\')" style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">' + _rfEsc(n0) + '</span>'
+          : '<span style="font-size:11px;color:#8A4F06;font-weight:600">da numerare</span>';
+      }
 
       corpo += '<tr style="background:#F1F5FA;cursor:pointer" onclick="pfRfEspandi(\'' + ns + '\',\'' + s + '\')">'
         + '<td style="text-align:center;border-bottom:1px solid #378ADD" onclick="event.stopPropagation()">'
@@ -208,6 +240,7 @@ function pfRfTabella(ns) {
         + '<td style="border-bottom:1px solid #378ADD"></td>'
         + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;border-bottom:1px solid #378ADD">' + _rfE(imp) + '</td>'
         + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;border-bottom:1px solid #378ADD">' + _rfE(tot) + '</td>'
+        + '<td style="border-bottom:1px solid #378ADD">' + numGruppo + '</td>'
         + '<td style="font-family:var(--font-mono);font-size:14.5px;font-weight:700;border-bottom:1px solid #378ADD;color:' + (scaduto ? '#7F1D1D' : '#C0392B') + '">' + (s ? _rfD(s) : '—') + '</td>'
         + '<td style="border-bottom:1px solid #378ADD"></td></tr>';
 
@@ -217,7 +250,7 @@ function pfRfTabella(ns) {
     c.ordini.slice().sort(perScadenza).forEach(function (o) { corpo += rigaOrdine(o, false); });
   }
 
-  if (!corpo) corpo = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
+  if (!corpo) corpo = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
 
   return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">'
     + head + '<tbody>' + corpo + '</tbody></table></div>';
@@ -457,6 +490,7 @@ function _rfRenderTab() {
     sel: (_rfCtx['rf'] && _rfCtx['rf'].sel) || {},
     fornitore: _ecfSel,
     selezionabile: true,
+    pagatiInFondo: true,
     onChange: _rfRenderTab,
     onSaved: async function () { await _ecfCarica(); _rfRenderTab(); }
   });

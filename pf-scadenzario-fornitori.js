@@ -10,6 +10,8 @@
 // ║                                                                  ║
 // ║  Registrazione pagamento → modulo separato (prossimo step)       ║
 // ╚══════════════════════════════════════════════════════════════════╝
+// v20260723d — riga con ordini flag-pagati resta PAGATA anche dopo l'aggancio
+//   del numero fattura (prima ricadeva su scaduta/da pagare).
 // v20260723c — RAMO della QUERY MADRE pf-debito-fornitori.js: ordini, fatture,
 //   pagamenti e anagrafica vengono da pfDebitoDati (scadenza già calcolata
 //   dalla madre sugli ordini). Filtro mese CLIENT-SIDE sulla SCADENZA (non più
@@ -220,10 +222,13 @@ function _sfAggregaRighe() {
               : (r.dataScadenza < oggi) ? 'scaduta_no_fattura' : 'senza_fattura';
     } else {
       var importoF = Number(r.fattura.importo_dichiarato);
-      if (r.totPagato <= 0.01) {
-        r.stato = (r.dataScadenza < oggi) ? 'scaduta' : 'da_pagare';
-      } else if (r.totPagato >= importoF - 0.01) {
+      if (r.totPagato >= importoF - 0.01 || r.tuttiPagati) {
+        // PAGATO vince sempre: sia col pagamento registrato, sia con gli
+        // ordini flag-pagati (avvio dati) a cui è stato agganciato il numero
+        // dopo — la fattura di un debito già estinto non torna "scaduta".
         r.stato = 'pagata';
+      } else if (r.totPagato <= 0.01) {
+        r.stato = (r.dataScadenza < oggi) ? 'scaduta' : 'da_pagare';
       } else {
         r.stato = 'parziale';
       }
