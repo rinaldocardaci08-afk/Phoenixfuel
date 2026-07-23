@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723e — legge i fornitori dalla QUERY MADRE e invalida la cache al salvataggio.
 // v20260723d — FIX "Deseleziona" che non faceva nulla. Causa: svuotava la
 //   selezione SOSTITUENDO l'oggetto (c.sel = {}), ma l'estratto conto passa il
 //   suo _ecfSelezione per RIFERIMENTO e al render successivo lo ri-registrava
@@ -132,7 +133,7 @@ function pfRfTabella(ns) {
     + '<th style="' + th + ';text-align:left">Scadenza</th><th style="' + th + ';text-align:left">Stato</th></tr></thead>';
 
   var badge = function (o) {
-    if (o.pagato) return '<span style="background:#EAF3DE;color:#27500A;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">pagato</span>';
+    if (o.pagato) return '<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px">PAGATO</span>';
     var scaduto = o.scadenza && o.scadenza < oggi;
     if (scaduto) {
       var gg = Math.round((new Date(oggi) - new Date(o.scadenza)) / 86400000);
@@ -370,6 +371,7 @@ async function pfRfSalva() {
       throw up.error;
     }
 
+    pfDebitoInvalida();
     if (typeof _auditLog === 'function') _auditLog('fattura_fornitore', 'fatture_ricevute', c.fornitore.nome + ' fattura ' + num + ' · ' + ids.length + ' ordini · ' + _rfE(imp));
     if (typeof toast === 'function') toast('✓ Fattura ' + num + ' registrata su ' + ids.length + (ids.length === 1 ? ' ordine' : ' ordini'));
     _rfMod = null;
@@ -404,10 +406,7 @@ function pfRfSwitchTabFF(tab, btn) {
 async function pfRfCaricaTab() {
   var sel = document.getElementById('rf-fornitore');
   if (sel && !sel.dataset.pop) {
-    if (!_ecfFornitori || !_ecfFornitori.length) {
-      var r = await sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').order('nome');
-      _ecfFornitori = r.data || [];
-    }
+    if (!_ecfFornitori || !_ecfFornitori.length) _ecfFornitori = (await pfDebitoDati()).fornitori;
     sel.innerHTML = '<option value="">— scegli un fornitore —</option>'
       + _ecfFornitori.map(function (f) { return '<option value="' + f.id + '">' + _rfEsc(f.nome) + '</option>'; }).join('');
     sel.dataset.pop = '1';

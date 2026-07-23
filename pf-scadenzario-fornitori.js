@@ -10,6 +10,12 @@
 // ║                                                                  ║
 // ║  Registrazione pagamento → modulo separato (prossimo step)       ║
 // ╚══════════════════════════════════════════════════════════════════╝
+// v20260723c — RAMO della QUERY MADRE pf-debito-fornitori.js: ordini, fatture,
+//   pagamenti e anagrafica vengono da pfDebitoDati (scadenza già calcolata
+//   dalla madre sugli ordini). Filtro mese CLIENT-SIDE sulla SCADENZA (non più
+//   sulla data ordine) e righe ordinate per scadenza crescente. Riga con tutti
+//   gli ordini già pagati (via flag pagato_fornitore, es. avvio dati) → label
+//   verde PAGATO anche senza fattura. Le scritture invalidano la cache.
 // v20260723b — ALLINEAMENTO ALLA REGOLA UNICA (Rinaldo 23/07). Due difformità
 //   facevano divergere questo elenco dall'estratto conto:
 //   1) PERIMETRO — filtrava tipo_ordine='entrata_deposito', cioè divideva per
@@ -98,40 +104,18 @@ function _sfSpostaAlLunedi(dataStr){
 async function _sfCaricaDati() {
   if (_sfFiltroAnno === null) _sfFiltroAnno = new Date().getFullYear();
   if (_sfFiltroMese === null) _sfFiltroMese = new Date().getMonth();
-  var inizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese - 3, 1);
-  var fine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 3, 0);
-  var [ordRes, fattRes, pagRes, fornRes, contiRes, istRes] = await Promise.all([
-    // NIENTE filtro su tipo_ordine: il debito verso il fornitore è lo stesso
-    // che la merce scenda a deposito, a Oppido o direttamente dal cliente.
-    _pfFetchAllPages(function () {
-      return sb.from('ordini')
-        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,fattura_ricevuta_id,das_firmato_url')
-        .neq('stato','annullato')
-        .gte('data', inizio)
-        .lte('data', fine)
-        .order('data',{ascending:false});
-    }),
-    sb.from('fatture_ricevute').select('*').gte('data_fattura', inizio).lte('data_fattura', fine),
-    sb.from('pagamenti_fornitori').select('*').gte('data_pagamento', inizio).lte('data_pagamento', fine).order('data_pagamento',{ascending:true}),
-    sb.from('fornitori').select('id,nome,giorni_pagamento,colore'),
+  // RAMO della QUERY MADRE: nessuna query propria su ordini/fatture/pagamenti.
+  var [d, contiRes, istRes] = await Promise.all([
+    pfDebitoDati(),
     sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
     sb.from('banche_istituti').select('id,nome')
   ]);
-  if (fattRes.error) throw fattRes.error;
-  if (pagRes.error)  throw pagRes.error;
-  _sfFatture   = fattRes.data || [];
-  _sfPagamenti = pagRes.data || [];
+  _sfOrdini    = d.ordini;      // già arricchiti: scadenza, totale, pagato
+  _sfFatture   = d.fatture;
+  _sfPagamenti = d.pagamenti;
   _sfConti     = contiRes.data || [];
   _sfIstituti  = istRes.data || [];
-  _sfFornitoriMap = {};
-  (fornRes.data || []).forEach(function(f){
-    if (f.nome) _sfFornitoriMap[f.nome.toLowerCase().trim()] = f;
-  });
-  // Fornitori VERI = quelli in anagrafica; Phoenix siamo noi ed esce da solo,
-  // senza doverlo escludere per pezzi di nome.
-  _sfOrdini = (ordRes || []).filter(function (o) {
-    return !!_sfFornitoriMap[String(o.fornitore || '').toLowerCase().trim()];
-  });
+  _sfFornitoriMap = d.fornitoriMap;
 }
 
 async function caricaScadenzarioFornitori() {
@@ -186,7 +170,9 @@ function _sfAggregaRighe() {
 
   var raggruppati = {};
   _sfOrdini.forEach(function(o){
-    if (o.data < meseInizio || o.data > meseFine) return;
+    // FILTRO SULLA SCADENZA (regola 23/07): il mese scelto è il mese in cui
+    // il debito scade, non quello in cui è arrivata la merce.
+    if (!o.scadenza || o.scadenza < meseInizio || o.scadenza > meseFine) return;
     var nomeKey = (o.fornitore || '?').toLowerCase().trim();
     var chiave  = _sfChiave(o.data, nomeKey, o.fattura_ricevuta_id);
     if (!raggruppati[chiave]) {
@@ -218,19 +204,20 @@ function _sfAggregaRighe() {
     r.pagamenti  = r.fatturaId ? (pagMap[r.fatturaId] || []) : [];
     r.totPagato  = r.pagamenti.reduce(function(s,p){ return s + Number(p.importo||0); }, 0);
 
-    // REGOLA UNICA — pfScadenzaFornitore (pf-estratto-fornitore.js), la stessa
-    // di estratto conto e calendario: giorni SEMPRE dall'anagrafica fornitore,
-    // la data_scadenza della fattura prevale, sab/dom slitta al lunedì.
-    // Mai ordini.giorni_pagamento: sull'ordine non può esistere un valore diverso.
+    // SCADENZA: la calcola la QUERY MADRE sull'ordine (regola unica). Gli
+    // ordini di una stessa tupla (data, fornitore, fattura) la condividono.
     var forn = _sfFornitoriMap[r.fornitoreNomeKey] || {};
-    var ggPag = Number(forn.giorni_pagamento || 30);
-    r.ggPagamento = ggPag;
-    r.dataScadenzaPresunta = pfScadenzaFornitore(r.data, ggPag, null);
-    r.dataScadenza = pfScadenzaFornitore(r.data, ggPag, r.fattura ? r.fattura.data_scadenza : null);
+    r.ggPagamento = Number(forn.giorni_pagamento || 30);
+    r.dataScadenzaPresunta = pfScadenzaFornitore(r.data, r.ggPagamento, null);
+    r.dataScadenza = (r.ordini[0] && r.ordini[0].scadenza) || r.dataScadenzaPresunta;
 
     // Stato
+    r.tuttiPagati = r.ordini.length > 0 && r.ordini.every(function(o){ return !!o.pagato; });
     if (!r.fattura) {
-      r.stato = (r.dataScadenza < oggi) ? 'scaduta_no_fattura' : 'senza_fattura';
+      // Ordini marcati pagati (es. avvio dati) senza fattura: il debito non
+      // c'è più → PAGATO, non "senza fattura da pagare".
+      r.stato = r.tuttiPagati ? 'pagata'
+              : (r.dataScadenza < oggi) ? 'scaduta_no_fattura' : 'senza_fattura';
     } else {
       var importoF = Number(r.fattura.importo_dichiarato);
       if (r.totPagato <= 0.01) {
@@ -249,7 +236,12 @@ function _sfAggregaRighe() {
     }
   });
 
-  righe.sort(function(a,b){ return a.data < b.data ? 1 : (a.data > b.data ? -1 : a.fornitoreNome.localeCompare(b.fornitoreNome)); });
+  // Per DATA SCADENZA crescente: la più vicina in cima (regola 23/07).
+  righe.sort(function(a,b){
+    var sa=a.dataScadenza||'9999-12-31', sb2=b.dataScadenza||'9999-12-31';
+    if (sa!==sb2) return sa<sb2?-1:1;
+    return a.fornitoreNome.localeCompare(b.fornitoreNome);
+  });
   return righe;
 }
 
@@ -462,9 +454,12 @@ function _sfHtmlRiga(r) {
       badge = '<span style="background:#E6F1FB;color:#0C447C;font-size:11px;padding:3px 8px;border-radius:10px;font-weight:600">Parziale · res. '+_sfFmtE(residuo)+'</span>';
       break;
     case 'pagata':
-      var ult = r.pagamenti[r.pagamenti.length-1];
+      var ult = (r.pagamenti && r.pagamenti.length) ? r.pagamenti[r.pagamenti.length-1] : null;
       var contoLabel = (ult && ult.conto_id) ? (' · '+(_sfIstituti.find(function(i){return i.id===(_sfConti.find(function(c){return c.id===ult.conto_id;})||{}).istituto_id;})||{}).nome) : '';
-      badge = '<span style="background:#EAF3DE;color:#3B6D11;font-size:11px;padding:3px 8px;border-radius:10px;font-weight:600">✓ Pagata '+_sfFmtD(ult.data_pagamento)+(contoLabel||'')+'</span>';
+      // Label PAGATO ben visibile (Rinaldo 23/07): verde pieno. Se pagata via
+      // flag ordini (avvio dati) non c'è un pagamento registrato: solo PAGATO.
+      badge = '<span style="background:#639922;color:#fff;font-size:11px;padding:4px 10px;border-radius:10px;font-weight:700;letter-spacing:.5px">PAGATO'
+            + (ult ? ' · '+_sfFmtD(ult.data_pagamento)+(contoLabel||'') : '') + '</span>';
       break;
   }
 
@@ -763,6 +758,7 @@ async function _sfSalvaFattura() {
       .in('id', _sfModaleCtx.ordiniIds);
 
     if (upd.error) throw upd.error;
+    pfDebitoInvalida();
 
     _sfChiudiModale();
     await caricaScadenzarioFornitori();
@@ -796,6 +792,7 @@ async function _sfRimuoviFattura(fatturaId) {
     var u = await sb.from('ordini').update({ fattura_ricevuta_id: null }).eq('fattura_ricevuta_id', fatturaId);
     if (u.error) throw u.error;
     var d = await sb.from('fatture_ricevute').delete().eq('id', fatturaId);
+    pfDebitoInvalida();
     if (d.error) throw d.error;
     await caricaScadenzarioFornitori();
   } catch (e) {

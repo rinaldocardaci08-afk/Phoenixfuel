@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723e — RAMO della QUERY MADRE pf-debito-fornitori.js: questo modulo
+//   non legge più ordini/fatture/pagamenti con query proprie — deriva tutto
+//   da pfDebitoDati/pfDebitoCards/pfDebitoFornitore. pfScadenzaFornitore è
+//   stata SPOSTATA nella madre. Le scritture invalidano con pfDebitoInvalida().
 // v20260723d — selettore anno sempre visibile (prima spariva con la torta vuota),
 //   badge anno sulle card, e la numerazione aggiorna anche la linguetta Senza fattura.
 // v20260723c — IBRIDO PURO (Rinaldo 23/07): qui comanda la SCADENZA, non il
@@ -57,12 +61,13 @@ function switchFornitoriTab(btn) {
 async function caricaEstrattoFornitore() {
   var sel = document.getElementById('ecf-fornitore');
   if (sel && !_ecfPop) {
+    // fornitori dalla QUERY MADRE; conti/istituti non sono debito e restano qui
     var r = await Promise.all([
-      sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').order('nome'),
+      pfDebitoDati(),
       sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
       sb.from('banche_istituti').select('id,nome')
     ]);
-    _ecfFornitori = r[0].data || [];
+    _ecfFornitori = r[0].fornitori;
     _ecfConti = r[1].data || [];
     (r[2].data || []).forEach(function (i) { _ecfIstituti[i.id] = i.nome; });
     sel.innerHTML = '<option value="">— scegli un fornitore —</option>' +
@@ -82,45 +87,11 @@ async function _ecfOverview() {
   _ecfDisegnaOverview(body, cards);
 }
 
-// Calcolo CONDIVISO (panoramica + dashboard): un solo posto, dati sempre uguali
+// Calcolo CONDIVISO (panoramica + dashboard) — ora è il ramo pfDebitoCards
+// della QUERY MADRE. Il nome resta per i chiamanti esistenti.
 async function _ecfCalcolaFornitori(annoSel) {
-  var annoG = Number(annoSel) || new Date().getFullYear();
-  var da = (new Date().getFullYear() - 1) + '-01-01';
-  var r = await Promise.all([
-    _pfFetchAllPages(function () {
-      return sb.from('ordini').select('fornitore,data,litri,costo_litro,iva,pagato_fornitore,fattura_ricevuta_id')
-        .neq('stato','annullato').gte('data', da).order('data', { ascending: false });
-    }),
-    sb.from('fatture_ricevute').select('id,fornitore_nome,importo_dichiarato'),
-    sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo')
-  ]);
-  var ordini = r[0] || [], fatture = r[1].data || [], pagam = r[2].data || [];
-  _ecfOrdiniTutti = ordini;
-  var pagPerFatt = {};
-  pagam.forEach(function (p) { pagPerFatt[p.fattura_ricevuta_id] = (pagPerFatt[p.fattura_ricevuta_id] || 0) + Number(p.importo || 0); });
-  var residuoPerForn = {};
-  fatture.forEach(function (f) {
-    var res = Number(f.importo_dichiarato || 0) - (pagPerFatt[f.id] || 0);
-    if (res > 0.01) residuoPerForn[String(f.fornitore_nome || '').toLowerCase()] = (residuoPerForn[String(f.fornitore_nome || '').toLowerCase()] || 0) + res;
-  });
-
-  var oggi = new Date().toISOString().slice(0, 10);
-  var cards = _ecfFornitori.map(function (f) {
-    var nome = String(f.nome || ''), gg = Number(f.giorni_pagamento || 30), fido = Number(f.fido_massimo || 0);
-    var suoi = ordini.filter(function (o) { return String(o.fornitore || '').toLowerCase() === nome.toLowerCase(); });
-    var aperti = suoi.filter(function (o) { return !o.pagato_fornitore && !o.fattura_ricevuta_id; });
-    var esp = aperti.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0) * (1 + Number(o.iva == null ? 22 : o.iva) / 100); }, 0)
-            + (residuoPerForn[nome.toLowerCase()] || 0);
-    esp = Math.round(esp * 100) / 100;
-    var scad = aperti.map(function (o) { return _ecfAddGiorni(o.data, gg); }).filter(Boolean).sort();
-    var prossima = scad.length ? scad[0] : null;
-    var scadute = scad.filter(function (d) { return d < oggi; }).length;
-    var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0,4) === String(annoG); });
-    var acq = annoOrd.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0); }, 0);
-    var litriAnno = annoOrd.reduce(function (s, o) { return s + Number(o.litri || 0); }, 0);
-    return { id: f.id, nome: nome, gg: gg, fido: fido, esp: esp, nAperti: aperti.length, prossima: prossima, scadute: scadute, acq: acq, litri: litriAnno };
-  }).filter(function (c) { return c.fido > 0 || c.nAperti > 0 || c.acq > 0; })
-    .sort(function (a, b) { return b.esp - a.esp; });
+  var cards = await pfDebitoCards(annoSel);
+  _ecfOrdiniTutti = (await pfDebitoDati()).ordini;  // per il grafico mensile
   return cards;
 }
 
@@ -239,68 +210,15 @@ function _ecfAddGiorni(dataISO, gg, scadFattura) {
 }
 
 async function _ecfCarica() {
-  var da = (new Date().getFullYear() - 1) + '-01-01';
-  var qd = await _pfFetchAllPages(function () {
-    return sb.from('ordini')
-      .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,pagato_fornitore,fattura_ricevuta_id')
-      .ilike('fornitore', _ecfSel.nome).neq('stato', 'annullato').gte('data', da).order('data', { ascending: false });
-  });
-  var q = { data: qd };
-  _ecfOrdini = (q.data || []).map(function (o) {
-    return {
-      id: o.id, data: o.data, prodotto: o.prodotto, litri: Number(o.litri || 0),
-      costoL: Number(o.costo_litro || 0),
-      imponibile: Math.round(Number(o.costo_litro || 0) * Number(o.litri || 0) * 100) / 100,
-      totale: Math.round(Number(o.costo_litro || 0) * Number(o.litri || 0) * (1 + Number(o.iva == null ? 22 : o.iva) / 100) * 100) / 100,
-      scadenza: _ecfAddGiorni(o.data, _ecfSel.gg),
-      pagato: !!o.pagato_fornitore, fatturaId: o.fattura_ricevuta_id || null
-    };
-  });
-
-  var fIds = [];
-  _ecfOrdini.forEach(function (o) { if (o.fatturaId && fIds.indexOf(o.fatturaId) < 0) fIds.push(o.fatturaId); });
-  _ecfFatture = [];
-  if (fIds.length) {
-    var rf = await Promise.all([
-      sb.from('fatture_ricevute').select('*').in('id', fIds),
-      sb.from('pagamenti_fornitori').select('fattura_ricevuta_id,importo,data_pagamento').in('fattura_ricevuta_id', fIds)
-    ]);
-    var pag = {};
-    (rf[1].data || []).forEach(function (p) {
-      if (!pag[p.fattura_ricevuta_id]) pag[p.fattura_ricevuta_id] = { tot: 0, n: 0, ultima: null };
-      var m = pag[p.fattura_ricevuta_id];
-      m.tot += Number(p.importo || 0); m.n++;
-      if (!m.ultima || String(p.data_pagamento) > String(m.ultima)) m.ultima = p.data_pagamento;
-    });
-    _ecfFatture = (rf[0].data || []).map(function (x) {
-      var ords = _ecfOrdini.filter(function (o) { return o.fatturaId === x.id; });
-      var tot = Number(x.importo_dichiarato || 0) || ords.reduce(function (s, o) { return s + o.totale; }, 0);
-      var pg = pag[x.id] || { tot: 0, n: 0, ultima: null };
-      var residuo = Math.round((tot - pg.tot) * 100) / 100;
-      return {
-        id: x.id, numero: x.numero_fattura, data: x.data_fattura, scadenza: x.data_scadenza,
-        totale: tot, pagato: pg.tot, nPag: pg.n, ultimoPag: pg.ultima,
-        residuo: residuo, saldata: residuo <= 0.01, ordini: ords
-      };
-    }).sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
-
-    // REGOLA: se l'ordine è agganciato a una fattura, comanda la scadenza
-    // scritta sulla fattura (il fornitore può averla variata sul cumulativo).
-    var scadFatt = {};
-    (rf[0].data || []).forEach(function (x) { if (x.data_scadenza) scadFatt[x.id] = x.data_scadenza; });
-    _ecfOrdini.forEach(function (o) {
-      if (o.fatturaId && scadFatt[o.fatturaId]) o.scadenza = _ecfAddGiorni(o.data, _ecfSel.gg, scadFatt[o.fatturaId]);
-    });
-  }
+  // RAMO della QUERY MADRE: nessuna query propria. La regola "la scadenza
+  // della fattura comanda" è già applicata dalla madre sugli ordini.
+  var d = await pfDebitoFornitore(_ecfSel.nome, true);
+  _ecfOrdini = d.ordini;
+  _ecfFatture = d.fatture;
 }
 
-// Esposizione = ordini senza fattura non pagati + residui delle fatture aperte
-function ecfEsposizione() {
-  var a = _ecfOrdini.filter(function (o) { return !o.fatturaId && !o.pagato; })
-                    .reduce(function (s, o) { return s + o.totale; }, 0);
-  var b = _ecfFatture.reduce(function (s, f) { return s + (f.saldata ? 0 : f.residuo); }, 0);
-  return Math.round((a + b) * 100) / 100;
-}
+// Esposizione = ramo condiviso della QUERY MADRE (stessa regola ovunque)
+function ecfEsposizione() { return pfDebitoEsposizione(_ecfOrdini, _ecfFatture); }
 
 function _ecfBarra(usato, fido, alta) {
   var pct = fido > 0 ? Math.min(100, (usato / fido) * 100) : 0;
@@ -584,6 +502,7 @@ async function ecfConferma() {
       await sb.from('ordini').update({ pagato_fornitore: true }).in('id', idsOk);
     }
 
+    pfDebitoInvalida();
     if (typeof _auditLog === 'function') _auditLog('pagamento_fornitore', 'pagamenti_fornitori', _ecfSel.nome + ' ' + fmtE(importo) + ' · fattura ' + (nFatt || (S.fattura && S.fattura.numero) || '—'));
     toast('✓ ' + (importo >= S.totale - 0.01 ? 'Pagamento registrato' : 'Acconto registrato'));
     chiudiModalePermessi();
@@ -608,6 +527,7 @@ async function ecfNumeraFattura(fatturaId) {
   try {
     var up = await sb.from('fatture_ricevute').update({ numero_fattura: n }).eq('id', fatturaId);
     if (up.error) throw up.error;
+    pfDebitoInvalida();
     if (typeof _auditLog === 'function') _auditLog('fattura_fornitore', 'fatture_ricevute', _ecfSel.nome + ' numerata ' + n);
     toast('✓ Fattura numerata: ' + n);
     await _ecfCarica();
@@ -654,10 +574,7 @@ async function caricaFidoFornitoriDashboard() {
   var el = document.getElementById('dash-fido-fornitori');
   if (!el) return;
   try {
-    if (!_ecfPop) {
-      var r0 = await sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento').order('nome');
-      _ecfFornitori = r0.data || [];
-    }
+    if (!_ecfPop) _ecfFornitori = (await pfDebitoDati()).fornitori;
     var cards = await _ecfCalcolaFornitori();
     var conFido = cards.filter(function (c) { return c.fido > 0; });
     if (!conFido.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Nessun fornitore con fido assegnato.</div>'; return; }
@@ -708,20 +625,7 @@ function vaiEstrattoFornitore(id) {
 //      scadenza propria, comanda quella (il fornitore ha unificato più giorni);
 //   3. le scadenze di sabato e domenica slittano al lunedì (giorno bancabile).
 // ══════════════════════════════════════════════════════════════════
-function pfScadenzaFornitore(dataOrdine, ggFornitore, dataScadenzaFattura) {
-  var base = dataScadenzaFattura ? String(dataScadenzaFattura).slice(0, 10) : null;
-  if (!base) {
-    if (!dataOrdine) return null;
-    var d = new Date(String(dataOrdine).slice(0, 10) + 'T12:00:00');
-    d.setDate(d.getDate() + Number(ggFornitore || 30));
-    base = d.toISOString().slice(0, 10);
-  }
-  var x = new Date(base + 'T12:00:00');
-  var g = x.getDay();
-  if (g === 6) x.setDate(x.getDate() + 2);
-  if (g === 0) x.setDate(x.getDate() + 1);
-  return x.toISOString().slice(0, 10);
-}
+// pfScadenzaFornitore è definita nella QUERY MADRE pf-debito-fornitori.js
 
 // ══════════════════════════════════════════════════════════════════
 // TIMELINE SCADENZE (22/07/2026) — variante compatta a barra unica.
