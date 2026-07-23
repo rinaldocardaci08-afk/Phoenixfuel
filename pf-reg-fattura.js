@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723j — UN ORDINE GIÀ FATTURATO NON SI RISELEZIONA (Rinaldo): il numero
+//   inserito da Elenco fornitori vive nella query madre e compare in riga in
+//   estratto conto; la checkbox resta solo sugli ordini SENZA fattura, così
+//   nessun modale può chiedere di nuovo un numero che c'è già (né creare una
+//   seconda fattura sullo stesso ordine). Fattura esistente → si gestisce dal
+//   suo numero in riga (dettaglio, pagamento, ✎).
 // v20260723i — SCADENZA PURA OVUNQUE (Rinaldo, definitivo): tutti gli elenchi,
 //   per ordine e raggruppati, pagati compresi, dalla scadenza più vicina in
 //   poi. Il pagati-in-fondo è rimosso anche dalla linguetta Senza fattura;
@@ -76,9 +82,10 @@ function _rfNum(v) {
   if (v.indexOf(',') >= 0) v = v.replace(/\./g, '').replace(',', '.');
   var n = Number(v); return isNaN(n) ? 0 : n;
 }
-// In queste liste ci sono solo ordini SENZA fattura: sono tutti agganciabili a
-// un numero, anche quelli già pagati (ibrido: prima il pagamento, poi il documento).
-function _rfSelezionabile(o) { return true; }
+// Selezionabile per l'aggancio di un numero = ordine SENZA fattura (anche se
+// già pagato: ibrido). Un ordine GIÀ fatturato non si riaggancia e non si
+// ri-paga da qui: si gestisce cliccando il suo numero in riga.
+function _rfSelezionabile(o) { return !o.fatturaId; }
 
 // ── selezione ───────────────────────────────────────────────────────
 function pfRfSetVista(ns, v) { _rfVista[ns] = v; _rfAgg(ns); }
