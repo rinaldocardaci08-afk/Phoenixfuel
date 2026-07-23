@@ -1,7 +1,7 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  pf-scadenzario-fornitori.js — Scadenzario Fornitori PhoenixFuel ║
 // ║                                                                  ║
-// ║  Sotto-tab di Finanze. Aggrega ordini entrata_deposito per       ║
+// ║  Card in Fornitori. Aggrega TUTTI gli ordini fornitore per       ║
 // ║  (data, fornitore, fattura_ricevuta_id) e gestisce:              ║
 // ║   • inserimento numero fattura + importo dichiarato              ║
 // ║   • sentinella di quadratura (Σ ordini vs importo fattura)       ║
@@ -10,6 +10,20 @@
 // ║                                                                  ║
 // ║  Registrazione pagamento → modulo separato (prossimo step)       ║
 // ╚══════════════════════════════════════════════════════════════════╝
+// v20260723b — ALLINEAMENTO ALLA REGOLA UNICA (Rinaldo 23/07). Due difformità
+//   facevano divergere questo elenco dall'estratto conto:
+//   1) PERIMETRO — filtrava tipo_ordine='entrata_deposito', cioè divideva per
+//      LUOGO DI SCARICO. Un ordine fornitore è un debito comunque: a deposito,
+//      a Oppido o consegnato diretto dal cliente. Filtro RIMOSSO; restano solo
+//      i fornitori presenti in ANAGRAFICA (Phoenix, che siamo noi, esce da sé).
+//   2) SCADENZA — priorità a ordini.giorni_pagamento e, per le fatture senza
+//      data_scadenza, ripartiva dalla data fattura. Ora passa TUTTO da
+//      pfScadenzaFornitore: giorni sempre dall'anagrafica, la data_scadenza
+//      della fattura prevale, sab/dom slitta al lunedì.
+//   + _pfFetchAllPages: senza il filtro deposito le righe crescono e il tetto
+//     delle 1000 di PostgREST era a portata di mano.
+// v20260723a — badge 'da numerare' quando la fattura nasce da un pagamento
+//   anticipato e il numero non è ancora arrivato.
 
 'use strict';
 
@@ -87,26 +101,24 @@ async function _sfCaricaDati() {
   var inizio = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese - 3, 1);
   var fine   = _sfDataMeseISO(_sfFiltroAnno, _sfFiltroMese + 3, 0);
   var [ordRes, fattRes, pagRes, fornRes, contiRes, istRes] = await Promise.all([
-    sb.from('ordini')
-      .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,fattura_ricevuta_id,giorni_pagamento,das_firmato_url')
-      .eq('tipo_ordine','entrata_deposito')
-      .neq('stato','annullato')
-      .gte('data', inizio)
-      .lte('data', fine)
-      .not('fornitore','ilike','%phoenix%')
-      .not('fornitore','ilike','%deposito%')
-      .not('fornitore','ilike','%rientro%')
-      .order('data',{ascending:false}),
+    // NIENTE filtro su tipo_ordine: il debito verso il fornitore è lo stesso
+    // che la merce scenda a deposito, a Oppido o direttamente dal cliente.
+    _pfFetchAllPages(function () {
+      return sb.from('ordini')
+        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,fattura_ricevuta_id,das_firmato_url')
+        .neq('stato','annullato')
+        .gte('data', inizio)
+        .lte('data', fine)
+        .order('data',{ascending:false});
+    }),
     sb.from('fatture_ricevute').select('*').gte('data_fattura', inizio).lte('data_fattura', fine),
     sb.from('pagamenti_fornitori').select('*').gte('data_pagamento', inizio).lte('data_pagamento', fine).order('data_pagamento',{ascending:true}),
     sb.from('fornitori').select('id,nome,giorni_pagamento,colore'),
     sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
     sb.from('banche_istituti').select('id,nome')
   ]);
-  if (ordRes.error)  throw ordRes.error;
   if (fattRes.error) throw fattRes.error;
   if (pagRes.error)  throw pagRes.error;
-  _sfOrdini    = ordRes.data || [];
   _sfFatture   = fattRes.data || [];
   _sfPagamenti = pagRes.data || [];
   _sfConti     = contiRes.data || [];
@@ -114,6 +126,11 @@ async function _sfCaricaDati() {
   _sfFornitoriMap = {};
   (fornRes.data || []).forEach(function(f){
     if (f.nome) _sfFornitoriMap[f.nome.toLowerCase().trim()] = f;
+  });
+  // Fornitori VERI = quelli in anagrafica; Phoenix siamo noi ed esce da solo,
+  // senza doverlo escludere per pezzi di nome.
+  _sfOrdini = (ordRes || []).filter(function (o) {
+    return !!_sfFornitoriMap[String(o.fornitore || '').toLowerCase().trim()];
   });
 }
 
@@ -201,33 +218,15 @@ function _sfAggregaRighe() {
     r.pagamenti  = r.fatturaId ? (pagMap[r.fatturaId] || []) : [];
     r.totPagato  = r.pagamenti.reduce(function(s,p){ return s + Number(p.importo||0); }, 0);
 
-    // Scadenza calcolata — STESSA LOGICA di pf-finanze.js (calendario):
-    // priorità ggPag: ordini.giorni_pagamento → fornitori.giorni_pagamento → 30
-    // costruzione data con T12:00:00 per evitare edge case timezone
+    // REGOLA UNICA — pfScadenzaFornitore (pf-estratto-fornitore.js), la stessa
+    // di estratto conto e calendario: giorni SEMPRE dall'anagrafica fornitore,
+    // la data_scadenza della fattura prevale, sab/dom slitta al lunedì.
+    // Mai ordini.giorni_pagamento: sull'ordine non può esistere un valore diverso.
     var forn = _sfFornitoriMap[r.fornitoreNomeKey] || {};
-    var ggPag = Number((r.ordini[0] && r.ordini[0].giorni_pagamento) || forn.giorni_pagamento || 30);
+    var ggPag = Number(forn.giorni_pagamento || 30);
     r.ggPagamento = ggPag;
-
-    // dataScadenzaPresunta = calcolata da data ordine + ggPag, spostata al lunedì se cade sab/dom
-    var dPres = new Date(r.data + 'T12:00:00');
-    dPres.setDate(dPres.getDate() + ggPag);
-    r.dataScadenzaPresunta = _sfSpostaAlLunedi(dPres.toISOString().split('T')[0]);
-
-    // dataScadenza effettiva:
-    //  - se c'è fattura con data_scadenza salvata → usa quella (override manuale, anche lei spostata al lun se necessario)
-    //  - se c'è fattura senza data_scadenza → calcolata da data_fattura + ggPag, spostata al lun
-    //  - se non c'è fattura → presunta dalla data ordine (già spostata)
-    if (r.fattura) {
-      if (r.fattura.data_scadenza) {
-        r.dataScadenza = _sfSpostaAlLunedi(r.fattura.data_scadenza);
-      } else {
-        var dF = new Date(r.fattura.data_fattura + 'T12:00:00');
-        dF.setDate(dF.getDate() + ggPag);
-        r.dataScadenza = _sfSpostaAlLunedi(dF.toISOString().split('T')[0]);
-      }
-    } else {
-      r.dataScadenza = r.dataScadenzaPresunta;
-    }
+    r.dataScadenzaPresunta = pfScadenzaFornitore(r.data, ggPag, null);
+    r.dataScadenza = pfScadenzaFornitore(r.data, ggPag, r.fattura ? r.fattura.data_scadenza : null);
 
     // Stato
     if (!r.fattura) {
@@ -680,11 +679,10 @@ function _sfRicalcolaScadenzaModale() {
   if (!dataF || !dataS) return;
   // Se l'utente ha già modificato a mano la scadenza, non sovrascrivere
   if (dataS.dataset.userModified === 'true') return;
-  if (!dataF.value) return;
-  var d = new Date(dataF.value + 'T12:00:00');
-  d.setDate(d.getDate() + (_sfModaleCtx.ggPagamento || 30));
-  // Sposta al lunedì se cade sab/dom (allineato a pf-finanze.js calendario)
-  dataS.value = _sfSpostaAlLunedi(d.toISOString().split('T')[0]);
+  // REGOLA UNICA: la scadenza presunta nasce dalla DATA ORDINE + giorni del
+  // fornitore, non dalla data fattura. Se il fornitore ne concorda un'altra,
+  // la si scrive a mano e da quel momento comanda quella.
+  dataS.value = _sfModaleCtx.scadenzaPresunta;
 }
 
 function _sfAggQuadratura() {  if (!_sfModaleCtx) return;
