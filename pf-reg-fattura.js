@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723g — data fattura proposta = data dell'ORDINE più recente, mai oggi.
 // v20260723f — ORDINAMENTO (Rinaldo): prima gli ordini NON PAGATI per scadenza
 //   crescente (la più vicina in cima), i PAGATI tutti IN FONDO all'elenco
 //   (anch'essi per scadenza). Vale nell'elenco piatto e dentro i gruppi.
@@ -232,8 +233,10 @@ function pfRfApri(ns) {
   if (!c.fornitore || !c.fornitore.nome) { if (typeof toast === 'function') toast('Scegli prima il fornitore'); return; }
   var tot = Math.round(ords.reduce(function (s, o) { return s + o.totale; }, 0) * 100) / 100;
   var scadenze = ords.map(function (o) { return o.scadenza; }).filter(Boolean).sort();
+  var dOrd = ords.map(function (o) { return o.data; }).filter(Boolean).sort();
   _rfMod = {
     ns: ns, ordini: ords, totale: tot,
+    dataOrdine: dOrd.length ? dOrd[dOrd.length - 1] : _rfOggi(),   // data fattura proposta = data ORDINE
     scadenzaMax: scadenze.length ? scadenze[scadenze.length - 1] : _rfOggi(),
     scadenzeDiverse: scadenze.filter(function (v, i, a) { return a.indexOf(v) === i; })
   };
@@ -251,7 +254,7 @@ function _rfRenderModale() {
 
     + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
       + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">n° fattura</label><input id="rf-num" type="text" placeholder="es. 64920" style="' + box + '"></div>'
-      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="rf-dfatt" type="date" value="' + _rfOggi() + '" style="' + box + '"></div>'
+      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="rf-dfatt" type="date" value="' + (S.dataOrdine || _rfOggi()) + '" style="' + box + '"></div>'
     + '</div>'
 
     + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'

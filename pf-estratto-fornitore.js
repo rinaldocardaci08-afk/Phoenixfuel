@@ -1,5 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723f — TRE FIX dal collaudo: (1) modalità pagamento coi CODICI
+//   minuscoli bonifico/riba/assegno come nel resto del programma — il check
+//   a DB li pretende e il modale mandava le etichette maiuscole; (2) la data
+//   fattura proposta = DATA DELL'ORDINE (la più recente tra i selezionati),
+//   mai oggi; (3) ROLLBACK nel pagamento: se l'insert del pagamento fallisce
+//   dopo la creazione della fattura contenitore, la fattura viene cancellata
+//   e gli ordini sganciati — niente orfani a DB.
 // v20260723e — RAMO della QUERY MADRE pf-debito-fornitori.js: questo modulo
 //   non legge più ordini/fatture/pagamenti con query proprie — deriva tutto
 //   da pfDebitoDati/pfDebitoCards/pfDebitoFornitore. pfScadenzaFornitore è
@@ -369,7 +376,9 @@ function ecfApriRegistra() {
   var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato; });
   if (!ords.length) { toast('Seleziona almeno un ordine non ancora pagato'); return; }
   var tot = Math.round(ords.reduce(function (s, o) { return s + o.totale; }, 0) * 100) / 100;
-  _ecfMod = { tipo: 'nuova', ordini: ords, totale: tot, modo: 'totale', importo: tot, fatturaId: null };
+  // data fattura proposta = data dell'ORDINE (la più recente), mai oggi
+  var dOrd = ords.map(function (o) { return o.data; }).sort();
+  _ecfMod = { tipo: 'nuova', ordini: ords, totale: tot, modo: 'totale', importo: tot, fatturaId: null, dataOrdine: dOrd[dOrd.length - 1] };
   _ecfRenderModale();
 }
 
@@ -419,7 +428,7 @@ function _ecfRenderModale() {
   if (!esistente) {
     h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
       + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">n° fattura <span style="font-weight:400;text-transform:none;letter-spacing:0">(facoltativo)</span></label><input id="ecf-nfatt" type="text" placeholder="lascia vuoto se non è ancora arrivata" style="' + box + '"></div>'
-      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="ecf-dfatt" type="date" value="' + _ecfOggi() + '" style="' + box + '"></div>'
+      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="ecf-dfatt" type="date" value="' + (S.dataOrdine || _ecfOggi()) + '" style="' + box + '"></div>'
       + '</div>'
       + '<div style="background:#E6F1FB;color:#0C447C;padding:8px 12px;border-radius:7px;font-size:11.5px;line-height:1.5;margin-bottom:12px">'
         + 'Puoi pagare anche senza fattura: l\'ordine esce dal fido subito e il numero si inserisce dopo, dal tasto ✎ nella tabella Fatture registrate.</div>';
@@ -435,7 +444,7 @@ function _ecfRenderModale() {
     + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data pagamento</label><input id="ecf-dpag" type="date" value="' + _ecfOggi() + '" style="' + box + '"></div>'
     + '</div>'
     + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
-    + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">modalità</label><select id="ecf-mod" style="' + box + ';font-family:inherit"><option>Bonifico</option><option>RIBA</option><option>Assegno</option></select></div>'
+    + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">modalità</label><select id="ecf-mod" style="' + box + ';font-family:inherit"><option value="bonifico">Bonifico</option><option value="riba">RIBA</option><option value="assegno">Assegno</option></select></div>'
     + '<div style="flex:1;min-width:180px"><label style="' + lbl + '">banca</label><select id="ecf-conto" style="' + box + ';font-family:inherit">' + _ecfOpzioniConti() + '</select></div>'
     + '</div>';
 
@@ -494,7 +503,15 @@ async function ecfConferma() {
       conto_id: contoId,
       riferimento_esterno: (importo < S.totale - 0.01) ? 'acconto su fattura' : null
     }]);
-    if (insP.error) throw insP.error;
+    if (insP.error) {
+      // ROLLBACK: la fattura contenitore appena creata non deve restare
+      // orfana se il pagamento non passa.
+      if (S.tipo === 'nuova' && fatturaId) {
+        await sb.from('ordini').update({ fattura_ricevuta_id: null }).eq('fattura_ricevuta_id', fatturaId);
+        await sb.from('fatture_ricevute').delete().eq('id', fatturaId);
+      }
+      throw insP.error;
+    }
 
     // Saldo totale → gli ordini della fattura risultano pagati
     if (importo >= S.totale - 0.01) {
