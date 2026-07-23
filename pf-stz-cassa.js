@@ -1,11 +1,37 @@
 // PhoenixFuel — Stazione: Cassa, Crediti, Differenze, OCR
+// v20260723a — all'APERTURA la cassa si posiziona sul PRIMO GIORNO NON ANCORA
+//   COMPILATO (primo buco in stazione_cassa negli ultimi 60 giorni; se tutto
+//   compilato → oggi). Vale solo alla prima apertura: cambio data a mano e
+//   frecce ◀▶ restano come prima.
 // ══════════════════════════════════════════════════════════════
 // ── CASSA STAZIONE ───────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
+// Primo giorno senza cassa salvata: scandisce dalla prima data presente
+// negli ultimi 60 giorni fino a oggi e si ferma al primo buco.
+// Nessun record nel periodo → oggi (si parte da zero, non da buchi finti).
+async function _cassaPrimoGiornoDaCompilare() {
+  try {
+    var da = new Date(); da.setDate(da.getDate() - 60);
+    var daISO = da.toISOString().slice(0, 10);
+    var r = await sb.from('stazione_cassa').select('data').gte('data', daISO).order('data');
+    var presenti = {};
+    (r.data || []).forEach(function (x) { presenti[String(x.data).slice(0, 10)] = true; });
+    var date = Object.keys(presenti).sort();
+    if (!date.length) return oggiISO;
+    var d = new Date(date[0] + 'T12:00:00');
+    while (true) {
+      var iso = d.toISOString().slice(0, 10);
+      if (iso >= oggiISO) return oggiISO;
+      if (!presenti[iso]) return iso;
+      d.setDate(d.getDate() + 1);
+    }
+  } catch (e) { return oggiISO; }
+}
+
 async function caricaCassa() {
   var input = document.getElementById('cassa-data');
-  if (!input.value) input.value = oggiISO;
+  if (!input.value) input.value = await _cassaPrimoGiornoDaCompilare();
   var data = input.value;
   _labelGiorno('cassa-data');
   _resetSaved('btn-salva-cassa');
