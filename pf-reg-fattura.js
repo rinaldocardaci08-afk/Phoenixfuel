@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723c — striscia "Fatture da numerare": un ordine pagato prima che
+//   arrivasse la fattura ha già un fattura_ricevuta_id, quindi esce dall'elenco
+//   "senza fattura" pur non avendo il numero. Senza questa striscia si perdeva.
+// v20260723b — ordini SEMPRE ordinati per SCADENZA crescente (dalla più vicina)
+//   e selezionabili anche se GIÀ PAGATI: nel modello ibrido il numero fattura
+//   può arrivare dopo il pagamento. Il pagamento vero resta altrove.
 // v20260723a
 //
 // Motore UNICO usato da due posti (matrice unica, niente query doppie):
@@ -49,7 +55,9 @@ function _rfNum(v) {
   if (v.indexOf(',') >= 0) v = v.replace(/\./g, '').replace(',', '.');
   var n = Number(v); return isNaN(n) ? 0 : n;
 }
-function _rfSelezionabile(o) { return !o.pagato; }
+// In queste liste ci sono solo ordini SENZA fattura: sono tutti agganciabili a
+// un numero, anche quelli già pagati (ibrido: prima il pagamento, poi il documento).
+function _rfSelezionabile(o) { return true; }
 
 // ── selezione ───────────────────────────────────────────────────────
 function pfRfSetVista(ns, v) { _rfVista[ns] = v; _rfAgg(ns); }
@@ -149,6 +157,12 @@ function pfRfTabella(ns) {
           : badge(o)) + '</td></tr>';
   };
 
+  // SEMPRE per scadenza crescente: qui comanda la data di scadenza
+  var perScadenza = function (a, b) {
+    var sa = String(a.scadenza || '9999-12-31'), sb2 = String(b.scadenza || '9999-12-31');
+    if (sa !== sb2) return sa < sb2 ? -1 : 1;
+    return String(a.data || '').localeCompare(String(b.data || ''));
+  };
   var corpo = '';
 
   if (vista === 'gruppi') {
@@ -182,10 +196,10 @@ function pfRfTabella(ns) {
         + '<td style="font-family:var(--font-mono);font-size:14.5px;font-weight:700;border-bottom:1px solid #378ADD;color:' + (scaduto ? '#7F1D1D' : '#C0392B') + '">' + (s ? _rfD(s) : '—') + '</td>'
         + '<td style="border-bottom:1px solid #378ADD"></td></tr>';
 
-      if (aperto) g.forEach(function (o) { corpo += rigaOrdine(o, true); });
+      if (aperto) g.slice().sort(perScadenza).forEach(function (o) { corpo += rigaOrdine(o, true); });
     });
   } else {
-    c.ordini.forEach(function (o) { corpo += rigaOrdine(o, false); });
+    c.ordini.slice().sort(perScadenza).forEach(function (o) { corpo += rigaOrdine(o, false); });
   }
 
   if (!corpo) corpo = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
@@ -420,7 +434,7 @@ function _rfRenderTab() {
     return;
   }
 
-  var ordini = _ecfOrdini.filter(function (o) { return !o.fatturaId && !o.pagato; });
+  var ordini = _ecfOrdini.filter(function (o) { return !o.fatturaId; });   // anche i già pagati: il numero può arrivare dopo
   var tot = ordini.reduce(function (s, o) { return s + o.totale; }, 0);
 
   pfRfCtx('rf', {
@@ -432,7 +446,23 @@ function _rfRenderTab() {
     onSaved: async function () { await _ecfCarica(); _rfRenderTab(); }
   });
 
-  body.innerHTML =
+  // Fatture create da un pagamento anticipato: hanno l'id ma non il numero.
+  var daNumerare = (_ecfFatture || []).filter(function (f) { return !f.numero; });
+  var strisciaNum = !daNumerare.length ? '' :
+    '<div style="border:1px solid #F5921E;background:#FFF9F0;border-radius:10px;padding:11px 13px;margin-bottom:14px">'
+    + '<div style="font-size:12px;font-weight:700;color:#8A4F06;margin-bottom:7px">Fatture da numerare · ' + daNumerare.length
+    + ' <span style="font-weight:400">— pagate prima che arrivasse il documento</span></div>'
+    + daNumerare.map(function (f) {
+        return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12px">'
+          + '<span style="font-family:var(--font-mono)">' + (f.data ? _rfD(f.data) : '—') + '</span>'
+          + '<span style="flex:1;color:var(--text-muted)">' + f.ordini.length + (f.ordini.length === 1 ? ' ordine' : ' ordini') + '</span>'
+          + '<span style="font-family:var(--font-mono);font-weight:700">' + _rfE(f.totale) + '</span>'
+          + '<button onclick="ecfNumeraFattura(\'' + f.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid #F5921E;border-radius:6px;background:#FFF1DC;color:#8A4F06;cursor:pointer;font-weight:600">✎ inserisci n°</button>'
+          + '</div>';
+      }).join('')
+    + '</div>';
+
+  body.innerHTML = strisciaNum +
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
       + '<div style="font-size:13px;font-weight:600">Ordini senza fattura — ' + _rfEsc(_ecfSel.nome)
         + ' <span style="font-weight:400;color:var(--text-muted)">· ' + ordini.length + (ordini.length === 1 ? ' ordine · ' : ' ordini · ') + _rfE(tot) + ' IVA inc.</span></div>'

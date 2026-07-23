@@ -1,5 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723d — selettore anno sempre visibile (prima spariva con la torta vuota),
+//   badge anno sulle card, e la numerazione aggiorna anche la linguetta Senza fattura.
+// v20260723c — IBRIDO PURO (Rinaldo 23/07): qui comanda la SCADENZA, non il
+//   documento. Ordini elencati per scadenza crescente; il pulsante è
+//   "Pagamento" (non più "fattura + pagamento") e il n° fattura è FACOLTATIVO:
+//   si può pagare un ordine di cui non è ancora arrivata la fattura, per
+//   liberare fido. Il numero si inserisce dopo, dalla riga in Fatture
+//   registrate (✎ inserisci n°). Selezionabili anche gli ordini già pagati,
+//   perché il loro numero fattura può arrivare dopo il pagamento.
+//   + selettore ANNO (2025/2026) su torta e grafico mensile: i dati c'erano
+//   già in memoria (il caricamento parte dal 1° gennaio dell'anno precedente).
 // v20260723b — REGISTRA FATTURA senza pagamento: la tabella "Ordini da pagare —
 //   senza fattura" è ora disegnata dal motore condiviso pf-reg-fattura.js
 //   (elenco o Σ raggruppa per scadenza, sgancio del singolo ordine dal gruppo).
@@ -28,6 +39,7 @@ let _ecfConti = [], _ecfIstituti = {};
 let _ecfMod = null;          // stato del modale
 let _ecfOrdiniTutti = [];    // tutti gli ordini caricati (per il grafico mensile)
 let _ecfMeseUnit = 'euro';   // 'euro' | 'litri'
+let _ecfAnnoGraf = new Date().getFullYear();  // anno mostrato da torta e grafico mensile
 
 function switchFornitoriTab(btn) {
   document.querySelectorAll('.forn-tab').forEach(function (t) {
@@ -65,13 +77,14 @@ async function _ecfOverview() {
   var body = document.getElementById('ecf-body');
   if (!body) return;
   body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:30px;font-size:12px">⏳ Caricamento fornitori...</div>';
-  var cards = await _ecfCalcolaFornitori();
+  var cards = await _ecfCalcolaFornitori(_ecfAnnoGraf);
   if (!cards.length) { body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Nessun fornitore con movimenti.</div>'; return; }
   _ecfDisegnaOverview(body, cards);
 }
 
 // Calcolo CONDIVISO (panoramica + dashboard): un solo posto, dati sempre uguali
-async function _ecfCalcolaFornitori() {
+async function _ecfCalcolaFornitori(annoSel) {
+  var annoG = Number(annoSel) || new Date().getFullYear();
   var da = (new Date().getFullYear() - 1) + '-01-01';
   var r = await Promise.all([
     _pfFetchAllPages(function () {
@@ -102,7 +115,7 @@ async function _ecfCalcolaFornitori() {
     var scad = aperti.map(function (o) { return _ecfAddGiorni(o.data, gg); }).filter(Boolean).sort();
     var prossima = scad.length ? scad[0] : null;
     var scadute = scad.filter(function (d) { return d < oggi; }).length;
-    var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0,4) === String(new Date().getFullYear()); });
+    var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0,4) === String(annoG); });
     var acq = annoOrd.reduce(function (s, o) { return s + Number(o.costo_litro || 0) * Number(o.litri || 0); }, 0);
     var litriAnno = annoOrd.reduce(function (s, o) { return s + Number(o.litri || 0); }, 0);
     return { id: f.id, nome: nome, gg: gg, fido: fido, esp: esp, nAperti: aperti.length, prossima: prossima, scadute: scadute, acq: acq, litri: litriAnno };
@@ -121,7 +134,7 @@ function _ecfDisegnaOverview(body, cards) {
           + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'
             + '<div style="font-size:15px;font-weight:700">' + esc(c.nome) + '</div>'
             + '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap">' + c.gg + ' gg</div></div>'
-          + '<div style="font-size:11px;color:var(--text-muted);margin:2px 0 10px">acquistato ' + fmtE(c.acq) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-muted);margin:2px 0 10px">acquistato ' + _ecfAnnoGraf + ' · ' + fmtE(c.acq) + '</div>'
           + (c.fido > 0 ? _ecfBarra(c.esp, c.fido, false)
                         : '<div style="font-size:11px;color:var(--text-muted)">Esposizione ' + fmtE(c.esp) + ' · nessun fido assegnato</div>')
           + (c.fido > 0 ? '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:7px">'
@@ -133,6 +146,8 @@ function _ecfDisegnaOverview(body, cards) {
                          : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
           + '</div></div>';
       }).join('') + '</div>'
+    + '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px">'
+      + '<span style="font-size:11.5px;color:var(--text-muted)">Anno dei grafici</span>' + _ecfBtnAnno() + '</div>'
     + _ecfTortaHtml(cards)
     + _ecfMesiHtml(cards);
   setTimeout(function () { _ecfDisegnaTorta(cards); _ecfDisegnaMesi(cards); }, 0);
@@ -140,9 +155,10 @@ function _ecfDisegnaOverview(body, cards) {
 
 // ── Torta acquisti dell'anno per fornitore (litri ed euro) ──
 function _ecfTortaHtml(cards) {
-  var anno = new Date().getFullYear();
+  var anno = _ecfAnnoGraf;
   var conAcq = cards.filter(function (c) { return c.acq > 0; });
-  if (!conAcq.length) return '';
+  if (!conAcq.length) return '<div class="card" style="margin-top:12px"><div class="card-title">Acquisti ' + anno + ' per fornitore</div>'
+    + '<div style="color:var(--text-muted);font-size:12.5px;padding:6px 0">Nessun acquisto registrato nel ' + anno + ' per i fornitori in anagrafica.</div></div>';
   var totE = conAcq.reduce(function (s, c) { return s + c.acq; }, 0);
   var totL = conAcq.reduce(function (s, c) { return s + c.litri; }, 0);
   var col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3', '#B4B2A9'];
@@ -332,6 +348,12 @@ function _ecfRender() {
 
   // Motore condiviso di registrazione fattura (pf-reg-fattura.js): stessa
   // tabella e stesso modale della linguetta "Senza fattura" in Fatture Fornitori.
+  var nDaPagare = senzaFatt.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato; }).length;
+  var nGiaPagati = senzaFatt.filter(function (o) { return _ecfSelezione[o.id] && o.pagato; }).length;
+  var btnPag = nDaPagare
+    ? '<button onclick="ecfApriRegistra()" style="width:100%;margin-top:6px;font-size:12px;padding:8px 10px;border:0.5px solid #0C447C;border-radius:8px;background:var(--bg-card,#fff);color:#0C447C;font-weight:600;cursor:pointer">＋ Pagamento' + (nGiaPagati ? ' (' + nDaPagare + ')' : '') + '</button>'
+    : '<div style="margin-top:6px;font-size:10.5px;color:#0C447C;line-height:1.45">Selezione di soli ordini già pagati: puoi agganciare la fattura, non il pagamento.</div>';
+
   if (typeof pfRfCtx === 'function') {
     pfRfCtx('ecf', {
       ordini: senzaFatt,
@@ -340,7 +362,7 @@ function _ecfRender() {
       selezionabile: true,
       onChange: _ecfRender,
       onSaved: async function () { _ecfSelezione = {}; await _ecfCarica(); _ecfRender(); },
-      extraBtn: '<button onclick="ecfApriRegistra()" style="width:100%;margin-top:6px;font-size:12px;padding:8px 10px;border:0.5px solid #0C447C;border-radius:8px;background:var(--bg-card,#fff);color:#0C447C;font-weight:600;cursor:pointer">＋ Fattura e pagamento</button>'
+      extraBtn: btnPag
     });
   }
 
@@ -351,7 +373,8 @@ function _ecfRender() {
                     : '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">aperta</span>');
     return '<tr>'
       + '<td style="text-align:center"><input type="checkbox"' + (f.saldata ? ' checked disabled' : '') + ' onclick="ecfPagaFattura(\'' + f.id + '\')" title="Registra pagamento" style="width:17px;height:17px;cursor:pointer;accent-color:#639922"></td>'
-      + '<td style="font-family:var(--font-mono)">' + esc(f.numero || '—') + '</td>'
+      + '<td style="font-family:var(--font-mono)">' + (f.numero ? esc(f.numero)
+          : '<button onclick="ecfNumeraFattura(\'' + f.id + '\')" title="La fattura è arrivata: inserisci il numero" style="font-size:11px;padding:4px 9px;border:0.5px solid #F5921E;border-radius:6px;background:#FFF1DC;color:#8A4F06;cursor:pointer;font-family:inherit;font-weight:600">✎ inserisci n°</button>') + '</td>'
       + '<td style="font-family:var(--font-mono)">' + (f.data ? _pfIsoToIt(f.data) : '—') + '</td>'
       + '<td>' + f.ordini.length + ' ordini <span onclick="ecfInfoFattura(\'' + f.id + '\')" title="Dettaglio ordini" style="display:inline-block;width:19px;height:19px;line-height:19px;text-align:center;border-radius:50%;background:#85B7EB;color:#fff;font-size:11px;font-weight:700;cursor:pointer;user-select:none">i</span></td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtE(f.totale) + '</td>'
@@ -425,8 +448,8 @@ function _ecfNum(v) {
 
 // Nuova fattura sugli ordini selezionati
 function ecfApriRegistra() {
-  var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; });
-  if (!ords.length) { toast('Seleziona almeno un ordine'); return; }
+  var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato; });
+  if (!ords.length) { toast('Seleziona almeno un ordine non ancora pagato'); return; }
   var tot = Math.round(ords.reduce(function (s, o) { return s + o.totale; }, 0) * 100) / 100;
   _ecfMod = { tipo: 'nuova', ordini: ords, totale: tot, modo: 'totale', importo: tot, fatturaId: null };
   _ecfRenderModale();
@@ -472,14 +495,16 @@ function _ecfRenderModale() {
   var lbl = 'display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:4px';
   var esistente = S.tipo === 'esistente';
 
-  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">' + (esistente ? 'Pagamento fattura ' + esc(S.fattura.numero || '') : 'Registra fattura e pagamento') + ' — ' + esc(_ecfSel.nome) + '</div>'
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">' + (esistente ? 'Pagamento fattura ' + esc(S.fattura.numero || '(da numerare)') : 'Registra pagamento') + ' — ' + esc(_ecfSel.nome) + '</div>'
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + S.ordini.length + ' ordini · ' + (esistente ? 'residuo ' : 'totale ') + fmtE(S.totale) + '</div>';
 
   if (!esistente) {
     h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
-      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">n° fattura</label><input id="ecf-nfatt" type="text" placeholder="es. 64920" style="' + box + '"></div>'
+      + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">n° fattura <span style="font-weight:400;text-transform:none;letter-spacing:0">(facoltativo)</span></label><input id="ecf-nfatt" type="text" placeholder="lascia vuoto se non è ancora arrivata" style="' + box + '"></div>'
       + '<div style="flex:1;min-width:150px"><label style="' + lbl + '">data fattura</label><input id="ecf-dfatt" type="date" value="' + _ecfOggi() + '" style="' + box + '"></div>'
-      + '</div>';
+      + '</div>'
+      + '<div style="background:#E6F1FB;color:#0C447C;padding:8px 12px;border-radius:7px;font-size:11.5px;line-height:1.5;margin-bottom:12px">'
+        + 'Puoi pagare anche senza fattura: l\'ordine esce dal fido subito e il numero si inserisce dopo, dal tasto ✎ nella tabella Fatture registrate.</div>';
   }
 
   h += '<div style="display:inline-flex;border:0.5px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:12px">'
@@ -520,7 +545,7 @@ async function ecfConferma() {
   if (S.tipo === 'nuova') {
     nFatt = (document.getElementById('ecf-nfatt').value || '').trim();
     dFatt = document.getElementById('ecf-dfatt').value || _ecfOggi();
-    if (!nFatt) { toast('Inserisci il numero della fattura'); return; }
+    // n° fattura FACOLTATIVO: si può pagare prima che la fattura arrivi
   }
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; }
 
@@ -530,7 +555,7 @@ async function ecfConferma() {
       var ins = await sb.from('fatture_ricevute').insert([{
         fornitore_id: _ecfSel.id,
         fornitore_nome: _ecfSel.nome,
-        numero_fattura: nFatt,
+        numero_fattura: nFatt || null,
         data_fattura: dFatt,
         data_scadenza: _ecfAddGiorni(dFatt, _ecfSel.gg),
         importo_dichiarato: S.totale,
@@ -569,6 +594,29 @@ async function ecfConferma() {
     console.error('ecfConferma', e);
     if (btn) { btn.disabled = false; btn.textContent = 'Conferma'; }
     toast('Errore: ' + (e && e.message ? e.message : e));
+  }
+}
+
+// La fattura pagata prima del documento riceve il numero dopo: ✎ nella riga
+async function ecfNumeraFattura(fatturaId) {
+  var f = _ecfFatture.filter(function (x) { return x.id === fatturaId; })[0];
+  if (!f) return;
+  var n = prompt('Numero fattura — ' + _ecfSel.nome + ' · ' + (f.data ? _pfIsoToIt(f.data) : '—') + ' · ' + fmtE(f.totale), f.numero || '');
+  if (n === null) return;
+  n = String(n).trim();
+  if (!n) { toast('Numero non inserito'); return; }
+  try {
+    var up = await sb.from('fatture_ricevute').update({ numero_fattura: n }).eq('id', fatturaId);
+    if (up.error) throw up.error;
+    if (typeof _auditLog === 'function') _auditLog('fattura_fornitore', 'fatture_ricevute', _ecfSel.nome + ' numerata ' + n);
+    toast('✓ Fattura numerata: ' + n);
+    await _ecfCarica();
+    _ecfRender();
+    if (typeof _rfRenderTab === 'function' && document.getElementById('rf-body')) _rfRenderTab();
+  } catch (e) {
+    var m = (e && e.message) ? e.message : String(e);
+    if (m.indexOf('duplicate') >= 0 || m.indexOf('unique') >= 0) m = 'Esiste già una fattura ' + n + ' per ' + _ecfSel.nome + '.';
+    toast('Errore: ' + m);
   }
 }
 
@@ -780,6 +828,17 @@ function _ecfTimelineHtml() {
 // ══════════════════════════════════════════════════════════════════
 const _ECF_MESI = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
 
+function _ecfBtnAnno() {
+  var ora = new Date().getFullYear();
+  return [ora - 1, ora].map(function (a) {
+    var on = _ecfAnnoGraf === a;
+    return '<button onclick="ecfSetAnnoGraf(' + a + ')" style="font-size:12px;padding:6px 16px;border:0.5px solid '
+      + (on ? '#185FA5' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#185FA5' : 'var(--bg)')
+      + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '400') + '">' + a + '</button>';
+  }).join('');
+}
+function ecfSetAnnoGraf(a) { _ecfAnnoGraf = Number(a); _ecfOverview(); }
+
 function _ecfMesiHtml(cards) {
   var attivi = cards.filter(function (c) { return c.acq > 0; });
   if (!attivi.length) return '';
@@ -789,7 +848,7 @@ function _ecfMesiHtml(cards) {
   };
   return '<div class="card" style="margin-top:18px">'
     + '<div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
-      + '<span>Acquisti per mese ' + new Date().getFullYear() + '</span>'
+      + '<span>Acquisti per mese ' + _ecfAnnoGraf + '</span>'
       + '<div style="display:flex;gap:8px">' + b('euro', '€ IVA inc.') + b('litri', 'Litri') + '</div></div>'
     + '<div style="position:relative;width:100%;height:300px"><canvas id="ecf-mesi"></canvas></div></div>';
 }
@@ -819,7 +878,7 @@ var _ecfChartMesi = null;
 function _ecfDisegnaMesi(cards) {
   var ctx = document.getElementById('ecf-mesi');
   if (!ctx || typeof Chart === 'undefined') return;
-  var anno = new Date().getFullYear();
+  var anno = _ecfAnnoGraf;
   var col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3', '#B4B2A9'];
 
   // SOLO i fornitori dell'anagrafica (come la torta e le card). Phoenix siamo NOI,

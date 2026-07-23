@@ -438,7 +438,7 @@ function _sfHtmlRiga(r) {
     fatturaCell = '<button onclick="_sfApriModaleInsFattura(\''+r.chiave+'\');event.stopPropagation();" style="width:100%;padding:5px 8px;font-size:12px;background:#FAEEDA;border:0.5px solid #EF9F27;color:#854F0B;border-radius:4px;cursor:pointer;text-align:left;font-weight:500">+ Inserisci fattura</button>';
   } else {
     fatturaCell = '<div style="display:flex;align-items:center;gap:4px">' +
-      '<span style="background:#E6F1FB;color:#0C447C;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:600;flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_sfEsc(r.fattura.numero_fattura)+'</span>' +
+      '<span style="background:#E6F1FB;color:#0C447C;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:600;flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(r.fattura.numero_fattura ? _sfEsc(r.fattura.numero_fattura) : 'da numerare')+'</span>' +
       '<button onclick="_sfRimuoviFattura(\''+r.fattura.id+'\');event.stopPropagation();" title="Rimuovi e scollega ordini" style="background:transparent;border:0;cursor:pointer;font-size:14px;color:var(--text-muted);padding:2px 4px">✕</button>' +
       '</div>';
   }
