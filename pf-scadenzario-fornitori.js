@@ -10,6 +10,8 @@
 // ║                                                                  ║
 // ║  Registrazione pagamento → modulo separato (prossimo step)       ║
 // ╚══════════════════════════════════════════════════════════════════╝
+// v20260723e — dati sempre freschi (pfDebitoDati force) e toast che spiega lo
+//   spostamento della riga nel mese della scadenza salvata.
 // v20260723d — riga con ordini flag-pagati resta PAGATA anche dopo l'aggancio
 //   del numero fattura (prima ricadeva su scaduta/da pagare).
 // v20260723c — RAMO della QUERY MADRE pf-debito-fornitori.js: ordini, fatture,
@@ -107,8 +109,10 @@ async function _sfCaricaDati() {
   if (_sfFiltroAnno === null) _sfFiltroAnno = new Date().getFullYear();
   if (_sfFiltroMese === null) _sfFiltroMese = new Date().getMonth();
   // RAMO della QUERY MADRE: nessuna query propria su ordini/fatture/pagamenti.
+  // FORCE: vista operativa, sempre dati freschi (copre anche scritture fatte
+  // fuori dall'app, es. SQL a mano, che non passano da pfDebitoInvalida).
   var [d, contiRes, istRes] = await Promise.all([
-    pfDebitoDati(),
+    pfDebitoDati(true),
     sb.from('banche_conti').select('id,istituto_id,iban,descrizione'),
     sb.from('banche_istituti').select('id,nome')
   ]);
@@ -764,6 +768,15 @@ async function _sfSalvaFattura() {
 
     if (upd.error) throw upd.error;
     pfDebitoInvalida();
+
+    // La riga si sposta nel MESE DELLA SCADENZA salvata: se esce dal mese a
+    // video, dirlo — altrimenti sembra che la data non sia stata presa.
+    if (typeof toast === 'function') {
+      var meseScad = String(dataScad).slice(0, 7);
+      var meseVista = _sfFiltroAnno + '-' + String(_sfFiltroMese + 1).padStart(2, '0');
+      toast('✓ Fattura ' + numero + ' salvata · scadenza ' + _sfFmtD(dataScad)
+        + (meseScad !== meseVista ? ' — la riga ora sta nel mese della scadenza' : ''));
+    }
 
     _sfChiudiModale();
     await caricaScadenzarioFornitori();

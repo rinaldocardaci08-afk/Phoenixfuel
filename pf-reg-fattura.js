@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723i — SCADENZA PURA OVUNQUE (Rinaldo, definitivo): tutti gli elenchi,
+//   per ordine e raggruppati, pagati compresi, dalla scadenza più vicina in
+//   poi. Il pagati-in-fondo è rimosso anche dalla linguetta Senza fattura;
+//   per isolare i non pagati ci sono i filtri.
 // v20260723h — ELENCO UNICO (Rinaldo): colonna "N. fattura" in riga per ogni
 //   ordine (numero cliccabile → dettaglio fattura; "da numerare" in ambra),
 //   niente sottogruppi. Ordinamento parametrico: ctx.pagatiInFondo=true tiene
@@ -447,7 +451,7 @@ function pfRfSwitchTabFF(tab, btn) {
 async function pfRfCaricaTab() {
   var sel = document.getElementById('rf-fornitore');
   if (sel && !sel.dataset.pop) {
-    if (!_ecfFornitori || !_ecfFornitori.length) _ecfFornitori = (await pfDebitoDati()).fornitori;
+    if (!_ecfFornitori || !_ecfFornitori.length) _ecfFornitori = (await pfDebitoDati(true)).fornitori;
     sel.innerHTML = '<option value="">— scegli un fornitore —</option>'
       + _ecfFornitori.map(function (f) { return '<option value="' + f.id + '">' + _rfEsc(f.nome) + '</option>'; }).join('');
     sel.dataset.pop = '1';
@@ -490,7 +494,6 @@ function _rfRenderTab() {
     sel: (_rfCtx['rf'] && _rfCtx['rf'].sel) || {},
     fornitore: _ecfSel,
     selezionabile: true,
-    pagatiInFondo: true,
     onChange: _rfRenderTab,
     onSaved: async function () { await _ecfCarica(); _rfRenderTab(); }
   });

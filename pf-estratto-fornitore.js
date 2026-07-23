@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723h — OVERRIDE QUADRATURA nella scheda fornitore: sotto i KPI un
+//   valore cliccabile = Σ (importo dichiarato fattura − Σ ordini agganciati)
+//   dell'anno corrente; il clic apre il dettaglio mese per mese. Serve a
+//   tenere d'occhio abbuoni/sconti accumulati rispetto agli ordini.
 // v20260723g — ELENCO UNICO nell'estratto conto (Rinaldo): un solo elenco di
 //   TUTTI gli ordini per scadenza PURA crescente — pagati e no, con e senza
 //   fattura, la prima riga è la prima scadenza da affrontare. Il numero
@@ -306,11 +310,29 @@ function _ecfRender() {
     return '<button onclick="ecfSetFiltro(\'' + v + '\')" style="font-size:11.5px;padding:6px 14px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#0C447C' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer">' + t + '</button>';
   };
 
+  // OVERRIDE QUADRATURA anno: Σ (dichiarato − Σ ordini) delle fatture con
+  // importo dichiarato, per data fattura nell'anno corrente.
+  var ovrAnno = 0, ovrN = 0;
+  _ecfFatture.forEach(function (f) {
+    if (!(Number(f.importo_dichiarato) > 0) || String(f.data || '').slice(0, 4) !== String(anno)) return;
+    var so = (f.ordini || []).reduce(function (t, o) { return t + Number(o.totale || 0); }, 0);
+    var d = Math.round((Number(f.importo_dichiarato) - so) * 100) / 100;
+    if (Math.abs(d) >= 0.01) { ovrAnno += d; ovrN++; }
+  });
+  ovrAnno = Math.round(ovrAnno * 100) / 100;
+
   body.innerHTML =
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
       + kpi('Acquistato ' + anno, acquistato, 'imponibile · IVA inc. ' + fmtE(acquistatoIva) + ' · ' + ordAnno.length + ' ordini · dilazione ' + _ecfSel.gg + ' gg', '')
       + kpi('Pagato', pagatoTot, nSaldate + ' fatture saldate', 'ok')
       + kpi('Da pagare', daPagare, nAperti + ' documenti aperti', 'ko')
+    + '</div>'
+    + '<div onclick="ecfApriOverride()" title="Differenze tra importo dichiarato in fattura e somma degli ordini — clicca per il dettaglio mensile"'
+      + ' style="display:inline-flex;align-items:baseline;gap:10px;margin-bottom:16px;padding:9px 14px;border:0.5px solid var(--border);border-radius:9px;background:var(--bg);cursor:pointer">'
+      + '<span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:600;color:var(--text-muted)">Override quadratura ' + anno + '</span>'
+      + '<span style="font-family:var(--font-mono);font-size:17px;font-weight:700;color:' + (ovrAnno > 0 ? '#A32D2D' : ovrAnno < 0 ? '#3B6D11' : 'var(--text-muted)') + '">'
+        + (ovrAnno > 0 ? '+' : '') + fmtE(ovrAnno) + '</span>'
+      + '<span style="font-size:11px;color:var(--text-muted)">' + ovrN + ' fatture con scarto · dettaglio per mese ▸</span>'
     + '</div>'
     + (_ecfSel.fido > 0
         ? '<div style="margin-bottom:20px">' + _ecfBarra(ecfEsposizione(), _ecfSel.fido, true)
@@ -517,6 +539,48 @@ async function ecfConferma() {
     if (btn) { btn.disabled = false; btn.textContent = 'Conferma'; }
     toast('Errore: ' + (e && e.message ? e.message : e));
   }
+}
+
+// OVERRIDE QUADRATURA — popup: differenza dichiarato − Σ ordini, per mese
+function ecfApriOverride() {
+  var anno = new Date().getFullYear();
+  var mesi = {};   // 'YYYY-MM' -> { n, ordini, dichiarato }
+  _ecfFatture.forEach(function (f) {
+    if (!(Number(f.importo_dichiarato) > 0) || String(f.data || '').slice(0, 4) !== String(anno)) return;
+    var so = (f.ordini || []).reduce(function (t, o) { return t + Number(o.totale || 0); }, 0);
+    var d = Math.round((Number(f.importo_dichiarato) - so) * 100) / 100;
+    if (Math.abs(d) < 0.01) return;
+    var m = String(f.data).slice(0, 7);
+    if (!mesi[m]) mesi[m] = { n: 0, ordini: 0, dich: 0 };
+    mesi[m].n++; mesi[m].ordini += so; mesi[m].dich += Number(f.importo_dichiarato);
+  });
+  var chiavi = Object.keys(mesi).sort();
+  var nomiMese = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  var th = 'padding:8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;background:var(--bg)';
+  var totD = 0;
+  var righe = chiavi.map(function (k) {
+    var m = mesi[k];
+    var diff = Math.round((m.dich - m.ordini) * 100) / 100;
+    totD += diff;
+    return '<tr>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);font-weight:600">' + nomiMese[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4) + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + m.n + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + fmtE(m.ordini) + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + fmtE(m.dich) + '</td>'
+      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono);font-weight:700;color:' + (diff > 0 ? '#A32D2D' : '#3B6D11') + '">' + (diff > 0 ? '+' : '') + fmtE(diff) + '</td></tr>';
+  }).join('');
+  totD = Math.round(totD * 100) / 100;
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Override quadratura ' + anno + ' — ' + esc(_ecfSel.nome) + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">differenza tra importo dichiarato in fattura e somma degli ordini agganciati</div>'
+    + (righe
+        ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
+          + '<th style="' + th + ';text-align:left">Mese</th><th style="' + th + ';text-align:right">Fatture</th>'
+          + '<th style="' + th + ';text-align:right">Σ ordini</th><th style="' + th + ';text-align:right">Dichiarato</th>'
+          + '<th style="' + th + ';text-align:right">Δ</th></tr></thead><tbody>' + righe + '</tbody>'
+          + '<tfoot><tr><td colspan="4" style="padding:11px 8px;border-top:2px solid var(--accent);font-weight:700">Totale anno</td>'
+          + '<td style="padding:11px 8px;border-top:2px solid var(--accent);text-align:right;font-family:var(--font-mono);font-weight:700;color:' + (totD > 0 ? '#A32D2D' : '#3B6D11') + '">' + (totD > 0 ? '+' : '') + fmtE(totD) + '</td></tr></tfoot></table></div>'
+        : '<div style="color:var(--text-muted);font-size:12.5px;padding:8px 0">Nessuno scarto: tutte le fatture dell\'anno quadrano con gli ordini.</div>');
+  apriModal(h);
 }
 
 // La fattura pagata prima del documento riceve il numero dopo: ✎ nella riga
