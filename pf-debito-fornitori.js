@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-debito-fornitori.js — QUERY MADRE del DEBITO FORNITORI
+// v20260723c — FIX FIDO (squadratura segnalata da Rinaldo su Q8): una fattura
+//   agganciata a ordini TUTTI flag-pagati (pagato_fornitore, es. avvio dati)
+//   è un debito GIÀ ESTINTO anche se nessun pagamento è registrato in
+//   pagamenti_fornitori — prima rientrava nell'esposizione a pieno residuo,
+//   gonfiando il fido occupato dell'importo della fattura. Ora saldata=true.
 // v20260723b — ogni ordine è arricchito anche con numeroFattura e fattSaldata
 //   della fattura a cui è agganciato: così le viste mostrano il numero in riga
 //   (come in Consegne clienti) senza un elenco fatture separato.
@@ -121,7 +126,11 @@ async function pfDebitoDati(force) {
     f.totale = tot;
     f.pagato = pg.tot; f.nPag = pg.n; f.ultimoPag = pg.ultima;
     f.residuo = Math.round((tot - pg.tot) * 100) / 100;
-    f.saldata = f.residuo <= 0.01;
+    // Debito estinto anche via flag ordini: PAGATO vince pure sul calcolo,
+    // non solo sul label (regola ibrida — il flag dice che è stato pagato).
+    var flagPagata = ords.length > 0 && ords.every(function (o) { return !!o.pagato; });
+    f.saldata = f.residuo <= 0.01 || flagPagata;
+    if (f.saldata && f.residuo > 0.01) f.residuo = 0;
     f.ordini = ords;
     ords.forEach(function (o) { o.fattSaldata = f.saldata; o.fattAcconti = f.nPag > 0 && !f.saldata; });
   });
