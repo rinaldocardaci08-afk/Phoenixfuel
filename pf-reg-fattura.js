@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723d — FIX "Deseleziona" che non faceva nulla. Causa: svuotava la
+//   selezione SOSTITUENDO l'oggetto (c.sel = {}), ma l'estratto conto passa il
+//   suo _ecfSelezione per RIFERIMENTO e al render successivo lo ri-registrava
+//   ancora pieno → le spunte tornavano. Ora si svuota IN LOCO (delete chiave
+//   per chiave), così l'oggetto condiviso resta lo stesso e si azzera davvero.
 // v20260723c — striscia "Fatture da numerare": un ordine pagato prima che
 //   arrivasse la fattura ha già un fattura_ricevuta_id, quindi esce dall'elenco
 //   "senza fattura" pur non avendo il numero. Senza questa striscia si perdeva.
@@ -76,7 +81,10 @@ function pfRfToggleGruppo(ns, scad, cb) {
   _rfAgg(ns);
 }
 function pfRfSgancia(ns, id) { var c = _rfC(ns); if (!c) return; delete c.sel[id]; _rfAgg(ns); }
-function pfRfDeseleziona(ns) { var c = _rfC(ns); if (!c) return; c.sel = {}; _rfCtx[ns].sel = c.sel; _rfAgg(ns); }
+// Svuota SEMPRE in loco: l'oggetto è condiviso con chi ci ha registrato il
+// contesto (in estratto conto è _ecfSelezione), sostituirlo lo scollegherebbe.
+function _rfSvuota(sel) { if (!sel) return; Object.keys(sel).forEach(function (k) { delete sel[k]; }); }
+function pfRfDeseleziona(ns) { var c = _rfC(ns); if (!c) return; _rfSvuota(c.sel); _rfAgg(ns); }
 function _rfSelezionati(ns) {
   var c = _rfC(ns); if (!c) return [];
   return c.ordini.filter(function (o) { return c.sel[o.id]; });
@@ -365,7 +373,7 @@ async function pfRfSalva() {
     if (typeof _auditLog === 'function') _auditLog('fattura_fornitore', 'fatture_ricevute', c.fornitore.nome + ' fattura ' + num + ' · ' + ids.length + ' ordini · ' + _rfE(imp));
     if (typeof toast === 'function') toast('✓ Fattura ' + num + ' registrata su ' + ids.length + (ids.length === 1 ? ' ordine' : ' ordini'));
     _rfMod = null;
-    c.sel = {}; _rfCtx[S.ns].sel = c.sel;
+    _rfSvuota(c.sel);
     if (typeof chiudiModalePermessi === 'function') chiudiModalePermessi();
     if (typeof c.onSaved === 'function') await c.onSaved();
   } catch (e) {
