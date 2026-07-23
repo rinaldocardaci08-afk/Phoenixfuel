@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723b — REGISTRA FATTURA senza pagamento: la tabella "Ordini da pagare —
+//   senza fattura" è ora disegnata dal motore condiviso pf-reg-fattura.js
+//   (elenco o Σ raggruppa per scadenza, sgancio del singolo ordine dal gruppo).
+//   Il vecchio pulsante "Registra fattura e pagamento" resta come seconda scelta.
+//   Inoltre: sugli ordini già agganciati a una fattura la scadenza mostrata è
+//   quella DELLA FATTURA (comanda lei), non più data ordine + giorni fornitore.
 // v20260723a — barre mensili AFFIANCATE (non impilate) e solo fornitori anagrafica
 //   (niente Phoenix, che siamo noi); Fido disponibile grande nella scheda singola.
 // v20260722b — IBRIDO su ORDINI (decisione Rinaldo 22/07):
@@ -261,6 +267,14 @@ async function _ecfCarica() {
         residuo: residuo, saldata: residuo <= 0.01, ordini: ords
       };
     }).sort(function (a, b) { return String(b.data).localeCompare(String(a.data)); });
+
+    // REGOLA: se l'ordine è agganciato a una fattura, comanda la scadenza
+    // scritta sulla fattura (il fornitore può averla variata sul cumulativo).
+    var scadFatt = {};
+    (rf[0].data || []).forEach(function (x) { if (x.data_scadenza) scadFatt[x.id] = x.data_scadenza; });
+    _ecfOrdini.forEach(function (o) {
+      if (o.fatturaId && scadFatt[o.fatturaId]) o.scadenza = _ecfAddGiorni(o.data, _ecfSel.gg, scadFatt[o.fatturaId]);
+    });
   }
 }
 
@@ -316,27 +330,19 @@ function _ecfRender() {
       + '<div style="font-size:11px;margin-top:3px;color:' + cl + '">' + sub + '</div></div>';
   };
 
-  var selIds = Object.keys(_ecfSelezione);
-  var totSel = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id]; }).reduce(function (s, o) { return s + o.totale; }, 0);
-
-  var righeOrd = senzaFatt.map(function (o) {
-    var scaduto = !o.pagato && o.scadenza && o.scadenza < oggi;
-    var gg = scaduto ? Math.round((new Date(oggi) - new Date(o.scadenza)) / 86400000) : 0;
-    var badge = o.pagato
-      ? '<span style="background:#EAF3DE;color:#27500A;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">pagato</span>'
-      : (scaduto ? '<span style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">scaduto ' + gg + ' gg</span>'
-                 : '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">da pagare</span>');
-    return '<tr>'
-      + '<td style="text-align:center">' + (o.pagato ? '' : '<input type="checkbox"' + (_ecfSelezione[o.id] ? ' checked' : '') + ' onclick="ecfToggleOrdine(\'' + o.id + '\',this)" style="width:17px;height:17px;cursor:pointer;accent-color:#639922">') + '</td>'
-      + '<td style="font-family:var(--font-mono)">' + _pfIsoToIt(o.data) + '</td>'
-      + '<td>' + esc(o.prodotto || '—') + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono);font-size:12px">' + o.costoL.toFixed(4).replace('.', ',') + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono)">' + fmtE(o.imponibile) + '</td>'
-      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(o.totale) + '</td>'
-      + '<td style="font-family:var(--font-mono);font-size:14.5px;font-weight:700;color:' + (scaduto ? '#7F1D1D' : '#C0392B') + '">' + (o.scadenza ? _pfIsoToIt(o.scadenza) : '—') + '</td>'
-      + '<td>' + badge + '</td></tr>';
-  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:18px;font-size:12px">Nessun ordine</td></tr>';
+  // Motore condiviso di registrazione fattura (pf-reg-fattura.js): stessa
+  // tabella e stesso modale della linguetta "Senza fattura" in Fatture Fornitori.
+  if (typeof pfRfCtx === 'function') {
+    pfRfCtx('ecf', {
+      ordini: senzaFatt,
+      sel: _ecfSelezione,
+      fornitore: _ecfSel,
+      selezionabile: true,
+      onChange: _ecfRender,
+      onSaved: async function () { _ecfSelezione = {}; await _ecfCarica(); _ecfRender(); },
+      extraBtn: '<button onclick="ecfApriRegistra()" style="width:100%;margin-top:6px;font-size:12px;padding:8px 10px;border:0.5px solid #0C447C;border-radius:8px;background:var(--bg-card,#fff);color:#0C447C;font-weight:600;cursor:pointer">＋ Fattura e pagamento</button>'
+    });
+  }
 
   var righeFatt = _ecfFatture.map(function (f) {
     var badge = f.saldata
@@ -376,24 +382,13 @@ function _ecfRender() {
 
     // Banner laterale FISSO: resta visibile anche scorrendo in fondo all'elenco
     + _ecfTimelineHtml()
-    + (selIds.length
-        ? '<div style="position:fixed;right:18px;top:120px;z-index:900;width:230px;background:#E6F1FB;border:1px solid #378ADD;border-radius:12px;padding:13px 14px;box-shadow:0 6px 18px rgba(0,0,0,.16)">'
-          + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#0C447C;font-weight:700;margin-bottom:6px">Selezione</div>'
-          + '<div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:#0C447C">' + selIds.length + ' ordini</div>'
-          + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700;margin:2px 0 10px">' + fmtE(totSel) + '</div>'
-          + '<button onclick="ecfApriRegistra()" style="width:100%;font-size:12px;padding:9px 10px;border:none;border-radius:8px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">＋ Registra fattura e pagamento</button>'
-          + '<button onclick="ecfDeseleziona()" style="width:100%;margin-top:6px;font-size:12px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Deseleziona</button>'
-          + '</div>'
-        : '')
+    + (typeof pfRfBox === 'function' ? pfRfBox('ecf') : '')
 
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">'
       + '<div style="font-size:13px;font-weight:600">Ordini da pagare — senza fattura</div>'
-      + '<div style="display:flex;gap:8px">' + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti') + '</div></div>'
-    + '<div style="overflow-x:auto;margin-bottom:22px"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
-      + '<th style="' + th + ';width:52px">Sel.</th><th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
-      + '<th style="' + th + ';text-align:right">Litri</th><th style="' + th + ';text-align:right">€/L</th>'
-      + '<th style="' + th + ';text-align:right">Imponibile</th><th style="' + th + ';text-align:right">Tot. IVA inc.</th><th style="' + th + ';text-align:left">Scadenza</th>'
-      + '<th style="' + th + ';text-align:left">Stato</th></tr></thead><tbody>' + righeOrd + '</tbody></table></div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap">' + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti')
+        + (typeof pfRfBtnVista === 'function' ? pfRfBtnVista('ecf') : '') + '</div></div>'
+    + '<div style="margin-bottom:22px">' + (typeof pfRfTabella === 'function' ? pfRfTabella('ecf') : '') + '</div>'
 
     + '<div style="font-size:13px;font-weight:600;margin-bottom:6px">Fatture registrate</div>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'

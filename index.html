@@ -1573,7 +1573,20 @@
         </div>
         <div class="card" style="margin-top:12px">
           <div class="card-title">📋 Fatture Fornitori</div>
-          <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento fatture fornitori...</div></div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <button class="ff-tab" onclick="pfRfSwitchTabFF('ff-scadenzario',this)" style="font-size:12px;padding:7px 14px;border-radius:7px;cursor:pointer;background:#185FA5;color:#fff;border:0.5px solid #185FA5;font-weight:600">📅 Scadenzario</button>
+            <button class="ff-tab" onclick="pfRfSwitchTabFF('ff-senza',this)" style="font-size:12px;padding:7px 14px;border-radius:7px;cursor:pointer;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🧾 Senza fattura</button>
+          </div>
+          <div class="ff-panel" id="ff-scadenzario">
+            <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento fatture fornitori...</div></div>
+          </div>
+          <div class="ff-panel" id="ff-senza" style="display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+              <div style="font-size:12.5px;color:var(--text-muted)">Aggancia il numero fattura agli ordini. Qui non si registrano pagamenti.</div>
+              <select id="rf-fornitore" onchange="pfRfCambiaFornitore()" style="font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:260px"><option value="">— scegli un fornitore —</option></select>
+            </div>
+            <div id="rf-body"><div style="text-align:center;color:var(--text-muted);padding:34px;font-size:12.5px">Scegli un fornitore: una fattura appartiene a un solo fornitore, quindi la selezione si attiva solo dopo la scelta.</div></div>
+          </div>
         </div>
         </div>
 
@@ -3044,7 +3057,8 @@
 <script src="pf-finanze-sostenibilita.js?v=20260503l"></script>
 <script src="pf-pagamento-fornitore-modale.js?v=20260717a"></script>
 <script src="pf-scadenzario-fornitori.js?v=20260717a"></script>
-<script src="pf-estratto-fornitore.js?v=20260722j"></script>
+<script src="pf-estratto-fornitore.js?v=20260723b"></script>
+<script src="pf-reg-fattura.js?v=20260723a"></script>
 <script src="pf-allegati.js?v=20260722a"></script>
 <script src="pf-fatture.js?v=20260717d"></script>
 <script src="pf-fatture-import.js?v=20260517a"></script>
