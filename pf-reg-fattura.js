@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260724a — (1) anche il badge ACCONTO è cliccabile → stesso modale
+//   "Modifica pagamento" (per correggere un acconto in più o in meno:
+//   annulli e reinserisci); (2) terzo pulsante "Σ Raggruppa per fattura":
+//   righe aggregate per NUMERO FATTURA per operare sulle singole fatture —
+//   gli ordini SENZA fattura si vedono come righe singole e non si aggregano.
+//   Flag sulla riga fattura = seleziona tutti i suoi ordini; clic = espandi.
 // v20260723m — il badge PAGATO è CLICCABILE: apre "Modifica pagamento"
 //   (ecfModificaPagamento) per annullare un pagamento registrato per errore o
 //   riportare a "da pagare" un ordine flag-pagato.
@@ -117,6 +123,14 @@ function pfRfToggleGruppo(ns, scad, cb) {
   });
   _rfAgg(ns);
 }
+function pfRfToggleFatt(ns, fattId, cb) {
+  var c = _rfC(ns); if (!c) return;
+  c.ordini.forEach(function (o) {
+    if (o.fatturaId !== fattId || !_rfSelezionabile(o)) return;
+    if (cb && cb.checked) c.sel[o.id] = true; else delete c.sel[o.id];
+  });
+  _rfAgg(ns);
+}
 function pfRfSgancia(ns, id) { var c = _rfC(ns); if (!c) return; delete c.sel[id]; _rfAgg(ns); }
 // Svuota SEMPRE in loco: l'oggetto è condiviso con chi ci ha registrato il
 // contesto (in estratto conto è _ecfSelezione), sostituirlo lo scollegherebbe.
@@ -136,7 +150,7 @@ function pfRfBtnVista(ns) {
       + (on ? '#185FA5' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#185FA5' : 'var(--bg)')
       + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '400') + '">' + txt + '</button>';
   };
-  return b('elenco', 'Elenco ordini') + b('gruppi', 'Σ Raggruppa per scadenza');
+  return b('elenco', 'Elenco ordini') + b('gruppi', 'Σ Raggruppa per scadenza') + b('fatture', 'Σ Raggruppa per fattura');
 }
 
 // ── riquadro selezione (fisso a destra) ─────────────────────────────
@@ -171,7 +185,7 @@ function pfRfTabella(ns) {
 
   var badge = function (o) {
     if (o.pagato || o.fattSaldata) return '<span onclick="if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + o.id + '\')" title="Clicca per modificare o annullare il pagamento" style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer">PAGATO</span>';
-    if (o.fattAcconti) return '<span style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">acconto</span>';
+    if (o.fattAcconti) return '<span onclick="if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + o.id + '\')" title="Clicca per modificare o annullare l\'acconto" style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600;cursor:pointer">acconto</span>';
     var scaduto = o.scadenza && o.scadenza < oggi;
     if (scaduto) {
       var gg = Math.round((new Date(oggi) - new Date(o.scadenza)) / 86400000);
@@ -227,7 +241,64 @@ function pfRfTabella(ns) {
   };
   var corpo = '';
 
-  if (vista === 'gruppi') {
+  if (vista === 'fatture') {
+    // RAGGRUPPA PER FATTURA: una riga per numero; gli ordini senza fattura
+    // restano righe singole (si vedono, non si aggregano). Tutto per scadenza.
+    var perFatt = {}, liberi = [];
+    c.ordini.forEach(function (o) {
+      if (!o.fatturaId) { liberi.push(o); return; }
+      if (!perFatt[o.fatturaId]) perFatt[o.fatturaId] = [];
+      perFatt[o.fatturaId].push(o);
+    });
+    var voci = liberi.map(function (o) { return { tipo: 'ord', scad: String(o.scadenza || '9999-12-31'), o: o }; });
+    Object.keys(perFatt).forEach(function (fid) {
+      var g = perFatt[fid].slice().sort(perScadenza);
+      voci.push({ tipo: 'fatt', fid: fid, g: g, scad: String(g[0].scadenza || '9999-12-31') });
+    });
+    voci.sort(function (a, b) { return a.scad < b.scad ? -1 : (a.scad > b.scad ? 1 : 0); });
+
+    voci.forEach(function (v) {
+      if (v.tipo === 'ord') { corpo += rigaOrdine(v.o, false); return; }
+      var g = v.g, fid = v.fid, chiave = 'F:' + fid;
+      var aperto = !!_rfAperti[ns][chiave];
+      var sel1 = g.filter(_rfSelezionabile);
+      var nSel = sel1.filter(function (o) { return c.sel[o.id]; }).length;
+      var tutti2 = sel1.length > 0 && nSel === sel1.length;
+      var lit = g.reduce(function (a, o) { return a + Number(o.litri || 0); }, 0);
+      var impG = g.reduce(function (a, o) { return a + Number(o.imponibile || 0); }, 0);
+      var totG = g.reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+      var scadF = v.scad === '9999-12-31' ? '' : v.scad;
+      var scadutoF = scadF && scadF < oggi;
+      var num = g[0].numeroFattura;
+      var badgeF;
+      if (g.every(function (o) { return o.pagato; }) || g[0].fattSaldata) {
+        badgeF = '<span onclick="event.stopPropagation();if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + g[0].id + '\')" style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer">PAGATO</span>';
+      } else if (g[0].fattAcconti) {
+        badgeF = '<span onclick="event.stopPropagation();if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + g[0].id + '\')" style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600;cursor:pointer">acconto</span>';
+      } else if (scadutoF) {
+        badgeF = '<span style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">scaduta</span>';
+      } else {
+        badgeF = '<span style="background:#FFF1DC;color:#8A4F06;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">da pagare</span>';
+      }
+      corpo += '<tr style="background:#F1F5FA;cursor:pointer" onclick="pfRfEspandi(\'' + ns + '\',\'' + chiave + '\')">'
+        + '<td style="text-align:center;border-bottom:1px solid #378ADD" onclick="event.stopPropagation()">'
+          + (c.selezionabile && sel1.length
+              ? '<input type="checkbox"' + (tutti2 ? ' checked' : '') + ' style="width:17px;height:17px;cursor:pointer;accent-color:#639922' + (nSel > 0 && !tutti2 ? ';opacity:.55' : '') + '"'
+                + ' onclick="pfRfToggleFatt(\'' + ns + '\',\'' + fid + '\',this)">'
+              : '') + '</td>'
+        + '<td colspan="2" style="font-weight:700;border-bottom:1px solid #378ADD">' + (aperto ? '▾' : '▸') + ' Fattura · ' + g.length + (g.length === 1 ? ' ordine' : ' ordini') + '</td>'
+        + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;border-bottom:1px solid #378ADD">' + _rfL(lit) + '</td>'
+        + '<td style="border-bottom:1px solid #378ADD"></td>'
+        + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;border-bottom:1px solid #378ADD">' + _rfE(impG) + '</td>'
+        + '<td style="text-align:right;font-family:var(--font-mono);font-weight:700;border-bottom:1px solid #378ADD">' + _rfE(totG) + '</td>'
+        + '<td style="border-bottom:1px solid #378ADD">' + (num
+            ? '<span onclick="event.stopPropagation();if(typeof ecfInfoFattura===\'function\')ecfInfoFattura(\'' + fid + '\')" style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">' + _rfEsc(num) + '</span>'
+            : '<span onclick="event.stopPropagation();if(typeof ecfNumeraFattura===\'function\')ecfNumeraFattura(\'' + fid + '\')" style="font-size:11px;color:#8A4F06;font-weight:600;background:#FFF1DC;padding:3px 8px;border-radius:6px;cursor:pointer">✎ da numerare</span>') + '</td>'
+        + '<td style="font-family:var(--font-mono);font-size:14.5px;font-weight:700;border-bottom:1px solid #378ADD;color:' + (scadutoF ? '#7F1D1D' : '#C0392B') + '">' + (scadF ? _rfD(scadF) : '—') + '</td>'
+        + '<td style="border-bottom:1px solid #378ADD">' + badgeF + '</td></tr>';
+      if (aperto) g.forEach(function (o) { corpo += rigaOrdine(o, true); });
+    });
+  } else if (vista === 'gruppi') {
     var scadenze = [];
     c.ordini.forEach(function (o) { var s = String(o.scadenza || ''); if (scadenze.indexOf(s) < 0) scadenze.push(s); });
     scadenze.sort();
