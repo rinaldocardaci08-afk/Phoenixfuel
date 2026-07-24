@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723i — PAGAMENTO DALLA SELEZIONE anche per ordini GIÀ FATTURATI:
+//   selezione tutta sulla STESSA fattura → si apre il pagamento di QUELLA
+//   fattura (numero visibile, mai richiesto di nuovo); selezione di soli
+//   ordini liberi → pagamento con contenitore come prima; selezione mista o
+//   su fatture diverse → messaggio (un pagamento = una fattura).
 // v20260723h — OVERRIDE QUADRATURA nella scheda fornitore: sotto i KPI un
 //   valore cliccabile = Σ (importo dichiarato fattura − Σ ordini agganciati)
 //   dell'anno corrente; il clic apre il dettaglio mese per mese. Serve a
@@ -381,8 +386,18 @@ function _ecfNum(v) {
 
 // Nuova fattura sugli ordini selezionati
 function ecfApriRegistra() {
-  var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato; });
+  var ords = _ecfOrdini.filter(function (o) { return _ecfSelezione[o.id] && !o.pagato && !o.fattSaldata; });
   if (!ords.length) { toast('Seleziona almeno un ordine non ancora pagato'); return; }
+
+  // Ordini GIÀ FATTURATI nella selezione: il pagamento è quello della fattura.
+  var fattIds = [];
+  ords.forEach(function (o) { var v = o.fatturaId || ''; if (fattIds.indexOf(v) < 0) fattIds.push(v); });
+  var conFattura = fattIds.filter(function (v) { return v; });
+  if (conFattura.length) {
+    if (fattIds.length === 1) { ecfPagaFattura(conFattura[0]); return; }  // tutti sulla stessa fattura
+    toast('Un pagamento riguarda una fattura sola: selezione su ' + (fattIds.indexOf('') >= 0 ? 'ordini liberi e fatturati insieme' : conFattura.length + ' fatture diverse') + ' — paga una fattura alla volta (anche dal suo numero in riga)');
+    return;
+  }
   var tot = Math.round(ords.reduce(function (s, o) { return s + o.totale; }, 0) * 100) / 100;
   // data fattura proposta = data dell'ORDINE (la più recente), mai oggi
   var dOrd = ords.map(function (o) { return o.data; }).sort();

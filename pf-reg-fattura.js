@@ -1,5 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723l — SELEZIONE per il PAGAMENTO anche sugli ordini GIÀ FATTURATI
+//   (regola ibrida: pagamento per ogni ordine non pagato, fatturato o no).
+//   Checkbox = ordine senza fattura (per l'aggancio del numero, anche pagato)
+//   OPPURE ordine fatturato ma non pagato (per il pagamento). "Registra
+//   fattura" agisce sui soli selezionati SENZA fattura; il pagamento di una
+//   fattura esistente passa da ecfPagaFattura quando la selezione è tutta
+//   sulla stessa fattura.
+// v20260723k — la riga Σ per scadenza mostra SEMPRE i numeri fattura presenti
+//   nel gruppo: uno solo → un badge; più fatture → un badge per ciascuna
+//   (cliccabili); nessuna → vuoto. Prima compariva solo se TUTTO il gruppo
+//   stava sulla stessa fattura, e i gruppi misti restavano senza numero.
 // v20260723j — UN ORDINE GIÀ FATTURATO NON SI RISELEZIONA (Rinaldo): il numero
 //   inserito da Elenco fornitori vive nella query madre e compare in riga in
 //   estratto conto; la checkbox resta solo sugli ordini SENZA fattura, così
@@ -82,10 +93,10 @@ function _rfNum(v) {
   if (v.indexOf(',') >= 0) v = v.replace(/\./g, '').replace(',', '.');
   var n = Number(v); return isNaN(n) ? 0 : n;
 }
-// Selezionabile per l'aggancio di un numero = ordine SENZA fattura (anche se
-// già pagato: ibrido). Un ordine GIÀ fatturato non si riaggancia e non si
-// ri-paga da qui: si gestisce cliccando il suo numero in riga.
-function _rfSelezionabile(o) { return !o.fatturaId; }
+// Selezionabile se c'è un'azione possibile: aggancio del numero (ordine SENZA
+// fattura, anche già pagato) o pagamento (ordine fatturato ma NON pagato).
+// Resta fuori solo l'ordine fatturato e già pagato/saldato: niente da fare.
+function _rfSelezionabile(o) { return !o.fatturaId || (!o.pagato && !o.fattSaldata); }
 
 // ── selezione ───────────────────────────────────────────────────────
 function pfRfSetVista(ns, v) { _rfVista[ns] = v; _rfAgg(ns); }
@@ -228,16 +239,19 @@ function pfRfTabella(ns) {
       var tot = g.reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
       var aperto = !!_rfAperti[ns][s];
       var scaduto = s && s < oggi;
-      // Numero UNICO sulla riga aggregata solo se tutti gli ordini del gruppo
-      // sono sulla stessa fattura (Rinaldo 23/07).
-      var fattIds = []; g.forEach(function (o) { var v = o.fatturaId || ''; if (fattIds.indexOf(v) < 0) fattIds.push(v); });
-      var numGruppo = '';
-      if (fattIds.length === 1 && fattIds[0]) {
-        var n0 = g[0].numeroFattura;
-        numGruppo = n0
-          ? '<span onclick="event.stopPropagation();if(typeof ecfInfoFattura===\'function\')ecfInfoFattura(\'' + fattIds[0] + '\')" style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">' + _rfEsc(n0) + '</span>'
-          : '<span style="font-size:11px;color:#8A4F06;font-weight:600">da numerare</span>';
-      }
+      // TUTTI i numeri fattura presenti nel gruppo, un badge ciascuno
+      // (cliccabile → dettaglio); "da numerare" per le fatture senza numero.
+      var fattVisti = {}, badges = [];
+      g.forEach(function (o) {
+        if (!o.fatturaId || fattVisti[o.fatturaId]) return;
+        fattVisti[o.fatturaId] = true;
+        badges.push(o.numeroFattura
+          ? '<span onclick="event.stopPropagation();if(typeof ecfInfoFattura===\'function\')ecfInfoFattura(\'' + o.fatturaId + '\')" title="Dettaglio fattura" style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:6px;cursor:pointer;white-space:nowrap">' + _rfEsc(o.numeroFattura) + '</span>'
+          : '<span onclick="event.stopPropagation();if(typeof ecfNumeraFattura===\'function\')ecfNumeraFattura(\'' + o.fatturaId + '\')" style="font-size:11px;color:#8A4F06;font-weight:600;background:#FFF1DC;padding:3px 8px;border-radius:6px;cursor:pointer;white-space:nowrap">✎ da numerare</span>');
+      });
+      var numGruppo = badges.length
+        ? '<span style="display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center">' + badges.join('') + '</span>'
+        : '';
 
       corpo += '<tr style="background:#F1F5FA;cursor:pointer" onclick="pfRfEspandi(\'' + ns + '\',\'' + s + '\')">'
         + '<td style="text-align:center;border-bottom:1px solid #378ADD" onclick="event.stopPropagation()">'
@@ -272,8 +286,12 @@ function pfRfTabella(ns) {
 // ═══════════════════════════════════════════════════════════════════
 function pfRfApri(ns) {
   var c = _rfC(ns); if (!c) return;
-  var ords = _rfSelezionati(ns);
-  if (!ords.length) { if (typeof toast === 'function') toast('Seleziona almeno un ordine'); return; }
+  var tutti = _rfSelezionati(ns);
+  // La fattura si registra solo su ordini che NON ne hanno già una.
+  var ords = tutti.filter(function (o) { return !o.fatturaId; });
+  if (!tutti.length) { if (typeof toast === 'function') toast('Seleziona almeno un ordine'); return; }
+  if (!ords.length) { if (typeof toast === 'function') toast('Gli ordini selezionati hanno già una fattura: gestiscila dal numero in riga'); return; }
+  if (ords.length < tutti.length && typeof toast === 'function') toast('Ordini già fatturati esclusi: la fattura si registra sui ' + ords.length + ' senza numero');
   if (!c.fornitore || !c.fornitore.nome) { if (typeof toast === 'function') toast('Scegli prima il fornitore'); return; }
   var tot = Math.round(ords.reduce(function (s, o) { return s + o.totale; }, 0) * 100) / 100;
   var scadenze = ords.map(function (o) { return o.scadenza; }).filter(Boolean).sort();
