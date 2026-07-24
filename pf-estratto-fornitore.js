@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260723j — MODIFICA PAGAMENTO (Rinaldo: "ho messo pagata una fattura che
+//   non lo è"): clic sul badge PAGATO → popup con i pagamenti registrati
+//   (annullabili uno per uno, con ritorno degli ordini a "da pagare") e, per
+//   gli ordini pagati solo via flag (avvio dati), il pulsante che riporta
+//   l'ordine a DA PAGARE. Ogni annullo passa dall'audit e invalida la madre.
 // v20260723i — PAGAMENTO DALLA SELEZIONE anche per ordini GIÀ FATTURATI:
 //   selezione tutta sulla STESSA fattura → si apre il pagamento di QUELLA
 //   fattura (numero visibile, mai richiesto di nuovo); selezione di soli
@@ -554,6 +559,78 @@ async function ecfConferma() {
     if (btn) { btn.disabled = false; btn.textContent = 'Conferma'; }
     toast('Errore: ' + (e && e.message ? e.message : e));
   }
+}
+
+// MODIFICA PAGAMENTO — dal badge PAGATO in riga
+async function ecfModificaPagamento(ordineId) {
+  var o = _ecfOrdini.filter(function (x) { return x.id === ordineId; })[0];
+  if (!o) return;
+  var f = o.fatturaId ? _ecfFatture.filter(function (x) { return x.id === o.fatturaId; })[0] : null;
+  var pags = [];
+  if (f) {
+    var d = await pfDebitoDati();
+    pags = d.pagamenti.filter(function (p) { return p.fattura_ricevuta_id === f.id; });
+  }
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Modifica pagamento — ' + esc(_ecfSel.nome) + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">ordine ' + _pfIsoToIt(o.data) + ' · ' + esc(o.prodotto || '') + ' · ' + fmtE(o.totale)
+      + (f ? ' · fattura ' + (f.numero ? esc(f.numero) : '(da numerare)') : ' · senza fattura') + '</div>';
+
+  if (pags.length) {
+    h += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;margin-bottom:6px">Pagamenti registrati</div>'
+      + '<div style="border:0.5px solid var(--border);border-radius:8px;margin-bottom:14px">'
+      + pags.map(function (p) {
+          var conto = _ecfConti.filter(function (c) { return c.id === p.conto_id; })[0];
+          var banca = conto ? (_ecfIstituti[conto.istituto_id] || '') : '';
+          return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:0.5px solid var(--border);font-size:12.5px">'
+            + '<span style="font-family:var(--font-mono)">' + _pfIsoToIt(p.data_pagamento) + '</span>'
+            + '<span style="flex:1;color:var(--text-muted)">' + esc(p.modalita || '') + (banca ? ' · ' + esc(banca) : '') + '</span>'
+            + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(p.importo) + '</span>'
+            + '<button onclick="ecfAnnullaPagamento(\'' + p.id + '\',\'' + f.id + '\')" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">✕ Annulla</button>'
+            + '</div>';
+        }).join('')
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Annullando un pagamento gli ordini della fattura tornano DA PAGARE e il fido si rioccupa subito.</div>';
+  }
+
+  if (o.pagato && !pags.length) {
+    h += '<div style="background:#FFF1DC;color:#633806;padding:10px 12px;border-radius:7px;font-size:12px;line-height:1.5;margin-bottom:14px">'
+      + 'Quest\'ordine risulta pagato dal caricamento iniziale (nessun pagamento registrato con data e banca).</div>'
+      + '<div style="display:flex;justify-content:flex-end;margin-bottom:4px">'
+      + '<button onclick="ecfAnnullaFlag(\'' + o.id + '\')" style="padding:9px 16px;font-size:12px;border:none;border-radius:8px;background:#A32D2D;color:#fff;font-weight:600;cursor:pointer">Riporta a DA PAGARE</button></div>';
+  }
+
+  if (!pags.length && !o.pagato) h += '<div style="color:var(--text-muted);font-size:12.5px">Nessun pagamento da modificare su quest\'ordine.</div>';
+  apriModal(h);
+}
+
+async function ecfAnnullaPagamento(pagId, fattId) {
+  if (!confirm('Annullare questo pagamento? Gli ordini della fattura torneranno DA PAGARE.')) return;
+  try {
+    var del = await sb.from('pagamenti_fornitori').delete().eq('id', pagId);
+    if (del.error) throw del.error;
+    var up = await sb.from('ordini').update({ pagato_fornitore: false }).eq('fattura_ricevuta_id', fattId);
+    if (up.error) throw up.error;
+    pfDebitoInvalida();
+    if (typeof _auditLog === 'function') _auditLog('annullo_pagamento', 'pagamenti_fornitori', _ecfSel.nome + ' — pagamento annullato su fattura ' + fattId);
+    toast('✓ Pagamento annullato: ordini di nuovo da pagare');
+    chiudiModalePermessi();
+    await _ecfCarica(); _ecfRender();
+    if (typeof _rfRenderTab === 'function' && document.getElementById('rf-body')) _rfRenderTab();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
+}
+
+async function ecfAnnullaFlag(ordineId) {
+  if (!confirm('Riportare quest\'ordine a DA PAGARE?')) return;
+  try {
+    var up = await sb.from('ordini').update({ pagato_fornitore: false }).eq('id', ordineId);
+    if (up.error) throw up.error;
+    pfDebitoInvalida();
+    if (typeof _auditLog === 'function') _auditLog('annullo_flag_pagato', 'ordini', _ecfSel.nome + ' — ordine ' + ordineId + ' riportato a da pagare');
+    toast('✓ Ordine di nuovo DA PAGARE');
+    chiudiModalePermessi();
+    await _ecfCarica(); _ecfRender();
+    if (typeof _rfRenderTab === 'function' && document.getElementById('rf-body')) _rfRenderTab();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
 }
 
 // OVERRIDE QUADRATURA — popup: differenza dichiarato − Σ ordini, per mese

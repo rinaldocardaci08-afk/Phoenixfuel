@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260723m — il badge PAGATO è CLICCABILE: apre "Modifica pagamento"
+//   (ecfModificaPagamento) per annullare un pagamento registrato per errore o
+//   riportare a "da pagare" un ordine flag-pagato.
 // v20260723l — SELEZIONE per il PAGAMENTO anche sugli ordini GIÀ FATTURATI
 //   (regola ibrida: pagamento per ogni ordine non pagato, fatturato o no).
 //   Checkbox = ordine senza fattura (per l'aggancio del numero, anche pagato)
@@ -167,7 +170,7 @@ function pfRfTabella(ns) {
     + '<th style="' + th + ';text-align:left">Scadenza</th><th style="' + th + ';text-align:left">Stato</th></tr></thead>';
 
   var badge = function (o) {
-    if (o.pagato || o.fattSaldata) return '<span style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px">PAGATO</span>';
+    if (o.pagato || o.fattSaldata) return '<span onclick="if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + o.id + '\')" title="Clicca per modificare o annullare il pagamento" style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer">PAGATO</span>';
     if (o.fattAcconti) return '<span style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">acconto</span>';
     var scaduto = o.scadenza && o.scadenza < oggi;
     if (scaduto) {
