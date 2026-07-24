@@ -1901,10 +1901,23 @@ function _uniCalcolaLive() {
         perProdLive[p.prodotto].litri += litri;
       }
     } else {
+      // SENZA LETTURA (Rinaldo 24/07): il margine €/L si mostra COMUNQUE se
+      // prezzo e costo ci sono — prezzo NETTO (IVA scorporata) − costo netto.
+      // È il margine a cui si sta lavorando con quel prezzo, litri o non litri.
+      // Es. gasolio: 2,150/1,22 = 1,7622 − 1,70 = +0,0622.
       elCalc.innerHTML = '<span style="color:var(--text-muted);font-size:15px">Venduto: <strong style="font-family:var(--font-mono)">€ —</strong></span>';
       var elLitriVuoto = document.getElementById('uni-litri-' + p.id);
       if (elLitriVuoto) elLitriVuoto.innerHTML = '—';
-      if (elMarg) elMarg.innerHTML = '—';
+      if (elMarg) {
+        var prezzoN0 = prezzoStd > 0 ? prezzoStd / 1.22 : 0;
+        if (prezzoN0 > 0 && costo > 0) {
+          var margL0 = prezzoN0 - costo;
+          elMarg.innerHTML = '<span style="color:' + (margL0 >= 0 ? '#639922' : '#E24B4A') + '">€ ' + margL0.toFixed(4) + '</span>'
+            + '<div style="font-size:10px;color:var(--text-muted);font-weight:400">' + prezzoN0.toFixed(4) + ' netto − ' + costo.toFixed(4) + ' costo</div>';
+        } else {
+          elMarg.innerHTML = '—';
+        }
+      }
     }
   });
 
