@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
+// v20260724b — con un ACCONTO sulla fattura, in riga compare anche il
+//   DETTAGLIO: acconto versato e residuo della fattura (sotto il badge);
+//   la riga "Σ per fattura" mostra acconti e residuo accanto al totale.
 // v20260724a — (1) anche il badge ACCONTO è cliccabile → stesso modale
 //   "Modifica pagamento" (per correggere un acconto in più o in meno:
 //   annulli e reinserisci); (2) terzo pulsante "Σ Raggruppa per fattura":
@@ -185,7 +188,8 @@ function pfRfTabella(ns) {
 
   var badge = function (o) {
     if (o.pagato || o.fattSaldata) return '<span onclick="if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + o.id + '\')" title="Clicca per modificare o annullare il pagamento" style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer">PAGATO</span>';
-    if (o.fattAcconti) return '<span onclick="if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + o.id + '\')" title="Clicca per modificare o annullare l\'acconto" style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600;cursor:pointer">acconto</span>';
+    if (o.fattAcconti) return '<span onclick="if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + o.id + '\')" title="Clicca per modificare o annullare l\'acconto" style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600;cursor:pointer">acconto</span>'
+      + '<div style="font-size:10.5px;margin-top:3px;font-family:var(--font-mono);white-space:nowrap">vers. ' + _rfE(o.fattPagatoVal || 0) + '<br>resid. <b style="color:#A32D2D">' + _rfE(o.fattResiduo || 0) + '</b></div>';
     var scaduto = o.scadenza && o.scadenza < oggi;
     if (scaduto) {
       var gg = Math.round((new Date(oggi) - new Date(o.scadenza)) / 86400000);
@@ -274,7 +278,8 @@ function pfRfTabella(ns) {
       if (g.every(function (o) { return o.pagato; }) || g[0].fattSaldata) {
         badgeF = '<span onclick="event.stopPropagation();if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + g[0].id + '\')" style="background:#639922;color:#fff;padding:4px 12px;border-radius:11px;font-size:11px;font-weight:700;letter-spacing:.5px;cursor:pointer">PAGATO</span>';
       } else if (g[0].fattAcconti) {
-        badgeF = '<span onclick="event.stopPropagation();if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + g[0].id + '\')" style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600;cursor:pointer">acconto</span>';
+        badgeF = '<span onclick="event.stopPropagation();if(typeof ecfModificaPagamento===\'function\')ecfModificaPagamento(\'' + g[0].id + '\')" style="background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600;cursor:pointer">acconto</span>'
+          + '<div style="font-size:10.5px;margin-top:3px;font-family:var(--font-mono);white-space:nowrap">vers. ' + _rfE(g[0].fattPagatoVal || 0) + '<br>resid. <b style="color:#A32D2D">' + _rfE(g[0].fattResiduo || 0) + '</b></div>';
       } else if (scadutoF) {
         badgeF = '<span style="background:#FCEBEB;color:#791F1F;padding:3px 10px;border-radius:11px;font-size:10.5px;font-weight:600">scaduta</span>';
       } else {

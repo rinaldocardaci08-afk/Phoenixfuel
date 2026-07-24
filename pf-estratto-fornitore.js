@@ -1,5 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260724b — la STAMPA deduce gli acconti: in fondo "Acconti già versati
+//   −€X" e "NETTO DA PAGARE €Y" (= totale elenco − acconti sulle fatture
+//   aperte, lo stesso numero del fido). Le righe con acconto lo indicano.
+// v20260724a — STAMPA ELENCO (solo vista "Solo da pagare"): pulsante in basso
+//   a destra che apre l'elenco dei soli ordini da pagare in una pagina pulita
+//   pronta per la stampa/PDF del browser, da condividere col fornitore per
+//   conferma (intestazione, numeri fattura, scadenze, totali, firma).
 // v20260723j — MODIFICA PAGAMENTO (Rinaldo: "ho messo pagata una fattura che
 //   non lo è"): clic sul badge PAGATO → popup con i pagamenti registrati
 //   (annullabili uno per uno, con ritorno degli ordini a "da pagare") e, per
@@ -361,7 +368,12 @@ function _ecfRender() {
       + '<div style="display:flex;gap:8px;flex-wrap:wrap">' + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti')
         + (typeof pfRfBtnVista === 'function' ? pfRfBtnVista('ecf') : '') + '</div></div>'
     + '<div style="margin-bottom:22px">' + (typeof pfRfTabella === 'function' ? pfRfTabella('ecf') : '') + '</div>'
-    + '<div style="font-size:10.5px;color:var(--text-muted)">Clicca il numero fattura in riga per il dettaglio, il pagamento o la modifica del numero.</div>';
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">Clicca il numero fattura in riga per il dettaglio, il pagamento o la modifica del numero.</div>'
+      + (_ecfFiltro === 'aperti'
+          ? '<button onclick="ecfStampaElenco()" style="font-size:12px;padding:8px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-weight:600;white-space:nowrap">🖨 Stampa elenco</button>'
+          : '')
+    + '</div>';
 
   window.scrollTo(0, scrollY);
 }
@@ -559,6 +571,68 @@ async function ecfConferma() {
     if (btn) { btn.disabled = false; btn.textContent = 'Conferma'; }
     toast('Errore: ' + (e && e.message ? e.message : e));
   }
+}
+
+// STAMPA ELENCO — pagina pulita dei soli ordini da pagare, per il fornitore
+function ecfStampaElenco() {
+  var vivi = _ecfOrdini.filter(function (o) { return !o.pagato && !o.fattSaldata; })
+    .slice().sort(function (a, b) {
+      var sa = String(a.scadenza || '9999'), sb2 = String(b.scadenza || '9999');
+      if (sa !== sb2) return sa < sb2 ? -1 : 1;
+      return String(a.data || '').localeCompare(String(b.data || ''));
+    });
+  if (!vivi.length) { toast('Nessun ordine da pagare da stampare'); return; }
+  var oggiIt = _pfIsoToIt(new Date().toISOString().slice(0, 10));
+  // acconti versati: una volta per fattura (non per ordine, o si duplicano)
+  var acconti = 0, _fv = {};
+  vivi.forEach(function (o) {
+    if (o.fattAcconti && o.fatturaId && !_fv[o.fatturaId]) { _fv[o.fatturaId] = true; acconti += Number(o.fattPagatoVal || 0); }
+  });
+  var lit = 0, imp = 0, tot = 0;
+  var righe = vivi.map(function (o) {
+    lit += Number(o.litri || 0); imp += o.imponibile; tot += o.totale;
+    return '<tr>'
+      + '<td>' + _pfIsoToIt(o.data) + '</td>'
+      + '<td>' + esc(o.prodotto || '—') + '</td>'
+      + '<td class="n">' + Number(o.litri || 0).toLocaleString('it-IT') + '</td>'
+      + '<td class="n">' + Number(o.costoL || 0).toFixed(4).replace('.', ',') + '</td>'
+      + '<td class="n">' + fmtE(o.imponibile) + '</td>'
+      + '<td class="n">' + fmtE(o.totale) + '</td>'
+      + '<td>' + (o.numeroFattura ? esc(o.numeroFattura) : (o.fatturaId ? 'da numerare' : '—'))
+        + (o.fattAcconti ? '<div style="font-size:10px;color:#555">acconto ' + fmtE(o.fattPagatoVal || 0) + '</div>' : '') + '</td>'
+      + '<td class="s">' + (o.scadenza ? _pfIsoToIt(o.scadenza) : '—') + '</td>'
+      + '</tr>';
+  }).join('');
+  var w = window.open('', '_blank');
+  if (!w) { toast('Il browser ha bloccato la finestra di stampa: consenti i pop-up'); return; }
+  w.document.write('<!DOCTYPE html><html lang="it"><head><meta charset="utf-8">'
+    + '<title>Ordini da pagare — ' + esc(_ecfSel.nome) + ' — ' + oggiIt + '</title>'
+    + '<style>'
+    + 'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1B2430;margin:28px}'
+    + 'h1{font-size:17px;margin:0 0 2px} .sub{color:#555;font-size:11.5px;margin-bottom:16px}'
+    + 'table{width:100%;border-collapse:collapse} '
+    + 'th{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;text-align:left;background:#F0F2F4;padding:7px 6px;border-bottom:1px solid #999}'
+    + 'td{padding:6px;border-bottom:0.5px solid #ccc} .n{text-align:right;font-variant-numeric:tabular-nums} .s{font-weight:700}'
+    + 'tfoot td{font-weight:700;border-top:2px solid #333;border-bottom:none}'
+    + '.firma{margin-top:44px;display:flex;justify-content:space-between;font-size:11.5px}'
+    + '.firma div{width:44%;border-top:1px solid #333;padding-top:5px}'
+    + '@media print{body{margin:12mm}}'
+    + '</style></head><body>'
+    + '<h1>Phoenix Fuel S.r.l. — Ordini da pagare · ' + esc(_ecfSel.nome) + '</h1>'
+    + '<div class="sub">Situazione al ' + oggiIt + ' · ' + vivi.length + (vivi.length === 1 ? ' ordine' : ' ordini')
+      + ' · dilazione ' + _ecfSel.gg + ' gg · documento di riscontro da confermare con il fornitore</div>'
+    + '<table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>€/L</th><th>Imponibile</th><th>Tot. IVA inc.</th><th>N. fattura</th><th>Scadenza</th></tr></thead>'
+    + '<tbody>' + righe + '</tbody>'
+    + '<tfoot><tr><td colspan="2">Totale ordini</td><td class="n">' + lit.toLocaleString('it-IT') + '</td><td></td>'
+      + '<td class="n">' + fmtE(imp) + '</td><td class="n">' + fmtE(tot) + '</td><td colspan="2"></td></tr>'
+      + (acconti > 0.009
+          ? '<tr><td colspan="5">Acconti già versati su fatture aperte</td><td class="n">− ' + fmtE(acconti) + '</td><td colspan="2"></td></tr>'
+            + '<tr><td colspan="5">NETTO DA PAGARE</td><td class="n">' + fmtE(Math.max(0, tot - acconti)) + '</td><td colspan="2"></td></tr>'
+          : '') + '</tfoot></table>'
+    + '<div class="firma"><div>Phoenix Fuel S.r.l.</div><div>Per conferma — ' + esc(_ecfSel.nome) + '</div></div>'
+    + '<script>window.onload=function(){window.print()}<\/script>'
+    + '</body></html>');
+  w.document.close();
 }
 
 // MODIFICA PAGAMENTO — dal badge PAGATO in riga

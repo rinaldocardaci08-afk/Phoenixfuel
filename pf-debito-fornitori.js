@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-debito-fornitori.js — QUERY MADRE del DEBITO FORNITORI
+// v20260724a — sugli ordini di fatture con acconti sono esposti anche
+//   fattPagatoVal (acconti versati) e fattResiduo (residuo della fattura),
+//   così elenchi e stampa mostrano il debito residuo senza ricalcoli.
 // v20260723d — FIDO SEMPRE DAGLI ORDINI (direttiva Rinaldo, ripristinata):
 //   l'esposizione è Σ totale IVA inc. degli ORDINI ancora vivi (non pagati e
 //   non su fattura saldata) MENO gli acconti registrati sulle fatture aperte.
@@ -140,7 +143,12 @@ async function pfDebitoDati(force) {
     f.saldata = f.residuo <= 0.01 || flagPagata;
     if (f.saldata && f.residuo > 0.01) f.residuo = 0;
     f.ordini = ords;
-    ords.forEach(function (o) { o.fattSaldata = f.saldata; o.fattAcconti = f.nPag > 0 && !f.saldata; });
+    ords.forEach(function (o) {
+      o.fattSaldata = f.saldata;
+      o.fattAcconti = f.nPag > 0 && !f.saldata;
+      o.fattPagatoVal = f.pagato;
+      o.fattResiduo = f.residuo;
+    });
   });
 
   _dfCache = { fornitori: fornitori, fornitoriMap: fornitoriMap, ordini: ordini, fatture: fatture, pagamenti: pagamenti };
