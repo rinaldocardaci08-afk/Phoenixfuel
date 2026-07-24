@@ -1,5 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
+// v20260724c — PONTE FOGLIO GIORNALE (verifica aperta dal 22/07, ora chiusa):
+//   il pagamento dall'estratto conto crea anche il MOVIMENTO in
+//   foglio_giornale_movimenti (uscita, banca = istituto del conto, origine
+//   'estratto_conto'), la RICONCILIAZIONE con la fattura e il link
+//   movimento_foglio_id sul pagamento — lo stesso schema del modale ufficiale
+//   pf-pagamento-fornitore-modale.js, che il mio modale non replicava: per
+//   questo i pagamenti fatti da qui non giravano sul Foglio giornale.
+//   L'ANNULLO di un pagamento rimuove anche movimento e riconciliazioni.
 // v20260724b — la STAMPA deduce gli acconti: in fondo "Acconti già versati
 //   −€X" e "NETTO DA PAGARE €Y" (= totale elenco − acconti sulle fatture
 //   aperte, lo stesso numero del fido). Le righe con acconto lo indicano.
@@ -542,7 +550,7 @@ async function ecfConferma() {
       modalita: modalita,
       conto_id: contoId,
       riferimento_esterno: (importo < S.totale - 0.01) ? 'acconto su fattura' : null
-    }]);
+    }]).select('id').single();
     if (insP.error) {
       // ROLLBACK: la fattura contenitore appena creata non deve restare
       // orfana se il pagamento non passa.
@@ -552,6 +560,39 @@ async function ecfConferma() {
       }
       throw insP.error;
     }
+
+    // PONTE FOGLIO GIORNALE — stesso schema del modale ufficiale. Non-critico:
+    // il pagamento è già salvato, un errore qui va solo a log.
+    try {
+      var contoSel = _ecfConti.filter(function (c) { return c.id === contoId; })[0];
+      var descMov = 'Pagamento ' + _ecfSel.nome + ' · FT ' + (nFatt || (S.fattura && S.fattura.numero) || '(da numerare)')
+        + (importo < S.totale - 0.01 ? ' (parziale)' : '');
+      var movIns = await sb.from('foglio_giornale_movimenti').insert([{
+        data: dataPag,
+        tipo: 'uscita',
+        importo: importo,
+        descrizione: descMov,
+        banca_id: contoSel ? contoSel.istituto_id : null,
+        cassa_tipo: null,
+        metodo: modalita,
+        origine: 'estratto_conto',
+        note: null
+      }]).select('id').single();
+      if (movIns.error) {
+        console.warn('[ecf] pagamento salvato ma movimento foglio non creato:', movIns.error.message);
+      } else if (movIns.data) {
+        await sb.from('foglio_giornale_riconciliazioni').insert([{
+          movimento_id: movIns.data.id,
+          fattura_emessa_id: null,
+          ordine_id: null,
+          fattura_ricevuta_id: fatturaId,
+          importo_imputato: importo
+        }]);
+        if (insP.data && insP.data.id) {
+          await sb.from('pagamenti_fornitori').update({ movimento_foglio_id: movIns.data.id }).eq('id', insP.data.id);
+        }
+      }
+    } catch (eMov) { console.warn('[ecf] ponte foglio giornale:', eMov); }
 
     // Saldo totale → gli ordini della fattura risultano pagati
     if (importo >= S.totale - 0.01) {
@@ -680,8 +721,15 @@ async function ecfModificaPagamento(ordineId) {
 async function ecfAnnullaPagamento(pagId, fattId) {
   if (!confirm('Annullare questo pagamento? Gli ordini della fattura torneranno DA PAGARE.')) return;
   try {
+    // il movimento di foglio giornale collegato va rimosso con il pagamento
+    var pRow = await sb.from('pagamenti_fornitori').select('movimento_foglio_id').eq('id', pagId).single();
+    var movId = (pRow.data && pRow.data.movimento_foglio_id) || null;
     var del = await sb.from('pagamenti_fornitori').delete().eq('id', pagId);
     if (del.error) throw del.error;
+    if (movId) {
+      await sb.from('foglio_giornale_riconciliazioni').delete().eq('movimento_id', movId);
+      await sb.from('foglio_giornale_movimenti').delete().eq('id', movId);
+    }
     var up = await sb.from('ordini').update({ pagato_fornitore: false }).eq('fattura_ricevuta_id', fattId);
     if (up.error) throw up.error;
     pfDebitoInvalida();
