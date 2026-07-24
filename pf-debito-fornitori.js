@@ -1,5 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════
 // pf-debito-fornitori.js — QUERY MADRE del DEBITO FORNITORI
+// v20260723d — FIDO SEMPRE DAGLI ORDINI (direttiva Rinaldo, ripristinata):
+//   l'esposizione è Σ totale IVA inc. degli ORDINI ancora vivi (non pagati e
+//   non su fattura saldata) MENO gli acconti registrati sulle fatture aperte.
+//   L'importo DICHIARATO della fattura NON entra mai nel fido: l'ordine pesa
+//   dal momento in cui esiste (just in time), la fattura porta solo numero e
+//   scadenza, il pagamento libera. Gli scarti dichiarato↔ordini restano
+//   visibili SOLO nell'override quadratura. (v20260723c aveva fatto seguire
+//   al fido il dichiarato: direttiva violata, annullata qui.)
 // v20260723c — FIX FIDO (squadratura segnalata da Rinaldo su Q8): una fattura
 //   agganciata a ordini TUTTI flag-pagati (pagato_fornitore, es. avvio dati)
 //   è un debito GIÀ ESTINTO anche se nessun pagamento è registrato in
@@ -143,13 +151,15 @@ async function pfDebitoDati(force) {
 // RAMI — derivazioni con parametri, nessuna query propria
 // ═══════════════════════════════════════════════════════════════════
 
-// Esposizione di un elenco di ordini/fatture: ordini non pagati senza fattura
-// + residui delle fatture aperte (regola unica del fido).
+// Esposizione = FIDO DAGLI ORDINI (regola costituzionale):
+//   Σ totale IVA inc. degli ordini VIVI (non flag-pagati e non su fattura
+//   saldata) − acconti registrati sulle fatture aperte.
+// Il dichiarato della fattura non entra: il debito in tempo reale è l'ordine.
 function pfDebitoEsposizione(ordini, fatture) {
-  var a = ordini.filter(function (o) { return !o.fatturaId && !o.pagato; })
+  var a = ordini.filter(function (o) { return !o.pagato && !o.fattSaldata; })
                 .reduce(function (s, o) { return s + o.totale; }, 0);
-  var b = fatture.reduce(function (s, f) { return s + (f.saldata ? 0 : f.residuo); }, 0);
-  return Math.round((a + b) * 100) / 100;
+  var acconti = fatture.reduce(function (s, f) { return s + (f.saldata ? 0 : Number(f.pagato || 0)); }, 0);
+  return Math.round(Math.max(0, a - acconti) * 100) / 100;
 }
 
 // Ramo: ordini e fatture di UN fornitore (estratto conto, linguetta Senza fattura).
