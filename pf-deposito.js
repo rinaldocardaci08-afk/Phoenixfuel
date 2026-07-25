@@ -384,6 +384,62 @@ async function aggiornaCisterna(cisternaId, litri, tipo, ordineId, data, costoLi
   await pfDepositoRicalcolaCisterne(cis.prodotto);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// RIALLINEO COSTO CARICO NEL CMP (24/07 — caso gasolio stazione 24/07).
+// Alla ricezione in cisterna il costo sbarcato (costo_litro+trasporto_litro)
+// viene CONGELATO in stazione_cmp_storico.costo_carico. Se dopo si modifica
+// costo o trasporto sull'ordine (Modifica ordine è l'unico punto che li
+// riscrive), il record resta al valore vecchio e CMP/prezzi restano bassi.
+// Questa funzione riporta il record al costo sbarcato attuale e ricalcola
+// il suo cmp_nuovo. NON cancella nulla: i CMP MANUALI restano intatti e,
+// se sono successivi al carico, comandano loro — in quel caso le cisterne
+// non vengono toccate.
+// ═══════════════════════════════════════════════════════════════════
+async function pfRiallineaCmpOrdine(ordineId) {
+  try {
+    if (!ordineId) return null;
+    var oRes = await sb.from('ordini').select('id,costo_litro,trasporto_litro').eq('id', ordineId).single();
+    if (oRes.error || !oRes.data) return null;
+    var sbarcato = Math.round((Number(oRes.data.costo_litro || 0) + Number(oRes.data.trasporto_litro || 0)) * 1000000) / 1000000;
+
+    var recRes = await sb.from('stazione_cmp_storico').select('*').eq('ordine_id', ordineId).order('created_at');
+    if (recRes.error || !recRes.data || !recRes.data.length) return null; // ordine mai ricevuto in cisterna
+
+    var toccati = 0, ultimo = null;
+    for (var i = 0; i < recRes.data.length; i++) {
+      var r = recRes.data[i];
+      if (Math.abs(Number(r.costo_carico || 0) - sbarcato) < 0.000001) { ultimo = { rec: r, cmpNuovo: Number(r.cmp_nuovo || 0) }; continue; }
+      var lp = Number(r.litri_precedenti || 0), lc = Number(r.litri_caricati || 0), cp = Number(r.cmp_precedente || 0);
+      var cn = (lp + lc) > 0 ? (lp * cp + lc * sbarcato) / (lp + lc) : sbarcato;
+      cn = Math.round(cn * 1000000) / 1000000;
+      var up = await sb.from('stazione_cmp_storico').update({ costo_carico: sbarcato, cmp_nuovo: cn }).eq('id', r.id);
+      if (up.error) { console.warn('[pfRiallineaCmpOrdine] update storico:', up.error.message); continue; }
+      toccati++;
+      ultimo = { rec: r, cmpNuovo: cn };
+    }
+    if (!toccati || !ultimo) return null;
+
+    // Eventi CMP successivi (altri carichi o MODIFICHE MANUALI): se ce ne sono,
+    // il costo medio attuale è deciso da loro e non va sovrascritto.
+    var succ = await sb.from('stazione_cmp_storico')
+      .select('id', { count: 'exact', head: true })
+      .eq('sede', ultimo.rec.sede).eq('prodotto', ultimo.rec.prodotto)
+      .gt('created_at', ultimo.rec.created_at);
+    var nSucc = Number(succ.count || 0);
+    if (nSucc === 0) {
+      await sb.from('cisterne')
+        .update({ costo_medio: ultimo.cmpNuovo, updated_at: new Date().toISOString() })
+        .eq('sede', ultimo.rec.sede).eq('prodotto', ultimo.rec.prodotto);
+    }
+    if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
+    if (typeof _auditLog === 'function') _auditLog('riallineo_cmp', 'stazione_cmp_storico', 'Ordine ' + ordineId + ' | costo carico → ' + sbarcato.toFixed(6) + ' | CMP ' + ultimo.cmpNuovo.toFixed(6) + (nSucc ? ' | cisterne NON toccate (' + nSucc + ' variazioni successive)' : ''));
+    return { sbarcato: sbarcato, cmpNuovo: ultimo.cmpNuovo, cisterneAggiornate: nSucc === 0, eventiSuccessivi: nSucc, record: toccati };
+  } catch (e) {
+    console.warn('[pfRiallineaCmpOrdine]', e);
+    return null;
+  }
+}
+
 async function apriModaleAssegnaCisterna(ordineId) {
   const { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
   if (!ordine) return;

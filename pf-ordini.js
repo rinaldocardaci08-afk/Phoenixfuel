@@ -2320,6 +2320,21 @@ async function salvaModificaOrdine(id, bypassCheck) {
       'Ordine ' + id + ' | ' + (ordine.cliente || '?') + ' → ' + clienteNomeNew +
       ' | data ' + dataValida + ' | litri ' + litri);
   }
+  // ═══ 24/07: se costo o trasporto sono cambiati su un ordine GIÀ RICEVUTO
+  // in cisterna, riallinea il costo del carico congelato nello storico CMP
+  // (altrimenti CMP e prezzi consigliati restano sul valore vecchio).
+  // I CMP manuali non vengono toccati: se sono successivi, comandano loro.
+  var _cmpDaRiallineare = (_modOrigCosto !== null && Math.abs(Number(_modOrigCosto) - costo) > 0.000001)
+                       || (_modOrigTrasporto !== null && Math.abs(Number(_modOrigTrasporto) - trasporto) > 0.000001);
+  if (_cmpDaRiallineare && typeof pfRiallineaCmpOrdine === 'function') {
+    var _ric = await pfRiallineaCmpOrdine(id);
+    if (_ric) {
+      toast(_ric.cisterneAggiornate
+        ? '✓ CMP riallineato: carico € ' + _ric.sbarcato.toFixed(6) + ' → CMP € ' + _ric.cmpNuovo.toFixed(6)
+        : '✓ Costo carico riallineato a € ' + _ric.sbarcato.toFixed(6) + ' — CMP attuale invariato (' + _ric.eventiSuccessivi + ' variazioni successive)');
+    }
+  }
+
   // Reset valori originali
   _modOrigCosto = _modOrigTrasporto = _modOrigMargine = _modOrigPrezzoNetto = null;
   toast('Ordine aggiornato!');
