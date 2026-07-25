@@ -369,6 +369,116 @@ function _uniChiudiModaleCambioPrezzo() {
   if (overlay) overlay.remove();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// DATI DAL PORTALE GILBARCO (25/07)
+// Lo scarico dal portale deposita contatori e prezzi in due tabelle di
+// appoggio. Qui NON si scrive niente: i valori vengono solo PROPOSTI nei
+// campi, poi Rinaldo controlla e preme Salva giornata come sempre.
+// Regola del costo nel cambio prezzo: i litri al prezzo VECCHIO tengono il
+// costo gia in uso; i litri al prezzo NUOVO hanno bisogno di un costo che il
+// portale non conosce, quindi resta VUOTO ed evidenziato da confermare.
+// ═══════════════════════════════════════════════════════════════════
+var _uniPortale = null;   // { data, contatori[], prezzi[], fasce2{} }
+
+async function _uniCaricaDalPortale() {
+  var data = document.getElementById('uni-data-input') ? document.getElementById('uni-data-input').value : '';
+  if (!data) { toast('Scegli prima la giornata'); return; }
+  var btn = document.getElementById('uni-btn-portale');
+  if (btn) { btn.disabled = true; btn.textContent = 'Leggo...'; }
+  try {
+    var res = await Promise.all([
+      sb.from('stazione_import_portale').select('*').eq('data', data).order('pompa_ordine'),
+      sb.from('stazione_import_prezzi').select('*').eq('data', data).order('prodotto').order('fascia')
+    ]);
+    var cont = (res[0].data || []);
+    var prez = (res[1].data || []);
+    if (!cont.length) {
+      toast('Per il ' + _pfIsoToIt(data) + ' il portale non e ancora stato scaricato');
+      return;
+    }
+
+    // ── CONTROLLO: l apertura del portale deve essere la chiusura del giorno
+    // prima gia salvata in Phoenix (la regola di Rinaldo). Se non torna,
+    // non si tocca niente: sarebbe un inserimento alla cieca.
+    var m = _uniData;
+    var rotture = [];
+    cont.forEach(function (r) {
+      var pompa = null;
+      m.pompe.forEach(function (pp) { if (Number(pp.ordine) === Number(r.pompa_ordine)) pompa = pp; });
+      if (!pompa) { rotture.push('pompa ' + r.pompa_ordine + ' non trovata in anagrafica'); return; }
+      var inp = document.querySelector('.uni-lettura-input[data-pompa="' + pompa.id + '"]');
+      if (!inp) return;
+      var prec = Number(inp.getAttribute('data-prec') || 0);
+      var iniz = Number(r.contatore_iniziale || 0);
+      if (prec > 0 && iniz > 0 && Math.abs(prec - iniz) > 1) {
+        rotture.push(pompa.nome + ': in Phoenix il giorno prima chiude a ' + Math.round(prec) + ', il portale apre a ' + Math.round(iniz));
+      }
+    });
+    if (rotture.length) {
+      alert('Non carico niente: i contatori non combaciano.\n\n' + rotture.join('\n')
+        + '\n\nControlla la giornata precedente prima di procedere.');
+      return;
+    }
+
+    // ── proposta contatori
+    var nCont = 0;
+    cont.forEach(function (r) {
+      var pompa = null;
+      m.pompe.forEach(function (pp) { if (Number(pp.ordine) === Number(r.pompa_ordine)) pompa = pp; });
+      if (!pompa) return;
+      var inp = document.querySelector('.uni-lettura-input[data-pompa="' + pompa.id + '"]');
+      if (!inp) return;
+      inp.value = String(Math.round(Number(r.contatore_finale || 0)));
+      inp.style.boxShadow = 'inset 0 2px 4px rgba(0,0,0,0.4), 0 0 0 2px #639922';
+      nCont++;
+    });
+
+    // ── proposta prezzo (fascia 1 = prezzo in vigore quel giorno)
+    var nPrez = 0;
+    var fasce2 = {};
+    prez.forEach(function (r) {
+      if (Number(r.fascia) === 1) {
+        var inpP = document.querySelector('.uni-prezzo-input[data-prodotto="' + r.prodotto + '"]');
+        if (inpP) {
+          inpP.value = Number(r.prezzo_litro_iva).toFixed(3);
+          inpP.style.borderColor = '#639922';
+          if (typeof _uniSyncProdotto === 'function') _uniSyncProdotto(inpP, 'prezzo');
+          nPrez++;
+        }
+      } else {
+        fasce2[r.prodotto] = { prezzo: Number(r.prezzo_litro_iva), litri: Number(r.litri) };
+      }
+    });
+
+    _uniPortale = { data: data, contatori: cont, prezzi: prez, fasce2: fasce2 };
+    if (typeof _uniMarkDirty === 'function') _uniMarkDirty();
+    if (typeof _uniCalcolaLive === 'function') _uniCalcolaLive();
+
+    var avviso = document.getElementById('uni-portale-avviso');
+    if (avviso) {
+      var testo = '<strong>Valori proposti dal portale</strong> del ' + _pfIsoToIt(data)
+        + ' — ' + nCont + ' contatori e ' + nPrez + ' prezzi. Controlla e premi Salva giornata: finche non salvi non cambia niente.';
+      var chiavi = Object.keys(fasce2);
+      if (chiavi.length) {
+        testo += '<div style="margin-top:8px;padding:8px 10px;background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 6px 6px 0;color:#633806">'
+          + '<strong>Cambio prezzo in giornata</strong><br>';
+        chiavi.forEach(function (k) {
+          testo += k + ': ' + fasce2[k].litri + ' L al nuovo prezzo di ' + fasce2[k].prezzo.toFixed(3) + ' €/L<br>';
+        });
+        testo += 'Apri <strong>⚡ Cambio prezzo</strong>: litri e prezzo sono gia pronti, il <strong>COSTO di questi litri lo devi confermare tu</strong> — dal portale non arriva.'
+          + '</div>';
+      }
+      avviso.innerHTML = testo;
+      avviso.style.display = 'block';
+    }
+    toast('✓ Dati del portale proposti: controlla e salva');
+  } catch (e) {
+    toast('Errore lettura portale: ' + ((e && e.message) || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 Carica dati dal portale'; }
+  }
+}
+
 function _uniRenderModaleCambioPrezzo(data) {
   var m = _uniData;
   // Prodotti unici dalle pompe attive
@@ -400,6 +510,16 @@ function _uniRenderModaleCambioPrezzo(data) {
     var costoInitial = (cpEsistente && cpEsistente.costo_netto_nuovo > 0) ? cpEsistente.costo_netto_nuovo : cmpProd;
     var prezzoInitial = (cpEsistente && cpEsistente.prezzo_iva_nuovo > 0) ? cpEsistente.prezzo_iva_nuovo : '';
     var litriInitial = (cpEsistente && cpEsistente.litri_al_nuovo_prezzo > 0) ? cpEsistente.litri_al_nuovo_prezzo : '';
+    // Dal portale (se caricato per questa giornata e non c e gia un cambio
+    // prezzo salvato): prezzo e litri sono suoi, il COSTO no — resta vuoto e
+    // segnalato, perche quei litri vanno valorizzati da noi.
+    var _daPortale = false;
+    if (!cpEsistente && _uniPortale && _uniPortale.data === data && _uniPortale.fasce2 && _uniPortale.fasce2[prodotto]) {
+      prezzoInitial = _uniPortale.fasce2[prodotto].prezzo;
+      litriInitial = _uniPortale.fasce2[prodotto].litri;
+      costoInitial = 0;
+      _daPortale = true;
+    }
     var prezzoVecchio = Number(m.prezziMap[data + '_' + prodotto] || 0);
     if (!prezzoVecchio) {
       var chiaviPrz = Object.keys(m.prezziMap).filter(function(kk){ return kk.endsWith('_' + prodotto); }).sort().reverse();
@@ -411,7 +531,8 @@ function _uniRenderModaleCambioPrezzo(data) {
     var _coloreMod = _piMod ? _piMod.colore : '#888';
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:4px solid ' + _coloreMod + ';border-radius:8px;padding:10px 12px;margin-bottom:8px">';
-    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:9px;height:9px;border-radius:50%;background:' + _coloreMod + '"></div><strong style="font-size:12px;color:var(--text)">' + esc(prodotto) + '</strong></div>';
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><div style="width:9px;height:9px;border-radius:50%;background:' + _coloreMod + '"></div><strong style="font-size:12px;color:var(--text)">' + esc(prodotto) + '</strong>'
+      + (_daPortale ? '<span style="margin-left:auto;font-size:9.5px;font-weight:700;color:#633806;background:#FFF1DC;border:0.5px solid #E0A458;border-radius:10px;padding:2px 8px">DAL PORTALE · COSTO DA INSERIRE</span>' : '') + '</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">';
     // 1) Prezzo IVA nuovo
     html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:6px;padding:6px 8px">';
@@ -805,6 +926,15 @@ function _uniRenderPerPompa(data) {
     var bannerBorder = lettureComplete ? '#639922' : '#378ADD';
     var bannerText = lettureComplete ? '#27500A' : '#0C447C';
     html += '<div style="background:' + bannerColor + ';border-left:4px solid ' + bannerBorder + ';border-radius:8px;padding:12px 16px;margin-bottom:14px;color:' + bannerText + '">' + messaggio + '</div>';
+
+    // PORTALE (25/07): il pulsante compare solo se la giornata NON e ancora
+    // completa. Propone i valori scaricati dal portale, non salva niente.
+    if (!lettureComplete) {
+      html += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">';
+      html += '<button id="uni-btn-portale" onclick="_uniCaricaDalPortale()" style="background:var(--bg-card);border:0.5px solid #378ADD;color:#0C447C;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">📥 Carica dati dal portale</button>';
+      html += '</div>';
+    }
+    html += '<div id="uni-portale-avviso" style="display:none;background:#EAF3DE;border-left:4px solid #639922;border-radius:8px;padding:12px 16px;margin-bottom:14px;color:#27500A;font-size:12.5px;line-height:1.55"></div>';
 
     m.pompe.forEach(function(pompa) {
       var _pi = cacheProdotti.find(function(pp) { return pp.nome === pompa.prodotto; });
