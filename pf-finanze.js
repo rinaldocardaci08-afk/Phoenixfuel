@@ -255,6 +255,27 @@ function renderCalendarioFinanze() {
 }
 
 // ── Helper: HTML interno della cella giorno (entrate/stazione/uscite pillole) ──
+// ═══════════════════════════════════════════════════════════════════
+// SCADENZA FORNITORE NON PAGATA (25/07 — richiesta Rinaldo)
+// Un giorno GIA PASSATO che porta ancora uscite fornitore non pagate deve
+// saltare all'occhio: cella su fondo rosso tenue e fascia in basso con
+// l'icona e l'importo ancora scoperto. Oggi e i giorni futuri non si
+// colorano; appena il pagamento viene registrato la cella torna normale.
+// ═══════════════════════════════════════════════════════════════════
+function _finCalScaduto(g, dataStr) {
+  var oggi = new Date(); oggi.setHours(12, 0, 0, 0);
+  var oggiStr = new Date(oggi.getTime() - oggi.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+  if (!dataStr || dataStr >= oggiStr) return null;
+  var tot = 0, n = 0;
+  (g.usciteDettaglio || []).forEach(function (u) {
+    if (u.pagato) return;
+    tot += Number(u.importo || 0);
+    n++;
+  });
+  if (!n) return null;
+  return { n: n, tot: Math.round(tot * 100) / 100 };
+}
+
 function _finCalHtmlCellaContenuto(g, dataStr, filtro) {
   var html = '';
 
@@ -357,13 +378,23 @@ function _finCalRenderMese() {
     var isWeekend = corrente.getDay() === 0 || corrente.getDay() === 6;
     var g = giornoMap[dataStr] || { entrateDettaglio: [], usciteDettaglio: [], stazione: 0 };
 
-    var bgStyle = isToday ? 'border:2px solid #D85A30;' : 'border:1px solid #e8e7e3;';
-    bgStyle += isWeekend ? 'background:#fafaf8;' : 'background:#fff;';
+    var scad = _finCalScaduto(g, dataStr);
+    var bgStyle = isToday ? 'border:2px solid #D85A30;' : (scad ? 'border:1px solid #E24B4A;' : 'border:1px solid #e8e7e3;');
+    bgStyle += scad ? 'background:#FCEBEB;' : (isWeekend ? 'background:#fafaf8;' : 'background:#fff;');
     if (!isThisMonth) bgStyle += 'opacity:0.3;';
 
-    html += '<div onclick="mostraDettaglioFinanze(\'' + dataStr + '\',\'tutto\')" style="' + bgStyle + 'border-radius:10px;min-height:110px;padding:6px;cursor:pointer" onmouseover="this.style.boxShadow=\'0 0 0 2px #185FA533\'" onmouseout="this.style.boxShadow=\'none\'">';
-    html += '<div style="font-size:13px;font-weight:600;color:' + (isToday ? '#D85A30' : 'var(--text)') + ';margin-bottom:4px">' + corrente.getDate() + '</div>';
+    html += '<div onclick="mostraDettaglioFinanze(\'' + dataStr + '\',\'tutto\')" style="' + bgStyle + 'border-radius:10px;min-height:110px;padding:6px;cursor:pointer;display:flex;flex-direction:column" onmouseover="this.style.boxShadow=\'0 0 0 2px #185FA533\'" onmouseout="this.style.boxShadow=\'none\'"'
+      + (scad ? ' title="Scadenza fornitore non pagata: ' + fmtE(scad.tot) + '"' : '') + '>';
+    html += '<div style="font-size:13px;font-weight:600;color:' + (scad ? '#A32D2D' : (isToday ? '#D85A30' : 'var(--text)')) + ';margin-bottom:4px;display:flex;align-items:center;gap:5px">'
+      + (scad ? '<span style="width:7px;height:7px;border-radius:50%;background:#E24B4A;display:inline-block"></span>' : '')
+      + corrente.getDate() + '</div>';
     html += _finCalHtmlCellaContenuto(g, dataStr, filtro);
+    if (scad) {
+      html += '<div style="margin-top:auto;padding-top:4px"><div style="display:flex;align-items:center;gap:4px;background:#E24B4A;color:#fff;border-radius:5px;padding:3px 6px;font-size:10.5px;font-weight:600;line-height:1.3">'
+        + '<span style="font-size:12px">⏰</span>'
+        + (scad.n > 1 ? scad.n + ' scadute ' : 'scaduta ') + fmtE(scad.tot)
+        + '</div></div>';
+    }
     html += '</div>';
 
     corrente.setDate(corrente.getDate() + 1);
