@@ -230,6 +230,20 @@
           <div id="dash-anticipi"><div class="loading">Caricamento...</div></div>
         </div>
 
+        <!-- SETTIMANA FINANZIARIA (stessa vista settimanale del calendario) -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Settimana</span>
+            <span style="display:flex;align-items:center;gap:6px">
+              <button onclick="dashSettimanaSposta(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;color:var(--text)">◀</button>
+              <span id="dash-settimana-label" style="font-size:12px;color:var(--text-muted);font-weight:400;min-width:130px;text-align:center"></span>
+              <button onclick="dashSettimanaSposta(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;color:var(--text)">▶</button>
+              <button onclick="dashSettimanaOggi()" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer;color:var(--text)">Oggi</button>
+            </span>
+          </div>
+          <div id="dash-settimana"><div class="loading">Caricamento...</div></div>
+        </div>
+
         <!-- ALERT OPERATIVI (collassabile) -->
         <div id="dash-alert-wrapper" style="display:none;margin-bottom:16px">
           <div onclick="dashToggleAlert()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:#FCEBEB;border:0.5px solid #F09595;border-left:3px solid #E24B4A;border-radius:10px;padding:10px 14px">
@@ -3056,13 +3070,13 @@
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=20260722e"></script>
 <script src="pf-admin.js?v=20260717a"></script>
-<script src="pf-dashboard.js?v=20260725a"></script>
+<script src="pf-dashboard.js?v=20260725b"></script>
 <script src="pf-home.js?v=20260419a"></script>
 <script src="pf-benchmark.js?v=20260514b"></script>
 <script src="pf-futures.js?v=20260508f"></script>
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
-<script src="pf-finanze.js?v=20260725a"></script>
+<script src="pf-finanze.js?v=20260725b"></script>
 <script src="pf-foglio-giornale.js?v=20260722a"></script>
 <script src="pf-finanze-sostenibilita.js?v=20260503l"></script>
 <script src="pf-pagamento-fornitore-modale.js?v=20260717a"></script>

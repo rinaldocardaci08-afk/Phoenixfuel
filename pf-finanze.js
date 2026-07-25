@@ -404,6 +404,118 @@ function _finCalRenderMese() {
   document.getElementById('fin-calendario').innerHTML = html;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// SETTIMANA IN DASHBOARD (25/07) — la stessa vista settimanale del
+// calendario, portata sotto gli Anticipi fatture e navigabile SOLO per
+// settimana. Le scadenze fornitore non pagate e gia passate si accendono
+// in rosso con l'importo scoperto, come nel calendario grande.
+// Uscite fornitore dalla QUERY MADRE (pfDebitoDati); entrate clienti da
+// una lettura leggera sulle sole scadenze della settimana.
+// ═══════════════════════════════════════════════════════════════════════
+var _dashSetAncora = null;
+
+function _dashSetLunedi(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  var dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return d.toISOString().split('T')[0];
+}
+
+function dashSettimanaSposta(delta) {
+  var base = _dashSetAncora || _finOggiISO();
+  var d = new Date(base + 'T12:00:00');
+  d.setDate(d.getDate() + delta * 7);
+  _dashSetAncora = d.toISOString().split('T')[0];
+  caricaSettimanaDashboard();
+}
+
+function dashSettimanaOggi() {
+  _dashSetAncora = _finOggiISO();
+  caricaSettimanaDashboard();
+}
+
+function vaiCalendarioSettimana(dataISO) {
+  _finCalModo = 'settimana';
+  _finCalAncora = dataISO;
+  var nav = document.querySelector('.nav-item[onclick*="finanze"]');
+  if (typeof setSection === 'function') { try { setSection('finanze', nav); } catch (e) {} }
+  setTimeout(function () { if (typeof caricaFinanze === 'function') caricaFinanze(); }, 150);
+}
+
+async function caricaSettimanaDashboard() {
+  var el = document.getElementById('dash-settimana');
+  if (!el) return;
+  try {
+    var lunISO = _dashSetLunedi(_dashSetAncora || _finOggiISO());
+    var lun = new Date(lunISO + 'T12:00:00');
+    var dom = new Date(lun); dom.setDate(lun.getDate() + 6);
+    var domISO = dom.toISOString().split('T')[0];
+    var oggiStr = _finOggiISO();
+
+    var lab = document.getElementById('dash-settimana-label');
+    if (lab) lab.textContent = _finFmtDataBreve(lunISO) + ' – ' + _finFmtDataBreve(domISO);
+
+    // uscite fornitore: query madre
+    var giorni = {};
+    function G(d) { if (!giorni[d]) giorni[d] = { entrate: 0, uscite: 0, uscitePag: 0, usciteDettaglio: [] }; return giorni[d]; }
+    var madre = await pfDebitoDati();
+    (madre.ordini || []).forEach(function (o) {
+      if (!o.scadenza || o.scadenza < lunISO || o.scadenza > domISO) return;
+      var g = G(o.scadenza);
+      g.usciteDettaglio.push({ fornitore: o.fornitore, importo: o.totale, pagato: (o.pagato || o.fattSaldata) });
+      if (o.pagato || o.fattSaldata) g.uscitePag += o.totale; else g.uscite += o.totale;
+    });
+
+    // entrate clienti: solo le scadenze della settimana
+    var res = await sb.from('ordini')
+      .select('cliente,litri,costo_litro,trasporto_litro,margine,iva,data_scadenza,pagato')
+      .eq('tipo_ordine', 'cliente').neq('stato', 'annullato')
+      .gte('data_scadenza', lunISO).lte('data_scadenza', domISO);
+    (res.data || []).forEach(function (o) {
+      var p = (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0)) * (1 + Number(o.iva || 22) / 100);
+      var imp = p * Number(o.litri || 0);
+      if (!o.pagato) G(o.data_scadenza).entrate += imp;
+    });
+
+    var nomiGG = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+    var h = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
+    nomiGG.forEach(function (n) {
+      h += '<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;padding:4px 0;letter-spacing:0.5px">' + n + '</div>';
+    });
+
+    var cur = new Date(lun);
+    for (var i = 0; i < 7; i++) {
+      var dataStr = cur.toISOString().split('T')[0];
+      var g = giorni[dataStr] || { entrate: 0, uscite: 0, uscitePag: 0, usciteDettaglio: [] };
+      var isToday = dataStr === oggiStr;
+      var isWeekend = cur.getDay() === 0 || cur.getDay() === 6;
+      var scad = _finCalScaduto(g, dataStr);
+
+      var st = isToday ? 'border:2px solid #D85A30;' : (scad ? 'border:1px solid #E24B4A;' : 'border:1px solid var(--border);');
+      st += scad ? 'background:#FCEBEB;' : (isWeekend ? 'background:var(--bg-card);' : 'background:var(--bg);');
+
+      h += '<div onclick="vaiCalendarioSettimana(\'' + dataStr + '\')" title="' + (scad ? 'Scadenza fornitore non pagata: ' + fmtE(scad.tot) : 'Apri il calendario su questa settimana') + '" style="' + st + 'border-radius:9px;min-height:104px;padding:7px;cursor:pointer;display:flex;flex-direction:column">';
+      h += '<div style="font-size:13px;font-weight:700;color:' + (scad ? '#A32D2D' : (isToday ? '#D85A30' : 'var(--text)')) + ';margin-bottom:5px;display:flex;align-items:center;gap:4px">'
+        + (scad ? '<span style="width:7px;height:7px;border-radius:50%;background:#E24B4A;display:inline-block"></span>' : '')
+        + cur.getDate() + '</div>';
+      if (g.entrate > 0) h += '<div style="font-size:10.5px;font-weight:600;background:#EAF3DE;color:#27500A;border-radius:4px;padding:2px 5px;margin-bottom:3px;text-align:center">+' + _fmtCompact(g.entrate) + '</div>';
+      if (g.uscite > 0) h += '<div style="font-size:10.5px;font-weight:600;background:#FCEBEB;color:#791F1F;border-radius:4px;padding:2px 5px;text-align:center">-' + _fmtCompact(g.uscite) + '</div>';
+      if (!g.entrate && !g.uscite && !scad) h += '<div style="font-size:10.5px;color:var(--text-muted)">—</div>';
+      if (scad) {
+        h += '<div style="margin-top:auto;padding-top:5px"><div style="display:flex;align-items:center;gap:3px;background:#E24B4A;color:#fff;border-radius:5px;padding:3px 5px;font-size:10px;font-weight:600;line-height:1.25">'
+          + '<span style="font-size:11px">⏰</span>' + (scad.n > 1 ? scad.n + ' scadute ' : 'scaduta ') + _fmtCompact(scad.tot) + '</div></div>';
+      }
+      h += '</div>';
+      cur.setDate(cur.getDate() + 1);
+    }
+    h += '</div>';
+    el.innerHTML = h;
+  } catch (e) {
+    console.warn('settimana dashboard', e);
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Dati della settimana non disponibili.</div>';
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // VISTA SETTIMANA (7 celle in linea, più alte)
 // ────────────────────────────────────────────────────────────────────────
@@ -426,14 +538,24 @@ function _finCalRenderSettimana() {
     var isWeekend = corrente.getDay() === 0 || corrente.getDay() === 6;
     var g = giornoMap[dataStr] || { entrateDettaglio: [], usciteDettaglio: [], stazione: 0 };
 
-    var bgStyle = isToday ? 'border:2px solid #D85A30;' : 'border:1px solid #e8e7e3;';
-    bgStyle += isWeekend ? 'background:#fafaf8;' : 'background:#fff;';
+    var scad = _finCalScaduto(g, dataStr);
+    var bgStyle = isToday ? 'border:2px solid #D85A30;' : (scad ? 'border:1px solid #E24B4A;' : 'border:1px solid #e8e7e3;');
+    bgStyle += scad ? 'background:#FCEBEB;' : (isWeekend ? 'background:#fafaf8;' : 'background:#fff;');
 
     var dataFmt = corrente.getDate() + ' ' + _FIN_MESI[corrente.getMonth()].substring(0,3).toLowerCase();
 
-    html += '<div onclick="mostraDettaglioFinanze(\'' + dataStr + '\',\'tutto\')" style="' + bgStyle + 'border-radius:10px;min-height:280px;padding:8px;cursor:pointer" onmouseover="this.style.boxShadow=\'0 0 0 2px #185FA533\'" onmouseout="this.style.boxShadow=\'none\'">';
-    html += '<div style="font-size:14px;font-weight:600;color:' + (isToday ? '#D85A30' : 'var(--text)') + ';margin-bottom:6px">' + dataFmt + '</div>';
+    html += '<div onclick="mostraDettaglioFinanze(\'' + dataStr + '\',\'tutto\')" style="' + bgStyle + 'border-radius:10px;min-height:280px;padding:8px;cursor:pointer;display:flex;flex-direction:column" onmouseover="this.style.boxShadow=\'0 0 0 2px #185FA533\'" onmouseout="this.style.boxShadow=\'none\'"'
+      + (scad ? ' title="Scadenza fornitore non pagata: ' + fmtE(scad.tot) + '"' : '') + '>';
+    html += '<div style="font-size:14px;font-weight:600;color:' + (scad ? '#A32D2D' : (isToday ? '#D85A30' : 'var(--text)')) + ';margin-bottom:6px;display:flex;align-items:center;gap:5px">'
+      + (scad ? '<span style="width:8px;height:8px;border-radius:50%;background:#E24B4A;display:inline-block"></span>' : '')
+      + dataFmt + '</div>';
     html += _finCalHtmlCellaContenuto(g, dataStr, filtro);
+    if (scad) {
+      html += '<div style="margin-top:auto;padding-top:6px"><div style="display:flex;align-items:center;gap:4px;background:#E24B4A;color:#fff;border-radius:5px;padding:4px 7px;font-size:11px;font-weight:600;line-height:1.3">'
+        + '<span style="font-size:13px">⏰</span>'
+        + (scad.n > 1 ? scad.n + ' scadute ' : 'scaduta ') + fmtE(scad.tot)
+        + '</div></div>';
+    }
     html += '</div>';
 
     corrente.setDate(corrente.getDate() + 1);
