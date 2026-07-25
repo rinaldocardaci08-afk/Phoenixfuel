@@ -173,7 +173,7 @@ async function renderBancheAnticipi() {
     !fidiAnticipi.find(f => 'banca:' + f.id === _antSubTabAttiva)
   )) {
     if (_antPuoVedere() && fidiAnticipi.length) {
-      _antSubTabAttiva = 'banca:' + fidiAnticipi[0].id;
+      _antSubTabAttiva = 'home';
     } else if (_antPuoVedereStorico()) {
       _antSubTabAttiva = 'storico';
     } else {
@@ -226,7 +226,9 @@ async function renderBancheAnticipi() {
   cont.innerHTML = html;
 
   // Carica contenuto della sub-tab attiva
-  if (_antSubTabAttiva.startsWith('banca:')) {
+  if (_antSubTabAttiva === 'home') {
+    await _antRenderTabHome(fidiAnticipi);
+  } else if (_antSubTabAttiva.startsWith('banca:')) {
     const affId = _antSubTabAttiva.slice(6);
     await _antRenderTabBanca(affId);
   } else if (_antSubTabAttiva === 'storico') {
@@ -240,6 +242,316 @@ async function renderBancheAnticipi() {
 function _antSwitchTab(tabId) {
   _antSubTabAttiva = tabId;
   renderBancheAnticipi();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HOME QUADRO ANTICIPI (25/07) — un pannello per istituto con anticipo fatture.
+// Stessi numeri della scheda banca, letti una volta sola per tutte le banche:
+//   accordato = importo_accordato dell affidamento
+//   utilizzato = somma anticipato dei moduli attivi - somma estinto
+//   disponibile = accordato - utilizzato
+//   prima scadenza = data piu vicina fra le fatture ancora vive, con il
+//     TOTALE di tutte le fatture che scadono quello stesso giorno
+// I pannelli sono cliccabili e aprono la banca. Nessuna scrittura.
+// ═══════════════════════════════════════════════════════════════════════════
+async function _antRenderTabHome(fidiAnticipi) {
+  const cont = document.getElementById('ant-content');
+  if (!cont) return;
+
+  const affIds = fidiAnticipi.map(f => f.id);
+  let presByAff = {}, fattByPres = {};
+  if (affIds.length) {
+    const { data: pres } = await sb.from('anticipi_sbf_presentazioni')
+      .select('*').in('affidamento_id', affIds).not('stato', 'in', '(estinta,rifiutata)');
+    const presIds = (pres || []).map(p => p.id);
+    if (presIds.length) {
+      const { data: ftt } = await sb.from('anticipi_sbf_fatture').select('*').in('presentazione_id', presIds);
+      (ftt || []).forEach(f => {
+        if (!fattByPres[f.presentazione_id]) fattByPres[f.presentazione_id] = [];
+        fattByPres[f.presentazione_id].push(f);
+      });
+    }
+    (pres || []).forEach(p => {
+      if (!presByAff[p.affidamento_id]) presByAff[p.affidamento_id] = [];
+      presByAff[p.affidamento_id].push(p);
+    });
+  }
+
+  const oggiISO = new Date().toISOString().slice(0, 10);
+  let totAcc = 0, totUso = 0;
+  let scadenzaGlob = null;
+  const schede = [];
+
+  fidiAnticipi.forEach(aff => {
+    const ist = _bancheIstituti.find(i => i.id === aff.istituto_id) || {};
+    const accordato = Number(aff.importo_accordato || 0);
+    let utilizzo = 0, scadute = 0;
+    const perData = {};
+
+    (presByAff[aff.id] || []).forEach(p => {
+      const ftt = fattByPres[p.id] || [];
+      const estinto = ftt.reduce((s, f) => s + Number(f.importo_estinto || 0), 0);
+      utilizzo += Math.max(0, Number(p.importo_anticipato_totale || 0) - estinto);
+      ftt.forEach(f => {
+        if (f.stato === 'estinta' || f.stato === 'esclusa' || !f.scadenza_banca) return;
+        const residuo = Math.max(0, Number(f.importo_anticipato || f.importo || 0) - Number(f.importo_estinto || 0));
+        if (f.scadenza_banca < oggiISO) { scadute++; return; }
+        if (!perData[f.scadenza_banca]) perData[f.scadenza_banca] = 0;
+        perData[f.scadenza_banca] += residuo;
+      });
+    });
+
+    const disponibile = Math.max(0, accordato - utilizzo);
+    const pct = accordato > 0 ? Math.min(100, Math.round(utilizzo / accordato * 100)) : 0;
+    const date = Object.keys(perData).sort();
+    const primaData = date.length ? date[0] : null;
+    const primaImporto = primaData ? Math.round(perData[primaData] * 100) / 100 : 0;
+
+    totAcc += accordato;
+    totUso += utilizzo;
+    if (primaData && (!scadenzaGlob || primaData < scadenzaGlob.data)) {
+      scadenzaGlob = { data: primaData, importo: primaImporto, banca: ist.nome || '' };
+    }
+    schede.push({ aff: aff, nome: ist.nome || '—', accordato: accordato, utilizzo: utilizzo,
+      disponibile: disponibile, pct: pct, primaData: primaData, primaImporto: primaImporto, scadute: scadute });
+  });
+
+  const colorePct = function (p) { return p >= 80 ? '#E24B4A' : (p >= 50 ? '#BA7517' : '#639922'); };
+  const dataBreve = function (iso) { return iso ? _pfIsoToIt(iso).slice(0, 5) : '—'; };
+
+  let h = '';
+  // striscia riassuntiva (la stessa che andra in dashboard)
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">';
+  h += '<div style="background:var(--bg-card);border-radius:8px;padding:14px"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Accordato</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono)">' + fmtE(totAcc) + '</div></div>';
+  h += '<div style="background:var(--bg-card);border-radius:8px;padding:14px"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Utilizzato</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono)">' + fmtE(totUso) + '</div></div>';
+  h += '<div style="background:var(--bg-card);border-radius:8px;padding:14px"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Disponibile</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono);color:#27500A">' + fmtE(Math.max(0, totAcc - totUso)) + '</div></div>';
+  h += '<div style="background:var(--bg-card);border-radius:8px;padding:14px"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Prossima scadenza</div>'
+    + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono)">' + (scadenzaGlob ? dataBreve(scadenzaGlob.data) : '—') + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono)">' + (scadenzaGlob ? fmtE(scadenzaGlob.importo) + ' · ' + esc(scadenzaGlob.banca) : 'nessuna in scadenza') + '</div></div>';
+  h += '</div>';
+
+  // pannelli per istituto
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">';
+  schede.forEach(s => {
+    const tipoLab = { sbf: 'SBF', anticipo_fatture: 'Anticipo fatture' }[s.aff.tipo] || s.aff.tipo;
+    const pctD = s.aff.percentuale_anticipo_default;
+    const baseD = s.aff.base_calcolo_default;
+    const sotto = pctD && baseD
+      ? Number(pctD).toFixed(0) + '% su ' + (baseD === 'totale' ? 'totale fattura' : 'imponibile')
+      : 'parametri anticipo da completare';
+
+    h += '<div onclick="_antSwitchTab(\'banca:' + s.aff.id + '\')" title="Apri la scheda della banca" '
+      + 'style="background:var(--bg);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px;cursor:pointer">';
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">'
+      + '<span style="font-size:15px;font-weight:700">🏦 ' + esc(s.nome) + '</span>'
+      + '<span style="margin-left:auto;font-size:11px;background:#E6F1FB;color:#0C447C;padding:3px 10px;border-radius:6px;font-weight:600">' + esc(tipoLab) + '</span></div>';
+    h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">' + esc(sotto) + '</div>';
+
+    h += '<div style="height:10px;background:var(--bg-card);border-radius:5px;overflow:hidden;margin-bottom:6px">'
+      + '<div style="width:' + s.pct + '%;height:100%;background:' + colorePct(s.pct) + '"></div></div>';
+    h += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:12px">'
+      + '<span style="color:' + (s.pct >= 80 ? '#A32D2D' : 'var(--text-muted)') + '">utilizzato ' + s.pct + '%</span>'
+      + '<span style="font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(s.utilizzo) + ' / ' + fmtE(s.accordato) + '</span></div>';
+
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-top:12px;border-top:0.5px solid var(--border)">';
+    h += '<div><div style="font-size:12px;color:var(--text-muted)">Disponibile</div>'
+      + '<div style="font-size:17px;font-weight:700;font-family:var(--font-mono);color:' + (s.disponibile > 0 ? '#27500A' : '#A32D2D') + '">' + fmtE(s.disponibile) + '</div></div>';
+    h += '<div><div style="font-size:12px;color:var(--text-muted)">Prima scadenza</div>'
+      + '<div style="font-size:17px;font-weight:700;font-family:var(--font-mono)">' + dataBreve(s.primaData) + '</div>'
+      + '<div style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono)">' + (s.primaData ? fmtE(s.primaImporto) : 'nessuna presentazione') + '</div></div>';
+    h += '</div>';
+
+    if (s.scadute > 0) {
+      h += '<div style="margin-top:10px;font-size:12px;color:#A32D2D;font-weight:600">⚠ ' + s.scadute + (s.scadute === 1 ? ' fattura scaduta in banca' : ' fatture scadute in banca') + '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div>';
+
+  // ── grafici di raffronto (come nel fido fornitori): quale istituto usiamo
+  //    di piu, e come si muove nei mesi.
+  h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">';
+  h += '<div style="flex:1 1 260px;min-width:260px;background:var(--bg);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px">'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:2px">Anticipi per banca</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">presentato negli ultimi 12 mesi</div>'
+    + '<div style="position:relative;height:230px"><canvas id="ant-torta"></canvas></div></div>';
+  h += '<div style="flex:2 1 340px;min-width:320px;background:var(--bg);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px">'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:2px">Andamento per mese</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">importi presentati, per istituto</div>'
+    + '<div style="position:relative;height:230px"><canvas id="ant-mesi"></canvas></div></div>';
+  h += '</div>';
+
+  cont.innerHTML = h;
+  _antRenderGrafici(fidiAnticipi);
+}
+
+// ─── GRAFICI DI RAFFRONTO ─────────────────────────────────────────────────
+// Torta = totale presentato per banca negli ultimi 12 mesi.
+// Barre = stesso dato spezzato per mese, una porzione per istituto: si vede
+// subito su chi ci stiamo appoggiando e come cambia nel tempo.
+var _antChartTorta = null, _antChartMesi = null;
+
+async function _antRenderGrafici(fidiAnticipi) {
+  if (typeof Chart === 'undefined') return;
+  const affIds = fidiAnticipi.map(f => f.id);
+  if (!affIds.length) return;
+  const da = new Date(); da.setMonth(da.getMonth() - 11); da.setDate(1);
+  const daISO = da.toISOString().slice(0, 10);
+
+  const { data: pres } = await sb.from('anticipi_sbf_presentazioni')
+    .select('affidamento_id,data_presentazione,importo_anticipato_totale')
+    .in('affidamento_id', affIds).gte('data_presentazione', daISO);
+  if (!pres || !pres.length) return;
+
+  const nomeDi = {};
+  fidiAnticipi.forEach(f => {
+    const ist = _bancheIstituti.find(i => i.id === f.istituto_id) || {};
+    nomeDi[f.id] = ist.nome || '—';
+  });
+
+  const totBanca = {};
+  const mesi = [];
+  for (let k = 11; k >= 0; k--) {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - k);
+    mesi.push(d.toISOString().slice(0, 7));
+  }
+  const perMese = {};
+  pres.forEach(p => {
+    const nome = nomeDi[p.affidamento_id] || '—';
+    const imp = Number(p.importo_anticipato_totale || 0);
+    if (!imp) return;
+    totBanca[nome] = (totBanca[nome] || 0) + imp;
+    const mese = String(p.data_presentazione || '').slice(0, 7);
+    if (mesi.indexOf(mese) < 0) return;
+    if (!perMese[nome]) perMese[nome] = {};
+    perMese[nome][mese] = (perMese[nome][mese] || 0) + imp;
+  });
+
+  const col = ['#185FA5', '#639922', '#F5921E', '#6B5FCC', '#E5342F', '#0FA3A3'];
+  const banche = Object.keys(totBanca).sort((a, b) => totBanca[b] - totBanca[a]);
+
+  const ctxT = document.getElementById('ant-torta');
+  if (ctxT && banche.length) {
+    if (_antChartTorta) _antChartTorta.destroy();
+    _antChartTorta = new Chart(ctxT, {
+      type: 'doughnut',
+      data: { labels: banche, datasets: [{ data: banche.map(b => Math.round(totBanca[b])),
+        backgroundColor: banche.map((b, i) => col[i % col.length]), borderWidth: 2, borderColor: '#fff' }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '52%',
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+          tooltip: { callbacks: { label: c => c.label + ': ' + fmtE(totBanca[c.label]) } } } }
+    });
+  }
+
+  const ctxM = document.getElementById('ant-mesi');
+  if (ctxM && banche.length) {
+    if (_antChartMesi) _antChartMesi.destroy();
+    const etichette = mesi.map(m => { const p = m.split('-'); return p[1] + '/' + p[0].slice(2); });
+    _antChartMesi = new Chart(ctxM, {
+      type: 'bar',
+      data: { labels: etichette, datasets: banche.map((b, i) => ({
+        label: b, backgroundColor: col[i % col.length],
+        data: mesi.map(m => Math.round((perMese[b] && perMese[b][m]) || 0)) })) },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, ticks: { callback: v => (v / 1000) + 'k' } } },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+          tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmtE(c.parsed.y) } } } }
+    });
+  }
+}
+
+// ─── PANNELLO DASHBOARD (stesso stile del fido fornitori) ─────────────────
+async function caricaAnticipiDashboard() {
+  const el = document.getElementById('dash-anticipi');
+  if (!el) return;
+  try {
+    if (!_bancheAffidamenti.length || !_bancheIstituti.length) {
+      const [affRes, istRes] = await Promise.all([
+        sb.from('banche_affidamenti').select('*'),
+        sb.from('banche_istituti').select('*').order('nome')
+      ]);
+      _bancheAffidamenti = affRes.data || [];
+      _bancheIstituti = istRes.data || [];
+    }
+    const fidi = _bancheAffidamenti
+      .filter(a => a.stato === 'attivo' && (a.tipo === 'sbf' || a.tipo === 'anticipo_fatture'))
+      .sort((a, b) => {
+        const nA = (_bancheIstituti.find(i => i.id === a.istituto_id) || {}).nome || '';
+        const nB = (_bancheIstituti.find(i => i.id === b.istituto_id) || {}).nome || '';
+        const p = _priorityBancaIstituto(nA) - _priorityBancaIstituto(nB);
+        return p !== 0 ? p : nA.localeCompare(nB);
+      });
+    if (!fidi.length) { el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Nessun affidamento anticipo attivo.</div>'; return; }
+
+    const affIds = fidi.map(f => f.id);
+    const { data: pres } = await sb.from('anticipi_sbf_presentazioni')
+      .select('*').in('affidamento_id', affIds).not('stato', 'in', '(estinta,rifiutata)');
+    const presIds = (pres || []).map(p => p.id);
+    let fattByPres = {};
+    if (presIds.length) {
+      const { data: ftt } = await sb.from('anticipi_sbf_fatture').select('*').in('presentazione_id', presIds);
+      (ftt || []).forEach(f => {
+        if (!fattByPres[f.presentazione_id]) fattByPres[f.presentazione_id] = [];
+        fattByPres[f.presentazione_id].push(f);
+      });
+    }
+    const oggiISO = new Date().toISOString().slice(0, 10);
+
+    el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">'
+      + fidi.map(aff => {
+        const ist = _bancheIstituti.find(i => i.id === aff.istituto_id) || {};
+        const accordato = Number(aff.importo_accordato || 0);
+        let utilizzo = 0, scadute = 0;
+        const perData = {};
+        (pres || []).filter(p => p.affidamento_id === aff.id).forEach(p => {
+          const ftt = fattByPres[p.id] || [];
+          const estinto = ftt.reduce((s, f) => s + Number(f.importo_estinto || 0), 0);
+          utilizzo += Math.max(0, Number(p.importo_anticipato_totale || 0) - estinto);
+          ftt.forEach(f => {
+            if (f.stato === 'estinta' || f.stato === 'esclusa' || !f.scadenza_banca) return;
+            const res = Math.max(0, Number(f.importo_anticipato || f.importo || 0) - Number(f.importo_estinto || 0));
+            if (f.scadenza_banca < oggiISO) { scadute++; return; }
+            perData[f.scadenza_banca] = (perData[f.scadenza_banca] || 0) + res;
+          });
+        });
+        const disp = Math.max(0, accordato - utilizzo);
+        const pct = accordato > 0 ? Math.min(100, (utilizzo / accordato) * 100) : 0;
+        const bordo = pct >= 85 ? '#C0392B' : pct >= 60 ? '#F5921E' : '#639922';
+        const date = Object.keys(perData).sort();
+        const primaD = date.length ? date[0] : null;
+        const primaI = primaD ? perData[primaD] : 0;
+        return '<div onclick="vaiAnticipiBanca(\'' + aff.id + '\')" style="cursor:pointer;border:1px solid ' + bordo + ';border-left:5px solid ' + bordo + ';border-radius:11px;padding:12px 14px;background:var(--bg)">'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">'
+            + '<span style="font-size:14px;font-weight:700">' + esc(ist.nome || '—') + '</span>'
+            + '<span style="font-size:11px;color:var(--text-muted)">' + (aff.tipo === 'sbf' ? 'SBF' : 'Anticipo fatture') + '</span></div>'
+          + '<div style="height:9px;background:var(--bg-card);border-radius:5px;overflow:hidden"><div style="width:' + Math.round(pct) + '%;height:100%;background:' + bordo + '"></div></div>'
+          + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:8px">'
+            + '<span style="color:var(--text-muted)">Utilizzato ' + Math.round(pct) + '%</span>'
+            + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(utilizzo) + ' / ' + fmtE(accordato) + '</span></div>'
+          + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:4px">'
+            + '<span style="color:var(--text-muted)">Disponibile</span>'
+            + '<span style="font-family:var(--font-mono);font-weight:700;color:' + (disp > 0 ? '#3B6D11' : '#A32D2D') + '">' + fmtE(disp) + '</span></div>'
+          + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px">'
+            + (scadute ? '<span style="color:#A32D2D;font-weight:700">' + scadute + ' scadute in banca</span>'
+                       : '<span style="color:var(--text-muted)">prima scadenza ' + (primaD ? _pfIsoToIt(primaD) : '—') + '</span>')
+            + '<span style="font-family:var(--font-mono)">' + (primaD ? fmtE(primaI) : '') + '</span></div>'
+          + '</div>';
+      }).join('') + '</div>';
+  } catch (e) {
+    console.warn('anticipi dashboard', e);
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Dati anticipi non disponibili.</div>';
+  }
+}
+
+function vaiAnticipiBanca(affId) {
+  const nav = document.querySelector('.nav-item[onclick*="banche"]');
+  if (typeof setSection === 'function') { try { setSection('banche', nav); } catch (e) {} }
+  setTimeout(function () {
+    const tab = document.querySelector('.banche-tab[data-tab="banche-panel-anticipi"]');
+    if (tab && typeof switchBancheTab === 'function') switchBancheTab(tab);
+    setTimeout(function () { _antSwitchTab('banca:' + affId); }, 150);
+  }, 150);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -324,6 +636,9 @@ async function _antRenderTabBanca(affidamentoId) {
   const parametriCompleti = pctDefault && baseDefault;
 
   let html = '';
+
+  // Ritorno al quadro d'insieme (25/07): la home della sezione sono i pannelli.
+  html += '<div style="margin-bottom:10px"><button onclick="_antSwitchTab(\'home\')" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;color:var(--text)">← Torna al quadro anticipi</button></div>';
 
   // Box info banca
   html += '<div style="background:#EEEDFE;border-left:4px solid #6B5FCC;padding:14px 18px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
