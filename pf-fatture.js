@@ -1601,6 +1601,82 @@ async function generaFattura(){
 // DETTAGLIO FATTURA (modale)
 // ═════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════
+// MODIFICA NUMERO / DATA FATTURA (24/07 — richiesta Rinaldo: un numero
+// sbagliato inserito da Consegne oggi non è correggibile).
+// Check: il numero non può essere già di un'altra fattura dello stesso
+// cedente nello stesso anno. `anno` è colonna GENERATA dalla data: non si
+// scrive, cambia da sé cambiando la data.
+// ═══════════════════════════════════════════════════════════════════
+async function apriModificaFattura(id){
+  const { data: f, error } = await sb.from('fatture_emesse').select('*').eq('id', id).single();
+  if (error || !f) { toast('Fattura non trovata'); return; }
+  const nOrd = await sb.from('ordini').select('id', { count: 'exact', head: true }).eq('fattura_id', id);
+  const html = `
+    <div style="font-size:13px;max-width:460px">
+      <h2 style="margin:0 0 4px 0;color:#26215C">Modifica fattura</h2>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">
+        ${_esc(f.cessionario_denominazione || '—')} · attuale <strong>${_esc(f.numero)}/${f.anno || '?'}</strong> del ${_fmtD(f.data)}
+        ${nOrd.count ? ' · ' + nOrd.count + (nOrd.count === 1 ? ' consegna collegata' : ' consegne collegate') : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">N° fattura</label>
+          <input id="mf-numero" type="text" value="${_esc(f.numero || '')}" style="width:100%;padding:9px;margin-top:4px;border:0.5px solid var(--border);border-radius:6px;font-family:var(--font-mono);font-size:14px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Data</label>
+          <input id="mf-data" type="date" value="${f.data || ''}" style="width:100%;padding:9px;margin-top:4px;border:0.5px solid var(--border);border-radius:6px;font-size:14px">
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.5">
+        Il numero non può essere quello di un'altra fattura dello stesso anno. Cambiando la data cambia anche l'anno di riferimento.
+      </div>
+      <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px">Annulla</button>
+        <button class="btn-primary" onclick="salvaModificaFattura('${f.id}')" style="font-size:12px">Salva</button>
+      </div>
+    </div>`;
+  apriModal(html);
+}
+
+async function salvaModificaFattura(id){
+  const elN = document.getElementById('mf-numero'), elD = document.getElementById('mf-data');
+  if (!elN || !elD) return;
+  const numero = String(elN.value || '').trim();
+  const data = String(elD.value || '').trim();
+  if (!numero) { toast('Il numero non può essere vuoto'); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) { toast('Data non valida'); return; }
+
+  const { data: f, error: eF } = await sb.from('fatture_emesse').select('*').eq('id', id).single();
+  if (eF || !f) { toast('Fattura non trovata'); return; }
+  if (numero === String(f.numero || '') && data === String(f.data || '')) { toast('Nessuna modifica'); chiudiModal(); return; }
+
+  // ─── Check numero già usato: stesso cedente, stesso anno, altra fattura
+  const anno = Number(data.slice(0, 4));
+  let q = sb.from('fatture_emesse').select('id,numero,data,cessionario_denominazione').eq('numero', numero).eq('anno', anno).neq('id', id);
+  if (f.cedente_piva) q = q.eq('cedente_piva', f.cedente_piva);
+  const { data: doppie, error: eQ } = await q;
+  if (eQ) { toast('Errore verifica numero: ' + eQ.message); return; }
+  if (doppie && doppie.length) {
+    const d0 = doppie[0];
+    toast('⛔ Il numero ' + numero + '/' + anno + ' è già della fattura di ' + (d0.cessionario_denominazione || '?') + ' del ' + _fmtD(d0.data));
+    return;
+  }
+
+  const { error: eU } = await sb.from('fatture_emesse').update({ numero: numero, data: data }).eq('id', id);
+  if (eU) { toast('Errore: ' + eU.message); return; }
+  if (typeof _auditLog === 'function') {
+    _auditLog('modifica_numero_fattura', 'fatture_emesse',
+      'Fattura ' + id + ' | ' + (f.numero || '?') + '/' + (f.anno || '?') + ' del ' + (f.data || '?') +
+      ' → ' + numero + '/' + anno + ' del ' + data + ' | ' + (f.cessionario_denominazione || ''));
+  }
+  toast('✓ Fattura aggiornata: ' + numero + ' del ' + _fmtD(data));
+  chiudiModal();
+  if (typeof caricaFatture === 'function') await caricaFatture();
+  apriDettaglioFattura(id);
+}
+
 async function apriDettaglioFattura(id){
   const { data: f, error: errF } = await sb.from('fatture_emesse').select('*').eq('id', id).single();
   if(errF || !f){ toast('Fattura non trovata: ' + (errF?.message||'')); return; }
@@ -1736,7 +1812,8 @@ async function apriDettaglioFattura(id){
 
       ${f.note ? `<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">Note: ${_esc(f.note)}</div>` : ''}
 
-      <div style="margin-top:12px;text-align:right">
+      <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <button onclick="apriModificaFattura('${f.id}')" title="Correggi numero o data di questa fattura" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:600">✏️ Modifica numero / data</button>
         <button class="btn-primary" onclick="chiudiModal()">Chiudi</button>
       </div>
     </div>
