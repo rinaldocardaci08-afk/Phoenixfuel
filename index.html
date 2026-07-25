@@ -1133,11 +1133,12 @@
             onclick="switchFattureTab(this)" style="font-size:12px;padding:8px 14px">
             📋 Elenco fatture
           </button>
-          <button class="btn-primary fatt-tab" data-tab="fatt-panel-nuova"
-            onclick="switchFattureTab(this)"
-            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
-            ➕ Nuova fattura
-          </button>
+          <!-- 24/07: linguetta "Nuova fattura" RIMOSSA (decisione Rinaldo).
+               Generava fatture nella tabella interna `fatture`, invisibili
+               nell'elenco (che legge fatture_emesse) e non gestibili: numero e
+               data non modificabili, cancellabili solo via SQL. La fatturazione
+               vera passa da Danea e dai numeri inseriti in Consegne. Il pannello
+               resta nel DOM ma non è più raggiungibile. -->
           <button class="btn-primary fatt-tab" data-tab="fatt-panel-impostazioni"
             onclick="switchFattureTab(this)"
             style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
@@ -3061,7 +3062,7 @@
 <script src="pf-estratto-fornitore.js?v=20260724c"></script>
 <script src="pf-reg-fattura.js?v=20260724b"></script>
 <script src="pf-allegati.js?v=20260722a"></script>
-<script src="pf-fatture.js?v=20260724b"></script>
+<script src="pf-fatture.js?v=20260724c"></script>
 <script src="pf-fatture-import.js?v=20260517a"></script>
 <script src="pf-banche.js?v=20260528b"></script>
 <script src="pf-banche-valutazioni.js?v=20260514a"></script>

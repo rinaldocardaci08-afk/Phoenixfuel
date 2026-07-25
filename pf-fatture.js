@@ -1475,6 +1475,16 @@ function aggiornaAnteprima(){
 }
 
 async function generaFattura(){
+  // ─── DISATTIVATA il 24/07 (decisione Rinaldo) ───────────────────────
+  // Scriveva nella tabella interna `fatture`: fatture invisibili in elenco
+  // (che legge fatture_emesse), con numero e data non modificabili e
+  // cancellabili solo via SQL. Si fattura da Danea e dai numeri inseriti in
+  // Consegne. La linguetta "Nuova fattura" è stata rimossa; questa guardia
+  // ferma anche eventuali chiamate residue.
+  toast('Generazione fatture interne disattivata: i numeri si inseriscono da Consegne o arrivano da Danea');
+  return;
+
+  /* eslint-disable no-unreachable */
   if(!_fattureOrdiniSelezionati.size){ toast('Seleziona almeno un ordine'); return; }
 
   const clienteId    = document.getElementById('nf-cliente').value;
@@ -1609,6 +1619,7 @@ async function generaFattura(){
   } finally {
     if(btn){ btn.disabled=false; }
   }
+  /* eslint-enable no-unreachable */
 }
 
 // ═════════════════════════════════════════════════════════════
