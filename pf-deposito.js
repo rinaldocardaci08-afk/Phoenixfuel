@@ -201,7 +201,7 @@ async function caricaDeposito() {
     }
     // Guardia permesso modifica CMP: admin sempre, altri solo se sub-permesso 'deposito.modifica-cmp' attivo
     var puoModificareCmp = typeof _haPermesso === 'function' ? _haPermesso('deposito.modifica-cmp') : (utenteCorrente && utenteCorrente.ruolo === 'admin');
-    var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
+    var cmpEditBtn = puoModificareCmp ? ' <button onclick="_apriModificaCMP(\'' + esc(prodNome) + '\',\'' + gruppo.map(function(c){return c.id;}).join(',') + '\',' + totG + ',' + cmpGruppo.toFixed(6) + ',\'deposito_vibo\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Modifica CMP">✏️</button>' : '';
     var cmpAnalisiBtn = ' <button onclick="_apriAnalisiCMP(\'' + esc(prodNome) + '\',\'deposito_vibo\')" style="font-size:9px;padding:1px 6px;background:none;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted)" title="Analisi CMP">🔍 Analisi</button>';
     const cmpLabel = '<div class="cmp-riga">CMP: <strong style="font-family:var(--font-mono)">€ ' + cmpGruppo.toFixed(6) + '</strong>' + (totG > 0 ? ' · Valore: <strong style="font-family:var(--font-mono)">' + fmtE(totG * cmpGruppo) + '</strong>' : '') + cmpEditBtn + cmpAnalisiBtn + '</div>';
     const distBtn = nCis > 1 ? '<button class="btn-distribuisci" onclick="apriDistribuzioneCisterne(\'' + esc(prodNome) + '\',\'deposito_vibo\')"><span class="icon">⚖️</span><span>Distribuisci</span></button>' : '';
@@ -2681,7 +2681,8 @@ async function _trovaCisternaPerProdotto(prodotto) {
 
 
 // ── Modifica manuale CMP deposito (permesso granulare deposito.modifica-cmp) ──
-function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale) {
+function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale, sede) {
+  var _mostraPrezzi = (sede === 'stazione_oppido'); // consiglio prezzo solo Oppido
   // Guardia: solo utenti con permesso specifico o admin
   if (typeof _haPermesso === 'function' && !_haPermesso('deposito.modifica-cmp')) {
     toast('Non hai i permessi per modificare il CMP deposito');
@@ -2697,10 +2698,12 @@ function _apriModificaCMP(prodNome, cisterneIds, litriTotali, cmpAttuale) {
   html += '<div class="form-group"><label>Nuovo CMP (€/L)</label>';
   html += '<input type="number" id="cmp-nuovo-val" value="' + Number(cmpAttuale).toFixed(6) + '" step="0.000001" oninput="_cmpModAggiornaPrezzi()" ';
   html += 'style="font-family:var(--font-mono);font-size:18px;font-weight:600;padding:10px 14px;width:100%" /></div>';
-  html += '<div style="display:flex;gap:8px;margin-top:14px">';
-  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:8px 10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#185FA5;font-weight:500">Prezzo · ultima marg.</div><div id="cmp-mod-ultima" style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#185FA5">—</div></div>';
-  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:8px 10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#0C447C;font-weight:500">Prezzo · marg. cercata</div><div id="cmp-mod-cercata" style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#0C447C">—</div></div>';
-  html += '</div>';
+  if (_mostraPrezzi) {
+    html += '<div style="display:flex;gap:8px;margin-top:14px">';
+    html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:8px 10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#185FA5;font-weight:500">Prezzo · ultima marg.</div><div id="cmp-mod-ultima" style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#185FA5">—</div></div>';
+    html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:8px 10px"><div style="font-size:9px;text-transform:uppercase;letter-spacing:0.3px;color:#0C447C;font-weight:500">Prezzo · marg. cercata</div><div id="cmp-mod-cercata" style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:#0C447C">—</div></div>';
+    html += '</div>';
+  }
   html += '<div style="display:flex;gap:8px;margin-top:16px">';
   html += '<button class="btn-primary" style="flex:1;background:#D85A30;padding:12px" ';
   html += 'onclick="_confermaCMPDeposito(\'' + cisterneIds + '\',\'' + esc(prodNome) + '\')" >💾 Salva nuovo CMP</button>';
@@ -3428,7 +3431,7 @@ async function _apriAnalisiCMP(prodotto, sede) {
         '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">€ ' + cn.toFixed(6) + '</td>' +
         '<td style="padding:6px 8px;text-align:center;white-space:nowrap">' +
           (flagAnomalia ? '<span style="color:#A32D2D" title="Scostamento calcolo: ' + delta.toFixed(6) + '">⚠</span>' : '<span style="color:#639922">✓</span>') +
-          ' <button onclick="_apriPopupCalcoloCMP(\'' + esc(prodSafe) + '\',\'' + esc(dataSafe) + '\',' + lp + ',' + cp + ',' + lc + ',' + cc + ',' + cn + ')" style="background:none;border:0.5px solid var(--border);border-radius:4px;padding:1px 6px;cursor:pointer;font-size:11px;color:var(--text-muted);margin-left:4px;font-family:var(--font-sans)" title="Dettaglio calcolo CMP">ℹ</button>' +
+          ' <button onclick="_apriPopupCalcoloCMP(\'' + esc(prodSafe) + '\',\'' + esc(dataSafe) + '\',' + lp + ',' + cp + ',' + lc + ',' + cc + ',' + cn + ',\'' + sede + '\')" style="background:none;border:0.5px solid var(--border);border-radius:4px;padding:1px 6px;cursor:pointer;font-size:11px;color:var(--text-muted);margin-left:4px;font-family:var(--font-sans)" title="Dettaglio calcolo CMP">ℹ</button>' +
         '</td>' +
       '</tr>';
       puntiGrafico.push({ data: r.data, cmp: cn, etichetta: 'Evento ' + (i+1) });
@@ -3569,7 +3572,10 @@ function _fmtDataIt(isoDate) {
 // Funziona per deposito e stazione (la funzione _apriAnalisiCMP è
 // parametrizzata per sede).
 // ═══════════════════════════════════════════════════════════════════
-function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn) {
+// sede: i PREZZI CONSIGLIATI si mostrano solo per la stazione di Oppido
+// (Rinaldo 24/07: nell'analisi CMP del deposito non li vuole).
+function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn, sede) {
+  var _mostraPrezzi = (sede === 'stazione_oppido');
   // Rimuovo eventuale popup precedente
   var existing = document.getElementById('cmp-info-popup-overlay');
   if (existing) existing.remove();
@@ -3607,12 +3613,14 @@ function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn) {
     html += '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#26215C">→ CMP nuovo: € ' + cn.toFixed(6) + '</div>';
     html += '<div style="font-size:11px;color:#5F5E5A;margin-top:10px;font-style:italic">CMP impostato manualmente dal pulsante ✏️ — nessun carico associato</div>';
     html += '</div>';
-    var _piM2 = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti.find(function(p){ return p.nome === prodotto; }) : null;
-    var _moM2 = (_piM2 && _piM2.margine_obiettivo != null) ? Number(_piM2.margine_obiettivo) : null;
-    html += '<div style="display:flex;gap:8px;margin-top:12px">';
-    html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#185FA5;font-weight:500;margin-bottom:3px">Prezzo · ultima marginalità</div><div id="cmp-box-ultima" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#185FA5">—</div></div>';
-    html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#0C447C;font-weight:500;margin-bottom:3px">Prezzo · marginalità cercata</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#0C447C">' + (_moM2 != null ? '€ ' + (cn + _moM2).toFixed(4).replace('.', ',') : '<span style="font-size:11px;font-weight:400;color:var(--text-muted)">imposta in Magazzino</span>') + '</div>' + (_moM2 != null ? '<div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:#BA7517;margin-top:2px">IVA inc. € ' + ((cn + _moM2) * 1.22).toFixed(4).replace('.', ',') + '</div>' : '') + '</div>';
-    html += '</div>';
+    if (_mostraPrezzi) {
+      var _piM2 = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti.find(function(p){ return p.nome === prodotto; }) : null;
+      var _moM2 = (_piM2 && _piM2.margine_obiettivo != null) ? Number(_piM2.margine_obiettivo) : null;
+      html += '<div style="display:flex;gap:8px;margin-top:12px">';
+      html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#185FA5;font-weight:500;margin-bottom:3px">Prezzo · ultima marginalità</div><div id="cmp-box-ultima" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#185FA5">—</div></div>';
+      html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#0C447C;font-weight:500;margin-bottom:3px">Prezzo · marginalità cercata</div><div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#0C447C">' + (_moM2 != null ? '€ ' + (cn + _moM2).toFixed(4).replace('.', ',') : '<span style="font-size:11px;font-weight:400;color:var(--text-muted)">imposta in Magazzino</span>') + '</div>' + (_moM2 != null ? '<div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:#BA7517;margin-top:2px">IVA inc. € ' + ((cn + _moM2) * 1.22).toFixed(4).replace('.', ',') + '</div>' : '') + '</div>';
+      html += '</div>';
+    }
     html += '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
     (async function(){
@@ -3684,17 +3692,19 @@ function _apriPopupCalcoloCMP(prodotto, dataFmt, lp, cp, lc, cc, cn) {
   }
   html += '</div>';
 
-  // Prezzi consigliati sul CMP: ultima marginalità (blu medio) + marginalità cercata (blu scuro)
-  var _piCmp = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti.find(function(p){ return p.nome === prodotto; }) : null;
-  var _moCmp = (_piCmp && _piCmp.margine_obiettivo != null) ? Number(_piCmp.margine_obiettivo) : null;
-  html += '<div style="display:flex;gap:8px;margin-top:12px">';
-  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:10px 12px">'
-    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#185FA5;font-weight:500;margin-bottom:3px">Prezzo · ultima marginalità</div>'
-    + '<div id="cmp-box-ultima" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#185FA5">—</div></div>';
-  html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:10px 12px">'
-    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#0C447C;font-weight:500;margin-bottom:3px">Prezzo · marginalità cercata</div>'
-    + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#0C447C">' + (_moCmp != null ? '€ ' + (cn + _moCmp).toFixed(4).replace('.', ',') : '<span style="font-size:11px;font-weight:400;color:var(--text-muted)">imposta in Magazzino</span>') + '</div>' + (_moCmp != null ? '<div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:#BA7517;margin-top:2px">IVA inc. € ' + ((cn + _moCmp) * 1.22).toFixed(4).replace('.', ',') + '</div>' : '') + '</div>';
-  html += '</div>';
+  if (_mostraPrezzi) {
+    // Prezzi consigliati sul CMP: ultima marginalità (blu medio) + marginalità cercata (blu scuro)
+    var _piCmp = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti.find(function(p){ return p.nome === prodotto; }) : null;
+    var _moCmp = (_piCmp && _piCmp.margine_obiettivo != null) ? Number(_piCmp.margine_obiettivo) : null;
+    html += '<div style="display:flex;gap:8px;margin-top:12px">';
+    html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #85B7EB;border-radius:8px;padding:10px 12px">'
+      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#185FA5;font-weight:500;margin-bottom:3px">Prezzo · ultima marginalità</div>'
+      + '<div id="cmp-box-ultima" style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#185FA5">—</div></div>';
+    html += '<div style="flex:1;background:#E6F1FB;border:0.5px solid #378ADD;border-radius:8px;padding:10px 12px">'
+      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:#0C447C;font-weight:500;margin-bottom:3px">Prezzo · marginalità cercata</div>'
+      + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:#0C447C">' + (_moCmp != null ? '€ ' + (cn + _moCmp).toFixed(4).replace('.', ',') : '<span style="font-size:11px;font-weight:400;color:var(--text-muted)">imposta in Magazzino</span>') + '</div>' + (_moCmp != null ? '<div style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:#BA7517;margin-top:2px">IVA inc. € ' + ((cn + _moCmp) * 1.22).toFixed(4).replace('.', ',') + '</div>' : '') + '</div>';
+    html += '</div>';
+  }
 
   // Nota finale
   html += '<div style="margin-top:12px;font-size:11px;color:var(--text-muted);text-align:center;font-style:italic">Media ponderata: i litri vecchi e i nuovi pesano in proporzione</div>';

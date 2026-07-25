@@ -1525,6 +1525,20 @@ async function generaFattura(){
     const ggPag = cliente.giorni_pagamento || 30;
     const dataScad = _addDays(dataFattura, ggPag);
 
+    // ─── CONFERMA (24/07 — Rinaldo: "non voglio fantasmi nel database") ───
+    // Prima si scriveva senza chiedere nulla: un clic per curiosità lasciava
+    // una bozza invisibile nell'elenco (che legge fatture_emesse) e bruciava
+    // un numero della serie interna.
+    if (!confirm('Generare la fattura interna?\n\n'
+      + '• Numero: ' + numero + '/' + anno + ' (del ' + _fmtD(dataFattura) + ')\n'
+      + '• Cliente: ' + (cliente.nome || '?') + '\n'
+      + '• ' + selezionati.length + (selezionati.length === 1 ? ' ordine' : ' ordini') + '\n'
+      + '• Imponibile ' + _fmtE(totImponibile) + ' + IVA ' + _fmtE(totIva) + ' = ' + _fmtE(totTotale) + '\n\n'
+      + 'Nasce in BOZZA e il numero ' + numero + ' resta impegnato.')) {
+      toast('Generazione annullata');
+      return;
+    }
+
     // Inserisci fattura
     const { data: fattura, error: errFatt } = await sb.from('fatture').insert([{
       numero, anno, data: dataFattura,

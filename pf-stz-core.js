@@ -176,7 +176,7 @@ async function caricaOrdiniRicevutiRecenti() {
   var limite = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() - 30);
   var limiteISO = limite.toISOString().split('T')[0];
   const { data: ordini } = await sb.from('ordini')
-    .select('id,data,prodotto,litri,fornitore,stato')
+    .select('id,data,prodotto,litri,fornitore,stato,costo_litro,trasporto_litro,iva')
     .eq('tipo_ordine','stazione_servizio')
     .eq('ricevuto_stazione', true)
     .gte('data', limiteISO)
@@ -196,7 +196,7 @@ async function caricaOrdiniRicevutiRecenti() {
   html += '</div>';
   // Body collassabile
   html += '<div id="stz-ricevuti-recenti-body" style="display:' + (isOpen ? 'block' : 'none') + ';margin-top:10px">';
-  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th></th></tr></thead><tbody>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>€/L sbarco</th><th>Fornitore</th><th></th></tr></thead><tbody>';
   ordini.forEach(function(r) {
     const dataFmt = new Date(r.data).toLocaleDateString('it-IT');
     const _pi = cacheProdotti.find(function(p) { return p.nome === r.prodotto; });
@@ -205,6 +205,14 @@ async function caricaOrdiniRicevutiRecenti() {
       '<td>' + dataFmt + '</td>' +
       '<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + colore + ';margin-right:4px"></span>' + esc(r.prodotto) + '</td>' +
       '<td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td>' +
+      // Costo SBARCATO = costo_litro + trasporto_litro (netto), e finito IVA inclusa
+      '<td style="font-family:var(--font-mono);white-space:nowrap">' + (function(){
+          var _net = Number(r.costo_litro || 0) + Number(r.trasporto_litro || 0);
+          if (!(_net > 0)) return '<span style="color:var(--text-muted)">—</span>';
+          var _ali = Number(r.iva != null ? r.iva : 22);
+          return '<span style="color:#A32D2D;font-weight:600">€ ' + _net.toFixed(4).replace('.', ',') + '</span>'
+            + '<div style="font-size:10.5px;color:#BA7517">IVA inc. € ' + (_net * (1 + _ali / 100)).toFixed(4).replace('.', ',') + '</div>';
+        })() + '</td>' +
       '<td>' + esc(r.fornitore || '—') + '</td>' +
       '<td><button class="btn-secondary" style="font-size:11px;padding:4px 10px;color:#a04020;border-color:#d4a090;background:#fff5f0" onclick="annullaRicezioneStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto).replace(/'/g, "\\'") + '\')" title="Riporta l\'ordine in elenco da ricevere e scarica i litri dalle cisterne">↩ Annulla ricezione</button></td>' +
       '</tr>';
