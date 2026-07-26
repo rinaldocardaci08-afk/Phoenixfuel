@@ -62,14 +62,23 @@
       }
 
       /* 3. eccezione: le SETTIMANE (calendario finanze, letture stazione,
-         giacenze, foglio giornale) restano sette giorni in fila, ma la riga
-         scorre di lato con l'aggancio: impilarle perderebbe il confronto */
+         giacenze, foglio giornale) restano sette giorni in fila e la riga
+         scorre di lato. Colonne STRETTE (se ne vedono tre per volta) e a
+         scorrere e SOLO la striscia: se scorresse la pagina intera si
+         vedrebbe il fondo grigio oltre il bordo della card. */
       [style*="repeat(7"] {
-        grid-template-columns:repeat(7, 46vw) !important;
+        grid-template-columns:repeat(7, 132px) !important;
         overflow-x:auto; -webkit-overflow-scrolling:touch;
-        scroll-snap-type:x proximity; padding-bottom:6px;
+        overscroll-behavior-x:contain;
+        scroll-snap-type:x proximity; padding-bottom:8px;
+        background:transparent;
       }
       [style*="repeat(7"] > * { scroll-snap-align:start; }
+
+      /* la pagina non si sposta di lato: scorrono solo le strisce e le
+         tabelle, ognuna dentro il proprio riquadro */
+      body, .app, .content, .card { overflow-x:hidden; }
+      [style*="repeat(7"], table { overflow-x:auto; }
 
       /* Tabelle larghe (Consegne, ordini, fatture): scorrono invece di
          essere spremute in colonne da pochi pixel */
@@ -94,9 +103,9 @@
       .modal-content, [id$="-modal"] > div { max-width:96vw !important; }
     }
 
-    /* Telefoni stretti: un giorno per volta nelle settimane */
+    /* Telefoni stretti: colonne appena piu strette */
     @media (max-width: 430px) {
-      [style*="repeat(7"] { grid-template-columns:repeat(7, 80vw) !important; }
+      [style*="repeat(7"] { grid-template-columns:repeat(7, 122px) !important; }
       [style*="auto-fit"], [style*="auto-fill"] { grid-template-columns:1fr !important; }
       .kpi-value { font-size:15px !important; }
       .card { padding:10px !important; }
