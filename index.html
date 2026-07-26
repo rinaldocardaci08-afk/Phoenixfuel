@@ -2242,12 +2242,9 @@
             <div style="display:flex;gap:8px">
               <button id="btn-salva-cassa" class="btn-primary" style="flex:1" onclick="salvaCassa()">💾 Salva registro</button>
               <button class="btn-primary" style="background:#6B5FCC" onclick="stampaCassa()">🖨️ Stampa</button>
-              <button class="btn-primary" style="background:#378ADD" onclick="document.getElementById('ocr-scontrino-input').click()">📷 Leggi scontrino</button>
-              <input type="file" id="ocr-scontrino-input" accept="image/*" style="display:none" onchange="ocrScontrino(this)" />
               <button class="btn-primary" style="background:#639922" onclick="document.getElementById('scontrino-upload-input').click()">📎 Allega scontrino</button>
               <input type="file" id="scontrino-upload-input" accept="image/*,.pdf" multiple style="display:none" onchange="uploadScontrinoCassa(this)" />
             </div>
-            <div id="ocr-status" style="display:none;margin-top:10px;padding:10px 14px;background:#E6F1FB;border-radius:8px;font-size:12px;color:#0C447C"></div>
             <!-- Anteprime scontrini allegati -->
             <div id="scontrini-cassa-preview" style="margin-top:10px"></div>
           </div>
@@ -2911,7 +2908,6 @@
             collega al cliente corretto in anagrafica con match per nome (prefisso). Lanciare ogni volta
             dopo un import massivo, o quando le fatture compaiono come <em>uncertain</em> con score "X PIVA".
           </div>
-          <button class="btn-primary" style="background:#6B5FCC" onclick="associaClienteIdMancanti()">🔗 Associa cliente_id mancanti</button>
           <div id="sanatoria-cliente-output" style="margin-top:12px;font-size:12px"></div>
         </div>
 
@@ -3061,7 +3057,7 @@
 <script src="pf-stz-unificata.js?v=20260726b"></script>
 <script src="pf-stz-corrispettivi.js?v=20260608a"></script>
 <script src="pf-stz-magazzino.js?v=20260724a"></script>
-<script src="pf-stz-cassa.js?v=20260726b"></script>
+<script src="pf-stz-cassa.js?v=20260726c"></script>
 <script src="pf-stz-report.js?v=20260526a"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260526a"></script>
