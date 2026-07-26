@@ -45,13 +45,20 @@ async function _cassaPortaleStato(data, giaCompilata) {
   if (!box) return;
   _cassaPortaleDati = null;
   box.innerHTML = '';
-  if (giaCompilata) return;   // il pulsante compare solo sul giorno da compilare
+  // Il pulsante compare ogni volta che per quel giorno esistono dati scaricati:
+  // anche su una giornata gia salvata, perche puo essere stata compilata a
+  // meta (26/07, caso del 24). Niente viene scritto: i valori si propongono
+  // nei campi e salva sempre Rinaldo.
   try {
     var r = await sb.from('stazione_import_cassa').select('*').eq('data', data).maybeSingle();
     if (!r.data) return;
     _cassaPortaleDati = r.data;
-    box.innerHTML = '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'
-      + '<button id="cassa-btn-portale" onclick="cassaCaricaDalPortale()" style="background:var(--bg-card);border:0.5px solid #378ADD;color:#0C447C;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">📥 Carica dati dal portale</button></div>';
+    var etichetta = giaCompilata ? '📥 Ricarica dati dal portale' : '📥 Carica dati dal portale';
+    var nota = giaCompilata
+      ? '<span style="font-size:11px;color:var(--text-muted);margin-right:10px">Giornata gia salvata: i valori verranno riproposti nei campi, salvi tu.</span>'
+      : '';
+    box.innerHTML = '<div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:10px">' + nota
+      + '<button id="cassa-btn-portale" onclick="cassaCaricaDalPortale()" style="background:var(--bg-card);border:0.5px solid #378ADD;color:#0C447C;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">' + etichetta + '</button></div>';
   } catch (e) {
     console.warn('[cassa] staging portale', e);
   }
