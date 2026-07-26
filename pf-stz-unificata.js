@@ -279,7 +279,7 @@ async function caricaUnificata() {
   // (es. errore non previsto su un nuovo blocco), il loading dovrebbe almeno
   // mostrare l'errore esplicito invece di restare in "Caricamento dati..."
   try {
-    _uniRenderGiorno(idxIniziale);
+    if (_uniVistaHome) { _uniRenderSettimana(); } else { _uniRenderGiorno(idxIniziale); }
   } catch(e) {
     console.error('[caricaUnificata] _uniRenderGiorno crash:', e);
     el.innerHTML = '<div style="padding:24px;background:#FCEBEB;border:1px solid #E24B4A;border-radius:8px;color:#791F1F;font-size:13px"><strong>⚠ Errore rendering giorno corrente</strong><br><br>Dettaglio: ' + (e && e.message ? e.message : String(e)) + '<br><br><small>Stack visibile in console (F12)</small></div>';
@@ -289,6 +289,223 @@ async function caricaUnificata() {
   try { _uniRenderStoricoLett(idxIniziale); } catch(e) { console.error('[_uniRenderStoricoLett] crash:', e); }
   try { _uniRenderPrezziMese(); } catch(e) { console.error('[_uniRenderPrezziMese] crash:', e); }
   try { _uniRenderStoricoCMP(); } catch(e) { console.error('[_uniRenderStoricoCMP] crash:', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HOME SETTIMANALE (26/07 — richiesta Rinaldo)
+// Sette giorni in linea, ciascuno con tre pannelli sovrapposti:
+//   1) contatori finali per pompa, in formato display, con etichetta POMPA n
+//      e pallino del prodotto (benzina verde, gasolio giallo)
+//   2) dati per prodotto (litri, prezzo, margine) + TOTALE GIORNO litri/euro
+//   3) cassa: venduto, contanti, elettronici e saldo crediti-rimborsi
+// Serve a capire a colpo d'occhio quali giornate sono complete e dove
+// intervenire. Il clic apre il giorno nella schermata di sempre, che resta
+// identica. Nessuna scrittura: qui si legge soltanto.
+// ═══════════════════════════════════════════════════════════════════
+var _uniVistaHome = true;
+var _uniSetAncora = null;
+
+function _uniSetLunedi(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  var dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return d.toISOString().split('T')[0];
+}
+
+function _uniToggleHome() {
+  _uniVistaHome = !_uniVistaHome;
+  if (_uniVistaHome) { _uniRenderSettimana(); }
+  else { _uniRenderGiorno(_uniData ? _uniData.indice : 0); }
+}
+
+function _uniSettimanaSposta(delta) {
+  var base = _uniSetAncora || new Date().toISOString().split('T')[0];
+  var d = new Date(base + 'T12:00:00');
+  d.setDate(d.getDate() + delta * 7);
+  _uniSetAncora = d.toISOString().split('T')[0];
+  _uniRenderSettimana();
+}
+
+function _uniApriGiornoDaSettimana(data) {
+  _uniVistaHome = false;
+  var inp = document.getElementById('uni-data-input');
+  if (inp) inp.value = data;
+  var idx = _uniData ? _uniData.dateUniche.indexOf(data) : -1;
+  if (idx >= 0) { _uniRenderGiorno(idx); return; }
+  // giorno senza dati: lo inserisco nell'elenco cosi la schermata lo apre vuoto
+  if (_uniData) {
+    _uniData.dateUniche.push(data);
+    _uniData.dateUniche.sort(function (a, b) { return b.localeCompare(a); });
+    _uniRenderGiorno(_uniData.dateUniche.indexOf(data));
+  }
+}
+
+function _uniSetFmtE(v) {
+  return Number(v || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function _uniRenderSettimana() {
+  var el = document.getElementById('uni-pompe');
+  if (!el || !_uniData) return;
+  var m = _uniData;
+
+  var pan = document.getElementById('uni-panel');
+  if (pan) pan.style.display = 'none';
+  var btnV = document.getElementById('uni-btn-vista');
+  if (btnV) btnV.style.display = 'none';
+  var btnH = document.getElementById('uni-btn-home');
+  if (btnH) btnH.textContent = '📆 Vai al giorno';
+
+  el.innerHTML = '<div class="loading" style="padding:24px">Caricamento settimana...</div>';
+
+  var lunISO = _uniSetLunedi(_uniSetAncora || new Date().toISOString().split('T')[0]);
+  var lun = new Date(lunISO + 'T12:00:00');
+  var dom = new Date(lun); dom.setDate(lun.getDate() + 6);
+  var domISO = dom.toISOString().split('T')[0];
+  var oggiISO = new Date().toISOString().split('T')[0];
+
+  // cassa salvata e dati in sala d'attesa per la settimana
+  var cassaByData = {}, impCont = {}, impCassa = {};
+  try {
+    var q = await Promise.all([
+      sb.from('stazione_cassa').select('*').gte('data', lunISO).lte('data', domISO),
+      sb.from('stazione_import_portale').select('data,pompa_ordine,contatore_finale,litri_portale').gte('data', lunISO).lte('data', domISO),
+      sb.from('stazione_import_cassa').select('*').gte('data', lunISO).lte('data', domISO)
+    ]);
+    (q[0].data || []).forEach(function (r) { cassaByData[r.data] = r; });
+    (q[1].data || []).forEach(function (r) { if (!impCont[r.data]) impCont[r.data] = []; impCont[r.data].push(r); });
+    (q[2].data || []).forEach(function (r) { impCassa[r.data] = r; });
+  } catch (e) {
+    console.warn('[settimana] letture di appoggio', e);
+  }
+
+  var GG = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
+  var MM = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+  var pompe = (m.pompe || []).slice().sort(function (a, b) { return Number(a.ordine) - Number(b.ordine); });
+
+  var h = '';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">';
+  h += '<div style="display:flex;align-items:center;gap:8px">'
+    + '<button onclick="_uniSettimanaSposta(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">◀</button>'
+    + '<span style="font-size:15px;font-weight:700">Settimana ' + lun.getDate() + ' ' + MM[lun.getMonth()] + ' – ' + dom.getDate() + ' ' + MM[dom.getMonth()] + '</span>'
+    + '<button onclick="_uniSettimanaSposta(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:14px;cursor:pointer;color:var(--text)">▶</button>'
+    + '</div>';
+  h += '<span style="font-size:11.5px;color:var(--text-muted)">clicca un giorno per aprirlo</span>';
+  h += '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">';
+
+  var setLitri = 0, setEuro = 0, setMarg = 0, setCompleti = 0, setGiorniConDati = 0;
+  var cur = new Date(lun);
+
+  for (var i = 0; i < 7; i++) {
+    var data = cur.toISOString().split('T')[0];
+    var letture = (m.lettureByData[data] || []);
+    var haLetture = letture.length > 0;
+    var cassa = cassaByData[data] || null;
+    var staging = (impCont[data] || []).length > 0 || !!impCassa[data];
+    var futuro = data > oggiISO;
+
+    var tot = haLetture ? _uniCalcolaTotaliPerProdotto(data) : null;
+    var litriG = tot ? (tot.gasolio.litri + tot.benzina.litri) : 0;
+    var euroIva = tot ? ((tot.gasolio.euro + tot.benzina.euro) * 1.22) : 0;
+    var margG = tot ? (tot.gasolio.marg + tot.benzina.marg) : 0;
+    if (haLetture) { setLitri += litriG; setEuro += euroIva; setMarg += margG; setGiorniConDati++; }
+    if (haLetture && cassa) setCompleti++;
+
+    var bordo = '#e8e7e3', icona = '';
+    if (haLetture && cassa) { bordo = '#639922'; icona = '<span style="color:#3B6D11;font-size:13px">●</span>'; }
+    else if (haLetture) { bordo = '#E0A458'; icona = '<span style="color:#8A4F06;font-size:13px">◐</span>'; }
+    else if (staging) { bordo = '#378ADD'; icona = '<span style="color:#0C447C;font-size:13px">↓</span>'; }
+
+    h += '<div onclick="_uniApriGiornoDaSettimana(\'' + data + '\')" title="Apri la giornata del ' + _pfIsoToIt(data) + '" '
+      + 'style="border:0.5px solid var(--border);border-left:3px solid ' + bordo + ';background:' + (data === oggiISO ? '#FFF8EE' : 'var(--bg)') + ';border-radius:9px;padding:6px;cursor:pointer;min-height:150px" '
+      + 'onmouseover="this.style.boxShadow=\'0 0 0 2px #185FA533\'" onmouseout="this.style.boxShadow=\'none\'">';
+
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">'
+      + '<span style="font-size:11.5px;font-weight:700;color:' + (data === oggiISO ? '#D85A30' : 'var(--text)') + '">' + GG[cur.getDay()] + ' ' + cur.getDate() + '</span>'
+      + icona + '</div>';
+
+    if (haLetture) {
+      // ── pannello 1: contatori
+      h += '<div style="background:var(--bg-card);border-radius:6px;padding:5px;margin-bottom:4px">';
+      pompe.forEach(function (pp) {
+        var l = null;
+        letture.forEach(function (x) { if (x.pompa_id === pp.id) l = x; });
+        var benz = String(pp.prodotto || '').toLowerCase().indexOf('benzina') >= 0;
+        var col = benz ? '#5AA02C' : '#E3B341';
+        var colTxt = benz ? '#7BE87B' : '#F2D06B';
+        h += '<div style="font-size:8px;font-weight:700;letter-spacing:.3px;color:' + (benz ? '#3B6D11' : '#8A4F06') + ';display:flex;align-items:center;gap:3px">'
+          + '<span style="width:5px;height:5px;border-radius:50%;background:' + col + ';display:inline-block"></span>POMPA ' + pp.ordine + '</div>';
+        h += '<div style="background:#0E1210;border-radius:3px;padding:2px 3px;margin:2px 0 4px;font-family:var(--font-mono);font-size:10px;letter-spacing:.5px;color:' + colTxt + ';text-align:center">'
+          + (l ? Math.round(Number(l.lettura)) : '—') + '</div>';
+      });
+      h += '</div>';
+
+      // ── pannello 2: prodotti + totale giorno
+      h += '<div style="background:var(--bg-card);border-radius:6px;padding:5px;margin-bottom:4px;font-size:9px;line-height:1.45">';
+      var pG = Number(m.prezziMap[data + '_Gasolio Autotrazione'] || 0);
+      var pB = Number(m.prezziMap[data + '_Benzina'] || 0);
+      if (tot.gasolio.litri > 0) {
+        h += '<div><span style="color:#8A4F06;font-weight:700">Gasolio</span><br>'
+          + '<span style="font-family:var(--font-mono)">' + Math.round(tot.gasolio.litri) + ' L' + (pG > 0 ? ' · ' + pG.toFixed(3) : '') + '</span><br>'
+          + '<span style="font-family:var(--font-mono);color:' + (tot.gasolio.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.gasolio.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.gasolio.marg) + '</span></div>';
+      }
+      if (tot.benzina.litri > 0) {
+        h += '<div style="margin-top:4px"><span style="color:#3B6D11;font-weight:700">Benzina</span><br>'
+          + '<span style="font-family:var(--font-mono)">' + Math.round(tot.benzina.litri) + ' L' + (pB > 0 ? ' · ' + pB.toFixed(3) : '') + '</span><br>'
+          + '<span style="font-family:var(--font-mono);color:' + (tot.benzina.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.benzina.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.benzina.marg) + '</span></div>';
+      }
+      h += '<div style="border-top:0.5px solid var(--border);margin-top:5px;padding-top:4px">'
+        + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Litri</span><span style="font-family:var(--font-mono);font-weight:700">' + Math.round(litriG) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Euro</span><span style="font-family:var(--font-mono);font-weight:700">' + _uniSetFmtE(euroIva) + '</span></div>'
+        + '</div></div>';
+
+      // ── pannello 3: cassa
+      if (cassa) {
+        var carte = Number(cassa.bancomat || 0) + Number(cassa.carte_nexi || 0) + Number(cassa.carte_aziendali || 0);
+        var contanti = euroIva - carte;
+        var saldo = Number(cassa.crediti_emessi || 0) - Number(cassa.rimborsi_effettuati || 0) - Number(cassa.rimborsi_giorni_prec || 0);
+        h += '<div style="background:var(--bg-card);border-radius:6px;padding:5px;font-size:9px;line-height:1.5">'
+          + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Venduto</span><span style="font-family:var(--font-mono);font-weight:700">' + _uniSetFmtE(euroIva) + '</span></div>'
+          + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Contanti</span><span style="font-family:var(--font-mono)">' + _uniSetFmtE(contanti) + '</span></div>'
+          + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Elettr.</span><span style="font-family:var(--font-mono)">' + _uniSetFmtE(carte) + '</span></div>'
+          + '<div style="display:flex;justify-content:space-between;border-top:0.5px solid var(--border);margin-top:3px;padding-top:3px"><span style="color:var(--text-muted)">Cred.−Rimb.</span>'
+          + '<span style="font-family:var(--font-mono);color:' + (Math.abs(saldo) < 0.005 ? '#3B6D11' : '#8A4F06') + '">' + _uniSetFmtE(saldo) + '</span></div>'
+          + '</div>';
+      } else {
+        h += '<div style="background:#FFF1DC;border-radius:6px;padding:6px;font-size:9px;color:#8A4F06;line-height:1.4;text-align:center;font-weight:600">'
+          + 'Cassa da compilare' + (impCassa[data] ? '<br><span style="font-weight:400">dati del portale pronti</span>' : '') + '</div>';
+      }
+    } else if (staging) {
+      var ic = impCassa[data] || {};
+      var litriPort = 0;
+      (impCont[data] || []).forEach(function (r) { litriPort += Number(r.litri_portale || 0); });
+      h += '<div style="background:#E6F1FB;border-radius:6px;padding:8px 5px;text-align:center;font-size:9.5px;color:#0C447C;line-height:1.4;margin-bottom:4px;font-weight:600">Dati pronti<br>dal portale</div>';
+      h += '<div style="background:var(--bg-card);border-radius:6px;padding:5px;font-size:9px;line-height:1.5;color:var(--text-muted)">'
+        + '<div style="display:flex;justify-content:space-between"><span>Litri</span><span style="font-family:var(--font-mono)">' + Math.round(litriPort || Number(ic.litri_totali || 0)) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Euro</span><span style="font-family:var(--font-mono)">' + _uniSetFmtE(ic.importo_totale) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Contanti</span><span style="font-family:var(--font-mono)">' + _uniSetFmtE(ic.contanti) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Elettr.</span><span style="font-family:var(--font-mono)">' + _uniSetFmtE(Number(ic.bancomat || 0) + Number(ic.nexi || 0)) + '</span></div>'
+        + '</div>';
+    } else {
+      h += '<div style="font-size:9.5px;color:var(--text-muted);text-align:center;padding-top:26px">' + (futuro ? '—' : 'da compilare') + '</div>';
+    }
+
+    h += '</div>';
+    cur.setDate(cur.getDate() + 1);
+  }
+  h += '</div>';
+
+  // riga totali settimana
+  h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;background:var(--bg-card);border-radius:9px;padding:12px 14px">'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Litri settimana</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + Math.round(setLitri).toLocaleString('it-IT') + '</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Venduto</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + _uniSetFmtE(setEuro) + '</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Margine</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:' + (setMarg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (setMarg >= 0 ? '+' : '') + _uniSetFmtE(setMarg) + '</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Giorni completi</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + setCompleti + ' / ' + setGiorniConDati + '</div></div>'
+    + '</div>';
+
+  el.innerHTML = h;
 }
 
 // ── Navigazione ◀ ▶ + input data ──
@@ -839,9 +1056,13 @@ function _uniRenderGiorno(idx) {
     elDay.style.background = dc[0]; elDay.style.color = dc[1]; elDay.style.display = 'inline-block';
   }
 
-  // Toggle vista label
+  // Toggle vista label + ripristino di cio che la home nasconde
   var btnVista = document.getElementById('uni-btn-vista');
-  if (btnVista) btnVista.textContent = m.vista === 'pompa' ? '📊 Per prodotto' : '⛽ Per pompa';
+  if (btnVista) { btnVista.style.display = ''; btnVista.textContent = m.vista === 'pompa' ? '📊 Per prodotto' : '⛽ Per pompa'; }
+  var panLat = document.getElementById('uni-panel');
+  if (panLat) panLat.style.display = '';
+  var btnHome = document.getElementById('uni-btn-home');
+  if (btnHome) btnHome.textContent = '📅 Settimana';
 
   if (m.vista === 'prodotto') {
     _uniRenderPerProdotto(data);
