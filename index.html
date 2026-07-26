@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PhoenixFuel — Gestionale Carburanti</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="pf-cisterne-v2.css?v=20260419d" />
@@ -75,6 +75,16 @@
          essere spremute in colonne da pochi pixel */
       table { font-size:12px; display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
       th, td { padding:6px 8px !important; }
+
+      /* Il pulsante menu (tre linee) deve restare cliccabile e sopra a
+         qualunque cosa: area di tocco piena e barra in alto che non scorre */
+      .hamburger {
+        position:relative; z-index:120;
+        min-width:44px; min-height:44px;
+        display:flex !important; align-items:center; justify-content:center;
+        font-size:24px !important; padding:0 10px !important;
+      }
+      .topbar { position:sticky; top:0; z-index:60; }
 
       /* Comandi piu grandi del dito; 16px sugli input evita lo zoom di iOS */
       button { min-height:34px; }
