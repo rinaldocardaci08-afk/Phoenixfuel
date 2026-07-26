@@ -25,6 +25,34 @@ var _pfpIstituti = [];
 function _pfpFmtE(v) { return '€ ' + Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function _pfpFmtD(d) { if(!d) return '—'; var p=String(d).split('-'); if(p.length<3) return d; return p[2]+'/'+p[1]+'/'+p[0]; }
 function _pfpEsc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// ═══════════════════════════════════════════════════════════════════
+// BARRA FIDO IN DIRETTA (completata il 26/07 — controllo bug)
+// L'input importo chiamava _pfpAggiornaFido() che non esisteva: ogni tasto
+// digitato lanciava un errore in console e il riquadro restava vuoto.
+// La funzione ora c'e: se chi apre il modale ha impostato window._ecfFidoCtx
+// ({ fido, esposizione, nome }) disegna la barra e la aggiorna mentre digiti;
+// se il contesto non c'e non fa nulla, in silenzio.
+// ═══════════════════════════════════════════════════════════════════
+function _pfpAggiornaFido() {
+  var box = document.getElementById('pfp-fido-box');
+  var ctx = window._ecfFidoCtx;
+  if (!box || !ctx || !(Number(ctx.fido) > 0)) return;
+  var fido = Number(ctx.fido || 0);
+  var espo = Number(ctx.esposizione || 0);
+  var inp = document.getElementById('pfp-importo');
+  var pagando = inp ? (parseFloat(inp.value) || 0) : 0;
+  var dopo = Math.max(0, espo - pagando);
+  var pct = fido > 0 ? Math.min(100, (dopo / fido) * 100) : 0;
+  var col = pct >= 85 ? '#C0392B' : (pct >= 60 ? '#F5921E' : '#639922');
+  box.innerHTML = '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px">'
+    + '<span style="color:var(--text-muted)">Fido ' + (ctx.nome ? _pfpEsc(ctx.nome) : '') + '</span>'
+    + '<span style="font-family:var(--font-mono);font-weight:700">' + _pfpFmtE(dopo) + ' / ' + _pfpFmtE(fido) + '</span></div>'
+    + '<div style="height:8px;background:var(--bg-card);border-radius:4px;overflow:hidden">'
+    + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + col + '"></div></div>'
+    + '<div style="font-size:11px;margin-top:5px;color:' + (fido - dopo > 0 ? '#3B6D11' : '#A32D2D') + '">'
+    + 'Dopo questo pagamento resterebbero <strong>' + _pfpFmtE(Math.max(0, fido - dopo)) + '</strong> disponibili</div>';
+}
+
 function _pfpOggiISO() {
   // Versione locale: evita il bug di toISOString() che in fuso UTC+2 di notte ritorna giorno precedente
   var d = new Date();

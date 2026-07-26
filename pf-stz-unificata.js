@@ -124,11 +124,20 @@ async function caricaUnificata() {
   // Patch 30/04 (d): Promise.allSettled invece di Promise.all così se una
   // query fallisce (es. tabella stazione_cambio_prezzo non ancora creata)
   // il caricamento prosegue con i dati che ci sono.
+  // PAGINAZIONE (26/07 — emerso dal controllo bug): su una finestra di 18 mesi
+  // le letture sono 4 al giorno (oltre 2200 righe) e prezzi/costi 2 al giorno
+  // (oltre 1100). Senza paginare PostgREST taglia a 1000 e i giorni piu vecchi
+  // sparivano in silenzio da vista settimanale e storici.
+  // NB: _pfFetchAllPages restituisce direttamente l'ARRAY, mentre _safeData qui
+  // sotto si aspetta { data: [...] } -> lo riavvolgo.
+  var _pag = function (fabbrica) {
+    return _pfFetchAllPages(fabbrica).then(function (arr) { return { data: arr, error: null }; });
+  };
   var [lettSet, pompeSet, prezziSet, costiSet, cisSet, cmpSet, cpSet] = await Promise.allSettled([
-    sb.from('stazione_letture').select('*').gte('data', limISO).order('data', { ascending: false }),
+    _pag(function () { return sb.from('stazione_letture').select('*').gte('data', limISO).order('data', { ascending: false }); }),
     sb.from('stazione_pompe').select('*').eq('attiva', true).order('ordine'),
-    sb.from('stazione_prezzi').select('*').gte('data', limISO).order('data', { ascending: false }),
-    sb.from('stazione_costi').select('*').gte('data', limISO).order('data', { ascending: false }),
+    _pag(function () { return sb.from('stazione_prezzi').select('*').gte('data', limISO).order('data', { ascending: false }); }),
+    _pag(function () { return sb.from('stazione_costi').select('*').gte('data', limISO).order('data', { ascending: false }); }),
     sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede', 'stazione_oppido'),
     sb.from('stazione_cmp_storico').select('*').eq('sede', 'stazione_oppido').order('created_at', { ascending: false }).limit(20),
     sb.from('stazione_cambio_prezzo').select('*').gte('data', limISO).order('data', { ascending: false })

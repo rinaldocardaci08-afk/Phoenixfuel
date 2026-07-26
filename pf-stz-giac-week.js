@@ -22,7 +22,7 @@ var _DGW_PROD_ORDINE = ['Gasolio Autotrazione','Benzina','Gasolio Agricolo','HVO
 // ───────────────────────────────────────────────────────────────────
 // Switch tra vista "Singolo giorno" (esistente) e "Settimanale" (nuova)
 // ───────────────────────────────────────────────────────────────────
-var _dgwMeseInit = false;
+var _sgwMeseInit = false;  // rinominata 26/07: collideva con quella di pf-dep-giac-week.js
 
 function __sgwNOOP(target) {
   var btnGg = document.getElementById('sgw-btn-giorno');
@@ -60,9 +60,9 @@ function __sgwNOOP(target) {
     blocoWk.style.display = 'none';
     if (blocoMs) blocoMs.style.display = '';
     // Lazy load: chiama caricaGiacenzeMensiliDeposito solo al primo accesso
-    if (!_dgwMeseInit && typeof caricaGiacenzeMensiliDeposito === 'function') {
+    if (!_sgwMeseInit && typeof caricaGiacenzeMensiliDeposito === 'function') {
       caricaGiacenzeMensiliDeposito();
-      _dgwMeseInit = true;
+      _sgwMeseInit = true;
     }
   } else {
     _activeBtn(btnGg);
