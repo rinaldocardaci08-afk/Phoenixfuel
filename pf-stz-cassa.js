@@ -29,6 +29,76 @@ async function _cassaPrimoGiornoDaCompilare() {
   } catch (e) { return oggiISO; }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// DATI DAL PORTALE GILBARCO (26/07)
+// Lo scarico dal PC deposita in stazione_import_cassa i totali della
+// giornata. Qui si PROPONGONO nei campi: bancomat, nexi, crediti emessi,
+// rimborsi (e rimborsi di giorni precedenti, che il portale distingue con
+// la data dello scontrino). I CONTANTI non si scrivono: Phoenix li calcola
+// come vendite meno carte, e quelli del portale servono da CONTROLLO.
+// Nessuna scrittura: salva sempre Rinaldo con il suo pulsante.
+// ═══════════════════════════════════════════════════════════════════
+var _cassaPortaleDati = null;
+
+async function _cassaPortaleStato(data, giaCompilata) {
+  var box = document.getElementById('cassa-portale-box');
+  if (!box) return;
+  _cassaPortaleDati = null;
+  box.innerHTML = '';
+  if (giaCompilata) return;   // il pulsante compare solo sul giorno da compilare
+  try {
+    var r = await sb.from('stazione_import_cassa').select('*').eq('data', data).maybeSingle();
+    if (!r.data) return;
+    _cassaPortaleDati = r.data;
+    box.innerHTML = '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'
+      + '<button id="cassa-btn-portale" onclick="cassaCaricaDalPortale()" style="background:var(--bg-card);border:0.5px solid #378ADD;color:#0C447C;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">📥 Carica dati dal portale</button></div>';
+  } catch (e) {
+    console.warn('[cassa] staging portale', e);
+  }
+}
+
+function cassaCaricaDalPortale() {
+  var d = _cassaPortaleDati;
+  if (!d) { toast('Per questa giornata il portale non e ancora stato scaricato'); return; }
+
+  var set = function (id, val) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.value = (Number(val || 0) > 0) ? Number(val).toFixed(2) : '';
+    el.style.borderColor = '#639922';
+  };
+  set('cassa-bancomat', d.bancomat);
+  set('cassa-nexi', d.nexi);
+  set('cassa-crediti-emessi', d.crediti_emessi);
+  set('cassa-rimborsi', d.rimborsi);
+  set('cassa-rimborsi-prec', d.rimborsi_giorni_prec);
+
+  calcolaCassa();
+
+  // CONTROLLO: i contanti che Phoenix calcola per differenza devono
+  // combaciare con quelli dichiarati dal portale.
+  var totVend = Number(window._cassaTotVendite || 0);
+  var carte = Number(d.bancomat || 0) + Number(d.nexi || 0) + (parseFloat(document.getElementById('cassa-aziendali').value) || 0);
+  var contantiCalc = Math.round((totVend - carte) * 100) / 100;
+  var contantiPort = Math.round(Number(d.contanti || 0) * 100) / 100;
+  var scarto = Math.round((contantiCalc - contantiPort) * 100) / 100;
+
+  var box = document.getElementById('cassa-portale-box');
+  var testo = '<div style="background:#EAF3DE;border-left:4px solid #639922;border-radius:8px;padding:12px 14px;margin-bottom:12px;color:#27500A;font-size:12.5px;line-height:1.55">'
+    + '<strong>Valori proposti dal portale</strong> — controlla e salva: finche non premi Salva non cambia niente.';
+  if (Math.abs(scarto) <= 0.5) {
+    testo += '<div style="margin-top:6px">Contanti: il portale dichiara ' + fmtE(contantiPort) + ', Phoenix ne calcola ' + fmtE(contantiCalc) + ' — quadra.</div>';
+  } else {
+    testo += '</div><div style="background:#FCEBEB;border-left:4px solid #E24B4A;border-radius:8px;padding:12px 14px;margin-bottom:12px;color:#791F1F;font-size:12.5px;line-height:1.55">'
+      + '<strong>Attenzione sui contanti</strong><br>Il portale dichiara ' + fmtE(contantiPort) + ', Phoenix calcola ' + fmtE(contantiCalc)
+      + ' (vendite ' + fmtE(totVend) + ' meno carte ' + fmtE(carte) + '): differenza ' + fmtE(scarto) + '.'
+      + '<br>Prima di salvare controlla le letture della giornata o le carte aziendali.';
+  }
+  testo += '</div>';
+  if (box) box.innerHTML = testo;
+  toast('✓ Dati del portale proposti: controlla e salva');
+}
+
 async function caricaCassa() {
   var input = document.getElementById('cassa-data');
   if (!input.value) input.value = await _cassaPrimoGiornoDaCompilare();
@@ -65,6 +135,7 @@ async function caricaCassa() {
   });
 
   window._cassaTotVendite = totVendite;
+  _cassaPortaleStato(data, !!cassa);
   calcolaCassa();
   caricaCrediti();
   caricaRegistroDifferenze();
