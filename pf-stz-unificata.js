@@ -402,7 +402,7 @@ async function _uniRenderSettimana() {
   h += '<span style="font-size:11.5px;color:var(--text-muted)">clicca un giorno per aprirlo</span>';
   h += '</div>';
 
-  h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">';
+  h += '<div class="pf-scroll-x"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">';
 
   var setLitri = 0, setEuro = 0, setMarg = 0, setCompleti = 0, setGiorniConDati = 0;
   var cur = new Date(lun);
@@ -504,7 +504,7 @@ async function _uniRenderSettimana() {
     h += '</div>';
     cur.setDate(cur.getDate() + 1);
   }
-  h += '</div>';
+  h += '</div></div>';   // chiude griglia + contenitore scorrevole
 
   // riga totali settimana
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;background:var(--bg-card);border-radius:9px;padding:12px 14px">'

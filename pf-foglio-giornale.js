@@ -242,7 +242,7 @@ function _fgRenderHeader(p) {
 function _fgRenderCalendarioSettimana(p, perGiorno) {
   var oggiISO = _fgDateToIso(new Date());
   var lun = _fgIsoToDate(p.daISO);
-  var html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:18px">';
+  var html = '<div class="pf-scroll-x"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:18px">';
 
   for (var i = 0; i < 7; i++) {
     var d = new Date(lun);
@@ -272,7 +272,7 @@ function _fgRenderCalendarioSettimana(p, perGiorno) {
     }
     html += '</div>';
   }
-  html += '</div>';
+  html += '</div></div>';   // chiude griglia + contenitore scorrevole
   return html;
 }
 

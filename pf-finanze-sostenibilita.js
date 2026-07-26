@@ -600,7 +600,7 @@ function _sostRenderKpiSettimana(sett) {
 
 function _sostRenderCalendarioSett(sett) {
   var oggiIso = _sostDateToIso(new Date());
-  var html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:12px">';
+  var html = '<div class="pf-scroll-x"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:12px">';
   sett.giorni.forEach(function(g) {
     var dati = g.dati;
     var isOggi = g.iso === oggiIso;
@@ -620,7 +620,7 @@ function _sostRenderCalendarioSett(sett) {
     if (dati.totEnt === 0 && dati.totUsc === 0) html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic">—</div>';
     html += '</div>';
   });
-  html += '</div>';
+  html += '</div></div>';   // chiude griglia + contenitore scorrevole
   return html;
 }
 

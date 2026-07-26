@@ -373,7 +373,7 @@ function _dgwRender() {
   html += '<button class="btn-edit" onclick="dgwNavSettimana(1)" title="Settimana successiva">›</button></div>';
   html += '</div>';
 
-  html += '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px">';
+  html += '<div class="pf-scroll-x"><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px">';
 
   var oggiIso = _dgwISO(new Date());
   var rilevataPrev = null;
@@ -514,7 +514,7 @@ function _dgwRender() {
     html += '</div>';
     rilevataPrev = rilevataValSalv;
   }
-  html += '</div>';
+  html += '</div></div>';   // chiude griglia + contenitore scorrevole
 
   // Container per il pannello dettaglio giornata (popolato on-demand da dgwMostraDettaglioGiorno)
   html += '<div id="dgw-dettaglio-box" style="margin-top:14px"></div>';

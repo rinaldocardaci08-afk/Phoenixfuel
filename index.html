@@ -46,47 +46,31 @@
       /* Card padding */
       .card { padding:12px !important; }
 
-      /* ═══ MOBILE 26/07 ════════════════════════════════════════════════
-         Le griglie sono scritte dentro il codice, in decine di varianti
-         (3, 4, 5 colonne, asimmetriche, con minmax). Invece di inseguirle
-         una per una: TUTTO cio che e a griglia si impila, e si riabilitano
-         solo le due eccezioni che hanno senso su un telefono. Nessuna
-         logica toccata: cambia solo la disposizione. */
+      /* ═══ MOBILE — UN SOLO MODO DI SCORRERE ═══════════════════════════
+         Nel calendario funziona cosi: la griglia sta dentro un contenitore
+         con overflow-x:auto (#fin-calendario), quindi scorre SOLO la striscia
+         e la cornice resta ferma. Stessa cosa ovunque: le viste settimanali
+         hanno ora la classe .pf-scroll-x e le tabelle si comportano allo
+         stesso modo. Niente regole su misura per singola pagina. */
 
-      /* 1. regola generale: una colonna sola */
+      /* tutto cio che e a griglia si impila... */
       [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
-
-      /* 2. eccezione: le griglie che si adattano gia da sole restano tali */
-      [style*="auto-fit"], [style*="auto-fill"] {
-        grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)) !important;
-      }
-
-      /* 3. eccezione: le SETTIMANE (calendario finanze, letture stazione,
-         giacenze, foglio giornale) restano sette giorni in fila e la riga
-         scorre di lato. Colonne STRETTE (se ne vedono tre per volta) e a
-         scorrere e SOLO la striscia: se scorresse la pagina intera si
-         vedrebbe il fondo grigio oltre il bordo della card. */
-      [style*="repeat(7"] {
+      /* ...tranne quelle che si adattano gia da sole... */
+      [style*="auto-fit"], [style*="auto-fill"] { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)) !important; }
+      /* ...e le SETTIMANE, che restano sette giorni in fila e scorrono
+         dentro il loro contenitore, come il calendario */
+      .pf-scroll-x > [style*="repeat(7"], #fin-calendario [style*="repeat(7"] {
         grid-template-columns:repeat(7, 132px) !important;
-        overflow-x:auto; -webkit-overflow-scrolling:touch;
-        overscroll-behavior-x:contain;
-        scroll-snap-type:x proximity; padding-bottom:8px;
-        background:transparent;
       }
-      [style*="repeat(7"] > * { scroll-snap-align:start; }
 
-      /* la pagina non si sposta di lato: scorrono solo le strisce e le
-         tabelle, ognuna dentro il proprio riquadro */
-      body, .app, .content, .card { overflow-x:hidden; }
-      [style*="repeat(7"], table { overflow-x:auto; }
-
-      /* Tabelle larghe (Consegne, ordini, fatture): scorrono invece di
-         essere spremute in colonne da pochi pixel */
+      /* tabelle larghe: ognuna scorre dentro il proprio riquadro */
       table { font-size:12px; display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
       th, td { padding:6px 8px !important; }
 
-      /* Il pulsante menu (tre linee) deve restare cliccabile e sopra a
-         qualunque cosa: area di tocco piena e barra in alto che non scorre */
+      /* la pagina non si sposta mai di lato */
+      body, .content { overflow-x:hidden; }
+
+      /* Il pulsante menu (tre linee) sempre cliccabile e sopra a tutto */
       .hamburger {
         position:relative; z-index:120;
         min-width:44px; min-height:44px;
@@ -99,17 +83,19 @@
       button { min-height:34px; }
       input[type="date"], input[type="number"], input[type="text"], select { font-size:16px !important; }
 
-      /* Modali quasi a pieno schermo */
       .modal-content, [id$="-modal"] > div { max-width:96vw !important; }
     }
 
     /* Telefoni stretti: colonne appena piu strette */
     @media (max-width: 430px) {
-      [style*="repeat(7"] { grid-template-columns:repeat(7, 122px) !important; }
+      .pf-scroll-x > [style*="repeat(7"], #fin-calendario [style*="repeat(7"] {
+        grid-template-columns:repeat(7, 122px) !important;
+      }
       [style*="auto-fit"], [style*="auto-fill"] { grid-template-columns:1fr !important; }
       .kpi-value { font-size:15px !important; }
       .card { padding:10px !important; }
     }
+    .pf-scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
     .nav-badge{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;font-size:10px;font-weight:700;color:#fff;background:#E24B4A;border-radius:50%;margin-left:auto;padding:0 4px;animation:badgePulse 1.5s ease-in-out infinite}
     .nav-item{display:flex;align-items:center}
     @keyframes badgePulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(226,75,74,0.5)}50%{transform:scale(1.15);box-shadow:0 0 8px 3px rgba(226,75,74,0.3)}}
@@ -1189,7 +1175,7 @@
             <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#E24B4A;vertical-align:middle;margin-right:4px"></span>Uscite fornitori</span>
           </div>
           <!-- Grid calendario -->
-          <div id="fin-calendario" style="overflow-x:auto"></div>
+          <div id="fin-calendario" class="pf-scroll-x"></div>
         </div>
         </div>
 
@@ -3118,7 +3104,7 @@
 <script src="pf-stz-core.js?v=20260724a"></script>
 <script src="pf-stz-letture.js?v=20260419c"></script>
 <script src="pf-stz-marginalita.js?v=20260526a"></script>
-<script src="pf-stz-unificata.js?v=20260726b"></script>
+<script src="pf-stz-unificata.js?v=20260726c"></script>
 <script src="pf-stz-corrispettivi.js?v=20260608a"></script>
 <script src="pf-stz-magazzino.js?v=20260724a"></script>
 <script src="pf-stz-cassa.js?v=20260726c"></script>
@@ -3126,7 +3112,7 @@
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260526a"></script>
 <script src="pf-stz-giac-giorno.js?v=20260526a"></script>
-<script src="pf-stz-giac-week.js?v=20260726a"></script>
+<script src="pf-stz-giac-week.js?v=20260726b"></script>
 <script src="pf-sentinelle.js?v=20260413f"></script>
 <script src="pf-movimenti-totali.js?v=20260526a"></script>
 <script src="pf-movimenti-dettaglio.js?v=20260716a"></script>
@@ -3140,8 +3126,8 @@
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=20260725b"></script>
-<script src="pf-foglio-giornale.js?v=20260722a"></script>
-<script src="pf-finanze-sostenibilita.js?v=20260503l"></script>
+<script src="pf-foglio-giornale.js?v=20260726a"></script>
+<script src="pf-finanze-sostenibilita.js?v=20260726a"></script>
 <script src="pf-pagamento-fornitore-modale.js?v=20260726a"></script>
 <script src="pf-debito-fornitori.js?v=20260724a"></script>
 <script src="pf-scadenzario-fornitori.js?v=20260723e"></script>
@@ -3160,7 +3146,7 @@
 <script src="pf-anticipi-storico.js?v=20260503j"></script>
 <script src="pf-estratto-conto.js?v=20260503t"></script>
 <script src="pf-dep-giacenze.js?v=20260525c"></script>
-<script src="pf-dep-giac-week.js?v=20260525c"></script>
+<script src="pf-dep-giac-week.js?v=20260726a"></script>
 <script src="pf-registri.js?v=20260721a"></script>
 <script src="pf-system.js?v=20260716a"></script>
 <script src="pf-termometro.js?v=20260720a"></script>
