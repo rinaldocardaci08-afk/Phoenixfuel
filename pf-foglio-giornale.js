@@ -270,7 +270,7 @@ function _fgRenderCalendarioSettimana(p, perGiorno) {
     if (dati.totEnt === 0 && dati.totUsc === 0) {
       html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic">—</div>';
     }
-    html += '</div>';
+    html += '</div></div>';   // chiude griglia mese + contenitore scorrevole
   }
   html += '</div></div>';   // chiude griglia + contenitore scorrevole
   return html;
@@ -291,6 +291,8 @@ function _fgRenderCalendarioMese(p, perGiorno) {
   inizio.setDate(inizio.getDate() + diffLun);
 
   var html = '';
+  // Contenitore scorrevole, come le altre viste a sette colonne
+  html += '<div class="pf-scroll-x">';
   // Header giorni della settimana
   html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;font-size:10px;color:var(--text-muted);text-align:center;font-weight:500">';
   html += '<div>Lun</div><div>Mar</div><div>Mer</div><div>Gio</div><div>Ven</div><div>Sab</div><div>Dom</div>';

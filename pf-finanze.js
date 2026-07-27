@@ -478,7 +478,7 @@ async function caricaSettimanaDashboard() {
     });
 
     var nomiGG = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
-    var h = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
+    var h = '<div class="pf-scroll-x"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
     nomiGG.forEach(function (n) {
       h += '<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;padding:4px 0;letter-spacing:0.5px">' + n + '</div>';
     });
@@ -508,7 +508,7 @@ async function caricaSettimanaDashboard() {
       h += '</div>';
       cur.setDate(cur.getDate() + 1);
     }
-    h += '</div>';
+    h += '</div></div>';   // chiude griglia + contenitore scorrevole
     el.innerHTML = h;
   } catch (e) {
     console.warn('settimana dashboard', e);

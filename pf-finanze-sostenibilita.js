@@ -658,11 +658,11 @@ function _sostRenderBarreSett(sett) {
   });
   svg += '</svg>';
 
-  svg += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:9px;color:var(--text-muted);margin-top:2px;text-align:center">';
+  svg += '<div class="pf-scroll-x"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:9px;color:var(--text-muted);margin-top:2px;text-align:center">';
   sett.giorni.forEach(function(g) {
     svg += '<span>' + _SOST_GIORNI[g.dow] + '</span>';
   });
-  svg += '</div>';
+  svg += '</div></div>';   // chiude riga giorni + contenitore scorrevole
   svg += '</div>';
   return svg;
 }
