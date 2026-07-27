@@ -285,6 +285,29 @@ function _sfCalcolaKPI(righe) {
 // ═════════════════════════════════════════════════════════════════════
 // RENDER PRINCIPALE
 // ═════════════════════════════════════════════════════════════════════
+// Selezione condivisa col motore (si MUTA in loco, mai riassegnata: regola 23/07)
+var _sfSelezione = {};
+
+// Una fattura = un fornitore. Il fornitore del modale si ricava da cio che e'
+// spuntato; se la selezione e' vuota o mescola fornitori diversi, resta null e
+// il motore lo dice quando si prova a registrare.
+function _sfFornitoreDaSelezione(ordini) {
+  var nomi = [];
+  (ordini || []).forEach(function (o) {
+    if (!_sfSelezione[o.id]) return;
+    var n = String(o.fornitore || '').trim();
+    if (n && nomi.indexOf(n) < 0) nomi.push(n);
+  });
+  if (nomi.length !== 1) {
+    // niente selezione, o fornitori diversi: nessun contesto valido
+    if (nomi.length > 1 && typeof toast === 'function') toast('Una fattura riguarda un fornitore solo: hai selezionato ' + nomi.length + ' fornitori');
+    return null;
+  }
+  var chiave = nomi[0].toLowerCase().trim();
+  var forn = _sfFornitoriMap[chiave] || null;
+  return { id: forn ? forn.id : null, nome: nomi[0], gg: forn ? (forn.giorni_pagamento || 30) : 30 };
+}
+
 function renderScadenzarioFornitori() {
   var el = document.getElementById('sf-content');
   if (!el) return;
@@ -312,11 +335,42 @@ function renderScadenzarioFornitori() {
 
   var kpi = _sfCalcolaKPI(righePerKpi);
 
+  // ── TABELLA: stesso motore della linguetta "Senza fattura" e dell'estratto
+  // conto (27/07, Rinaldo: "rendili tutti uguali, cliccabili e con pop up").
+  // Le righe restano quelle filtrate qui sopra (mese sulla scadenza, fornitore,
+  // stato): si spacchettano nei loro ORDINI e li disegna il motore, che porta
+  // spunte, viste raggruppate, riquadro col totale e "Registra fattura".
+  var ordiniVista = [];
+  righe.forEach(function (r) { ordiniVista = ordiniVista.concat(r.ordini || []); });
+
+  if (typeof pfRfCtx === 'function') {
+    pfRfCtx('sf', {
+      ordini: ordiniVista,
+      sel: _sfSelezione,
+      fornitore: _sfFornitoreDaSelezione(ordiniVista),
+      selezionabile: true,
+      onChange: renderScadenzarioFornitori,
+      onSaved: async function () { await caricaScadenzarioFornitori(); }
+    });
+  }
+
+  var totVista = ordiniVista.reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+
   var h = '';
   h += _sfHtmlToolbar();
   h += _sfHtmlKPI(kpi);
   h += _sfHtmlFiltri();
-  h += _sfHtmlTabella(righe);
+  if (typeof pfRfCtx === 'function') {
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0">'
+      + '<div style="font-size:13px;font-weight:600">Ordini del periodo'
+        + ' <span style="font-weight:400;color:var(--text-muted)">· ' + ordiniVista.length
+        + (ordiniVista.length === 1 ? ' ordine · ' : ' ordini · ') + _sfFmtE(totVista) + ' IVA inc.</span></div>'
+      + '<div style="display:flex;gap:8px">' + pfRfBtnVista('sf') + '</div></div>'
+      + pfRfTabella('sf')
+      + pfRfBox('sf');
+  } else {
+    h += _sfHtmlTabella(righe);   // ripiego: se il motore non c'e, la vecchia tabella
+  }
   el.innerHTML = h;
 }
 
