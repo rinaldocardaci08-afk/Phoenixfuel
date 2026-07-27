@@ -551,9 +551,13 @@ async function dgwMostraDettaglioGiorno(iso) {
   box.innerHTML = '<div class="loading" style="padding:16px;text-align:center">Caricamento movimenti del ' + fmtD(iso) + '...</div>';
 
   // Query: stessi criteri di caricaMovimentiDeposito ma filtrata sulla data del giorno
+  // FILTRO PRODOTTO (27/07): la vista settimanale e' PER PRODOTTO, quindi il
+  // dettaglio del giorno deve mostrare solo quel prodotto. Prima li prendeva
+  // tutti e sotto al gasolio comparivano anche i movimenti di benzina.
   var res = await sb.from('ordini').select('*,basi_carico(nome)')
     .or('tipo_ordine.eq.entrata_deposito,tipo_ordine.eq.stazione_servizio,tipo_ordine.eq.autoconsumo,fornitore.ilike.%phoenix%')
     .eq('data', iso)
+    .eq('prodotto', _dgwProdotto)
     .order('created_at', { ascending: false });
 
   if (res.error) {
@@ -566,7 +570,7 @@ async function dgwMostraDettaglioGiorno(iso) {
   var uscite = movimenti.filter(function(r) { return r.tipo_ordine !== 'entrata_deposito'; });
 
   var header = '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px 8px 0 0;border-bottom:none">';
-  header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + fmtD(iso) + '</div>';
+  header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + fmtD(iso) + ' · <span style="color:var(--text-muted);font-weight:500">' + esc(_dgwProdotto) + '</span></div>';
   header += '<button class="btn-edit" style="font-size:11px;padding:3px 10px" onclick="dgwMostraDettaglioGiorno(\'' + iso + '\')" title="Chiudi">✕</button>';
   header += '</div>';
 

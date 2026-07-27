@@ -534,9 +534,12 @@ async function sgwMostraDettaglioGiorno(iso) {
   box.innerHTML = '<div class="loading" style="padding:16px;text-align:center">Caricamento movimenti del ' + fmtD(iso) + '...</div>';
 
   // Query: solo entrate stazione_servizio (le uscite stazione sono da letture pompe, vedi Totalizzatori)
+  // FILTRO PRODOTTO (27/07): come nel deposito, la vista e' per prodotto e il
+  // dettaglio deve rispettarlo.
   var res = await sb.from('ordini').select('*,basi_carico(nome)')
     .eq('tipo_ordine','stazione_servizio')
     .eq('data', iso)
+    .eq('prodotto', _sgwProdotto)
     .in('stato', ['confermato','consegnato'])
     .order('created_at', { ascending: false });
 
@@ -552,7 +555,7 @@ async function sgwMostraDettaglioGiorno(iso) {
   (_sgwSerie || []).forEach(function(x) { if (x.data === iso) usciteTot = x.uscite; });
 
   var header = '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px 8px 0 0;border-bottom:none">';
-  header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + fmtD(iso) + '</div>';
+  header += '<div style="font-size:13px;font-weight:600;color:var(--text)">Dettaglio movimenti del ' + fmtD(iso) + ' · <span style="color:var(--text-muted);font-weight:500">' + esc(_sgwProdotto) + '</span></div>';
   header += '<button class="btn-edit" style="font-size:11px;padding:3px 10px" onclick="sgwMostraDettaglioGiorno(\'' + iso + '\')" title="Chiudi">✕</button>';
   header += '</div>';
 
