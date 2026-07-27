@@ -159,6 +159,64 @@ async function pfDebitoDati(force) {
 // RAMI — derivazioni con parametri, nessuna query propria
 // ═══════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════
+// NUMERO FATTURA GIA' USATO (27/07 — richiesta Rinaldo)
+// Un fornitore fattura piu ordini nella STESSA fattura, quindi trovare il
+// numero gia presente non deve essere un blocco: si aggancia l'ordine alla
+// fattura che esiste. Il vincolo unique (fornitore, numero) resta e va
+// rispettato — non si crea mai una seconda fattura con lo stesso numero.
+// Scritto qui una volta sola e usato dai tre punti che registrano un numero:
+// motore (pf-reg-fattura), scadenzario, estratto conto.
+// ═══════════════════════════════════════════════════════════════════
+
+// Cerca la fattura di quel fornitore con quel numero. null se non c'e.
+async function pfFatturaConNumero(fornitoreId, fornitoreNome, numero) {
+  var num = String(numero || '').trim();
+  if (!num) return null;
+  try {
+    var q = sb.from('fatture_ricevute').select('*').eq('numero_fattura', num);
+    if (fornitoreId) q = q.eq('fornitore_id', fornitoreId);
+    else if (fornitoreNome) q = q.ilike('fornitore_nome', String(fornitoreNome).trim());
+    var res = await q;
+    if (res.error) return null;
+    return (res.data && res.data[0]) || null;
+  } catch (e) {
+    console.warn('[debito] ricerca numero fattura', e);
+    return null;
+  }
+}
+
+// Chiede se agganciare gli ordini alla fattura esistente, mostrando cosa c'e
+// gia dentro. Ritorna true/false.
+async function pfChiediAggancioFattura(f, nOrdiniNuovi, fmt) {
+  var euro = fmt || function (v) { return '€ ' + Number(v || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var nGia = 0, totGia = 0;
+  try {
+    var res = await sb.from('ordini').select('id,litri,costo_litro,iva').eq('fattura_ricevuta_id', f.id);
+    (res.data || []).forEach(function (o) {
+      nGia++;
+      totGia += Number(o.costo_litro || 0) * Number(o.litri || 0) * (1 + Number(o.iva != null ? o.iva : 22) / 100);
+    });
+  } catch (e) { /* il conteggio e' solo informativo */ }
+
+  var dataF = f.data_fattura ? String(f.data_fattura).split('-').reverse().join('/') : '—';
+  var msg = 'Il numero ' + f.numero_fattura + ' esiste gia per questo fornitore.\n\n'
+    + 'Fattura del ' + dataF
+    + (nGia ? ' · ' + nGia + (nGia === 1 ? ' ordine gia agganciato' : ' ordini gia agganciati') + ' · ' + euro(totGia) : ' · nessun ordine agganciato')
+    + (f.importo_dichiarato ? '\nImporto dichiarato: ' + euro(f.importo_dichiarato) : '')
+    + '\n\nAggancio anche ' + nOrdiniNuovi + (nOrdiniNuovi === 1 ? ' ordine' : ' ordini') + ' a QUESTA fattura?\n'
+    + '(non viene creata una seconda fattura con lo stesso numero)';
+  return confirm(msg);
+}
+
+// Aggancia gli ordini alla fattura esistente.
+async function pfAgganciaOrdiniAFattura(fatturaId, ordiniIds) {
+  var res = await sb.from('ordini').update({ fattura_ricevuta_id: fatturaId }).in('id', ordiniIds);
+  if (res.error) throw res.error;
+  pfDebitoInvalida();
+  return true;
+}
+
 // Esposizione = FIDO DAGLI ORDINI (regola costituzionale):
 //   Σ totale IVA inc. degli ordini VIVI (non flag-pagati e non su fattura
 //   saldata) − acconti registrati sulle fatture aperte.

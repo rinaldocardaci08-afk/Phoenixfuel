@@ -747,6 +747,24 @@ async function _sfSalvaFattura() {
     var forn = _sfFornitoriMap[_sfModaleCtx.fornitoreNomeKey] || null;
     var fornitoreId = forn ? forn.id : null;
 
+    // NUMERO GIA' USATO (27/07): si aggancia alla fattura esistente invece di
+    // bloccare — stessa regola del motore e dell'estratto conto.
+    if (typeof pfFatturaConNumero === 'function') {
+      var esistenteSf = await pfFatturaConNumero(fornitoreId, _sfModaleCtx.fornitoreNome, numero);
+      if (esistenteSf) {
+        var okSf = await pfChiediAggancioFattura(esistenteSf, _sfModaleCtx.ordiniIds.length, _sfFmtE);
+        if (!okSf) {
+          if (btn) { btn.disabled = false; btn.textContent = 'Salva fattura'; btn.style.opacity = '1'; }
+          return;
+        }
+        await pfAgganciaOrdiniAFattura(esistenteSf.id, _sfModaleCtx.ordiniIds);
+        if (typeof toast === 'function') toast('✓ ' + _sfModaleCtx.ordiniIds.length + ' ordini agganciati alla fattura ' + numero);
+        _sfChiudiModale();
+        await caricaScadenzarioFornitori();
+        return;
+      }
+    }
+
     var ins = await sb.from('fatture_ricevute').insert([{
       fornitore_id:        fornitoreId,
       fornitore_nome:      _sfModaleCtx.fornitoreNome,
@@ -785,7 +803,7 @@ async function _sfSalvaFattura() {
     var msg = e.message || String(e);
     // Caso unique constraint: stesso fornitore + stesso numero
     if (msg.indexOf('duplicate') >= 0 || msg.indexOf('unique') >= 0) {
-      alert('Esiste già una fattura con questo numero per lo stesso fornitore.');
+      alert('Numero già usato da un altro fornitore o fattura: ricarica la pagina e riprova.');
     } else {
       alert('Errore salvataggio: ' + msg);
     }

@@ -806,6 +806,32 @@ async function ecfNumeraFattura(fatturaId) {
   n = String(n).trim();
   if (!n) { toast('Numero non inserito'); return; }
   try {
+    // NUMERO GIA' USATO (27/07): quel numero appartiene gia a un'altra fattura
+    // dello stesso fornitore. Non si duplica: si spostano gli ordini di QUESTO
+    // contenitore su quella fattura e il contenitore vuoto si elimina.
+    if (typeof pfFatturaConNumero === 'function') {
+      var esistente = await pfFatturaConNumero(f.fornitore_id || null, _ecfSel.nome, n);
+      if (esistente && esistente.id !== fatturaId) {
+        var idsMove = (f.ordini || []).map(function (o) { return o.id; });
+        var okM = await pfChiediAggancioFattura(esistente, idsMove.length, fmtE);
+        if (!okM) { toast('Operazione annullata'); return; }
+        if (idsMove.length) await pfAgganciaOrdiniAFattura(esistente.id, idsMove);
+        // il contenitore resta senza ordini: via, altrimenti sporca gli elenchi
+        var pagRes = await sb.from('pagamenti_fornitori').select('id').eq('fattura_ricevuta_id', fatturaId);
+        if ((pagRes.data || []).length) {
+          await sb.from('pagamenti_fornitori').update({ fattura_ricevuta_id: esistente.id }).eq('fattura_ricevuta_id', fatturaId);
+        }
+        await sb.from('fatture_ricevute').delete().eq('id', fatturaId);
+        pfDebitoInvalida();
+        if (typeof _auditLog === 'function') _auditLog('fusione_fattura', 'fatture_ricevute', _ecfSel.nome + ' · ' + idsMove.length + ' ordini spostati sulla fattura ' + n);
+        toast('✓ Uniti alla fattura ' + n + ': ' + idsMove.length + (idsMove.length === 1 ? ' ordine' : ' ordini'));
+        await _ecfCarica();
+        _ecfRender();
+        if (typeof _rfRenderTab === 'function' && document.getElementById('rf-body')) _rfRenderTab();
+        return;
+      }
+    }
+
     var up = await sb.from('fatture_ricevute').update({ numero_fattura: n }).eq('id', fatturaId);
     if (up.error) throw up.error;
     pfDebitoInvalida();
@@ -816,7 +842,7 @@ async function ecfNumeraFattura(fatturaId) {
     if (typeof _rfRenderTab === 'function' && document.getElementById('rf-body')) _rfRenderTab();
   } catch (e) {
     var m = (e && e.message) ? e.message : String(e);
-    if (m.indexOf('duplicate') >= 0 || m.indexOf('unique') >= 0) m = 'Esiste già una fattura ' + n + ' per ' + _ecfSel.nome + '.';
+    if (m.indexOf('duplicate') >= 0 || m.indexOf('unique') >= 0) m = 'Numero già usato: ricarica la pagina e riprova.';
     toast('Errore: ' + m);
   }
 }

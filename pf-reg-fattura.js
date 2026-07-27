@@ -499,6 +499,29 @@ async function pfRfSalva() {
   if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio…'; btn.style.opacity = '.6'; }
   var fatturaId = null;
   try {
+    // NUMERO GIA' USATO (27/07): non e' un errore — il fornitore mette piu
+    // ordini nella stessa fattura. Si aggancia a quella che esiste.
+    if (typeof pfFatturaConNumero === 'function') {
+      var esistente = await pfFatturaConNumero(c.fornitore.id || null, c.fornitore.nome, num);
+      if (esistente) {
+        var idsE = S.ordini.map(function (o) { return o.id; });
+        var ok = await pfChiediAggancioFattura(esistente, idsE.length, _rfE);
+        if (!ok) {
+          if (typeof toast === 'function') toast('Operazione annullata');
+          if (btn) { btn.disabled = false; btn.textContent = 'Salva fattura'; btn.style.opacity = '1'; }
+          return;
+        }
+        await pfAgganciaOrdiniAFattura(esistente.id, idsE);
+        if (typeof _auditLog === 'function') _auditLog('aggancio_fattura', 'ordini', c.fornitore.nome + ' fattura ' + num + ' · +' + idsE.length + ' ordini');
+        if (typeof toast === 'function') toast('✓ ' + idsE.length + (idsE.length === 1 ? ' ordine agganciato' : ' ordini agganciati') + ' alla fattura ' + num);
+        _rfMod = null;
+        _rfSvuota(c.sel);
+        if (typeof chiudiModalePermessi === 'function') chiudiModalePermessi();
+        if (typeof c.onSaved === 'function') await c.onSaved();
+        return;
+      }
+    }
+
     var ins = await sb.from('fatture_ricevute').insert([{
       fornitore_id:        c.fornitore.id || null,
       fornitore_nome:      c.fornitore.nome,
@@ -530,7 +553,7 @@ async function pfRfSalva() {
   } catch (e) {
     console.error('[rf] salva fattura', e);
     var msg = (e && e.message) ? e.message : String(e);
-    if (msg.indexOf('duplicate') >= 0 || msg.indexOf('unique') >= 0) msg = 'Esiste già una fattura con questo numero per lo stesso fornitore.';
+    if (msg.indexOf('duplicate') >= 0 || msg.indexOf('unique') >= 0) msg = 'Numero già usato da un altro fornitore o fattura: ricarica la pagina e riprova.';
     if (typeof toast === 'function') toast('Errore: ' + msg);
     if (btn) { btn.disabled = false; btn.textContent = 'Salva fattura'; btn.style.opacity = '1'; }
   }
