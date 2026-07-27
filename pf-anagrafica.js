@@ -83,8 +83,8 @@ async function caricaConsegne() {
         var num = (r.fattura_riga_id && _rigaNumMap[r.fattura_riga_id]!=null) ? _rigaNumMap[r.fattura_riga_id]
                 : (r.fattura_id && _fattNumMap[r.fattura_id]!=null) ? _fattNumMap[r.fattura_id] : null;
         if (num!=null) { fatturate++; return; }   // già fatturato conta come con-fattura anche senza allegati
-        var hd=!!r.das_firmato_url, hc=!!r.cartellino_url;
-        if (!hd || !hc) { inLavorazione++; return; }
+        var hd=!!r.das_firmato_url;   // discriminante = solo il DAS
+        if (!hd) { inLavorazione++; return; }
         daAgganciare++;
       });
       function _pill(label,val,color){ return '<span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:0.5px solid #E4D4C2;border-radius:20px;padding:4px 12px;font-size:11px;color:'+color+'"><b style="font-size:15px">'+val+'</b> '+label+'</span>'; }
@@ -215,7 +215,10 @@ async function pfSalvaFatturaManuale(ordineId){
   var o = res.data;
   if (res.error || !o) { toast('Ordine non trovato'); return; }
   if (o.tipo_ordine !== 'cliente') { toast('Solo consegne a cliente'); return; }
-  if (!o.das_firmato_url || !o.cartellino_url) { toast('Servono DAS firmato e cartellino prima della fattura'); return; }
+  // REGOLA (Rinaldo): per inserire e SALVARE il numero fattura basta il DAS
+  // firmato. Il cartellino NON e' discriminante — la cella in riga applicava
+  // gia questa regola, era rimasta solo questa guardia a bloccare il salvataggio.
+  if (!o.das_firmato_url) { toast('Serve il DAS firmato prima della fattura'); return; }
   if (o.fattura_riga_id) { toast('Questa consegna ha già una fattura'); return; }
 
   var inp = document.getElementById('nf-inp-' + ordineId);
