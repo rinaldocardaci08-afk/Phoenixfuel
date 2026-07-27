@@ -18,7 +18,38 @@ function _finOggiISO() {
 var _finCalAncora = _finOggiISO(); // ancora ISO per modo settimana
 var _finCalModo = 'mese';   // 'settimana' | 'mese' | 'anno'
 var _finCalDati = null;
-var _finForColori = {};
+var _finForColori = {};   // { nome: { bg: '#...', bar: '#...' } }
+
+// ── COLORI FORNITORE (27/07) ──────────────────────────────────────────
+// Nel calendario ogni fornitore deve avere il SUO colore, per capire a colpo
+// d'occhio verso chi e' il debito del giorno. Se l'anagrafica ha il campo
+// colore vince quello; altrimenti si pesca da questa tavolozza in modo
+// stabile (stesso nome = sempre lo stesso colore, anche dopo un ricarico).
+var _FIN_TAVOLOZZA = [
+  { bg: '#FBE9A7', bar: '#E3B341' },   // giallo
+  { bg: '#D9E9FB', bar: '#378ADD' },   // blu
+  { bg: '#E2F0CE', bar: '#639922' },   // verde
+  { bg: '#F6DDE8', bar: '#C2557F' },   // rosa
+  { bg: '#E4DFF7', bar: '#6B5FCC' },   // viola
+  { bg: '#FBDFC8', bar: '#E0762B' },   // arancio
+  { bg: '#CFECEC', bar: '#2E9A9A' },   // acqua
+  { bg: '#EADFD0', bar: '#9A7B4F' }    // sabbia
+];
+
+function _finHexRgba(hex, a) {
+  var h = String(hex || '').replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  if (h.length !== 6) return 'rgba(0,0,0,' + a + ')';
+  return 'rgba(' + parseInt(h.slice(0, 2), 16) + ',' + parseInt(h.slice(2, 4), 16) + ',' + parseInt(h.slice(4, 6), 16) + ',' + a + ')';
+}
+
+function _finColoreFornitore(nome, coloreAnagrafica, posizione) {
+  if (coloreAnagrafica) return { bg: _finHexRgba(coloreAnagrafica, 0.28), bar: coloreAnagrafica };
+  if (typeof posizione === 'number') return _FIN_TAVOLOZZA[posizione % _FIN_TAVOLOZZA.length];
+  var somma = 0, t = String(nome || '');
+  for (var i = 0; i < t.length; i++) somma += t.charCodeAt(i);
+  return _FIN_TAVOLOZZA[somma % _FIN_TAVOLOZZA.length];
+}
 
 var _FIN_MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -146,10 +177,14 @@ async function caricaFinanze() {
   var cassaDati = cassaRes.data || [];
   var fornitoriMap = {};
   _finForColori = {};
-  (fornitoriRes.data || []).forEach(function(f) {
-    fornitoriMap[f.nome] = f;
-    _finForColori[f.nome] = f.colore || '#FAEEDA';
-  });
+  // ordinati per nome: la posizione (e quindi il colore) resta la stessa
+  // a ogni ricarico, e due fornitori non finiscono mai sulla stessa tinta
+  (fornitoriRes.data || []).slice()
+    .sort(function (a, b) { return String(a.nome || '').localeCompare(String(b.nome || '')); })
+    .forEach(function(f, idx) {
+      fornitoriMap[f.nome] = f;
+      _finForColori[f.nome] = _finColoreFornitore(f.nome, f.colore, idx);
+    });
 
   var giornoMap = {};
   function getGiorno(data) {
@@ -317,18 +352,19 @@ function _finCalHtmlCellaContenuto(g, dataStr, filtro) {
 
   if (mostraUscite) {
     Object.keys(uscitePerFor).forEach(function(fornitore) {
-      var col = _finForColori[fornitore] || '#FAEEDA';
+      var cf = _finForColori[fornitore] || _finColoreFornitore(fornitore, null);
       var dati = uscitePerFor[fornitore];
       if (dati.tot > 0) {
-        // Non pagata: pillola normale
-        html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + col + ';color:#791F1F;border-left:2px solid #E24B4A">';
+        // Da pagare: pillola piena col colore del fornitore
+        html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" title="' + esc(fornitore) + ' — da pagare" style="cursor:pointer;font-size:9px;padding:3px 5px;border-radius:4px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + cf.bg + ';color:#3A2A08;border-left:3px solid ' + cf.bar + '">';
         html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600">' + esc(fornitore) + '</span>';
         html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + _fmtCompact(dati.tot) + '</span></div>';
       }
       if (dati.totPag > 0) {
-        // Pagata in anticipo: trasparente + ✓ + strikethrough
-        html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" style="cursor:pointer;font-size:8px;padding:2px 5px;border-radius:3px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + col + ';color:#791F1F;border-left:2px solid #E24B4A;opacity:0.45">';
-        html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600">✓ ' + esc(fornitore) + '</span>';
+        // GIA' PAGATA: resta in elenco (non si cancella mai), con il nome e
+        // l'importo barrati e il colore attenuato — Rinaldo 27/07.
+        html += '<div onclick="event.stopPropagation();mostraDettaglioFinanze(\'' + dataStr + '\',\'uscite\')" title="' + esc(fornitore) + ' — già pagata" style="cursor:pointer;font-size:9px;padding:3px 5px;border-radius:4px;margin-bottom:2px;display:flex;justify-content:space-between;background:' + cf.bg + ';color:#3A2A08;border-left:3px solid ' + cf.bar + ';opacity:0.5">';
+        html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600;text-decoration:line-through">✓ ' + esc(fornitore) + '</span>';
         html += '<span style="font-family:var(--font-mono);font-weight:600;white-space:nowrap;text-decoration:line-through">' + _fmtCompact(dati.totPag) + '</span></div>';
       }
     });
@@ -666,8 +702,8 @@ function _finCalRenderRiepilogoSettimana() {
     if (ordForn.length === 0) return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic">Nessuna uscita fornitore</div>';
     var inner = '';
     ordForn.forEach(function(nome, idx) {
-      var col = _finForColori[nome] || '#FAEEDA';
-      inner += _finSettRiga('forn-' + idx, nome, perFornitore[nome], col, '#791F1F', '#E24B4A');
+      var cfR = _finForColori[nome] || _finColoreFornitore(nome, null, idx);
+      inner += _finSettRiga('forn-' + idx, nome, perFornitore[nome], cfR.bg, '#3A2A08', cfR.bar);
     });
     return inner;
   });
@@ -864,7 +900,8 @@ function mostraDettaglioFinanze(dataStr, tipo) {
       keysFor.sort(function(a, b) { return perFornitore[b].importo - perFornitore[a].importo; }).forEach(function(k) {
         var f = perFornitore[k];
         totaleUsc += f.importo;
-        var col = _finForColori[f.fornitore] || '#FAEEDA';
+        var cfD = _finForColori[f.fornitore] || _finColoreFornitore(f.fornitore, null);
+        var col = cfD.bg;
         var opa = f.pagato ? 'opacity:0.5;' : '';
         var strike = f.pagato ? 'text-decoration:line-through;' : '';
         var checkIcon = f.pagato ? '<span style="color:#27500A;margin-right:6px">✓</span>' : '';
