@@ -513,13 +513,26 @@ async function caricaSettimanaDashboard() {
 
     // uscite fornitore: query madre
     var giorni = {};
-    function G(d) { if (!giorni[d]) giorni[d] = { entrate: 0, uscite: 0, uscitePag: 0, usciteDettaglio: [] }; return giorni[d]; }
+    // STESSA FORMA DEI GIORNI DEL CALENDARIO: cosi la cella la disegna il
+    // motore condiviso _finCalHtmlCellaContenuto e la dashboard mostra le
+    // stesse pillole colorate per fornitore, senza un secondo disegno.
+    function G(d) { if (!giorni[d]) giorni[d] = { entrateDettaglio: [], usciteDettaglio: [], stazione: 0 }; return giorni[d]; }
     var madre = await pfDebitoDati();
+    // colori fornitore: se non ci si e' ancora passati dal calendario, la
+    // mappa e' vuota — la riempio qui con la stessa regola (posizione nell'
+    // elenco ordinato per nome), altrimenti due fornitori rischiano la stessa tinta
+    if (!Object.keys(_finForColori).length && (madre.fornitori || []).length) {
+      (madre.fornitori || []).slice()
+        .sort(function (a, b) { return String(a.nome || '').localeCompare(String(b.nome || '')); })
+        .forEach(function (f, idx) { _finForColori[f.nome] = _finColoreFornitore(f.nome, f.colore, idx); });
+    }
     (madre.ordini || []).forEach(function (o) {
       if (!o.scadenza || o.scadenza < lunISO || o.scadenza > domISO) return;
-      var g = G(o.scadenza);
-      g.usciteDettaglio.push({ fornitore: o.fornitore, importo: o.totale, pagato: (o.pagato || o.fattSaldata) });
-      if (o.pagato || o.fattSaldata) g.uscitePag += o.totale; else g.uscite += o.totale;
+      G(o.scadenza).usciteDettaglio.push({
+        fornitore: o.fornitore, importo: o.totale,
+        prodotto: o.prodotto, litri: Number(o.litri || 0),
+        pagato: (o.pagato || o.fattSaldata)
+      });
     });
 
     // entrate clienti: solo le scadenze della settimana
@@ -529,8 +542,10 @@ async function caricaSettimanaDashboard() {
       .gte('data_scadenza', lunISO).lte('data_scadenza', domISO);
     (res.data || []).forEach(function (o) {
       var p = (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0)) * (1 + Number(o.iva || 22) / 100);
-      var imp = p * Number(o.litri || 0);
-      if (!o.pagato) G(o.data_scadenza).entrate += imp;
+      G(o.data_scadenza).entrateDettaglio.push({
+        cliente: o.cliente, importo: p * Number(o.litri || 0),
+        prodotto: o.prodotto, litri: Number(o.litri || 0), pagato: !!o.pagato
+      });
     });
 
     var nomiGG = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
@@ -542,7 +557,7 @@ async function caricaSettimanaDashboard() {
     var cur = new Date(lun);
     for (var i = 0; i < 7; i++) {
       var dataStr = cur.toISOString().split('T')[0];
-      var g = giorni[dataStr] || { entrate: 0, uscite: 0, uscitePag: 0, usciteDettaglio: [] };
+      var g = giorni[dataStr] || { entrateDettaglio: [], usciteDettaglio: [], stazione: 0 };
       var isToday = dataStr === oggiStr;
       var isWeekend = cur.getDay() === 0 || cur.getDay() === 6;
       var scad = _finCalScaduto(g, dataStr);
@@ -554,9 +569,10 @@ async function caricaSettimanaDashboard() {
       h += '<div style="font-size:13px;font-weight:700;color:' + (scad ? '#A32D2D' : (isToday ? '#D85A30' : 'var(--text)')) + ';margin-bottom:5px;display:flex;align-items:center;gap:4px">'
         + (scad ? '<span style="width:7px;height:7px;border-radius:50%;background:#E24B4A;display:inline-block"></span>' : '')
         + cur.getDate() + '</div>';
-      if (g.entrate > 0) h += '<div style="font-size:10.5px;font-weight:600;background:#EAF3DE;color:#27500A;border-radius:4px;padding:2px 5px;margin-bottom:3px;text-align:center">+' + _fmtCompact(g.entrate) + '</div>';
-      if (g.uscite > 0) h += '<div style="font-size:10.5px;font-weight:600;background:#FCEBEB;color:#791F1F;border-radius:4px;padding:2px 5px;text-align:center">-' + _fmtCompact(g.uscite) + '</div>';
-      if (!g.entrate && !g.uscite && !scad) h += '<div style="font-size:10.5px;color:var(--text-muted)">—</div>';
+      // stesso contenuto delle celle del calendario: pillole per fornitore
+      // col suo colore, pagati barrati, totali in fondo
+      var corpo = _finCalHtmlCellaContenuto(g, dataStr, '', false);
+      h += corpo || '<div style="font-size:10.5px;color:var(--text-muted)">—</div>';
       if (scad) {
         h += '<div style="margin-top:auto;padding-top:5px"><div style="display:flex;align-items:center;gap:3px;background:#E24B4A;color:#fff;border-radius:5px;padding:3px 5px;font-size:10px;font-weight:600;line-height:1.25">'
           + '<span style="font-size:11px">⏰</span>' + (scad.n > 1 ? scad.n + ' scadute ' : 'scaduta ') + _fmtCompact(scad.tot) + '</div></div>';
