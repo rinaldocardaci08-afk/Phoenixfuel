@@ -55,6 +55,12 @@
 
       /* tutto cio che e a griglia si impila... */
       [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
+      /* ...e le righe con colonne in PIXEL (elenchi autisti, mezzi, scomparti,
+         riquadri con min-width) restano larghe anche impilate: qui si adattano */
+      [style*="1fr 110px"], [style*="110px 1fr"], [style*="px 1fr"],
+      [style*="minmax(220px"], [style*="min-width:280px"], [style*="min-width:180px"] {
+        min-width:0 !important; max-width:100% !important;
+      }
       /* ...tranne quelle che si adattano gia da sole... */
       [style*="auto-fit"], [style*="auto-fill"] { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)) !important; }
       /* ...e le SETTIMANE, che restano sette giorni in fila e scorrono
@@ -72,8 +78,16 @@
       table { font-size:12px; display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
       th, td { padding:6px 8px !important; }
 
-      /* la pagina non si sposta mai di lato */
+      /* la pagina non si sposta mai di lato: a scorrere sono i riquadri.
+         Se il contenuto di una card e' piu largo dello schermo (tabelle
+         carichi, griglie a colonne fisse, pannelli larghi) scorre DENTRO la
+         card, come fa il calendario: la cornice resta ferma. Senza questo
+         veniva tagliato e non c'era modo di raggiungerlo. */
       body, .content { overflow-x:hidden; }
+      .card, .log-panel, .stz-panel, .banche-panel, .dep-panel, .fatt-panel,
+      .cli-panel, .forn-panel, .ff-panel, .all-panel, .fin-subpanel {
+        overflow-x:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain;
+      }
 
       /* Il pulsante menu (tre linee) sempre cliccabile e sopra a tutto */
       .hamburger {
