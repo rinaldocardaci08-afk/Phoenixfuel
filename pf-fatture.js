@@ -189,15 +189,26 @@ async function caricaFatture(){
     dataMax = `${annoInt}-12-31`;
   }
 
-  let q = sb.from('fatture_emesse').select('*').gte('data', dataMin).lte('data', dataMax).order('data', {ascending:false}).order('numero', {ascending:false});
-  if(clId) q = q.eq('cliente_id', clId);
-  if(search){
-    // Filtra su numero o PIVA cessionario o denominazione (ILIKE)
-    q = q.or(`numero.ilike.%${search}%,cessionario_piva.ilike.%${search}%,cessionario_denominazione.ilike.%${search}%`);
-  }
+  // PAGINAZIONE (27/07): l'elenco leggeva senza paginare e PostgREST taglia a
+  // 1000 righe. Ordinando dalla piu recente, con oltre mille fatture nell'anno
+  // i mesi piu vecchi sparivano in silenzio — Rinaldo: "nell'elenco non le vedo".
+  const _queryElenco = function () {
+    let qq = sb.from('fatture_emesse').select('*').gte('data', dataMin).lte('data', dataMax)
+      .order('data', {ascending:false}).order('numero', {ascending:false});
+    if (clId) qq = qq.eq('cliente_id', clId);
+    if (search) {
+      qq = qq.or(`numero.ilike.%${search}%,cessionario_piva.ilike.%${search}%,cessionario_denominazione.ilike.%${search}%`);
+    }
+    return qq;
+  };
 
-  const { data: fatture, error } = await q;
-  if(error){ tb.innerHTML='<tr><td colspan="9" style="color:red">Errore: '+_esc(error.message)+'</td></tr>'; return; }
+  let fatture = [];
+  try {
+    fatture = await _pfFetchAllPages(_queryElenco);
+  } catch (e) {
+    tb.innerHTML='<tr><td colspan="9" style="color:red">Errore: '+_esc((e && e.message) || e)+'</td></tr>';
+    return;
+  }
 
   if(!fatture||!fatture.length){
     tb.innerHTML='<tr><td colspan="9" class="loading">Nessuna fattura per il periodo selezionato</td></tr>';
