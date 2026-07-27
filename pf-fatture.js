@@ -191,10 +191,16 @@ async function caricaFatture(){
 
   // PAGINAZIONE (27/07): l'elenco leggeva senza paginare e PostgREST taglia a
   // 1000 righe. Ordinando dalla piu recente, con oltre mille fatture nell'anno
-  // i mesi piu vecchi sparivano in silenzio — Rinaldo: "nell'elenco non le vedo".
+  // i mesi piu vecchi sparivano in silenzio.
+  // RICERCA SENZA PERIODO (27/07): se si cerca un numero o un cliente, la
+  // ricerca IGNORA anno e mese e guarda tutto l'archivio — altrimenti si cerca
+  // la 1285 stando in luglio e non si trova, perche' quella fattura porta la
+  // data di giugno. Trovata la fattura, la si corregge con la matita.
+  const ricercaGlobale = !!search;
   const _queryElenco = function () {
-    let qq = sb.from('fatture_emesse').select('*').gte('data', dataMin).lte('data', dataMax)
+    let qq = sb.from('fatture_emesse').select('*')
       .order('data', {ascending:false}).order('numero', {ascending:false});
+    if (!ricercaGlobale) qq = qq.gte('data', dataMin).lte('data', dataMax);
     if (clId) qq = qq.eq('cliente_id', clId);
     if (search) {
       qq = qq.or(`numero.ilike.%${search}%,cessionario_piva.ilike.%${search}%,cessionario_denominazione.ilike.%${search}%`);
@@ -210,8 +216,15 @@ async function caricaFatture(){
     return;
   }
 
+  const _avvisoRicerca = document.getElementById('fatt-avviso-ricerca');
+  if (_avvisoRicerca) {
+    _avvisoRicerca.innerHTML = ricercaGlobale
+      ? '<div style="background:#E6F1FB;border-left:3px solid #378ADD;border-radius:0 6px 6px 0;padding:7px 10px;font-size:11.5px;color:#0C447C;margin-bottom:10px">Ricerca su <strong>tutto l\'archivio</strong>: anno e mese sono ignorati finche la casella di ricerca resta piena.</div>'
+      : '';
+  }
+
   if(!fatture||!fatture.length){
-    tb.innerHTML='<tr><td colspan="9" class="loading">Nessuna fattura per il periodo selezionato</td></tr>';
+    tb.innerHTML='<tr><td colspan="9" class="loading">' + (ricercaGlobale ? 'Nessuna fattura trovata in tutto l\'archivio' : 'Nessuna fattura per il periodo selezionato') + '</td></tr>';
     _aggiornaTotaliFatture([]);
     return;
   }
