@@ -552,6 +552,22 @@ function pfRfSwitchTabFF(tab, btn) {
   if (tab === 'ff-senza') pfRfCaricaTab();
 }
 
+// ── FILTRI della linguetta "Senza fattura" (27/07) ────────────────────
+// Stessi pulsanti dell'estratto conto, stesso aspetto: Da pagare / Tutti.
+// Periodo sulla SCADENZA (regola costituzionale), con la possibilita di
+// aprire all'anno intero. L'ordine e' sempre per scadenza crescente, dalla
+// piu vicina alla piu lontana: lo fa gia il motore.
+var _rfFiltro  = 'aperti';                       // 'aperti' | 'tutti'
+var _rfAnno    = new Date().getFullYear();
+var _rfMese    = null;                            // null = anno intero
+
+function pfRfSetFiltro(v) { _rfFiltro = v; _rfRenderTab(); }
+function pfRfSetPeriodo(v) {
+  if (v === '') { _rfMese = null; } else { _rfMese = parseInt(v, 10); }
+  _rfRenderTab();
+}
+function pfRfSetAnno(v) { _rfAnno = parseInt(v, 10); _rfRenderTab(); }
+
 async function pfRfCaricaTab() {
   var sel = document.getElementById('rf-fornitore');
   if (sel && !sel.dataset.pop) {
@@ -579,6 +595,34 @@ async function pfRfCambiaFornitore() {
   _rfRenderTab();
 }
 
+// Barra filtri: pulsanti identici a quelli dell'estratto conto + periodo.
+function _rfBarraFiltri(tutti) {
+  var MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  var nApe = tutti.filter(function (o) { return !o.pagato && !o.fattSaldata; }).length;
+  var btnF = function (v, t) {
+    var on = _rfFiltro === v;
+    return '<button onclick="pfRfSetFiltro(\'' + v + '\')" style="font-size:11.5px;padding:6px 14px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#0C447C' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer">' + t + '</button>';
+  };
+  var anni = [];
+  var aOggi = new Date().getFullYear();
+  for (var a = aOggi + 1; a >= aOggi - 2; a--) anni.push(a);
+
+  var h = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
+  h += btnF('aperti', 'Da pagare' + (nApe ? ' (' + nApe + ')' : ''));
+  h += btnF('tutti', 'Tutti');
+  h += '<span style="width:10px"></span>';
+  h += '<select onchange="pfRfSetPeriodo(this.value)" style="font-size:11.5px;padding:6px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">'
+    + '<option value=""' + (_rfMese === null ? ' selected' : '') + '>Anno intero</option>'
+    + MESI.map(function (m, i) { return '<option value="' + i + '"' + (_rfMese === i ? ' selected' : '') + '>' + m + '</option>'; }).join('')
+    + '</select>';
+  h += '<select onchange="pfRfSetAnno(this.value)" style="font-size:11.5px;padding:6px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">'
+    + anni.map(function (a) { return '<option value="' + a + '"' + (a === _rfAnno ? ' selected' : '') + '>' + a + '</option>'; }).join('')
+    + '</select>';
+  h += '<span style="font-size:11px;color:var(--text-muted)">per data di scadenza, dalla piu vicina</span>';
+  h += '</div>';
+  return h;
+}
+
 function _rfRenderTab() {
   var body = document.getElementById('rf-body');
   if (!body) return;
@@ -590,7 +634,17 @@ function _rfRenderTab() {
     return;
   }
 
-  var ordini = _ecfOrdini.filter(function (o) { return !o.fatturaId; });   // anche i già pagati: il numero può arrivare dopo
+  var tuttiSenzaFatt = _ecfOrdini.filter(function (o) { return !o.fatturaId; });   // anche i già pagati: il numero può arrivare dopo
+  var ordini = tuttiSenzaFatt.filter(function (o) {
+    if (_rfFiltro === 'aperti' && (o.pagato || o.fattSaldata)) return false;
+    // periodo sulla SCADENZA; se un ordine non ce l'ha si usa la sua data,
+    // cosi finisce comunque in un periodo solo e non compare in tutti gli anni
+    var sc = String(o.scadenza || o.data || '');
+    if (!sc) return true;
+    if (Number(sc.slice(0, 4)) !== _rfAnno) return false;
+    if (_rfMese !== null && Number(sc.slice(5, 7)) !== _rfMese + 1) return false;
+    return true;
+  });
   var tot = ordini.reduce(function (s, o) { return s + o.totale; }, 0);
 
   pfRfCtx('rf', {
@@ -623,6 +677,7 @@ function _rfRenderTab() {
       + '<div style="font-size:13px;font-weight:600">Ordini senza fattura — ' + _rfEsc(_ecfSel.nome)
         + ' <span style="font-weight:400;color:var(--text-muted)">· ' + ordini.length + (ordini.length === 1 ? ' ordine · ' : ' ordini · ') + _rfE(tot) + ' IVA inc.</span></div>'
       + '<div style="display:flex;gap:8px">' + pfRfBtnVista('rf') + '</div></div>'
+    + _rfBarraFiltri(tuttiSenzaFatt)
     + pfRfTabella('rf')
     + pfRfBox('rf');
 
