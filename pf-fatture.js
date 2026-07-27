@@ -94,6 +94,78 @@ async function eliminaFattura(fatturaId){
   if (typeof caricaFatture === 'function') caricaFatture();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// RIGHE EXTRA DEL MESE (27/07 — richiesta Rinaldo)
+// "+N extra" significa che nel mese ci sono piu RIGHE FATTURA che consegne.
+// Non e' per forza un errore: puo' essere lo sfasamento di fine mese, una
+// riga di servizio senza consegna, oppure un aggancio sbagliato. Qui si
+// vedono una per una, con scritto accanto PERCHE' risultano in piu.
+// Solo lettura: nessuna scrittura, nessuna query nuova (usa i dati gia in
+// pagina del riepilogo).
+// ═══════════════════════════════════════════════════════════════════
+function apriRigheExtraMese(mese) {
+  const D = window._fattRiepDati;
+  if (!D) { toast('Riapri la sezione Fatture e riprova'); return; }
+  const mPad = String(mese).padStart(2, '0');
+  const prefix = `${D.anno}-${mPad}`;
+  const MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+
+  // ordine collegato a ciascuna riga fattura
+  const ordinePerRiga = new Map();
+  (D.ordini || []).forEach(o => { if (o.fattura_riga_id) ordinePerRiga.set(o.fattura_riga_id, o); });
+  const fattById = new Map();
+  (D.fatture || []).forEach(f => fattById.set(f.id, f));
+
+  const righeMese = (D.righe || []).filter(r => r.data && r.data.startsWith(prefix));
+  // "in piu" = la riga non corrisponde a una consegna DI QUESTO MESE
+  const extra = [];
+  righeMese.forEach(r => {
+    const o = ordinePerRiga.get(r.id);
+    if (o && o.data && o.data.startsWith(prefix)) return;   // riga a posto
+    const f = fattById.get(r.fattura_id) || {};
+    let nota, colore;
+    if (!o) {
+      nota = 'Nessuna consegna collegata — riga di servizio (trasporto, conguaglio) oppure consegna da agganciare';
+      colore = '#8B6A00';
+    } else {
+      const dOrd = String(o.data || '');
+      const primaDelMese = dOrd < prefix + '-01';
+      if (primaDelMese) {
+        nota = 'Consegna del ' + _fmtD(dOrd) + ': fatturata il mese dopo — sfasamento normale di fine mese';
+        colore = '#3B6D11';
+      } else {
+        nota = 'Consegna del ' + _fmtD(dOrd) + ': FATTURA PRIMA DELLA CONSEGNA — data fattura o data consegna da controllare';
+        colore = '#B02A1A';
+      }
+    }
+    extra.push({ r, o, f, nota, colore });
+  });
+
+  let html = `<div style="font-size:16px;font-weight:600;margin-bottom:2px">Righe in più — ${MESI[mese-1]} ${D.anno}</div>`;
+  html += `<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">${righeMese.length} righe fattura nel mese, di cui <strong>${extra.length}</strong> non corrispondono a una consegna dello stesso mese</div>`;
+
+  if (!extra.length) {
+    html += '<div style="color:var(--text-muted);font-size:12.5px">Nessuna riga in più: tutte le righe del mese hanno la loro consegna.</div>';
+  } else {
+    html += '<div style="border:0.5px solid var(--border);border-radius:8px;overflow:hidden">';
+    extra.forEach(x => {
+      html += '<div style="padding:9px 12px;border-bottom:0.5px solid var(--border)">'
+        + '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px">'
+          + '<span><strong style="font-family:var(--font-mono)">' + _esc(x.f.numero || '?') + '</strong> del ' + _fmtD(x.f.data) + ' · ' + _esc(x.f.cessionario_denominazione || (x.o ? x.o.cliente : '') || '—') + '</span>'
+          + '<span style="font-family:var(--font-mono);white-space:nowrap">' + _esc(x.r.prodotto_normalizzato || '') + ' · ' + Number(x.r.quantita || 0).toLocaleString('it-IT') + ' L</span>'
+        + '</div>'
+        + '<div style="font-size:11.5px;color:' + x.colore + ';margin-top:3px">' + x.nota + '</div>'
+        + '</div>';
+    });
+    html += '</div>';
+    html += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-muted);line-height:1.6">'
+      + 'In verde lo sfasamento di fine mese, che è fisiologico. In ambra le righe senza consegna collegata: se sono trasporti o servizi va bene, se sono carburante vanno agganciate. In rosso le fatture emesse prima della consegna: lì c\'è una data sbagliata da correggere.'
+      + '</div>';
+  }
+  html += '<div style="margin-top:14px;text-align:right"><button class="btn-primary" onclick="chiudiModal()">Chiudi</button></div>';
+  apriModal(html);
+}
+
 async function caricaFatture(){
   const anno     = document.getElementById('fatt-filtro-anno')?.value || new Date().getFullYear();
   const mese     = document.getElementById('fatt-filtro-mese')?.value || '';
@@ -240,13 +312,13 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
         .gte('data', dataMin).lte('data', dataMax); }),
       // Tutti gli ordini clienti consegnati dell'ANNO (per riepilogo mensile) — con aggancio fattura
       _pfFetchAllPages(function(){ return sb.from('ordini')
-        .select('id, data, fattura_id, fattura_riga_id')
+        .select('id, data, cliente, prodotto, litri, fattura_id, fattura_riga_id')
         .eq('tipo_ordine', 'cliente')
         .eq('stato', 'consegnato')
         .gte('data', annoMin).lte('data', annoMax); }),
       // Tutte le fatture dell'ANNO (per riepilogo mensile)
       _pfFetchAllPages(function(){ return sb.from('fatture_emesse')
-        .select('id, data')
+        .select('id, data, numero, cessionario_denominazione')
         .gte('data', annoMin).lte('data', annoMax); }),
       // Tutte le righe fattura "vere" (con prodotto+quantità) dell'ANNO — FIX 16/07 paginazione (bug 1000 righe)
       // Il riepilogo deve confrontare ordini ↔ righe fattura, non documenti fattura,
@@ -300,6 +372,10 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
     }
 
     // ── 4b. Ultimo mese con fatture importate (per banner promemoria) ──
+    // Dati tenuti da parte per il DETTAGLIO delle righe extra (27/07):
+    // il pulsante sulla riga del mese apre l'elenco senza rileggere niente.
+    window._fattRiepDati = { anno: annoInt, righe: righeAnno, ordini: ordiniAnno, fatture: fattureAnno };
+
     const mesiConFatture = riepMesi.filter(r => r.fatture > 0).map(r => r.mese);
     const ultimoMeseImportato = mesiConFatture.length > 0 ? Math.max(...mesiConFatture) : null;
     const oggi = new Date();
@@ -411,13 +487,14 @@ async function caricaDashboardFatture(fatture, dataMin, dataMax) {
                     else if (nonAgg > 0) { stato = `⚠ ${nonAgg} da agganciare`; colore = '#B02A1A'; }
                     else if (diff === 0) { stato = '✓ Chiuso'; colore = '#639922'; }
                     else if (diff > 0) { stato = `⚠ ${diff} da fatturare`; colore = '#D4A017'; }
-                    else { stato = `+${-diff} extra`; colore = '#8B6A00'; }
+                    else { stato = `+${-diff} extra 🔍`; colore = '#8B6A00'; }
+                    const cliccabile = (diff < 0 && nonAgg === 0);
                     return `
                       <tr style="border-bottom:0.5px solid var(--border)">
                         <td style="padding:3px 4px">${r.label}</td>
                         <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.ordini}</td>
                         <td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">${r.fatture}</td>
-                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600">${stato}</td>
+                        <td style="padding:3px 4px;text-align:center;color:${colore};font-size:10px;font-weight:600${cliccabile ? ';cursor:pointer;text-decoration:underline dotted' : ''}"${cliccabile ? ` onclick="apriRigheExtraMese(${r.mese})" title="Vedi quali righe sono in più"` : ''}>${stato}</td>
                       </tr>
                     `;
                   }).join('')}
