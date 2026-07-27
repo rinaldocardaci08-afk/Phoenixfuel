@@ -466,8 +466,11 @@ async function _uniRenderSettimana() {
           + '<span style="font-family:var(--font-mono);color:' + (tot.benzina.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.benzina.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.benzina.marg) + '</span></div>';
       }
       h += '<div style="border-top:0.5px solid var(--border);margin-top:5px;padding-top:4px">'
-        + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Litri</span><span style="font-family:var(--font-mono);font-weight:700">' + Math.round(litriG) + '</span></div>'
-        + '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Euro</span><span style="font-family:var(--font-mono);font-weight:700">' + _uniSetFmtE(euroIva) + '</span></div>'
+        // LITRI in evidenza (26/07): stessa riga, ma incorniciata e piu grande
+        + '<div style="border:1.5px solid var(--text);border-radius:6px;padding:4px 6px;display:flex;justify-content:space-between;align-items:baseline">'
+          + '<span style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Litri</span>'
+          + '<span style="font-family:var(--font-mono);font-size:17px;font-weight:700">' + Math.round(litriG) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:var(--text-muted)">Euro</span><span style="font-family:var(--font-mono);font-weight:700">' + _uniSetFmtE(euroIva) + '</span></div>'
         + '</div></div>';
 
       // ── pannello 3: cassa
@@ -486,6 +489,16 @@ async function _uniRenderSettimana() {
         h += '<div style="background:#FFF1DC;border-radius:6px;padding:6px;font-size:9px;color:#8A4F06;line-height:1.4;text-align:center;font-weight:600">'
           + 'Cassa da compilare' + (impCassa[data] ? '<br><span style="font-weight:400">dati del portale pronti</span>' : '') + '</div>';
       }
+
+      // ── pannello 4 (27/07): marginalita del giorno, stessi colori del
+      //    pannello "Marginalita live" della schermata giornaliera.
+      var margL = litriG > 0 ? (margG / litriG) : 0;
+      h += '<div style="background:#16305B;border-radius:6px;padding:6px 5px;text-align:center;margin-top:4px">'
+        + '<div style="font-size:7.5px;letter-spacing:.6px;color:#9FB6D9;text-transform:uppercase">Margine totale</div>'
+        + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:' + (margG >= 0 ? '#7BE87B' : '#FF9A9A') + ';margin-bottom:4px">' + (margG >= 0 ? '' : '−') + '€ ' + _uniSetFmtE(Math.abs(margG)) + '</div>'
+        + '<div style="font-size:7.5px;letter-spacing:.6px;color:#9FB6D9;text-transform:uppercase">€/L margine medio</div>'
+        + '<div style="font-family:var(--font-mono);font-size:13px;font-weight:700;color:' + (margL >= 0 ? '#7BE87B' : '#FF9A9A') + '">€ ' + margL.toFixed(4) + '</div>'
+        + '</div>';
     } else if (staging) {
       var ic = impCassa[data] || {};
       var litriPort = 0;
