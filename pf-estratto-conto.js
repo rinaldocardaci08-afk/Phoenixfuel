@@ -461,13 +461,21 @@ function _ecChiudiCliente() {
 // ═══════════════════════════════════════════════════════════════════
 var _ecSel = {};        // { fatturaId: true } — si muta in loco, mai riassegnata
 
+// BUG 28/07: _ecRenderCliente RESTITUISCE l'html, non lo scrive. Chiamandola
+// e basta il risultato veniva buttato via — spuntavi e non compariva niente,
+// e "Deseleziona" sembrava morto. Ora si ridisegna sul serio.
+function _ecRidisegna() {
+  var el = document.getElementById('ec-content');
+  if (el) el.innerHTML = _ecRenderCliente();
+}
+
 function _ecToggleFatt(id, cb) {
   if (cb && cb.checked) _ecSel[id] = true; else delete _ecSel[id];
-  _ecRenderCliente();
+  _ecRidisegna();
 }
 function _ecDeseleziona() {
   Object.keys(_ecSel).forEach(function (k) { delete _ecSel[k]; });
-  _ecRenderCliente();
+  _ecRidisegna();
 }
 function _ecFattureSelezionate() {
   return (_ecStato.fatture || []).filter(function (f) { return _ecSel[f.fattura_id || f.id]; })
@@ -1738,8 +1746,7 @@ function _ecTabFiltro(filtro, label, attivo) {
 
 function _ecCambiaFiltroFatture(filtro) {
   _ecStato.filtroFatture = filtro;
-  var el = document.getElementById('ec-content');
-  if (el) el.innerHTML = _ecRenderCliente();
+  _ecRidisegna();       // un solo modo di ridisegnare, per tutti
 }
 
 
