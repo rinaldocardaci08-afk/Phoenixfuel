@@ -800,37 +800,100 @@ function _ecBarraFido(cliente, esp) {
   return h;
 }
 
-// Timeline delle scadenze: un pallino per fattura aperta, data sopra e
-// importo sotto, dimensione proporzionale, rosso per lo scaduto.
+// Timeline delle scadenze (rifatta 28/07 su disegno di Rinaldo).
+// Prima la scala andava dalla piu vecchia alla piu recente: bastava una
+// fattura vecchia aperta — i 270 euro di aprile — per schiacciare tutte le
+// scadenze dei prossimi giorni in un angolo.
+// Ora la linea e' ancorata a OGGI: a sinistra la ZONA SCADUTA, rossa e
+// compressa, dove il dettaglio non serve (lo scaduto si gestisce come tale);
+// a destra il futuro, disteso da oggi all'ultima scadenza, che e' la parte
+// che serve leggere bene. Le fatture con la stessa data fanno un pallino solo.
 function _ecTimelineScadenze(fattAperte) {
-  var conScad = (fattAperte || []).filter(function (f) { return f.data_scadenza && Number(f.saldo_residuo) > 0; })
-    .sort(function (a, b) { return a.data_scadenza < b.data_scadenza ? -1 : 1; });
-  if (conScad.length < 2) return '';
+  var aperte = (fattAperte || []).filter(function (f) { return f.data_scadenza && Number(f.saldo_residuo) > 0; });
+  if (!aperte.length) return '';
 
   var oggiIso = new Date().toISOString().split('T')[0];
-  var t0 = new Date(conScad[0].data_scadenza + 'T12:00:00').getTime();
-  var t1 = new Date(conScad[conScad.length - 1].data_scadenza + 'T12:00:00').getTime();
-  var span = Math.max(1, t1 - t0);
-  var maxImp = conScad.reduce(function (m, f) { return Math.max(m, Number(f.saldo_residuo || 0)); }, 0) || 1;
+  var perData = {};
+  aperte.forEach(function (f) {
+    if (!perData[f.data_scadenza]) perData[f.data_scadenza] = { imp: 0, n: 0 };
+    perData[f.data_scadenza].imp += Number(f.saldo_residuo || 0);
+    perData[f.data_scadenza].n++;
+  });
+  var date = Object.keys(perData).sort();
+  var scadute = date.filter(function (d) { return d < oggiIso; });
+  var future  = date.filter(function (d) { return d >= oggiIso; });
+
+  var LIM = 26;                       // % di larghezza riservata allo scaduto
+  var totScaduto = scadute.reduce(function (a, d) { return a + perData[d].imp; }, 0);
+  var nScadute   = scadute.reduce(function (a, d) { return a + perData[d].n; }, 0);
 
   var h = '<div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">'
-    + '<div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px;margin-bottom:22px">Scadenze delle sue fatture</div>'
-    + '<div style="position:relative;height:58px;margin:0 14px">'
-    + '<div style="position:absolute;top:27px;left:0;right:0;height:3px;background:#EDEAE1;border-radius:2px"></div>';
+    + '<div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px;margin-bottom:24px">Scadenze delle sue fatture</div>'
+    + '<div style="position:relative;height:66px;margin:0 16px">';
 
-  conScad.forEach(function (f) {
-    var t = new Date(f.data_scadenza + 'T12:00:00').getTime();
-    var x = ((t - t0) / span) * 100;
-    var scaduta = f.data_scadenza < oggiIso;
-    var d = 9 + Math.round((Number(f.saldo_residuo || 0) / maxImp) * 7);
-    h += '<div title="' + _ecEsc(f.numero || '') + ' · ' + _ecFmtDec(f.saldo_residuo) + '" style="position:absolute;left:' + x.toFixed(1) + '%;top:0;transform:translateX(-50%);text-align:center;white-space:nowrap">'
-      + '<div style="font-size:10px;font-family:var(--font-mono);color:' + (scaduta ? '#A32D2D' : '#666') + ';margin-bottom:4px">' + _ecFmtData(f.data_scadenza).slice(0, 5) + '</div>'
-      + '<div style="width:' + d + 'px;height:' + d + 'px;border-radius:50%;background:' + (scaduta ? '#E24B4A' : '#378ADD') + ';margin:0 auto;border:2px solid #FAF8F2"></div>'
-      + '<div style="font-size:10px;font-family:var(--font-mono);color:' + (scaduta ? '#A32D2D' : '#412402') + ';margin-top:4px">' + _ecFmtImpKb(f.saldo_residuo) + '</div>'
-      + '</div>';
-  });
+  // fondo: zona scaduta rossa fino a oggi, poi linea neutra
+  h += '<div style="position:absolute;top:29px;left:0;width:' + LIM + '%;height:9px;background:#F6C9C6;border-radius:5px 0 0 5px"></div>';
+  h += '<div style="position:absolute;top:31px;left:' + LIM + '%;right:0;height:3px;background:#EDEAE1;border-radius:0 2px 2px 0"></div>';
+  // riga di OGGI
+  h += '<div style="position:absolute;left:' + LIM + '%;top:16px;width:2px;height:36px;background:#412402"></div>'
+    + '<div style="position:absolute;left:' + LIM + '%;top:54px;transform:translateX(-50%);font-size:9.5px;color:#412402;font-weight:700">oggi</div>';
+
+  // ── scadute: dentro la zona rossa, distribuite ma senza pretese di scala
+  if (scadute.length) {
+    scadute.forEach(function (d, k) {
+      var x = scadute.length === 1 ? LIM * 0.45 : 3 + (k / (scadute.length - 1)) * (LIM - 8);
+      var v = perData[d];
+      h += '<div title="' + _ecFmtData(d) + ' · ' + _ecFmtDec(v.imp) + (v.n > 1 ? ' · ' + v.n + ' fatture' : '') + '" '
+        + 'style="position:absolute;left:' + x.toFixed(1) + '%;top:2px;transform:translateX(-50%);text-align:center;white-space:nowrap">'
+        + '<div style="font-size:9.5px;font-family:var(--font-mono);color:#A32D2D;margin-bottom:3px">' + _ecFmtData(d).slice(0, 5) + '</div>'
+        + '<div style="width:12px;height:12px;border-radius:50%;background:#E24B4A;margin:0 auto;border:2px solid #FAF8F2"></div>'
+        + '<div style="font-size:9.5px;font-family:var(--font-mono);color:#A32D2D;margin-top:3px">' + _ecFmtImpKb(v.imp) + '</div>'
+        + '</div>';
+    });
+    // etichetta riassuntiva dello scaduto
+    h += '<div style="position:absolute;left:0;top:-16px;font-size:10px;color:#A32D2D;font-weight:700">SCADUTO ' + _ecFmtDec(totScaduto)
+      + ' <span style="font-weight:400">· ' + nScadute + (nScadute === 1 ? ' fattura' : ' fatture') + '</span></div>';
+  }
+
+  // ── future: distese da oggi all'ultima scadenza
+  if (future.length) {
+    var t0 = new Date(oggiIso + 'T12:00:00').getTime();
+    var t1 = new Date(future[future.length - 1] + 'T12:00:00').getTime();
+    var span = Math.max(1, t1 - t0);
+    var maxImp = future.reduce(function (m, d) { return Math.max(m, perData[d].imp); }, 0) || 1;
+    var prevX = -99, alto = false;
+    future.forEach(function (d) {
+      var t = new Date(d + 'T12:00:00').getTime();
+      var x = LIM + ((t - t0) / span) * (100 - LIM - 3);
+      alto = (x - prevX) < 7 ? !alto : false;      // due date vicine: si sfalsano
+      prevX = x;
+      var v = perData[d];
+      var dm = 9 + Math.round((v.imp / maxImp) * 7);
+      h += '<div title="' + _ecFmtData(d) + ' · ' + _ecFmtDec(v.imp) + (v.n > 1 ? ' · ' + v.n + ' fatture' : '') + '" '
+        + 'style="position:absolute;left:' + x.toFixed(1) + '%;top:' + (alto ? -12 : 2) + 'px;transform:translateX(-50%);text-align:center;white-space:nowrap">'
+        + '<div style="font-size:9.5px;font-family:var(--font-mono);color:#666;margin-bottom:3px">' + _ecFmtData(d).slice(0, 5) + '</div>'
+        + '<div style="width:' + dm + 'px;height:' + dm + 'px;border-radius:50%;background:#378ADD;margin:0 auto;border:2px solid #FAF8F2"></div>'
+        + '<div style="font-size:9.5px;font-family:var(--font-mono);color:#412402;margin-top:3px">' + _ecFmtImpKb(v.imp) + (v.n > 1 ? '<span style="color:#999">·' + v.n + '</span>' : '') + '</div>'
+        + '</div>';
+    });
+  }
+
   h += '</div></div>';
   return h;
+}
+
+// Apre la scheda anagrafica del cliente aperto e, alla chiusura, ricarica
+// l'estratto conto: se cambia il fido, la barra si aggiorna subito.
+function _ecApriAnagrafica() {
+  var id = _ecStato.clienteSelezionato;
+  if (!id) return;
+  if (typeof apriModaleCliente !== 'function') { toast('Scheda cliente non disponibile'); return; }
+  apriModaleCliente(id);
+  var chk = setInterval(function () {
+    var m = document.getElementById('modal-title');
+    if (!m || m.offsetParent === null) { clearInterval(chk); renderEstrattoConto(); }
+  }, 700);
+  setTimeout(function () { clearInterval(chk); }, 300000);
 }
 
 function _ecRenderCliente() {
@@ -893,6 +956,8 @@ function _ecRenderCliente() {
   html += '</div>';
   html += '</div>';
   html += '<button onclick="_ecChiudiCliente()" style="background:white;border:0.5px solid var(--border);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer">← Torna a elenco</button>';
+  // apertura anagrafica cliente (27/07): si modificano i dati senza uscire dall'estratto
+  html += '<button onclick="_ecApriAnagrafica()" style="margin-left:8px;background:white;border:0.5px solid var(--border);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer">✏️ Anagrafica cliente</button>';
   html += '</div>';
 
   // 4 KPI
