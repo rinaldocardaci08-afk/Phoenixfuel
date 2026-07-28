@@ -154,10 +154,14 @@ function _ecfDisegnaOverview(body, cards) {
               + '<span style="color:var(--text-muted)">Fido disponibile</span>'
               + '<span style="font-family:var(--font-mono);font-weight:700;color:' + ((c.fido - c.esp) < 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(c.fido - c.esp) + '</span></div>' : '')
           + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:7px">'
-            + '<span style="color:var(--text-muted)">' + c.nAperti + ' ordini aperti</span>'
-            + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
-                         : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
-          + '</div></div>';
+            + '<span style="color:var(--text-muted)">Prossima scadenza</span>'
+            + (c.prossima
+                ? '<span style="font-family:var(--font-mono);font-weight:700;color:' + (c.scadute ? '#A32D2D' : 'var(--text)') + '">'
+                    + _pfIsoToIt(c.prossima) + (c.prossimaImporto ? ' · ' + fmtE(c.prossimaImporto) : '') + '</span>'
+                : '<span style="color:var(--text-muted)">—</span>')
+          + '</div>'
+          + (c.scadute ? '<div style="font-size:11px;color:#A32D2D;font-weight:700;text-align:right;margin-top:2px">' + c.scadute + ' scaduti</div>' : '')
+          + '</div>';
       }).join('') + '</div>'
     + '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px">'
       + '<span style="font-size:11.5px;color:var(--text-muted)">Anno dei grafici</span>' + _ecfBtnAnno() + '</div>'
@@ -904,10 +908,14 @@ async function caricaFidoFornitoriDashboard() {
               + '<span style="color:var(--text-muted)">Fido disponibile</span>'
               + '<span style="font-family:var(--font-mono);font-weight:700;color:' + ((c.fido - c.esp) < 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(c.fido - c.esp) + '</span></div>'
             + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px">'
-              + '<span style="color:var(--text-muted)">' + c.nAperti + ' ordini aperti</span>'
-              + (c.scadute ? '<span style="color:#A32D2D;font-weight:700">' + c.scadute + ' scaduti</span>'
-                           : '<span style="color:var(--text-muted)">prossima ' + (c.prossima ? _pfIsoToIt(c.prossima) : '—') + '</span>')
-            + '</div></div>';
+              + '<span style="color:var(--text-muted)">Prossima scadenza</span>'
+              + (c.prossima
+                  ? '<span style="font-family:var(--font-mono);font-weight:700;color:' + (c.scadute ? '#A32D2D' : 'var(--text)') + '">'
+                      + _pfIsoToIt(c.prossima) + (c.prossimaImporto ? ' · ' + fmtE(c.prossimaImporto) : '') + '</span>'
+                  : '<span style="color:var(--text-muted)">—</span>')
+            + '</div>'
+            + (c.scadute ? '<div style="font-size:11px;color:#A32D2D;font-weight:700;text-align:right;margin-top:2px">' + c.scadute + ' scaduti</div>' : '')
+            + '</div>';
         }).join('') + '</div>';
   } catch (e) {
     console.warn('fido fornitori dashboard', e);

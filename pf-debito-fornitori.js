@@ -254,12 +254,19 @@ async function pfDebitoCards(annoSel, force) {
     var sueFatt = d.fatture.filter(function (x) { return String(x.fornitore_nome || '').toLowerCase().trim() === k; });
     var aperti = suoi.filter(function (o) { return !o.pagato && !o.fatturaId; });
     var esp = pfDebitoEsposizione(suoi, sueFatt);
-    var scad = aperti.map(function (o) { return o.scadenza; }).filter(Boolean).sort();
+    // PROSSIMA SCADENZA (28/07): si guardano gli ordini VIVI — non pagati e non
+    // su fattura saldata — cioe' lo stesso perimetro dell'esposizione. Prima si
+    // guardavano solo quelli SENZA fattura, quindi un ordine gia numerato ma da
+    // pagare non contava: per Q8 usciva 07/09 invece del 06/08 reale.
+    var vivi = suoi.filter(function (o) { return !o.pagato && !o.fattSaldata; });
+    var scad = vivi.map(function (o) { return o.scadenza; }).filter(Boolean).sort();
     var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0, 4) === String(annoG); });
     return {
       id: f.id, nome: nome, gg: gg, fido: fido,
       esp: esp, nAperti: aperti.length,
       prossima: scad.length ? scad[0] : null,
+      prossimaImporto: scad.length ? vivi.filter(function (o) { return o.scadenza === scad[0]; })
+                                         .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0) : 0,
       scadute: scad.filter(function (x) { return x < oggi; }).length,
       acq: annoOrd.reduce(function (s, o) { return s + o.imponibile; }, 0),
       litri: annoOrd.reduce(function (s, o) { return s + Number(o.litri || 0); }, 0),
