@@ -735,9 +735,12 @@ function _ecEsposizioneCliente(clienteId) {
   var scaduto = fatt.filter(function (f) { return f.data_scadenza && f.data_scadenza < oggiIso; })
                     .reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
 
-  // consegne senza fattura: ne' fattura_id ne' riga fattura, non pagate
+  // Ordini VIVI senza fattura: contano dal momento in cui esistono, non da
+  // quando sono consegnati (28/07 — stessa regola dei fornitori: se il fido
+  // aspetta la consegna o la fattura, la merce e' gia partita). Gli annullati
+  // sono gia esclusi a monte dalla query.
   var consegne = (_ecStato.ordini || []).filter(function (o) {
-    return o.cliente_id === clienteId && o.stato === 'consegnato'
+    return o.cliente_id === clienteId
       && !o.fattura_id && !o.fattura_riga_id && !o.pagato;
   });
   var nonFatturato = consegne.reduce(function (a, o) { return a + _ecValoreOrdine(o); }, 0);
@@ -918,6 +921,41 @@ function _ecMarginalitaCliente(clienteId, quante) {
     dal: ord[ord.length - 1].data,
     al: ord[0].data
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PANNELLO FIDO A RICHIESTA (28/07) — richiamato dall'icona nella riga di
+// ORDINI: apre lo stesso riquadro dell'estratto conto, cosi prima di
+// confermare una consegna si sa se il cliente ha capienza.
+// Riusa _ecEsposizioneCliente e _ecBarraFido: nessun calcolo doppio.
+// ═══════════════════════════════════════════════════════════════════
+async function pfFidoCliente(clienteId, nomeFallback) {
+  if (!clienteId) { toast('Cliente non collegato a questo ordine'); return; }
+  try {
+    // se l'estratto conto non e' mai stato aperto in questa sessione, carico
+    // il minimo indispensabile per QUESTO cliente
+    if (!(_ecStato.fatture || []).length || !(_ecStato.clienti || []).length) {
+      var r = await Promise.all([
+        sb.from('estratto_conto_cliente').select('*').eq('cliente_id', clienteId),
+        sb.from('ordini').select('id,cliente_id,data,litri,costo_litro,trasporto_litro,margine,iva,stato,fattura_id,fattura_riga_id,pagato')
+          .eq('cliente_id', clienteId).eq('tipo_ordine', 'cliente').neq('stato', 'annullato'),
+        sb.from('clienti').select('id,nome,ragione_sociale,fido_massimo,giorni_pagamento,modalita_pagamento').eq('id', clienteId).single()
+      ]);
+      _ecStato.fatture = (_ecStato.fatture || []).concat(r[0].data || []);
+      _ecStato.ordini  = (_ecStato.ordini  || []).concat(r[1].data || []);
+      if (r[2].data) _ecStato.clienti = (_ecStato.clienti || []).concat([r[2].data]);
+    }
+    var cliente = (_ecStato.clienti || []).filter(function (c) { return c.id === clienteId; })[0]
+      || { nome: nomeFallback || '', fido_massimo: 0 };
+    var esp = _ecEsposizioneCliente(clienteId);
+    var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Fido — ' + _ecEsc(cliente.ragione_sociale || cliente.nome || nomeFallback || '') + '</div>'
+      + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">situazione aggiornata a questo momento</div>'
+      + _ecBarraFido(cliente, esp)
+      + '<div style="margin-top:12px;text-align:right"><button onclick="chiudiModal()" class="btn-primary">Chiudi</button></div>';
+    apriModal(h);
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
 }
 
 // Apre la scheda anagrafica del cliente aperto e, alla chiusura, ricarica
