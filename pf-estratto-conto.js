@@ -1697,6 +1697,36 @@ function _ecRenderEstrattoFatture(fattCli) {
     });
   }
 
+  // ELENCO IBRIDO (28/07 — come nei fornitori): oltre alle fatture entrano
+  // anche gli ORDINI SENZA FATTURA, che sono gia esposizione. Non sono
+  // incassabili (l'incasso si imputa a una fattura) ma devono VEDERSI, perche'
+  // il fido li conta e altrimenti l'elenco non spiega il totale.
+  var _cliOra = (_ecStato.clienti || []).filter(function (c) { return c.id === clienteId; })[0] || {};
+  var _ggCli = Number(_cliOra.giorni_pagamento || 0);
+  (_ecStato.ordini || []).forEach(function (o) {
+    if (o.cliente_id !== clienteId) return;
+    if (o.fattura_id || o.fattura_riga_id || o.pagato) return;
+    var scad = o.data_scadenza || null;
+    if (!scad && o.data && _ggCli > 0) {
+      var d = new Date(o.data + 'T12:00:00');
+      d.setDate(d.getDate() + _ggCli);
+      scad = d.toISOString().split('T')[0];
+    }
+    fattFilt.push({
+      _ordine: true,
+      fattura_id: null,
+      numero: '(ordine)',
+      data: o.data,
+      data_scadenza: scad,
+      importo_totale: _ecValoreOrdine(o),
+      importo_incassato: 0,
+      saldo_residuo: _ecValoreOrdine(o),
+      stato_pagamento: 'aperta',
+      prodotto: o.prodotto,
+      litri: o.litri
+    });
+  });
+
   // ORDINE (28/07): per SCADENZA crescente, dalla piu vicina alla piu lontana
   // — stessa regola dei fornitori. Senza scadenza in fondo.
   fattFilt.sort(function(a, b) {
@@ -1765,9 +1795,14 @@ function _ecRenderEstrattoFatture(fattCli) {
       var ant = (_ecStato.anticipiPerFattura || {})[_fid] || null;
       html += '<tr style="border-bottom:0.5px solid var(--border);' + rowBg + (_ecSel[_fid] ? 'background:#E6F1FB;' : '') + '">';
       html += '<td style="padding:5px 4px;text-align:center">'
-        + (isOpen && _fid ? '<input type="checkbox"' + (_ecSel[_fid] ? ' checked' : '') + ' onclick="_ecToggleFatt(\'' + _fid + '\',this)" style="width:15px;height:15px;cursor:pointer;accent-color:#185FA5">' : '')
+        + (isOpen && _fid && !f._ordine ? '<input type="checkbox"' + (_ecSel[_fid] ? ' checked' : '') + ' onclick="_ecToggleFatt(\'' + _fid + '\',this)" style="width:15px;height:15px;cursor:pointer;accent-color:#185FA5">' : '')
         + '</td>';
-      html += '<td style="padding:5px 9px;font-family:var(--font-mono);font-size:10px">' + _ecEsc(f.numero || '') + '/' + _ecEsc(String(f.anno || '')) + '</td>';
+      html += '<td style="padding:5px 9px;font-family:var(--font-mono);font-size:10px">'
+        + (f._ordine
+            ? '<span style="background:#FFF1DC;color:#8A4F06;border-radius:8px;padding:1px 7px;font-size:9.5px;font-weight:600">da fatturare</span>'
+              + (f.litri ? '<div style="color:#888;font-size:9px;margin-top:2px">' + _ecFmt(f.litri) + ' L · ' + _ecEsc(String(f.prodotto || '').split(' ')[0]) + '</div>' : '')
+            : _ecEsc(f.numero || '') + '/' + _ecEsc(String(f.anno || '')))
+        + '</td>';
       html += '<td style="padding:5px 9px">' + _ecFmtData(f.data) + '</td>';
       html += '<td style="padding:5px 9px">' + _ecFmtData(f.data_scadenza)
         + (ant ? '<div style="font-size:9.5px;color:#0C447C;background:#E6F1FB;border-radius:8px;padding:1px 6px;display:inline-block;margin-top:2px">Anticipata · ' + _ecEsc(ant.istituto) + '</div>' : '')
@@ -1778,7 +1813,7 @@ function _ecRenderEstrattoFatture(fattCli) {
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono);font-weight:' + (Number(f.saldo_residuo) > 0 ? '600' : 'normal') + ';color:' + (Number(f.saldo_residuo) > 0 ? (isScad ? '#791F1F' : '#412402') : '#888') + '">' + (Number(f.saldo_residuo) > 0 ? _ecFmtDec(f.saldo_residuo) : '—') + '</td>';
       // il badge dello STATO e' il richiamo alla modifica del pagamento
       // (come il badge PAGATO dei fornitori), non l'importo incassato
-      var _cliccabile = Number(f.importo_incassato) > 0 && _fid;
+      var _cliccabile = Number(f.importo_incassato) > 0 && _fid && !f._ordine;
       html += '<td style="padding:5px 9px;text-align:center"'
         + (_cliccabile ? ' onclick="_ecModificaIncasso(\'' + _fid + '\')" title="Modifica o annulla il pagamento" style="padding:5px 9px;text-align:center;cursor:pointer"' : '')
         + '>' + _ecBadgeStato(f.stato_pagamento, isScad) + '</td>';
