@@ -270,7 +270,7 @@ function _fgRenderCalendarioSettimana(p, perGiorno) {
     if (dati.totEnt === 0 && dati.totUsc === 0) {
       html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic">—</div>';
     }
-    html += '</div></div>';   // chiude griglia mese + contenitore scorrevole
+    html += '</div>';        // chiude la cella del giorno
   }
   html += '</div></div>';   // chiude griglia + contenitore scorrevole
   return html;
@@ -325,7 +325,7 @@ function _fgRenderCalendarioMese(p, perGiorno) {
     // Stop dopo l'ultima domenica che contiene l'ultimo del mese
     if (d > ultimoMese && d.getDay() === 1) break;
   }
-  html += '</div>';
+  html += '</div></div>';   // chiude griglia mese + contenitore scorrevole
   return html;
 }
 
