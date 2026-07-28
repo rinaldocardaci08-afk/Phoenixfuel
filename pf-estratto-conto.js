@@ -915,6 +915,98 @@ function _ecMarginalitaCliente(clienteId, quante) {
 // Apre la scheda anagrafica del cliente aperto e, alla chiusura, ricarica
 // l'estratto conto: se cambia il fido, la barra si aggiorna subito.
 // ═══════════════════════════════════════════════════════════════════
+// MODIFICA DI UN INCASSO GIA' REGISTRATO (28/07)
+// Come il badge PAGATO dei fornitori: si clicca l'importo incassato in riga e
+// si vede cosa e' stato registrato su quella fattura, con la possibilita' di
+// correggere la data o annullare. Annullando si toglie l'imputazione e, se il
+// movimento resta senza nulla imputato, si cancella anche quello: altrimenti
+// in banca resterebbe un'entrata che non appartiene a nessuno.
+// ═══════════════════════════════════════════════════════════════════
+async function _ecApriModificaIncasso(fatturaId) {
+  try {
+    var r = await sb.from('foglio_giornale_riconciliazioni')
+      .select('id,importo_imputato,movimento_id').eq('fattura_emessa_id', fatturaId);
+    if (r.error) throw r.error;
+    var righe = r.data || [];
+    if (!righe.length) { toast('Nessun incasso registrato su questa fattura'); return; }
+
+    var movIds = righe.map(function (x) { return x.movimento_id; });
+    var m = await sb.from('foglio_giornale_movimenti').select('id,data,importo,metodo,banca_id,descrizione,note').in('id', movIds);
+    var movMap = {};
+    (m.data || []).forEach(function (x) { movMap[x.id] = x; });
+
+    var f = (_ecStato.fatture || []).filter(function (x) { return (x.fattura_id || x.id) === fatturaId; })[0] || {};
+    var banca = function (id) {
+      var b = (_ecStato.banche || []).filter(function (x) { return x.id === id; })[0];
+      return b ? b.nome : '—';
+    };
+
+    var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Stai modificando un pagamento già registrato</div>'
+      + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Fattura ' + _ecEsc(f.numero || '') + ' · importo ' + _ecFmtDec(f.importo_totale) + ' · residuo ' + _ecFmtDec(f.saldo_residuo) + '</div>';
+
+    h += '<div style="border:0.5px solid var(--border);border-radius:9px;overflow:hidden">';
+    righe.forEach(function (rg) {
+      var mv = movMap[rg.movimento_id] || {};
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:0.5px solid var(--border);flex-wrap:wrap">'
+        + '<div style="font-size:12.5px">'
+          + '<strong style="font-family:var(--font-mono)">' + _ecFmtDec(rg.importo_imputato) + '</strong>'
+          + ' <span style="color:var(--text-muted)">· ' + _ecFmtData(mv.data) + ' · ' + _ecEsc(mv.metodo || '') + ' · ' + _ecEsc(banca(mv.banca_id)) + '</span>'
+        + '</div>'
+        + '<div style="display:flex;gap:6px">'
+          + '<button onclick="_ecCambiaDataIncasso(\'' + rg.movimento_id + '\',\'' + fatturaId + '\')" style="font-size:11px;padding:5px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">✎ data</button>'
+          + '<button onclick="_ecAnnullaIncasso(\'' + rg.id + '\',\'' + rg.movimento_id + '\',\'' + fatturaId + '\')" style="font-size:11px;padding:5px 10px;border:0.5px solid #E24B4A;border-radius:6px;background:#FCEBEB;color:#A32D2D;cursor:pointer">✕ Annulla</button>'
+        + '</div></div>';
+    });
+    h += '</div>';
+
+    var ant = (_ecStato.anticipiPerFattura || {})[fatturaId];
+    if (ant) {
+      h += '<div style="margin-top:11px;background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 8px 8px 0;padding:10px 12px;font-size:11.5px;color:#633806">'
+        + 'Questa fattura è anticipata da ' + _ecEsc(ant.istituto) + '. Annullando l\'incasso il rientro dell\'anticipo NON viene toccato: se era stato registrato, si sistema dal Quadro anticipi.</div>';
+    }
+    h += '<div style="margin-top:14px;text-align:right"><button onclick="chiudiModal()" class="btn-primary">Chiudi</button></div>';
+    apriModal(h);
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
+}
+
+async function _ecCambiaDataIncasso(movId, fatturaId) {
+  var oggi = new Date().toISOString().split('T')[0];
+  var v = prompt('Nuova data dell\'incasso (GG/MM/AAAA):', _ecFmtData(oggi));
+  if (!v) return;
+  var p = String(v).trim().split(/[\/\-\.]/);
+  if (p.length !== 3) { toast('Data non valida'); return; }
+  var iso = (p[2].length === 2 ? '20' + p[2] : p[2]) + '-' + String(p[1]).padStart(2, '0') + '-' + String(p[0]).padStart(2, '0');
+  if (isNaN(new Date(iso + 'T12:00:00').getTime())) { toast('Data non valida'); return; }
+  try {
+    var up = await sb.from('foglio_giornale_movimenti').update({ data: iso }).eq('id', movId);
+    if (up.error) throw up.error;
+    if (typeof _auditLog === 'function') _auditLog('modifica_incasso', 'foglio_giornale_movimenti', 'data spostata al ' + iso);
+    toast('✓ Data aggiornata');
+    chiudiModal();
+    await renderEstrattoConto();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
+}
+
+async function _ecAnnullaIncasso(ricId, movId, fatturaId) {
+  if (!confirm('Annullo questo incasso?\n\nLa fattura torna scoperta per l\'importo imputato.')) return;
+  try {
+    var d1 = await sb.from('foglio_giornale_riconciliazioni').delete().eq('id', ricId);
+    if (d1.error) throw d1.error;
+    // il movimento resta solo se ha ancora qualcosa di imputato
+    var resta = await sb.from('foglio_giornale_riconciliazioni').select('id').eq('movimento_id', movId);
+    if (!(resta.data || []).length) {
+      await sb.from('foglio_giornale_movimenti').delete().eq('id', movId);
+    }
+    if (typeof _auditLog === 'function') _auditLog('annulla_incasso', 'foglio_giornale_riconciliazioni', 'fattura ' + fatturaId);
+    toast('✓ Incasso annullato');
+    chiudiModal();
+    await renderEstrattoConto();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SCHEDA CLIENTE A PAGINA INTERA (28/07) — impianto "B" scelto da Rinaldo:
 // testata fissa con i quattro numeri che contano, poi quattro linguette.
 // Cosi non si allunga mai e c'e' posto per crescere.
@@ -1622,7 +1714,9 @@ function _ecRenderEstrattoFatture(fattCli) {
         + (ant ? '<div style="font-size:9.5px;color:#0C447C;background:#E6F1FB;border-radius:8px;padding:1px 6px;display:inline-block;margin-top:2px">Anticipata · ' + _ecEsc(ant.istituto) + '</div>' : '')
         + '</td>';
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono)">' + _ecFmtDec(f.importo_totale) + '</td>';
-      html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono);color:' + (Number(f.importo_incassato) > 0 ? '#27500A' : '#888') + '">' + (Number(f.importo_incassato) > 0 ? _ecFmtDec(f.importo_incassato) : '—') + '</td>';
+      html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono);color:' + (Number(f.importo_incassato) > 0 ? '#27500A' : '#888') + '"'
+        + (Number(f.importo_incassato) > 0 && _fid ? ' onclick="_ecApriModificaIncasso(\'' + _fid + '\')" title="Modifica o annulla questo incasso" style="padding:5px 9px;text-align:right;font-family:var(--font-mono);color:#27500A;cursor:pointer;text-decoration:underline dotted;font-weight:600"' : '')
+        + '>' + (Number(f.importo_incassato) > 0 ? _ecFmtDec(f.importo_incassato) : '—') + '</td>';
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono);font-weight:' + (Number(f.saldo_residuo) > 0 ? '600' : 'normal') + ';color:' + (Number(f.saldo_residuo) > 0 ? (isScad ? '#791F1F' : '#412402') : '#888') + '">' + (Number(f.saldo_residuo) > 0 ? _ecFmtDec(f.saldo_residuo) : '—') + '</td>';
       html += '<td style="padding:5px 9px;text-align:center">' + _ecBadgeStato(f.stato_pagamento, isScad) + '</td>';
       html += '<td style="padding:5px 9px;text-align:center;font-weight:600;color:' + ggColor + '">' + ggDiff + '</td>';
