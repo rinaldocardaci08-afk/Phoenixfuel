@@ -1701,10 +1701,13 @@ function _ecRenderEstrattoFatture(fattCli) {
   // anche gli ORDINI SENZA FATTURA, che sono gia esposizione. Non sono
   // incassabili (l'incasso si imputa a una fattura) ma devono VEDERSI, perche'
   // il fido li conta e altrimenti l'elenco non spiega il totale.
-  var _cliOra = (_ecStato.clienti || []).filter(function (c) { return c.id === clienteId; })[0] || {};
+  // NB: questa funzione non riceve clienteId — si prende dallo stato (era la
+  // causa dell'errore che spegneva l'estratto conto).
+  var _cliId  = _ecStato.clienteSelezionato;
+  var _cliOra = (_ecStato.clienti || []).filter(function (c) { return c.id === _cliId; })[0] || {};
   var _ggCli = Number(_cliOra.giorni_pagamento || 0);
   (_ecStato.ordini || []).forEach(function (o) {
-    if (o.cliente_id !== clienteId) return;
+    if (!_cliId || o.cliente_id !== _cliId) return;
     if (o.fattura_id || o.fattura_riga_id || o.pagato) return;
     var scad = o.data_scadenza || null;
     if (!scad && o.data && _ggCli > 0) {
