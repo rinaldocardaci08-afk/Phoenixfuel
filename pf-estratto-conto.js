@@ -149,7 +149,9 @@ async function renderEstrattoConto() {
   _ecStato.ordini = resOrd.data || [];
 
   // Render in base alla vista corrente
-  if (_ecStato.vista === 'cliente' && _ecStato.clienteSelezionato) {
+  if (_ecStato.vista === 'scheda' && _ecStato.clienteSelezionato) {
+    el.innerHTML = _ecRenderScheda();
+  } else if (_ecStato.vista === 'cliente' && _ecStato.clienteSelezionato) {
     el.innerHTML = _ecRenderCliente();
   } else {
     _ecStato.vista = 'dashboard';
@@ -882,18 +884,272 @@ function _ecTimelineScadenze(fattAperte) {
   return h;
 }
 
+// Marginalità applicata al cliente nelle ultime consegne (28/07).
+// Stessa formula usata nell'elenco clienti: margine per litro dell'ordine,
+// media pesata sui litri. Dice a che valore si sta lavorando quel cliente.
+function _ecMarginalitaCliente(clienteId, quante) {
+  var n = quante || 10;
+  var ord = (_ecStato.ordini || [])
+    .filter(function (o) { return o.cliente_id === clienteId && o.stato !== 'annullato' && Number(o.litri) > 0; })
+    .sort(function (a, b) { return a.data < b.data ? 1 : -1; })
+    .slice(0, n);
+  if (!ord.length) return null;
+  var litri = 0, margine = 0;
+  ord.forEach(function (o) {
+    var l = Number(o.litri || 0);
+    litri += l;
+    margine += Number(o.margine || 0) * l;
+  });
+  return {
+    n: ord.length,
+    litri: litri,
+    margineTot: margine,
+    medio: litri > 0 ? margine / litri : 0,
+    dal: ord[ord.length - 1].data,
+    al: ord[0].data
+  };
+}
+
 // Apre la scheda anagrafica del cliente aperto e, alla chiusura, ricarica
 // l'estratto conto: se cambia il fido, la barra si aggiorna subito.
-function _ecApriAnagrafica() {
+// ═══════════════════════════════════════════════════════════════════
+// SCHEDA CLIENTE A PAGINA INTERA (28/07) — impianto "B" scelto da Rinaldo:
+// testata fissa con i quattro numeri che contano, poi quattro linguette.
+// Cosi non si allunga mai e c'e' posto per crescere.
+// ═══════════════════════════════════════════════════════════════════
+var _ecSchedaTab  = 'anagrafica';
+var _ecSchedaRec  = null;    // record cliente completo
+var _ecSchedaSedi = [];
+
+async function _ecApriAnagrafica() {
   var id = _ecStato.clienteSelezionato;
   if (!id) return;
-  if (typeof apriModaleCliente !== 'function') { toast('Scheda cliente non disponibile'); return; }
-  apriModaleCliente(id);
-  var chk = setInterval(function () {
-    var m = document.getElementById('modal-title');
-    if (!m || m.offsetParent === null) { clearInterval(chk); renderEstrattoConto(); }
-  }, 700);
-  setTimeout(function () { clearInterval(chk); }, 300000);
+  try {
+    var r = await Promise.all([
+      sb.from('clienti').select('*').eq('id', id).single(),
+      sb.from('sedi_scarico').select('*').eq('cliente_id', id).eq('attivo', true).order('is_default', { ascending: false }).order('nome')
+    ]);
+    if (r[0].error) throw r[0].error;
+    _ecSchedaRec = r[0].data;
+    _ecSchedaSedi = r[1].data || [];
+    _ecSchedaTab = 'anagrafica';
+    _ecStato.vista = 'scheda';
+    document.getElementById('ec-content').innerHTML = _ecRenderScheda();
+    window.scrollTo(0, 0);
+  } catch (e) {
+    toast('Errore apertura scheda: ' + ((e && e.message) || e));
+  }
+}
+
+function _ecSchedaVai(tab) {
+  _ecSalvaCampiInMemoria();
+  _ecSchedaTab = tab;
+  document.getElementById('ec-content').innerHTML = _ecRenderScheda();
+}
+
+function _ecChiudiScheda() {
+  _ecStato.vista = 'cliente';
+  renderEstrattoConto();
+}
+
+// I campi a video finiscono nel record tenuto in memoria: cosi cambiando
+// linguetta non si perde quello che si e' scritto.
+function _ecSalvaCampiInMemoria() {
+  if (!_ecSchedaRec) return;
+  document.querySelectorAll('[data-cl]').forEach(function (el) {
+    var k = el.getAttribute('data-cl');
+    _ecSchedaRec[k] = (el.type === 'checkbox') ? el.checked : el.value;
+  });
+  _ecSchedaSedi.forEach(function (sd, i) {
+    document.querySelectorAll('[data-sede="' + i + '"]').forEach(function (el) {
+      var k = el.getAttribute('data-campo');
+      sd[k] = (el.type === 'checkbox') ? el.checked : el.value;
+    });
+  });
+}
+
+function _ecCampo(label, chiave, tipo, opzioni) {
+  var v = _ecSchedaRec[chiave];
+  var st = 'width:100%;padding:8px 10px;margin-top:4px;border:0.5px solid var(--border);border-radius:7px;font-size:13px;background:#fff';
+  var inner;
+  if (tipo === 'select') {
+    inner = '<select data-cl="' + chiave + '" style="' + st + '">'
+      + (opzioni || []).map(function (o) {
+          var val = (typeof o === 'string') ? o : o.v, txt = (typeof o === 'string') ? o : o.t;
+          return '<option value="' + _ecEsc(val) + '"' + (String(v || '') === String(val) ? ' selected' : '') + '>' + _ecEsc(txt) + '</option>';
+        }).join('') + '</select>';
+  } else if (tipo === 'textarea') {
+    inner = '<textarea data-cl="' + chiave + '" rows="3" style="' + st + ';resize:vertical">' + _ecEsc(v || '') + '</textarea>';
+  } else if (tipo === 'check') {
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:18px;cursor:pointer">'
+      + '<input type="checkbox" data-cl="' + chiave + '"' + (v ? ' checked' : '') + ' style="width:16px;height:16px;cursor:pointer">' + label + '</label>';
+  } else {
+    inner = '<input type="' + (tipo || 'text') + '" data-cl="' + chiave + '" value="' + _ecEsc(v == null ? '' : v) + '" style="' + st + '">';
+  }
+  return '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase;letter-spacing:.4px">' + label + '</label>' + inner + '</div>';
+}
+
+function _ecRenderScheda() {
+  var c = _ecSchedaRec || {};
+  var esp = _ecEsposizioneCliente(_ecStato.clienteSelezionato);
+  var fido = Number(c.fido_massimo || 0);
+  var marg = _ecMarginalitaCliente(_ecStato.clienteSelezionato, 10);
+
+  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div><div style="font-size:19px;font-weight:600;color:#26215C">' + _ecEsc(c.ragione_sociale || c.nome || '—') + '</div>'
+    + '<div style="font-size:11.5px;color:#666;margin-top:2px">' + _ecEsc(c.piva || '—')
+    + (c.tipo ? ' · ' + _ecEsc(c.tipo) : '') + (c.cliente_rete ? ' · <span style="background:#E6F1FB;color:#0C447C;padding:2px 7px;border-radius:8px">Cliente Rete</span>' : '')
+    + (c.sospeso ? ' · <span style="background:#FCEBEB;color:#A32D2D;padding:2px 7px;border-radius:8px">SOSPESO</span>' : '') + '</div></div>';
+  h += '<div style="display:flex;gap:8px">'
+    + '<button onclick="_ecChiudiScheda()" style="background:#fff;border:0.5px solid var(--border);font-size:11.5px;padding:7px 13px;border-radius:6px;cursor:pointer">← Estratto conto</button>'
+    + '<button onclick="_ecSalvaScheda()" style="background:#185FA5;color:#fff;border:none;font-size:12px;font-weight:600;padding:7px 18px;border-radius:6px;cursor:pointer">Salva</button>'
+    + '</div></div>';
+
+  // testata fissa coi quattro numeri
+  var kpi = function (lab, val, col, sub) {
+    return '<div style="flex:1;min-width:130px;background:#FAF8F2;border:0.5px solid var(--border);border-radius:8px;padding:9px 11px">'
+      + '<div style="font-size:10.5px;color:#666;text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-size:17px;font-weight:700;font-family:var(--font-mono);color:' + (col || '#412402') + '">' + val + '</div>'
+      + (sub ? '<div style="font-size:10.5px;color:#888">' + sub + '</div>' : '') + '</div>';
+  };
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    + kpi('Esposizione', _ecFmtDec(esp.totale), esp.totale > fido && fido > 0 ? '#A32D2D' : '#412402', esp.nonFatturato > 0 ? 'di cui non fatturato ' + _ecFmtDec(esp.nonFatturato) : '')
+    + kpi('Fido', fido > 0 ? _ecFmtDec(fido) : '—', '#412402', fido > 0 ? 'disponibile ' + _ecFmtDec(Math.max(0, fido - esp.totale)) : 'non impostato')
+    + kpi('Scaduto', esp.scaduto > 0 ? _ecFmtDec(esp.scaduto) : '—', esp.scaduto > 0 ? '#A32D2D' : '#888')
+    + kpi('Marginalità applicata', marg ? '€ ' + marg.medio.toFixed(4) : '—', marg && marg.medio >= 0 ? '#3B6D11' : '#A32D2D', marg ? 'ultime ' + marg.n + ' consegne' : 'nessuna consegna')
+    + '</div>';
+
+  // linguette
+  var tabs = [['anagrafica', 'Anagrafica'], ['commerciale', 'Commerciale'], ['sedi', 'Sedi di scarico'], ['note', 'Note e storico']];
+  h += '<div style="display:flex;gap:2px;border-bottom:0.5px solid var(--border);margin-bottom:14px">';
+  tabs.forEach(function (t) {
+    var on = _ecSchedaTab === t[0];
+    h += '<button onclick="_ecSchedaVai(\'' + t[0] + '\')" style="background:none;border:none;border-bottom:2px solid ' + (on ? '#185FA5' : 'transparent')
+      + ';font-size:12.5px;font-weight:' + (on ? '600' : '400') + ';color:' + (on ? '#0C447C' : '#666') + ';padding:8px 14px;cursor:pointer">' + t[1] + '</button>';
+  });
+  h += '</div>';
+
+  var G = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">';
+
+  if (_ecSchedaTab === 'anagrafica') {
+    h += G
+      + _ecCampo('Ragione sociale', 'ragione_sociale')
+      + _ecCampo('Nome (breve)', 'nome')
+      + _ecCampo('Tipo', 'tipo', 'select', ['', 'Azienda', 'Agricoltore', 'Privato', 'Comune / Ente', 'Trasportatore'])
+      + _ecCampo('P.IVA', 'piva')
+      + _ecCampo('Codice fiscale', 'codice_fiscale')
+      + _ecCampo('PEC', 'pec')
+      + _ecCampo('Codice destinatario SDI', 'codice_sdi')
+      + _ecCampo('Indirizzo', 'indirizzo')
+      + _ecCampo('Città', 'citta')
+      + _ecCampo('Provincia', 'provincia')
+      + _ecCampo('Telefono', 'telefono')
+      + _ecCampo('Email', 'email')
+      + _ecCampo('Referente', 'referente')
+      + _ecCampo('Telefono referente', 'referente_telefono')
+      + _ecCampo('Cliente dal', 'data_inizio_rapporto', 'date')
+      + _ecCampo('Cliente Rete', 'cliente_rete', 'check')
+      + _ecCampo('Sospeso', 'sospeso', 'check')
+      + _ecCampo('Motivo sospensione', 'motivo_sospensione')
+      + '</div>';
+  } else if (_ecSchedaTab === 'commerciale') {
+    var banche = (_ecStato.banche || []).map(function (b) { return { v: b.id, t: b.nome }; });
+    banche.unshift({ v: '', t: '—' });
+    h += G
+      + _ecCampo('Fido massimo (€)', 'fido_massimo', 'number')
+      + _ecCampo('Giorni pagamento', 'giorni_pagamento', 'select', ['', '30', '45', '60', '90'])
+      + _ecCampo('Modalità pagamento', 'modalita_pagamento', 'select', ['', 'bonifico', 'riba', 'assegno', 'contanti'])
+      + _ecCampo('Banca di accredito', 'banca_accredito_id', 'select', banche)
+      + _ecCampo('IBAN', 'iban')
+      + _ecCampo('Margine obiettivo (€/L)', 'margine_obiettivo', 'number')
+      + _ecCampo('Zona consegna', 'zona')
+      + _ecCampo('Prodotti abituali', 'prodotti')
+      + '</div>';
+    h += '<div style="margin-top:14px;background:#EAF3FB;border-left:3px solid #378ADD;border-radius:0 8px 8px 0;padding:11px 13px">'
+      + '<div style="font-size:10.5px;color:#0C447C;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Marginalità applicata — come stai lavorando questo cliente</div>';
+    if (!marg) {
+      h += '<div style="font-size:12.5px;color:#666">Nessuna consegna registrata: non c\'è ancora una marginalità da confrontare.</div>';
+    } else {
+      var ob = Number(c.margine_obiettivo || 0);
+      h += '<div style="font-size:13px;color:#0C447C">Media pesata delle ultime <strong>' + marg.n + '</strong> consegne: '
+        + '<strong style="font-family:var(--font-mono);font-size:15px">€ ' + marg.medio.toFixed(4) + '</strong> al litro'
+        + ' <span style="color:#666">· ' + _ecFmt(marg.litri) + ' litri dal ' + _ecFmtData(marg.dal) + ' al ' + _ecFmtData(marg.al) + '</span></div>';
+      if (ob > 0) {
+        var d = marg.medio - ob;
+        h += '<div style="font-size:12.5px;margin-top:5px;color:' + (d >= 0 ? '#3B6D11' : '#A32D2D') + '">'
+          + (d >= 0 ? 'Sopra' : 'Sotto') + ' l\'obiettivo di € ' + Math.abs(d).toFixed(4) + ' al litro'
+          + ' <span style="color:#666">(obiettivo € ' + ob.toFixed(4) + ')</span></div>';
+      }
+    }
+    h += '</div>';
+  } else if (_ecSchedaTab === 'sedi') {
+    if (!_ecSchedaSedi.length) {
+      h += '<div style="color:#888;font-size:12.5px;font-style:italic">Nessuna sede di scarico registrata per questo cliente.</div>';
+    } else {
+      _ecSchedaSedi.forEach(function (sd, i) {
+        h += '<div style="border:0.5px solid var(--border);border-radius:9px;padding:11px;margin-bottom:9px;background:#FAF8F2">'
+          + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">'
+            + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Nome sede</label><input data-sede="' + i + '" data-campo="nome" value="' + _ecEsc(sd.nome || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
+            + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Indirizzo</label><input data-sede="' + i + '" data-campo="indirizzo" value="' + _ecEsc(sd.indirizzo || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
+            + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Città</label><input data-sede="' + i + '" data-campo="citta" value="' + _ecEsc(sd.citta || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
+            + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Orari di scarico</label><input data-sede="' + i + '" data-campo="orari_scarico" value="' + _ecEsc(sd.orari_scarico || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
+            + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Vincoli del mezzo</label><input data-sede="' + i + '" data-campo="vincoli_mezzo" value="' + _ecEsc(sd.vincoli_mezzo || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
+            + '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin-top:18px;cursor:pointer"><input type="checkbox" data-sede="' + i + '" data-campo="is_default"' + (sd.is_default ? ' checked' : '') + ' style="width:15px;height:15px">Sede predefinita</label>'
+          + '</div></div>';
+      });
+    }
+    h += '<div style="font-size:11.5px;color:#666;margin-top:6px">Le sedi si aggiungono e si eliminano dalla sezione Clienti; qui si correggono i dati e si sceglie la predefinita.</div>';
+  } else {
+    h += G
+      + _ecCampo('Note interne', 'note', 'textarea')
+      + _ecCampo('Note da stampare in bolla', 'note_bolla', 'textarea')
+      + '</div>';
+    h += '<div style="margin-top:14px;font-size:11.5px;color:#666">Lo storico delle modifiche a fido e condizioni è registrato nell\'audit: lo porto qui nel prossimo passaggio, quando decidiamo quali voci mostrare.</div>';
+  }
+
+  return h;
+}
+
+async function _ecSalvaScheda() {
+  _ecSalvaCampiInMemoria();
+  var c = _ecSchedaRec;
+  if (!c || !c.id) return;
+  var num = function (v) { var n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) ? n : null; };
+  var rec = {
+    ragione_sociale: c.ragione_sociale || null, nome: c.nome || null, tipo: c.tipo || null,
+    piva: c.piva || null, codice_fiscale: c.codice_fiscale || null,
+    pec: c.pec || null, codice_sdi: c.codice_sdi || null,
+    indirizzo: c.indirizzo || null, citta: c.citta || null, provincia: c.provincia || null,
+    telefono: c.telefono || null, email: c.email || null,
+    referente: c.referente || null, referente_telefono: c.referente_telefono || null,
+    data_inizio_rapporto: c.data_inizio_rapporto || null,
+    cliente_rete: !!c.cliente_rete, sospeso: !!c.sospeso, motivo_sospensione: c.motivo_sospensione || null,
+    fido_massimo: num(c.fido_massimo), giorni_pagamento: num(c.giorni_pagamento),
+    modalita_pagamento: c.modalita_pagamento || null, banca_accredito_id: c.banca_accredito_id || null,
+    iban: c.iban || null, margine_obiettivo: num(c.margine_obiettivo),
+    zona: c.zona || null, prodotti: c.prodotti || null,
+    note: c.note || null, note_bolla: c.note_bolla || null
+  };
+  try {
+    var up = await sb.from('clienti').update(rec).eq('id', c.id);
+    if (up.error) throw up.error;
+    for (var i = 0; i < _ecSchedaSedi.length; i++) {
+      var sd = _ecSchedaSedi[i];
+      var us = await sb.from('sedi_scarico').update({
+        nome: sd.nome || null, indirizzo: sd.indirizzo || null, citta: sd.citta || null,
+        orari_scarico: sd.orari_scarico || null, vincoli_mezzo: sd.vincoli_mezzo || null,
+        is_default: !!sd.is_default
+      }).eq('id', sd.id);
+      if (us.error) throw us.error;
+    }
+    if (typeof cacheClienti !== 'undefined') cacheClienti = [];
+    if (typeof _auditLog === 'function') _auditLog('modifica_cliente', 'clienti', (rec.ragione_sociale || rec.nome || '') + ' · scheda aggiornata');
+    toast('✓ Scheda cliente salvata');
+    _ecStato.vista = 'cliente';
+    await renderEstrattoConto();
+  } catch (e) {
+    toast('Errore salvataggio: ' + ((e && e.message) || e));
+  }
 }
 
 function _ecRenderCliente() {
