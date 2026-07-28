@@ -2348,6 +2348,74 @@ async function _antRenderModaleIncasso(fatturaAntId) {
   apriModal(html);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ESTINZIONE ANTICIPO — funzione UNICA (27/07)
+// Quando il cliente paga una fattura anticipata, la banca si riprende la sua
+// parte: il fido anticipi si libera e il conto scende. Sono due effetti e
+// vanno scritti insieme, sempre dallo stesso punto — la chiamano sia il
+// modale Incasso degli anticipi sia l'estratto conto clienti.
+// La riga: aggiorna anticipi_sbf_fatture (importo_estinto, stato, data) e,
+// se conosce la banca, crea il movimento di USCITA dal conto.
+// ═══════════════════════════════════════════════════════════════════════════
+async function antEstinguiAnticipo(fatturaAntId, opt) {
+  opt = opt || {};
+  var res = await sb.from('anticipi_sbf_fatture').select('*').eq('id', fatturaAntId).single();
+  if (res.error || !res.data) throw (res.error || new Error('riga anticipo non trovata'));
+  var riga = res.data;
+
+  // banca: se non la passa il chiamante, la ricavo dalla presentazione
+  var bancaId = opt.bancaId || null;
+  if (!bancaId) {
+    try {
+      var rp = await sb.from('anticipi_sbf_presentazioni').select('affidamento_id').eq('id', riga.presentazione_id).single();
+      if (rp.data && rp.data.affidamento_id) {
+        var ra = await sb.from('banche_affidamenti').select('istituto_id').eq('id', rp.data.affidamento_id).single();
+        if (ra.data) bancaId = ra.data.istituto_id || null;
+      }
+    } catch (e) { /* senza banca il movimento non si scrive, l'estinzione si */ }
+  }
+
+  var residuo = Math.max(0, Number(riga.importo_anticipato || 0) - Number(riga.importo_estinto || 0));
+  var quota = Number(opt.importo != null ? opt.importo : residuo);
+  if (!(quota > 0)) return { estinto: 0 };
+  if (quota > residuo) quota = residuo;
+
+  var nuovoEstinto = Number(riga.importo_estinto || 0) + quota;
+  var chiusa = nuovoEstinto >= Number(riga.importo_anticipato || 0) - 0.005;
+
+  var up = await sb.from('anticipi_sbf_fatture').update({
+    importo_estinto: Math.round(nuovoEstinto * 100) / 100,
+    stato: chiusa ? 'estinta' : (riga.stato || 'anticipata'),
+    data_incasso: opt.data || new Date().toISOString().split('T')[0],
+    modificato_at: new Date().toISOString()
+  }).eq('id', fatturaAntId);
+  if (up.error) throw up.error;
+
+  // Uscita dal conto: la banca si riprende l'anticipo. Non-critica: se fallisce
+  // l'estinzione resta valida e l'errore va a log.
+  if (bancaId) {
+    try {
+      var mov = await sb.from('foglio_giornale_movimenti').insert([{
+        data: opt.data || new Date().toISOString().split('T')[0],
+        tipo: 'uscita',
+        importo: Math.round(quota * 100) / 100,
+        descrizione: 'Rientro anticipo · fattura ' + (riga.numero_fattura || '') + (riga.cliente_nome ? ' · ' + riga.cliente_nome : ''),
+        banca_id: bancaId,
+        cassa_tipo: null,
+        metodo: 'bonifico',
+        origine: 'anticipi',
+        note: opt.note || null
+      }]).select('id').single();
+      if (mov.error) throw mov.error;
+    } catch (e) {
+      console.warn('[ant] movimento rientro anticipo non creato:', (e && e.message) || e);
+    }
+  }
+
+  if (typeof _auditLog === 'function') _auditLog('estinzione_anticipo', 'anticipi_sbf_fatture', 'fattura ' + (riga.numero_fattura || fatturaAntId) + ' · rientro ' + quota.toFixed(2));
+  return { estinto: quota, chiusa: chiusa, riga: riga };
+}
+
 async function _antSalvaIncasso(fatturaAntId) {
   if (!_antPuoIncasso()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   var insoluta = document.getElementById('ant-inc-insoluta').checked;
@@ -2371,8 +2439,20 @@ async function _antSalvaIncasso(fatturaAntId) {
     payload.importo_estinto = importo;
   }
 
-  var resU = await sb.from('anticipi_sbf_fatture').update(payload).eq('id', fatturaAntId);
-  if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+  if (insoluta) {
+    var resU = await sb.from('anticipi_sbf_fatture').update(payload).eq('id', fatturaAntId);
+    if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+  } else {
+    // stessa funzione usata dall'estratto conto clienti: aggiorna la riga E
+    // scrive l'uscita dal conto (rientro dell'anticipo alla banca)
+    try {
+      await antEstinguiAnticipo(fatturaAntId, {
+        importo: Number(importoRaw),
+        data: data,
+        bancaId: null   // la ricava da se dalla presentazione
+      });
+    } catch (e) { toast('❌ Errore: ' + ((e && e.message) || e)); return; }
+  }
 
   chiudiModal();
   toast(insoluta ? '⚠ Fattura segnata come insoluta' : '✓ Fattura estinta');

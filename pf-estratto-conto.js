@@ -82,7 +82,7 @@ async function renderEstrattoConto() {
 
   // Carica clienti e banche (sempre piccoli, no paginazione necessaria)
   var [resCli, resIst] = await Promise.all([
-    sb.from('clienti').select('id,nome,ragione_sociale,piva,codice_fiscale,giorni_pagamento,modalita_pagamento,banca_accredito_id,cliente_rete,attivo').eq('attivo', true),
+    sb.from('clienti').select('id,nome,ragione_sociale,piva,codice_fiscale,giorni_pagamento,modalita_pagamento,banca_accredito_id,cliente_rete,attivo,fido_massimo').eq('attivo', true),
     sb.from('banche_istituti').select('id,nome')
   ]);
 
@@ -99,7 +99,7 @@ async function renderEstrattoConto() {
   // Carica ordini (paginati + esclusione annullati)
   var resOrd = await _ecCaricaPaginate(function(a, b) {
     return sb.from('ordini')
-      .select('id,cliente_id,data,litri,tipo_ordine,stato')
+      .select('id,cliente_id,data,litri,tipo_ordine,stato,costo_litro,trasporto_litro,margine,iva,prodotto,data_scadenza,fattura_id,fattura_riga_id,pagato')
       .eq('tipo_ordine', 'cliente')
       .neq('stato', 'annullato')
       .gte('data', dueAnniFaIso)
@@ -115,6 +115,37 @@ async function renderEstrattoConto() {
   _ecStato.clienti = resCli.data || [];
   _ecStato.banche = resIst.data || [];
   _ecStato.riconciliazioni = resRic.data || [];
+
+  // ── ANTICIPI (27/07): quali fatture sono state presentate in banca e per
+  // quanto. Serve per l'etichetta "Anticipata · Istituto" accanto alla
+  // scadenza e per sapere quanto rientra alla banca quando si incassa.
+  try {
+    var resAnt = await Promise.all([
+      sb.from('anticipi_sbf_fatture').select('id,presentazione_id,fattura_id,importo_anticipato,importo_estinto,stato'),
+      sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,stato'),
+      sb.from('banche_affidamenti').select('id,istituto_id')
+    ]);
+    var presMap = {}, affMap = {};
+    (resAnt[1].data || []).forEach(function (p) { presMap[p.id] = p; });
+    (resAnt[2].data || []).forEach(function (a) { affMap[a.id] = a; });
+    _ecStato.anticipiPerFattura = {};
+    (resAnt[0].data || []).forEach(function (r) {
+      if (!r.fattura_id) return;
+      if (r.stato === 'estinta') return;                       // gia rientrata: niente etichetta
+      var pres = presMap[r.presentazione_id] || {};
+      var aff  = affMap[pres.affidamento_id] || {};
+      var ist  = (_ecStato.banche || []).filter(function (b) { return b.id === aff.istituto_id; })[0];
+      _ecStato.anticipiPerFattura[r.fattura_id] = {
+        rigaId: r.id,
+        istitutoId: aff.istituto_id || null,
+        istituto: ist ? ist.nome : 'banca',
+        anticipato: Math.max(0, Number(r.importo_anticipato || 0) - Number(r.importo_estinto || 0))
+      };
+    });
+  } catch (e) {
+    console.warn('[ec] anticipi', e);
+    _ecStato.anticipiPerFattura = {};
+  }
   _ecStato.ordini = resOrd.data || [];
 
   // Render in base alla vista corrente
@@ -415,6 +446,393 @@ function _ecChiudiCliente() {
 }
 
 
+// ═══════════════════════════════════════════════════════════════════
+// INCASSO FATTURE CLIENTE (27/07)
+// Si spuntano una o piu fatture aperte e si registra l'incasso: totale o
+// parziale, con banca e modalita. L'importo si distribuisce DALLA SCADENZA
+// PIU VECCHIA, come paga un cliente in ritardo e come lavora la banca.
+// Scrittura: un movimento di ENTRATA nel foglio giornale + una riconciliazione
+// per fattura — il saldo residuo lo ricalcola la vista, come per i fornitori.
+// Se la fattura e' ANTICIPATA e si spunta "comunicata alla banca", parte anche
+// l'estinzione dell'anticipo (funzione unica in pf-anticipi.js), che libera il
+// fido e fa uscire dal conto la parte della banca.
+// ═══════════════════════════════════════════════════════════════════
+var _ecSel = {};        // { fatturaId: true } — si muta in loco, mai riassegnata
+
+function _ecToggleFatt(id, cb) {
+  if (cb && cb.checked) _ecSel[id] = true; else delete _ecSel[id];
+  _ecRenderCliente();
+}
+function _ecDeseleziona() {
+  Object.keys(_ecSel).forEach(function (k) { delete _ecSel[k]; });
+  _ecRenderCliente();
+}
+function _ecFattureSelezionate() {
+  return (_ecStato.fatture || []).filter(function (f) { return _ecSel[f.id]; })
+    .sort(function (a, b) {
+      var sa = a.data_scadenza || '9999-12-31', sb2 = b.data_scadenza || '9999-12-31';
+      return sa < sb2 ? -1 : (sa > sb2 ? 1 : 0);
+    });
+}
+
+function _ecBoxSelezione(fattVisibili) {
+  var sel = _ecFattureSelezionate();
+  if (!sel.length) return '';
+  var oggiIso = new Date().toISOString().split('T')[0];
+  var tot = sel.reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
+  var scad = sel.filter(function (f) { return f.data_scadenza && f.data_scadenza < oggiIso; })
+                .reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#E6F1FB;border-top:1px solid #378ADD;padding:10px 14px">'
+    + '<div style="font-size:12px;color:#0C447C">'
+      + '<strong>' + sel.length + (sel.length === 1 ? ' fattura selezionata' : ' fatture selezionate') + '</strong> · '
+      + '<span style="font-family:var(--font-mono);font-weight:700">' + _ecFmtDec(tot) + '</span>'
+      + (scad > 0 ? ' <span style="color:#A32D2D">· di cui scaduto ' + _ecFmtDec(scad) + '</span>' : '')
+    + '</div>'
+    + '<div style="display:flex;gap:8px">'
+      + '<button onclick="_ecDeseleziona()" style="background:white;border:0.5px solid var(--border);border-radius:6px;padding:7px 12px;font-size:11.5px;cursor:pointer">Deseleziona</button>'
+      + '<button onclick="_ecApriIncasso()" style="background:#185FA5;color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer">Registra incasso</button>'
+    + '</div></div>';
+}
+
+// Distribuzione dell'importo sulle fatture selezionate, dalla piu vecchia
+function _ecDistribuisci(sel, importo) {
+  var resta = Math.round(Number(importo || 0) * 100) / 100;
+  return sel.map(function (f) {
+    var res = Number(f.saldo_residuo || 0);
+    var q = Math.min(res, Math.max(0, resta));
+    q = Math.round(q * 100) / 100;
+    resta = Math.round((resta - q) * 100) / 100;
+    return { f: f, quota: q, saldata: q >= res - 0.005 };
+  });
+}
+
+async function _ecSalvaIncasso() {
+  var btn = document.getElementById('ec-inc-salva');
+  var sel = _ecFattureSelezionate();
+  if (!sel.length) { toast('Nessuna fattura selezionata'); return; }
+
+  var imp = parseFloat((document.getElementById('ec-inc-importo') || {}).value) || 0;
+  var data = (document.getElementById('ec-inc-data') || {}).value || '';
+  var bancaId = (document.getElementById('ec-inc-banca') || {}).value || null;
+  var modalita = (document.getElementById('ec-inc-modalita') || {}).value || 'bonifico';
+  var elCom = document.getElementById('ec-inc-comunicata');
+  var comunicata = !!(elCom && (elCom.type === 'checkbox' ? elCom.checked : elCom.value === '1'));
+
+  if (!(imp > 0)) { toast('Indica un importo maggiore di zero'); return; }
+  if (!data) { toast('Indica la data dell\'incasso'); return; }
+  if (!bancaId) { toast('Scegli l\'istituto'); return; }
+
+  var dist = _ecDistribuisci(sel, imp).filter(function (d) { return d.quota > 0; });
+  if (!dist.length) { toast('L\'importo non copre nessuna fattura'); return; }
+
+  var cliente = (_ecStato.clienti || []).filter(function (c) { return c.id === _ecStato.clienteSelezionato; })[0] || {};
+  if (btn) { btn.disabled = true; btn.textContent = 'Registro…'; btn.style.opacity = '0.6'; }
+
+  try {
+    // 1. ENTRATA sul conto per l'intero incassato dal cliente
+    var insMov = await sb.from('foglio_giornale_movimenti').insert([{
+      data: data,
+      tipo: 'entrata',
+      importo: Math.round(imp * 100) / 100,
+      descrizione: 'Incasso ' + (cliente.ragione_sociale || cliente.nome || 'cliente')
+        + ' · ' + dist.length + (dist.length === 1 ? ' fattura' : ' fatture'),
+      banca_id: bancaId,
+      cassa_tipo: null,
+      metodo: modalita,
+      origine: 'estratto_cliente',
+      note: null
+    }]).select('id').single();
+    if (insMov.error) throw insMov.error;
+
+    // 2. una riconciliazione per fattura: e' questa che abbassa il saldo residuo
+    var righe = dist.map(function (d) {
+      return { movimento_id: insMov.data.id, fattura_emessa_id: d.f.id, ordine_id: null, fattura_ricevuta_id: null, importo_imputato: d.quota };
+    });
+    var insRic = await sb.from('foglio_giornale_riconciliazioni').insert(righe);
+    if (insRic.error) {
+      await sb.from('foglio_giornale_movimenti').delete().eq('id', insMov.data.id);   // niente movimenti orfani
+      throw insRic.error;
+    }
+
+    // 3. se comunicata alla banca: rientro degli anticipi (funzione unica)
+    var nAnt = 0, totAnt = 0;
+    if (comunicata && typeof antEstinguiAnticipo === 'function') {
+      for (var i = 0; i < dist.length; i++) {
+        var an = (_ecStato.anticipiPerFattura || {})[dist[i].f.id];
+        if (!an || !(an.anticipato > 0)) continue;
+        var quotaAnt = Math.min(an.anticipato, dist[i].quota);
+        try {
+          await antEstinguiAnticipo(an.rigaId, { importo: quotaAnt, data: data, bancaId: an.istitutoId || bancaId });
+          nAnt++; totAnt += quotaAnt;
+        } catch (e) {
+          console.warn('[ec] estinzione anticipo fallita', e);
+          toast('Incasso registrato, ma il rientro dell\'anticipo della ' + (dist[i].f.numero || '') + ' non è passato: fallo dal Quadro anticipi');
+        }
+      }
+    }
+
+    if (typeof _auditLog === 'function') {
+      _auditLog('incasso_cliente', 'foglio_giornale_movimenti',
+        (cliente.ragione_sociale || cliente.nome || '') + ' · ' + _ecFmtDec(imp) + ' · ' + dist.length + ' fatture'
+        + (nAnt ? ' · rientro anticipi ' + _ecFmtDec(totAnt) : ''));
+    }
+
+    chiudiModal();
+    toast('✓ Incasso registrato: ' + _ecFmtDec(imp) + ' su ' + dist.length + (dist.length === 1 ? ' fattura' : ' fatture')
+      + (nAnt ? ' · rientro anticipi ' + _ecFmtDec(totAnt) : ''));
+    Object.keys(_ecSel).forEach(function (k) { delete _ecSel[k]; });
+    await renderEstrattoConto();
+  } catch (e) {
+    console.error('[ec] incasso', e);
+    toast('Errore: ' + ((e && e.message) || e));
+    if (btn) { btn.disabled = false; btn.textContent = 'Registra'; btn.style.opacity = '1'; }
+  }
+}
+
+function _ecApriIncasso() {
+  var sel = _ecFattureSelezionate();
+  if (!sel.length) { toast('Nessuna fattura selezionata'); return; }
+  var tot = sel.reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
+  var cliente = (_ecStato.clienti || []).filter(function (c) { return c.id === _ecStato.clienteSelezionato; })[0] || {};
+  var banche = _ecStato.banche || [];
+  var bancaDef = cliente.banca_accredito_id || (banche[0] && banche[0].id) || '';
+
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Registra incasso</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + _ecEsc(cliente.ragione_sociale || cliente.nome || '') + ' · ' + sel.length + (sel.length === 1 ? ' fattura' : ' fatture') + '</div>';
+
+  h += '<div style="display:flex;gap:6px;margin-bottom:14px">'
+    + '<button id="ec-inc-tot" onclick="_ecIncTipo(true)" style="flex:1;background:#185FA5;color:#fff;border:none;border-radius:7px;padding:8px;font-size:12px;cursor:pointer">Totale</button>'
+    + '<button id="ec-inc-par" onclick="_ecIncTipo(false)" style="flex:1;background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:7px;padding:8px;font-size:12px;cursor:pointer">Parziale</button>'
+    + '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+    + '<div><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Importo incassato</label>'
+      + '<input id="ec-inc-importo" type="number" step="0.01" value="' + tot.toFixed(2) + '" oninput="_ecIncAggiorna()" style="width:100%;padding:9px;margin-top:4px;border:0.5px solid var(--border);border-radius:7px;font-family:var(--font-mono);font-size:15px"></div>'
+    + '<div><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Data incasso</label>'
+      + '<input id="ec-inc-data" type="date" value="' + new Date().toISOString().split('T')[0] + '" style="width:100%;padding:9px;margin-top:4px;border:0.5px solid var(--border);border-radius:7px;font-size:14px"></div>'
+    + '<div><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Istituto</label>'
+      + '<select id="ec-inc-banca" onchange="_ecIncAggiorna()" style="width:100%;padding:9px;margin-top:4px;border:0.5px solid var(--border);border-radius:7px;font-size:14px">'
+      + banche.map(function (b) { return '<option value="' + b.id + '"' + (b.id === bancaDef ? ' selected' : '') + '>' + _ecEsc(b.nome) + '</option>'; }).join('')
+      + '</select></div>'
+    + '<div><label style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Modalità</label>'
+      + '<select id="ec-inc-modalita" style="width:100%;padding:9px;margin-top:4px;border:0.5px solid var(--border);border-radius:7px;font-size:14px">'
+      + '<option value="bonifico">Bonifico</option><option value="riba">Ri.Ba.</option><option value="assegno">Assegno</option><option value="contanti">Contanti</option>'
+      + '</select></div>'
+    + '</div>';
+
+  h += '<div id="ec-inc-distrib"></div>';
+  h += '<div id="ec-inc-anticipi"></div>';
+
+  h += '<div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">'
+    + '<button onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px">Annulla</button>'
+    + '<button id="ec-inc-salva" onclick="_ecSalvaIncasso()" style="padding:9px 18px;border:none;border-radius:8px;background:#185FA5;color:#fff;font-size:12px;font-weight:600;cursor:pointer">Registra</button>'
+    + '</div>';
+
+  apriModal(h);
+  _ecIncAggiorna();
+}
+
+function _ecIncTipo(totale) {
+  var sel = _ecFattureSelezionate();
+  var inp = document.getElementById('ec-inc-importo');
+  var bT = document.getElementById('ec-inc-tot'), bP = document.getElementById('ec-inc-par');
+  if (totale) {
+    if (inp) inp.value = sel.reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0).toFixed(2);
+    if (bT) { bT.style.background = '#185FA5'; bT.style.color = '#fff'; bT.style.border = 'none'; }
+    if (bP) { bP.style.background = 'var(--bg)'; bP.style.color = 'var(--text)'; bP.style.border = '0.5px solid var(--border)'; }
+  } else {
+    if (bP) { bP.style.background = '#185FA5'; bP.style.color = '#fff'; bP.style.border = 'none'; }
+    if (bT) { bT.style.background = 'var(--bg)'; bT.style.color = 'var(--text)'; bT.style.border = '0.5px solid var(--border)'; }
+    if (inp) { inp.focus(); inp.select(); }
+  }
+  _ecIncAggiorna();
+}
+
+function _ecIncAggiorna() {
+  var sel = _ecFattureSelezionate();
+  var imp = parseFloat((document.getElementById('ec-inc-importo') || {}).value) || 0;
+  var bancaSel = (document.getElementById('ec-inc-banca') || {}).value || null;
+  var dist = _ecDistribuisci(sel, imp);
+
+  var box = document.getElementById('ec-inc-distrib');
+  if (box) {
+    box.innerHTML = '<div style="background:var(--bg-card);border-radius:8px;padding:10px 12px">'
+      + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Come viene distribuito</div>'
+      + dist.map(function (d) {
+          return '<div style="display:flex;justify-content:space-between;font-size:12px;line-height:1.7' + (d.quota <= 0 ? ';opacity:.45' : '') + '">'
+            + '<span>' + _ecEsc(d.f.numero || '') + ' · scad. ' + _ecFmtData(d.f.data_scadenza) + '</span>'
+            + '<span style="font-family:var(--font-mono)">' + _ecFmtDec(d.quota)
+              + (d.quota <= 0 ? ' <span style="color:var(--text-muted)">non coperta</span>'
+                              : (d.saldata ? ' <span style="color:#3B6D11">saldata</span>'
+                                           : ' <span style="color:#8A4F06">acconto</span>')) + '</span></div>';
+        }).join('')
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:7px">Dalla scadenza più vecchia alla più recente.</div>'
+      + '</div>';
+  }
+
+  // anticipi coinvolti + flag "comunicata alla banca"
+  var antBox = document.getElementById('ec-inc-anticipi');
+  if (!antBox) return;
+  var coinvolti = dist.filter(function (d) { return d.quota > 0 && (_ecStato.anticipiPerFattura || {})[d.f.id]; });
+  if (!coinvolti.length) { antBox.innerHTML = ''; return; }
+
+  var diversa = coinvolti.filter(function (d) {
+    var a = _ecStato.anticipiPerFattura[d.f.id];
+    return a.istitutoId && bancaSel && a.istitutoId !== bancaSel;
+  });
+  var totAnt = coinvolti.reduce(function (a, d) {
+    var an = _ecStato.anticipiPerFattura[d.f.id];
+    return a + Math.min(Number(an.anticipato || 0), d.quota);
+  }, 0);
+
+  var h = '<div style="margin-top:10px;background:' + (diversa.length ? '#FFF1DC' : '#E6F1FB') + ';border-left:3px solid ' + (diversa.length ? '#E0A458' : '#378ADD') + ';border-radius:0 8px 8px 0;padding:10px 12px">';
+  h += '<div style="font-size:12px;color:' + (diversa.length ? '#633806' : '#0C447C') + ';line-height:1.6">'
+    + '<strong>' + coinvolti.length + (coinvolti.length === 1 ? ' fattura anticipata' : ' fatture anticipate') + '</strong> · rientro alla banca ' + _ecFmtDec(totAnt) + '</div>';
+  if (diversa.length) {
+    h += '<div style="font-size:11.5px;color:#8A4F06;margin-top:5px">L\'incasso è su un istituto diverso da quello che ha anticipato: la banca non può stornare da sola. Registro solo l\'entrata; il rientro lo gestisci dal Quadro anticipi.</div>';
+    h += '<input type="hidden" id="ec-inc-comunicata" value="0">';
+  } else {
+    h += '<label style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12px;color:#0C447C;cursor:pointer">'
+      + '<input type="checkbox" id="ec-inc-comunicata" style="width:15px;height:15px;cursor:pointer">'
+      + 'Comunicata alla banca — registra anche il rientro dell\'anticipo</label>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Se non la spunti, l\'incasso entra tutto sul conto e l\'anticipo resta aperto: lo chiuderai dal Quadro anticipi quando la banca stornerà.</div>';
+  }
+  h += '</div>';
+  antBox.innerHTML = h;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FIDO CLIENTE (27/07) — stessa regola dei fornitori, al contrario:
+// l'esposizione RAGIONA SUGLI ORDINI, non solo sulle fatture. Una consegna
+// gia fatta ma non ancora fatturata e' rischio a tutti gli effetti: se si
+// aspetta la fattura per accorgersi dello sforamento, si e' gia consegnato.
+//   esposizione = saldo residuo delle fatture aperte
+//               + consegne non fatturate e non pagate (valorizzate IVA inc.)
+// ═══════════════════════════════════════════════════════════════════
+function _ecValoreOrdine(o) {
+  var p = (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0));
+  return p * Number(o.litri || 0) * (1 + Number(o.iva != null ? o.iva : 22) / 100);
+}
+
+function _ecEsposizioneCliente(clienteId) {
+  var oggiIso = new Date().toISOString().split('T')[0];
+  var fatt = (_ecStato.fatture || []).filter(function (f) {
+    return f.cliente_id === clienteId && (f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale');
+  });
+  var fatturato = fatt.reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
+  var scaduto = fatt.filter(function (f) { return f.data_scadenza && f.data_scadenza < oggiIso; })
+                    .reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
+
+  // consegne senza fattura: ne' fattura_id ne' riga fattura, non pagate
+  var consegne = (_ecStato.ordini || []).filter(function (o) {
+    return o.cliente_id === clienteId && o.stato === 'consegnato'
+      && !o.fattura_id && !o.fattura_riga_id && !o.pagato;
+  });
+  var nonFatturato = consegne.reduce(function (a, o) { return a + _ecValoreOrdine(o); }, 0);
+
+  return {
+    fatturato: fatturato,
+    nonFatturato: nonFatturato,
+    totale: fatturato + nonFatturato,
+    scaduto: scaduto,
+    nConsegne: consegne.length,
+    fattAperte: fatt
+  };
+}
+
+function _ecBarraFido(cliente, esp) {
+  var fido = Number(cliente.fido_massimo || 0);
+  var h = '';
+
+  if (!(fido > 0)) {
+    h += '<div style="border:0.5px dashed var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;background:#FAF8F2">'
+      + '<div style="height:14px;border-radius:7px;background:#EDEAE1;margin-bottom:8px"></div>'
+      + '<div style="font-size:12.5px;color:#666;line-height:1.6">Fido non impostato su questo cliente.<br>Esposizione attuale <strong style="font-family:var(--font-mono);color:#412402">' + _ecFmtDec(esp.totale) + '</strong></div>'
+      + '</div>';
+    return h;
+  }
+
+  var pct = Math.min(100, (esp.totale / fido) * 100);
+  var pctFatt = Math.min(100, (esp.fatturato / fido) * 100);
+  var pctCons = Math.max(0, Math.min(100 - pctFatt, (esp.nonFatturato / fido) * 100));
+  var oltre = esp.totale > fido;
+  var col = oltre ? '#C0392B' : (pct >= 85 ? '#E0A458' : '#639922');
+  var colTratteggio = oltre ? 'repeating-linear-gradient(45deg,#C0392B,#C0392B 4px,#E06B5B 4px,#E06B5B 8px)'
+                            : (pct >= 85 ? 'repeating-linear-gradient(45deg,#BA7517,#BA7517 4px,#E0A458 4px,#E0A458 8px)'
+                                         : 'repeating-linear-gradient(45deg,#3B6D11,#3B6D11 4px,#639922 4px,#639922 8px)');
+
+  h += '<div style="border:0.5px solid ' + (oltre ? '#E24B4A' : 'var(--border)') + ';border-radius:10px;padding:12px 14px;margin-bottom:14px;background:' + (oltre ? '#FCEBEB' : '#FAF8F2') + '">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:5px">'
+    + '<span style="color:#666">Fido utilizzato <strong style="color:' + col + '">' + Math.round((esp.totale / fido) * 100) + '%</strong></span>'
+    + '<span style="font-family:var(--font-mono);font-weight:600">' + _ecFmtDec(esp.totale) + ' / ' + _ecFmtDec(fido) + '</span></div>';
+  h += '<div style="display:flex;height:16px;border-radius:8px;overflow:hidden;background:#EDEAE1;margin-bottom:7px">'
+    + '<div style="width:' + pctFatt.toFixed(1) + '%;background:' + col + '"></div>'
+    + '<div style="width:' + pctCons.toFixed(1) + '%;background:' + colTratteggio + '"></div></div>';
+  h += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#666;margin-bottom:12px">'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + col + ';margin-right:5px"></span>Fatturato aperto <span style="font-family:var(--font-mono);color:#412402">' + _ecFmtDec(esp.fatturato) + '</span></span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + colTratteggio + ';margin-right:5px"></span>Consegne non fatturate <span style="font-family:var(--font-mono);color:#412402">' + _ecFmtDec(esp.nonFatturato) + '</span>'
+      + (esp.nConsegne ? ' <span style="color:#999">(' + esp.nConsegne + ')</span>' : '') + '</span>'
+    + '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding-top:11px;border-top:0.5px solid var(--border)">';
+  if (oltre) {
+    h += '<div><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px">Oltre fido di</div>'
+      + '<div style="font-size:21px;font-weight:700;font-family:var(--font-mono);color:#A32D2D">' + _ecFmtDec(esp.totale - fido) + '</div>'
+      + '<div style="font-size:11px;color:#A32D2D">consegne da fermare o incasso da chiedere</div></div>';
+  } else {
+    h += '<div><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px">Fido disponibile</div>'
+      + '<div style="font-size:21px;font-weight:700;font-family:var(--font-mono);color:#3B6D11">' + _ecFmtDec(fido - esp.totale) + '</div></div>';
+  }
+  h += '<div><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px">Scaduto</div>'
+    + '<div style="font-size:21px;font-weight:700;font-family:var(--font-mono);color:' + (esp.scaduto > 0 ? '#A32D2D' : '#888') + '">' + (esp.scaduto > 0 ? _ecFmtDec(esp.scaduto) : '—') + '</div></div>';
+
+  var prossime = esp.fattAperte.filter(function (f) { return f.data_scadenza; })
+    .sort(function (a, b) { return a.data_scadenza < b.data_scadenza ? -1 : 1; });
+  var oggiIso = new Date().toISOString().split('T')[0];
+  var pross = prossime.filter(function (f) { return f.data_scadenza >= oggiIso; })[0];
+  h += '<div><div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px">Prossima scadenza</div>'
+    + '<div style="font-size:21px;font-weight:700;font-family:var(--font-mono)">' + (pross ? _ecFmtData(pross.data_scadenza).slice(0, 5) : '—') + '</div>'
+    + (pross ? '<div style="font-size:11px;color:#666;font-family:var(--font-mono)">' + _ecFmtDec(pross.saldo_residuo) + '</div>' : '') + '</div>';
+  h += '</div>';
+
+  h += _ecTimelineScadenze(esp.fattAperte);
+  h += '</div>';
+  return h;
+}
+
+// Timeline delle scadenze: un pallino per fattura aperta, data sopra e
+// importo sotto, dimensione proporzionale, rosso per lo scaduto.
+function _ecTimelineScadenze(fattAperte) {
+  var conScad = (fattAperte || []).filter(function (f) { return f.data_scadenza && Number(f.saldo_residuo) > 0; })
+    .sort(function (a, b) { return a.data_scadenza < b.data_scadenza ? -1 : 1; });
+  if (conScad.length < 2) return '';
+
+  var oggiIso = new Date().toISOString().split('T')[0];
+  var t0 = new Date(conScad[0].data_scadenza + 'T12:00:00').getTime();
+  var t1 = new Date(conScad[conScad.length - 1].data_scadenza + 'T12:00:00').getTime();
+  var span = Math.max(1, t1 - t0);
+  var maxImp = conScad.reduce(function (m, f) { return Math.max(m, Number(f.saldo_residuo || 0)); }, 0) || 1;
+
+  var h = '<div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">'
+    + '<div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.4px;margin-bottom:22px">Scadenze delle sue fatture</div>'
+    + '<div style="position:relative;height:58px;margin:0 14px">'
+    + '<div style="position:absolute;top:27px;left:0;right:0;height:3px;background:#EDEAE1;border-radius:2px"></div>';
+
+  conScad.forEach(function (f) {
+    var t = new Date(f.data_scadenza + 'T12:00:00').getTime();
+    var x = ((t - t0) / span) * 100;
+    var scaduta = f.data_scadenza < oggiIso;
+    var d = 9 + Math.round((Number(f.saldo_residuo || 0) / maxImp) * 7);
+    h += '<div title="' + _ecEsc(f.numero || '') + ' · ' + _ecFmtDec(f.saldo_residuo) + '" style="position:absolute;left:' + x.toFixed(1) + '%;top:0;transform:translateX(-50%);text-align:center;white-space:nowrap">'
+      + '<div style="font-size:10px;font-family:var(--font-mono);color:' + (scaduta ? '#A32D2D' : '#666') + ';margin-bottom:4px">' + _ecFmtData(f.data_scadenza).slice(0, 5) + '</div>'
+      + '<div style="width:' + d + 'px;height:' + d + 'px;border-radius:50%;background:' + (scaduta ? '#E24B4A' : '#378ADD') + ';margin:0 auto;border:2px solid #FAF8F2"></div>'
+      + '<div style="font-size:10px;font-family:var(--font-mono);color:' + (scaduta ? '#A32D2D' : '#412402') + ';margin-top:4px">' + _ecFmtImpKb(f.saldo_residuo) + '</div>'
+      + '</div>';
+  });
+  h += '</div></div>';
+  return h;
+}
+
 function _ecRenderCliente() {
   var clienteId = _ecStato.clienteSelezionato;
   var cliente = _ecStato.clienti.find(function(c) { return c.id === clienteId; });
@@ -478,6 +896,9 @@ function _ecRenderCliente() {
   html += '</div>';
 
   // 4 KPI
+  // BARRA FIDO (27/07): esposizione = fatturato aperto + consegne non fatturate
+  html += _ecBarraFido(cliente, _ecEsposizioneCliente(clienteId));
+
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:14px">';
   html += _ecKpiCard('Credito aperto', '€ ' + _ecFmt(creditoAperto), '#412402', '#FAEEDA', '#BA7517', fattAperte.length + ' fatture');
   html += _ecKpiCard('Di cui scaduto', '€ ' + _ecFmt(creditoScaduto), '#791F1F', '#FCEBEB', '#A32D2D', creditoAperto > 0 ? _ecFmtPerc(creditoScaduto / creditoAperto) + ' del credito' : '0%');
@@ -814,7 +1235,13 @@ function _ecRenderEstrattoFatture(fattCli) {
 
   var html = '<div style="background:#FAF8F2;padding:0;border-radius:6px;border:0.5px solid #e5e0d2;overflow:hidden">';
   html += '<div style="padding:10px 14px;background:white;border-bottom:0.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
-  html += '<div style="font-size:11px;text-transform:uppercase;color:#666;letter-spacing:0.4px;font-weight:600">📋 Estratto conto fatture (' + fattFilt.length + ' / ' + nTutte + ')</div>';
+  var _nomeCli = (function () {
+    var c = (_ecStato.clienti || []).filter(function (x) { return x.id === _ecStato.clienteSelezionato; })[0];
+    return c ? (c.ragione_sociale || c.nome || '') : '';
+  })();
+  html += '<div style="font-size:11px;text-transform:uppercase;color:#666;letter-spacing:0.4px;font-weight:600">📋 Estratto conto fatture'
+    + (_nomeCli ? ' · <span style="text-transform:none;color:#26215C;font-size:12px">' + _ecEsc(_nomeCli) + '</span>' : '')
+    + ' (' + fattFilt.length + ' / ' + nTutte + ')</div>';
   html += '<div style="display:flex;gap:6px">';
   html += '<div style="display:flex;background:#f0f0f0;border-radius:4px;padding:2px">';
   html += _ecTabFiltro('tutte', 'Tutte (' + nTutte + ')', filtro === 'tutte');
@@ -829,6 +1256,7 @@ function _ecRenderEstrattoFatture(fattCli) {
   } else {
     html += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
     html += '<thead><tr style="background:#fafaf6">';
+    html += '<th style="padding:6px 4px;width:26px;border-bottom:0.5px solid var(--border)"></th>';
     html += '<th style="padding:6px 9px;text-align:left;border-bottom:0.5px solid var(--border)">Fattura</th>';
     html += '<th style="padding:6px 9px;text-align:left;border-bottom:0.5px solid var(--border)">Data emissione</th>';
     html += '<th style="padding:6px 9px;text-align:left;border-bottom:0.5px solid var(--border)">Scadenza</th>';
@@ -854,10 +1282,16 @@ function _ecRenderEstrattoFatture(fattCli) {
           else { ggDiff = '0'; ggColor = '#444'; }
         }
       }
-      html += '<tr style="border-bottom:0.5px solid var(--border);' + rowBg + '">';
+      var ant = (_ecStato.anticipiPerFattura || {})[f.id] || null;
+      html += '<tr style="border-bottom:0.5px solid var(--border);' + rowBg + (_ecSel[f.id] ? 'background:#E6F1FB;' : '') + '">';
+      html += '<td style="padding:5px 4px;text-align:center">'
+        + (isOpen ? '<input type="checkbox"' + (_ecSel[f.id] ? ' checked' : '') + ' onclick="_ecToggleFatt(\'' + f.id + '\',this)" style="width:15px;height:15px;cursor:pointer;accent-color:#185FA5">' : '')
+        + '</td>';
       html += '<td style="padding:5px 9px;font-family:var(--font-mono);font-size:10px">' + _ecEsc(f.numero || '') + '/' + _ecEsc(String(f.anno || '')) + '</td>';
       html += '<td style="padding:5px 9px">' + _ecFmtData(f.data) + '</td>';
-      html += '<td style="padding:5px 9px">' + _ecFmtData(f.data_scadenza) + '</td>';
+      html += '<td style="padding:5px 9px">' + _ecFmtData(f.data_scadenza)
+        + (ant ? '<div style="font-size:9.5px;color:#0C447C;background:#E6F1FB;border-radius:8px;padding:1px 6px;display:inline-block;margin-top:2px">Anticipata · ' + _ecEsc(ant.istituto) + '</div>' : '')
+        + '</td>';
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono)">' + _ecFmtDec(f.importo_totale) + '</td>';
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono);color:' + (Number(f.importo_incassato) > 0 ? '#27500A' : '#888') + '">' + (Number(f.importo_incassato) > 0 ? _ecFmtDec(f.importo_incassato) : '—') + '</td>';
       html += '<td style="padding:5px 9px;text-align:right;font-family:var(--font-mono);font-weight:' + (Number(f.saldo_residuo) > 0 ? '600' : 'normal') + ';color:' + (Number(f.saldo_residuo) > 0 ? (isScad ? '#791F1F' : '#412402') : '#888') + '">' + (Number(f.saldo_residuo) > 0 ? _ecFmtDec(f.saldo_residuo) : '—') + '</td>';
@@ -868,6 +1302,7 @@ function _ecRenderEstrattoFatture(fattCli) {
 
     html += '</tbody></table>';
   }
+  html += _ecBoxSelezione(fattFilt);
   html += '</div>';
   return html;
 }
