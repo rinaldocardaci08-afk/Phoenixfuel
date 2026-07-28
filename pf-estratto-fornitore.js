@@ -575,7 +575,7 @@ async function ecfConferma() {
         banca_id: contoSel ? contoSel.istituto_id : null,
         cassa_tipo: null,
         metodo: modalita,
-        origine: 'estratto_conto',
+        origine: 'auto-fattura',   // valore ammesso dal vincolo: prima era 'estratto_conto' e l'insert falliva in silenzio
         note: null
       }]).select('id').single();
       if (movIns.error) {

@@ -2403,7 +2403,7 @@ async function antEstinguiAnticipo(fatturaAntId, opt) {
         banca_id: bancaId,
         cassa_tipo: null,
         metodo: 'bonifico',
-        origine: 'anticipi',
+        origine: 'auto-anticipo-rientro',   // valore previsto dal vincolo per il rientro
         note: opt.note || null
       }]).select('id').single();
       if (mov.error) throw mov.error;

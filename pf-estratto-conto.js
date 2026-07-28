@@ -539,7 +539,7 @@ async function _ecSalvaIncasso() {
       banca_id: bancaId,
       cassa_tipo: null,
       metodo: modalita,
-      origine: 'estratto_cliente',
+      origine: 'auto-fattura',   // valore ammesso dal vincolo su foglio_giornale_movimenti
       note: null
     }]).select('id').single();
     if (insMov.error) throw insMov.error;

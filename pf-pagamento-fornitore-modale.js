@@ -360,7 +360,7 @@ async function _pfpConferma() {
         banca_id: bancaId,
         cassa_tipo: null,
         metodo: modalita,
-        origine: 'scadenzario_fornitori',
+        origine: 'auto-fattura',   // valore ammesso dal vincolo: prima era 'scadenzario_fornitori'
         note: noteMov
       }]).select('id').single();
 
