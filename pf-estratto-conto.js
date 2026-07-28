@@ -1142,6 +1142,31 @@ function _ecCampo(label, chiave, tipo, opzioni) {
   return '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase;letter-spacing:.4px">' + label + '</label>' + inner + '</div>';
 }
 
+function _ecAggiungiSede() {
+  _ecSalvaCampiInMemoria();
+  _ecSchedaSedi.push({ id: null, _nuova: true, cliente_id: _ecStato.clienteSelezionato,
+    nome: '', indirizzo: '', citta: '', orari_scarico: '', vincoli_mezzo: '', is_default: false, attivo: true });
+  _ecSchedaTab = 'sedi';
+  document.getElementById('ec-content').innerHTML = _ecRenderScheda();
+}
+
+function _ecTogliSede(i) {
+  _ecSalvaCampiInMemoria();
+  var sd = _ecSchedaSedi[i];
+  if (!sd) return;
+  if (!sd._nuova && !confirm('Tolgo la sede "' + (sd.nome || '') + '"?\n\nResta negli ordini già fatti, ma non sarà più proponibile.')) return;
+  if (sd._nuova) _ecSchedaSedi.splice(i, 1);
+  else sd._eliminata = true;   // si disattiva al salvataggio
+  document.getElementById('ec-content').innerHTML = _ecRenderScheda();
+}
+
+function _ecUsaMargineConsigliato(v) {
+  _ecSalvaCampiInMemoria();
+  _ecSchedaRec.margine_obiettivo = Number(v).toFixed(4);
+  document.getElementById('ec-content').innerHTML = _ecRenderScheda();
+  toast('Obiettivo impostato a € ' + Number(v).toFixed(4) + ' — ricordati di salvare');
+}
+
 function _ecRenderScheda() {
   var c = _ecSchedaRec || {};
   var esp = _ecEsposizioneCliente(_ecStato.clienteSelezionato);
@@ -1233,14 +1258,55 @@ function _ecRenderScheda() {
           + (d >= 0 ? 'Sopra' : 'Sotto') + ' l\'obiettivo di € ' + Math.abs(d).toFixed(4) + ' al litro'
           + ' <span style="color:#666">(obiettivo € ' + ob.toFixed(4) + ')</span></div>';
       }
+      // casella col valore consigliato: si copia nell'obiettivo con un clic
+      h += '<div style="display:flex;align-items:center;gap:10px;margin-top:9px;padding-top:9px;border-top:0.5px solid #B8D4EE;flex-wrap:wrap">'
+        + '<span style="font-size:11.5px;color:#0C447C">Valore medio da applicare</span>'
+        + '<span style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:#0C447C">€ ' + marg.medio.toFixed(4) + '</span>'
+        + '<button onclick="_ecUsaMargineConsigliato(' + marg.medio.toFixed(6) + ')" style="font-size:11px;padding:5px 11px;border:0.5px solid #378ADD;border-radius:6px;background:#fff;color:#0C447C;cursor:pointer;font-weight:600">Usa come obiettivo</button>'
+        + '</div>';
     }
     h += '</div>';
+
+    // ── ULTIME CONSEGNE con il margine applicato — stesse colonne del popup
+    //    "info" di Elenco clienti, qui in sola lettura (28/07)
+    var ultime = (_ecStato.ordini || [])
+      .filter(function (o) { return o.cliente_id === _ecStato.clienteSelezionato && Number(o.litri) > 0; })
+      .sort(function (a, b) { return a.data < b.data ? 1 : -1; })
+      .slice(0, 10);
+    if (ultime.length) {
+      h += '<div style="margin-top:12px;border:0.5px solid var(--border);border-radius:9px;overflow:hidden">'
+        + '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+        + '<thead style="background:#EAF3FB"><tr>'
+          + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #B8D4EE;color:#0C447C">Data</th>'
+          + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid #B8D4EE;color:#0C447C">Prodotto</th>'
+          + '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;color:#0C447C">Litri</th>'
+          + '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;color:#0C447C">Prezzo netto/L</th>'
+          + '<th style="padding:6px 8px;text-align:right;border-bottom:1px solid #B8D4EE;color:#0C447C">Margine/L</th>'
+        + '</tr></thead><tbody>'
+        + ultime.map(function (o) {
+            var netto = Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0);
+            var mg = Number(o.margine || 0);
+            return '<tr style="border-bottom:0.5px solid var(--border)">'
+              + '<td style="padding:5px 8px;font-family:var(--font-mono)">' + _ecFmtData(o.data) + '</td>'
+              + '<td style="padding:5px 8px">' + _ecEsc(o.prodotto || '') + '</td>'
+              + '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">' + _ecFmt(o.litri) + '</td>'
+              + '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono)">' + netto.toFixed(4) + '</td>'
+              + '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:' + (mg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + mg.toFixed(4) + '</td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }
   } else if (_ecSchedaTab === 'sedi') {
     if (!_ecSchedaSedi.length) {
       h += '<div style="color:#888;font-size:12.5px;font-style:italic">Nessuna sede di scarico registrata per questo cliente.</div>';
     } else {
       _ecSchedaSedi.forEach(function (sd, i) {
-        h += '<div style="border:0.5px solid var(--border);border-radius:9px;padding:11px;margin-bottom:9px;background:#FAF8F2">'
+        if (sd._eliminata) return;
+        h += '<div style="border:0.5px solid var(--border);border-radius:9px;padding:11px;margin-bottom:9px;background:' + (sd._nuova ? '#EAF3FB' : '#FAF8F2') + '">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+            + '<span style="font-size:10.5px;color:#666;text-transform:uppercase;letter-spacing:.4px">' + (sd._nuova ? 'Nuova sede' : 'Sede ' + (i + 1)) + '</span>'
+            + '<button onclick="_ecTogliSede(' + i + ')" title="Togli questa sede" style="background:none;border:none;color:#A32D2D;cursor:pointer;font-size:13px">✕</button>'
+          + '</div>'
           + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">'
             + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Nome sede</label><input data-sede="' + i + '" data-campo="nome" value="' + _ecEsc(sd.nome || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
             + '<div><label style="font-size:10.5px;color:#666;text-transform:uppercase">Indirizzo</label><input data-sede="' + i + '" data-campo="indirizzo" value="' + _ecEsc(sd.indirizzo || '') + '" style="width:100%;padding:7px 9px;margin-top:3px;border:0.5px solid var(--border);border-radius:6px;font-size:12.5px"></div>'
@@ -1251,7 +1317,8 @@ function _ecRenderScheda() {
           + '</div></div>';
       });
     }
-    h += '<div style="font-size:11.5px;color:#666;margin-top:6px">Le sedi si aggiungono e si eliminano dalla sezione Clienti; qui si correggono i dati e si sceglie la predefinita.</div>';
+    h += '<button onclick="_ecAggiungiSede()" style="margin-top:4px;background:var(--bg);border:0.5px dashed #378ADD;color:#0C447C;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer">+ Aggiungi sede</button>';
+    h += '<div style="font-size:11.5px;color:#666;margin-top:8px">Le sedi nuove si salvano insieme alla scheda. Una sola può essere predefinita: spuntandone un\'altra la precedente si libera.</div>';
   } else {
     h += G
       + _ecCampo('Note interne', 'note', 'textarea')
@@ -1286,17 +1353,38 @@ async function _ecSalvaScheda() {
   try {
     var up = await sb.from('clienti').update(rec).eq('id', c.id);
     if (up.error) throw up.error;
+    // una sola predefinita: vince l'ultima spuntata
+    var primaDef = -1;
+    _ecSchedaSedi.forEach(function (sd, i) { if (sd.is_default && !sd._eliminata && primaDef < 0) primaDef = i; });
+    _ecSchedaSedi.forEach(function (sd, i) { sd.is_default = (i === primaDef); });
+
     for (var i = 0; i < _ecSchedaSedi.length; i++) {
       var sd = _ecSchedaSedi[i];
-      var us = await sb.from('sedi_scarico').update({
+      var dati = {
         nome: sd.nome || null, indirizzo: sd.indirizzo || null, citta: sd.citta || null,
         orari_scarico: sd.orari_scarico || null, vincoli_mezzo: sd.vincoli_mezzo || null,
         is_default: !!sd.is_default
-      }).eq('id', sd.id);
-      if (us.error) throw us.error;
+      };
+      if (sd._eliminata && sd.id) {
+        var ud = await sb.from('sedi_scarico').update({ attivo: false }).eq('id', sd.id);
+        if (ud.error) throw ud.error;
+      } else if (sd._nuova) {
+        if (!String(sd.nome || '').trim()) continue;      // riga lasciata vuota: si ignora
+        dati.cliente_id = c.id; dati.attivo = true;
+        var ins = await sb.from('sedi_scarico').insert([dati]);
+        if (ins.error) throw ins.error;
+      } else if (sd.id) {
+        var us = await sb.from('sedi_scarico').update(dati).eq('id', sd.id);
+        if (us.error) throw us.error;
+      }
     }
     if (typeof cacheClienti !== 'undefined') cacheClienti = [];
     if (typeof _auditLog === 'function') _auditLog('modifica_cliente', 'clienti', (rec.ragione_sociale || rec.nome || '') + ' · scheda aggiornata');
+    try {
+      var rs = await sb.from('sedi_scarico').select('*').eq('cliente_id', c.id).eq('attivo', true)
+        .order('is_default', { ascending: false }).order('nome');
+      _ecSchedaSedi = rs.data || [];
+    } catch (e) { /* non critico */ }
     toast('✓ Scheda cliente salvata');
     _ecStato.vista = 'cliente';
     await renderEstrattoConto();
