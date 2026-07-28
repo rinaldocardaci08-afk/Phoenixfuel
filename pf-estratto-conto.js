@@ -470,13 +470,16 @@ function _ecDeseleziona() {
   _ecRenderCliente();
 }
 function _ecFattureSelezionate() {
-  return (_ecStato.fatture || []).filter(function (f) { return _ecSel[f.id]; })
+  return (_ecStato.fatture || []).filter(function (f) { return _ecSel[f.fattura_id || f.id]; })
     .sort(function (a, b) {
       var sa = a.data_scadenza || '9999-12-31', sb2 = b.data_scadenza || '9999-12-31';
       return sa < sb2 ? -1 : (sa > sb2 ? 1 : 0);
     });
 }
 
+// Riquadro della selezione: FISSO in basso, sempre visibile appena spunti una
+// fattura (28/07). Prima stava in coda alla tabella e con 119 righe restava
+// fuori schermo: si spuntava e non succedeva niente di visibile.
 function _ecBoxSelezione(fattVisibili) {
   var sel = _ecFattureSelezionate();
   if (!sel.length) return '';
@@ -484,16 +487,15 @@ function _ecBoxSelezione(fattVisibili) {
   var tot = sel.reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
   var scad = sel.filter(function (f) { return f.data_scadenza && f.data_scadenza < oggiIso; })
                 .reduce(function (a, f) { return a + Number(f.saldo_residuo || 0); }, 0);
-  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#E6F1FB;border-top:1px solid #378ADD;padding:10px 14px">'
-    + '<div style="font-size:12px;color:#0C447C">'
-      + '<strong>' + sel.length + (sel.length === 1 ? ' fattura selezionata' : ' fatture selezionate') + '</strong> · '
-      + '<span style="font-family:var(--font-mono);font-weight:700">' + _ecFmtDec(tot) + '</span>'
-      + (scad > 0 ? ' <span style="color:#A32D2D">· di cui scaduto ' + _ecFmtDec(scad) + '</span>' : '')
-    + '</div>'
-    + '<div style="display:flex;gap:8px">'
-      + '<button onclick="_ecDeseleziona()" style="background:white;border:0.5px solid var(--border);border-radius:6px;padding:7px 12px;font-size:11.5px;cursor:pointer">Deseleziona</button>'
-      + '<button onclick="_ecApriIncasso()" style="background:#185FA5;color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer">Registra incasso</button>'
-    + '</div></div>';
+  // STESSO riquadro dei fornitori (pfRfBox): fisso a DESTRA, segue lo scorrimento
+  return '<div style="position:fixed;right:18px;top:120px;z-index:900;width:238px;background:#E6F1FB;border:1px solid #378ADD;border-radius:12px;padding:13px 14px;box-shadow:0 6px 18px rgba(0,0,0,.16)">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#0C447C;font-weight:700;margin-bottom:6px">Selezione</div>'
+    + '<div style="font-family:var(--font-mono);font-size:20px;font-weight:700;color:#0C447C">' + sel.length + (sel.length === 1 ? ' fattura' : ' fatture') + '</div>'
+    + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700;margin:2px 0 ' + (scad > 0 ? '2px' : '10px') + '">' + _ecFmtDec(tot) + '</div>'
+    + (scad > 0 ? '<div style="font-size:11px;color:#A32D2D;margin-bottom:10px">di cui scaduto ' + _ecFmtDec(scad) + '</div>' : '')
+    + '<button onclick="_ecApriIncasso()" style="width:100%;font-size:12px;padding:9px 10px;border:none;border-radius:8px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">＋ Registra incasso</button>'
+    + '<button onclick="_ecDeseleziona()" style="width:100%;margin-top:6px;font-size:12px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Deseleziona</button>'
+    + '</div>';
 }
 
 // Distribuzione dell'importo sulle fatture selezionate, dalla piu vecchia
@@ -548,7 +550,7 @@ async function _ecSalvaIncasso() {
 
     // 2. una riconciliazione per fattura: e' questa che abbassa il saldo residuo
     var righe = dist.map(function (d) {
-      return { movimento_id: insMov.data.id, fattura_emessa_id: d.f.id, ordine_id: null, fattura_ricevuta_id: null, importo_imputato: d.quota };
+      return { movimento_id: insMov.data.id, fattura_emessa_id: (d.f.fattura_id || d.f.id), ordine_id: null, fattura_ricevuta_id: null, importo_imputato: d.quota };
     });
     var insRic = await sb.from('foglio_giornale_riconciliazioni').insert(righe);
     if (insRic.error) {
@@ -560,7 +562,7 @@ async function _ecSalvaIncasso() {
     var nAnt = 0, totAnt = 0;
     if (comunicata && typeof antEstinguiAnticipo === 'function') {
       for (var i = 0; i < dist.length; i++) {
-        var an = (_ecStato.anticipiPerFattura || {})[dist[i].f.id];
+        var an = (_ecStato.anticipiPerFattura || {})[dist[i].f.fattura_id || dist[i].f.id];
         if (!an || !(an.anticipato > 0)) continue;
         var quotaAnt = Math.min(an.anticipato, dist[i].quota);
         try {
@@ -675,15 +677,15 @@ function _ecIncAggiorna() {
   // anticipi coinvolti + flag "comunicata alla banca"
   var antBox = document.getElementById('ec-inc-anticipi');
   if (!antBox) return;
-  var coinvolti = dist.filter(function (d) { return d.quota > 0 && (_ecStato.anticipiPerFattura || {})[d.f.id]; });
+  var coinvolti = dist.filter(function (d) { return d.quota > 0 && (_ecStato.anticipiPerFattura || {})[d.f.fattura_id || d.f.id]; });
   if (!coinvolti.length) { antBox.innerHTML = ''; return; }
 
   var diversa = coinvolti.filter(function (d) {
-    var a = _ecStato.anticipiPerFattura[d.f.id];
+    var a = _ecStato.anticipiPerFattura[d.f.fattura_id || d.f.id];
     return a.istitutoId && bancaSel && a.istitutoId !== bancaSel;
   });
   var totAnt = coinvolti.reduce(function (a, d) {
-    var an = _ecStato.anticipiPerFattura[d.f.id];
+    var an = _ecStato.anticipiPerFattura[d.f.fattura_id || d.f.id];
     return a + Math.min(Number(an.anticipato || 0), d.quota);
   }, 0);
 
@@ -1544,8 +1546,13 @@ function _ecRenderEstrattoFatture(fattCli) {
     });
   }
 
-  // Ordino per data emissione decrescente
-  fattFilt.sort(function(a, b) { return (a.data < b.data) ? 1 : -1; });
+  // ORDINE (28/07): per SCADENZA crescente, dalla piu vicina alla piu lontana
+  // — stessa regola dei fornitori. Senza scadenza in fondo.
+  fattFilt.sort(function(a, b) {
+    var sa = a.data_scadenza || '9999-12-31', sb2 = b.data_scadenza || '9999-12-31';
+    if (sa !== sb2) return sa < sb2 ? -1 : 1;
+    return (a.data < b.data) ? 1 : -1;
+  });
 
   var nTutte = fattCli.length;
   var nAperte = fattCli.filter(function(f) { return f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale'; }).length;
@@ -1603,10 +1610,11 @@ function _ecRenderEstrattoFatture(fattCli) {
           else { ggDiff = '0'; ggColor = '#444'; }
         }
       }
-      var ant = (_ecStato.anticipiPerFattura || {})[f.id] || null;
-      html += '<tr style="border-bottom:0.5px solid var(--border);' + rowBg + (_ecSel[f.id] ? 'background:#E6F1FB;' : '') + '">';
+      var _fid = f.fattura_id || f.id;   // la vista espone fattura_id
+      var ant = (_ecStato.anticipiPerFattura || {})[_fid] || null;
+      html += '<tr style="border-bottom:0.5px solid var(--border);' + rowBg + (_ecSel[_fid] ? 'background:#E6F1FB;' : '') + '">';
       html += '<td style="padding:5px 4px;text-align:center">'
-        + (isOpen ? '<input type="checkbox"' + (_ecSel[f.id] ? ' checked' : '') + ' onclick="_ecToggleFatt(\'' + f.id + '\',this)" style="width:15px;height:15px;cursor:pointer;accent-color:#185FA5">' : '')
+        + (isOpen && _fid ? '<input type="checkbox"' + (_ecSel[_fid] ? ' checked' : '') + ' onclick="_ecToggleFatt(\'' + _fid + '\',this)" style="width:15px;height:15px;cursor:pointer;accent-color:#185FA5">' : '')
         + '</td>';
       html += '<td style="padding:5px 9px;font-family:var(--font-mono);font-size:10px">' + _ecEsc(f.numero || '') + '/' + _ecEsc(String(f.anno || '')) + '</td>';
       html += '<td style="padding:5px 9px">' + _ecFmtData(f.data) + '</td>';
