@@ -239,6 +239,12 @@ async function caricaBenchmark() {
       '<td style="text-align:right;font-size:10px;color:' + (varGg > 0 ? '#E24B4A' : varGg < 0 ? '#639922' : 'var(--text-muted)') + '">' + (varGg !== 0 ? (varGg > 0 ? '+' : '') + varGg.toFixed(6) : '—') + '</td>' +
       '</tr>';
   }).join('');
+
+  // Se la linguetta visibile e' "Mercato gasolio", disegnala: aprendo la
+  // sezione il programma chiama SOLO questa funzione, e senza questa riga la
+  // vista nuova restava vuota — la sezione sembrava rotta (29/07).
+  var wMkt = document.getElementById('mercato-wrap');
+  if (wMkt && wMkt.style.display !== 'none' && typeof renderMercato === 'function') renderMercato();
 }
 
 // ── Aggiorna benchmark dalla media prezzi fornitori ──
