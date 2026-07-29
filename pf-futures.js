@@ -275,7 +275,7 @@ async function renderMercato() {
       }).join('')
     + '</div>';
   h += '<div style="display:flex;gap:8px;align-items:center">'
-    + '<span id="mkt-esito" style="font-size:11.5px;color:var(--text-muted)"></span>'
+    + '<span id="mkt-esito" style="font-size:11.5px;color:var(--text-muted);max-width:420px;text-align:right;line-height:1.5"></span>'
     + '<button id="mkt-btn-stor" onclick="mktCaricaStorico()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">↧ Carica storico</button>'
     + '<button id="mkt-btn-agg" onclick="mktAggiornaOra()" style="font-size:12px;padding:7px 15px;border:0.5px solid #378ADD;border-radius:7px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">⟳ Aggiorna adesso</button>'
     + '</div></div>';
@@ -398,7 +398,8 @@ async function mktCaricaStorico() {
     var res = await sb.functions.invoke('mercato-gasolio', { body: { giorni: giorni } });
     if (res.error) throw res.error;
     var d = res.data || {};
-    if (!d.ok) throw new Error(d.errore || 'risposta non valida');
+    if (!d.ok) throw new Error((d.errore || 'risposta non valida')
+      + ((d.dettaglio && d.dettaglio.length) ? ' — ' + d.dettaglio.join(' · ') : ''));
     if (out) { out.style.color = '#3B6D11'; out.textContent = '✓ ' + (d.messaggio || 'storico caricato'); }
     await renderMercato();
   } catch (e) {
@@ -426,7 +427,9 @@ async function mktAggiornaOra() {
       await renderMercato();
       return;
     }
-    throw new Error(d.errore || 'risposta non valida');
+    // il dettaglio dice QUALE fonte ha risposto e come: senza, si resta al buio
+    throw new Error((d.errore || 'risposta non valida')
+      + ((d.dettaglio && d.dettaglio.length) ? ' — ' + d.dettaglio.join(' · ') : ''));
   } catch (e) {
     var msg = (e && e.message) || String(e);
     if (out) { out.style.color = '#A32D2D'; out.textContent = '✕ ' + msg; }
