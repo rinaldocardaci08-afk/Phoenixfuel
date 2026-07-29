@@ -208,3 +208,193 @@ async function _salvaFuturesManuale() {
   toast('Dati futures salvati!');
   _caricaStoricoFuturesDB();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VISTA MERCATO UNIFICATA (29/07)
+// Una pagina sola: la serie ICE Gasoil convertita in €/litro (quella che
+// futures_storico gia salva), le medie a 7 e 30 giorni (stesso calcolo del
+// benchmark) e i TUOI CARICHI sovrapposti, cosi si vede se hai comprato
+// sopra o sotto il mercato di quel giorno.
+// Carichi usati per il confronto: Eni e Ludoil a deposito, dove NON c'e'
+// trasporto del fornitore a sporcare il paragone (regola di Rinaldo).
+// Tutto in IMPONIBILE: l'IVA si mostra a parte, e' solo cassa.
+// Nessuna tabella nuova, nessuna query nuova: legge futures_storico e ordini.
+// ═══════════════════════════════════════════════════════════════════════════
+var _mktChart = null;
+var _mktGiorni = 90;
+var _MKT_IVA = 0.22;
+
+function _mktMedia(arr, n) {
+  return arr.map(function (_, i) {
+    if (i < n - 1) return null;
+    var s = 0;
+    for (var k = i - n + 1; k <= i; k++) s += arr[k];
+    return Math.round((s / n) * 1000000) / 1000000;
+  });
+}
+
+function mktPeriodo(g) { _mktGiorni = g; renderMercato(); }
+
+async function renderMercato() {
+  var el = document.getElementById('mercato-wrap');
+  if (!el) return;
+  el.innerHTML = '<div class="loading" style="padding:30px">Caricamento mercato…</div>';
+
+  var dal = new Date(); dal.setDate(dal.getDate() - _mktGiorni);
+  var dalISO = dal.toISOString().split('T')[0];
+
+  var serie = [], carichi = [];
+  try {
+    var r = await Promise.all([
+      sb.from('futures_storico').select('*').gte('data', dalISO).order('data', { ascending: true }),
+      sb.from('ordini').select('data,fornitore,prodotto,litri,costo_litro,trasporto_litro,tipo_ordine,stato')
+        .eq('tipo_ordine', 'entrata_deposito').neq('stato', 'annullato')
+        .gte('data', dalISO).order('data', { ascending: true })
+    ]);
+    serie = r[0].data || [];
+    carichi = (r[1].data || []).filter(function (o) {
+      var f = String(o.fornitore || '').toLowerCase();
+      return (f.indexOf('eni') >= 0 || f.indexOf('ludoil') >= 0) && Number(o.litri) > 0 && Number(o.costo_litro) > 0;
+    });
+  } catch (e) {
+    el.innerHTML = '<div class="card"><div style="color:#A32D2D;font-size:13px">Errore lettura dati: ' + esc((e && e.message) || e) + '</div></div>';
+    return;
+  }
+
+  var h = '';
+
+  // barra comandi: periodo + aggiorna adesso
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">';
+  h += '<div style="display:flex;gap:6px">'
+    + [[30, '1M'], [90, '3M'], [180, '6M'], [365, '1A']].map(function (p) {
+        var on = _mktGiorni === p[0];
+        return '<button onclick="mktPeriodo(' + p[0] + ')" style="font-size:12px;padding:6px 14px;border:0.5px solid ' + (on ? '#185FA5' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#185FA5' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '500') + '">' + p[1] + '</button>';
+      }).join('')
+    + '</div>';
+  h += '<div style="display:flex;gap:8px;align-items:center">'
+    + '<span id="mkt-esito" style="font-size:11.5px;color:var(--text-muted)"></span>'
+    + '<button id="mkt-btn-agg" onclick="mktAggiornaOra()" style="font-size:12px;padding:7px 15px;border:0.5px solid #378ADD;border-radius:7px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">⟳ Aggiorna adesso</button>'
+    + '</div></div>';
+
+  if (!serie.length) {
+    h += '<div class="card"><div style="font-size:13px;color:var(--text-muted);line-height:1.7">'
+      + 'Nessuna quotazione nel periodo. Premi <strong>Aggiorna adesso</strong> per prendere la chiusura di Londra e il cambio, '
+      + 'oppure inseriscila a mano dalla linguetta <strong>Futures ICE</strong>.</div></div>';
+    el.innerHTML = h;
+    return;
+  }
+
+  var lab = serie.map(function (r) { return fmtD(r.data).substring(0, 5); });
+  var prezzi = serie.map(function (r) { return Number(r.prezzo_euro_litro || 0); });
+  var ma7 = _mktMedia(prezzi, 7), ma30 = _mktMedia(prezzi, 30);
+  var ultimo = prezzi[prezzi.length - 1];
+  var prec = prezzi.length > 1 ? prezzi[prezzi.length - 2] : ultimo;
+  var varG = ultimo - prec;
+  var m7 = ma7[ma7.length - 1], m30 = ma30[ma30.length - 1];
+  var tendenza = (m7 != null && m30 != null) ? (m7 > m30 ? 'In salita' : 'In discesa') : '—';
+  var colTend = (m7 != null && m30 != null) ? (m7 > m30 ? '#A32D2D' : '#3B6D11') : 'var(--text-muted)';
+
+  // ultimo carico e confronto col mercato di quel giorno
+  var ultC = carichi.length ? carichi[carichi.length - 1] : null;
+  var costoUlt = ultC ? (Number(ultC.costo_litro) + Number(ultC.trasporto_litro || 0)) : null;
+  var mktQuelGiorno = null;
+  if (ultC) {
+    for (var i = serie.length - 1; i >= 0; i--) {
+      if (serie[i].data <= ultC.data) { mktQuelGiorno = Number(serie[i].prezzo_euro_litro || 0); break; }
+    }
+  }
+
+  var kpi = function (lab2, val, sub, col) {
+    return '<div class="kpi"><div class="kpi-label">' + lab2 + '</div>'
+      + '<div class="kpi-value" style="font-family:var(--font-mono);color:' + (col || 'var(--text)') + '">' + val + '</div>'
+      + (sub ? '<div style="font-size:11px;color:var(--text-muted)">' + sub + '</div>' : '') + '</div>';
+  };
+  h += '<div class="grid4" style="margin-bottom:16px">'
+    + kpi('Mercato ' + fmtD(serie[serie.length - 1].data), ultimo.toFixed(4),
+          (varG >= 0 ? '+' : '') + varG.toFixed(4) + ' sul giorno', varG >= 0 ? '#A32D2D' : '#3B6D11')
+    + kpi('Tendenza', tendenza, (m7 != null && m30 != null) ? 'MA7 ' + (m7 > m30 ? 'sopra' : 'sotto') + ' MA30' : 'servono più giorni', colTend)
+    + kpi('Tuo ultimo carico', costoUlt != null ? costoUlt.toFixed(4) : '—',
+          ultC ? esc(ultC.fornitore) + ' · ' + fmtD(ultC.data) : 'nessun carico nel periodo')
+    + kpi('Scarto sul mercato', (costoUlt != null && mktQuelGiorno) ? ((costoUlt - mktQuelGiorno) >= 0 ? '+' : '') + (costoUlt - mktQuelGiorno).toFixed(4) : '—',
+          'prodotto + accisa + margine fornitore')
+    + '</div>';
+
+  h += '<div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:8px;font-size:11.5px;color:var(--text-muted)">'
+    + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;margin-right:5px"></span>Mercato €/L</span>'
+    + '<span><span style="display:inline-block;width:10px;height:2px;background:#eb6834;margin-right:5px;vertical-align:middle"></span>Media 7 giorni</span>'
+    + '<span><span style="display:inline-block;width:10px;height:2px;background:#898781;margin-right:5px;vertical-align:middle"></span>Media 30 giorni</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#1baf7a;margin-right:5px"></span>Tuoi carichi (Eni/Ludoil a deposito)</span>'
+    + '</div>';
+  h += '<div class="card"><div style="position:relative;height:300px"><canvas id="mkt-chart"></canvas></div></div>';
+
+  // nota IVA: si lavora in imponibile, il finito e' solo informativo
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">'
+    + '<div class="kpi" style="flex:1;min-width:200px"><div class="kpi-label">Valore usato nei conti (imponibile)</div>'
+      + '<div class="kpi-value" style="font-family:var(--font-mono)">' + ultimo.toFixed(4) + '</div></div>'
+    + '<div class="kpi" style="flex:1;min-width:200px"><div class="kpi-label">Solo informativo: con IVA 22%</div>'
+      + '<div class="kpi-value" style="font-family:var(--font-mono);color:var(--text-muted)">' + (ultimo * (1 + _MKT_IVA)).toFixed(4) + '</div>'
+      + '<div style="font-size:11px;color:var(--text-muted)">l\'IVA la recuperi: non entra mai nei confronti</div></div>'
+    + '</div>';
+
+  el.innerHTML = h;
+
+  // grafico
+  var punti = carichi.map(function (o) {
+    var iLab = -1;
+    for (var i = 0; i < serie.length; i++) { if (serie[i].data === o.data) { iLab = i; break; } }
+    if (iLab < 0) return null;
+    return { x: lab[iLab], y: Math.round((Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * 10000) / 10000, _f: o.fornitore, _l: o.litri };
+  }).filter(Boolean);
+
+  if (_mktChart) _mktChart.destroy();
+  var cv = document.getElementById('mkt-chart');
+  if (cv && typeof Chart !== 'undefined') {
+    _mktChart = new Chart(cv, {
+      data: {
+        labels: lab,
+        datasets: [
+          { type: 'line', label: 'Mercato', data: prezzi, borderColor: '#2a78d6', backgroundColor: 'rgba(42,120,214,0.10)', fill: true, borderWidth: 2, pointRadius: 0, tension: 0.3 },
+          { type: 'line', label: 'MA7', data: ma7, borderColor: '#eb6834', borderWidth: 2, borderDash: [5, 3], pointRadius: 0, fill: false, tension: 0.3 },
+          { type: 'line', label: 'MA30', data: ma30, borderColor: '#898781', borderWidth: 2, borderDash: [2, 3], pointRadius: 0, fill: false, tension: 0.3 },
+          { type: 'scatter', label: 'Carichi', data: punti, backgroundColor: '#1baf7a', pointRadius: 7, pointHoverRadius: 9, borderColor: '#fff', borderWidth: 2 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) {
+          if (c.dataset.label === 'Carichi') { var p = c.raw; return (p._f || '') + ': € ' + Number(p.y).toFixed(4) + '/L · ' + fmtL(p._l); }
+          return c.dataset.label + ': € ' + Number(c.parsed.y).toFixed(4) + '/L';
+        } } } },
+        interaction: { mode: 'index', intersect: false },
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 9 } },
+                  y: { grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 }, callback: function (v) { return Number(v).toFixed(3); } } } }
+      }
+    });
+  }
+}
+
+// Chiama la funzione sul server che prende chiusura di Londra e cambio.
+// Stessa funzione che poi girera' da sola alle 17:35: qui la si prova subito.
+async function mktAggiornaOra() {
+  var btn = document.getElementById('mkt-btn-agg');
+  var out = document.getElementById('mkt-esito');
+  if (btn) { btn.disabled = true; btn.textContent = 'Aggiorno…'; }
+  if (out) { out.textContent = ''; out.style.color = 'var(--text-muted)'; }
+  try {
+    var res = await sb.functions.invoke('mercato-gasolio', { body: { manuale: true } });
+    if (res.error) throw res.error;
+    var d = res.data || {};
+    if (d.ok) {
+      if (out) { out.style.color = '#3B6D11'; out.textContent = '✓ ' + (d.messaggio || 'aggiornato'); }
+      await renderMercato();
+      return;
+    }
+    throw new Error(d.errore || 'risposta non valida');
+  } catch (e) {
+    var msg = (e && e.message) || String(e);
+    if (out) { out.style.color = '#A32D2D'; out.textContent = '✕ ' + msg; }
+    if (typeof toast === 'function') toast('Aggiornamento non riuscito: ' + msg);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⟳ Aggiorna adesso'; }
+  }
+}

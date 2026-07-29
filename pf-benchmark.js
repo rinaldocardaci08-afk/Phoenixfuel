@@ -324,15 +324,25 @@ function _regressione(arr) {
 }
 
 // ── Tab switcher Benchmark / Futures ──
+// Tre linguette (29/07): Mercato (vista unificata), Benchmark, Futures ICE.
 function _switchBenchTab(tab) {
-  var isStd = tab === 'std';
-  var wStd = document.getElementById('bench-std-wrap');
-  var wFut = document.getElementById('futures-wrap');
-  var tStd = document.getElementById('tab-benchmark-std');
-  var tFut = document.getElementById('tab-futures');
-  if (wStd) wStd.style.display = isStd ? '' : 'none';
-  if (wFut) wFut.style.display = isStd ? 'none' : '';
-  if (tStd) { tStd.style.color = isStd ? 'var(--primary)' : 'var(--text-muted)'; tStd.style.borderBottomColor = isStd ? 'var(--primary)' : 'transparent'; tStd.style.fontWeight = isStd ? '600' : '500'; }
-  if (tFut) { tFut.style.color = isStd ? 'var(--text-muted)' : 'var(--primary)'; tFut.style.borderBottomColor = isStd ? 'transparent' : 'var(--primary)'; tFut.style.fontWeight = isStd ? '500' : '600'; }
-  if (!isStd) renderFutures();
+  var viste = {
+    mercato: { wrap: 'mercato-wrap', tab: 'tab-mercato' },
+    std:     { wrap: 'bench-std-wrap', tab: 'tab-benchmark-std' },
+    futures: { wrap: 'futures-wrap', tab: 'tab-futures' }
+  };
+  if (!viste[tab]) tab = 'mercato';
+  Object.keys(viste).forEach(function (k) {
+    var w = document.getElementById(viste[k].wrap);
+    var t = document.getElementById(viste[k].tab);
+    var on = (k === tab);
+    if (w) w.style.display = on ? '' : 'none';
+    if (t) {
+      t.style.color = on ? 'var(--primary)' : 'var(--text-muted)';
+      t.style.borderBottomColor = on ? 'var(--primary)' : 'transparent';
+      t.style.fontWeight = on ? '600' : '500';
+    }
+  });
+  if (tab === 'futures') renderFutures();
+  if (tab === 'mercato' && typeof renderMercato === 'function') renderMercato();
 }

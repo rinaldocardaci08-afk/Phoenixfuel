@@ -1488,8 +1488,12 @@
 
         <!-- Tab Benchmark / Futures -->
         <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px" id="benchmark-tabs">
-          <button id="tab-benchmark-std" onclick="_switchBenchTab('std')"
+          <button id="tab-mercato" onclick="_switchBenchTab('mercato')"
             style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--primary);border-bottom:2px solid var(--primary)">
+            🛢️ Mercato gasolio
+          </button>
+          <button id="tab-benchmark-std" onclick="_switchBenchTab('std')"
+            style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent">
             📈 Benchmark mercato
           </button>
           <button id="tab-futures" onclick="_switchBenchTab('futures')"
@@ -1498,8 +1502,11 @@
           </button>
         </div>
 
+        <!-- Vista unificata mercato (29/07): serie ICE + medie + tuoi carichi -->
+        <div id="mercato-wrap"><div class="loading" style="padding:30px">Caricamento…</div></div>
+
         <!-- Contenuto Benchmark standard -->
-        <div id="bench-std-wrap">
+        <div id="bench-std-wrap" style="display:none">
         <!-- Input giornaliero -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Inserisci prezzo di riferimento</div>
@@ -3142,8 +3149,8 @@
 <script src="pf-admin.js?v=20260717a"></script>
 <script src="pf-dashboard.js?v=20260725b"></script>
 <script src="pf-home.js?v=20260419a"></script>
-<script src="pf-benchmark.js?v=20260514b"></script>
-<script src="pf-futures.js?v=20260508f"></script>
+<script src="pf-benchmark.js?v=20260729a"></script>
+<script src="pf-futures.js?v=20260729a"></script>
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=20260727d"></script>
