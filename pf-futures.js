@@ -252,9 +252,12 @@ async function renderMercato() {
         .gte('data', dalISO).order('data', { ascending: true })
     ]);
     serie = r[0].data || [];
+    // TUTTI i carichi (29/07): il filtro Eni/Ludoil vale solo per l'analisi
+    // delle accise, dove il trasporto del fornitore falserebbe il conto. Qui
+    // si distinguono per DATO, non per nome: chi non ha trasporto e'
+    // confrontabile col mercato in modo pulito, gli altri lo includono.
     carichi = (r[1].data || []).filter(function (o) {
-      var f = String(o.fornitore || '').toLowerCase();
-      return (f.indexOf('eni') >= 0 || f.indexOf('ludoil') >= 0) && Number(o.litri) > 0 && Number(o.costo_litro) > 0;
+      return Number(o.litri) > 0 && Number(o.costo_litro) > 0;
     });
   } catch (e) {
     el.innerHTML = '<div class="card"><div style="color:#A32D2D;font-size:13px">Errore lettura dati: ' + esc((e && e.message) || e) + '</div></div>';
@@ -273,13 +276,15 @@ async function renderMercato() {
     + '</div>';
   h += '<div style="display:flex;gap:8px;align-items:center">'
     + '<span id="mkt-esito" style="font-size:11.5px;color:var(--text-muted)"></span>'
+    + '<button id="mkt-btn-stor" onclick="mktCaricaStorico()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">↧ Carica storico</button>'
     + '<button id="mkt-btn-agg" onclick="mktAggiornaOra()" style="font-size:12px;padding:7px 15px;border:0.5px solid #378ADD;border-radius:7px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">⟳ Aggiorna adesso</button>'
     + '</div></div>';
 
   if (!serie.length) {
     h += '<div class="card"><div style="font-size:13px;color:var(--text-muted);line-height:1.7">'
-      + 'Nessuna quotazione nel periodo. Premi <strong>Aggiorna adesso</strong> per prendere la chiusura di Londra e il cambio, '
-      + 'oppure inseriscila a mano dalla linguetta <strong>Futures ICE</strong>.</div></div>';
+      + 'Nessuna quotazione nel periodo. Premi <strong>↧ Carica storico</strong> per ricostruire gli ultimi mesi in una volta sola, '
+      + 'oppure <strong>⟳ Aggiorna adesso</strong> per la sola chiusura di oggi. '
+      + 'Resta possibile inserire a mano dalla linguetta <strong>Futures ICE</strong>.</div></div>';
     el.innerHTML = h;
     return;
   }
@@ -314,7 +319,7 @@ async function renderMercato() {
           (varG >= 0 ? '+' : '') + varG.toFixed(4) + ' sul giorno', varG >= 0 ? '#A32D2D' : '#3B6D11')
     + kpi('Tendenza', tendenza, (m7 != null && m30 != null) ? 'MA7 ' + (m7 > m30 ? 'sopra' : 'sotto') + ' MA30' : 'servono più giorni', colTend)
     + kpi('Tuo ultimo carico', costoUlt != null ? costoUlt.toFixed(4) : '—',
-          ultC ? esc(ultC.fornitore) + ' · ' + fmtD(ultC.data) : 'nessun carico nel periodo')
+          ultC ? esc(ultC.fornitore) + ' · ' + fmtD(ultC.data) + (Number(ultC.trasporto_litro || 0) > 0 ? ' · trasporto incluso' : '') : 'nessun carico nel periodo')
     + kpi('Scarto sul mercato', (costoUlt != null && mktQuelGiorno) ? ((costoUlt - mktQuelGiorno) >= 0 ? '+' : '') + (costoUlt - mktQuelGiorno).toFixed(4) : '—',
           'prodotto + accisa + margine fornitore')
     + '</div>';
@@ -323,7 +328,8 @@ async function renderMercato() {
     + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;margin-right:5px"></span>Mercato €/L</span>'
     + '<span><span style="display:inline-block;width:10px;height:2px;background:#eb6834;margin-right:5px;vertical-align:middle"></span>Media 7 giorni</span>'
     + '<span><span style="display:inline-block;width:10px;height:2px;background:#898781;margin-right:5px;vertical-align:middle"></span>Media 30 giorni</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#1baf7a;margin-right:5px"></span>Tuoi carichi (Eni/Ludoil a deposito)</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#1baf7a;margin-right:5px"></span>Carichi senza trasporto fornitore</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid #1baf7a;margin-right:5px"></span>Carichi con trasporto incluso</span>'
     + '</div>';
   h += '<div class="card"><div style="position:relative;height:300px"><canvas id="mkt-chart"></canvas></div></div>';
 
@@ -339,12 +345,15 @@ async function renderMercato() {
   el.innerHTML = h;
 
   // grafico
-  var punti = carichi.map(function (o) {
+  var _punto = function (o) {
     var iLab = -1;
     for (var i = 0; i < serie.length; i++) { if (serie[i].data === o.data) { iLab = i; break; } }
     if (iLab < 0) return null;
-    return { x: lab[iLab], y: Math.round((Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * 10000) / 10000, _f: o.fornitore, _l: o.litri };
-  }).filter(Boolean);
+    return { x: lab[iLab], y: Math.round((Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * 10000) / 10000,
+             _f: o.fornitore, _l: o.litri, _t: Number(o.trasporto_litro || 0) };
+  };
+  var puntiPuliti = carichi.filter(function (o) { return !(Number(o.trasporto_litro) > 0); }).map(_punto).filter(Boolean);
+  var puntiTrasp  = carichi.filter(function (o) { return Number(o.trasporto_litro) > 0; }).map(_punto).filter(Boolean);
 
   if (_mktChart) _mktChart.destroy();
   var cv = document.getElementById('mkt-chart');
@@ -356,13 +365,15 @@ async function renderMercato() {
           { type: 'line', label: 'Mercato', data: prezzi, borderColor: '#2a78d6', backgroundColor: 'rgba(42,120,214,0.10)', fill: true, borderWidth: 2, pointRadius: 0, tension: 0.3 },
           { type: 'line', label: 'MA7', data: ma7, borderColor: '#eb6834', borderWidth: 2, borderDash: [5, 3], pointRadius: 0, fill: false, tension: 0.3 },
           { type: 'line', label: 'MA30', data: ma30, borderColor: '#898781', borderWidth: 2, borderDash: [2, 3], pointRadius: 0, fill: false, tension: 0.3 },
-          { type: 'scatter', label: 'Carichi', data: punti, backgroundColor: '#1baf7a', pointRadius: 7, pointHoverRadius: 9, borderColor: '#fff', borderWidth: 2 }
+          { type: 'scatter', label: 'Carichi', data: puntiPuliti, backgroundColor: '#1baf7a', pointRadius: 7, pointHoverRadius: 9, borderColor: '#fff', borderWidth: 2 },
+          { type: 'scatter', label: 'Carichi', data: puntiTrasp, backgroundColor: '#fff', pointRadius: 6, pointHoverRadius: 8, borderColor: '#1baf7a', borderWidth: 2 }
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) {
-          if (c.dataset.label === 'Carichi') { var p = c.raw; return (p._f || '') + ': € ' + Number(p.y).toFixed(4) + '/L · ' + fmtL(p._l); }
+          if (c.dataset.label === 'Carichi') { var p = c.raw;
+            return (p._f || '') + ': € ' + Number(p.y).toFixed(4) + '/L · ' + fmtL(p._l) + (p._t > 0 ? ' · trasporto incluso' : ''); }
           return c.dataset.label + ': € ' + Number(c.parsed.y).toFixed(4) + '/L';
         } } } },
         interaction: { mode: 'index', intersect: false },
@@ -370,6 +381,32 @@ async function renderMercato() {
                   y: { grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 }, callback: function (v) { return Number(v).toFixed(3); } } } }
       }
     });
+  }
+}
+
+// Recupero storico: la stessa funzione, chiamata con un numero di giorni.
+// Serve la prima volta — senza almeno un mese di serie le medie non dicono nulla.
+async function mktCaricaStorico() {
+  var giorni = _mktGiorni > 180 ? 365 : 180;
+  if (!confirm('Ricostruisco la serie degli ultimi ' + giorni + ' giorni?\n\n'
+      + 'I giorni già presenti vengono riscritti con lo stesso valore, quindi si può ripetere senza doppioni.')) return;
+  var btn = document.getElementById('mkt-btn-stor');
+  var out = document.getElementById('mkt-esito');
+  if (btn) { btn.disabled = true; btn.textContent = 'Ricostruisco…'; }
+  if (out) { out.textContent = ''; out.style.color = 'var(--text-muted)'; }
+  try {
+    var res = await sb.functions.invoke('mercato-gasolio', { body: { giorni: giorni } });
+    if (res.error) throw res.error;
+    var d = res.data || {};
+    if (!d.ok) throw new Error(d.errore || 'risposta non valida');
+    if (out) { out.style.color = '#3B6D11'; out.textContent = '✓ ' + (d.messaggio || 'storico caricato'); }
+    await renderMercato();
+  } catch (e) {
+    var msg = (e && e.message) || String(e);
+    if (out) { out.style.color = '#A32D2D'; out.textContent = '✕ ' + msg; }
+    if (typeof toast === 'function') toast('Storico non caricato: ' + msg);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↧ Carica storico'; }
   }
 }
 
