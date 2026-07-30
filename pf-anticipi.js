@@ -378,7 +378,7 @@ async function _antRenderTabHome(fidiAnticipi) {
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">';
   h += '<div style="flex:1 1 260px;min-width:260px;background:var(--bg);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px">'
     + '<div style="font-size:13px;font-weight:700;margin-bottom:2px">Anticipi per banca</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">presentato negli ultimi 12 mesi</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">presentato nell\'anno in corso</div>'
     + '<div style="position:relative;height:230px"><canvas id="ant-torta"></canvas></div></div>';
   h += '<div style="flex:2 1 340px;min-width:320px;background:var(--bg);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px">'
     + '<div style="font-size:13px;font-weight:700;margin-bottom:2px">Andamento per mese</div>'
@@ -391,7 +391,7 @@ async function _antRenderTabHome(fidiAnticipi) {
 }
 
 // ─── GRAFICI DI RAFFRONTO ─────────────────────────────────────────────────
-// Torta = totale presentato per banca negli ultimi 12 mesi.
+// Torta = totale presentato per banca nell'anno in corso.
 // Barre = stesso dato spezzato per mese, una porzione per istituto: si vede
 // subito su chi ci stiamo appoggiando e come cambia nel tempo.
 var _antChartTorta = null, _antChartMesi = null;
@@ -416,8 +416,11 @@ async function _antRenderGrafici(fidiAnticipi) {
 
   const totBanca = {};
   const mesi = [];
-  for (let k = 11; k >= 0; k--) {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - k);
+  // ANNO IN CORSO (30/07): da gennaio a dicembre dell'anno solare, non gli
+  // ultimi dodici mesi a scavalco — Rinaldo vuole leggere l'esercizio.
+  const _annoOra = new Date().getFullYear();
+  for (let k = 0; k < 12; k++) {
+    const d = new Date(_annoOra, k, 1);
     mesi.push(d.toISOString().slice(0, 7));
   }
   const perMese = {};
@@ -3048,7 +3051,7 @@ async function antApriValutazioni(riusa) {
         sb.from('banche_affidamenti').select('id,istituto_id,importo_accordato').eq('tipo', 'anticipo_fatture'),
         sb.from('banche_istituti').select('id,nome'),
         sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,data_presentazione,importo_anticipato_totale,stato'),
-        sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,scadenza_cliente,scadenza_banca,data_incasso,stato')
+        sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
       ]);
       _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
     }
@@ -3075,14 +3078,28 @@ function _antValCalcola(anno) {
   Object.keys(affInfo).forEach(id => {
     per[affInfo[id].nome] = {
       nome: affInfo[id].nome, accordato: affInfo[id].accordato,
-      mesi: new Array(12).fill(0), anticipato: 0, estinto: 0,
-      giorniPres: [], giorniScad: [], nModuli: 0, senzaDettaglio: 0
+      giorni: {},                    // 'AAAA-MM-GG' → impegno di quel giorno
+      presentato: new Array(12).fill(0),
+      anticipato: 0, estinto: 0, nModuli: 0, senzaDettaglio: 0,
+      giorniPres: [], giorniScad: []
     };
   });
 
-  const fineMese = m => {
-    const d = new Date(anno, m + 1, 0);
-    return anno + '-' + String(m + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  // ── impegno GIORNO PER GIORNO: e' la misura che conta, perche' il fido si
+  // occupa dal momento dell'erogazione fino all'incasso, non a fine mese.
+  const bisestile = (anno % 4 === 0 && anno % 100 !== 0) || anno % 400 === 0;
+  const nGiorni = bisestile ? 366 : 365;
+  const iso = g => {
+    const d = new Date(anno, 0, 1 + g);
+    return anno + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  const meseDi = g => new Date(anno, 0, 1 + g).getMonth();
+
+  const impegna = (b, da, a, imp) => {
+    for (let g = 0; g < nGiorni; g++) {
+      const d = iso(g);
+      if (d >= da && (!a || d < a)) b.giorni[d] = (b.giorni[d] || 0) + imp;
+    }
   };
 
   D.pres.forEach(p => {
@@ -3092,29 +3109,30 @@ function _antValCalcola(anno) {
     const dp = String(p.data_presentazione || '');
     if (!dp) return;
     const tot = Number(p.importo_anticipato_totale || 0);
+
+    // PRESENTATO: il flusso del mese. Se le fatture hanno la data di emissione
+    // si usa quella, fattura per fattura; altrimenti vale la data del modulo.
     if (Number(dp.slice(0, 4)) === anno) { b.anticipato += tot; b.nModuli++; }
 
     const sue = D.fatt.filter(f => f.presentazione_id === p.id);
     if (!sue.length) {
-      // modulo senza dettaglio: occupa tutto il suo importo finche' e' aperto
-      if (Number(dp.slice(0, 4)) === anno) b.senzaDettaglio += tot;
-      const chiuso = (p.stato === 'estinta');
-      for (let m = 0; m < 12; m++) {
-        const fm = fineMese(m);
-        if (dp <= fm && !chiuso) b.mesi[m] += tot;
+      if (Number(dp.slice(0, 4)) === anno) {
+        b.senzaDettaglio += tot;
+        b.presentato[Number(dp.slice(5, 7)) - 1] += tot;
       }
+      impegna(b, dp, (p.stato === 'estinta') ? dp : null, tot);   // aperto = fino a fine anno
       return;
     }
-
     sue.forEach(f => {
       const ant = Number(f.importo_anticipato_calcolato || 0);
       const est = Number(f.importo_estinto || 0);
       if (Number(dp.slice(0, 4)) === anno) b.estinto += est;
+      const _em = String(f.data_emissione || '') || dp;
+      if (Number(_em.slice(0, 4)) === anno) b.presentato[Number(_em.slice(5, 7)) - 1] += ant;
       const inc = String(f.data_incasso || '');
-
-      // giorni di rientro, sulle fatture incassate NELL'anno guardato
       if (inc && Number(inc.slice(0, 4)) === anno) {
-        const gP = Math.round((new Date(inc) - new Date(dp)) / 86400000);
+        const _rif = String(f.data_emissione || '') || dp;
+        const gP = Math.round((new Date(inc) - new Date(_rif)) / 86400000);
         if (gP >= 0 && gP < 400) b.giorniPres.push(gP);
         const sb2 = String(f.scadenza_banca || '');
         if (sb2) {
@@ -3122,24 +3140,43 @@ function _antValCalcola(anno) {
           if (gS > -200 && gS < 400) b.giorniScad.push(gS);
         }
       }
-      // impegno a fine mese: erogato prima e non ancora incassato
-      for (let m = 0; m < 12; m++) {
-        const fm = fineMese(m);
-        if (dp <= fm && (!inc || inc > fm)) b.mesi[m] += ant;
-      }
+      // L'anticipo occupa il fido da quando la fattura e' stata PRESENTATA, che
+      // in pratica coincide con la sua emissione. Dove la data c'e' si usa
+      // quella; altrimenti si ripiega sulla data del modulo (30/07).
+      const inizio = String(f.data_emissione || '') || dp;
+      impegna(b, inizio < dp ? inizio : dp, inc || null, ant);
     });
   });
 
   const media = arr => arr.length ? Math.round(arr.reduce((a, x) => a + x, 0) / arr.length) : null;
   Object.values(per).forEach(b => {
-    b.pctMesi = b.mesi.map(v => b.accordato > 0 ? Math.round(v / b.accordato * 100) : 0);
-    b.picco = Math.max.apply(null, b.pctMesi.concat([0]));
-    b.piccoMese = b.pctMesi.indexOf(b.picco);
-    const oggiM = (new Date().getFullYear() === anno) ? new Date().getMonth() : 11;
-    b.inEssere = b.mesi[oggiM] || 0;
+    b.mesiMedia = new Array(12).fill(0);
+    b.mesiMax   = new Array(12).fill(0);
+    const somma = new Array(12).fill(0), conta = new Array(12).fill(0);
+    for (let g = 0; g < nGiorni; g++) {
+      const m = meseDi(g), v = b.giorni[iso(g)] || 0;
+      somma[m] += v; conta[m]++;
+      if (v > b.mesiMax[m]) b.mesiMax[m] = v;
+    }
+    for (let m = 0; m < 12; m++) b.mesiMedia[m] = conta[m] ? Math.round(somma[m] / conta[m]) : 0;
+
+    b.pctMedia = b.mesiMedia.map(v => b.accordato > 0 ? Math.round(v / b.accordato * 100) : 0);
+    b.pctMax   = b.mesiMax.map(v => b.accordato > 0 ? Math.round(v / b.accordato * 100) : 0);
+    b.mesi = b.mesiMedia;                    // il grafico segue la media
+    b.pctMesi = b.pctMedia;
+    b.picco = Math.max.apply(null, b.pctMax.concat([0]));
+    b.piccoMese = b.pctMax.indexOf(b.picco);
+
+    const oggi = new Date();
+    const dOggi = (oggi.getFullYear() === anno)
+      ? anno + '-' + String(oggi.getMonth() + 1).padStart(2, '0') + '-' + String(oggi.getDate()).padStart(2, '0')
+      : anno + '-12-31';
+    b.inEssere = b.giorni[dOggi] || 0;
     b.utilizzo = b.accordato > 0 ? Math.round(b.inEssere / b.accordato * 100) : 0;
     b.rientroPres = media(b.giorniPres);
     b.rientroScad = media(b.giorniScad);
+    b.totPresentato = b.presentato.reduce((a, x) => a + x, 0);
+    delete b.giorni;                          // non serve piu, alleggerisce
   });
   return per;
 }
@@ -3166,34 +3203,44 @@ function _antRenderValutazioni() {
     + '<div style="position:relative;height:260px"><canvas id="antval-linee"></canvas></div></div>';
 
   // ── TABELLA MESE PER MESE, euro e percentuale
-  h += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px">Utilizzo mese per mese · ' + _antValAnno + '</div>';
-  h += '<div style="overflow-x:auto;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;min-width:820px">'
+  h += '<div style="font-size:13px;font-weight:700;margin:16px 0 4px">Utilizzo mese per mese · ' + _antValAnno + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">'
+      + '<strong>presentato</strong> = quanto hai messo in anticipo quel mese · '
+      + '<strong>medio</strong> e <strong>massimo</strong> = quanto fido risultava occupato, giorno per giorno</div>';
+  h += '<div style="overflow-x:auto;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;min-width:900px">'
     + '<thead><tr style="background:var(--bg-card)">'
       + '<th style="padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">Istituto</th>'
+      + '<th style="padding:7px 6px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--text-muted);border-bottom:1.5px solid var(--border)"></th>'
       + MESI.map(m => '<th style="padding:7px 6px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + m + '</th>').join('')
+      + '<th style="padding:7px 8px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--text-muted);border-bottom:1.5px solid var(--border)">anno</th>'
     + '</tr></thead><tbody>';
+
+  const cella = (v, pct, forte) => {
+    const col = pct >= 85 ? '#A32D2D' : pct >= 60 ? '#E07B18' : pct > 0 ? '#3B6D11' : 'var(--text-muted)';
+    return '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)' + (forte ? ';font-weight:700' : '') + '">'
+      + (v > 0 ? Math.round(v).toLocaleString('it-IT') + (pct != null ? '<div style="font-size:10px;font-weight:700;color:' + col + '">' + pct + '%</div>' : '')
+               : '<span style="color:var(--text-muted)">—</span>') + '</td>';
+  };
+
   banche.forEach(b => {
-    h += '<tr style="border-bottom:0.5px solid var(--border)">'
-      + '<td style="padding:6px 8px;font-weight:700">' + esc(b.nome) + '<div style="font-size:10px;color:var(--text-muted);font-weight:400">fido ' + fmtE(b.accordato) + '</div></td>';
-    b.mesi.forEach((v, k) => {
-      const pct = b.pctMesi[k];
-      const col = pct >= 85 ? '#A32D2D' : pct >= 60 ? '#E07B18' : pct > 0 ? '#3B6D11' : 'var(--text-muted)';
-      h += '<td style="padding:6px 6px;text-align:right;font-family:var(--font-mono)">'
-        + (v > 0 ? '<div>' + Math.round(v).toLocaleString('it-IT') + '</div><div style="font-size:10px;font-weight:700;color:' + col + '">' + pct + '%</div>' : '<span style="color:var(--text-muted)">—</span>')
-        + '</td>';
+    const righe = [
+      ['presentato', b.presentato, null, false],
+      ['medio',      b.mesiMedia,  b.pctMedia, true],
+      ['massimo',    b.mesiMax,    b.pctMax,  false]
+    ];
+    righe.forEach((r, k) => {
+      h += '<tr style="' + (k === 2 ? 'border-bottom:1.5px solid var(--border)' : 'border-bottom:0.5px solid var(--border)') + '">';
+      if (k === 0) h += '<td rowspan="3" style="padding:6px 8px;font-weight:700;vertical-align:top">' + esc(b.nome)
+        + '<div style="font-size:10px;color:var(--text-muted);font-weight:400">fido ' + fmtE(b.accordato) + '</div></td>';
+      h += '<td style="padding:5px 6px;font-size:10.5px;color:var(--text-muted)">' + r[0] + '</td>';
+      r[1].forEach((v, m) => { h += cella(v, r[2] ? r[2][m] : null, r[3]); });
+      const tot = r[0] === 'presentato' ? b.totPresentato
+                : r[0] === 'medio' ? Math.round(r[1].reduce((a, x) => a + x, 0) / 12)
+                : Math.max.apply(null, r[1].concat([0]));
+      h += '<td style="padding:5px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">' + Math.round(tot).toLocaleString('it-IT') + '</td>';
+      h += '</tr>';
     });
-    h += '</tr>';
   });
-  // riga totale
-  const totMesi = new Array(12).fill(0), totFido = banche.reduce((s, b) => s + b.accordato, 0);
-  banche.forEach(b => b.mesi.forEach((v, k) => { totMesi[k] += v; }));
-  h += '<tr style="background:var(--bg-card)"><td style="padding:7px 8px;font-weight:700">Totale<div style="font-size:10px;color:var(--text-muted);font-weight:400">fido ' + fmtE(totFido) + '</div></td>'
-    + totMesi.map(v => {
-        const pct = totFido > 0 ? Math.round(v / totFido * 100) : 0;
-        return '<td style="padding:7px 6px;text-align:right;font-family:var(--font-mono);font-weight:700">'
-          + (v > 0 ? '<div>' + Math.round(v).toLocaleString('it-IT') + '</div><div style="font-size:10px;color:var(--text-muted)">' + pct + '%</div>' : '—') + '</td>';
-      }).join('')
-    + '</tr>';
   h += '</tbody></table></div>';
 
   // ── tabella di confronto
