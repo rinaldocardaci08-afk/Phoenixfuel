@@ -443,6 +443,10 @@ function _ecfRender() {
   var btnPag = nDaPagare
     ? '<button onclick="ecfApriRegistra()" style="width:100%;margin-top:6px;font-size:12px;padding:8px 10px;border:0.5px solid #0C447C;border-radius:8px;background:var(--bg-card,#fff);color:#0C447C;font-weight:600;cursor:pointer">＋ Pagamento' + (nGiaPagati ? ' (' + nDaPagare + ')' : '') + '</button>'
     : '<div style="margin-top:6px;font-size:10.5px;color:#0C447C;line-height:1.45">Selezione di soli ordini già pagati: puoi agganciare la fattura, non il pagamento.</div>';
+  // Stampa dei dettagli della selezione (30/07): solo nella scheda del SINGOLO
+  // fornitore — nella vista "Tutti i fornitori" servirebbe una colonna in piu'
+  // e mischiare fornitori diversi non serve a nulla.
+  btnPag += '<button onclick="ecfStampaSelezione()" style="width:100%;margin-top:6px;font-size:11.5px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card,#fff);color:var(--text);cursor:pointer">🖨 Visualizza dettagli</button>';
 
   if (typeof pfRfCtx === 'function') {
     pfRfCtx('ecf', {
@@ -978,6 +982,116 @@ async function ecfNumeraFattura(fatturaId) {
 }
 
 // Tasto (i) — ordini che compongono la fattura
+// ═══════════════════════════════════════════════════════════════════════════
+// DETTAGLI DELLA SELEZIONE (30/07) — stessa impaginazione della stampa
+// "ordini del giorno", ma raggruppata per GIORNO e, dentro il giorno, per
+// FATTURA: la testata porta la data e il numero in grassetto ben visibile,
+// oppure "SENZA FATTURA" in ambra quando gli ordini non sono ancora
+// documentati. Vale solo per il singolo fornitore.
+// ═══════════════════════════════════════════════════════════════════════════
+function ecfStampaSelezione() {
+  var sel = (_ecfOrdini || []).filter(function (o) { return _ecfSelezione[o.id]; });
+  if (!sel.length) { toast('Nessun ordine selezionato'); return; }
+
+  sel.sort(function (a, b) {
+    if (a.data !== b.data) return a.data < b.data ? -1 : 1;
+    return String(a.numeroFattura || '') < String(b.numeroFattura || '') ? -1 : 1;
+  });
+
+  // gruppi: un blocco per (giorno + fattura)
+  var gruppi = [], chiaveCorr = null;
+  sel.forEach(function (o) {
+    var k = o.data + '|' + (o.fatturaId || 'nessuna');
+    if (k !== chiaveCorr) {
+      gruppi.push({ data: o.data, numero: o.numeroFattura || null, fatturaId: o.fatturaId || null,
+                    scadenza: o.scadenza || null, righe: [] });
+      chiaveCorr = k;
+    }
+    gruppi[gruppi.length - 1].righe.push(o);
+  });
+
+  var totLitri = sel.reduce(function (a, o) { return a + Number(o.litri || 0); }, 0);
+  var totImp = sel.reduce(function (a, o) { return a + Number(o.imponibile || 0); }, 0);
+  var totIva = sel.reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+  var daPag = sel.filter(function (o) { return !o.pagato && !o.fattSaldata; })
+                 .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+  var giorniDiversi = {};
+  sel.forEach(function (o) { giorniDiversi[o.data] = 1; });
+
+  var w = window.open('', '_blank');
+  if (!w) { toast('Il browser ha bloccato la finestra di stampa: consenti i pop-up'); return; }
+
+  var H = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dettaglio selezione — ' + esc(_ecfSel.nome) + '</title><style>'
+    + 'body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#222;margin:24px;font-size:12px}'
+    + '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0C447C;padding-bottom:10px;margin-bottom:14px}'
+    + '.az{font-size:17px;font-weight:700;color:#0C447C}'
+    + '.pic{font-size:9px;color:#666}'
+    + '.kpis{display:flex;gap:8px;margin-bottom:16px}'
+    + '.k{flex:1;border-radius:5px;padding:7px 9px}'
+    + '.k .et{font-size:8px;text-transform:uppercase;letter-spacing:.4px}'
+    + '.k .v{font-size:19px;font-weight:700;font-family:Courier New,monospace}'
+    + '.gh{display:flex;align-items:center;gap:9px;padding-bottom:5px;margin-bottom:7px}'
+    + '.gd{font-size:14px;font-weight:700}'
+    + '.gn{font-size:11px;font-weight:700;font-family:Courier New,monospace;padding:3px 10px;border-radius:5px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:16px}'
+    + 'th{text-align:left;padding:5px 6px;font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#0C447C;background:#0C447C10}'
+    + 'td{padding:4px 6px;border-bottom:1px solid #eee}'
+    + '.r{text-align:right;font-family:Courier New,monospace}'
+    + 'th.r{text-align:right}'
+    + '.tot td{font-weight:700;border-bottom:none}'
+    + '.firme{display:flex;gap:40px;margin-top:34px;font-size:10px;color:#555}'
+    + '.firme>div{flex:1;border-top:1px solid #999;padding-top:4px}'
+    + '@media print{body{margin:12mm}}'
+    + '</style></head><body>';
+
+  H += '<div class="head"><div><div class="az">PHOENIX FUEL S.R.L.</div><div class="pic">Vibo Valentia — Calabria</div></div>'
+    + '<div style="text-align:right"><div style="font-size:13px;font-weight:700">Dettaglio selezione — ' + esc(_ecfSel.nome) + '</div>'
+    + '<div class="pic">' + sel.length + ' ordini · ' + Object.keys(giorniDiversi).length + ' giorni · dilazione ' + _ecfSel.gg + ' gg</div>'
+    + '<div class="pic">Stampato: ' + new Date().toLocaleDateString('it-IT') + ' ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '</div></div></div>';
+
+  H += '<div class="kpis">'
+    + '<div class="k" style="background:#FDF3D0;border:1px solid #D4A017"><div class="et" style="color:#633806">Litri totali</div><div class="v">' + fmtL(totLitri) + '</div></div>'
+    + '<div class="k" style="background:#EAF3DE;border:1px solid #639922"><div class="et" style="color:#27500A">Imponibile</div><div class="v">' + fmtE(totImp) + '</div></div>'
+    + '<div class="k" style="background:#EAF3DE;border:1px solid #639922"><div class="et" style="color:#27500A">Totale IVA incl.</div><div class="v">' + fmtE(totIva) + '</div></div>'
+    + '<div class="k" style="background:#FCEBEB;border:1px solid #E24B4A"><div class="et" style="color:#791F1F">Da pagare</div><div class="v">' + fmtE(daPag) + '</div></div>'
+    + '</div>';
+
+  gruppi.forEach(function (g) {
+    var col = g.numero ? '#0C447C' : '#8A4F06';
+    var gl = g.righe.reduce(function (a, o) { return a + Number(o.litri || 0); }, 0);
+    var gi = g.righe.reduce(function (a, o) { return a + Number(o.imponibile || 0); }, 0);
+    H += '<div class="gh" style="border-bottom:1.5px solid ' + col + '">'
+      + '<div class="gd" style="color:' + col + '">' + _pfIsoToIt(g.data) + '</div>'
+      + (g.numero
+          ? '<div class="gn" style="background:#E6F1FB;color:#0C447C">FATTURA ' + esc(g.numero) + '</div>'
+          : '<div class="gn" style="background:#FFF1DC;color:#8A4F06;border:1px solid #F5921E">SENZA FATTURA</div>')
+      + (g.scadenza ? '<div style="font-size:10px;color:#666">scadenza ' + _pfIsoToIt(g.scadenza) + '</div>' : '')
+      + '<div style="margin-left:auto;font-size:11px;color:#666">' + g.righe.length + (g.righe.length === 1 ? ' ordine · ' : ' ordini · ')
+      + '<strong style="font-family:Courier New,monospace">' + fmtL(gl) + '</strong></div></div>';
+
+    H += '<table><thead><tr><th>Cliente</th><th>Sede di scarico</th><th>Prodotto</th>'
+      + '<th class="r">Litri</th><th class="r">€/L</th><th class="r">Imponibile</th></tr></thead><tbody>';
+    g.righe.forEach(function (o) {
+      H += '<tr><td>' + esc(o.cliente || '—') + '</td>'
+        + '<td>' + esc(o.sede_scarico_nome || o.destinazione || '—') + '</td>'
+        + '<td>' + esc(o.prodotto || '') + '</td>'
+        + '<td class="r">' + fmtL(o.litri) + '</td>'
+        + '<td class="r">' + Number(o.costoL || 0).toFixed(5).replace('.', ',') + '</td>'
+        + '<td class="r">' + fmtE(o.imponibile) + '</td></tr>';
+    });
+    H += '<tr class="tot"><td colspan="3" style="border-top:1.5px solid ' + col + '">Totale ' + _pfIsoToIt(g.data) + '</td>'
+      + '<td class="r" style="border-top:1.5px solid ' + col + '">' + fmtL(gl) + '</td>'
+      + '<td style="border-top:1.5px solid ' + col + '"></td>'
+      + '<td class="r" style="border-top:1.5px solid ' + col + '">' + fmtE(gi) + '</td></tr>';
+    H += '</tbody></table>';
+  });
+
+  H += '<div class="firme"><div>Verificato da</div><div>Note</div></div></body></html>';
+  w.document.write(H);
+  w.document.close();
+  setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 400);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // STAMPA DELLA FATTURA (30/07) — riepilogo di come quella fattura e' COMPOSTA
 // secondo Phoenix: intestazione, dati del fornitore, numero e data, l'elenco
