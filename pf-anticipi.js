@@ -294,7 +294,7 @@ async function _antRenderTabHome(fidiAnticipi) {
       utilizzo += Math.max(0, Number(p.importo_anticipato_totale || 0) - estinto);
       ftt.forEach(f => {
         if (f.stato === 'estinta' || f.stato === 'esclusa' || !f.scadenza_banca) return;
-        const residuo = Math.max(0, Number(f.importo_anticipato || f.importo || 0) - Number(f.importo_estinto || 0));
+        const residuo = Math.max(0, Number(f.importo_anticipato_calcolato || 0) - Number(f.importo_estinto || 0));
         if (f.scadenza_banca < oggiISO) { scadute++; return; }
         if (!perData[f.scadenza_banca]) perData[f.scadenza_banca] = 0;
         perData[f.scadenza_banca] += residuo;
@@ -510,7 +510,7 @@ async function caricaAnticipiDashboard() {
           utilizzo += Math.max(0, Number(p.importo_anticipato_totale || 0) - estinto);
           ftt.forEach(f => {
             if (f.stato === 'estinta' || f.stato === 'esclusa' || !f.scadenza_banca) return;
-            const res = Math.max(0, Number(f.importo_anticipato || f.importo || 0) - Number(f.importo_estinto || 0));
+            const res = Math.max(0, Number(f.importo_anticipato_calcolato || 0) - Number(f.importo_estinto || 0));
             if (f.scadenza_banca < oggiISO) { scadute++; return; }
             perData[f.scadenza_banca] = (perData[f.scadenza_banca] || 0) + res;
           });
@@ -2375,13 +2375,13 @@ async function antEstinguiAnticipo(fatturaAntId, opt) {
     } catch (e) { /* senza banca il movimento non si scrive, l'estinzione si */ }
   }
 
-  var residuo = Math.max(0, Number(riga.importo_anticipato || 0) - Number(riga.importo_estinto || 0));
+  var residuo = Math.max(0, Number(riga.importo_anticipato_calcolato || 0) - Number(riga.importo_estinto || 0));
   var quota = Number(opt.importo != null ? opt.importo : residuo);
   if (!(quota > 0)) return { estinto: 0 };
   if (quota > residuo) quota = residuo;
 
   var nuovoEstinto = Number(riga.importo_estinto || 0) + quota;
-  var chiusa = nuovoEstinto >= Number(riga.importo_anticipato || 0) - 0.005;
+  var chiusa = nuovoEstinto >= Number(riga.importo_anticipato_calcolato || 0) - 0.005;
 
   var up = await sb.from('anticipi_sbf_fatture').update({
     importo_estinto: Math.round(nuovoEstinto * 100) / 100,
