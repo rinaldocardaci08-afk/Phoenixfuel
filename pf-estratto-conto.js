@@ -537,6 +537,22 @@ async function _ecSalvaIncasso() {
   var dist = _ecDistribuisci(sel, imp).filter(function (d) { return d.quota > 0; });
   if (!dist.length) { toast('L\'importo non copre nessuna fattura'); return; }
 
+  // DOMANDA ESPLICITA sullo storno dell'anticipo (30/07): il flag da solo si
+  // dimentica. Se fra le fatture incassate ce n'è qualcuna anticipata e la
+  // casella non è spuntata, si chiede prima di scrivere.
+  var _ant = dist.map(function (d) { return (_ecStato.anticipiPerFattura || {})[d.f.fattura_id || d.f.id]; })
+                 .filter(function (a) { return a && a.anticipato > 0; });
+  if (_ant.length && !comunicata) {
+    var _tot = _ant.reduce(function (a, x) { return a + Number(x.anticipato || 0); }, 0);
+    var _ist = _ant.map(function (x) { return x.istituto; }).filter(function (v, i, arr) { return arr.indexOf(v) === i; }).join(', ');
+    comunicata = confirm(
+      'Tra le fatture che stai incassando ce ne ' + (_ant.length === 1 ? 'è 1 anticipata' : 'sono ' + _ant.length + ' anticipate')
+      + ' da ' + _ist + ' per ' + _ecFmtDec(_tot) + '.\n\n'
+      + 'Vuoi stornare anche l\'anticipo?\n\n'
+      + 'SÌ  → due movimenti: l\'anticipo rientra alla banca e sul conto resta la differenza.\n'
+      + 'NO  → entra tutto sul conto e l\'anticipo resta aperto, da chiudere dal Quadro anticipi.');
+  }
+
   var cliente = (_ecStato.clienti || []).filter(function (c) { return c.id === _ecStato.clienteSelezionato; })[0] || {};
   if (btn) { btn.disabled = true; btn.textContent = 'Registro…'; btn.style.opacity = '0.6'; }
 
