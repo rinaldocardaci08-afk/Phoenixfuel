@@ -85,8 +85,16 @@ async function pfDebitoDati(force) {
         .gte('data', da)
         .order('data', { ascending: false });
     }),
-    sb.from('fatture_ricevute').select('*'),
-    sb.from('pagamenti_fornitori').select('*').order('data_pagamento', { ascending: true })
+    // PAGINATE anche queste (30/07): senza, PostgREST taglia a 1000 righe e le
+    // fatture piu vecchie non arrivano — gli ordini collegati restavano SENZA
+    // numero (visibile col filtro "Tutti") e i pagamenti mancanti facevano
+    // sembrare non pagate fatture gia saldate.
+    _pfFetchAllPages(function () {
+      return sb.from('fatture_ricevute').select('*').order('data_fattura', { ascending: false });
+    }),
+    _pfFetchAllPages(function () {
+      return sb.from('pagamenti_fornitori').select('*').order('data_pagamento', { ascending: true });
+    })
   ]);
 
   var fornitori = r[0].data || [];
@@ -100,8 +108,10 @@ async function pfDebitoDati(force) {
     return !!fornitoriMap[String(o.fornitore || '').toLowerCase().trim()];
   });
 
-  var fatture = r[2].data || [];
-  var pagamenti = r[3].data || [];
+  // NB: _pfFetchAllPages restituisce un ARRAY NUDO, non { data } — leggerlo
+  // come r[2].data darebbe undefined e svuoterebbe tutto (30/07).
+  var fatture = r[2] || [];
+  var pagamenti = r[3] || [];
   var fattMap = {};
   fatture.forEach(function (f) { fattMap[f.id] = f; });
 
