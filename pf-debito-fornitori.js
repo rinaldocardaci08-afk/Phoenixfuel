@@ -80,7 +80,7 @@ async function pfDebitoDati(force) {
     sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento,colore').order('nome'),
     _pfFetchAllPages(function () {
       return sb.from('ordini')
-        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore,fattura_ricevuta_id,das_firmato_url')
+        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore,fattura_ricevuta_id,das_firmato_url,cliente,sede_scarico_nome,destinazione')
         .neq('stato', 'annullato')
         .gte('data', da)
         .order('data', { ascending: false });
@@ -263,7 +263,14 @@ async function pfDebitoCards(annoSel, force) {
     var annoOrd = suoi.filter(function (o) { return String(o.data).slice(0, 4) === String(annoG); });
     return {
       id: f.id, nome: nome, gg: gg, fido: fido,
-      esp: esp, nAperti: aperti.length,
+      esp: esp,
+      // quota dell'esposizione GIA' su fattura e quota ancora DA FATTURARE
+      // (30/07): servono a colorare la barra del fido in due toni
+      espFatturato: vivi.filter(function (o) { return o.fatturaId; })
+                        .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0),
+      espDaFatturare: vivi.filter(function (o) { return !o.fatturaId; })
+                          .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0),
+      nAperti: aperti.length,
       prossima: scad.length ? scad[0] : null,
       prossimaImporto: scad.length ? vivi.filter(function (o) { return o.scadenza === scad[0]; })
                                          .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0) : 0,

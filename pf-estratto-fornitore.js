@@ -148,7 +148,7 @@ function _ecfDisegnaOverview(body, cards) {
             + '<div style="font-size:15px;font-weight:700">' + esc(c.nome) + '</div>'
             + '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap">' + c.gg + ' gg</div></div>'
           + '<div style="font-size:11px;color:var(--text-muted);margin:2px 0 10px">acquistato ' + _ecfAnnoGraf + ' · ' + fmtE(c.acq) + '</div>'
-          + (c.fido > 0 ? _ecfBarra(c.esp, c.fido, false)
+          + (c.fido > 0 ? _ecfBarra(c.esp, c.fido, false, c.espDaFatturare)
                         : '<div style="font-size:11px;color:var(--text-muted)">Esposizione ' + fmtE(c.esp) + ' · nessun fido assegnato</div>')
           + (c.fido > 0 ? '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:7px">'
               + '<span style="color:var(--text-muted)">Fido disponibile</span>'
@@ -266,17 +266,50 @@ async function _ecfCarica() {
 // Esposizione = ramo condiviso della QUERY MADRE (stessa regola ovunque)
 function ecfEsposizione() { return pfDebitoEsposizione(_ecfOrdini, _ecfFatture); }
 
-function _ecfBarra(usato, fido, alta) {
+// Quanta parte dell'esposizione e' ancora SENZA fattura: stessa regola del
+// fido (ordini vivi = non pagati e non su fattura saldata).
+function _ecfDaFatturare() {
+  return (_ecfOrdini || []).filter(function (o) {
+    return !o.pagato && !o.fattSaldata && !o.fatturaId;
+  }).reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+}
+
+// La barra distingue la parte GIA' FATTURATA (tinta piena) da quella ANCORA
+// DA FATTURARE (tratteggiata): sono due nature diverse dello stesso debito.
+// daFatturare e' opzionale — senza, la barra resta come prima.
+function _ecfBarra(usato, fido, alta, daFatturare) {
   var pct = fido > 0 ? Math.min(100, (usato / fido) * 100) : 0;
   var col = pct >= 85 ? 'linear-gradient(90deg,#F0564F,#E5342F)' : pct >= 60 ? 'linear-gradient(90deg,#FBAA3E,#F5921E)' : 'linear-gradient(90deg,#5DC33A,#4CAF2E)';
+  var tinta = pct >= 85 ? '#E5342F' : pct >= 60 ? '#F5921E' : '#4CAF2E';
+  var chiaro = pct >= 85 ? '#F0A9A6' : pct >= 60 ? '#FBD3A0' : '#A8DF95';
   var txt = pct >= 85 ? '#C0392B' : pct >= 60 ? '#E07B18' : '#3B6D11';
   var h = alta ? 24 : 14;
-  return '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
+
+  var df = Number(daFatturare || 0);
+  var pctDF = (fido > 0 && df > 0) ? Math.min(pct, (df / fido) * 100) : 0;
+  var pctFatt = Math.max(0, pct - pctDF);
+
+  var out = '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
     + '<span style="font-size:' + (alta ? 12 : 11) + 'px;color:var(--text-secondary)">Fido utilizzato</span>'
     + '<span style="font-family:var(--font-mono);font-size:' + (alta ? 12.5 : 11) + 'px;font-weight:700;color:' + txt + '">'
     + fmtE(usato) + ' / ' + fmtE(fido) + ' · ' + Math.round(pct) + '%</span></div>'
-    + '<div style="height:' + h + 'px;border-radius:' + (h / 2) + 'px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
-    + '<div style="height:100%;width:' + pct + '%;border-radius:' + (h / 2) + 'px;background:' + col + '"></div></div>';
+    + '<div style="display:flex;height:' + h + 'px;border-radius:' + (h / 2) + 'px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">';
+
+  if (pctDF > 0) {
+    out += '<div style="height:100%;width:' + pctFatt.toFixed(1) + '%;background:' + col + '"></div>'
+      + '<div title="ordini ancora da fatturare" style="height:100%;width:' + pctDF.toFixed(1) + '%;background:repeating-linear-gradient(45deg,' + tinta + ',' + tinta + ' 4px,' + chiaro + ' 4px,' + chiaro + ' 8px)"></div>';
+  } else {
+    out += '<div style="height:100%;width:' + pct + '%;border-radius:' + (h / 2) + 'px;background:' + col + '"></div>';
+  }
+  out += '</div>';
+
+  if (df > 0) {
+    out += '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:' + (alta ? 11.5 : 10.5) + 'px;color:var(--text-muted);margin-top:5px">'
+      + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + tinta + ';margin-right:4px"></span>Fatturato ' + fmtE(usato - df) + '</span>'
+      + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:repeating-linear-gradient(45deg,' + tinta + ',' + tinta + ' 3px,' + chiaro + ' 3px,' + chiaro + ' 6px);margin-right:4px"></span>Da fatturare ' + fmtE(df) + '</span>'
+      + '</div>';
+  }
+  return out;
 }
 
 function ecfSetFiltro(v) { _ecfFiltro = v; _ecfRender(); }
@@ -364,7 +397,7 @@ function _ecfRender() {
       + '<span style="font-size:11px;color:var(--text-muted)">' + ovrN + ' fatture con scarto · dettaglio per mese ▸</span>'
     + '</div>'
     + (_ecfSel.fido > 0
-        ? '<div style="margin-bottom:20px">' + _ecfBarra(ecfEsposizione(), _ecfSel.fido, true)
+        ? '<div style="margin-bottom:20px">' + _ecfBarra(ecfEsposizione(), _ecfSel.fido, true, _ecfDaFatturare())
           + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:11px;padding-top:11px;border-top:0.5px solid var(--border)">'
             + '<span style="font-size:13px;color:var(--text-secondary);font-weight:600">Fido disponibile da usare</span>'
             + '<span style="font-family:var(--font-mono);font-size:21px;font-weight:700;color:' + ((_ecfSel.fido - ecfEsposizione()) < 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(_ecfSel.fido - ecfEsposizione()) + '</span></div>'
@@ -852,24 +885,44 @@ async function ecfNumeraFattura(fatturaId) {
 }
 
 // Tasto (i) — ordini che compongono la fattura
+// Apre e chiude la riga di dettaglio dell'ordine dentro il modale fattura.
+function ecfInfoOrdine(i) {
+  var tr = document.getElementById('ecf-ord-' + i);
+  if (tr) tr.style.display = (tr.style.display === 'none' || !tr.style.display) ? 'table-row' : 'none';
+}
+
 function ecfInfoFattura(fatturaId) {
   var f = _ecfFatture.filter(function (x) { return x.id === fatturaId; })[0];
   if (!f) return;
   var th = 'padding:8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);font-weight:600;background:var(--bg)';
-  var righe = f.ordini.map(function (o) {
-    return '<tr><td style="padding:9px 8px;border-top:0.5px solid var(--border);font-family:var(--font-mono)">' + _pfIsoToIt(o.data) + '</td>'
-      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border)">' + esc(o.prodotto || '—') + '</td>'
-      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>'
-      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono)">' + o.costoL.toFixed(4).replace('.', ',') + '</td>'
-      + '<td style="padding:9px 8px;border-top:0.5px solid var(--border);text-align:right;font-family:var(--font-mono);font-weight:600">' + fmtE(o.imponibile) + '</td></tr>';
+  var righe = f.ordini.map(function (o, i) {
+    var bt = 'border-top:0.5px solid var(--border)';
+    return '<tr><td style="padding:9px 4px;' + bt + ';text-align:center">'
+        + '<span onclick="ecfInfoOrdine(' + i + ')" title="Dettagli dell\'ordine" style="cursor:pointer;display:inline-block;width:19px;height:19px;line-height:18px;border-radius:50%;background:#E6F1FB;color:#0C447C;font-size:11px;font-weight:700;font-family:Georgia,serif;font-style:italic">i</span></td>'
+      + '<td style="padding:9px 8px;' + bt + ';font-family:var(--font-mono)">' + _pfIsoToIt(o.data) + '</td>'
+      + '<td style="padding:9px 8px;' + bt + '">' + esc(o.prodotto || '—') + '</td>'
+      + '<td style="padding:9px 8px;' + bt + ';text-align:right;font-family:var(--font-mono)">' + fmtL(o.litri) + '</td>'
+      + '<td style="padding:9px 8px;' + bt + ';text-align:right;font-family:var(--font-mono)">' + o.costoL.toFixed(4).replace('.', ',') + '</td>'
+      + '<td style="padding:9px 8px;' + bt + ';text-align:right;font-family:var(--font-mono);font-weight:600">' + fmtE(o.imponibile) + '</td></tr>'
+      // riga di dettaglio, chiusa: si apre col pulsante info
+      + '<tr id="ecf-ord-' + i + '" style="display:none;background:#FAF8F2"><td colspan="6" style="padding:8px 12px;font-size:12px;color:var(--text-secondary)">'
+        + '<span style="color:var(--text-muted)">Data</span> <strong>' + _pfIsoToIt(o.data) + '</strong>'
+        + ' · <span style="color:var(--text-muted)">Litri</span> <strong style="font-family:var(--font-mono)">' + fmtL(o.litri) + '</strong>'
+        + ' · <span style="color:var(--text-muted)">Cliente</span> <strong>' + esc(o.cliente || '—') + '</strong>'
+        + ' · <span style="color:var(--text-muted)">Sede di scarico</span> <strong>' + esc(o.sede_scarico_nome || o.destinazione || '—') + '</strong>'
+        + '</td></tr>';
   }).join('');
-  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Fattura ' + esc(f.numero || '—') + ' — ' + esc(_ecfSel.nome) + '</div>'
+  // ✎ accanto al numero (30/07): la stessa finestrella che lo inserisce sa
+  // anche modificarlo — si apre precompilata e controlla i duplicati.
+  var h = '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Fattura ' + esc(f.numero || '—')
+    + ' <span onclick="ecfNumeraFattura(\'' + f.id + '\')" title="Modifica il numero" style="cursor:pointer;font-size:13px;color:#8A4F06;background:#FFF1DC;border:0.5px solid #F5921E;border-radius:6px;padding:1px 7px;margin-left:4px;font-weight:600">✎</span>'
+    + ' — ' + esc(_ecfSel.nome) + '</div>'
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + (f.data ? _pfIsoToIt(f.data) : '—') + ' · ' + f.ordini.length + ' ordini · ' + fmtE(f.totale) + '</div>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>'
-    + '<th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
+    + '<th style="' + th + ';width:28px"></th><th style="' + th + ';text-align:left">Data</th><th style="' + th + ';text-align:left">Prodotto</th>'
     + '<th style="' + th + ';text-align:right">Litri</th><th style="' + th + ';text-align:right">€/L</th>'
     + '<th style="' + th + ';text-align:right">Imponibile</th></tr></thead><tbody>' + righe + '</tbody>'
-    + '<tfoot><tr><td colspan="4" style="padding:11px 8px;border-top:2px solid var(--accent);font-weight:700">Totale fattura</td>'
+    + '<tfoot><tr><td colspan="5" style="padding:11px 8px;border-top:2px solid var(--accent);font-weight:700">Totale fattura</td>'
     + '<td style="padding:11px 8px;border-top:2px solid var(--accent);text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(f.totale) + '</td></tr></tfoot></table></div>'
     + (f.pagato > 0 ? '<div style="font-size:12px;color:#3B6D11;margin-top:10px">Pagato ' + fmtE(f.pagato) + (f.saldata ? ' — saldata' : ' · residuo ' + fmtE(f.residuo)) + '</div>' : '')
     + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">'
@@ -900,7 +953,7 @@ async function caricaFidoFornitoriDashboard() {
             + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">'
               + '<span style="font-size:14px;font-weight:700">' + esc(c.nome) + '</span>'
               + '<span style="font-size:11px;color:var(--text-muted)">' + c.gg + ' gg</span></div>'
-            + _ecfBarra(c.esp, c.fido, false)
+            + _ecfBarra(c.esp, c.fido, false, c.espDaFatturare)
             + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:8px">'
               + '<span style="color:var(--text-muted)">Acquistato ' + new Date().getFullYear() + '</span>'
               + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(c.acq) + '</span></div>'
