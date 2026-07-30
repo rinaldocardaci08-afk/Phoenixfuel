@@ -121,7 +121,14 @@ async function renderEstrattoConto() {
   // scadenza e per sapere quanto rientra alla banca quando si incassa.
   try {
     var resAnt = await Promise.all([
-      sb.from('anticipi_sbf_fatture').select('id,presentazione_id,fattura_id,importo_anticipato,importo_estinto,stato'),
+      // colonna giusta: `importo_anticipato` NON esiste (l'errore faceva fallire
+      // tutta la lettura e la mappa restava vuota → nessuna etichetta).
+      // E paginata: dopo l'import dello storico le righe superano le mille (30/07).
+      _ecCaricaPaginate(function (a, b) {
+        return sb.from('anticipi_sbf_fatture')
+          .select('id,presentazione_id,fattura_id,importo_anticipato_calcolato,importo_estinto,stato')
+          .range(a, b);
+      }),
       sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,stato'),
       sb.from('banche_affidamenti').select('id,istituto_id')
     ]);
@@ -139,12 +146,15 @@ async function renderEstrattoConto() {
         rigaId: r.id,
         istitutoId: aff.istituto_id || null,
         istituto: ist ? ist.nome : 'banca',
-        anticipato: Math.max(0, Number(r.importo_anticipato || 0) - Number(r.importo_estinto || 0))
+        anticipato: Math.max(0, Number(r.importo_anticipato_calcolato || 0) - Number(r.importo_estinto || 0))
       };
     });
   } catch (e) {
+    // non piu silenzioso: se questa lettura fallisce spariscono TUTTE le
+    // etichette "Anticipata" e nessuno se ne accorge (30/07)
     console.warn('[ec] anticipi', e);
     _ecStato.anticipiPerFattura = {};
+    if (typeof toast === 'function') toast('Anticipi non letti: le etichette "Anticipata" non compariranno — ' + ((e && e.message) || e));
   }
   _ecStato.ordini = resOrd.data || [];
 
