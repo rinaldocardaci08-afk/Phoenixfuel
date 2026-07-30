@@ -419,7 +419,9 @@ async function _uniRenderSettimana() {
     var litriG = tot ? (tot.gasolio.litri + tot.benzina.litri) : 0;
     var euroIva = tot ? ((tot.gasolio.euro + tot.benzina.euro) * 1.22) : 0;
     var margG = tot ? (tot.gasolio.marg + tot.benzina.marg) : 0;
-    if (haLetture) { setLitri += litriG; setEuro += euroIva; setMarg += margG; setGiorniConDati++; }
+    if (haLetture) {
+      setLitri += litriG; setEuro += euroIva; setMarg += margG; setGiorniConDati++;
+    }
     if (haLetture && cassa) setCompleti++;
 
     var bordo = '#e8e7e3', icona = '';
@@ -458,12 +460,18 @@ async function _uniRenderSettimana() {
       if (tot.gasolio.litri > 0) {
         h += '<div><span style="color:#8A4F06;font-weight:700">Gasolio</span><br>'
           + '<span style="font-family:var(--font-mono)">' + Math.round(tot.gasolio.litri) + ' L' + (pG > 0 ? ' · ' + pG.toFixed(3) : '') + '</span><br>'
-          + '<span style="font-family:var(--font-mono);color:' + (tot.gasolio.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.gasolio.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.gasolio.marg) + '</span></div>';
+          + '<span style="font-family:var(--font-mono);color:' + (tot.gasolio.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.gasolio.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.gasolio.marg) + '</span>'
+          // margine al litro DEL PRODOTTO (30/07): serve a capire come si sta
+          // lavorando quel prodotto, non solo quanto ha reso in totale
+          + (tot.gasolio.litri > 0 ? '<span style="font-family:var(--font-mono);color:var(--text-muted);margin-left:5px">€/L ' + (tot.gasolio.marg / tot.gasolio.litri).toFixed(4) + '</span>' : '')
+          + '</div>';
       }
       if (tot.benzina.litri > 0) {
         h += '<div style="margin-top:4px"><span style="color:#3B6D11;font-weight:700">Benzina</span><br>'
           + '<span style="font-family:var(--font-mono)">' + Math.round(tot.benzina.litri) + ' L' + (pB > 0 ? ' · ' + pB.toFixed(3) : '') + '</span><br>'
-          + '<span style="font-family:var(--font-mono);color:' + (tot.benzina.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.benzina.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.benzina.marg) + '</span></div>';
+          + '<span style="font-family:var(--font-mono);color:' + (tot.benzina.marg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (tot.benzina.marg >= 0 ? '+' : '') + _uniSetFmtE(tot.benzina.marg) + '</span>'
+          + (tot.benzina.litri > 0 ? '<span style="font-family:var(--font-mono);color:var(--text-muted);margin-left:5px">€/L ' + (tot.benzina.marg / tot.benzina.litri).toFixed(4) + '</span>' : '')
+          + '</div>';
       }
       h += '<div style="border-top:0.5px solid var(--border);margin-top:5px;padding-top:4px">'
         // LITRI in evidenza (26/07): stessa riga, ma incorniciata e piu grande
@@ -523,9 +531,12 @@ async function _uniRenderSettimana() {
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;background:var(--bg-card);border-radius:9px;padding:12px 14px">'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Litri settimana</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + Math.round(setLitri).toLocaleString('it-IT') + '</div></div>'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Venduto</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + _uniSetFmtE(setEuro) + '</div></div>'
-    + '<div><div style="font-size:11px;color:var(--text-muted)">Margine</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:' + (setMarg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (setMarg >= 0 ? '+' : '') + _uniSetFmtE(setMarg) + '</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Margine</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:' + (setMarg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (setMarg >= 0 ? '+' : '') + _uniSetFmtE(setMarg) + '</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">€/L ' + (setLitri > 0 ? (setMarg / setLitri).toFixed(4) : '—') + '</div></div>'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Giorni completi</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono)">' + setCompleti + ' / ' + setGiorniConDati + '</div></div>'
     + '</div>';
+
+
 
   el.innerHTML = h;
 }
