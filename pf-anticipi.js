@@ -754,6 +754,7 @@ async function _antRenderTabBanca(affidamentoId) {
 // Sola lettura.
 // ═══════════════════════════════════════════════════════════════════════════
 var _antAnalisiIst = null;
+var _antGrafClienti = null;
 var _antAnalisiAnno = new Date().getFullYear();
 
 async function antAnalisiClienti(nomeIstituto, anno) {
@@ -833,6 +834,13 @@ function _antRenderAnalisiClienti() {
     + kpi('Primi quattro', Math.round(primi4 / totMontante * 100) + '%', fmtE(primi4))
     + '</div>';
 
+  // grafico a barre orizzontali: i clienti in ordine di montante, con importo
+  // e percentuale accanto — la stessa lettura del documento per la banca
+  const nGraf = Math.min(12, lista.length);
+  h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Quanto ha lavorato ciascun cliente sulla linea nel ' + _antAnalisiAnno + '</div>'
+    + '<div style="position:relative;height:' + (60 + nGraf * 26) + 'px"><canvas id="ant-graf-clienti"></canvas></div></div>';
+
   h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">'
     + '<thead><tr style="background:var(--bg-card)">'
     + ['Cliente','Fatture','Montante','% del totale','Anticipato','Ancora aperte',''].map((t, k) =>
@@ -860,6 +868,53 @@ function _antRenderAnalisiClienti() {
   h += '</tbody></table></div>';
 
   cont.innerHTML = h;
+
+  // il grafico si disegna dopo che la pagina esiste
+  setTimeout(function () {
+    const cv = document.getElementById('ant-graf-clienti');
+    if (!cv || typeof Chart === 'undefined') return;
+    if (_antGrafClienti) { try { _antGrafClienti.destroy(); } catch (e) {} }
+    const top = lista.slice(0, nGraf);
+    const forti = top.map((c, i) => i < 4 ? '#9E2B25' : '#D08C88');   // primi quattro piu scuri
+    _antGrafClienti = new Chart(cv, {
+      type: 'bar',
+      data: {
+        labels: top.map(c => c.nome.length > 26 ? c.nome.slice(0, 26) + '…' : c.nome),
+        datasets: [{ data: top.map(c => Math.round(c.montante)), backgroundColor: forti, borderRadius: 3, maxBarThickness: 18 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 90 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => {
+            const cl = top[c.dataIndex];
+            return fmtE(cl.montante) + ' · ' + (cl.montante / totMontante * 100).toFixed(1) + '% · ' + cl.n + ' fatture';
+          } } }
+        },
+        scales: {
+          x: { grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 }, callback: v => Math.round(v / 1000) + 'k' } },
+          y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        }
+      },
+      plugins: [{
+        id: 'etichette',
+        afterDatasetsDraw: function (ch) {
+          const g = ch.ctx, meta = ch.getDatasetMeta(0);
+          g.save();
+          g.font = '600 11px -apple-system, Segoe UI, Roboto, sans-serif';
+          g.fillStyle = '#555';
+          g.textBaseline = 'middle';
+          meta.data.forEach(function (bar, i) {
+            const cl = top[i];
+            const pct = totMontante > 0 ? (cl.montante / totMontante * 100) : 0;
+            g.fillText(fmtE(cl.montante) + '  (' + pct.toFixed(1) + '%)', bar.x + 8, bar.y);
+          });
+          g.restore();
+        }
+      }]
+    });
+  }, 60);
 }
 
 // ─── ELENCO FATTURE ANTICIPATE (30/07) ────────────────────────────────────
