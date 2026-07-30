@@ -675,6 +675,11 @@ async function _antRenderTabBanca(affidamentoId) {
   html += '</div>';
 
   // KPI row
+  // ── BARRA UTILIZZO + RIENTRO MEDIO (30/07) — sopra i pannelli, come chiesto.
+  //    Tutto sull'ANNO IN CORSO: media e massimo dei giorni, non ultimi 12 mesi.
+  if (!_antValDati) { antApriValutazioni(false, true); }   // carica in sottofondo, non apre nulla
+  html += _antBarraIstituto(ist.nome, utilizzo, monteAcc);
+
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">';
   html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid #6B5FCC;padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Monte accordato</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px">' + fmtE(monteAcc) + '</div></div>';
   html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid ' + colorePct + ';padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Utilizzo attuale</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:' + colorePct + '">' + fmtE(utilizzo) + '</div><div style="font-size:11px;color:' + colorePct + ';margin-top:3px;font-weight:600">' + pctUtilizzo.toFixed(1) + '%</div></div>';
@@ -727,6 +732,51 @@ async function _antRenderTabBanca(affidamentoId) {
   if (typeof _calcRenderPanelEsempio === 'function' && aff.tasso) {
     _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId, Number(aff.importo_accordato || 0));
   }
+}
+
+// ─── BARRA UTILIZZO E RIENTRO MEDIO PER ISTITUTO (30/07) ──────────────────
+// Usa lo stesso calcolo delle Valutazioni, quindi i numeri non possono
+// divergere: media e massimo dell'ANNO IN CORSO, giorni medi di rientro,
+// e il confronto con l'anno precedente dove lo storico c'e'.
+function _antBarraIstituto(nome, utilizzo, accordato) {
+  const pct = accordato > 0 ? Math.min(100, Math.round(utilizzo / accordato * 100)) : 0;
+  const col = pct >= 85 ? '#E5342F' : pct >= 60 ? '#F5921E' : '#4CAF2E';
+  const txt = pct >= 85 ? '#C0392B' : pct >= 60 ? '#E07B18' : '#3B6D11';
+
+  let dati = null, prec = null;
+  try {
+    if (_antValDati) {
+      const anno = new Date().getFullYear();
+      dati = (_antValCalcola(anno) || {})[nome];
+      prec = (_antValCalcola(anno - 1) || {})[nome];
+    }
+  } catch (e) { /* la barra si disegna comunque */ }
+
+  let h = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:5px">'
+    + '<span style="color:var(--text-muted)">Fido anticipi utilizzato <strong style="color:' + txt + '">' + pct + '%</strong></span>'
+    + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(utilizzo) + ' / ' + fmtE(accordato) + '</span></div>';
+  h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+    + '<div style="height:100%;width:' + pct + '%;background:' + col + '"></div></div>';
+
+  if (dati) {
+    const mediaAnno = Math.round(dati.mesiMedia.reduce((a, x) => a + x, 0) / 12);
+    const maxAnno = Math.max.apply(null, dati.mesiMax.concat([0]));
+    const box = (lab, val, sub, colore) =>
+      '<div style="flex:1;min-width:120px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:' + (colore || 'var(--text)') + '">' + val + '</div>'
+      + (sub ? '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div>' : '') + '</div>';
+    h += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:0.5px solid var(--border)">'
+      + box('Utilizzo medio ' + new Date().getFullYear(), fmtE(mediaAnno),
+            prec && prec.mesiMedia ? 'anno prima ' + fmtE(Math.round(prec.mesiMedia.reduce((a, x) => a + x, 0) / 12)) : '')
+      + box('Picco dell\'anno', fmtE(maxAnno), dati.picco ? dati.picco + '% del fido' : '')
+      + box('Rientro medio', dati.rientroPres != null ? dati.rientroPres + ' gg' : '—', 'dall\'emissione all\'incasso')
+      + box('Presentato ' + new Date().getFullYear(), fmtE(dati.totPresentato),
+            prec ? 'anno prima ' + fmtE(prec.totPresentato) : '')
+      + '</div>';
+  }
+  h += '</div>';
+  return h;
 }
 
 // ─── ELENCO MODULI A FISARMONICA, DIVISO PER ANNO (30/07) ─────────────────
@@ -3044,7 +3094,7 @@ var _antValAperta = false;
 function antValAnno(a) { _antValAnno = parseInt(a, 10); antApriValutazioni(true); }
 function antChiudiValutazioni() { _antValAperta = false; renderAnticipi(); }
 
-async function antApriValutazioni(riusa) {
+async function antApriValutazioni(riusa, soloDati) {
   try {
     if (!riusa || !_antValDati) {
       const r = await Promise.all([
@@ -3054,6 +3104,13 @@ async function antApriValutazioni(riusa) {
         sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
       ]);
       _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
+    }
+    if (soloDati) {
+      // serviva solo per la barra nella scheda istituto: ridisegna quella
+      if (typeof _antRenderTabBanca === 'function' && _antSubTabAttiva && _antSubTabAttiva.indexOf('banca:') === 0) {
+        _antRenderTabBanca(_antSubTabAttiva.split(':')[1]);
+      }
+      return;
     }
     _antValAperta = true;
     _antRenderValutazioni();
