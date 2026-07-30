@@ -711,10 +711,11 @@ async function _antRenderTabBanca(affidamentoId) {
       + '<div style="font-size:11px">Click su <strong>+ Presenta nuove fatture</strong> per crearne uno</div>'
       + '</div>';
   } else {
-    // Lista moduli (uno per blocco) — ognuno espandibile
-    _antPresentazioniByAff[affidamentoId].forEach(p => {
-      html += _antRenderModuloCard(p, aff);
-    });
+    // ELENCO A FISARMONICA (30/07): con decine di moduli la lista aperta era
+    // illeggibile. Ora: un blocco per ANNO, dentro un elenco NUMERATO di
+    // moduli chiusi; si apre quello che serve e dentro c'e' la scheda intera
+    // con le sue fatture — la card di prima, riusata tale e quale.
+    html += _antRenderModuliElenco(_antPresentazioniByAff[affidamentoId], aff);
   }
 
   cont.innerHTML = html;
@@ -723,6 +724,102 @@ async function _antRenderTabBanca(affidamentoId) {
   if (typeof _calcRenderPanelEsempio === 'function' && aff.tasso) {
     _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId, Number(aff.importo_accordato || 0));
   }
+}
+
+// ─── ELENCO MODULI A FISARMONICA, DIVISO PER ANNO (30/07) ─────────────────
+var _antModuliAperti = {};        // { presentazioneId: true }
+var _antAnniChiusi   = {};        // { anno: true }  → anni ripiegati
+
+function antToggleModulo(id) {
+  if (_antModuliAperti[id]) delete _antModuliAperti[id]; else _antModuliAperti[id] = true;
+  const el = document.getElementById('ant-mod-' + id);
+  const fr = document.getElementById('ant-frec-' + id);
+  if (el) el.style.display = _antModuliAperti[id] ? 'block' : 'none';
+  if (fr) fr.textContent = _antModuliAperti[id] ? '▾' : '▸';
+}
+
+function antToggleAnno(anno) {
+  if (_antAnniChiusi[anno]) delete _antAnniChiusi[anno]; else _antAnniChiusi[anno] = true;
+  const el = document.getElementById('ant-anno-' + anno);
+  const fr = document.getElementById('ant-annofrec-' + anno);
+  if (el) el.style.display = _antAnniChiusi[anno] ? 'none' : 'block';
+  if (fr) fr.textContent = _antAnniChiusi[anno] ? '▸' : '▾';
+}
+
+function _antRenderModuliElenco(moduli, aff) {
+  // piu recenti in cima, e dentro l'anno dal piu recente
+  const ordinati = (moduli || []).slice().sort((a, b) =>
+    String(b.data_presentazione || '').localeCompare(String(a.data_presentazione || '')));
+
+  const perAnno = {};
+  ordinati.forEach(p => {
+    const anno = String(p.data_presentazione || '').slice(0, 4) || '—';
+    (perAnno[anno] = perAnno[anno] || []).push(p);
+  });
+
+  const stCol = {
+    'in_delibera':          { bg: '#EEEDFE', fg: '#26215C', label: 'In delibera' },
+    'anticipata_parziale':  { bg: '#FAEEDA', fg: '#633806', label: 'Parziale' },
+    'anticipata':           { bg: '#E6F1FB', fg: '#0C447C', label: 'Anticipata' },
+    'estinta':              { bg: '#EAF3DE', fg: '#27500A', label: 'Estinta' },
+    'insoluta':             { bg: '#FCEBEB', fg: '#791F1F', label: 'Insoluta' },
+    'rifiutata':            { bg: '#f0f0f0', fg: '#666',    label: 'Rifiutata' }
+  };
+
+  let h = '';
+  Object.keys(perAnno).sort().reverse().forEach(anno => {
+    const lista = perAnno[anno];
+    const totAnt = lista.reduce((s, p) => s + Number(p.importo_anticipato_totale || 0), 0);
+    const totEst = lista.reduce((s, p) => s + (p._fatture || []).reduce((x, f) => x + Number(f.importo_estinto || 0), 0), 0);
+    const chiuso = !!_antAnniChiusi[anno];
+
+    h += '<div style="margin-bottom:14px">';
+    h += '<div onclick="antToggleAnno(\'' + anno + '\')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;'
+      + 'background:var(--bg);border:0.5px solid var(--border);border-radius:9px;padding:9px 13px;cursor:pointer">'
+      + '<div style="display:flex;align-items:baseline;gap:9px">'
+        + '<span id="ant-annofrec-' + anno + '" style="color:var(--text-muted);font-size:12px">' + (chiuso ? '▸' : '▾') + '</span>'
+        + '<span style="font-size:14px;font-weight:700">' + anno + '</span>'
+        + '<span style="font-size:11.5px;color:var(--text-muted)">' + lista.length + (lista.length === 1 ? ' modulo' : ' moduli') + '</span>'
+      + '</div>'
+      + '<div style="font-size:11.5px;color:var(--text-muted)">anticipato <strong style="font-family:var(--font-mono);color:var(--text)">' + fmtE(totAnt) + '</strong>'
+        + ' · rientrato <strong style="font-family:var(--font-mono);color:#3B6D11">' + fmtE(totEst) + '</strong></div>'
+      + '</div>';
+
+    h += '<div id="ant-anno-' + anno + '" style="display:' + (chiuso ? 'none' : 'block') + ';padding-top:8px">';
+
+    lista.forEach((p, i) => {
+      const n = lista.length - i;                    // numerati dal piu vecchio
+      const st = stCol[p.stato] || { bg: '#f0f0f0', fg: '#666', label: p.stato };
+      const nF = (p._fatture || []).length;
+      const est = (p._fatture || []).reduce((s, f) => s + Number(f.importo_estinto || 0), 0);
+      const attivo = Number(p.importo_anticipato_totale || 0) - est;
+      const aperte = (p._fatture || []).filter(f => f.stato !== 'estinta').length;
+      const apertoOra = !!_antModuliAperti[p.id];
+
+      h += '<div style="border:0.5px solid var(--border);border-radius:9px;margin-bottom:7px;overflow:hidden">';
+      h += '<div onclick="antToggleModulo(\'' + p.id + '\')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;'
+        + 'padding:9px 13px;cursor:pointer;background:var(--bg-card)">'
+        + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+          + '<span id="ant-frec-' + p.id + '" style="color:var(--text-muted);font-size:12px">' + (apertoOra ? '▾' : '▸') + '</span>'
+          + '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);min-width:22px">#' + n + '</span>'
+          + '<span style="font-size:12.5px;font-weight:700">' + fmtD(p.data_presentazione) + '</span>'
+          + '<span style="background:' + st.bg + ';color:' + st.fg + ';padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">' + st.label + '</span>'
+          + '<span style="font-size:11px;color:var(--text-muted)">' + nF + (nF === 1 ? ' fattura' : ' fatture')
+            + (aperte ? ' · <span style="color:#8A4F06;font-weight:600">' + aperte + ' aperte</span>' : '')
+            + (nF === 0 ? ' · <span style="color:#8A4F06;font-weight:600">da comporre</span>' : '') + '</span>'
+        + '</div>'
+        + '<div style="display:flex;gap:14px;font-size:11.5px">'
+          + '<span style="color:var(--text-muted)">anticipato <strong style="font-family:var(--font-mono);color:var(--text)">' + fmtE(p.importo_anticipato_totale) + '</strong></span>'
+          + '<span style="color:var(--text-muted)">in essere <strong style="font-family:var(--font-mono);color:' + (attivo > 0 ? '#A32D2D' : '#3B6D11') + '">' + fmtE(attivo) + '</strong></span>'
+        + '</div></div>';
+      h += '<div id="ant-mod-' + p.id + '" style="display:' + (apertoOra ? 'block' : 'none') + ';padding:0 8px 8px">'
+        + _antRenderModuloCard(p, aff) + '</div>';
+      h += '</div>';
+    });
+
+    h += '</div></div>';
+  });
+  return h;
 }
 
 // ─── RENDER SINGOLO MODULO (card espandibile) ─────────────────────────────
