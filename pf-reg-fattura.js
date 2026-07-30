@@ -236,8 +236,17 @@ function pfRfTabella(ns) {
   // ORDINE: scadenza crescente (la più vicina in cima). Se ctx.pagatiInFondo,
   // i PAGATI vanno tutti in fondo (anch'essi per scadenza); altrimenti scadenza
   // PURA, pagati compresi — la prima riga è la prima scadenza da affrontare.
+  // ctx.ordine = 'recenti' (30/07): dal piu recente al piu vecchio. Serve quando
+  // si guardano TUTTI gli ordini, compresi i vecchi gia pagati: ordinare per
+  // scadenza piu vicina li' metterebbe in cima roba chiusa da mesi.
   var _pagatoEff = function (o) { return !!o.pagato || !!o.fattSaldata; };
   var perScadenza = function (a, b) {
+    if (c.ordine === 'recenti') {
+      var da = String(a.data || ''), db = String(b.data || '');
+      if (da !== db) return da < db ? 1 : -1;                 // data ordine, decrescente
+      var xa = String(a.scadenza || ''), xb = String(b.scadenza || '');
+      return xa < xb ? 1 : (xa > xb ? -1 : 0);
+    }
     if (c.pagatiInFondo && _pagatoEff(a) !== _pagatoEff(b)) return _pagatoEff(a) ? 1 : -1;
     var sa = String(a.scadenza || '9999-12-31'), sb2 = String(b.scadenza || '9999-12-31');
     if (sa !== sb2) return sa < sb2 ? -1 : 1;

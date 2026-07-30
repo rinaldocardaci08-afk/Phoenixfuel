@@ -455,6 +455,9 @@ function _ecfRender() {
       fornitore: _ecfSel,
       selezionabile: true,
       pagatiInFondo: false,   // scadenza PURA: la prima riga è la prossima scadenza
+      // con "Tutti" comandano i piu recenti: fra i vecchi gia pagati la
+      // prossima scadenza non e' piu la cosa utile da vedere in cima (30/07)
+      ordine: _ecfFiltro === 'tutti' ? 'recenti' : 'scadenza',
       onChange: _ecfRender,
       onSaved: async function () { _ecfSelezione = {}; await _ecfCarica(); _ecfRender(); },
       extraBtn: btnPag
