@@ -702,6 +702,15 @@ async function _antRenderTabBanca(affidamentoId) {
   });
   html += '</select>';
   html += '<input type="text" placeholder="🔍 Cliente o n. fattura..." value="' + esc(_antFiltri.search) + '" oninput="_antSetFiltro(\'search\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);min-width:200px;color:var(--text)">';
+  // due modi di guardare la stessa cosa (30/07): per MODULI, come li presenti
+  // alla banca, o per FATTURE, tutte in fila dalla scadenza piu vicina — che
+  // e' come le cerchi quando una viene pagata.
+  html += '<div style="display:flex;gap:4px;margin-left:4px">'
+    + [['moduli', '📋 Moduli'], ['fatture', '🧾 Fatture anticipate']].map(function (v) {
+        var on = _antVistaBanca === v[0];
+        return '<button onclick="antVistaBanca(\'' + v[0] + '\')" style="font-size:11px;padding:6px 11px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:6px;background:' + (on ? '#0C447C' : 'var(--bg-card)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '700' : '500') + '">' + v[1] + '</button>';
+      }).join('')
+    + '</div>';
   html += '</div>';
   html += '<div style="display:flex;gap:6px">';
   if (_antPuoPresentare()) {
@@ -723,7 +732,9 @@ async function _antRenderTabBanca(affidamentoId) {
     // illeggibile. Ora: un blocco per ANNO, dentro un elenco NUMERATO di
     // moduli chiusi; si apre quello che serve e dentro c'e' la scheda intera
     // con le sue fatture — la card di prima, riusata tale e quale.
-    html += _antRenderModuliElenco(_antPresentazioniByAff[affidamentoId], aff);
+    html += (_antVistaBanca === 'fatture')
+      ? _antRenderFattureAnticipate(_antPresentazioniByAff[affidamentoId])
+      : _antRenderModuliElenco(_antPresentazioniByAff[affidamentoId], aff);
   }
 
   cont.innerHTML = html;
@@ -732,6 +743,87 @@ async function _antRenderTabBanca(affidamentoId) {
   if (typeof _calcRenderPanelEsempio === 'function' && aff.tasso) {
     _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId, Number(aff.importo_accordato || 0));
   }
+}
+
+// ─── ELENCO FATTURE ANTICIPATE (30/07) ────────────────────────────────────
+// Tutte le fatture dell'istituto in una lista sola, dalla scadenza banca piu
+// vicina alla piu lontana: quando una viene pagata la trovi subito e registri
+// il rientro da li, senza aprire il modulo che la contiene.
+var _antVistaBanca = 'moduli';
+function antVistaBanca(v) {
+  _antVistaBanca = v;
+  if (_antSubTabAttiva && _antSubTabAttiva.indexOf('banca:') === 0) _antRenderTabBanca(_antSubTabAttiva.split(':')[1]);
+}
+
+function _antRenderFattureAnticipate(moduli) {
+  const oggi = new Date().toISOString().slice(0, 10);
+  const q = String((_antFiltri && _antFiltri.search) || '').toLowerCase().trim();
+
+  let righe = [];
+  (moduli || []).forEach(p => {
+    (p._fatture || []).forEach(f => {
+      righe.push({ f: f, p: p });
+    });
+  });
+
+  // filtro testo e stato, gli stessi della barra sopra
+  righe = righe.filter(r => {
+    const f = r.f;
+    if (_antFiltri && _antFiltri.stato && _antFiltri.stato !== 'tutti' && f.stato !== _antFiltri.stato) return false;
+    if (!q) return true;
+    return String(f.numero_fattura || '').toLowerCase().indexOf(q) >= 0
+        || String(f.cliente_nome || '').toLowerCase().indexOf(q) >= 0;
+  });
+
+  // dalla scadenza banca piu vicina alla piu lontana; le gia rientrate in fondo
+  righe.sort((a, b) => {
+    const ae = a.f.stato === 'estinta', be = b.f.stato === 'estinta';
+    if (ae !== be) return ae ? 1 : -1;
+    return String(a.f.scadenza_banca || '9999-12-31').localeCompare(String(b.f.scadenza_banca || '9999-12-31'));
+  });
+
+  if (!righe.length) {
+    return '<div style="padding:26px;text-align:center;color:var(--text-muted);font-size:12.5px">Nessuna fattura con questi filtri.</div>';
+  }
+
+  const aperte = righe.filter(r => r.f.stato !== 'estinta');
+  const totAperte = aperte.reduce((s, r) => s + Number(r.f.importo_anticipato_calcolato || 0), 0);
+  const scadute = aperte.filter(r => r.f.scadenza_banca && r.f.scadenza_banca < oggi);
+
+  let h = '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px;font-size:12px">'
+    + '<span style="color:var(--text-muted)">' + righe.length + ' fatture · <strong style="color:var(--text)">' + aperte.length + ' da rientrare</strong> per <strong style="font-family:var(--font-mono);color:var(--text)">' + fmtE(totAperte) + '</strong></span>'
+    + (scadute.length ? '<span style="color:#A32D2D;font-weight:700">' + scadute.length + ' oltre la scadenza banca</span>' : '')
+    + '</div>';
+
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px">'
+    + '<thead><tr style="background:var(--bg-card)">'
+    + ['Scadenza banca','N. fattura','Cliente','Totale','Anticipato','Scad. cliente','Stato',''].map((t, k) =>
+        '<th style="padding:7px 8px;text-align:' + (k >= 3 && k <= 4 ? 'right' : 'left') + ';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + t + '</th>').join('')
+    + '</tr></thead><tbody>';
+
+  righe.forEach(r => {
+    const f = r.f;
+    const estinta = f.stato === 'estinta';
+    const scad = f.scadenza_banca && f.scadenza_banca < oggi && !estinta;
+    h += '<tr style="border-bottom:0.5px solid var(--border);' + (estinta ? 'opacity:.55' : '') + '">'
+      + '<td style="padding:6px 8px;font-family:var(--font-mono);font-weight:700;color:' + (scad ? '#A32D2D' : 'var(--text)') + '">'
+        + (f.scadenza_banca ? fmtD(f.scadenza_banca) : '—') + (scad ? '<div style="font-size:10px;font-weight:600">scaduta</div>' : '') + '</td>'
+      + '<td style="padding:6px 8px;font-family:var(--font-mono)">' + esc(f.numero_fattura || '—') + '</td>'
+      + '<td style="padding:6px 8px">' + esc(f.cliente_nome || '—') + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(f.totale_fattura) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(f.importo_anticipato_calcolato) + '</td>'
+      + '<td style="padding:6px 8px;font-family:var(--font-mono);color:var(--text-muted)">' + (f.scadenza_cliente ? fmtD(f.scadenza_cliente) : '—') + '</td>'
+      + '<td style="padding:6px 8px">'
+        + (estinta
+            ? '<span style="background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">rientrata ' + (f.data_incasso ? fmtD(f.data_incasso) : '') + '</span>'
+            : '<span style="background:#E6F1FB;color:#0C447C;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">in essere</span>')
+      + '</td>'
+      + '<td style="padding:6px 8px;text-align:right">'
+        + (estinta ? '' : '<button onclick="_antRegistraIncasso(\'' + f.id + '\')" style="font-size:11px;padding:5px 11px;border:0.5px solid #378ADD;border-radius:6px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">Registra rientro</button>')
+      + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  return h;
 }
 
 // ─── BARRA UTILIZZO E RIENTRO MEDIO PER ISTITUTO (30/07) ──────────────────
