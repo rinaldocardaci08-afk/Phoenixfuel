@@ -710,6 +710,7 @@ async function _antRenderTabBanca(affidamentoId) {
         var on = _antVistaBanca === v[0];
         return '<button onclick="antVistaBanca(\'' + v[0] + '\')" style="font-size:11px;padding:6px 11px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:6px;background:' + (on ? '#0C447C' : 'var(--bg-card)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '700' : '500') + '">' + v[1] + '</button>';
       }).join('')
+    + '<button onclick="antAnalisiClienti(\'' + esc(ist.nome || '') + '\')" style="font-size:11px;padding:6px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);cursor:pointer;margin-left:4px">👥 Analisi per cliente</button>'
     + '</div>';
   html += '</div>';
   html += '<div style="display:flex;gap:6px">';
@@ -743,6 +744,122 @@ async function _antRenderTabBanca(affidamentoId) {
   if (typeof _calcRenderPanelEsempio === 'function' && aff.tasso) {
     _calcRenderPanelEsempio(aff.istituto_id, Number(aff.tasso), ist.nome || '', 'ant-costi-' + affidamentoId, Number(aff.importo_accordato || 0));
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALISI ANTICIPI PER CLIENTE (30/07)
+// Stessa struttura del documento preparato per la banca il 14 luglio: per ogni
+// cliente quante fatture, che montante e che peso sul totale della linea, con
+// la concentrazione dei primi quattro. Qui e' per istituto e per anno.
+// Sola lettura.
+// ═══════════════════════════════════════════════════════════════════════════
+var _antAnalisiIst = null;
+var _antAnalisiAnno = new Date().getFullYear();
+
+async function antAnalisiClienti(nomeIstituto, anno) {
+  _antAnalisiIst = nomeIstituto || _antAnalisiIst;
+  if (anno) _antAnalisiAnno = parseInt(anno, 10);
+  if (!_antValDati) { await antApriValutazioni(false, true); }
+  _antRenderAnalisiClienti();
+}
+function antAnalisiAnno(a) { antAnalisiClienti(null, a); }
+function antChiudiAnalisi() {
+  if (_antSubTabAttiva && _antSubTabAttiva.indexOf('banca:') === 0) _antRenderTabBanca(_antSubTabAttiva.split(':')[1]);
+  else renderAnticipi();
+}
+
+function _antRenderAnalisiClienti() {
+  const cont = document.getElementById('ant-content');
+  if (!cont || !_antValDati) return;
+  const D = _antValDati;
+
+  const nomeIst = {};
+  D.ist.forEach(i => { nomeIst[i.id] = i.nome; });
+  const affDi = {};
+  D.aff.forEach(a => { affDi[a.id] = nomeIst[a.istituto_id] || '—'; });
+  const presDi = {};
+  D.pres.forEach(p => { presDi[p.id] = p; });
+
+  // TUTTI gli anni disponibili, per il selettore
+  const anni = {};
+  D.fatt.forEach(f => {
+    const p = presDi[f.presentazione_id]; if (!p) return;
+    const d = String(f.data_emissione || p.data_presentazione || '');
+    if (d) anni[d.slice(0, 4)] = 1;
+  });
+
+  const perCliente = {};
+  let totMontante = 0, totFatture = 0;
+  D.fatt.forEach(f => {
+    const p = presDi[f.presentazione_id]; if (!p) return;
+    if (affDi[p.affidamento_id] !== _antAnalisiIst) return;
+    const d = String(f.data_emissione || p.data_presentazione || '');
+    if (!d || Number(d.slice(0, 4)) !== _antAnalisiAnno) return;
+    const cli = String(f.cliente_nome || '—').trim();
+    const b = perCliente[cli] || (perCliente[cli] = { nome: cli, n: 0, montante: 0, anticipato: 0, aperte: 0 });
+    b.n++; b.montante += Number(f.totale_fattura || 0);
+    b.anticipato += Number(f.importo_anticipato_calcolato || 0);
+    if (f.stato !== 'estinta') b.aperte++;
+    totMontante += Number(f.totale_fattura || 0); totFatture++;
+  });
+
+  const lista = Object.values(perCliente).sort((a, b) => b.montante - a.montante);
+  const primi4 = lista.slice(0, 4).reduce((s, c) => s + c.montante, 0);
+
+  let h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px">'
+    + '<div style="font-size:17px;font-weight:700">👥 Composizione anticipi per cliente — ' + esc(_antAnalisiIst || '') + '</div>'
+    + '<div style="display:flex;gap:6px;align-items:center">'
+      + Object.keys(anni).sort().reverse().map(a =>
+          '<button onclick="antAnalisiAnno(' + a + ')" style="font-size:12px;padding:6px 13px;border:0.5px solid ' + (Number(a) === _antAnalisiAnno ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (Number(a) === _antAnalisiAnno ? '#0C447C' : 'var(--bg)') + ';color:' + (Number(a) === _antAnalisiAnno ? '#fff' : 'var(--text)') + ';cursor:pointer">' + a + '</button>').join('')
+      + '<button onclick="antChiudiAnalisi()" style="font-size:12px;padding:6px 13px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer;margin-left:6px">← Indietro</button>'
+    + '</div></div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">quanto lavoro di ciascun cliente è transitato su questa linea nell\'anno scelto</div>';
+
+  if (!lista.length) {
+    cont.innerHTML = h + '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12.5px">Nessuna fattura anticipata su questo istituto nel ' + _antAnalisiAnno + '.</div>';
+    return;
+  }
+
+  const kpi = (lab, val, sub) =>
+    '<div style="flex:1;min-width:160px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
+    + '<div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+    + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700">' + val + '</div>'
+    + (sub ? '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div>' : '') + '</div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    + kpi('Montante ' + _antAnalisiAnno, fmtE(totMontante), totFatture + ' fatture')
+    + kpi('Clienti', String(lista.length), 'sulla linea')
+    + kpi('Primo cliente', lista[0].nome.length > 18 ? lista[0].nome.slice(0, 18) + '…' : lista[0].nome,
+          Math.round(lista[0].montante / totMontante * 100) + '% del montante')
+    + kpi('Primi quattro', Math.round(primi4 / totMontante * 100) + '%', fmtE(primi4))
+    + '</div>';
+
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">'
+    + '<thead><tr style="background:var(--bg-card)">'
+    + ['Cliente','Fatture','Montante','% del totale','Anticipato','Ancora aperte',''].map((t, k) =>
+        '<th style="padding:7px 8px;text-align:' + (k === 0 || k === 6 ? 'left' : 'right') + ';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + t + '</th>').join('')
+    + '</tr></thead><tbody>';
+  lista.forEach((c, i) => {
+    const pct = totMontante > 0 ? (c.montante / totMontante * 100) : 0;
+    h += '<tr style="border-bottom:0.5px solid var(--border)' + (i < 4 ? ';font-weight:600' : '') + '">'
+      + '<td style="padding:6px 8px">' + esc(c.nome) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + c.n + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(c.montante) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + pct.toFixed(1) + '%</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(c.anticipato) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:' + (c.aperte ? '#8A4F06' : 'var(--text-muted)') + '">' + (c.aperte || '—') + '</td>'
+      + '<td style="padding:6px 8px"><div style="height:8px;border-radius:4px;background:var(--bg);overflow:hidden;min-width:70px">'
+        + '<div style="height:100%;width:' + Math.min(100, pct * 2).toFixed(1) + '%;background:#378ADD"></div></div></td>'
+      + '</tr>';
+  });
+  h += '<tr style="background:var(--bg-card);font-weight:700">'
+    + '<td style="padding:8px">TOTALE</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + totFatture + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + fmtE(totMontante) + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">100%</td>'
+    + '<td colspan="3"></td></tr>';
+  h += '</tbody></table></div>';
+
+  cont.innerHTML = h;
 }
 
 // ─── ELENCO FATTURE ANTICIPATE (30/07) ────────────────────────────────────
@@ -3193,7 +3310,7 @@ async function antApriValutazioni(riusa, soloDati) {
         sb.from('banche_affidamenti').select('id,istituto_id,importo_accordato').eq('tipo', 'anticipo_fatture'),
         sb.from('banche_istituti').select('id,nome'),
         sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,data_presentazione,importo_anticipato_totale,stato'),
-        sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
+        sb.from('anticipi_sbf_fatture').select('presentazione_id,cliente_nome,totale_fattura,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
       ]);
       _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
     }
@@ -3430,6 +3547,7 @@ function _antRenderValutazioni() {
       + '<div style="display:flex;justify-content:space-between;font-size:11.5px">'
         + '<span style="color:var(--text-muted)">Rientrato</span>'
         + '<span style="font-family:var(--font-mono)">' + fmtE(b.estinto) + '</span></div>'
+      + '<div style="margin-top:9px"><button onclick="antAnalisiClienti(\'' + esc(b.nome) + '\', ' + _antValAnno + ')" style="width:100%;font-size:11.5px;padding:7px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">👥 Analisi per cliente</button></div>'
       + '<div style="display:flex;justify-content:space-between;font-size:11.5px">'
         + '<span style="color:var(--text-muted)">Moduli</span>'
         + '<span style="font-family:var(--font-mono)">' + b.nModuli + (b.senzaDettaglio > 0 ? ' <span style="color:#8A4F06">· ' + fmtE(b.senzaDettaglio) + ' da comporre</span>' : '') + '</span></div>'
