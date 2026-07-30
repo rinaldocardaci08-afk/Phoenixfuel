@@ -320,6 +320,11 @@ async function _antRenderTabHome(fidiAnticipi) {
   const dataBreve = function (iso) { return iso ? _pfIsoToIt(iso).slice(0, 5) : '—'; };
 
   let h = '';
+  // Valutazioni utilizzo (30/07): apre l'analisi dei tre anticipi — grafico
+  // unico con le tre linee + tabella di confronto, poi una scheda per istituto.
+  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">'
+    + '<button onclick="antApriValutazioni()" style="font-size:12px;padding:8px 15px;border:0.5px solid #378ADD;border-radius:8px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">📊 Valutazioni utilizzo</button>'
+    + '</div>';
   // striscia riassuntiva (la stessa che andra in dashboard)
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">';
   h += '<div style="background:var(--bg-card);border-radius:8px;padding:14px"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Accordato</div><div style="font-size:22px;font-weight:700;font-family:var(--font-mono)">' + fmtE(totAcc) + '</div></div>';
@@ -2918,4 +2923,206 @@ async function _antConfermaInsoluta(presentazioneId) {
   chiudiModal();
   toast('❌ Modulo marcato insoluto il ' + fmtD(data) + ' (uscita ' + fmtE(importoOverride) + ' registrata in foglio giornale)');
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VALUTAZIONI UTILIZZO ANTICIPI (30/07)
+// Impaginazione scelta da Rinaldo: PRIMA il grafico unico con le tre linee e
+// la tabella di confronto (vista B), POI una scheda per istituto (vista A).
+// Dalla vista C si prende solo il RIENTRO MEDIO, calcolato in due modi:
+//   • dalla presentazione all'incasso  → quanto la banca tiene impegnato il fido
+//   • dalla scadenza banca all'incasso → quanto il cliente paga oltre l'attesa
+// Confronto fra anni quando lo storico c'e' (2025 importato).
+// Legge e basta: nessuna scrittura.
+// ═══════════════════════════════════════════════════════════════════════════
+var _antValAnno = new Date().getFullYear();
+var _antValDati = null;
+var _antValCharts = [];
+
+function antValAnno(a) { _antValAnno = parseInt(a, 10); antApriValutazioni(true); }
+
+async function antApriValutazioni(riusa) {
+  try {
+    if (!riusa || !_antValDati) {
+      const r = await Promise.all([
+        sb.from('banche_affidamenti').select('id,istituto_id,importo_accordato').eq('tipo', 'anticipo_fatture'),
+        sb.from('banche_istituti').select('id,nome'),
+        sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,data_presentazione,importo_anticipato_totale'),
+        sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,scadenza_banca,data_incasso,stato')
+      ]);
+      _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
+    }
+    _antRenderValutazioni();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
+}
+
+function _antValCalcola(anno) {
+  const D = _antValDati;
+  const nomeIst = {};
+  D.ist.forEach(i => { nomeIst[i.id] = i.nome; });
+  const affInfo = {};
+  D.aff.forEach(a => { affInfo[a.id] = { nome: nomeIst[a.istituto_id] || '—', accordato: Number(a.importo_accordato || 0) }; });
+
+  const presById = {};
+  D.pres.forEach(p => { presById[p.id] = p; });
+
+  // un blocco per istituto
+  const per = {};
+  Object.keys(affInfo).forEach(id => {
+    per[affInfo[id].nome] = {
+      nome: affInfo[id].nome, accordato: affInfo[id].accordato,
+      mesi: new Array(12).fill(0),        // impegnato a fine mese
+      anticipato: 0, estinto: 0,
+      giorniPres: [], giorniScad: []
+    };
+  });
+
+  // impegnato a fine mese: moduli aperti a quella data
+  D.pres.forEach(p => {
+    const info = affInfo[p.affidamento_id];
+    if (!info) return;
+    const b = per[info.nome];
+    const dp = String(p.data_presentazione || '');
+    if (!dp) return;
+    const annoP = Number(dp.slice(0, 4));
+    const tot = Number(p.importo_anticipato_totale || 0);
+    if (annoP === anno) b.anticipato += tot;
+
+    // le sue fatture, per sapere quando e' rientrato
+    const sue = D.fatt.filter(f => f.presentazione_id === p.id);
+    sue.forEach(f => {
+      const est = Number(f.importo_estinto || 0);
+      const ant = Number(f.importo_anticipato_calcolato || 0);
+      if (annoP === anno) b.estinto += est;
+      const inc = String(f.data_incasso || '');
+      if (inc && Number(inc.slice(0, 4)) === anno) {
+        const gP = Math.round((new Date(inc) - new Date(dp)) / 86400000);
+        if (gP >= 0 && gP < 400) b.giorniPres.push(gP);
+        const sb2 = String(f.scadenza_banca || '');
+        if (sb2) {
+          const gS = Math.round((new Date(inc) - new Date(sb2)) / 86400000);
+          if (gS > -200 && gS < 400) b.giorniScad.push(gS);
+        }
+      }
+      // impegno mensile: dal mese di presentazione fino al mese di rientro
+      const mDa = (annoP === anno) ? Number(dp.slice(5, 7)) - 1 : (annoP < anno ? 0 : 99);
+      let mA = 11;
+      if (inc && Number(inc.slice(0, 4)) === anno) mA = Number(inc.slice(5, 7)) - 1;
+      else if (inc && Number(inc.slice(0, 4)) < anno) mA = -1;
+      for (let m = mDa; m <= mA && m < 12; m++) if (m >= 0) b.mesi[m] += (ant - 0);
+    });
+  });
+
+  const media = arr => arr.length ? Math.round(arr.reduce((a, x) => a + x, 0) / arr.length) : null;
+  Object.values(per).forEach(b => {
+    b.pctMesi = b.mesi.map(v => b.accordato > 0 ? Math.round(v / b.accordato * 100) : 0);
+    b.picco = Math.max.apply(null, b.pctMesi.concat([0]));
+    b.piccoMese = b.pctMesi.indexOf(b.picco);
+    b.inEssere = Math.max(0, b.anticipato - b.estinto);
+    b.utilizzo = b.accordato > 0 ? Math.round(b.inEssere / b.accordato * 100) : 0;
+    b.rientroPres = media(b.giorniPres);
+    b.rientroScad = media(b.giorniScad);
+  });
+  return per;
+}
+
+function _antRenderValutazioni() {
+  const MESI = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  const per = _antValCalcola(_antValAnno);
+  const banche = Object.values(per).filter(b => b.accordato > 0);
+  const COL = ['#2a78d6', '#eb6834', '#639922', '#6B5FCC'];
+
+  let h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px">'
+    + '<div style="font-size:16px;font-weight:600">📊 Valutazioni utilizzo anticipi</div>'
+    + '<div style="display:flex;gap:6px">'
+      + [_antValAnno - 1, _antValAnno, _antValAnno + 1].filter(a => a <= new Date().getFullYear()).map(a =>
+          '<button onclick="antValAnno(' + a + ')" style="font-size:12px;padding:5px 12px;border:0.5px solid ' + (a === _antValAnno ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (a === _antValAnno ? '#0C447C' : 'var(--bg)') + ';color:' + (a === _antValAnno ? '#fff' : 'var(--text)') + ';cursor:pointer">' + a + '</button>').join('')
+    + '</div></div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">percentuale del fido impegnata mese per mese, e quanto tempo passa prima che gli anticipi rientrino</div>';
+
+  // ── VISTA B: grafico unico + tabella
+  h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'
+    + '<div style="position:relative;height:250px"><canvas id="antval-linee"></canvas></div></div>';
+
+  h += '<div style="overflow-x:auto;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">'
+    + '<thead><tr style="background:var(--bg-card)">'
+      + ['Istituto','Accordato','In essere','Utilizzo','Picco','Rientro dalla presentazione','Rientro dalla scadenza'].map((t, k) =>
+          '<th style="padding:7px 8px;text-align:' + (k === 0 ? 'left' : 'right') + ';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + t + '</th>').join('')
+    + '</tr></thead><tbody>';
+  banche.forEach(b => {
+    const colU = b.utilizzo >= 85 ? '#A32D2D' : b.utilizzo >= 60 ? '#E07B18' : '#3B6D11';
+    h += '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:7px 8px;font-weight:600">' + esc(b.nome) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(b.accordato) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(b.inEssere) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:' + colU + '">' + b.utilizzo + '%</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">' + (b.picco > 0 ? b.picco + '% <span style="color:var(--text-muted)">' + MESI[b.piccoMese] + '</span>' : '—') + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">' + (b.rientroPres != null ? b.rientroPres + ' gg' : '—') + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono)">' + (b.rientroScad != null ? (b.rientroScad > 0 ? '+' : '') + b.rientroScad + ' gg' : '—') + '</td>'
+      + '</tr>';
+  });
+  h += '</tbody></table></div>';
+
+  // ── VISTA A: una scheda per istituto
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px">';
+  banche.forEach((b, k) => {
+    const colU = b.utilizzo >= 85 ? '#A32D2D' : b.utilizzo >= 60 ? '#E07B18' : '#3B6D11';
+    h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:13px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
+        + '<span style="font-size:15px;font-weight:700">' + esc(b.nome) + '</span>'
+        + '<span style="font-size:13px;font-weight:700;color:' + colU + '">' + b.utilizzo + '%</span></div>'
+      + '<div style="position:relative;height:90px;margin-bottom:10px"><canvas id="antval-mini-' + k + '"></canvas></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding-top:8px;border-top:0.5px solid var(--border)">'
+        + '<span style="color:var(--text-muted)">Rientro medio</span>'
+        + '<span style="font-family:var(--font-mono);font-weight:700">' + (b.rientroPres != null ? b.rientroPres + ' gg' : '—') + '</span></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px">'
+        + '<span style="color:var(--text-muted)">Anticipato ' + _antValAnno + '</span>'
+        + '<span style="font-family:var(--font-mono)">' + fmtE(b.anticipato) + '</span></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px">'
+        + '<span style="color:var(--text-muted)">Rientrato</span>'
+        + '<span style="font-family:var(--font-mono)">' + fmtE(b.estinto) + '</span></div>'
+      + '</div>';
+  });
+  h += '</div>';
+  h += '<div style="margin-top:16px;text-align:right"><button onclick="chiudiModal()" class="btn-primary">Chiudi</button></div>';
+
+  apriModal(h);
+
+  // grafici, dopo che il modale esiste
+  setTimeout(function () {
+    _antValCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
+    _antValCharts = [];
+    if (typeof Chart === 'undefined') return;
+    const cv = document.getElementById('antval-linee');
+    if (cv) {
+      _antValCharts.push(new Chart(cv, {
+        type: 'line',
+        data: { labels: MESI, datasets: banche.map((b, k) => ({
+          label: b.nome, data: b.pctMesi, borderColor: COL[k % COL.length],
+          backgroundColor: k === 0 ? 'rgba(42,120,214,.10)' : 'transparent', fill: k === 0,
+          borderWidth: 2, tension: .3, pointRadius: 3
+        })) },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { font: { size: 11 }, usePointStyle: true, boxWidth: 6 } },
+            tooltip: { callbacks: { label: c => c.dataset.label + ': ' + c.parsed.y + '% del fido' } } },
+          scales: { x: { grid: { display: false } },
+                    y: { max: 100, ticks: { callback: v => v + '%' } } } }
+      }));
+    }
+    banche.forEach((b, k) => {
+      const c2 = document.getElementById('antval-mini-' + k);
+      if (!c2) return;
+      _antValCharts.push(new Chart(c2, {
+        type: 'bar',
+        data: { labels: MESI, datasets: [{ data: b.pctMesi, backgroundColor: COL[k % COL.length], borderRadius: 3, maxBarThickness: 14 }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y + '% del fido' } } },
+          scales: { x: { grid: { display: false }, ticks: { font: { size: 8 } } },
+                    y: { max: 100, ticks: { font: { size: 8 }, callback: v => v + '%' } } } }
+      }));
+    });
+  }, 60);
 }
