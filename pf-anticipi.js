@@ -3036,8 +3036,10 @@ async function _antConfermaInsoluta(presentazioneId) {
 var _antValAnno = new Date().getFullYear();
 var _antValDati = null;
 var _antValCharts = [];
+var _antValAperta = false;
 
 function antValAnno(a) { _antValAnno = parseInt(a, 10); antApriValutazioni(true); }
+function antChiudiValutazioni() { _antValAperta = false; renderAnticipi(); }
 
 async function antApriValutazioni(riusa) {
   try {
@@ -3045,17 +3047,23 @@ async function antApriValutazioni(riusa) {
       const r = await Promise.all([
         sb.from('banche_affidamenti').select('id,istituto_id,importo_accordato').eq('tipo', 'anticipo_fatture'),
         sb.from('banche_istituti').select('id,nome'),
-        sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,data_presentazione,importo_anticipato_totale'),
-        sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,scadenza_banca,data_incasso,stato')
+        sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,data_presentazione,importo_anticipato_totale,stato'),
+        sb.from('anticipi_sbf_fatture').select('presentazione_id,importo_anticipato_calcolato,importo_estinto,scadenza_cliente,scadenza_banca,data_incasso,stato')
       ]);
       _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
     }
+    _antValAperta = true;
     _antRenderValutazioni();
   } catch (e) {
     toast('Errore: ' + ((e && e.message) || e));
   }
 }
 
+// ── CALCOLO (rifatto 30/07) ────────────────────────────────────────────────
+// L'impegno mensile si calcola sul PERIODO DI ESPOSIZIONE, non sul mese in cui
+// il modulo e' archiviato: un anticipo occupa il fido da quando la banca lo
+// eroga a quando la fattura viene incassata. Cosi contano anche i moduli SENZA
+// fatture dettagliate (la "prenotazione"), che prima sparivano dalla curva.
 function _antValCalcola(anno) {
   const D = _antValDati;
   const nomeIst = {};
@@ -3063,38 +3071,48 @@ function _antValCalcola(anno) {
   const affInfo = {};
   D.aff.forEach(a => { affInfo[a.id] = { nome: nomeIst[a.istituto_id] || '—', accordato: Number(a.importo_accordato || 0) }; });
 
-  const presById = {};
-  D.pres.forEach(p => { presById[p.id] = p; });
-
-  // un blocco per istituto
   const per = {};
   Object.keys(affInfo).forEach(id => {
     per[affInfo[id].nome] = {
       nome: affInfo[id].nome, accordato: affInfo[id].accordato,
-      mesi: new Array(12).fill(0),        // impegnato a fine mese
-      anticipato: 0, estinto: 0,
-      giorniPres: [], giorniScad: []
+      mesi: new Array(12).fill(0), anticipato: 0, estinto: 0,
+      giorniPres: [], giorniScad: [], nModuli: 0, senzaDettaglio: 0
     };
   });
 
-  // impegnato a fine mese: moduli aperti a quella data
+  const fineMese = m => {
+    const d = new Date(anno, m + 1, 0);
+    return anno + '-' + String(m + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+
   D.pres.forEach(p => {
     const info = affInfo[p.affidamento_id];
     if (!info) return;
     const b = per[info.nome];
     const dp = String(p.data_presentazione || '');
     if (!dp) return;
-    const annoP = Number(dp.slice(0, 4));
     const tot = Number(p.importo_anticipato_totale || 0);
-    if (annoP === anno) b.anticipato += tot;
+    if (Number(dp.slice(0, 4)) === anno) { b.anticipato += tot; b.nModuli++; }
 
-    // le sue fatture, per sapere quando e' rientrato
     const sue = D.fatt.filter(f => f.presentazione_id === p.id);
+    if (!sue.length) {
+      // modulo senza dettaglio: occupa tutto il suo importo finche' e' aperto
+      if (Number(dp.slice(0, 4)) === anno) b.senzaDettaglio += tot;
+      const chiuso = (p.stato === 'estinta');
+      for (let m = 0; m < 12; m++) {
+        const fm = fineMese(m);
+        if (dp <= fm && !chiuso) b.mesi[m] += tot;
+      }
+      return;
+    }
+
     sue.forEach(f => {
-      const est = Number(f.importo_estinto || 0);
       const ant = Number(f.importo_anticipato_calcolato || 0);
-      if (annoP === anno) b.estinto += est;
+      const est = Number(f.importo_estinto || 0);
+      if (Number(dp.slice(0, 4)) === anno) b.estinto += est;
       const inc = String(f.data_incasso || '');
+
+      // giorni di rientro, sulle fatture incassate NELL'anno guardato
       if (inc && Number(inc.slice(0, 4)) === anno) {
         const gP = Math.round((new Date(inc) - new Date(dp)) / 86400000);
         if (gP >= 0 && gP < 400) b.giorniPres.push(gP);
@@ -3104,12 +3122,11 @@ function _antValCalcola(anno) {
           if (gS > -200 && gS < 400) b.giorniScad.push(gS);
         }
       }
-      // impegno mensile: dal mese di presentazione fino al mese di rientro
-      const mDa = (annoP === anno) ? Number(dp.slice(5, 7)) - 1 : (annoP < anno ? 0 : 99);
-      let mA = 11;
-      if (inc && Number(inc.slice(0, 4)) === anno) mA = Number(inc.slice(5, 7)) - 1;
-      else if (inc && Number(inc.slice(0, 4)) < anno) mA = -1;
-      for (let m = mDa; m <= mA && m < 12; m++) if (m >= 0) b.mesi[m] += (ant - 0);
+      // impegno a fine mese: erogato prima e non ancora incassato
+      for (let m = 0; m < 12; m++) {
+        const fm = fineMese(m);
+        if (dp <= fm && (!inc || inc > fm)) b.mesi[m] += ant;
+      }
     });
   });
 
@@ -3118,7 +3135,8 @@ function _antValCalcola(anno) {
     b.pctMesi = b.mesi.map(v => b.accordato > 0 ? Math.round(v / b.accordato * 100) : 0);
     b.picco = Math.max.apply(null, b.pctMesi.concat([0]));
     b.piccoMese = b.pctMesi.indexOf(b.picco);
-    b.inEssere = Math.max(0, b.anticipato - b.estinto);
+    const oggiM = (new Date().getFullYear() === anno) ? new Date().getMonth() : 11;
+    b.inEssere = b.mesi[oggiM] || 0;
     b.utilizzo = b.accordato > 0 ? Math.round(b.inEssere / b.accordato * 100) : 0;
     b.rientroPres = media(b.giorniPres);
     b.rientroScad = media(b.giorniScad);
@@ -3131,20 +3149,55 @@ function _antRenderValutazioni() {
   const per = _antValCalcola(_antValAnno);
   const banche = Object.values(per).filter(b => b.accordato > 0);
   const COL = ['#2a78d6', '#eb6834', '#639922', '#6B5FCC'];
+  const cont = document.getElementById('ant-content');
+  if (!cont) return;
 
   let h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px">'
-    + '<div style="font-size:16px;font-weight:600">📊 Valutazioni utilizzo anticipi</div>'
-    + '<div style="display:flex;gap:6px">'
+    + '<div style="font-size:17px;font-weight:700">📊 Valutazioni utilizzo anticipi</div>'
+    + '<div style="display:flex;gap:6px;align-items:center">'
       + [_antValAnno - 1, _antValAnno, _antValAnno + 1].filter(a => a <= new Date().getFullYear()).map(a =>
-          '<button onclick="antValAnno(' + a + ')" style="font-size:12px;padding:5px 12px;border:0.5px solid ' + (a === _antValAnno ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (a === _antValAnno ? '#0C447C' : 'var(--bg)') + ';color:' + (a === _antValAnno ? '#fff' : 'var(--text)') + ';cursor:pointer">' + a + '</button>').join('')
+          '<button onclick="antValAnno(' + a + ')" style="font-size:12px;padding:6px 13px;border:0.5px solid ' + (a === _antValAnno ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (a === _antValAnno ? '#0C447C' : 'var(--bg)') + ';color:' + (a === _antValAnno ? '#fff' : 'var(--text)') + ';cursor:pointer">' + a + '</button>').join('')
+      + '<button onclick="antChiudiValutazioni()" style="font-size:12px;padding:6px 13px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer;margin-left:6px">← Quadro anticipi</button>'
     + '</div></div>'
-    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">percentuale del fido impegnata mese per mese, e quanto tempo passa prima che gli anticipi rientrino</div>';
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">impegno a fine mese: anticipi erogati e non ancora incassati — compresi i moduli senza dettaglio fatture</div>';
 
-  // ── VISTA B: grafico unico + tabella
+  // ── grafico unico
   h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'
-    + '<div style="position:relative;height:250px"><canvas id="antval-linee"></canvas></div></div>';
+    + '<div style="position:relative;height:260px"><canvas id="antval-linee"></canvas></div></div>';
 
-  h += '<div style="overflow-x:auto;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">'
+  // ── TABELLA MESE PER MESE, euro e percentuale
+  h += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px">Utilizzo mese per mese · ' + _antValAnno + '</div>';
+  h += '<div style="overflow-x:auto;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;min-width:820px">'
+    + '<thead><tr style="background:var(--bg-card)">'
+      + '<th style="padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">Istituto</th>'
+      + MESI.map(m => '<th style="padding:7px 6px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + m + '</th>').join('')
+    + '</tr></thead><tbody>';
+  banche.forEach(b => {
+    h += '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:6px 8px;font-weight:700">' + esc(b.nome) + '<div style="font-size:10px;color:var(--text-muted);font-weight:400">fido ' + fmtE(b.accordato) + '</div></td>';
+    b.mesi.forEach((v, k) => {
+      const pct = b.pctMesi[k];
+      const col = pct >= 85 ? '#A32D2D' : pct >= 60 ? '#E07B18' : pct > 0 ? '#3B6D11' : 'var(--text-muted)';
+      h += '<td style="padding:6px 6px;text-align:right;font-family:var(--font-mono)">'
+        + (v > 0 ? '<div>' + Math.round(v).toLocaleString('it-IT') + '</div><div style="font-size:10px;font-weight:700;color:' + col + '">' + pct + '%</div>' : '<span style="color:var(--text-muted)">—</span>')
+        + '</td>';
+    });
+    h += '</tr>';
+  });
+  // riga totale
+  const totMesi = new Array(12).fill(0), totFido = banche.reduce((s, b) => s + b.accordato, 0);
+  banche.forEach(b => b.mesi.forEach((v, k) => { totMesi[k] += v; }));
+  h += '<tr style="background:var(--bg-card)"><td style="padding:7px 8px;font-weight:700">Totale<div style="font-size:10px;color:var(--text-muted);font-weight:400">fido ' + fmtE(totFido) + '</div></td>'
+    + totMesi.map(v => {
+        const pct = totFido > 0 ? Math.round(v / totFido * 100) : 0;
+        return '<td style="padding:7px 6px;text-align:right;font-family:var(--font-mono);font-weight:700">'
+          + (v > 0 ? '<div>' + Math.round(v).toLocaleString('it-IT') + '</div><div style="font-size:10px;color:var(--text-muted)">' + pct + '%</div>' : '—') + '</td>';
+      }).join('')
+    + '</tr>';
+  h += '</tbody></table></div>';
+
+  // ── tabella di confronto
+  h += '<div style="overflow-x:auto;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:660px">'
     + '<thead><tr style="background:var(--bg-card)">'
       + ['Istituto','Accordato','In essere','Utilizzo','Picco','Rientro dalla presentazione','Rientro dalla scadenza'].map((t, k) =>
           '<th style="padding:7px 8px;text-align:' + (k === 0 ? 'left' : 'right') + ';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + t + '</th>').join('')
@@ -3163,7 +3216,7 @@ function _antRenderValutazioni() {
   });
   h += '</tbody></table></div>';
 
-  // ── VISTA A: una scheda per istituto
+  // ── schede per istituto
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px">';
   banche.forEach((b, k) => {
     const colU = b.utilizzo >= 85 ? '#A32D2D' : b.utilizzo >= 60 ? '#E07B18' : '#3B6D11';
@@ -3181,14 +3234,17 @@ function _antRenderValutazioni() {
       + '<div style="display:flex;justify-content:space-between;font-size:11.5px">'
         + '<span style="color:var(--text-muted)">Rientrato</span>'
         + '<span style="font-family:var(--font-mono)">' + fmtE(b.estinto) + '</span></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px">'
+        + '<span style="color:var(--text-muted)">Moduli</span>'
+        + '<span style="font-family:var(--font-mono)">' + b.nModuli + (b.senzaDettaglio > 0 ? ' <span style="color:#8A4F06">· ' + fmtE(b.senzaDettaglio) + ' da comporre</span>' : '') + '</span></div>'
       + '</div>';
   });
   h += '</div>';
-  h += '<div style="margin-top:16px;text-align:right"><button onclick="chiudiModal()" class="btn-primary">Chiudi</button></div>';
 
-  apriModal(h);
+  cont.innerHTML = h;
 
-  // grafici, dopo che il modale esiste
+
+  // grafici, dopo che la pagina e' stata scritta
   setTimeout(function () {
     _antValCharts.forEach(c => { try { c.destroy(); } catch (e) {} });
     _antValCharts = [];
