@@ -1697,7 +1697,10 @@
           <div class="card">
             <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
               <span>📑 Estratto conto fornitore</span>
-              <select id="ecf-fornitore" onchange="ecfCambiaFornitore()" style="font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:280px"><option value="">— scegli un fornitore —</option></select>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button onclick="ecfApriTutti()" style="font-size:12px;padding:8px 14px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-weight:600">🗂 Tutti i fornitori</button>
+                <select id="ecf-fornitore" onchange="ecfCambiaFornitore()" style="font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:280px"><option value="">— scegli un fornitore —</option></select>
+              </div>
             </div>
             <div id="ecf-body"><div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un fornitore per vedere l'estratto conto.</div></div>
           </div>
@@ -3159,7 +3162,7 @@
 <script src="pf-pagamento-fornitore-modale.js?v=20260728a"></script>
 <script src="pf-debito-fornitori.js?v=20260730a"></script>
 <script src="pf-scadenzario-fornitori.js?v=20260727b"></script>
-<script src="pf-estratto-fornitore.js?v=20260730a"></script>
+<script src="pf-estratto-fornitore.js?v=20260730b"></script>
 <script src="pf-reg-fattura.js?v=20260727b"></script>
 <script src="pf-allegati.js?v=20260722a"></script>
 <script src="pf-fatture.js?v=20260727d"></script>

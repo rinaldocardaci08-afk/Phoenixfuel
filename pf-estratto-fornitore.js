@@ -316,6 +316,97 @@ function ecfSetFiltro(v) { _ecfFiltro = v; _ecfRender(); }
 function ecfToggleOrdine(id, cb) { if (cb && cb.checked) _ecfSelezione[id] = true; else delete _ecfSelezione[id]; _ecfRender(); }
 function ecfDeseleziona() { _ecfSelezione = {}; _ecfRender(); }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FASCIA FORNITORE (30/07) — fusione delle proposte B e C scelta da Rinaldo.
+// In cima: pillole di tutti i fornitori, l'attivo grande, e a destra il da
+// pagare. Appena si scorre la fascia si restringe e resta attaccata in alto
+// (position:sticky), perché il problema nasce proprio scorrendo le scadenze:
+// prima il nome stava in una tendina in alto a destra e si perdeva di vista.
+// ═══════════════════════════════════════════════════════════════════════════
+function _ecfFascia(daPagare, nAperti) {
+  if (!_ecfSel) return '';
+  var pct = _ecfSel.fido > 0 ? Math.round((daPagare / _ecfSel.fido) * 100) : null;
+
+  var pillole = (_ecfFornitori || []).map(function (f) {
+    var on = f.id === _ecfSel.id;
+    return '<span onclick="ecfVaiFornitore(\'' + f.id + '\')" title="' + esc(f.nome) + '" style="cursor:pointer;'
+      + (on ? 'font-size:21px;font-weight:700;padding:4px 16px;background:rgba(255,255,255,0.22);'
+            : 'font-size:13px;padding:6px 13px;background:rgba(255,255,255,0.10);opacity:.9;')
+      + 'border-radius:9px;white-space:nowrap">' + esc(f.nome) + '</span>';
+  }).join('');
+
+  return '<div id="ecf-fascia" style="position:sticky;top:0;z-index:40;background:#0C447C;color:#fff;'
+      + 'border-radius:11px;padding:11px 16px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.12)">'
+    // riga aperta: tutte le pillole
+    + '<div id="ecf-fascia-full" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + pillole
+      + '<span style="flex:1"></span>'
+      + '<span style="font-size:12px;opacity:.85">da pagare</span>'
+      + '<span style="font-family:var(--font-mono);font-size:19px;font-weight:700">' + fmtE(daPagare) + '</span>'
+    + '</div>'
+    + '<div id="ecf-fascia-sub" style="font-size:11.5px;opacity:.85;margin-top:5px">dilazione ' + _ecfSel.gg + ' gg'
+      + (_ecfSel.fido > 0 ? ' · fido ' + fmtE(_ecfSel.fido) : ' · fido non impostato')
+      + ' · ' + nAperti + ' documenti aperti</div>'
+    // riga ristretta: compare solo quando la fascia si attacca in alto
+    + '<div id="ecf-fascia-mini" style="display:none;align-items:center;gap:10px;flex-wrap:wrap">'
+      + '<span style="font-size:16px;font-weight:700">' + esc(_ecfSel.nome) + '</span>'
+      + '<span style="font-size:11.5px;opacity:.8">' + _ecfSel.gg + ' gg</span>'
+      + '<span style="flex:1"></span>'
+      + (pct != null ? '<span style="font-size:11.5px;opacity:.85">fido ' + pct + '%</span>' : '')
+      + '<span style="font-family:var(--font-mono);font-size:15px;font-weight:700">' + fmtE(daPagare) + '</span>'
+      + '<span onclick="_ecfFasciaApri()" style="font-size:11.5px;background:rgba(255,255,255,0.22);padding:3px 10px;border-radius:7px;cursor:pointer">cambia ▾</span>'
+    + '</div></div>';
+}
+
+// Passa da fascia aperta a ristretta seguendo lo scorrimento.
+function _ecfFasciaOsserva() {
+  var f = document.getElementById('ecf-fascia');
+  if (!f || f._osservata) return;
+  f._osservata = true;
+  var sentinella = document.createElement('div');
+  sentinella.style.height = '1px';
+  f.parentNode.insertBefore(sentinella, f);
+  var io = new IntersectionObserver(function (voci) {
+    var attaccata = !voci[0].isIntersecting;
+    var full = document.getElementById('ecf-fascia-full');
+    var sub  = document.getElementById('ecf-fascia-sub');
+    var mini = document.getElementById('ecf-fascia-mini');
+    if (!full || !mini) return;
+    if (attaccata && !f._forzataAperta) {
+      full.style.display = 'none'; if (sub) sub.style.display = 'none';
+      mini.style.display = 'flex'; f.style.padding = '8px 16px';
+    } else {
+      full.style.display = 'flex'; if (sub) sub.style.display = '';
+      mini.style.display = 'none'; f.style.padding = '11px 16px';
+    }
+  }, { threshold: 0 });
+  io.observe(sentinella);
+}
+
+// "cambia ▾" nella fascia ristretta: riapre le pillole finche non si sceglie
+function _ecfFasciaApri() {
+  var f = document.getElementById('ecf-fascia');
+  if (!f) return;
+  f._forzataAperta = true;
+  var full = document.getElementById('ecf-fascia-full');
+  var sub  = document.getElementById('ecf-fascia-sub');
+  var mini = document.getElementById('ecf-fascia-mini');
+  if (full) full.style.display = 'flex';
+  if (sub) sub.style.display = '';
+  if (mini) mini.style.display = 'none';
+  f.style.padding = '11px 16px';
+}
+
+// Cambio fornitore dalle pillole: allinea anche la tendina esistente.
+function ecfVaiFornitore(id) {
+  if (!id || (_ecfSel && id === _ecfSel.id)) return;
+  var sel = document.getElementById('ecf-fornitore');
+  if (sel) sel.value = id;
+  var f = document.getElementById('ecf-fascia');
+  if (f) f._forzataAperta = false;
+  ecfCambiaFornitore();
+}
+
 function _ecfRender() {
   var body = document.getElementById('ecf-body');
   if (!body || !_ecfSel) return;
@@ -384,7 +475,8 @@ function _ecfRender() {
   ovrAnno = Math.round(ovrAnno * 100) / 100;
 
   body.innerHTML =
-    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
+    _ecfFascia(daPagare, nAperti)
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
       + kpi('Acquistato ' + anno, acquistato, 'imponibile · IVA inc. ' + fmtE(acquistatoIva) + ' · ' + ordAnno.length + ' ordini · dilazione ' + _ecfSel.gg + ' gg', '')
       + kpi('Pagato', pagatoTot, nSaldate + ' fatture saldate', 'ok')
       + kpi('Da pagare', daPagare, nAperti + ' documenti aperti', 'ko')
@@ -421,6 +513,7 @@ function _ecfRender() {
     + '</div>';
 
   window.scrollTo(0, scrollY);
+  if (typeof IntersectionObserver === 'function') _ecfFasciaOsserva();
 }
 
 // ── Banche: ordine costituzionale Intesa → MPS → BNL → BCC → altri ──
@@ -885,6 +978,84 @@ async function ecfNumeraFattura(fatturaId) {
 }
 
 // Tasto (i) — ordini che compongono la fattura
+// ═══════════════════════════════════════════════════════════════════════════
+// STAMPA DELLA FATTURA (30/07) — riepilogo di come quella fattura e' COMPOSTA
+// secondo Phoenix: intestazione, dati del fornitore, numero e data, l'elenco
+// delle consegne con DDT/cliente/sede di scarico e i totali imponibile, IVA e
+// documento. Non e' la riproduzione della fattura del fornitore, che e' un suo
+// documento: serve per controllare e per contestare.
+// ═══════════════════════════════════════════════════════════════════════════
+function ecfStampaFattura(fatturaId) {
+  var f = _ecfFatture.filter(function (x) { return x.id === fatturaId; })[0];
+  if (!f) return;
+  var iva = 0, imp = 0;
+  (f.ordini || []).forEach(function (o) {
+    imp += Number(o.imponibile || 0);
+    iva += Number(o.totale || 0) - Number(o.imponibile || 0);
+  });
+
+  var righe = (f.ordini || []).map(function (o) {
+    return '<tr>'
+      + '<td>' + _pfIsoToIt(o.data) + '</td>'
+      + '<td>' + esc(o.prodotto || '') + '</td>'
+      + '<td class="r">' + fmtL(o.litri) + '</td>'
+      + '<td class="r">' + Number(o.costoL || 0).toFixed(5).replace('.', ',') + '</td>'
+      + '<td class="r">' + fmtE(o.imponibile) + '</td>'
+      + '<td>' + esc(o.cliente || '—') + '</td>'
+      + '<td>' + esc(o.sede_scarico_nome || o.destinazione || '—') + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var w = window.open('', '_blank');
+  if (!w) { toast('Il browser ha bloccato la finestra di stampa: consenti i pop-up'); return; }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Fattura '
+    + esc(f.numero || '') + ' — ' + esc(_ecfSel.nome) + '</title><style>'
+    + 'body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#222;margin:26px;font-size:12px}'
+    + 'h1{font-size:17px;margin:0 0 2px}'
+    + '.sub{color:#666;font-size:11.5px;margin-bottom:16px}'
+    + '.box{display:flex;gap:14px;margin-bottom:16px}'
+    + '.box>div{flex:1;border:1px solid #ccc;border-radius:6px;padding:9px 11px}'
+    + '.et{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#777;margin-bottom:3px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:11px}'
+    + 'th{background:#f2f2ee;text-align:left;padding:6px 7px;border-bottom:1.5px solid #999;font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;color:#555}'
+    + 'td{padding:6px 7px;border-bottom:0.5px solid #e2e2dc}'
+    + '.r{text-align:right;font-variant-numeric:tabular-nums}'
+    + 'th.r{text-align:right}'
+    + 'tfoot td{border-top:1.5px solid #999;font-weight:700;border-bottom:none;padding-top:8px}'
+    + '.firme{display:flex;gap:40px;margin-top:44px;font-size:11px;color:#555}'
+    + '.firme>div{flex:1;border-top:1px solid #999;padding-top:5px}'
+    + '@media print{body{margin:12mm}}'
+    + '</style></head><body>');
+  w.document.write('<h1>PHOENIX FUEL S.R.L.</h1>'
+    + '<div class="sub">Zona Industriale · 89900 Vibo Valentia (VV) · P.IVA 02744150802</div>'
+    + '<div class="box">'
+      + '<div><div class="et">Fornitore</div><strong>' + esc(_ecfSel.nome) + '</strong>'
+        + '<div style="color:#666;margin-top:2px">dilazione ' + _ecfSel.gg + ' giorni</div></div>'
+      + '<div><div class="et">Documento</div><strong>' + esc(f.numero || 'senza numero') + '</strong>'
+        + '<div style="color:#666;margin-top:2px">del ' + (f.data ? _pfIsoToIt(f.data) : '—')
+        + (f.dataScadenza ? ' · scadenza ' + _pfIsoToIt(f.dataScadenza) : '') + '</div></div>'
+      + '<div><div class="et">Consegne che la compongono</div><strong>' + (f.ordini || []).length + '</strong>'
+        + '<div style="color:#666;margin-top:2px">stampato il ' + _pfIsoToIt(new Date().toISOString().slice(0, 10)) + '</div></div>'
+    + '</div>');
+  w.document.write('<table><thead><tr>'
+    + '<th>Data</th><th>Prodotto</th><th class="r">Litri</th><th class="r">€/L</th>'
+    + '<th class="r">Imponibile</th><th>Cliente</th><th>Sede di scarico</th></tr></thead>'
+    + '<tbody>' + righe + '</tbody>'
+    + '<tfoot>'
+      + '<tr><td colspan="4">Totale imponibile</td><td class="r">' + fmtE(imp) + '</td><td colspan="2"></td></tr>'
+      + '<tr><td colspan="4">IVA</td><td class="r">' + fmtE(iva) + '</td><td colspan="2"></td></tr>'
+      + '<tr><td colspan="4">Totale documento</td><td class="r">' + fmtE(f.totale) + '</td><td colspan="2"></td></tr>'
+    + '</tfoot></table>');
+  if (f.pagato > 0) {
+    w.document.write('<div style="margin-top:12px;font-size:11.5px">Pagato ' + fmtE(f.pagato)
+      + (f.saldata ? ' — saldata' : ' · residuo ' + fmtE(f.residuo)) + '</div>');
+  }
+  w.document.write('<div class="firme"><div>Verificato da</div><div>Note</div></div>');
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 400);
+}
+
 // Apre e chiude la riga di dettaglio dell'ordine dentro il modale fattura.
 function ecfInfoOrdine(i) {
   var tr = document.getElementById('ecf-ord-' + i);
@@ -927,6 +1098,7 @@ function ecfInfoFattura(fatturaId) {
     + (f.pagato > 0 ? '<div style="font-size:12px;color:#3B6D11;margin-top:10px">Pagato ' + fmtE(f.pagato) + (f.saldata ? ' — saldata' : ' · residuo ' + fmtE(f.residuo)) + '</div>' : '')
     + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">'
       + (!f.numero ? '<button onclick="ecfNumeraFattura(\'' + f.id + '\')" style="padding:8px 14px;font-size:12px;border:0.5px solid #F5921E;border-radius:8px;background:#FFF1DC;color:#8A4F06;font-weight:600;cursor:pointer">✎ Inserisci numero</button>' : '')
+      + '<button onclick="ecfStampaFattura(\'' + f.id + '\')" style="padding:8px 14px;font-size:12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer">🖨 Stampa</button>'
       + (!f.saldata ? '<button onclick="ecfPagaFattura(\'' + f.id + '\')" style="padding:8px 16px;font-size:12px;border:none;border-radius:8px;background:#0C447C;color:#fff;font-weight:600;cursor:pointer">Registra pagamento</button>' : '')
     + '</div>';
   apriModal(h);
@@ -1205,4 +1377,129 @@ function _ecfDisegnaMesi(cards) {
       }
     }
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TUTTI I FORNITORI (30/07) — la vista che oggi vive nello Scadenzario, qui
+// dentro: scadenze di TUTTI i fornitori insieme, per pianificare la cassa.
+// Stesso motore delle altre viste (spazio dei nomi 'tf'), stessa query madre.
+// Una fattura riguarda un fornitore solo: il contesto del modale si ricava da
+// cio che e' spuntato, come nello Scadenzario.
+// ═══════════════════════════════════════════════════════════════════════════
+var _ecfTuttiOn = false;
+var _ecfTuttiMese = null;                       // null = tutto l'anno
+var _ecfTuttiAnno = new Date().getFullYear();
+var _ecfTuttiStato = 'da-pagare';               // 'da-pagare' | 'tutti'
+var _ecfTuttiSel = {};                          // si muta in loco
+
+function ecfApriTutti() { _ecfTuttiOn = true; _ecfSel = null; ecfTuttiRender(); }
+function ecfChiudiTutti() { _ecfTuttiOn = false; _ecfOverview(); }
+function ecfTuttiPeriodo(v) { _ecfTuttiMese = (v === '' ? null : parseInt(v, 10)); ecfTuttiRender(); }
+function ecfTuttiAnno(v) { _ecfTuttiAnno = parseInt(v, 10); ecfTuttiRender(); }
+function ecfTuttiStato(v) { _ecfTuttiStato = v; ecfTuttiRender(); }
+
+// fornitore ricavato dalla selezione; null se vuota o se ne mescola piu di uno
+function _ecfFornDaSel(ordini) {
+  var nomi = [];
+  (ordini || []).forEach(function (o) {
+    if (!_ecfTuttiSel[o.id]) return;
+    var n = String(o.fornitore || '').trim();
+    if (n && nomi.indexOf(n) < 0) nomi.push(n);
+  });
+  if (nomi.length !== 1) {
+    if (nomi.length > 1 && typeof toast === 'function') toast('Una fattura riguarda un fornitore solo: hai selezionato ' + nomi.length + ' fornitori');
+    return null;
+  }
+  var f = (_ecfFornitori || []).filter(function (x) {
+    return String(x.nome || '').toLowerCase().trim() === nomi[0].toLowerCase();
+  })[0];
+  return { id: f ? f.id : null, nome: nomi[0], gg: f ? (f.giorni_pagamento || 30) : 30, fido: f ? (f.fido_massimo || 0) : 0 };
+}
+
+async function ecfTuttiRender() {
+  var body = document.getElementById('ecf-body');
+  if (!body) return;
+  body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:34px;font-size:12px">Caricamento…</div>';
+
+  var d;
+  try { d = await pfDebitoDati(true); }
+  catch (e) { body.innerHTML = '<div style="color:#A32D2D;font-size:12.5px">Errore: ' + esc((e && e.message) || e) + '</div>'; return; }
+  _ecfFornitori = d.fornitori;
+
+  // ordini VIVI di tutti i fornitori (stesso perimetro del fido)
+  var tutti = (d.ordini || []).filter(function (o) { return _ecfTuttiStato === 'tutti' || (!o.pagato && !o.fattSaldata); });
+  var elenco = tutti.filter(function (o) {
+    var sc = String(o.scadenza || o.data || '');
+    if (!sc) return _ecfTuttiMese === null;
+    if (Number(sc.slice(0, 4)) !== _ecfTuttiAnno) return false;
+    if (_ecfTuttiMese !== null && Number(sc.slice(5, 7)) !== _ecfTuttiMese + 1) return false;
+    return true;
+  });
+
+  var oggi = new Date().toISOString().slice(0, 10);
+  var tot = elenco.reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+  var scaduto = elenco.filter(function (o) { return o.scadenza && o.scadenza < oggi; })
+                      .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0);
+  var prossime = elenco.filter(function (o) { return o.scadenza && o.scadenza >= oggi; })
+                       .sort(function (a, b) { return a.scadenza < b.scadenza ? -1 : 1; });
+  var pross = prossime[0] || null;
+  var impPross = pross ? prossime.filter(function (o) { return o.scadenza === pross.scadenza; })
+                                 .reduce(function (a, o) { return a + Number(o.totale || 0); }, 0) : 0;
+
+  if (typeof pfRfCtx === 'function') {
+    pfRfCtx('tf', {
+      ordini: elenco,
+      sel: _ecfTuttiSel,
+      fornitore: _ecfFornDaSel(elenco),
+      selezionabile: true,
+      pagatiInFondo: false,
+      onChange: ecfTuttiRender,
+      onSaved: async function () { _ecfTuttiSel = {}; await ecfTuttiRender(); }
+    });
+  }
+
+  var MESI = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  var anni = []; for (var a = _ecfTuttiAnno + 1; a >= _ecfTuttiAnno - 2; a--) anni.push(a);
+  var selStile = 'font-size:11.5px;padding:6px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer';
+
+  var kpi = function (lab, val, sub, col) {
+    return '<div style="flex:1;min-width:170px;border:0.5px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--bg)">'
+      + '<div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700;color:' + (col || 'var(--text)') + '">' + val + '</div>'
+      + (sub ? '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div>' : '') + '</div>';
+  };
+
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">'
+    + '<div style="font-size:15px;font-weight:700">🗂 Tutti i fornitori · per scadenza</div>'
+    + '<button onclick="ecfChiudiTutti()" style="font-size:11.5px;padding:6px 13px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Panoramica fornitori</button>'
+    + '</div>';
+
+  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+    + ['da-pagare', 'tutti'].map(function (v) {
+        var on = _ecfTuttiStato === v;
+        return '<button onclick="ecfTuttiStato(\'' + v + '\')" style="font-size:11.5px;padding:6px 14px;border:0.5px solid ' + (on ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#0C447C' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer">' + (v === 'da-pagare' ? 'Da pagare' : 'Tutti') + '</button>';
+      }).join('')
+    + '<span style="width:8px"></span>'
+    + '<select onchange="ecfTuttiPeriodo(this.value)" style="' + selStile + '">'
+      + '<option value=""' + (_ecfTuttiMese === null ? ' selected' : '') + '>Tutto l\'anno</option>'
+      + MESI.map(function (m, i) { return '<option value="' + i + '"' + (_ecfTuttiMese === i ? ' selected' : '') + '>' + m + '</option>'; }).join('')
+    + '</select>'
+    + '<select onchange="ecfTuttiAnno(this.value)" style="' + selStile + '">'
+      + anni.map(function (x) { return '<option value="' + x + '"' + (x === _ecfTuttiAnno ? ' selected' : '') + '>' + x + '</option>'; }).join('')
+    + '</select>'
+    + '<span style="font-size:11px;color:var(--text-muted)">per data di scadenza, dalla più vicina</span>'
+    + '</div>';
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    + kpi('Totale periodo', fmtE(tot), elenco.length + ' documenti')
+    + kpi('Scaduto', scaduto > 0 ? fmtE(scaduto) : '—', scaduto > 0 ? 'da sistemare' : 'niente scaduto', scaduto > 0 ? '#A32D2D' : '#888')
+    + kpi('Prossima scadenza', pross ? _pfIsoToIt(pross.scadenza) : '—', pross ? fmtE(impPross) : '')
+    + kpi('Fornitori coinvolti', String(new Set(elenco.map(function (o) { return o.fornitore; })).size), 'nel periodo scelto')
+    + '</div>';
+
+  if (typeof pfRfCtx === 'function') {
+    h += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">' + pfRfBtnVista('tf') + '</div>'
+      + pfRfTabella('tf') + pfRfBox('tf');
+  }
+  body.innerHTML = h;
 }
