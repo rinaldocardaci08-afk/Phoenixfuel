@@ -746,6 +746,95 @@ async function _antRenderTabBanca(affidamentoId) {
   }
 }
 
+// ─── QUANTO DEL LAVORATO PASSA DALL'ANTICIPO (30/07) ──────────────────────
+// Due banner, consumo e rete: fatturato IMPONIBILE dell'anno e quanta parte e'
+// transitata dall'anticipo — l'imponibile perche' e' quello che occupa il fido.
+// La divisione consumo/rete e' un'abitudine commerciale, non una regola: il
+// calcolo guarda cosa e' stato anticipato davvero, quindi se un domani si
+// anticipa un cliente rete il banner lo mostra da se.
+// filtro = null → tutti gli istituti (Valutazioni); un nome → solo quello.
+function _antBannerTipologia(filtro) {
+  const D = _antValDati;
+  if (!D || !D.clienti || !D.clienti.length) return '';
+  const anno = new Date().getFullYear();
+  const IVA = 1.22;
+
+  const reteDi = {}, perNome = {};
+  D.clienti.forEach(function (c) {
+    reteDi[c.id] = !!c.cliente_rete;
+    const k1 = String(c.nome || '').toLowerCase().trim();
+    const k2 = String(c.ragione_sociale || '').toLowerCase().trim();
+    if (k1) perNome[k1] = c.id;
+    if (k2) perNome[k2] = c.id;
+  });
+
+  const G = { consumo: { fatt: 0, ant: 0, clienti: {} }, rete: { fatt: 0, ant: 0, clienti: {} } };
+  (D.fattEmesse || []).forEach(function (f) {
+    if (!f.cliente_id) return;
+    const g = reteDi[f.cliente_id] ? G.rete : G.consumo;
+    g.fatt += Number(f.importo_totale || 0) / IVA;
+    g.clienti[f.cliente_id] = 1;
+  });
+
+  const nomeIst = {}; D.ist.forEach(function (i) { nomeIst[i.id] = i.nome; });
+  const affDi = {}; D.aff.forEach(function (a) { affDi[a.id] = nomeIst[a.istituto_id] || '—'; });
+  const presDi = {}; D.pres.forEach(function (p) { presDi[p.id] = p; });
+
+  (D.fatt || []).forEach(function (f) {
+    const p = presDi[f.presentazione_id]; if (!p) return;
+    if (filtro && affDi[p.affidamento_id] !== filtro) return;
+    const d = String(f.data_emissione || p.data_presentazione || '');
+    if (!d || Number(d.slice(0, 4)) !== anno) return;
+    let cid = f.cliente_id;
+    if (!cid) cid = perNome[String(f.cliente_nome || '').toLowerCase().trim()];
+    const g = (cid && reteDi[cid]) ? G.rete : G.consumo;
+    g.ant += Number(f.importo_anticipato_calcolato || 0);
+  });
+
+  const box = function (titolo, d, colore, fill) {
+    const pct = d.fatt > 0 ? Math.round(d.ant / d.fatt * 100) : 0;
+    const mai = Math.max(0, d.fatt - d.ant);
+    return '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:11px;padding:13px 15px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px">'
+        + '<span style="font-size:14px;font-weight:700">' + titolo + '</span>'
+        + '<span style="font-size:11.5px;color:var(--text-muted)">' + Object.keys(d.clienti).length + ' clienti</span></div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;margin-bottom:5px">'
+        + '<span style="color:var(--text-muted)">Anticipato <strong style="color:' + colore + '">' + pct + '%</strong></span>'
+        + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(d.ant) + ' / ' + fmtE(d.fatt) + '</span></div>'
+      + '<div style="height:17px;border-radius:9px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;margin-bottom:9px">'
+        + '<div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + fill + '"></div></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px;line-height:1.9"><span style="color:var(--text-muted)">Fatturato ' + anno + ' (imponibile)</span><span style="font-family:var(--font-mono)">' + fmtE(d.fatt) + '</span></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px;line-height:1.9"><span style="color:var(--text-muted)">Passato dall\'anticipo</span><span style="font-family:var(--font-mono);color:' + colore + '">' + fmtE(d.ant) + '</span></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px;line-height:1.9;padding-top:6px;border-top:0.5px solid var(--border)"><span style="color:var(--text-muted)">Mai anticipato</span><span style="font-family:var(--font-mono)">' + fmtE(mai) + '</span></div>'
+      + '</div>';
+  };
+
+  const totF = G.consumo.fatt + G.rete.fatt;
+  const pc = totF > 0 ? (G.consumo.ant / totF * 100) : 0;
+  const pr = totF > 0 ? (G.rete.ant / totF * 100) : 0;
+  const mai = Math.max(0, totF - G.consumo.ant - G.rete.ant);
+
+  let h = '<div style="font-size:13px;font-weight:700;margin:18px 0 4px">Quanto del lavorato passa dall\'anticipo'
+    + (filtro ? ' — ' + esc(filtro) : ' — tutti gli istituti') + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">fatturato ' + anno + ' al netto IVA, perché è l\'imponibile che occupa il fido</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;margin-bottom:12px">'
+    + box('Clienti consumo', G.consumo, '#0C447C', '#378ADD')
+    + box('Clienti rete', G.rete, '#27500A', '#639922')
+    + '</div>';
+  h += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:11px;padding:12px 15px">'
+    + '<div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Tutto il fatturato ' + anno + '</div>'
+    + '<div style="display:flex;height:24px;border-radius:6px;overflow:hidden;margin-bottom:7px">'
+      + '<div style="width:' + pc.toFixed(1) + '%;background:#378ADD"></div>'
+      + '<div style="width:' + pr.toFixed(1) + '%;background:#639922"></div>'
+      + '<div style="flex:1;background:var(--bg-card);border-left:0.5px solid var(--border)"></div></div>'
+    + '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-muted)">'
+      + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#378ADD;margin-right:5px"></span>Consumo anticipato ' + fmtE(G.consumo.ant) + ' · ' + pc.toFixed(1) + '%</span>'
+      + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#639922;margin-right:5px"></span>Rete anticipato ' + fmtE(G.rete.ant) + ' · ' + pr.toFixed(1) + '%</span>'
+      + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--bg-card);border:0.5px solid var(--border);margin-right:5px"></span>Mai anticipato ' + fmtE(mai) + '</span>'
+    + '</div></div>';
+  return h;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ANALISI ANTICIPI PER CLIENTE (30/07)
 // Stessa struttura del documento preparato per la banca il 14 luglio: per ogni
@@ -866,6 +955,8 @@ function _antRenderAnalisiClienti() {
     + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">100%</td>'
     + '<td colspan="3"></td></tr>';
   h += '</tbody></table></div>';
+
+  h += _antBannerTipologia(_antAnalisiIst);    // banner del solo istituto
 
   cont.innerHTML = h;
 
@@ -3368,6 +3459,26 @@ async function antApriValutazioni(riusa, soloDati) {
         sb.from('anticipi_sbf_fatture').select('presentazione_id,cliente_nome,totale_fattura,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
       ]);
       _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
+      // clienti (per la tipologia) e fatturato dell'anno. Le fatture emesse sono
+      // tante: lettura PAGINATA, altrimenti si ferma a mille righe.
+      try {
+        const rc = await sb.from('clienti').select('id,nome,ragione_sociale,cliente_rete');
+        _antValDati.clienti = rc.data || [];
+        const annoOra = new Date().getFullYear();
+        let tutte = [], da = 0;
+        for (let g = 0; g < 20; g++) {
+          const rf = await sb.from('fatture_emesse').select('cliente_id,importo_totale,anno')
+            .eq('anno', annoOra).range(da, da + 999);
+          const b = rf.data || [];
+          tutte = tutte.concat(b);
+          if (b.length < 1000) break;
+          da += 1000;
+        }
+        _antValDati.fattEmesse = tutte;
+      } catch (e) {
+        console.warn('[ant] clienti/fatturato', e);
+        _antValDati.clienti = []; _antValDati.fattEmesse = [];
+      }
     }
     if (soloDati) {
       // serviva solo per la barra nella scheda istituto: ridisegna quella
@@ -3609,6 +3720,7 @@ function _antRenderValutazioni() {
       + '</div>';
   });
   h += '</div>';
+  h += _antBannerTipologia(null);      // totali su tutti gli istituti
 
   cont.innerHTML = h;
 
