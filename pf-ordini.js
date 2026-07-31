@@ -1100,7 +1100,7 @@ function _renderRigaOrdine(r) {
   // Patch v20260503r: badge accoppiamento fattura sotto la data (display-only, no scrittura DB)
   return '<tr><td style="vertical-align:top">' + fmtD(r.data) + badgeFuturo + _renderBadgeFatturaInline(r) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente)
      + (r.cliente_id ? ' <span onclick="event.stopPropagation();pfFidoCliente(\'' + r.cliente_id + '\')" title="Fido e situazione del cliente" style="cursor:pointer;margin-left:5px">🛡️</span>' : '')
-     + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+     + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'costo_litro\',\'' + r.id + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -1117,7 +1117,7 @@ async function caricaOrdiniGiorno() {
   var data = inp.value;
 
   if (!navigator.onLine) {
-    document.getElementById('tabella-ordini').innerHTML = '<tr><td colspan="14" class="loading" style="color:#D85A30">⚡ Sei offline</td></tr>';
+    document.getElementById('tabella-ordini').innerHTML = '<tr><td colspan="15" class="loading" style="color:#D85A30">⚡ Sei offline</td></tr>';
     return;
   }
   await aggiornaSelezioniOrdine();
@@ -1125,7 +1125,7 @@ async function caricaOrdiniGiorno() {
   const tbody = document.getElementById('tabella-ordini');
   var countEl = document.getElementById('ordini-giorno-count');
   if (!ordini||!ordini.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine per questa data</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" class="loading">Nessun ordine per questa data</td></tr>';
     if (countEl) countEl.textContent = '0 ordini';
     return;
   }
@@ -1469,13 +1469,13 @@ async function caricaStoricoOrdini() {
     document.getElementById('filtro-da-ordini').value = da;
     document.getElementById('filtro-a-ordini').value = a;
   }
-  tbody.innerHTML = '<tr><td colspan="14" class="loading">Caricamento...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="15" class="loading">Caricamento...</td></tr>';
   var q = sb.from('ordini').select('*, basi_carico(nome), carico_ordini(carichi(trasportatori(nome)))').order('data',{ascending:false}).order('created_at',{ascending:false});
   if (da) q = q.gte('data', da);
   if (a) q = q.lte('data', a);
   q = q.limit(1000);
   const { data: ordini } = await q;
-  if (!ordini||!ordini.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine nel periodo</td></tr>'; return; }
+  if (!ordini||!ordini.length) { tbody.innerHTML = '<tr><td colspan="15" class="loading">Nessun ordine nel periodo</td></tr>'; return; }
   window._storicoOrdiniData = ordini;
   _renderStoricoFiltrato();
 }
@@ -1496,7 +1496,7 @@ function _renderStoricoFiltrato() {
   });
 
   var tbody = document.getElementById('tabella-storico-ordini');
-  if (!filtrati.length) { tbody.innerHTML = '<tr><td colspan="14" class="loading">Nessun ordine con questi filtri</td></tr>'; return; }
+  if (!filtrati.length) { tbody.innerHTML = '<tr><td colspan="15" class="loading">Nessun ordine con questi filtri</td></tr>'; return; }
   // Popola cache DAS per bloccare bottone annulla scarico/carico sui già processati
   _popolaOrdiniConDas(filtrati.map(function(o){return o.id;})).then(async function() {
     // Patch v20260503r: costruisco mappa accoppiamento fattura per badge inline
