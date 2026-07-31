@@ -1,4 +1,8 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260731a — guardiano del prezzo di vendita: le celle Trasporto/L e
+//               Margine/L dell'elenco non scrivono piu mute, e su un ordine
+//               gia fatturato il prezzo al cliente non si tocca (il margine
+//               assorbe la differenza). Decisione unica in _ordRegolaPrezzo.
 // v20260626a — entrata in Ordini: pulsante "💧 Accetta" → apriAccettaCarico (modale DAS entrata + registro)
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1096,7 +1100,7 @@ function _renderRigaOrdine(r) {
   // Patch v20260503r: badge accoppiamento fattura sotto la data (display-only, no scrittura DB)
   return '<tr><td style="vertical-align:top">' + fmtD(r.data) + badgeFuturo + _renderBadgeFatturaInline(r) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente)
      + (r.cliente_id ? ' <span onclick="event.stopPropagation();pfFidoCliente(\'' + r.cliente_id + '\')" title="Fido e situazione del cliente" style="cursor:pointer;margin-left:5px">🛡️</span>' : '')
-     + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="editaCella(this,\'ordini\',\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+     + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
@@ -1990,6 +1994,7 @@ let _ordiniCache = [];
 // ── MODIFICA ORDINE ───────────────────────────────────────────────
 // Valori originali dell'ordine in modifica, usati per rilevare cambi di costo
 var _modOrigCosto = null, _modOrigTrasporto = null, _modOrigMargine = null, _modOrigPrezzoNetto = null;
+var _modHasFattura = false;
 
 async function apriModaleOrdine(id) {
   // ═══ v20260515c: carico ordine + clienti in parallelo (Promise.all) ═══
@@ -2005,6 +2010,7 @@ async function apriModaleOrdine(id) {
   window._modOrigClienteId = r.cliente_id;
 
   // Memorizza valori originali per il check di coerenza in salvataggio
+  _modHasFattura = !!(r.fattura_id);
   _modOrigCosto = Number(r.costo_litro);
   _modOrigTrasporto = Number(r.trasporto_litro);
   _modOrigMargine = Number(r.margine);
@@ -2063,10 +2069,13 @@ async function apriModaleOrdine(id) {
   var dataLocked = (r.stato === 'consegnato');
   html += '<div class="form-group"><label>Data consegna' + (dataLocked ? ' <span style="font-size:10px;color:#639922;font-weight:500">🔒 Consegnato</span>' : '') + '</label><input type="date" id="mod-data" value="' + (r.data || '') + '"' + (dataLocked ? ' disabled title="Data bloccata: ordine consegnato"' : '') + ' /></div>';
   html += '<div class="form-group"><label>Litri</label><input type="number" id="mod-litri" value="' + r.litri + '" /></div>';
+  var fattBloccoPrezzo = !!(r.fattura_id);
+  var lucchettoPrezzo = fattBloccoPrezzo ? ' <span style="font-size:10px;color:#8B6A00;font-weight:500">&#128274; Fattura emessa</span>' : '';
+  var attrBloccoPrezzo = fattBloccoPrezzo ? ' disabled title="Bloccato: fattura gia emessa. Il prezzo di vendita non si tocca; cambia un costo e il margine si adegua da solo."' : '';
   html += '<div class="form-group"><label>Costo/L</label><input type="number" id="mod-costo" step="0.000001" value="' + r.costo_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
   html += '<div class="form-group"><label>Trasporto/L</label><input type="number" id="mod-trasporto" step="0.000001" value="' + r.trasporto_litro + '" onchange="aggiornaPreviewModifica()" /></div>';
-  html += '<div class="form-group"><label>Margine/L</label><input type="number" id="mod-margine" step="0.000001" value="' + r.margine + '" onchange="aggiornaPreviewModifica()" /></div>';
-  html += '<div class="form-group"><label>Prezzo netto/L</label><input type="number" id="mod-prezzo-netto" step="0.000001" value="' + (Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine)).toFixed(6) + '" onchange="aggiornaMargineDaPrezzo()" /></div>';
+  html += '<div class="form-group"><label>Margine/L' + lucchettoPrezzo + '</label><input type="number" id="mod-margine" step="0.000001" value="' + r.margine + '"' + attrBloccoPrezzo + ' onchange="aggiornaPreviewModifica()" /></div>';
+  html += '<div class="form-group"><label>Prezzo netto/L' + lucchettoPrezzo + '</label><input type="number" id="mod-prezzo-netto" step="0.000001" value="' + (Number(r.costo_litro)+Number(r.trasporto_litro)+Number(r.margine)).toFixed(6) + '"' + attrBloccoPrezzo + ' onchange="aggiornaMargineDaPrezzo()" /></div>';
   html += '<div class="form-group"><label>Giorni pagamento</label><select id="mod-gg">';
   [30,45,60].forEach(g => { html += '<option value="' + g + '"' + (r.giorni_pagamento==g?' selected':'') + '>' + g + ' gg</option>'; });
   html += '</select></div>';
@@ -2368,8 +2377,14 @@ function _mostraPopupConfermaPrezzo(id, nuovoCosto, nuovoTrasporto, margineCorre
   var bgOk = '#EAF3DE', txtOk = '#27500A';
   var trasportoCambiato = Math.abs(nuovoTrasporto - _modOrigTrasporto) > 0.00001;
 
-  var html = '<div style="font-size:16px;font-weight:600;margin-bottom:6px">⚠️ Hai modificato il costo di acquisto</div>';
-  html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Il prezzo netto cliente era già stato comunicato. Cosa vuoi fare?</div>';
+  var html = '';
+  if (_modHasFattura) {
+    html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">&#128274; Ordine gia fatturato</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Il prezzo di vendita e su una fattura ufficiale e non viene toccato. Cambia solo il margine.</div>';
+  } else {
+    html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">&#9888;&#65039; Hai modificato il costo di acquisto</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Il prezzo netto cliente era gia stato comunicato. Cosa vuoi fare?</div>';
+  }
 
   // Tabella confronto valori (3 colonne: voce, prima, dopo)
   html += '<div style="background:var(--bg-kpi);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">';
@@ -2394,11 +2409,13 @@ function _mostraPopupConfermaPrezzo(id, nuovoCosto, nuovoTrasporto, margineCorre
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il margine viene ricalcolato: ' + margineCorrente.toFixed(6) + ' → ' + margineRicalc.toFixed(6) + ' €/L</div>';
   html += '</button>';
 
-  // Opzione 2: accetta nuovo prezzo
+  // Opzione 2: accetta nuovo prezzo - NON offerta se l ordine ha gia la fattura
+  if (!_modHasFattura) {
   html += '<button onclick="_optAccettaNuovoPrezzo(\'' + id + '\',' + nuovoCosto + ',' + nuovoTrasporto + ',' + margineCorrente + ')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #BA7517;background:' + bgWarn + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
   html += '<div style="font-weight:600;font-size:13px;color:' + txtWarn + '">⚠ Accetta nuovo prezzo netto € ' + prezzoNuovo.toFixed(6) + '/L</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il prezzo cliente cambia di ' + (deltaPrezzo>=0?'+':'') + deltaPrezzo.toFixed(6) + ' €/L. Margine invariato a ' + margineCorrente.toFixed(6) + '</div>';
   html += '</button>';
+  }
 
   // Opzione 3: annulla → riapre la modale ricaricando l'ordine, scarta tutto
   html += '<button onclick="chiudiModalePermessi();apriModaleOrdine(\'' + id + '\')" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid var(--border);background:var(--bg);border-radius:8px;cursor:pointer">';
@@ -2528,6 +2545,184 @@ async function eliminaDocumento(docId, percorso, ordineId) {
 }
 
 // ── MODIFICA INLINE ───────────────────────────────────────────────
+
+// ═══ v20260731a · GUARDIANO DEL PREZZO DI VENDITA ═══════════════════
+// Nella tabella `ordini` il prezzo NON e' salvato da nessuna parte:
+//   prezzo netto = costo_litro + trasporto_litro + margine
+// Quindi toccare un costo SPOSTA il prezzo al cliente, a meno che il
+// margine non venga ricalcolato.
+// Regola di Rinaldo (31/07/2026):
+//   - ordine SENZA fattura -> si chiede sempre cosa fare, anche dalle
+//     celle dell'elenco (prima scrivevano mute);
+//   - ordine CON fattura   -> il prezzo e' su un documento ufficiale e
+//     non si tocca mai: il margine assorbe la differenza e il popup
+//     informa soltanto.
+// Questa funzione e' l'UNICO punto che decide. La usano sia le celle
+// dell'elenco sia il salvataggio della modale.
+function _ordRegolaPrezzo(orig, nuovo, hasFattura) {
+  var pOrig = Number(orig.costo) + Number(orig.trasporto) + Number(orig.margine);
+  var pNuovo = Number(nuovo.costo) + Number(nuovo.trasporto) + Number(nuovo.margine);
+  var costoTocco = Math.abs(Number(nuovo.costo) - Number(orig.costo)) > 0.00001
+                || Math.abs(Number(nuovo.trasporto) - Number(orig.trasporto)) > 0.00001;
+  var margineTocco = Math.abs(Number(nuovo.margine) - Number(orig.margine)) > 0.00001;
+  var r = {
+    prezzoOrig: pOrig,
+    prezzoNuovo: pNuovo,
+    margineRicalc: pOrig - Number(nuovo.costo) - Number(nuovo.trasporto),
+    costoTocco: costoTocco,
+    margineTocco: margineTocco,
+    azione: 'scrivi',
+    motivo: ''
+  };
+  if (!costoTocco && !margineTocco) return r;
+  if (hasFattura) {
+    if (margineTocco && !costoTocco) {
+      r.azione = 'vietato';
+      r.motivo = 'Ordine gia fatturato: il margine non si cambia a mano, sposterebbe il prezzo di vendita. Correggi un costo e il margine si adegua da solo.';
+      return r;
+    }
+    r.azione = 'forza-prezzo';
+    return r;
+  }
+  if (costoTocco && !margineTocco) { r.azione = 'chiedi'; return r; }
+  return r;
+}
+
+// Editor in linea per costo/trasporto/margine nell'elenco ordini.
+// Stesso comportamento dell'editaCella di prima (clic, digiti, Invio o
+// Esc), ma prima di scrivere rilegge l'ordine dal database e passa dal
+// guardiano qui sopra.
+async function _ordEditaPrezzo(td, campo, id, val) {
+  const input = document.createElement('input');
+  input.className = 'inline-edit'; input.type = 'number'; input.step = '0.000001'; input.value = val;
+  td.innerHTML = ''; td.appendChild(input); input.focus();
+  var finito = false;
+  input.onkeydown = function(e) {
+    if (e.key === 'Enter') input.blur();
+    if (e.key === 'Escape') { finito = true; caricaOrdini(); }
+  };
+  input.onblur = async function() {
+    if (finito) return;
+    finito = true;
+    var nv = parseFloat(input.value);
+    if (isNaN(nv)) { caricaOrdini(); return; }
+    var lettura = await sb.from('ordini')
+      .select('id,cliente,litri,costo_litro,trasporto_litro,margine,fattura_id')
+      .eq('id', id).single();
+    if (lettura.error || !lettura.data) {
+      toast('Non riesco a rileggere l ordine: modifica annullata');
+      caricaOrdini(); return;
+    }
+    var o = lettura.data;
+    var orig = { costo: Number(o.costo_litro || 0), trasporto: Number(o.trasporto_litro || 0), margine: Number(o.margine || 0) };
+    var nuovo = { costo: orig.costo, trasporto: orig.trasporto, margine: orig.margine };
+    if (campo === 'costo_litro') nuovo.costo = nv;
+    else if (campo === 'trasporto_litro') nuovo.trasporto = nv;
+    else nuovo.margine = nv;
+    var hasFatt = !!o.fattura_id;
+    var reg = _ordRegolaPrezzo(orig, nuovo, hasFatt);
+    if (reg.azione === 'vietato') { alert('\u{1F512} ' + reg.motivo); caricaOrdini(); return; }
+    if (reg.azione === 'scrivi') { await _ordScriviPrezzo(id, campo, nv, null); return; }
+    window._ordPrezzoPend = { id: id, campo: campo, valore: nv, orig: orig, nuovo: nuovo, reg: reg, hasFatt: hasFatt, litri: Number(o.litri || 0), cliente: o.cliente || '' };
+    _ordPopupPrezzo();
+  };
+}
+
+// Scrittura unica per le celle dell'elenco: il campo toccato e, quando
+// serve tenere fermo il prezzo, anche il margine ricalcolato.
+async function _ordScriviPrezzo(id, campo, valore, margineNuovo) {
+  var payload = {};
+  payload[campo] = valore;
+  if (margineNuovo !== null && margineNuovo !== undefined) payload.margine = margineNuovo;
+  var res = await sb.from('ordini').update(payload).eq('id', id);
+  if (res.error) { toast('Errore: ' + res.error.message); }
+  else {
+    _auditLog('modifica_ordini', 'ordini', 'id:' + id + ' | ' + campo + ' -> ' + valore
+      + (margineNuovo !== null && margineNuovo !== undefined ? ' | margine -> ' + margineNuovo + ' (prezzo di vendita tenuto fermo)' : ''));
+    toast('Aggiornato!');
+  }
+  caricaOrdini();
+}
+
+function _ordPopupPrezzo() {
+  var p = window._ordPrezzoPend;
+  if (!p) return;
+  var reg = p.reg;
+  var litri = p.litri;
+  var margOra = p.orig.margine;
+  var margDopo = reg.margineRicalc;
+  var bgWarn = '#FAEEDA', txtWarn = '#854F0B';
+  var bgOk = '#EAF3DE', txtOk = '#27500A';
+  var mono = 'font-family:var(--font-mono)';
+
+  var html = '';
+  if (p.hasFatt) {
+    html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">\u{1F512} Ordine gia fatturato</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Il prezzo di vendita e su una fattura ufficiale e non viene toccato. Cambia solo il margine.</div>';
+  } else {
+    html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">\u{26A0}\u{FE0F} Hai cambiato un costo</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Il prezzo di vendita si calcola come costo + trasporto + margine. Cosa vuoi fare?</div>';
+  }
+
+  html += '<div style="background:var(--bg-kpi);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">';
+  html += '<div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 18px;align-items:baseline">';
+  html += '<div style="color:var(--text-muted)">Costo &euro;/L</div>';
+  html += '<div style="' + mono + ';color:var(--text-muted)">' + p.orig.costo.toFixed(6) + '</div>';
+  html += '<div style="' + mono + ';font-weight:600">' + p.nuovo.costo.toFixed(6) + '</div>';
+  html += '<div style="color:var(--text-muted)">Trasporto &euro;/L</div>';
+  html += '<div style="' + mono + ';color:var(--text-muted)">' + p.orig.trasporto.toFixed(6) + '</div>';
+  html += '<div style="' + mono + ';font-weight:600">' + p.nuovo.trasporto.toFixed(6) + '</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;font-weight:600">Prezzo di vendita &euro;/L</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;' + mono + ';font-weight:600">' + reg.prezzoOrig.toFixed(6) + '</div>';
+  html += '<div style="border-top:0.5px solid var(--border);padding-top:6px;' + mono + ';font-weight:600' + (p.hasFatt ? '' : ';color:' + txtWarn) + '">' + (p.hasFatt ? reg.prezzoOrig.toFixed(6) + ' \u{1F512}' : reg.prezzoNuovo.toFixed(6)) + '</div>';
+  html += '</div></div>';
+
+  // Riquadro del margine: prima -> dopo, per litro e sulla consegna
+  html += '<div style="background:var(--bg-kpi);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;display:flex;gap:18px;flex-wrap:wrap">';
+  html += '<div><div style="color:var(--text-muted);font-size:12px">Margine &euro;/L</div><div style="' + mono + ';font-size:18px;font-weight:600"><span style="color:var(--text-muted)">' + margOra.toFixed(6) + '</span> &rarr; <span style="color:' + (margDopo < margOra ? '#A32D2D' : txtOk) + '">' + margDopo.toFixed(6) + '</span></div></div>';
+  if (litri > 0) {
+    html += '<div style="margin-left:auto;text-align:right"><div style="color:var(--text-muted);font-size:12px">Sulla consegna (' + litri + ' L)</div><div style="' + mono + ';font-size:18px;font-weight:600"><span style="color:var(--text-muted)">' + (margOra * litri).toFixed(2) + '</span> &rarr; <span style="color:' + (margDopo < margOra ? '#A32D2D' : txtOk) + '">' + (margDopo * litri).toFixed(2) + ' &euro;</span></div></div>';
+  }
+  html += '</div>';
+
+  html += '<button onclick="_ordOptMantieni()" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #639922;background:' + bgOk + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
+  html += '<div style="font-weight:600;font-size:13px;color:' + txtOk + '">\u{2713} ' + (p.hasFatt ? 'Conferma' : 'Mantieni il prezzo di vendita &euro; ' + reg.prezzoOrig.toFixed(6) + '/L') + '</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il margine viene ricalcolato: ' + margOra.toFixed(6) + ' &rarr; ' + margDopo.toFixed(6) + ' &euro;/L</div>';
+  html += '</button>';
+
+  if (!p.hasFatt) {
+    html += '<button onclick="_ordOptAccetta()" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid #BA7517;background:' + bgWarn + ';border-radius:8px;cursor:pointer;margin-bottom:8px">';
+    html += '<div style="font-weight:600;font-size:13px;color:' + txtWarn + '">\u{26A0} Accetta il nuovo prezzo &euro; ' + reg.prezzoNuovo.toFixed(6) + '/L</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Il margine resta ' + margOra.toFixed(6) + ' &euro;/L e il prezzo al cliente cambia</div>';
+    html += '</button>';
+  }
+
+  html += '<button onclick="_ordOptAnnulla()" style="display:block;width:100%;text-align:left;padding:12px 14px;border:0.5px solid var(--border);background:var(--bg);border-radius:8px;cursor:pointer">';
+  html += '<div style="font-weight:600;font-size:13px">Annulla</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Non cambia niente</div>';
+  html += '</button>';
+
+  apriModal(html);
+}
+
+async function _ordOptMantieni() {
+  var p = window._ordPrezzoPend; if (!p) return;
+  window._ordPrezzoPend = null;
+  chiudiModalePermessi();
+  await _ordScriviPrezzo(p.id, p.campo, p.valore, p.reg.margineRicalc);
+}
+async function _ordOptAccetta() {
+  var p = window._ordPrezzoPend; if (!p) return;
+  window._ordPrezzoPend = null;
+  chiudiModalePermessi();
+  await _ordScriviPrezzo(p.id, p.campo, p.valore, null);
+}
+function _ordOptAnnulla() {
+  window._ordPrezzoPend = null;
+  chiudiModalePermessi();
+  caricaOrdini();
+}
+
 async function editaCella(td, tabella, campo, id, val) {
   const input = document.createElement('input');
   input.className='inline-edit'; input.type='number'; input.step='0.000001'; input.value=val;
