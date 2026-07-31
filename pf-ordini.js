@@ -1,4 +1,6 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260731b — cliente in grassetto, fornitore come etichetta colorata,
+//               costo in rosso e grassetto nell elenco ordini
 // v20260731a — guardiano del prezzo di vendita: le celle Trasporto/L e
 //               Margine/L dell'elenco non scrivono piu mute, e su un ordine
 //               gia fatturato il prezzo al cliente non si tocca (il margine
@@ -1065,6 +1067,17 @@ async function salvaOrdine() {
 }
 
 // ── Helper per renderizzare una riga ordine ──
+// Sceglie nero o bianco per il testo dell etichetta fornitore, in base a
+// quanto e chiaro il colore assegnato al fornitore in anagrafica.
+function _ordTestoSuSfondo(hex) {
+  var h = String(hex || '').replace('#', '');
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  if (h.length !== 6) return '#1A1A1A';
+  var rr = parseInt(h.slice(0, 2), 16), gg = parseInt(h.slice(2, 4), 16), bb = parseInt(h.slice(4, 6), 16);
+  if (isNaN(rr) || isNaN(gg) || isNaN(bb)) return '#1A1A1A';
+  return (0.299 * rr + 0.587 * gg + 0.114 * bb) > 150 ? '#1A1A1A' : '#FFFFFF';
+}
+
 function _renderRigaOrdine(r) {
   const pL = prezzoConIva(r), tot = pL*r.litri;
   const basNome = r.basi_carico ? r.basi_carico.nome : '—';
@@ -1097,10 +1110,17 @@ function _renderRigaOrdine(r) {
   var destHtml = r.destinazione ? '<div style="font-size:10px;color:var(--text-muted)">📍 ' + esc(r.destinazione) + '</div>' : '';
   // Calcolo prezzo netto = costo + trasporto + margine
   var pNetto = Number(r.costo_litro || 0) + Number(r.trasporto_litro || 0) + Number(r.margine || 0);
+  // Fornitore come etichetta: sfondo col colore dell anagrafica fornitori
+  // (la mappa _forColori e gia caricata da caricaPrezzi), testo leggibile sopra.
+  var forCol = '#FAEEDA';
+  try { if (_forColori && _forColori[r.fornitore]) forCol = _forColori[r.fornitore]; } catch (e) {}
+  var forHtml = '<span style="display:inline-block;padding:2px 9px;border-radius:9px;background:' + forCol
+    + ';color:' + _ordTestoSuSfondo(forCol) + ';font-weight:700;font-size:12.5px;white-space:nowrap">'
+    + esc(r.fornitore) + '</span>';
   // Patch v20260503r: badge accoppiamento fattura sotto la data (display-only, no scrittura DB)
-  return '<tr><td style="vertical-align:top">' + fmtD(r.data) + badgeFuturo + _renderBadgeFatturaInline(r) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td>' + esc(r.cliente)
+  return '<tr><td style="vertical-align:top">' + fmtD(r.data) + badgeFuturo + _renderBadgeFatturaInline(r) + '</td><td>' + badgeStato(r.tipo_ordine||'cliente') + '</td><td><strong>' + esc(r.cliente) + '</strong>'
      + (r.cliente_id ? ' <span onclick="event.stopPropagation();pfFidoCliente(\'' + r.cliente_id + '\')" title="Fido e situazione del cliente" style="cursor:pointer;margin-left:5px">🛡️</span>' : '')
-     + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + esc(r.fornitore) + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'costo_litro\',\'' + r.id + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.costo_litro) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
+     + destHtml + '</td><td>' + esc(r.prodotto) + '</td><td style="font-family:var(--font-mono)">' + fmtL(r.litri) + '</td><td>' + forHtml + '</td><td>' + esc(basNome) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'costo_litro\',\'' + r.id + '\',' + r.costo_litro + ')" style="font-family:var(--font-mono);color:#A32D2D;font-weight:700">' + fmt(r.costo_litro) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'trasporto_litro\',\'' + r.id + '\',' + r.trasporto_litro + ')" style="font-family:var(--font-mono)">' + fmt(r.trasporto_litro) + '</td><td style="font-family:var(--font-mono);background:rgba(186,117,23,0.04)">' + fmt(pNetto) + '</td><td class="editable" onclick="_ordEditaPrezzo(this,\'margine\',\'' + r.id + '\',' + r.margine + ')" style="font-family:var(--font-mono)">' + fmtM(r.margine) + '</td><td style="font-family:var(--font-mono)">' + fmt(pL) + '</td><td style="font-family:var(--font-mono)">' + fmtE(tot) + '</td><td>' + badgeStato(r.stato, r) + '</td><td>' + btnCisterna + btnAnnullaOp + '<button class="btn-edit" title="DAS" onclick="mostraDasOrdine(\'' + r.id + '\')">🚛</button><button class="btn-edit" title="Conferma ordine PDF" onclick="apriConfermaOrdine(\'' + r.id + '\')">📄</button><button class="btn-edit" onclick="apriModaleOrdine(\'' + r.id + '\')">✏️</button><button class="btn-danger" onclick="eliminaRecord(\'ordini\',\'' + r.id + '\',caricaOrdini)">x</button></td></tr>';
 }
 
 // ── ORDINI DEL GIORNO (vista compatta) ──
