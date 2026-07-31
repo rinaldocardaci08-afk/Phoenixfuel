@@ -1,6 +1,11 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260731a — la creazione del modulo non puo piu fallire in silenzio:
+//              lettura paginata delle fatture gia impegnate (si fermava a
+//              mille righe e proponeva fatture non piu disponibili),
+//              controllo prima di scrivere, avvisi visibili al posto dei
+//              toast, involucro che cattura qualunque errore imprevisto.
 //
 // Patch 05/05 (a) — allineamento permessi alla Costituzione B.4:
 //   - _antIsAdmin() delega ora al global _isAdmin() di pf-admin.js (rimuove
@@ -1677,7 +1682,7 @@ async function _antRenderModalePresenta(affidamentoId) {
   // (prima erano 3 await sequenziali = 3 round-trip; ora 1 round-trip parallelo)
   var [resBL, resBusy, resF] = await Promise.all([
     sb.from('anticipi_sbf_regole').select('cliente_id').eq('affidamento_id', affidamentoId).eq('stato', 'esclusa'),
-    sb.from('anticipi_sbf_fatture').select('fattura_id').not('fattura_id', 'is', null).neq('stato', 'esclusa'),
+    _antLeggiTutte('anticipi_sbf_fatture', 'fattura_id', function(q) { return q.not('fattura_id', 'is', null).neq('stato', 'esclusa'); }),
     // Fatture emesse: query molto larga, filtraggio fine in JS dopo.
     // - Includiamo tutti i tipi vendita (TD01/TD06/TD24/TD25) — note credito TD04 escluse perché negative
     // - Niente filtro temporale duro: prendiamo le 1500 più recenti
@@ -2159,16 +2164,68 @@ function _antPresentaRipristinaForm() {
   if (fc.note && document.getElementById('ant-pres-note')) document.getElementById('ant-pres-note').value = fc.note;
 }
 
+// ═══ v20260731a · LETTURA PAGINATA ═════════════════════════════════
+// PostgREST restituisce al massimo mille righe per volta. Su
+// anticipi_sbf_fatture, che dopo l import dello storico e cresciuta
+// oltre quella soglia, una lettura senza paginazione taglia i dati IN
+// SILENZIO: nessun errore, solo meta risposta. Questa funzione legge a
+// blocchi finche non finiscono le righe e restituisce lo stesso
+// { data, error } di Supabase, cosi si usa senza cambiare il resto.
+async function _antLeggiTutte(tabella, colonne, filtri) {
+  var fuori = [], da = 0, blocco = 1000;
+  for (var giro = 0; giro < 60; giro++) {
+    var q = sb.from(tabella).select(colonne);
+    if (typeof filtri === 'function') q = filtri(q);
+    var r = await q.range(da, da + blocco - 1);
+    if (r.error) return { data: null, error: r.error };
+    var righe = r.data || [];
+    fuori = fuori.concat(righe);
+    if (righe.length < blocco) break;
+    da += blocco;
+  }
+  return { data: fuori, error: null };
+}
+
+// Avviso VISIBILE e che resta a schermo. Il toast sparisce da solo e su
+// una schermata piena non lo si vede: per un errore che blocca la
+// creazione di un anticipo serve qualcosa che vada chiuso a mano.
+function _antAvvisoCreazione(testoHtml) {
+  apriModal('<div style="max-width:560px;padding:20px">'
+    + '<div style="font-size:15px;font-weight:600;color:#A32D2D;margin-bottom:10px">&#9888; Modulo non creato</div>'
+    + '<div style="font-size:12.5px;color:var(--text);line-height:1.55">' + testoHtml + '</div>'
+    + '<div style="margin-top:16px;text-align:right"><button onclick="chiudiModal()" class="btn-primary" style="font-size:12px;padding:8px 14px">Ho capito</button></div>'
+    + '</div>');
+}
+
+// Involucro: qualunque cosa vada storta dentro, l utente lo vede.
+// Prima un errore imprevisto usciva in console e a schermo non
+// succedeva NIENTE - il difetto segnalato il 31/07/2026.
 async function _antPresentaConferma() {
+  try {
+    await _antPresentaConfermaInterna();
+  } catch (e) {
+    _antAvvisoCreazione('Si e fermato qualcosa mentre creavo il modulo:<br><strong>' + esc(e && e.message ? e.message : String(e)) + '</strong><br><br>Niente e stato scritto. Riprova; se ricapita, mandami questo messaggio.');
+  }
+}
+
+async function _antPresentaConfermaInterna() {
   var st = _antPresentaState;
   if (!st || st.selezionate.size === 0) { toast('Seleziona almeno una fattura'); return; }
 
-  // Leggo metadati form
-  var dataPres = document.getElementById('ant-pres-data').value;
+  // Leggo metadati form.
+  // Prima si leggeva .value senza rete: se un campo non c era piu nel DOM
+  // (modale ridisegnata) partiva un errore e la funzione moriva ZITTA,
+  // senza avviso ne modulo creato. Ora se manca qualcosa lo dice.
+  var elData = document.getElementById('ant-pres-data');
+  var elProt = document.getElementById('ant-pres-prot');
+  var elScad = document.getElementById('ant-pres-scad');
+  var elNote = document.getElementById('ant-pres-note');
+  if (!elData) { _antAvvisoCreazione('Il modulo non e piu a schermo: chiudi e riapri "Presenta nuove fatture", poi riprova.'); return; }
+  var dataPres = elData.value;
   if (!dataPres) { toast('Indica la data di presentazione'); return; }
-  var prot = (document.getElementById('ant-pres-prot').value || '').trim() || null;
-  var scadDefault = document.getElementById('ant-pres-scad').value || null;
-  var note = (document.getElementById('ant-pres-note').value || '').trim() || null;
+  var prot = ((elProt && elProt.value) || '').trim() || null;
+  var scadDefault = (elScad && elScad.value) || null;
+  var note = ((elNote && elNote.value) || '').trim() || null;
 
   // Compongo le righe da inserire
   var righe = [];
@@ -2205,6 +2262,26 @@ async function _antPresentaConferma() {
       toast('Massimale superato per ' + over.length + ' cliente/i. Riduci la selezione.');
       return;
     }
+  }
+
+  if (!righe.length) { _antAvvisoCreazione('Nessuna delle fatture selezionate e stata trovata in elenco. Chiudi e riapri la finestra, poi riprova.'); return; }
+
+  // Controllo prima di scrivere: una fattura puo stare in UN SOLO anticipo
+  // (vincolo idx_anticipi_ft_univoca). Se una delle selezionate e gia dentro
+  // un altro modulo, meglio dirlo adesso con nome e cognome che farsi
+  // rifiutare dal database con un messaggio incomprensibile.
+  var idsSel = righe.map(function(r) { return r._src_id; });
+  var giaDentro = await sb.from('anticipi_sbf_fatture')
+    .select('fattura_id,numero_fattura,presentazione_id')
+    .in('fattura_id', idsSel).neq('stato', 'esclusa');
+  if (giaDentro.error) {
+    _antAvvisoCreazione('Non sono riuscito a controllare se le fatture sono gia in un altro anticipo: ' + giaDentro.error.message);
+    return;
+  }
+  if (giaDentro.data && giaDentro.data.length) {
+    var elenco = giaDentro.data.map(function(x) { return x.numero_fattura || '?'; }).join(', ');
+    _antAvvisoCreazione('Queste fatture sono gia dentro un altro anticipo e non possono entrare in due moduli: <strong>' + esc(elenco) + '</strong>.<br><br>Toglile dalla selezione e riprova. Se ti aspettavi di poterle presentare, vuol dire che risultano ancora impegnate: guarda il modulo che le contiene dalla scheda della banca.');
+    return;
   }
 
   // Conferma finale
@@ -2257,7 +2334,11 @@ async function _antPresentaConferma() {
   if (insErr) {
     // Rollback presentazione (se nessuna fattura inserita)
     await sb.from('anticipi_sbf_presentazioni').delete().eq('id', presId);
-    toast('❌ Errore inserimento fatture: ' + insErr.message + ' (modulo annullato)');
+    var spiega = insErr.message || '';
+    if (/duplicate key|23505|univoca/i.test(spiega)) {
+      spiega = 'una delle fatture risulta gia dentro un altro anticipo (una fattura puo stare in un solo modulo).';
+    }
+    _antAvvisoCreazione('Il modulo NON e stato creato: ' + esc(spiega) + '<br><br>Non e rimasto niente a meta: la presentazione appena aperta e stata annullata.');
     return;
   }
 
@@ -3456,7 +3537,7 @@ async function antApriValutazioni(riusa, soloDati) {
         sb.from('banche_affidamenti').select('id,istituto_id,importo_accordato').eq('tipo', 'anticipo_fatture'),
         sb.from('banche_istituti').select('id,nome'),
         sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,data_presentazione,importo_anticipato_totale,stato'),
-        sb.from('anticipi_sbf_fatture').select('presentazione_id,cliente_nome,totale_fattura,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
+        _antLeggiTutte('anticipi_sbf_fatture', 'presentazione_id,cliente_nome,totale_fattura,importo_anticipato_calcolato,importo_estinto,data_emissione,scadenza_cliente,scadenza_banca,data_incasso,stato')
       ]);
       _antValDati = { aff: r[0].data || [], ist: r[1].data || [], pres: r[2].data || [], fatt: r[3].data || [] };
       // clienti (per la tipologia) e fatturato dell'anno. Le fatture emesse sono
