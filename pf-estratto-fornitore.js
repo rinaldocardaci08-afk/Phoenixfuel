@@ -1,4 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260801a — modifica di un pagamento fornitore: data, importo, modalita,
+//               banca e riferimento. Il movimento in banca segue l'importo
+//               sempre, il resto solo con la spunta.
 // pf-estratto-fornitore.js — Estratto conto fornitore (linguetta in Fornitori)
 // v20260724c — PONTE FOGLIO GIORNALE (verifica aperta dal 22/07, ora chiusa):
 //   il pagamento dall'estratto conto crea anche il MOVIMENTO in
@@ -837,6 +840,7 @@ async function ecfModificaPagamento(ordineId) {
             + '<span style="font-family:var(--font-mono)">' + _pfIsoToIt(p.data_pagamento) + '</span>'
             + '<span style="flex:1;color:var(--text-muted)">' + esc(p.modalita || '') + (banca ? ' · ' + esc(banca) : '') + '</span>'
             + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(p.importo) + '</span>'
+            + '<button onclick="ecfApriModificaPagamento(\\\'' + p.id + '\\\',\\\'' + o.id + '\\\')" style="font-size:11px;color:#0C447C;border:0.5px solid #A9C9EC;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600;margin-right:4px">&#9998; Modifica</button>'
             + '<button onclick="ecfAnnullaPagamento(\'' + p.id + '\',\'' + f.id + '\')" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">✕ Annulla</button>'
             + '</div>';
         }).join('')
@@ -853,6 +857,187 @@ async function ecfModificaPagamento(ordineId) {
 
   if (!pags.length && !o.pagato) h += '<div style="color:var(--text-muted);font-size:12.5px">Nessun pagamento da modificare su quest\'ordine.</div>';
   apriModal(h);
+}
+
+
+// ═══ v20260801a · MODIFICA DI UN PAGAMENTO FORNITORE ════════════════
+// Prima si poteva solo ANNULLARE e rifare. Ora si corregge sul posto:
+// data, importo, modalita, banca, riferimento.
+// Regola di Rinaldo (01/08/2026): il movimento nel foglio giornale
+// segue la modifica SOLO quando cambia l'importo. Se cambiano data,
+// banca o modalita il movimento resta com'e — ma il modale lo dice e
+// offre una spunta per allinearlo lo stesso, perche altrimenti in
+// banca la riga resta al vecchio giorno e la riconciliazione non torna.
+var _ecfModPag = null;
+
+async function ecfApriModificaPagamento(pagId, ordineId) {
+  var d = await pfDebitoDati();
+  var p = (d.pagamenti || []).filter(function (x) { return x.id === pagId; })[0];
+  if (!p) { toast('Pagamento non trovato'); return; }
+  var f = (_ecfFatture || []).filter(function (x) { return x.id === p.fattura_ricevuta_id; })[0];
+
+  // Quanto pesa questa fattura e quanto e gia stato pagato con ALTRI pagamenti:
+  // serve per dire subito se la fattura resta scoperta o va in pari.
+  var totFattura = 0;
+  if (f) {
+    totFattura = Number(f.importo_dichiarato || 0);
+    if (!totFattura) {
+      totFattura = (_ecfOrdini || []).filter(function (o) { return o.fatturaId === f.id; })
+        .reduce(function (s, o) { return s + Number(o.totale || 0); }, 0);
+    }
+  }
+  var altri = (d.pagamenti || [])
+    .filter(function (x) { return x.fattura_ricevuta_id === p.fattura_ricevuta_id && x.id !== pagId; })
+    .reduce(function (s, x) { return s + Number(x.importo || 0); }, 0);
+
+  _ecfModPag = { pagId: pagId, ordineId: ordineId, fatturaId: p.fattura_ricevuta_id,
+                 importoOrig: Number(p.importo || 0), dataOrig: p.data_pagamento,
+                 contoOrig: p.conto_id, modalitaOrig: p.modalita,
+                 movId: p.movimento_foglio_id || null, totFattura: totFattura, altri: altri };
+
+  var inp = 'width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
+  var lab = 'font-size:11px;color:var(--text-muted);font-weight:500';
+
+  var h = '<div style="max-width:520px">';
+  h += '<div style="font-size:16px;font-weight:600;margin-bottom:2px">&#9998; Modifica pagamento — ' + esc(_ecfSel.nome) + '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">fattura '
+     + (f && f.numero ? esc(f.numero) : '(da numerare)')
+     + (totFattura ? ' · totale ' + fmtE(totFattura) : '')
+     + (altri ? ' · altri pagamenti ' + fmtE(altri) : '') + '</div>';
+
+  h += '<div style="display:grid;gap:10px">';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div><label style="' + lab + '">Data pagamento</label>'
+     + '<input id="ecf-mp-data" type="date" value="' + esc(p.data_pagamento || '') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lab + '">Importo &euro;</label>'
+     + '<input id="ecf-mp-importo" type="number" step="0.01" value="' + Number(p.importo || 0).toFixed(2) + '" oninput="_ecfModPagAnteprima()" style="' + inp + ';font-family:var(--font-mono)"></div>';
+  h += '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div><label style="' + lab + '">Modalita</label><select id="ecf-mp-modalita" style="' + inp + '">';
+  ['bonifico', 'assegno', 'riba', 'contanti', 'compensazione', 'altro'].forEach(function (m) {
+    h += '<option value="' + m + '"' + (String(p.modalita || '') === m ? ' selected' : '') + '>' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>';
+  });
+  h += '</select></div>';
+  h += '<div><label style="' + lab + '">Banca</label><select id="ecf-mp-conto" style="' + inp + '">';
+  h += '<option value="">— nessuna —</option>';
+  (_ecfConti || []).forEach(function (c) {
+    var nome = (_ecfIstituti[c.istituto_id] || '') + (c.numero_conto ? ' · ' + c.numero_conto : '');
+    h += '<option value="' + c.id + '"' + (p.conto_id === c.id ? ' selected' : '') + '>' + esc(nome) + '</option>';
+  });
+  h += '</select></div></div>';
+
+  h += '<div><label style="' + lab + '">Riferimento (assegno, CRO, nota)</label>'
+     + '<input id="ecf-mp-rif" type="text" value="' + esc(p.riferimento_esterno || '') + '" style="' + inp + '"></div>';
+  h += '</div>';
+
+  h += '<div id="ecf-mp-anteprima" style="background:var(--bg-kpi);border-radius:8px;padding:11px 13px;margin-top:12px;font-size:12.5px"></div>';
+
+  h += '<label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:11.5px;color:var(--text-muted);cursor:pointer">'
+     + '<input id="ecf-mp-allinea" type="checkbox" style="cursor:pointer"> Allinea anche data, banca e modalita del movimento in banca'
+     + '</label>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px">L\'importo del movimento viene sempre aggiornato quando cambia.</div>';
+
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  h += '<button onclick="chiudiModalePermessi()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
+  h += '<button onclick="ecfSalvaModificaPagamento()" class="btn-primary" style="font-size:12px;padding:8px 14px">&#128190; Salva</button>';
+  h += '</div></div>';
+
+  apriModal(h);
+  _ecfModPagAnteprima();
+}
+
+// Dice in diretta che effetto ha il nuovo importo sulla fattura.
+function _ecfModPagAnteprima() {
+  var box = document.getElementById('ecf-mp-anteprima');
+  if (!box || !_ecfModPag) return;
+  var el = document.getElementById('ecf-mp-importo');
+  var nuovo = el ? Number(el.value || 0) : _ecfModPag.importoOrig;
+  var S = _ecfModPag;
+  var pagatoDopo = S.altri + nuovo;
+  var residuo = S.totFattura ? (S.totFattura - pagatoDopo) : 0;
+  var righe = '';
+  righe += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Importo</span>'
+        + '<span style="font-family:var(--font-mono)"><span style="color:var(--text-muted)">' + fmtE(S.importoOrig) + '</span> &rarr; <strong>' + fmtE(nuovo) + '</strong></span></div>';
+  if (S.totFattura) {
+    var saldata = residuo <= 0.01;
+    righe += '<div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:var(--text-muted)">Residuo della fattura</span>'
+          + '<span style="font-family:var(--font-mono);font-weight:700;color:' + (saldata ? '#27500A' : '#854F0B') + '">'
+          + fmtE(Math.max(0, residuo)) + (saldata ? ' · saldata' : ' · ancora scoperta') + '</span></div>';
+    righe += '<div style="font-size:11px;color:var(--text-muted);margin-top:5px">'
+          + (saldata ? 'Gli ordini della fattura restano PAGATI.' : 'Gli ordini della fattura tornano DA PAGARE e il fido si rioccupa.') + '</div>';
+  }
+  box.innerHTML = righe;
+}
+
+async function ecfSalvaModificaPagamento() {
+  var S = _ecfModPag;
+  if (!S) return;
+  var data = (document.getElementById('ecf-mp-data') || {}).value || null;
+  var importo = Number((document.getElementById('ecf-mp-importo') || {}).value || 0);
+  var modalita = (document.getElementById('ecf-mp-modalita') || {}).value || null;
+  var contoId = (document.getElementById('ecf-mp-conto') || {}).value || null;
+  var rif = (((document.getElementById('ecf-mp-rif') || {}).value) || '').trim() || null;
+  var allinea = !!((document.getElementById('ecf-mp-allinea') || {}).checked);
+
+  if (!data) { toast('Indica la data del pagamento'); return; }
+  if (!(importo > 0)) { toast('L\'importo deve essere maggiore di zero'); return; }
+  if (S.totFattura && (S.altri + importo) > S.totFattura + 0.01) {
+    if (!confirm('Con questo importo la fattura risulterebbe pagata piu del dovuto ('
+      + fmtE(S.altri + importo) + ' su ' + fmtE(S.totFattura) + '). Procedo lo stesso?')) return;
+  }
+
+  var importoCambiato = Math.abs(importo - S.importoOrig) > 0.005;
+
+  try {
+    var up = await sb.from('pagamenti_fornitori').update({
+      data_pagamento: data, importo: importo, modalita: modalita,
+      conto_id: contoId || null, riferimento_esterno: rif
+    }).eq('id', S.pagId);
+    if (up.error) throw up.error;
+
+    // Movimento in banca: l'importo lo segue sempre, il resto solo su richiesta.
+    if (S.movId && (importoCambiato || allinea)) {
+      var payMov = {};
+      if (importoCambiato) payMov.importo = importo;
+      if (allinea) {
+        payMov.data = data;
+        payMov.metodo = modalita;
+        var contoSel = (_ecfConti || []).filter(function (c) { return c.id === contoId; })[0];
+        payMov.banca_id = contoSel ? contoSel.istituto_id : null;
+      }
+      var upMov = await sb.from('foglio_giornale_movimenti').update(payMov).eq('id', S.movId);
+      if (upMov.error) toast('Pagamento salvato, ma il movimento in banca non e stato aggiornato: ' + upMov.error.message);
+      else if (importoCambiato) {
+        await sb.from('foglio_giornale_riconciliazioni')
+          .update({ importo_imputato: importo }).eq('movimento_id', S.movId);
+      }
+    }
+
+    // Gli ordini della fattura seguono il saldo: pagati se copre tutto,
+    // di nuovo da pagare se l'importo e sceso sotto il totale.
+    if (importoCambiato && S.fatturaId && S.totFattura) {
+      var saldata = (S.altri + importo) >= S.totFattura - 0.01;
+      var upOrd = await sb.from('ordini').update({ pagato_fornitore: saldata })
+        .eq('fattura_ricevuta_id', S.fatturaId);
+      if (upOrd.error) toast('Attenzione: lo stato degli ordini non e stato aggiornato: ' + upOrd.error.message);
+    }
+
+    pfDebitoInvalida();
+    if (typeof _auditLog === 'function') {
+      _auditLog('modifica_pagamento', 'pagamenti_fornitori', _ecfSel.nome
+        + ' — pagamento ' + S.pagId.substring(0, 8)
+        + ': ' + fmtE(S.importoOrig) + ' del ' + S.dataOrig + ' -> ' + fmtE(importo) + ' del ' + data
+        + (importoCambiato ? ' (movimento in banca aggiornato)' : ''));
+    }
+    toast('\u2713 Pagamento aggiornato');
+    _ecfModPag = null;
+    chiudiModalePermessi();
+    await _ecfCarica(); _ecfRender();
+    if (typeof _rfRenderTab === 'function' && document.getElementById('rf-body')) _rfRenderTab();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
 }
 
 async function ecfAnnullaPagamento(pagId, fattId) {
