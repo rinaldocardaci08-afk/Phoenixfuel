@@ -1,6 +1,11 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260801b — la scadenza del modulo la decide l utente, e obbligatoria,
+//               vale per tutte le fatture del modulo e non puo superare i
+//               150 giorni dalla presentazione; prima non veniva nemmeno
+//               salvata e le fatture senza rate prendevano il giorno di
+//               creazione del modulo
 // v20260801a — barra del fido a due tratti (erogato + presentato non ancora
 //               accreditato), valore fra parentesi con i moduli in attesa,
 //               moduli in attesa evidenziati nella lista, scadenza del modulo
@@ -1894,8 +1899,9 @@ function _antPresentaRender() {
   html += '<input id="ant-pres-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">N. protocollo (opzionale)</label>';
   html += '<input id="ant-pres-prot" type="text" placeholder="Es. PRES/2026/12" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px;font-family:var(--font-mono)"></div>';
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza banca default</label>';
-  html += '<input id="ant-pres-scad" type="date" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px" title="Se compilato, applicato a tutte le fatture senza scadenza propria"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza del modulo <span style="color:#A32D2D">*</span></label>';
+  html += '<input id="ant-pres-scad" type="date" oninput="_antPresentaEsitoScadenza()" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px" title="Data entro cui il modulo va rientrato in banca. Vale per tutte le fatture del modulo. Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione.">';
+  html += '<div id="ant-pres-scad-esito" style="font-size:10px;color:var(--text-muted);margin-top:3px">Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione. Vale per tutte le fatture del modulo.</div></div>';
   html += '</div>';
   html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
   html += '<input id="ant-pres-note" type="text" placeholder="Note operative (opzionali)" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
@@ -2131,6 +2137,30 @@ function _antPresentaRender() {
   // (data/protocollo/scadenza/note non si conservano: l'utente li (re)inserisce solo a fine selezione)
 }
 
+// Avviso immediato sotto il campo: quanti giorni sono e se sfora, senza
+// aspettare la conferma. Non ridisegna la finestra, tocca solo la scritta.
+function _antPresentaEsitoScadenza() {
+  var elS = document.getElementById('ant-pres-scad');
+  var elD = document.getElementById('ant-pres-data');
+  var box = document.getElementById('ant-pres-scad-esito');
+  if (!box) return;
+  var scad = elS ? elS.value : '';
+  var dataPres = elD ? elD.value : '';
+  if (!scad) {
+    box.style.color = 'var(--text-muted)';
+    box.innerHTML = 'Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione. Vale per tutte le fatture del modulo.';
+    return;
+  }
+  var errore = _antControllaScadenza(dataPres, scad);
+  if (errore) {
+    box.style.color = '#A32D2D';
+    box.innerHTML = '&#9888; ' + errore;
+  } else {
+    box.style.color = '#27500A';
+    box.innerHTML = '&#10003; ' + _antGiorniTra(dataPres, scad) + ' giorni dalla presentazione.';
+  }
+}
+
 function _antPresentaSetFilter(campo, val) {
   if (!_antPresentaState) return;
   if (campo === 'search') _antPresentaState.filterSearch = val;
@@ -2227,6 +2257,30 @@ function _antPresentaRipristinaForm() {
 // SILENZIO: nessun errore, solo meta risposta. Questa funzione legge a
 // blocchi finche non finiscono le righe e restituisce lo stesso
 // { data, error } di Supabase, cosi si usa senza cambiare il resto.
+// v20260801b · La scadenza del modulo la decide Rinaldo e non puo mai
+// superare i 150 giorni dalla presentazione (limite della banca). E una
+// scelta commerciale, non un automatismo: se il cliente ha scadenza 30
+// settembre ma paga tardi, il modulo si mette a ottobre per essere sicuri
+// di incassare prima di doverlo rientrare.
+var ANT_MAX_GIORNI_MODULO = 150;
+
+// Restituisce '' se va bene, altrimenti il motivo del rifiuto.
+function _antControllaScadenza(dataPres, scad) {
+  if (!scad) return 'Indica la scadenza del modulo: e la data entro cui va rientrato in banca.';
+  if (!dataPres) return 'Indica prima la data di presentazione.';
+  if (scad < dataPres) return 'La scadenza non puo essere precedente alla presentazione.';
+  var g = _antGiorniTra(dataPres, scad);
+  if (g > ANT_MAX_GIORNI_MODULO) {
+    return 'La scadenza e a ' + g + ' giorni dalla presentazione: il massimo consentito e ' + ANT_MAX_GIORNI_MODULO + '.';
+  }
+  return '';
+}
+
+function _antGiorniTra(da, a) {
+  var d1 = new Date(da + 'T12:00:00'), d2 = new Date(a + 'T12:00:00');
+  return Math.round((d2 - d1) / 86400000);
+}
+
 async function _antLeggiTutte(tabella, colonne, filtri) {
   var fuori = [], da = 0, blocco = 1000;
   for (var giro = 0; giro < 60; giro++) {
@@ -2283,6 +2337,12 @@ async function _antPresentaConfermaInterna() {
   var scadDefault = (elScad && elScad.value) || null;
   var note = ((elNote && elNote.value) || '').trim() || null;
 
+  // La scadenza del modulo e obbligatoria e non puo superare i 150 giorni.
+  // Prima era facoltativa: lasciata vuota, ogni fattura senza rate finiva
+  // con scadenza banca = giorno di creazione del modulo.
+  var erroreScad = _antControllaScadenza(dataPres, (elScad && elScad.value) || null);
+  if (erroreScad) { _antAvvisoCreazione(esc(erroreScad)); return; }
+
   // Compongo le righe da inserire
   var righe = [];
   var totAnticipo = 0;
@@ -2303,7 +2363,7 @@ async function _antPresentaConfermaInterna() {
       totale_fattura: Number(f.importo_totale || 0),
       imponibile: Number(f.imponibile_totale || 0),
       scadenza_cliente: f._scadenza_cliente || null,
-      scadenza_banca: scadDefault || f._scadenza_cliente || dataPres, // fallback sicuro: data presentazione
+      scadenza_banca: scadDefault, // la scadenza del modulo vale per tutte le sue fatture
       percentuale_applicata: st.perc,
       base_calcolo_applicata: st.base,
       importo_anticipato_calcolato: anticipo,
@@ -2351,6 +2411,7 @@ async function _antPresentaConfermaInterna() {
     stato: 'in_delibera',
     importo_richiesto: totAnticipo,
     importo_anticipato_totale: 0,
+    scadenza_banca_default: scadDefault,   // prima non veniva salvata: il modulo restava senza scadenza
     note: note
   }]).select('id').single();
 
@@ -3157,10 +3218,11 @@ async function _antRenderModaleModulo(presentazioneId) {
   // quella del modulo si chiede se allineare anche le fatture non rientrate,
   // altrimenti la modifica resterebbe solo un'etichetta.
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza del modulo (rientro in banca)</label>';
-  html += '<input id="mod-mod-scad" type="date" value="' + esc(p.scadenza_banca_default || '') + '" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+  html += '<input id="mod-mod-scad" type="date" value="' + esc(p.scadenza_banca_default || '') + '" title="Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
   html += '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-muted);cursor:pointer">';
   html += '<input id="mod-mod-scad-propaga" type="checkbox" checked style="cursor:pointer"> Applica la nuova scadenza anche alle fatture del modulo non ancora rientrate';
   html += '</label>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione.</div>';
   if (p.prorogato && p.data_rientro_originale) {
     html += '<div style="font-size:10px;color:#854F0B;margin-top:4px">Modulo gia prorogato · scadenza originale ' + fmtD(p.data_rientro_originale) + '</div>';
   }
@@ -3197,7 +3259,8 @@ async function _antSalvaModulo(presentazioneId) {
   var propaga = !!(elProp && elProp.checked);
 
   if (!dataPres) { toast('Data obbligatoria'); return; }
-  if (scad && dataPres && scad < dataPres) { toast('La scadenza non puo essere prima della presentazione'); return; }
+  var erroreScad = _antControllaScadenza(dataPres, scad);
+  if (erroreScad) { toast(erroreScad); return; }
 
   // Scadenza cambiata? Serve saperlo prima, per decidere se toccare le fatture
   // e per registrare la data originale la prima volta che si sposta.
