@@ -1,6 +1,10 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260801a — barra del fido a due tratti (erogato + presentato non ancora
+//               accreditato), valore fra parentesi con i moduli in attesa,
+//               moduli in attesa evidenziati nella lista, scadenza del modulo
+//               modificabile dal modale
 // v20260731b — la casella di ricerca non perde piu il cursore a ogni lettera
 // v20260731a — la creazione del modulo non puo piu fallire in silenzio:
 //              lettura paginata delle fatture gia impegnate (si fermava a
@@ -626,9 +630,20 @@ async function _antRenderTabBanca(affidamentoId) {
   const oggi = new Date();
   const tra7gg = new Date(); tra7gg.setDate(oggi.getDate() + 7);
 
+  // v20260801a: quanto e stato PRESENTATO alla banca ma non ancora
+  // accreditato. Il fido vero (utilizzo) conta solo i soldi gia erogati -
+  // il campo importo_anticipato_totale, che il trigger valorizza quando si
+  // registra l accredito. Un modulo appena creato ha quel campo a zero,
+  // quindi non muoveva niente e sembrava che il fido fosse fermo.
+  let inAttesa = 0;
   _antPresentazioniByAff[affidamentoId].forEach(p => {
     const totEstinto = p._fatture.reduce((s, f) => s + Number(f.importo_estinto || 0), 0);
     utilizzo += Math.max(0, Number(p.importo_anticipato_totale || 0) - totEstinto);
+    if (p.stato !== 'rifiutata' && p.stato !== 'estinta') {
+      let richiesto = Number(p.importo_richiesto || 0);
+      if (!richiesto) richiesto = p._fatture.reduce((s, f) => s + Number(f.importo_anticipato_calcolato || 0), 0);
+      inAttesa += Math.max(0, richiesto - Number(p.importo_anticipato_totale || 0));
+    }
     p._fatture.forEach(f => {
       if (f.stato !== 'estinta' && f.stato !== 'esclusa' && f.scadenza_banca) {
         const sb_d = new Date(f.scadenza_banca + 'T12:00:00');
@@ -684,12 +699,12 @@ async function _antRenderTabBanca(affidamentoId) {
   // ── BARRA UTILIZZO + RIENTRO MEDIO (30/07) — sopra i pannelli, come chiesto.
   //    Tutto sull'ANNO IN CORSO: media e massimo dei giorni, non ultimi 12 mesi.
   if (!_antValDati) { antApriValutazioni(false, true); }   // carica in sottofondo, non apre nulla
-  html += _antBarraIstituto(ist.nome, utilizzo, monteAcc);
+  html += _antBarraIstituto(ist.nome, utilizzo, monteAcc, inAttesa);
 
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">';
   html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid #6B5FCC;padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Monte accordato</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px">' + fmtE(monteAcc) + '</div></div>';
-  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid ' + colorePct + ';padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Utilizzo attuale</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:' + colorePct + '">' + fmtE(utilizzo) + '</div><div style="font-size:11px;color:' + colorePct + ';margin-top:3px;font-weight:600">' + pctUtilizzo.toFixed(1) + '%</div></div>';
-  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid #639922;padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Disponibile</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:#27500A">' + fmtE(disponibile) + '</div></div>';
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid ' + colorePct + ';padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Utilizzo attuale</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:' + colorePct + '">' + fmtE(utilizzo) + (inAttesa > 0 ? ' <span style="font-size:13px;font-weight:600;color:#7A6BC4">(' + fmtE(utilizzo + inAttesa) + ')</span>' : '') + '</div><div style="font-size:11px;color:' + colorePct + ';margin-top:3px;font-weight:600">' + pctUtilizzo.toFixed(1) + '%' + (inAttesa > 0 ? ' <span style="color:#7A6BC4;font-weight:500">· fra parentesi con i moduli in attesa</span>' : '') + '</div></div>';
+  html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid #639922;padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Disponibile</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:#27500A">' + fmtE(disponibile) + (inAttesa > 0 ? ' <span style="font-size:13px;font-weight:600;color:#7A6BC4">(' + fmtE(Math.max(0, monteAcc - utilizzo - inAttesa)) + ')</span>' : '') + '</div></div>';
   const colorRischio = nFattureScadute > 0 ? '#A32D2D' : (nFattureScadenza7gg > 0 ? '#BA7517' : '#888');
   html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:4px solid ' + colorRischio + ';padding:12px 14px;border-radius:8px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;font-weight:600">Rischio scadenze</div><div style="font-size:18px;font-weight:700;font-family:var(--font-mono);margin-top:4px;color:' + colorRischio + '">' + (nFattureScadute + nFattureScadenza7gg) + '</div><div style="font-size:10px;color:' + colorRischio + ';margin-top:3px">' + (nFattureScadenza7gg > 0 ? nFattureScadenza7gg + ' entro 7gg' : '') + (nFattureScadute > 0 ? (nFattureScadenza7gg > 0 ? ' · ' : '') + nFattureScadute + ' scadute ⚠' : '') + '</div></div>';
   html += '</div>';
@@ -1099,8 +1114,13 @@ function _antRenderFattureAnticipate(moduli) {
 // Usa lo stesso calcolo delle Valutazioni, quindi i numeri non possono
 // divergere: media e massimo dell'ANNO IN CORSO, giorni medi di rientro,
 // e il confronto con l'anno precedente dove lo storico c'e'.
-function _antBarraIstituto(nome, utilizzo, accordato) {
+function _antBarraIstituto(nome, utilizzo, accordato, inAttesa) {
+  const attesa = Number(inAttesa || 0);
   const pct = accordato > 0 ? Math.min(100, Math.round(utilizzo / accordato * 100)) : 0;
+  // Secondo tratto: presentato e non ancora accreditato. Non e fido occupato,
+  // ma lo diventera appena la banca eroga, quindi si vede a parte.
+  const pctAttesa = accordato > 0 ? Math.max(0, Math.min(100 - pct, Math.round(attesa / accordato * 100))) : 0;
+  const pctTot = accordato > 0 ? Math.round((utilizzo + attesa) / accordato * 100) : 0;
   const col = pct >= 85 ? '#E5342F' : pct >= 60 ? '#F5921E' : '#4CAF2E';
   const txt = pct >= 85 ? '#C0392B' : pct >= 60 ? '#E07B18' : '#3B6D11';
 
@@ -1115,10 +1135,20 @@ function _antBarraIstituto(nome, utilizzo, accordato) {
 
   let h = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:14px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:5px">'
-    + '<span style="color:var(--text-muted)">Fido anticipi utilizzato <strong style="color:' + txt + '">' + pct + '%</strong></span>'
-    + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(utilizzo) + ' / ' + fmtE(accordato) + '</span></div>';
-  h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
-    + '<div style="height:100%;width:' + pct + '%;background:' + col + '"></div></div>';
+    + '<span style="color:var(--text-muted)">Fido anticipi utilizzato <strong style="color:' + txt + '">' + pct + '%</strong>'
+      + (attesa > 0 ? ' <span style="color:#7A6BC4">(' + pctTot + '% con i moduli in attesa)</span>' : '') + '</span>'
+    + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(utilizzo)
+      + (attesa > 0 ? ' <span style="color:#7A6BC4">(' + fmtE(utilizzo + attesa) + ')</span>' : '')
+      + ' / ' + fmtE(accordato) + '</span></div>';
+  h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;display:flex">'
+    + '<div style="height:100%;width:' + pct + '%;background:' + col + '"></div>'
+    + (pctAttesa > 0 ? '<div title="Presentato alla banca, non ancora accreditato" style="height:100%;width:' + pctAttesa + '%;background:repeating-linear-gradient(45deg,#9C8FDB,#9C8FDB 5px,#C4BAF0 5px,#C4BAF0 10px)"></div>' : '')
+    + '</div>';
+  if (attesa > 0) {
+    h += '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-muted)">'
+      + '<span style="display:inline-block;width:22px;height:9px;border-radius:3px;background:repeating-linear-gradient(45deg,#9C8FDB,#9C8FDB 5px,#C4BAF0 5px,#C4BAF0 10px)"></span>'
+      + 'Presentato e non ancora accreditato: <strong style="font-family:var(--font-mono);color:#5B4CA8">' + fmtE(attesa) + '</strong></div>';
+  }
 
   if (dati) {
     const mediaAnno = Math.round(dati.mesiMedia.reduce((a, x) => a + x, 0) / 12);
@@ -1251,13 +1281,19 @@ function _antRenderModuloCard(p, aff) {
     'anticipata': { bg: '#E6F1FB', fg: '#0C447C', label: 'Anticipata' }
   }[p.stato] || { bg: '#f0f0f0', fg: '#666', label: p.stato };
 
-  let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">';
+  // v20260801a: un modulo senza accrediti e ancora "in attesa" - non occupa
+  // fido e va riconosciuto a colpo d occhio nella lista.
+  const inAttesa = Number(p.importo_anticipato_totale || 0) === 0
+                   && p.stato !== 'rifiutata' && p.stato !== 'estinta';
+
+  let html = '<div style="background:var(--bg-card);border:0.5px solid ' + (inAttesa ? '#9C8FDB' : 'var(--border)') + ';border-left:' + (inAttesa ? '4px solid #6B5FCC' : '0.5px solid var(--border)') + ';border-radius:10px;margin-bottom:12px;overflow:hidden">';
 
   // Header modulo
-  html += '<div style="padding:12px 16px;background:var(--bg);border-bottom:0.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
+  html += '<div style="padding:12px 16px;background:' + (inAttesa ? '#F4F2FE' : 'var(--bg)') + ';border-bottom:0.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
   html += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">';
   html += '<div>';
   html += '<div style="font-size:13px;font-weight:700;color:var(--text)">📋 Modulo del ' + fmtD(p.data_presentazione);
+  if (inAttesa) html += ' <span style="font-size:10px;font-weight:700;background:#EEEDFE;color:#4A3F9E;padding:2px 8px;border-radius:9px;vertical-align:1px;white-space:nowrap">IN ATTESA DI ACCREDITO</span>';
   if (p.numero_protocollo) html += ' <span style="font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--text-muted)">· prot. ' + esc(p.numero_protocollo) + '</span>';
   html += '</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">';
@@ -3116,6 +3152,20 @@ async function _antRenderModaleModulo(presentazioneId) {
   html += '</select>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">⚠ Lo stato è gestito automaticamente dagli accrediti. Modifica solo per casi eccezionali (rifiuto banca, chiusura forzata).</div></div>';
 
+  // v20260801a: scadenza del modulo, prima non modificabile da qui (si poteva
+  // solo prorogare). Le fatture hanno una loro scadenza_banca: se si cambia
+  // quella del modulo si chiede se allineare anche le fatture non rientrate,
+  // altrimenti la modifica resterebbe solo un'etichetta.
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza del modulo (rientro in banca)</label>';
+  html += '<input id="mod-mod-scad" type="date" value="' + esc(p.scadenza_banca_default || '') + '" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+  html += '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-muted);cursor:pointer">';
+  html += '<input id="mod-mod-scad-propaga" type="checkbox" checked style="cursor:pointer"> Applica la nuova scadenza anche alle fatture del modulo non ancora rientrate';
+  html += '</label>';
+  if (p.prorogato && p.data_rientro_originale) {
+    html += '<div style="font-size:10px;color:#854F0B;margin-top:4px">Modulo gia prorogato · scadenza originale ' + fmtD(p.data_rientro_originale) + '</div>';
+  }
+  html += '</div>';
+
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
   html += '<textarea id="mod-mod-note" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;min-height:60px;resize:vertical">' + esc(p.note || '') + '</textarea></div>';
 
@@ -3141,20 +3191,55 @@ async function _antSalvaModulo(presentazioneId) {
   var prot = (document.getElementById('mod-mod-prot').value || '').trim() || null;
   var stato = document.getElementById('mod-mod-stato').value;
   var note = (document.getElementById('mod-mod-note').value || '').trim() || null;
+  var elScad = document.getElementById('mod-mod-scad');
+  var scad = (elScad && elScad.value) || null;
+  var elProp = document.getElementById('mod-mod-scad-propaga');
+  var propaga = !!(elProp && elProp.checked);
 
   if (!dataPres) { toast('Data obbligatoria'); return; }
+  if (scad && dataPres && scad < dataPres) { toast('La scadenza non puo essere prima della presentazione'); return; }
 
-  var resU = await sb.from('anticipi_sbf_presentazioni').update({
+  // Scadenza cambiata? Serve saperlo prima, per decidere se toccare le fatture
+  // e per registrare la data originale la prima volta che si sposta.
+  var resPrec = await sb.from('anticipi_sbf_presentazioni')
+    .select('scadenza_banca_default,prorogato,data_rientro_originale').eq('id', presentazioneId).single();
+  var prec = resPrec.data || {};
+  var scadCambiata = scad && String(prec.scadenza_banca_default || '') !== String(scad);
+
+  var payload = {
     data_presentazione: dataPres,
     numero_protocollo: prot,
     stato: stato,
     note: note,
+    scadenza_banca_default: scad,
     modificato_at: new Date().toISOString()
-  }).eq('id', presentazioneId);
+  };
+  if (scadCambiata && !prec.data_rientro_originale && prec.scadenza_banca_default) {
+    payload.data_rientro_originale = prec.scadenza_banca_default;
+  }
+
+  var resU = await sb.from('anticipi_sbf_presentazioni').update(payload).eq('id', presentazioneId);
 
   if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+
+  // Allineo le fatture ancora aperte, se richiesto
+  var nAllineate = 0;
+  if (scadCambiata && propaga) {
+    var resFt = await sb.from('anticipi_sbf_fatture')
+      .update({ scadenza_banca: scad })
+      .eq('presentazione_id', presentazioneId)
+      .neq('stato', 'estinta').neq('stato', 'esclusa')
+      .select('id');
+    if (resFt.error) { toast('Modulo salvato, ma le fatture non sono state allineate: ' + resFt.error.message); }
+    else { nAllineate = (resFt.data || []).length; }
+  }
+
+  if (typeof _auditLog === 'function' && scadCambiata) {
+    _auditLog('anticipi', 'anticipi_sbf_presentazioni', 'Scadenza modulo ' + presentazioneId.substring(0, 8) + ': ' + (prec.scadenza_banca_default || '—') + ' -> ' + scad + (nAllineate ? ' (' + nAllineate + ' fatture allineate)' : ''));
+  }
+
   chiudiModal();
-  toast('✓ Modulo aggiornato');
+  toast('✓ Modulo aggiornato' + (nAllineate ? ' · ' + nAllineate + ' fatture allineate alla nuova scadenza' : ''));
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
