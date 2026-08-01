@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260801b — corretto l escape del pulsante Modifica: l onclick usciva con
+//               le barre rovesciate e il clic non faceva nulla
 // v20260801a — modifica di un pagamento fornitore: data, importo, modalita,
 //               banca e riferimento. Il movimento in banca segue l'importo
 //               sempre, il resto solo con la spunta.
@@ -840,7 +842,7 @@ async function ecfModificaPagamento(ordineId) {
             + '<span style="font-family:var(--font-mono)">' + _pfIsoToIt(p.data_pagamento) + '</span>'
             + '<span style="flex:1;color:var(--text-muted)">' + esc(p.modalita || '') + (banca ? ' · ' + esc(banca) : '') + '</span>'
             + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(p.importo) + '</span>'
-            + '<button onclick="ecfApriModificaPagamento(\\\'' + p.id + '\\\',\\\'' + o.id + '\\\')" style="font-size:11px;color:#0C447C;border:0.5px solid #A9C9EC;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600;margin-right:4px">&#9998; Modifica</button>'
+            + '<button onclick="ecfApriModificaPagamento(\'' + p.id + '\',\'' + o.id + '\')" style="font-size:11px;color:#0C447C;border:0.5px solid #A9C9EC;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600;margin-right:4px">✎ Modifica</button>'
             + '<button onclick="ecfAnnullaPagamento(\'' + p.id + '\',\'' + f.id + '\')" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">✕ Annulla</button>'
             + '</div>';
         }).join('')
