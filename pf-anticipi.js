@@ -1,6 +1,8 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260801d — dopo ogni scrittura i dati tenuti in memoria vengono buttati:
+//               Analisi per cliente e Valutazioni mostravano i dati di prima
 // v20260801c — pannello anticipi in dashboard: barra a due tratti e valori
 //               fra parentesi con i moduli da accreditare, come nella scheda
 //               banca; letture delle fatture paginate. In index.html
@@ -2479,6 +2481,7 @@ async function _antPresentaConfermaInterna() {
   _antPresentaState = null;
   toast('✓ Modulo creato: ' + righe.length + ' fatture, anticipo ' + fmtE(totAnticipo));
   // Refresh tab banca
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -2994,6 +2997,7 @@ async function _antSalvaAccredito(presentazioneId) {
 
   chiudiModal();
   toast('✓ Accredito di ' + fmtE(importo) + ' registrato');
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3003,6 +3007,7 @@ async function _antEliminaAccredito(accreditoId, presentazioneId) {
   var resD = await sb.from('anticipi_sbf_accrediti').delete().eq('id', accreditoId);
   if (resD.error) { toast('❌ Errore: ' + resD.error.message); return; }
   toast('✓ Accredito eliminato');
+  _antValDati = null;   // v20260801d: anche qui i dati in memoria diventano vecchi
   // Riapri la modale aggiornata
   await _antRenderModaleAccredito(presentazioneId);
 }
@@ -3180,6 +3185,7 @@ async function _antSalvaIncasso(fatturaAntId) {
 
   chiudiModal();
   toast(insoluta ? '⚠ Fattura segnata come insoluta' : '✓ Fattura estinta');
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3319,6 +3325,7 @@ async function _antSalvaModulo(presentazioneId) {
 
   chiudiModal();
   toast('✓ Modulo aggiornato' + (nAllineate ? ' · ' + nAllineate + ' fatture allineate alla nuova scadenza' : ''));
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3330,6 +3337,7 @@ async function _antEliminaModulo(presentazioneId) {
   if (resD.error) { toast('❌ Errore: ' + resD.error.message); return; }
   chiudiModal();
   toast('✓ Modulo annullato');
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3414,6 +3422,7 @@ async function _antSalvaFattura(fatturaAntId) {
   if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
   chiudiModal();
   toast('✓ Fattura aggiornata');
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3502,6 +3511,7 @@ async function _antConfermaProroga(presentazioneId) {
 
   chiudiModal();
   toast('✓ Scadenza prorogata al ' + fmtD(nuovaData));
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3596,6 +3606,7 @@ async function _antConfermaRientro(presentazioneId) {
 
   chiudiModal();
   toast('✓ Modulo rientrato il ' + fmtD(data) + ' (uscita ' + fmtE(importoOverride) + ' registrata in foglio giornale)');
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3692,6 +3703,7 @@ async function _antConfermaInsoluta(presentazioneId) {
 
   chiudiModal();
   toast('❌ Modulo marcato insoluto il ' + fmtD(data) + ' (uscita ' + fmtE(importoOverride) + ' registrata in foglio giornale)');
+  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
