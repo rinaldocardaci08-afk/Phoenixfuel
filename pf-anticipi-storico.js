@@ -29,7 +29,33 @@ var _antsStato = {
   fatturatoTotale: 0
 };
 
+// v20260801a — fido anticipi per banca: solo le linee di anticipo (prima si
+//               sommavano anche cassa e mutui) e utilizzo calcolato davvero,
+//               piu tutte le letture paginate.
 var _ANTS_STATI_VALIDI = ['anticipata', 'anticipata_parziale', 'estinta', 'insoluta'];
+
+// v20260801a — Un istituto ha piu linee di fido (anticipi, cassa, mutui...).
+// Qui contano SOLO quelle di anticipo: prima si sommava tutto l'attivo, cosi
+// Intesa risultava 650.000 invece di 600.000 (600.000 anticipi + 50.000 cassa)
+// e BNL compariva pur avendo solo una linea di cassa.
+// Stessi tipi usati da pf-anticipi.js.
+var _ANTS_TIPI_ANTICIPO = ['anticipo_fatture', 'sbf', 'castelletto', 'autoliquidante'];
+
+// Lettura a blocchi: PostgREST ne restituisce mille per volta e non avvisa.
+async function _antsLeggiTutte(tabella, colonne, filtri) {
+  var fuori = [], da = 0, blocco = 1000;
+  for (var giro = 0; giro < 60; giro++) {
+    var q = sb.from(tabella).select(colonne);
+    if (typeof filtri === 'function') q = filtri(q);
+    var r = await q.range(da, da + blocco - 1);
+    if (r.error) return { data: null, error: r.error };
+    var righe = r.data || [];
+    fuori = fuori.concat(righe);
+    if (righe.length < blocco) break;
+    da += blocco;
+  }
+  return { data: fuori, error: null };
+}
 
 var _ANTS_MESI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
 var _ANTS_MESI_FULL = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
@@ -75,13 +101,16 @@ async function renderAntStorico() {
   var fineAnno = anno + '-12-31';
 
   // Carico tutto in parallelo
+  // v20260801a: letture paginate. anticipi_sbf_fatture e fatture_emesse hanno
+  // superato le mille righe: senza paginazione PostgREST ne restituiva mille e
+  // taceva, quindi lo storico calcolava su dati parziali senza avvisare.
   var [resPres, resFatt, resAff, resIst, resFattEm] = await Promise.all([
-    sb.from('anticipi_sbf_presentazioni').select('*').in('stato', _ANTS_STATI_VALIDI).order('data_presentazione', { ascending: false }),
-    sb.from('anticipi_sbf_fatture').select('*').neq('stato', 'esclusa'),
-    sb.from('banche_affidamenti').select('id,istituto_id,importo_accordato,importo_utilizzato,stato').eq('stato', 'attivo'),
+    _antsLeggiTutte('anticipi_sbf_presentazioni', '*', function(q) { return q.in('stato', _ANTS_STATI_VALIDI).order('data_presentazione', { ascending: false }); }),
+    _antsLeggiTutte('anticipi_sbf_fatture', '*', function(q) { return q.neq('stato', 'esclusa'); }),
+    sb.from('banche_affidamenti').select('id,istituto_id,tipo,importo_accordato,importo_utilizzato,stato').eq('stato', 'attivo').in('tipo', _ANTS_TIPI_ANTICIPO),
     sb.from('banche_istituti').select('id,nome'),
     // Fatturato consumo: fatture emesse anno corrente, escludo clienti rete
-    sb.from('fatture_emesse').select('importo_totale,cliente_id,data').gte('data', inizioAnno).lte('data', fineAnno)
+    _antsLeggiTutte('fatture_emesse', 'importo_totale,cliente_id,data', function(q) { return q.gte('data', inizioAnno).lte('data', fineAnno); })
   ]);
 
   if (resPres.error) {
@@ -292,12 +321,29 @@ function _antsRenderUtilizzoFidi() {
   var html = '<div style="background:#FAF8F2;padding:14px 16px;border-radius:6px;border:0.5px solid #e5e0d2;margin-bottom:14px">';
   html += '<div style="font-size:11px;text-transform:uppercase;color:#666;letter-spacing:0.4px;font-weight:600;margin-bottom:10px">🏦 Utilizzo Fidi Anticipi per Banca (oggi)</div>';
 
-  // Aggrego per istituto: somma accordato e utilizzato
+  // Aggrego per istituto. Gli affidamenti sono gia filtrati ai soli tipi di
+  // anticipo, quindi qui entrano solo quelle linee.
   var perIstituto = {};
+  var affDiIst = {};
   _antsStato.affidamenti.forEach(function(a) {
     if (!perIstituto[a.istituto_id]) perIstituto[a.istituto_id] = { accordato: 0, utilizzato: 0 };
     perIstituto[a.istituto_id].accordato += Number(a.importo_accordato || 0);
-    perIstituto[a.istituto_id].utilizzato += Number(a.importo_utilizzato || 0);
+    affDiIst[a.id] = a.istituto_id;
+  });
+
+  // v20260801a — L'utilizzo NON si legge piu da importo_utilizzato scritto
+  // sull'affidamento: quel campo resta indietro (Intesa ci teneva 548.192,10
+  // mentre l'utilizzo vero era 473.173,10). Si calcola come nel resto del
+  // programma: anticipato meno estinto, modulo per modulo.
+  var estintoDiPres = {};
+  (_antsStato.fatture || []).forEach(function(f) {
+    estintoDiPres[f.presentazione_id] = (estintoDiPres[f.presentazione_id] || 0) + Number(f.importo_estinto || 0);
+  });
+  (_antsStato.presentazioni || []).forEach(function(pr) {
+    var istId = affDiIst[pr.affidamento_id];
+    if (!istId || !perIstituto[istId]) return;
+    var vivo = Number(pr.importo_anticipato_totale || 0) - (estintoDiPres[pr.id] || 0);
+    if (vivo > 0) perIstituto[istId].utilizzato += vivo;
   });
 
   var righe = [];
