@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PhoenixFuel — Gestionale Carburanti</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="pf-cisterne-v2.css?v=20260419d" />
@@ -45,7 +45,77 @@
       .kpi-value { font-size:16px !important; }
       /* Card padding */
       .card { padding:12px !important; }
+
+      /* ═══ MOBILE — UN SOLO MODO DI SCORRERE ═══════════════════════════
+         Nel calendario funziona cosi: la griglia sta dentro un contenitore
+         con overflow-x:auto (#fin-calendario), quindi scorre SOLO la striscia
+         e la cornice resta ferma. Stessa cosa ovunque: le viste settimanali
+         hanno ora la classe .pf-scroll-x e le tabelle si comportano allo
+         stesso modo. Niente regole su misura per singola pagina. */
+
+      /* tutto cio che e a griglia si impila... */
+      [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
+      /* ...e le righe con colonne in PIXEL (elenchi autisti, mezzi, scomparti,
+         riquadri con min-width) restano larghe anche impilate: qui si adattano */
+      [style*="1fr 110px"], [style*="110px 1fr"], [style*="px 1fr"],
+      [style*="minmax(220px"], [style*="min-width:280px"], [style*="min-width:180px"] {
+        min-width:0 !important; max-width:100% !important;
+      }
+      /* ...tranne quelle che si adattano gia da sole... */
+      [style*="auto-fit"], [style*="auto-fill"] { grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)) !important; }
+      /* ...e le SETTIMANE, che restano sette giorni in fila e scorrono
+         dentro il loro contenitore, come il calendario */
+      .pf-scroll-x > [style*="repeat(7"], #fin-calendario [style*="repeat(7"] {
+        grid-template-columns:repeat(7, 132px) !important;
+        width:max-content;          /* larghezza vera = 7 colonne, cosi c'e' qualcosa da scorrere */
+      }
+      /* il layout a due colonne delle letture si impila: la settimana prende
+         tutta la larghezza e il contenitore puo restringersi */
+      #uni-layout { flex-direction:column !important; }
+      #uni-content, #uni-pompe { min-width:0 !important; max-width:100% !important; width:100% !important; }
+
+      /* tabelle larghe: ognuna scorre dentro il proprio riquadro */
+      table { font-size:12px; display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
+      th, td { padding:6px 8px !important; }
+
+      /* la pagina non si sposta mai di lato: a scorrere sono i riquadri.
+         Se il contenuto di una card e' piu largo dello schermo (tabelle
+         carichi, griglie a colonne fisse, pannelli larghi) scorre DENTRO la
+         card, come fa il calendario: la cornice resta ferma. Senza questo
+         veniva tagliato e non c'era modo di raggiungerlo. */
+      body, .content { overflow-x:hidden; }
+      .card, .log-panel, .stz-panel, .banche-panel, .dep-panel, .fatt-panel,
+      .cli-panel, .forn-panel, .ff-panel, .all-panel, .fin-subpanel {
+        overflow-x:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain;
+      }
+
+      /* Il pulsante menu (tre linee) sempre cliccabile e sopra a tutto */
+      .hamburger {
+        position:relative; z-index:120;
+        min-width:44px; min-height:44px;
+        display:flex !important; align-items:center; justify-content:center;
+        font-size:24px !important; padding:0 10px !important;
+      }
+      .topbar { position:sticky; top:0; z-index:60; }
+
+      /* Comandi piu grandi del dito; 16px sugli input evita lo zoom di iOS */
+      button { min-height:34px; }
+      input[type="date"], input[type="number"], input[type="text"], select { font-size:16px !important; }
+
+      .modal-content, [id$="-modal"] > div { max-width:96vw !important; }
     }
+
+    /* Telefoni stretti: colonne appena piu strette */
+    @media (max-width: 430px) {
+      .pf-scroll-x > [style*="repeat(7"], #fin-calendario [style*="repeat(7"] {
+        grid-template-columns:repeat(7, 122px) !important;
+        width:max-content;
+      }
+      [style*="auto-fit"], [style*="auto-fill"] { grid-template-columns:1fr !important; }
+      .kpi-value { font-size:15px !important; }
+      .card { padding:10px !important; }
+    }
+    .pf-scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;min-width:0;max-width:100%}
     .nav-badge{display:inline-block;min-width:18px;height:18px;line-height:18px;text-align:center;font-size:10px;font-weight:700;color:#fff;background:#E24B4A;border-radius:50%;margin-left:auto;padding:0 4px;animation:badgePulse 1.5s ease-in-out infinite}
     .nav-item{display:flex;align-items:center}
     @keyframes badgePulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(226,75,74,0.5)}50%{transform:scale(1.15);box-shadow:0 0 8px 3px rgba(226,75,74,0.3)}}
@@ -212,22 +282,36 @@
           </div>
         </div>
 
-        <!-- FIDI FORNITORI + ANTICIPI (ricostruiti 01/08/2026: i due
-             contenitori erano spariti da index.html in una sessione
-             precedente, quindi le funzioni che li disegnano uscivano
-             subito senza scrivere niente e i pannelli non comparivano) -->
+        <!-- FIDO FORNITORI (stessi dati dell'Estratto conto fornitore) -->
         <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Fidi fornitori</div>
-          <div id="dash-fido-fornitori">
-            <div class="loading">Caricamento...</div>
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Fido fornitori</span>
+            <span style="font-size:11px;color:var(--text-muted);font-weight:400">clicca per aprire l'estratto conto</span>
           </div>
+          <div id="dash-fido-fornitori"><div class="loading">Caricamento...</div></div>
         </div>
 
+        <!-- ANTICIPI FATTURE (stessi dati del Quadro anticipi in Banche e Mutui) -->
         <div class="card" style="margin-bottom:16px">
-          <div class="card-title">Anticipi fatture</div>
-          <div id="dash-anticipi">
-            <div class="loading">Caricamento...</div>
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Anticipi fatture</span>
+            <span style="font-size:11px;color:var(--text-muted);font-weight:400">clicca per aprire la banca</span>
           </div>
+          <div id="dash-anticipi"><div class="loading">Caricamento...</div></div>
+        </div>
+
+        <!-- SETTIMANA FINANZIARIA (stessa vista settimanale del calendario) -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span>Settimana</span>
+            <span style="display:flex;align-items:center;gap:6px">
+              <button onclick="dashSettimanaSposta(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;color:var(--text)">◀</button>
+              <span id="dash-settimana-label" style="font-size:12px;color:var(--text-muted);font-weight:400;min-width:130px;text-align:center"></span>
+              <button onclick="dashSettimanaSposta(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;color:var(--text)">▶</button>
+              <button onclick="dashSettimanaOggi()" style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer;color:var(--text)">Oggi</button>
+            </span>
+          </div>
+          <div id="dash-settimana"><div class="loading">Caricamento...</div></div>
         </div>
 
         <!-- ALERT OPERATIVI (collassabile) -->
@@ -1111,7 +1195,7 @@
             <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#E24B4A;vertical-align:middle;margin-right:4px"></span>Uscite fornitori</span>
           </div>
           <!-- Grid calendario -->
-          <div id="fin-calendario" style="overflow-x:auto"></div>
+          <div id="fin-calendario" class="pf-scroll-x"></div>
         </div>
         </div>
 
@@ -1142,11 +1226,12 @@
             onclick="switchFattureTab(this)" style="font-size:12px;padding:8px 14px">
             📋 Elenco fatture
           </button>
-          <button class="btn-primary fatt-tab" data-tab="fatt-panel-nuova"
-            onclick="switchFattureTab(this)"
-            style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
-            ➕ Nuova fattura
-          </button>
+          <!-- 24/07: linguetta "Nuova fattura" RIMOSSA (decisione Rinaldo).
+               Generava fatture nella tabella interna `fatture`, invisibili
+               nell'elenco (che legge fatture_emesse) e non gestibili: numero e
+               data non modificabili, cancellabili solo via SQL. La fatturazione
+               vera passa da Danea e dai numeri inseriti in Consegne. Il pannello
+               resta nel DOM ma non è più raggiungibile. -->
           <button class="btn-primary fatt-tab" data-tab="fatt-panel-impostazioni"
             onclick="switchFattureTab(this)"
             style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">
@@ -1163,6 +1248,7 @@
         <div id="fatt-panel-elenco" class="fatt-panel">
           <!-- Dashboard controllo integrità (popolato da caricaDashboardFatture) -->
           <div id="fatt-dashboard"></div>
+          <div id="fatt-avviso-ricerca"></div>
 
           <!-- Filtri -->
           <div class="card" style="margin-bottom:14px">
@@ -1402,8 +1488,12 @@
 
         <!-- Tab Benchmark / Futures -->
         <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:18px" id="benchmark-tabs">
-          <button id="tab-benchmark-std" onclick="_switchBenchTab('std')"
+          <button id="tab-mercato" onclick="_switchBenchTab('mercato')"
             style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--primary);border-bottom:2px solid var(--primary)">
+            🛢️ Mercato gasolio
+          </button>
+          <button id="tab-benchmark-std" onclick="_switchBenchTab('std')"
+            style="padding:10px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent">
             📈 Benchmark mercato
           </button>
           <button id="tab-futures" onclick="_switchBenchTab('futures')"
@@ -1412,8 +1502,11 @@
           </button>
         </div>
 
+        <!-- Vista unificata mercato (29/07): serie ICE + medie + tuoi carichi -->
+        <div id="mercato-wrap"><div class="loading" style="padding:30px">Caricamento…</div></div>
+
         <!-- Contenuto Benchmark standard -->
-        <div id="bench-std-wrap">
+        <div id="bench-std-wrap" style="display:none">
         <!-- Input giornaliero -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-title">Inserisci prezzo di riferimento</div>
@@ -1559,6 +1652,12 @@
 
       <!-- FORNITORI -->
       <div class="section" id="s-fornitori">
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn-primary forn-tab active" data-tab="forn-elenco" onclick="switchFornitoriTab(this)" style="font-size:12px;padding:8px 14px">🏭 Elenco fornitori</button>
+          <button class="btn-primary forn-tab" data-tab="forn-estratto" onclick="switchFornitoriTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📑 Estratto conto fornitore</button>
+        </div>
+
+        <div class="forn-panel" id="forn-elenco">
         <div class="card">
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
             <span>Elenco fornitori</span>
@@ -1576,7 +1675,35 @@
         </div>
         <div class="card" style="margin-top:12px">
           <div class="card-title">📋 Fatture Fornitori</div>
-          <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento fatture fornitori...</div></div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <button class="ff-tab" onclick="pfRfSwitchTabFF('ff-scadenzario',this)" style="font-size:12px;padding:7px 14px;border-radius:7px;cursor:pointer;background:#185FA5;color:#fff;border:0.5px solid #185FA5;font-weight:600">📅 Scadenzario</button>
+            <button class="ff-tab" onclick="pfRfSwitchTabFF('ff-senza',this)" style="font-size:12px;padding:7px 14px;border-radius:7px;cursor:pointer;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🧾 Senza fattura</button>
+          </div>
+          <div class="ff-panel" id="ff-scadenzario">
+            <div id="sf-content"><div class="loading" style="padding:16px;font-size:12px">Caricamento fatture fornitori...</div></div>
+          </div>
+          <div class="ff-panel" id="ff-senza" style="display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+              <div style="font-size:12.5px;color:var(--text-muted)">Aggancia il numero fattura agli ordini. Qui non si registrano pagamenti.</div>
+              <select id="rf-fornitore" onchange="pfRfCambiaFornitore()" style="font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:260px"><option value="">— scegli un fornitore —</option></select>
+            </div>
+            <div id="rf-body"><div style="text-align:center;color:var(--text-muted);padding:34px;font-size:12.5px">Scegli un fornitore: una fattura appartiene a un solo fornitore, quindi la selezione si attiva solo dopo la scelta.</div></div>
+          </div>
+        </div>
+        </div>
+
+        <!-- ESTRATTO CONTO FORNITORE -->
+        <div class="forn-panel" id="forn-estratto" style="display:none">
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <span>📑 Estratto conto fornitore</span>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button onclick="ecfApriTutti()" style="font-size:12px;padding:8px 14px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-weight:600">🗂 Tutti i fornitori</button>
+                <select id="ecf-fornitore" onchange="ecfCambiaFornitore()" style="font-size:13px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:600;min-width:280px"><option value="">— scegli un fornitore —</option></select>
+              </div>
+            </div>
+            <div id="ecf-body"><div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Seleziona un fornitore per vedere l'estratto conto.</div></div>
+          </div>
         </div>
       </div>
 
@@ -1707,6 +1834,7 @@
                 <span id="uni-data-day" style="padding:3px 10px;border-radius:8px;font-size:11px;font-weight:500;display:none"></span>
                 <button onclick="_uniGiorno(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
                 <input type="date" id="uni-data-input" data-nav="day" onchange="_uniVaiAlGiorno()" style="font-size:12px;height:32px;width:135px" />
+                <button id="uni-btn-home" onclick="_uniToggleHome()" style="background:var(--bg);border:0.5px solid var(--border);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px">📅 Settimana</button>
                 <button id="uni-btn-vista" onclick="_uniToggleVista()" style="background:var(--bg);border:0.5px solid var(--border);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px">📊 Per prodotto</button>
                 <button onclick="_uniApriModaleCambioPrezzo()" style="background:#FFF8E1;border:1px solid #BA7517;color:#8B6914;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">⚡ CAMBIO PREZZO</button>
               </div>
@@ -2156,6 +2284,8 @@
             </div>
 
             <!-- KPI vendite vs incassi carte -->
+            <div id="cassa-portale-box"></div>
+
             <div class="grid2" style="margin-bottom:16px">
               <div class="kpi"><div class="kpi-label">Totale vendite (da letture)</div><div class="kpi-value" id="cassa-tot-vendite">—</div></div>
               <div class="kpi" id="cassa-kpi-quadra"><div class="kpi-label">Somma incassi carte</div><div class="kpi-value" id="cassa-tot-incassi">—</div></div>
@@ -2193,12 +2323,9 @@
             <div style="display:flex;gap:8px">
               <button id="btn-salva-cassa" class="btn-primary" style="flex:1" onclick="salvaCassa()">💾 Salva registro</button>
               <button class="btn-primary" style="background:#6B5FCC" onclick="stampaCassa()">🖨️ Stampa</button>
-              <button class="btn-primary" style="background:#378ADD" onclick="document.getElementById('ocr-scontrino-input').click()">📷 Leggi scontrino</button>
-              <input type="file" id="ocr-scontrino-input" accept="image/*" style="display:none" onchange="ocrScontrino(this)" />
               <button class="btn-primary" style="background:#639922" onclick="document.getElementById('scontrino-upload-input').click()">📎 Allega scontrino</button>
               <input type="file" id="scontrino-upload-input" accept="image/*,.pdf" multiple style="display:none" onchange="uploadScontrinoCassa(this)" />
             </div>
-            <div id="ocr-status" style="display:none;margin-top:10px;padding:10px 14px;background:#E6F1FB;border-radius:8px;font-size:12px;color:#0C447C"></div>
             <!-- Anteprime scontrini allegati -->
             <div id="scontrini-cassa-preview" style="margin-top:10px"></div>
           </div>
@@ -2555,7 +2682,7 @@
           <div class="card" style="margin-bottom:16px">
             <div class="card-title">Pianifica nuovo carico</div>
             <div class="form-grid">
-              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" data-nav="day" onchange="caricaOrdiniPerCarico();_labelGiorno('car-data')" /></div>
+              <div class="form-group"><label>Data consegna</label><input type="date" id="car-data" data-nav="day" onchange="caricaOrdiniPerCarico();_labelGiorno('car-data');pfVaiAlGiornoCarichi(this.value)" /></div>
               <div class="form-group"><label>Vettore</label><select id="car-trasportatore" onchange="aggiornaVeicoliVettore()"><option value="">Nostro mezzo</option></select></div>
               <div class="form-group"><label>Mezzo</label><select id="car-mezzo"><option value="">Seleziona mezzo...</option></select></div>
               <div class="form-group"><label>Autista</label><select id="car-autista"><option value="">Seleziona autista...</option></select></div>
@@ -2862,7 +2989,6 @@
             collega al cliente corretto in anagrafica con match per nome (prefisso). Lanciare ogni volta
             dopo un import massivo, o quando le fatture compaiono come <em>uncertain</em> con score "X PIVA".
           </div>
-          <button class="btn-primary" style="background:#6B5FCC" onclick="associaClienteIdMancanti()">🔗 Associa cliente_id mancanti</button>
           <div id="sanatoria-cliente-output" style="margin-top:12px;font-size:12px"></div>
         </div>
 
@@ -3000,47 +3126,47 @@
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
 <script src="pf-ordini.js?v=20260731b"></script>
-<script src="pf-deposito.js?v=20260717c"></script>
-<script src="pf-anagrafica.js?v=20260720c"></script>
+<script src="pf-deposito.js?v=20260724b"></script>
+<script src="pf-anagrafica.js?v=20260722g"></script>
 <script src="pf-vendite-cliente.js?v=20260720b"></script>
 <script src="pf-vendite-prodotto.js?v=20260720b"></script>
 <script src="pf-data.js?v=20260526d"></script>
 <script src="pf-fornitore-analisi.js?v=20260415p"></script>
-<script src="pf-stz-core.js?v=20260717c"></script>
+<script src="pf-stz-core.js?v=20260724a"></script>
 <script src="pf-stz-letture.js?v=20260419c"></script>
 <script src="pf-stz-marginalita.js?v=20260526a"></script>
-<script src="pf-stz-unificata.js?v=20260526d"></script>
+<script src="pf-stz-unificata.js?v=20260730a"></script>
 <script src="pf-stz-corrispettivi.js?v=20260608a"></script>
-<script src="pf-stz-magazzino.js?v=20260717b"></script>
-<script src="pf-stz-cassa.js?v=1775149951158"></script>
+<script src="pf-stz-magazzino.js?v=20260724a"></script>
+<script src="pf-stz-cassa.js?v=20260726c"></script>
 <script src="pf-stz-report.js?v=20260526a"></script>
 <script src="pf-stz-foglio.js?v=1775149951158"></script>
 <script src="pf-stz-giacenze.js?v=20260526a"></script>
 <script src="pf-stz-giac-giorno.js?v=20260526a"></script>
-<script src="pf-stz-giac-week.js?v=20260420a"></script>
+<script src="pf-stz-giac-week.js?v=20260727a"></script>
 <script src="pf-sentinelle.js?v=20260413f"></script>
 <script src="pf-movimenti-totali.js?v=20260526a"></script>
 <script src="pf-movimenti-dettaglio.js?v=20260716a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
-<script src="pf-logistica.js?v=20260714b"></script>
+<script src="pf-logistica.js?v=20260722e"></script>
 <script src="pf-admin.js?v=20260717a"></script>
-<script src="pf-dashboard.js?v=20260515b"></script>
+<script src="pf-dashboard.js?v=20260725b"></script>
 <script src="pf-home.js?v=20260419a"></script>
-<script src="pf-benchmark.js?v=20260514b"></script>
-<script src="pf-futures.js?v=20260508f"></script>
+<script src="pf-benchmark.js?v=20260729b"></script>
+<script src="pf-futures.js?v=20260729d"></script>
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
-<script src="pf-finanze.js?v=20260525a"></script>
-<script src="pf-foglio-giornale.js?v=20260524c"></script>
-<script src="pf-finanze-sostenibilita.js?v=20260503l"></script>
-<script src="pf-pagamento-fornitore-modale.js?v=20260524c"></script>
-<script src="pf-debito-fornitori.js?v=20260801a"></script>
-<script src="pf-estratto-fornitore.js?v=20260801a"></script>
-<script src="pf-scadenzario-fornitori.js?v=20260717a"></script>
-<script src="pf-allegati.js?v=20260717a"></script>
-<script src="pf-fatture.js?v=20260717d"></script>
+<script src="pf-finanze.js?v=20260727d"></script>
+<script src="pf-foglio-giornale.js?v=20260728a"></script>
+<script src="pf-finanze-sostenibilita.js?v=20260727a"></script>
+<script src="pf-pagamento-fornitore-modale.js?v=20260728a"></script>
+<script src="pf-debito-fornitori.js?v=20260730b"></script>
+<script src="pf-scadenzario-fornitori.js?v=20260727b"></script>
+<script src="pf-estratto-fornitore.js?v=20260730d"></script>
+<script src="pf-reg-fattura.js?v=20260730a"></script>
+<script src="pf-allegati.js?v=20260722a"></script>
+<script src="pf-fatture.js?v=20260727d"></script>
 <script src="pf-fatture-import.js?v=20260517a"></script>
-<script src="pf-reg-fattura.js?v=20260801a"></script>
 <script src="pf-banche.js?v=20260528b"></script>
 <script src="pf-banche-valutazioni.js?v=20260514a"></script>
 <script src="pf-banche-strumenti.js?v=20260716a"></script>
@@ -3049,10 +3175,10 @@
 <script src="pf-anticipi.js?v=20260801c"></script>
 <script src="pf-anticipi-stampa.js?v=20260503f"></script>
 <script src="pf-anticipi-storico.js?v=20260503j"></script>
-<script src="pf-estratto-conto.js?v=20260503t"></script>
+<script src="pf-estratto-conto.js?v=20260730b"></script>
 <script src="pf-dep-giacenze.js?v=20260525c"></script>
-<script src="pf-dep-giac-week.js?v=20260525c"></script>
-<script src="pf-registri.js?v=20260717a"></script>
+<script src="pf-dep-giac-week.js?v=20260727b"></script>
+<script src="pf-registri.js?v=20260721a"></script>
 <script src="pf-system.js?v=20260716a"></script>
 <script src="pf-termometro.js?v=20260720a"></script>
 <script>
