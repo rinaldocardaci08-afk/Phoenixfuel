@@ -1,6 +1,10 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260801c — pannello anticipi in dashboard: barra a due tratti e valori
+//               fra parentesi con i moduli da accreditare, come nella scheda
+//               banca; letture delle fatture paginate. In index.html
+//               ricostruiti i contenitori dei due pannelli, spariti prima.
 // v20260801b — la scadenza del modulo la decide l utente, e obbligatoria,
 //               vale per tutte le fatture del modulo e non puo superare i
 //               150 giorni dalla presentazione; prima non veniva nemmeno
@@ -280,7 +284,7 @@ async function _antRenderTabHome(fidiAnticipi) {
       .select('*').in('affidamento_id', affIds).not('stato', 'in', '(estinta,rifiutata)');
     const presIds = (pres || []).map(p => p.id);
     if (presIds.length) {
-      const { data: ftt } = await sb.from('anticipi_sbf_fatture').select('*').in('presentazione_id', presIds);
+      const { data: ftt } = await _antLeggiTutte('anticipi_sbf_fatture', '*', function(q) { return q.in('presentazione_id', presIds); });
       (ftt || []).forEach(f => {
         if (!fattByPres[f.presentazione_id]) fattByPres[f.presentazione_id] = [];
         fattByPres[f.presentazione_id].push(f);
@@ -513,7 +517,7 @@ async function caricaAnticipiDashboard() {
     const presIds = (pres || []).map(p => p.id);
     let fattByPres = {};
     if (presIds.length) {
-      const { data: ftt } = await sb.from('anticipi_sbf_fatture').select('*').in('presentazione_id', presIds);
+      const { data: ftt } = await _antLeggiTutte('anticipi_sbf_fatture', '*', function(q) { return q.in('presentazione_id', presIds); });
       (ftt || []).forEach(f => {
         if (!fattByPres[f.presentazione_id]) fattByPres[f.presentazione_id] = [];
         fattByPres[f.presentazione_id].push(f);
@@ -525,12 +529,17 @@ async function caricaAnticipiDashboard() {
       + fidi.map(aff => {
         const ist = _bancheIstituti.find(i => i.id === aff.istituto_id) || {};
         const accordato = Number(aff.importo_accordato || 0);
-        let utilizzo = 0, scadute = 0;
+        let utilizzo = 0, scadute = 0, inAttesa = 0;
         const perData = {};
         (pres || []).filter(p => p.affidamento_id === aff.id).forEach(p => {
           const ftt = fattByPres[p.id] || [];
           const estinto = ftt.reduce((s, f) => s + Number(f.importo_estinto || 0), 0);
           utilizzo += Math.max(0, Number(p.importo_anticipato_totale || 0) - estinto);
+          // v20260801c: presentato e non ancora accreditato. Senza, il pannello
+          // mostrava un disponibile piu alto del vero.
+          let richiesto = Number(p.importo_richiesto || 0);
+          if (!richiesto) richiesto = ftt.reduce((s, f) => s + Number(f.importo_anticipato_calcolato || 0), 0);
+          inAttesa += Math.max(0, richiesto - Number(p.importo_anticipato_totale || 0));
           ftt.forEach(f => {
             if (f.stato === 'estinta' || f.stato === 'esclusa' || !f.scadenza_banca) return;
             const res = Math.max(0, Number(f.importo_anticipato_calcolato || 0) - Number(f.importo_estinto || 0));
@@ -539,7 +548,11 @@ async function caricaAnticipiDashboard() {
           });
         });
         const disp = Math.max(0, accordato - utilizzo);
+        const dispTot = Math.max(0, accordato - utilizzo - inAttesa);
         const pct = accordato > 0 ? Math.min(100, (utilizzo / accordato) * 100) : 0;
+        const pctAttesa = accordato > 0 ? Math.max(0, Math.min(100 - Math.round(pct), Math.round(inAttesa / accordato * 100))) : 0;
+        const pctTot = accordato > 0 ? Math.round((utilizzo + inAttesa) / accordato * 100) : 0;
+        const righeAtt = 'repeating-linear-gradient(45deg,#9C8FDB,#9C8FDB 4px,#C4BAF0 4px,#C4BAF0 8px)';
         const bordo = pct >= 85 ? '#C0392B' : pct >= 60 ? '#F5921E' : '#639922';
         const date = Object.keys(perData).sort();
         const primaD = date.length ? date[0] : null;
@@ -548,13 +561,16 @@ async function caricaAnticipiDashboard() {
           + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">'
             + '<span style="font-size:14px;font-weight:700">' + esc(ist.nome || '—') + '</span>'
             + '<span style="font-size:11px;color:var(--text-muted)">' + (aff.tipo === 'sbf' ? 'SBF' : 'Anticipo fatture') + '</span></div>'
-          + '<div style="height:9px;background:var(--bg-card);border-radius:5px;overflow:hidden"><div style="width:' + Math.round(pct) + '%;height:100%;background:' + bordo + '"></div></div>'
+          + '<div style="height:9px;background:var(--bg-card);border-radius:5px;overflow:hidden;display:flex"><div style="width:' + Math.round(pct) + '%;height:100%;background:' + bordo + '"></div>'
+            + (pctAttesa > 0 ? '<div style="width:' + pctAttesa + '%;height:100%;background:' + righeAtt + '"></div>' : '') + '</div>'
           + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:8px">'
-            + '<span style="color:var(--text-muted)">Utilizzato ' + Math.round(pct) + '%</span>'
-            + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(utilizzo) + ' / ' + fmtE(accordato) + '</span></div>'
+            + '<span style="color:var(--text-muted)">Utilizzato ' + Math.round(pct) + '%' + (inAttesa > 0 ? ' <span style="color:#5B4CA8">(' + pctTot + '%)</span>' : '') + '</span>'
+            + '<span style="font-family:var(--font-mono);font-weight:700">' + fmtE(utilizzo) + (inAttesa > 0 ? ' <span style="color:#5B4CA8">(' + fmtE(utilizzo + inAttesa) + ')</span>' : '') + ' / ' + fmtE(accordato) + '</span></div>'
+          + (inAttesa > 0 ? '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:4px;color:#5B4CA8">'
+            + '<span>Presentato da accreditare</span><span style="font-family:var(--font-mono);font-weight:700">' + fmtE(inAttesa) + '</span></div>' : '')
           + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:4px">'
             + '<span style="color:var(--text-muted)">Disponibile</span>'
-            + '<span style="font-family:var(--font-mono);font-weight:700;color:' + (disp > 0 ? '#3B6D11' : '#A32D2D') + '">' + fmtE(disp) + '</span></div>'
+            + '<span style="font-family:var(--font-mono);font-weight:700;color:' + (dispTot > 0 ? '#3B6D11' : '#A32D2D') + '">' + fmtE(disp) + (inAttesa > 0 ? ' <span style="color:#5B4CA8">(' + fmtE(dispTot) + ')</span>' : '') + '</span></div>'
           + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px">'
             + (scadute ? '<span style="color:#A32D2D;font-weight:700">' + scadute + ' scadute in banca</span>'
                        : '<span style="color:var(--text-muted)">prima scadenza ' + (primaD ? _pfIsoToIt(primaD) : '—') + '</span>')
@@ -607,7 +623,7 @@ async function _antRenderTabBanca(affidamentoId) {
   let fatturePerPres = {}, accreditiPerPres = {};
   if (presIds.length) {
     const [ftRes, acRes] = await Promise.all([
-      sb.from('anticipi_sbf_fatture').select('*').in('presentazione_id', presIds),
+      _antLeggiTutte('anticipi_sbf_fatture', '*', function(q) { return q.in('presentazione_id', presIds); }),
       sb.from('anticipi_sbf_accrediti').select('*').in('presentazione_id', presIds).order('data_accredito')
     ]);
     (ftRes.data || []).forEach(f => {

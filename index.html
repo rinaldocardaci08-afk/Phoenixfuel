@@ -212,6 +212,24 @@
           </div>
         </div>
 
+        <!-- FIDI FORNITORI + ANTICIPI (ricostruiti 01/08/2026: i due
+             contenitori erano spariti da index.html in una sessione
+             precedente, quindi le funzioni che li disegnano uscivano
+             subito senza scrivere niente e i pannelli non comparivano) -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Fidi fornitori</div>
+          <div id="dash-fidi-fornitori">
+            <div class="loading">Caricamento...</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Anticipi fatture</div>
+          <div id="dash-anticipi">
+            <div class="loading">Caricamento...</div>
+          </div>
+        </div>
+
         <!-- ALERT OPERATIVI (collassabile) -->
         <div id="dash-alert-wrapper" style="display:none;margin-bottom:16px">
           <div onclick="dashToggleAlert()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:#FCEBEB;border:0.5px solid #F09595;border-left:3px solid #E24B4A;border-radius:10px;padding:10px 14px">
@@ -3025,7 +3043,7 @@
 <script src="pf-banche-strumenti.js?v=20260716a"></script>
 <script src="pf-banche-import-estratto.js?v=20260512a"></script>
 <script src="pf-banche-calc-costi.js?v=20260512d"></script>
-<script src="pf-anticipi.js?v=20260801b"></script>
+<script src="pf-anticipi.js?v=20260801c"></script>
 <script src="pf-anticipi-stampa.js?v=20260503f"></script>
 <script src="pf-anticipi-storico.js?v=20260503j"></script>
 <script src="pf-estratto-conto.js?v=20260503t"></script>
