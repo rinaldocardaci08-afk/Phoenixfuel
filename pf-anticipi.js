@@ -1,6 +1,7 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260731b — la casella di ricerca non perde piu il cursore a ogni lettera
 // v20260731a — la creazione del modulo non puo piu fallire in silenzio:
 //              lettura paginata delle fatture gia impegnate (si fermava a
 //              mille righe e proponeva fatture non piu disponibili),
@@ -2101,9 +2102,28 @@ function _antPresentaSetFilter(campo, val) {
   else if (campo === 'sortBy') _antPresentaState.sortBy = val;
   else if (campo === 'rete') _antPresentaState.filterRete = val;
   // Salva data/protocollo/scadenza/note prima di rerender
+  // v20260731b: ogni lettera digitata nella casella di ricerca ridisegna
+  // TUTTA la finestra, quindi il campo viene distrutto e ricreato e il
+  // cursore se ne va — si riusciva a scrivere una lettera per volta.
+  // Qui ci si ricorda dove era il cursore e lo si rimette dov era.
+  var focusId = null, curDa = null, curA = null;
+  var attivo = document.activeElement;
+  if (attivo && attivo.id) {
+    focusId = attivo.id;
+    try { curDa = attivo.selectionStart; curA = attivo.selectionEnd; } catch (e) {}
+  }
   _antPresentaSalvaForm();
   _antPresentaRender();
   _antPresentaRipristinaForm();
+  if (focusId) {
+    var rinato = document.getElementById(focusId);
+    if (rinato) {
+      try { rinato.focus(); } catch (e) {}
+      if (curDa !== null && typeof rinato.setSelectionRange === 'function') {
+        try { rinato.setSelectionRange(curDa, curA); } catch (e) {}
+      }
+    }
+  }
 }
 
 function _antPresentaToggleFatt(fid, checked) {
