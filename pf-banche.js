@@ -1,4 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20260802c — corretto l ordine: la somma delle differenze stava PRIMA del
+//               calcolo della differenza (errore a schermo, tabella non
+//               disegnata)
 // v20260802b — la quadratura non puo bloccare il caricamento dei saldi:
 //               tetto di 8 secondi sulle sue letture, e se non risponde le
 //               due colonne restano vuote invece di appendere la pagina
@@ -3774,7 +3777,6 @@ function _renderPanelSituazioneSaldi() {
       ? sDisp
       : (sDispCalc !== null ? sDispCalc : sDisp);
 
-    if (diff !== null) { totDiff += diff; nDiff++; }
     if (sCont !== null) totContabile += sCont;
     if (sDispEffettivo !== null) totDisponibile += sDispEffettivo;
     totFido += fido;
@@ -3826,6 +3828,7 @@ function _renderPanelSituazioneSaldi() {
     // Col NEW: Atteso e Differenza (quadratura giornaliera)
     const atteso = _quadNonDisponibile ? null : _quadAtteso[c.id];
     const diff = _quadNonDisponibile ? null : _quadDifferenza(c, sCont);
+    if (diff !== null) { totDiff += diff; nDiff++; }
     const giaSpiegato = (_quadRighe[c.istituto_id] || [])
       .reduce(function (x, q) { return x + Number(q.importo || 0); }, 0);
 
