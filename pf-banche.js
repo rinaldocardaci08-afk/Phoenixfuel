@@ -1,4 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20260802a — quadratura giornaliera dei conti: colonne Atteso e Differenza
+//               nella situazione, modale che smonta la differenza a voci con
+//               barra di completamento e segno automatico, causali per banca.
+//               Corretto anche numero_conto -> descrizione (colonna inesistente).
 // PhoenixFuel — Sezione Banche & Mutui
 // Versione 28/05/2026 (v20260528b) - Form esteso + Simulatore impatto (Gantt cumulativo)
 //
@@ -248,7 +252,7 @@ async function renderBancheIstituti() {
 
     istitutiSorted.forEach(ist => {
       const contiBanca = _bancheConti.filter(c => c.istituto_id === ist.id)
-        .sort((a, b) => (a.numero_conto || '').localeCompare(b.numero_conto || ''));
+        .sort((a, b) => (a.descrizione || '').localeCompare(b.descrizione || ''));
       const fidiBanca = _bancheAffidamenti.filter(a => a.istituto_id === ist.id && a.stato === 'attivo');
       const finBanca = _bancheFinanziamenti.filter(f => f.istituto_id === ist.id && f.stato === 'attivo');
 
@@ -295,7 +299,7 @@ async function renderBancheIstituti() {
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--bg);border-left:3px solid #378ADD;border-radius:0 6px 6px 0;margin-bottom:4px;' + (cc.attivo ? '' : 'opacity:0.5') + '">';
           html += '<div style="flex:1">';
           html += '<div style="font-size:12px;font-weight:500">' + esc(cc.descrizione || '');
-          if (cc.numero_conto) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(cc.numero_conto) + '</span>';
+          if (cc.descrizione) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(cc.descrizione) + '</span>';
           html += '</div>';
           html += '<div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + esc(ibanMasc) + '</div>';
           html += '</div>';
@@ -3231,6 +3235,272 @@ var _situazioneDataCorrente = null; // 'YYYY-MM-DD' del giorno mostrato
 var _situazioneSaldi = {};          // {conto_id: {saldo_contabile, saldo_disponibile, id, note}}
 var _situazioneStorico = [];        // Array degli ultimi 60 giorni di saldi (tutti i conti)
 
+// ═══ v20260802a · QUADRATURA GIORNALIERA DEI CONTI ═════════════════
+// Un istituto = un conto operativo (verificato a DB: Intesa, MPS, BNL e BCC
+// ne hanno uno ciascuno). I movimenti del foglio giornale portano
+// banca_id = istituto, quindi l attribuzione al conto e univoca.
+var _quadMovimenti = {};   // istituto_id -> saldo dei movimenti di oggi
+var _quadRighe = {};       // istituto_id -> quadrature gia registrate oggi
+var _quadCausali = {};     // istituto_id -> elenco causali
+var _quadAtteso = {};      // conto_id -> saldo atteso
+var _quadStato = null;     // modale aperto
+
+function _quadIeri(dataISO) {
+  var d = new Date(dataISO + 'T12:00:00');
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+async function _quadCaricaGiornata(dataISO, storico) {
+  _quadMovimenti = {}; _quadRighe = {}; _quadCausali = {}; _quadAtteso = {};
+  try {
+    var r = await Promise.all([
+      sb.from('foglio_giornale_movimenti').select('banca_id,tipo,importo').eq('data', dataISO),
+      sb.from('banche_quadrature').select('*').eq('data', dataISO),
+      sb.from('banche_causali_quadratura').select('*').eq('attiva', true).order('ordine')
+    ]);
+    (r[0].data || []).forEach(function (m) {
+      if (!m.banca_id) return;
+      var seg = (m.tipo === 'entrata') ? 1 : -1;
+      _quadMovimenti[m.banca_id] = (_quadMovimenti[m.banca_id] || 0) + seg * Number(m.importo || 0);
+    });
+    (r[1].data || []).forEach(function (q) {
+      (_quadRighe[q.istituto_id] = _quadRighe[q.istituto_id] || []).push(q);
+    });
+    (r[2].data || []).forEach(function (c) {
+      (_quadCausali[c.istituto_id] = _quadCausali[c.istituto_id] || []).push(c);
+    });
+  } catch (e) {
+    console.warn('[quadratura] lettura fallita', e);
+  }
+
+  var ieri = _quadIeri(dataISO);
+  var contIeri = {};
+  (storico || []).filter(function (x) { return x.data === ieri; })
+    .forEach(function (x) {
+      if (x.saldo_contabile !== null && x.saldo_contabile !== undefined) {
+        contIeri[x.conto_id] = Number(x.saldo_contabile);
+      }
+    });
+  (_bancheConti || []).forEach(function (c) {
+    if (contIeri[c.id] === undefined) { _quadAtteso[c.id] = null; return; }
+    _quadAtteso[c.id] = Math.round((contIeri[c.id] + (_quadMovimenti[c.istituto_id] || 0)) * 100) / 100;
+  });
+}
+
+// Differenza di un conto: saldo reale meno atteso. null se manca un pezzo.
+function _quadDifferenza(conto, saldoContabile) {
+  var att = _quadAtteso[conto.id];
+  if (att === null || att === undefined || saldoContabile === null) return null;
+  return Math.round((saldoContabile - att) * 100) / 100;
+}
+
+
+// ═══ Modale di quadratura ══════════════════════════════════════════
+// La differenza si smonta a voci finche il residuo non e zero. Gli
+// importi si digitano SEMPRE positivi: il segno lo mette il programma,
+// preso dalla differenza — una voce che va nel verso opposto
+// allontanerebbe la quadratura invece di avvicinarla.
+async function _quadApri(istitutoId, contoId) {
+  var conto = (_bancheConti || []).filter(function (c) { return c.id === contoId; })[0];
+  var ist = (_bancheIstituti || []).filter(function (i) { return i.id === istitutoId; })[0];
+  var saldo = _situazioneSaldi[contoId] || {};
+  var sCont = (saldo.saldo_contabile !== null && saldo.saldo_contabile !== undefined) ? Number(saldo.saldo_contabile) : null;
+  var diff = _quadDifferenza(conto || { id: contoId }, sCont);
+  if (diff === null) { toast('Serve il saldo contabile di oggi e di ieri per poter quadrare'); return; }
+
+  _quadStato = {
+    istitutoId: istitutoId, contoId: contoId, data: _situazioneDataCorrente,
+    diff: diff, segno: diff < 0 ? -1 : 1, righe: [], n: 0
+  };
+  _quadRender();
+  _quadAggiungiRiga(); _quadAggiungiRiga();
+}
+
+function _quadRender() {
+  var S = _quadStato; if (!S) return;
+  var ist = (_bancheIstituti || []).filter(function (i) { return i.id === S.istitutoId; })[0] || {};
+  var conto = (_bancheConti || []).filter(function (c) { return c.id === S.contoId; })[0] || {};
+  var att = _quadAtteso[S.contoId];
+  var saldo = _situazioneSaldi[S.contoId] || {};
+  var gia = (_quadRighe[S.istitutoId] || []);
+
+  var h = '<div style="max-width:620px">';
+  h += '<div style="font-size:16px;font-weight:600">Quadratura ' + esc(ist.nome || '') + '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">' + _pfIsoToIt(S.data)
+     + ' · ' + esc(conto.descrizione || '') + ' · atteso ' + fmtE(att) + ' · saldo reale ' + fmtE(Number(saldo.saldo_contabile || 0)) + '</div>';
+
+  if (gia.length) {
+    h += '<div style="background:var(--bg-kpi);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px">';
+    h += '<div style="color:var(--text-muted);margin-bottom:4px">Gia spiegato oggi</div>';
+    gia.forEach(function (q) {
+      h += '<div style="display:flex;justify-content:space-between;padding:2px 0">'
+         + '<span>' + esc(q.causale_nome) + (q.nota ? ' <span style="color:var(--text-muted)">· ' + esc(q.nota) + '</span>' : '') + '</span>'
+         + '<span style="font-family:var(--font-mono)">' + fmtE(Number(q.importo)) + '</span></div>';
+    });
+    h += '</div>';
+  }
+
+  h += '<div style="background:var(--bg-kpi);border-radius:8px;padding:12px 14px;margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-size:12px">';
+  h += '<span style="color:var(--text-muted)">Differenza da spiegare <strong style="font-family:var(--font-mono);color:var(--text)">' + fmtE(S.diff) + '</strong></span>';
+  h += '<span><strong id="quad-pct">0%</strong> <span style="color:var(--text-muted)">· residuo</span> <strong id="quad-res" style="font-family:var(--font-mono);color:#A32D2D">' + fmtE(S.diff) + '</strong></span>';
+  h += '</div>';
+  h += '<div style="height:12px;border-radius:6px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+     + '<div id="quad-bar" style="height:100%;width:0%;background:#BA7517;transition:width .15s"></div></div>';
+  h += '</div>';
+
+  h += '<div id="quad-righe"></div>';
+
+  h += '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">';
+  h += '<button onclick="_quadAggiungiRiga()" style="padding:7px 12px;font-size:12px;border:0.5px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer">+ Aggiungi voce</button>';
+  h += '<button onclick="_quadNuovaCausale()" style="padding:7px 12px;font-size:12px;border:0.5px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer">+ Nuova causale</button>';
+  h += '<span style="margin-left:auto;display:flex;gap:8px">';
+  h += '<button onclick="chiudiModal()" style="padding:8px 14px;font-size:12px;border:0.5px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;cursor:pointer">Annulla</button>';
+  h += '<button id="quad-ok" onclick="_quadSalva()" disabled style="padding:8px 14px;font-size:12px;border:0.5px solid var(--border);background:var(--bg);color:var(--text-muted);border-radius:6px;cursor:not-allowed;opacity:0.5;font-weight:600">Registra</button>';
+  h += '</span></div>';
+  h += '<div id="quad-avviso" style="font-size:11.5px;color:var(--text-muted);margin-top:8px"></div>';
+  h += '</div>';
+  apriModal(h);
+  _quadCalcola();
+}
+
+function _quadOpzioniCausali(sel) {
+  var lista = _quadCausali[_quadStato.istitutoId] || [];
+  if (!lista.length) return '<option value="">— nessuna causale: creane una —</option>';
+  return lista.map(function (c) {
+    return '<option value="' + c.id + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
+  }).join('');
+}
+
+function _quadAggiungiRiga() {
+  var S = _quadStato; if (!S) return;
+  var box = document.getElementById('quad-righe');
+  if (!box) return;
+  S.n++;
+  var d = document.createElement('div');
+  d.className = 'quad-riga';
+  d.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+  d.innerHTML = '<span style="font-size:12px;color:var(--text-muted);width:14px">' + S.n + '</span>'
+    + '<select class="quad-cau" style="width:172px;padding:7px 8px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + _quadOpzioniCausali() + '</select>'
+    + '<input type="text" class="quad-nota" placeholder="Nota" style="flex:1;min-width:80px;padding:7px 8px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+    + '<input type="number" step="0.01" min="0" class="quad-imp" placeholder="0,00" oninput="_quadCalcola()" style="width:104px;padding:7px 8px;font-size:12px;text-align:right;font-family:var(--font-mono);border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+    + '<span class="quad-seg" style="font-size:12px;font-family:var(--font-mono);color:var(--text-muted);width:82px;text-align:right">—</span>';
+  box.appendChild(d);
+  _quadCalcola();
+}
+
+function _quadCalcola() {
+  var S = _quadStato; if (!S) return;
+  var somma = 0;
+  var righe = document.querySelectorAll('.quad-riga');
+  righe.forEach(function (r) {
+    var v = Math.abs(Number((r.querySelector('.quad-imp') || {}).value || 0));
+    somma += v * S.segno;
+    var seg = r.querySelector('.quad-seg');
+    if (seg) {
+      seg.textContent = v ? fmtE(v * S.segno) : '—';
+      seg.style.color = v ? (S.segno < 0 ? '#A32D2D' : '#27500A') : 'var(--text-muted)';
+    }
+  });
+  var residuo = Math.round((S.diff - somma) * 100) / 100;
+  var fatto = S.diff === 0 ? 100 : Math.min(100, Math.abs(somma / S.diff) * 100);
+  var zero = Math.abs(residuo) < 0.005;
+
+  var bar = document.getElementById('quad-bar');
+  if (bar) { bar.style.width = fatto.toFixed(1) + '%'; bar.style.background = zero ? '#639922' : '#BA7517'; }
+  var pct = document.getElementById('quad-pct');
+  if (pct) pct.textContent = Math.round(fatto) + '%';
+  var res = document.getElementById('quad-res');
+  if (res) { res.textContent = zero ? fmtE(0) : fmtE(residuo); res.style.color = zero ? '#27500A' : '#A32D2D'; }
+  var ok = document.getElementById('quad-ok');
+  if (ok) {
+    ok.disabled = !zero;
+    ok.style.cursor = zero ? 'pointer' : 'not-allowed';
+    ok.style.opacity = zero ? '1' : '0.5';
+    ok.style.color = zero ? '#26215C' : 'var(--text-muted)';
+    ok.style.borderColor = zero ? '#AFA9EC' : 'var(--border)';
+  }
+  var av = document.getElementById('quad-avviso');
+  if (av) {
+    av.textContent = zero
+      ? 'Residuo azzerato: puoi registrare.'
+      : ('Gli importi si digitano positivi: il segno lo mette il programma, qui vanno tutti in ' + (S.segno < 0 ? 'negativo' : 'positivo') + '.');
+    av.style.color = zero ? '#27500A' : 'var(--text-muted)';
+  }
+  S.somma = somma;
+}
+
+async function _quadNuovaCausale() {
+  var S = _quadStato; if (!S) return;
+  var nome = prompt('Nome della nuova causale (vale solo per questa banca)');
+  if (!nome || !nome.trim()) return;
+  var r = await sb.from('banche_causali_quadratura')
+    .insert([{ istituto_id: S.istitutoId, nome: nome.trim(), ordine: 90 }])
+    .select('*').single();
+  if (r.error) { toast('Non sono riuscito a creare la causale: ' + r.error.message); return; }
+  (_quadCausali[S.istitutoId] = _quadCausali[S.istitutoId] || []).push(r.data);
+  _quadCausali[S.istitutoId].sort(function (a, b) { return (a.ordine || 0) - (b.ordine || 0); });
+  document.querySelectorAll('.quad-cau').forEach(function (sel) {
+    var v = sel.value; sel.innerHTML = _quadOpzioniCausali(v);
+  });
+  toast('Causale aggiunta');
+}
+
+async function _quadSalva() {
+  var S = _quadStato; if (!S) return;
+  var voci = [];
+  document.querySelectorAll('.quad-riga').forEach(function (r) {
+    var v = Math.abs(Number((r.querySelector('.quad-imp') || {}).value || 0));
+    if (!v) return;
+    var sel = r.querySelector('.quad-cau');
+    var opt = sel && sel.options[sel.selectedIndex];
+    voci.push({
+      causale_id: (sel && sel.value) || null,
+      causale_nome: (opt && opt.text) || 'Altro',
+      nota: ((r.querySelector('.quad-nota') || {}).value || '').trim() || null,
+      importo: Math.round(v * S.segno * 100) / 100
+    });
+  });
+  if (!voci.length) { toast('Non hai inserito nessuna voce'); return; }
+  if (voci.some(function (v) { return !v.causale_id; })) { toast('Scegli una causale per ogni voce'); return; }
+
+  try {
+    for (var i = 0; i < voci.length; i++) {
+      var v = voci[i];
+      // Un movimento vero nel foglio giornale, cosi la voce si ritrova in
+      // banca e nel saldo del giorno dopo.
+      var mov = await sb.from('foglio_giornale_movimenti').insert([{
+        data: S.data,
+        tipo: v.importo < 0 ? 'uscita' : 'entrata',
+        importo: Math.abs(v.importo),
+        descrizione: v.causale_nome + (v.nota ? ' · ' + v.nota : ''),
+        banca_id: S.istitutoId,
+        metodo: 'altro',
+        origine: 'manuale',
+        note: 'Quadratura giornaliera'
+      }]).select('id').single();
+      if (mov.error) throw mov.error;
+      var q = await sb.from('banche_quadrature').insert([{
+        istituto_id: S.istitutoId, data: S.data,
+        causale_id: v.causale_id, causale_nome: v.causale_nome,
+        nota: v.nota, importo: v.importo, movimento_id: mov.data.id
+      }]);
+      if (q.error) throw q.error;
+    }
+    if (typeof _auditLog === 'function') {
+      _auditLog('quadratura_banca', 'banche_quadrature',
+        S.data + ' · ' + voci.length + ' voci per ' + fmtE(S.diff));
+    }
+    toast('\u2713 Quadratura registrata: ' + voci.length + ' voci');
+    _quadStato = null;
+    chiudiModal();
+    await renderBancheSituazione();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
+}
+
 async function renderBancheSituazione() {
   const cont = document.getElementById('banche-panel-situazione');
   if (!cont) return;
@@ -3279,6 +3549,14 @@ async function renderBancheSituazione() {
 
   // Storico globale (ultimi 90 giorni)
   _situazioneStorico = storicoData;
+
+  // v20260802a — Quadratura giornaliera: l'ATTESO di un conto e il saldo
+  // contabile di ieri piu i movimenti che il programma ha registrato oggi
+  // su quella banca. La differenza col saldo reale letto dal sito e cio che
+  // e passato in banca senza passare dal programma (commissioni, RID, rate,
+  // stipendi): si spiega a voci dal modale, e finche resta un residuo la
+  // giornata non si chiude.
+  await _quadCaricaGiornata(_situazioneDataCorrente, storicoData);
 
   // Saldi del giorno corrente: filtra dallo storico (no nuova query)
   _situazioneSaldi = {};
@@ -3360,7 +3638,7 @@ function _sortContiPriorita() {
     const pB = _priorityBancaIstituto(istB);
     if (pA !== pB) return pA - pB;
     if (istA !== istB) return istA.localeCompare(istB);
-    return (a.numero_conto || '').localeCompare(b.numero_conto || '');
+    return (a.descrizione || '').localeCompare(b.descrizione || '');
   });
 }
 
@@ -3385,6 +3663,7 @@ function _renderPanelSituazioneSaldi() {
   const giornataConfermata = Object.values(_situazioneSaldi).some(s => s.confermato === true);
 
   // Totali aggregati
+  let totDiff = 0, nDiff = 0;
   let totContabile = 0, totDisponibile = 0, totFido = 0, totUtilizzato = 0, totResiduo = 0, totAssegni = 0;
 
   let html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:18px;padding-top:34px">';
@@ -3430,10 +3709,12 @@ function _renderPanelSituazioneSaldi() {
     { lbl: '📋 Assegni n.v.', align: 'right', isNew: true },
     { lbl: 'Saldo contabile', align: 'right' },
     { lbl: 'Saldo disponibile', align: 'right' },
+    { lbl: 'Atteso', align: 'right', isQuad: true },
+    { lbl: 'Differenza', align: 'right', isQuad: true },
     { lbl: 'Residuo fido', align: 'right' }
   ];
   headers.forEach(h => {
-    const extraStyle = h.isNew ? ';color:#72243E' : '';
+    const extraStyle = h.isNew ? ';color:#72243E' : (h.isQuad ? ';color:#3C3489' : '');
     html += '<th style="text-align:' + h.align + ';padding:10px 8px;font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.3px' + extraStyle + '">' + h.lbl + '</th>';
   });
   html += '</tr></thead><tbody>';
@@ -3465,6 +3746,7 @@ function _renderPanelSituazioneSaldi() {
       ? sDisp
       : (sDispCalc !== null ? sDispCalc : sDisp);
 
+    if (diff !== null) { totDiff += diff; nDiff++; }
     if (sCont !== null) totContabile += sCont;
     if (sDispEffettivo !== null) totDisponibile += sDispEffettivo;
     totFido += fido;
@@ -3476,7 +3758,7 @@ function _renderPanelSituazioneSaldi() {
 
     // Col 1: Banca / Conto
     html += '<td style="padding:10px 8px;font-weight:500;font-size:13px">' + esc(istNome);
-    if (c.numero_conto) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(c.numero_conto) + '</span>';
+    if (c.descrizione) html += ' <span style="color:var(--text-hint);font-family:var(--font-mono);font-size:10px;font-weight:400">N. ' + esc(c.descrizione) + '</span>';
     html += '</td>';
 
     // Col 2: Fido cassa (read-only, allineato a destra, mono)
@@ -3513,6 +3795,32 @@ function _renderPanelSituazioneSaldi() {
     html += overrideTag;
     html += '</td>';
 
+    // Col NEW: Atteso e Differenza (quadratura giornaliera)
+    const atteso = _quadAtteso[c.id];
+    const diff = _quadDifferenza(c, sCont);
+    const giaSpiegato = (_quadRighe[c.istituto_id] || [])
+      .reduce(function (x, q) { return x + Number(q.importo || 0); }, 0);
+
+    html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono);font-size:12px;color:var(--text-muted)">';
+    html += (atteso === null || atteso === undefined)
+      ? '<span title="Manca il saldo contabile di ieri">—</span>'
+      : fmtE(atteso);
+    html += '</td>';
+
+    html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono)">';
+    if (diff === null) {
+      html += '<span style="color:var(--text-hint)">—</span>';
+    } else if (Math.abs(diff) < 0.005) {
+      html += '<span style="font-size:11px;padding:3px 9px;border-radius:5px;background:#E1F5EE;color:#085041;font-weight:600;font-family:var(--font-sans)">quadra</span>';
+    } else {
+      html += '<div style="font-size:13px;font-weight:700;color:' + (diff < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(diff) + '</div>';
+      html += '<button onclick="_quadApri(\'' + c.istituto_id + '\',\'' + c.id + '\')" style="margin-top:3px;font-size:10px;padding:3px 9px;border:0.5px solid #AFA9EC;background:var(--bg-card,#fff);color:#3C3489;border-radius:5px;cursor:pointer;font-weight:600;font-family:var(--font-sans)">Quadra</button>';
+      if (giaSpiegato) {
+        html += '<div style="font-size:9px;color:var(--text-muted);margin-top:2px">gia spiegato ' + fmtE(giaSpiegato) + '</div>';
+      }
+    }
+    html += '</td>';
+
     // Col 6: Residuo fido (calc, BIG, BOLD, color by % residuo)
     html += '<td style="padding:10px 8px;text-align:right;font-family:var(--font-mono)">';
     if (fido > 0) {
@@ -3535,12 +3843,14 @@ function _renderPanelSituazioneSaldi() {
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:#72243E">' + (totAssegni > 0 ? fmtE(totAssegni) : '—') + '</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (totContabile < 0 ? '#A32D2D' : (totContabile > 0 ? '#27500A' : 'var(--text)')) + '">' + fmtE(totContabile) + '</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (totDisponibile < 0 ? '#A32D2D' : '#27500A') + '">' + fmtE(totDisponibile) + '</td>';
+  html += '<td colspan="2" style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:12px;font-weight:700;color:' + (Math.abs(totDiff) < 0.005 ? '#085041' : '#A32D2D') + '">' + (nDiff === 0 ? '<span style="color:var(--text-hint);font-weight:400">-</span>' : (Math.abs(totDiff) < 0.005 ? 'tutto quadrato' : fmtE(totDiff) + ' da spiegare')) + '</td>';
   html += '<td style="padding:12px 8px;text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:700;color:' + (pctTotResiduo >= 50 ? '#27500A' : (pctTotResiduo >= 20 ? '#BA7517' : '#A32D2D')) + '">' + fmtE(totResiduo) + '<div style="font-size:10px;font-weight:500;opacity:0.85;margin-top:2px">' + pctTotResiduo.toFixed(0) + '%</div></td>';
   html += '</tr>';
 
   html += '</tbody></table></div>';
   html += '<div style="font-size:11px;color:var(--text-hint);margin-top:10px">Le celle gialle sono editabili. Salva automatico al cambio focus o premendo Invio. Il fido cassa proviene dalla tab Affidamenti (tipo "cassa"). Il residuo del fido = accordato − utilizzato (utilizzato derivato dal saldo contabile negativo).<br>';
-  html += '<b style="color:#26215C">Saldo disponibile</b> calcolato come: <code style="background:#EEEDFE;padding:1px 4px;border-radius:3px;color:#26215C;font-family:var(--font-mono);font-size:10px">saldo contabile + fido cassa − assegni n.v.</code> Override manuale richiede conferma se scarto > 1 €.';
+  html += '<b style="color:#26215C">Saldo disponibile</b> calcolato come: <code style="background:#EEEDFE;padding:1px 4px;border-radius:3px;color:#26215C;font-family:var(--font-mono);font-size:10px">saldo contabile + fido cassa − assegni n.v.</code> Override manuale richiede conferma se scarto > 1 €.<br>';
+  html += '<b style="color:#3C3489">Atteso</b> = saldo contabile di ieri + i movimenti registrati oggi su quella banca. La <b style="color:#3C3489">differenza</b> col saldo reale e cio che e passato in banca senza passare dal programma: si spiega a voci col pulsante Quadra.';
   html += '</div>';
 
   // Toolbar conferma giornata
@@ -3659,7 +3969,7 @@ function _renderPanelSituazioneRiepilogo() {
     totFido += fido;
     totUtilizzato += utilizzato;
     totResiduo += residuo;
-    datiPerConto.push({ nome: istNome, numero: c.numero_conto, fido, utilizzato, residuo, pctUtil, pctResid });
+    datiPerConto.push({ nome: istNome, numero: c.descrizione, fido, utilizzato, residuo, pctUtil, pctResid });
   });
 
   const pctUtilTot = totFido > 0 ? (totUtilizzato / totFido * 100) : 0;
@@ -3847,7 +4157,7 @@ function _renderPanelSituazioneStorico() {
     // Versione compatta del nome (max 12 char) + numero conto
     const istBreve = istNome.length > 12 ? istNome.substring(0, 12) + '…' : istNome;
     html += '<th style="text-align:right;padding:8px;font-weight:600;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.3px;white-space:nowrap">' + esc(istBreve);
-    if (c.numero_conto) html += '<div style="font-family:var(--font-mono);font-size:9px;font-weight:400;text-transform:none;letter-spacing:0">N. ' + esc(c.numero_conto) + '</div>';
+    if (c.descrizione) html += '<div style="font-family:var(--font-mono);font-size:9px;font-weight:400;text-transform:none;letter-spacing:0">N. ' + esc(c.descrizione) + '</div>';
     html += '</th>';
   });
   html += '<th style="text-align:right;padding:8px;font-weight:600;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:0.3px;background:var(--bg)">Totale</th>';
@@ -4189,7 +4499,7 @@ function stampaSituazionePDF() {
     totFido += fido;
     totUtilizzato += utilizzato;
     totResiduo += residuo;
-    return { istNome, numero: c.numero_conto, sCont, sDisp, fido, utilizzato, residuo };
+    return { istNome, numero: c.descrizione, sCont, sDisp, fido, utilizzato, residuo };
   });
   const pctTotResid = totFido > 0 ? (totResiduo / totFido * 100) : 0;
 
