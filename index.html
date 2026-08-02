@@ -1158,6 +1158,7 @@
           <button class="btn-primary fin-subtab active" data-tab="fin-tab-calendario" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px">📅 Calendario</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-foglio" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📓 Foglio giornale</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-sostenibilita" onclick="switchFinanzeSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Sostenibilità</button>
+          <button class="btn-primary fin-subtab" data-tab="fin-tab-bilanci" onclick="switchFinanzeSubTab(this); if (typeof caricaAnalisiBilanci === 'function') caricaAnalisiBilanci();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📈 Analisi Bilanci</button>
         </div>
 
         <!-- PANEL: CALENDARIO (esistente, immutato) -->
@@ -1213,6 +1214,9 @@
         </div>
 
         <!-- PANEL: SCADENZARIO FORNITORI (24/05/2026) -->
+        <div class="fin-subpanel" id="fin-tab-bilanci" style="display:none">
+          <div id="bil-content"><div class="loading">Caricamento...</div></div>
+        </div>
         <div class="fin-subpanel" id="fin-tab-scadenzario-rimosso" style="display:none"></div>
       </div>
 
@@ -3156,6 +3160,7 @@
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=20260801a"></script>
+<script src="pf-bilanci.js?v=20260802a"></script>
 <script src="pf-foglio-giornale.js?v=20260728a"></script>
 <script src="pf-finanze-sostenibilita.js?v=20260727a"></script>
 <script src="pf-pagamento-fornitore-modale.js?v=20260728a"></script>
