@@ -1,6 +1,9 @@
 // ═════════════════════════════════════════════════════════════════════════════
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
+// v20260801e — la percentuale di anticipo si cambia sul singolo modulo:
+//               parte dal valore dell affidamento e si puo variare, e con lei
+//               la base di calcolo; salvata riga per riga come prima
 // v20260801d — dopo ogni scrittura i dati tenuti in memoria vengono buttati:
 //               Analisi per cliente e Valutazioni mostravano i dati di prima
 // v20260801c — pannello anticipi in dashboard: barra a due tratti e valori
@@ -1878,6 +1881,7 @@ async function _antRenderModalePresenta(affidamentoId) {
     fido: fido,
     bancaLabel: bancaLabel,
     perc: perc,
+    percDefault: perc,
     base: base,
     massEuro: massEuro,
     fatture: fattureCandidate,
@@ -1906,7 +1910,23 @@ function _antPresentaRender() {
   html += '<div>';
   html += '<div style="font-size:17px;font-weight:700">📋 Presenta nuove fatture</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">🏛 ' + esc(st.bancaLabel);
-  html += ' · ' + Number(st.perc).toFixed(0) + '% su <strong>' + (st.base === 'totale' ? 'Totale fattura' : 'Imponibile') + '</strong>';
+  // v20260801e — La percentuale NON e piu solo scritta: si cambia qui, sul
+  // singolo modulo. Parte dal valore dell affidamento (Intesa 100, MPS 80,
+  // BCC 82) e resta quella finche non la si tocca; viene salvata riga per
+  // riga in percentuale_applicata, quindi lo storico regge anche a
+  // percentuali diverse fra un modulo e l altro.
+  html += ' · <input id="ant-pres-perc" type="number" min="1" max="100" step="0.5" value="' + Number(st.perc) + '"'
+        + ' onchange="_antPresentaCambiaPerc(this.value)" onkeyup="if(event.key===\'Enter\')this.blur()"'
+        + ' title="Percentuale di anticipo di questo modulo"'
+        + ' style="width:62px;padding:2px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:12px;font-weight:700;font-family:var(--font-mono);text-align:right">';
+  html += '% su <select id="ant-pres-base" onchange="_antPresentaCambiaBase(this.value)"'
+        + ' style="padding:2px 4px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:12px;font-weight:700">'
+        + '<option value="imponibile"' + (st.base === 'totale' ? '' : ' selected') + '>Imponibile</option>'
+        + '<option value="totale"' + (st.base === 'totale' ? ' selected' : '') + '>Totale fattura</option>'
+        + '</select>';
+  if (Number(st.perc) !== Number(st.percDefault)) {
+    html += ' <span style="font-size:10px;color:#854F0B;font-weight:600">modificata (di norma ' + Number(st.percDefault) + '%)</span>';
+  }
   if (st.massEuro) html += ' · Max cliente <strong>' + fmtE(st.massEuro) + '</strong>';
   html += '</div></div></div>';
 
@@ -2177,6 +2197,53 @@ function _antPresentaEsitoScadenza() {
     box.style.color = '#27500A';
     box.innerHTML = '&#10003; ' + _antGiorniTra(dataPres, scad) + ' giorni dalla presentazione.';
   }
+}
+
+// Ricalcola l anticipo di tutte le fatture con la nuova percentuale o la
+// nuova base, poi ridisegna. Il fuoco torna dov era (stesso accorgimento
+// di _antPresentaSetFilter: il ridisegno distrugge e ricrea i campi).
+function _antPresentaRicalcola() {
+  var st = _antPresentaState;
+  if (!st) return;
+  var perc = Number(st.perc) || 0;
+  (st.fatture || []).forEach(function(f) {
+    var b = st.base === 'totale' ? Number(f.importo_totale || 0) : Number(f.imponibile_totale || 0);
+    f._anticipo_calc = Math.round(b * perc) / 100;
+  });
+  var focusId = null, curDa = null, curA = null;
+  var attivo = document.activeElement;
+  if (attivo && attivo.id) {
+    focusId = attivo.id;
+    try { curDa = attivo.selectionStart; curA = attivo.selectionEnd; } catch (e) {}
+  }
+  _antPresentaSalvaForm();
+  _antPresentaRender();
+  _antPresentaRipristinaForm();
+  if (focusId) {
+    var rinato = document.getElementById(focusId);
+    if (rinato) {
+      try { rinato.focus(); } catch (e) {}
+      if (curDa !== null && typeof rinato.setSelectionRange === 'function') {
+        try { rinato.setSelectionRange(curDa, curA); } catch (e) {}
+      }
+    }
+  }
+}
+
+function _antPresentaCambiaPerc(val) {
+  var st = _antPresentaState;
+  if (!st) return;
+  var v = Number(val);
+  if (!(v > 0) || v > 100) { toast('La percentuale deve stare fra 1 e 100'); _antPresentaRicalcola(); return; }
+  st.perc = v;
+  _antPresentaRicalcola();
+}
+
+function _antPresentaCambiaBase(val) {
+  var st = _antPresentaState;
+  if (!st) return;
+  st.base = (val === 'totale') ? 'totale' : 'imponibile';
+  _antPresentaRicalcola();
 }
 
 function _antPresentaSetFilter(campo, val) {
