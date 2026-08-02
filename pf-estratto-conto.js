@@ -1,4 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20260801a — lettura di anticipi_sbf_presentazioni paginata (si fermava a mille)
 // PhoenixFuel — Estratto Conto Clienti (Patch v20260503k)
 // ═══════════════════════════════════════════════════════════════════════════
 // Tab "📋 Estratto Conto" dentro sezione Clienti.
@@ -129,7 +130,11 @@ async function renderEstrattoConto() {
           .select('id,presentazione_id,fattura_id,importo_anticipato_calcolato,importo_estinto,stato')
           .range(a, b);
       }),
-      sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id,stato'),
+      _ecCaricaPaginate(function (a, b) {
+        return sb.from('anticipi_sbf_presentazioni')
+          .select('id,affidamento_id,stato')
+          .range(a, b);
+      }),
       sb.from('banche_affidamenti').select('id,istituto_id')
     ]);
     var presMap = {}, affMap = {};

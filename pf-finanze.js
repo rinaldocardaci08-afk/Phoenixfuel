@@ -1,4 +1,5 @@
 // PhoenixFuel — Finanze: Calendario Entrate/Uscite
+// v20260801a — lettura di fatture_ricevute paginata (si fermava a mille righe)
 // v2 (24/05/2026): modo settimana / mese / anno + click cella + fix timezone griglia
 
 'use strict';
@@ -130,6 +131,25 @@ function _finFmtDataBreve(iso) {
 // ────────────────────────────────────────────────────────────────────────
 // CARICAMENTO DATI
 // ────────────────────────────────────────────────────────────────────────
+
+// v20260801a — Lettura a blocchi: PostgREST ne restituisce mille per volta e
+// non avvisa. `fatture_ricevute` cresce a ogni fattura fornitore: senza
+// paginazione il calendario delle scadenze perdeva le piu vecchie in silenzio.
+async function _finLeggiTutte(tabella, colonne, filtri) {
+  var fuori = [], da = 0, blocco = 1000;
+  for (var giro = 0; giro < 60; giro++) {
+    var q = sb.from(tabella).select(colonne);
+    if (typeof filtri === 'function') q = filtri(q);
+    var r = await q.range(da, da + blocco - 1);
+    if (r.error) return { data: null, error: r.error };
+    var righe = r.data || [];
+    fuori = fuori.concat(righe);
+    if (righe.length < blocco) break;
+    da += blocco;
+  }
+  return { data: fuori, error: null };
+}
+
 async function caricaFinanze() {
   var rng = _finCalRange();
   document.getElementById('fin-cal-mese-label').textContent = rng.label;
@@ -167,7 +187,7 @@ async function caricaFinanze() {
     sb.from('stazione_cassa').select('data,bancomat,carte_nexi,carte_aziendali,contanti_da_versare,versato')
       .gte('data',rng.inizioMeseISO).lte('data',rng.fineMeseISO).order('data'),
     sb.from('fornitori').select('nome,giorni_pagamento,colore'),
-    sb.from('fatture_ricevute').select('id,data_scadenza')
+    _finLeggiTutte('fatture_ricevute', 'id,data_scadenza')
   ]);
   var _finScadFatture = {};
   (fattScadRes && fattScadRes.data ? fattScadRes.data : []).forEach(function (f) { _finScadFatture[f.id] = f.data_scadenza; });
