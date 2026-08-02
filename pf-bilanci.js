@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Analisi Bilanci
+// v20260802b — canvas dentro riquadri di altezza fissa: i grafici si
+//              allungavano senza fine
 // v20260802a — sezione di sola consultazione sui bilanci depositati.
 //              I dati stanno in `bilanci_annuali`, un record per esercizio,
 //              caricati con SQL una volta l'anno. Gli INDICI non si salvano:
@@ -152,10 +154,10 @@ function _bilRenderAnno(anno) {
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
   h += '<div style="flex:2;min-width:300px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px">'
      + '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Dalla vendita all\u2019utile</div>'
-     + '<canvas id="bil-ch-redd" height="190"></canvas></div>';
+     + '<div style="position:relative;height:210px"><canvas id="bil-ch-redd"></canvas></div></div>';
   h += '<div style="flex:1;min-width:230px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px">'
      + '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Come e finanziata l\u2019azienda</div>'
-     + '<canvas id="bil-ch-strut" height="190"></canvas></div>';
+     + '<div style="position:relative;height:210px"><canvas id="bil-ch-strut"></canvas></div></div>';
   h += '</div>';
 
   var sem = [
@@ -181,7 +183,7 @@ function _bilRenderAnno(anno) {
 
   h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">'
      + '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Di cosa sono fatti i debiti verso le banche \u00b7 totale ' + _bilEuro(d.deb_banche_tot) + '</div>'
-     + '<canvas id="bil-ch-deb" height="150"></canvas></div>';
+     + '<div style="position:relative;height:170px"><canvas id="bil-ch-deb"></canvas></div></div>';
 
   if (d.flusso_operativo !== null && d.flusso_operativo !== undefined) {
     h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
@@ -235,15 +237,15 @@ function _bilRenderConfronto() {
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
   h += '<div style="flex:1;min-width:290px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px">'
      + '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Redditivita \u00b7 ' + a.esercizio + ' contro ' + b.esercizio + '</div>'
-     + '<canvas id="bil-ch-cfr-redd" height="200"></canvas></div>';
+     + '<div style="position:relative;height:220px"><canvas id="bil-ch-cfr-redd"></canvas></div></div>';
   h += '<div style="flex:1;min-width:290px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px">'
      + '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Stato patrimoniale</div>'
-     + '<canvas id="bil-ch-cfr-sp" height="200"></canvas></div>';
+     + '<div style="position:relative;height:220px"><canvas id="bil-ch-cfr-sp"></canvas></div></div>';
   h += '</div>';
 
   h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-top:12px">'
      + '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Indicatori bancari</div>'
-     + '<canvas id="bil-ch-cfr-ind" height="170"></canvas></div>';
+     + '<div style="position:relative;height:190px"><canvas id="bil-ch-cfr-ind"></canvas></div></div>';
   return h;
 }
 
@@ -254,6 +256,9 @@ function _bilCtx(id) {
 }
 var _BIL_COL = ['#26215C', '#639922', '#BA7517', '#A32D2D', '#3C3489', '#0C447C'];
 
+// I canvas stanno dentro riquadri di altezza fissa: con maintainAspectRatio
+// a false Chart.js ignora l attributo height e, se il contenitore non ha una
+// altezza propria, il grafico si allunga senza fine a ogni ridisegno.
 function _bilOpz(extra) {
   var base = {
     responsive: true, maintainAspectRatio: false,
