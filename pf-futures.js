@@ -1,4 +1,7 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260802a — scomposizione del prezzo: accisa scorporata dal costo dei
+//              carichi, confronto col mercato sul prodotto puro e avviso
+//              prima che la deroga decada
 // Fetch live da Yahoo Finance, calcolo prezzo euro/litro, semaforo, alert dashboard
 
 var _chartFutEuro = null, _chartFutLgo = null, _chartFutEurusd = null;
@@ -235,6 +238,173 @@ function _mktMedia(arr, n) {
 
 function mktPeriodo(g) { _mktGiorni = g; renderMercato(); }
 
+// ═══ v20260802a · ACCISE ═══════════════════════════════════════════
+// Il costo di un carico non e tutto prodotto: dentro c'e l'accisa, che
+// cambia per legge e non c'entra col mercato. Senza scorporarla ogni
+// confronto costo↔quotazione e falso — al ribasso finche vale la deroga,
+// all'insu appena decade. In fattura e stampata l'aliquota PIENA
+// (Accisa=0,6229): quella applicata e piena meno la riduzione in vigore
+// quel giorno.
+var _mktAccise = [];
+
+function _mktProdottoChiave(nome) {
+  var n = String(nome || '').toLowerCase();
+  if (n.indexOf('benzina') >= 0) return 'benzina';
+  if (n.indexOf('gasolio') >= 0 || n.indexOf('diesel') >= 0) return 'gasolio';
+  return null;
+}
+
+// Accisa in vigore per un prodotto in una data. null se non la conosciamo:
+// meglio non mostrare niente che mostrare un numero inventato.
+function _mktAccisaAl(dataISO, prodotto) {
+  var k = _mktProdottoChiave(prodotto);
+  if (!k || !dataISO) return null;
+  var righe = _mktAccise.filter(function (a) {
+    return a.prodotto === k
+      && a.data_inizio <= dataISO
+      && (!a.data_fine || a.data_fine >= dataISO);
+  });
+  if (!righe.length) return null;
+  var a = righe[righe.length - 1];
+  var piena = Number(a.accisa_piena || 0);
+  var rid = Number(a.riduzione || 0);
+  return { piena: piena, riduzione: rid, applicata: Math.round((piena - rid) * 100000) / 100000,
+           descrizione: a.descrizione || '' };
+}
+
+// Il prossimo scalino: quando la riduzione oggi in vigore finisce e di
+// quanto sale il costo. Serve a non farsi cogliere di sorpresa.
+function _mktProssimoScalino(oggiISO) {
+  var k = 'gasolio';
+  var ora = _mktAccisaAl(oggiISO, k);
+  if (!ora || !(ora.riduzione > 0)) return null;
+  var corrente = _mktAccise.filter(function (a) {
+    return a.prodotto === k && a.data_inizio <= oggiISO && (!a.data_fine || a.data_fine >= oggiISO);
+  }).pop();
+  if (!corrente || !corrente.data_fine) return null;
+  var dopo = _mktAccise.filter(function (a) {
+    return a.prodotto === k && a.data_inizio > corrente.data_fine;
+  })[0];
+  var riduzioneDopo = dopo ? Number(dopo.riduzione || 0) : 0;
+  var salto = Math.round((ora.riduzione - riduzioneDopo) * 100000) / 100000;
+  if (!(salto > 0)) return null;
+  var g = Math.round((new Date(corrente.data_fine + 'T12:00:00') - new Date(oggiISO + 'T12:00:00')) / 86400000);
+  return { fine: corrente.data_fine, giorni: g, salto: salto };
+}
+
+
+// Scompone il costo dei carichi: prodotto puro, accisa, e confronto col
+// mercato di quel giorno. Solo i carichi SENZA trasporto fornitore, perche
+// il trasporto sporcherebbe il paragone (regola sua del 29/07).
+function _mktSezioneAccise(carichi, serie) {
+  if (!_mktAccise.length) {
+    return '<div class="card" style="margin-top:14px;padding:14px;font-size:12px;color:var(--text-muted)">'
+      + 'Composizione del prezzo non disponibile: non ci sono accise registrate.</div>';
+  }
+  var oggi = new Date().toISOString().split('T')[0];
+  var h = '';
+
+  // avviso dello scalino, se in arrivo
+  var sc = _mktProssimoScalino(oggi);
+  if (sc && sc.giorni >= 0) {
+    var litri = 35000;
+    var ultimi = carichi.filter(function (o) { return Number(o.litri) > 0; });
+    if (ultimi.length) {
+      var somma = ultimi.reduce(function (x, o) { return x + Number(o.litri); }, 0);
+      litri = Math.round(somma / ultimi.length / 1000) * 1000 || 35000;
+    }
+    h += '<div style="margin-top:14px;background:#FAEEDA;border:0.5px solid #E4C892;border-left:3px solid #BA7517;border-radius:10px;padding:13px 15px">'
+      + '<div style="font-size:13px;font-weight:700;color:#854F0B">&#9888; Fra ' + sc.giorni + ' giorni l\'accisa torna piena</div>'
+      + '<div style="font-size:12px;color:#854F0B;margin-top:4px">Dal ' + fmtD(sc.fine) + ' la riduzione di '
+      + sc.salto.toFixed(4) + ' &euro;/L decade. A parita di mercato il costo sale di <strong>'
+      + sc.salto.toFixed(4) + ' &euro;/L</strong>: su un carico da ' + litri.toLocaleString('it-IT')
+      + ' L sono <strong>' + (sc.salto * litri).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      + ' &euro;</strong> in piu. Non e il mercato che sale: e lo Stato che riprende quanto aveva sospeso.</div></div>';
+  }
+
+  // tabella di scomposizione, ultimi carichi puliti
+  var puliti = carichi.filter(function (o) {
+    return !(Number(o.trasporto_litro) > 0) && _mktAccisaAl(o.data, o.prodotto);
+  }).slice(-12).reverse();
+
+  h += '<div class="card" style="margin-top:14px;padding:14px">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:4px">Di cosa e fatto il prezzo che paghi</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Solo i carichi senza trasporto del fornitore: sono gli unici confrontabili col mercato senza correzioni.</div>';
+
+  if (!puliti.length) {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessun carico confrontabile nel periodo scelto.</div></div>';
+    return h;
+  }
+
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  h += '<tr style="color:var(--text-muted);text-align:right">'
+    + '<th style="text-align:left;padding:6px 8px;font-weight:500">Data</th>'
+    + '<th style="text-align:left;padding:6px 8px;font-weight:500">Fornitore</th>'
+    + '<th style="text-align:left;padding:6px 8px;font-weight:500">Prodotto</th>'
+    + '<th style="padding:6px 8px;font-weight:500">Litri</th>'
+    + '<th style="padding:6px 8px;font-weight:500">Costo &euro;/L</th>'
+    + '<th style="padding:6px 8px;font-weight:500">Accisa</th>'
+    + '<th style="padding:6px 8px;font-weight:500">Prodotto puro</th>'
+    + '<th style="padding:6px 8px;font-weight:500">Mercato</th>'
+    + '<th style="padding:6px 8px;font-weight:500">Scarto</th></tr>';
+
+  var etich = [], vProd = [], vAcc = [];
+  puliti.forEach(function (o) {
+    var acc = _mktAccisaAl(o.data, o.prodotto);
+    var costo = Number(o.costo_litro);
+    var puro = Math.round((costo - acc.applicata) * 100000) / 100000;
+    var mkt = null;
+    for (var i = serie.length - 1; i >= 0; i--) {
+      if (serie[i].data <= o.data) { mkt = Number(serie[i].prezzo_euro_litro || 0); break; }
+    }
+    var scarto = (mkt != null) ? Math.round((puro - mkt) * 100000) / 100000 : null;
+    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+      + '<td style="text-align:left;padding:7px 8px">' + fmtD(o.data) + '</td>'
+      + '<td style="text-align:left;padding:7px 8px">' + esc(o.fornitore) + '</td>'
+      + '<td style="text-align:left;padding:7px 8px">' + esc(o.prodotto) + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + Number(o.litri).toLocaleString('it-IT') + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + costo.toFixed(4) + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);color:#854F0B" title="piena ' + acc.piena.toFixed(4)
+        + (acc.riduzione ? ' meno riduzione ' + acc.riduzione.toFixed(4) : '') + '">' + acc.applicata.toFixed(4) + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700">' + puro.toFixed(4) + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);color:var(--text-muted)">' + (mkt != null ? mkt.toFixed(4) : '&mdash;') + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);color:' + (scarto == null ? 'var(--text-muted)' : (scarto >= 0 ? '#A32D2D' : '#3B6D11')) + '">'
+        + (scarto == null ? '&mdash;' : (scarto >= 0 ? '+' : '') + scarto.toFixed(4)) + '</td>'
+      + '</tr>';
+    etich.push(fmtD(o.data)); vProd.push(puro); vAcc.push(acc.applicata);
+  });
+  h += '</table></div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Lo <strong>scarto</strong> e la differenza fra il prodotto puro e la quotazione: e il margine del fornitore piu la logistica. L\'accisa non c\'entra col mercato.</div>';
+
+  h += '<div style="position:relative;height:230px;margin-top:12px"><canvas id="mkt-acc-chart"></canvas></div>';
+  h += '</div>';
+
+  window._mktAccGraf = { etich: etich.slice().reverse(), prod: vProd.slice().reverse(), acc: vAcc.slice().reverse() };
+  return h;
+}
+
+function _mktDisegnaGraficoAccise() {
+  var d = window._mktAccGraf;
+  var cv = document.getElementById('mkt-acc-chart');
+  if (!d || !cv || typeof Chart === 'undefined' || !d.etich.length) return;
+  if (window._mktAccChart) { try { window._mktAccChart.destroy(); } catch (e) {} }
+  window._mktAccChart = new Chart(cv, {
+    type: 'bar',
+    data: { labels: d.etich, datasets: [
+      { label: 'Prodotto', data: d.prod, backgroundColor: '#2a78d6', maxBarThickness: 34 },
+      { label: 'Accisa', data: d.acc, backgroundColor: '#BA7517', maxBarThickness: 34 }
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#9b9b9b', font: { size: 11 } } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { display: false } },
+        y: { stacked: true, ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: 'rgba(150,150,150,0.15)' } }
+      }
+    }
+  });
+}
+
 async function renderMercato() {
   var el = document.getElementById('mercato-wrap');
   if (!el) return;
@@ -249,8 +419,10 @@ async function renderMercato() {
       sb.from('futures_storico').select('*').gte('data', dalISO).order('data', { ascending: true }),
       sb.from('ordini').select('data,fornitore,prodotto,litri,costo_litro,trasporto_litro,tipo_ordine,stato')
         .eq('tipo_ordine', 'entrata_deposito').neq('stato', 'annullato')
-        .gte('data', dalISO).order('data', { ascending: true })
+        .gte('data', dalISO).order('data', { ascending: true }),
+      sb.from('accise_storico').select('*').order('data_inizio')
     ]);
+    _mktAccise = r[2] && !r[2].error ? (r[2].data || []) : [];
     serie = r[0].data || [];
     // TUTTI i carichi (29/07): il filtro Eni/Ludoil vale solo per l'analisi
     // delle accise, dove il trasporto del fornitore falserebbe il conto. Qui
@@ -342,6 +514,9 @@ async function renderMercato() {
       + '<div style="font-size:11px;color:var(--text-muted)">l\'IVA la recuperi: non entra mai nei confronti</div></div>'
     + '</div>';
 
+  // ═══ Composizione del prezzo · accise ═══
+  h += _mktSezioneAccise(carichi, serie);
+
   el.innerHTML = h;
 
   // grafico
@@ -382,6 +557,8 @@ async function renderMercato() {
       }
     });
   }
+
+  _mktDisegnaGraficoAccise();
 }
 
 // Recupero storico: la stessa funzione, chiamata con un numero di giorni.
