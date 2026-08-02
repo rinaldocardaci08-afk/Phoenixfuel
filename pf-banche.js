@@ -1,4 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20260802b — la quadratura non puo bloccare il caricamento dei saldi:
+//               tetto di 8 secondi sulle sue letture, e se non risponde le
+//               due colonne restano vuote invece di appendere la pagina
 // v20260802a — quadratura giornaliera dei conti: colonne Atteso e Differenza
 //               nella situazione, modale che smonta la differenza a voci con
 //               barra di completamento e segno automatico, causali per banca.
@@ -3251,14 +3254,30 @@ function _quadIeri(dataISO) {
   return d.toISOString().split('T')[0];
 }
 
+// La quadratura e un di piu: i saldi devono comparire comunque. Se una
+// delle tre letture non risponde entro 8 secondi si prosegue senza, e le
+// colonne mostrano un trattino invece di bloccare la pagina.
+var _quadNonDisponibile = false;
+
 async function _quadCaricaGiornata(dataISO, storico) {
   _quadMovimenti = {}; _quadRighe = {}; _quadCausali = {}; _quadAtteso = {};
+  _quadNonDisponibile = false;
+  if (!dataISO) { _quadNonDisponibile = true; return; }
   try {
-    var r = await Promise.all([
+    var attesa = Promise.all([
       sb.from('foglio_giornale_movimenti').select('banca_id,tipo,importo').eq('data', dataISO),
       sb.from('banche_quadrature').select('*').eq('data', dataISO),
       sb.from('banche_causali_quadratura').select('*').eq('attiva', true).order('ordine')
     ]);
+    var scaduto = new Promise(function (ris) {
+      setTimeout(function () { ris('__timeout__'); }, 8000);
+    });
+    var r = await Promise.race([attesa, scaduto]);
+    if (r === '__timeout__') {
+      _quadNonDisponibile = true;
+      console.warn('[quadratura] lettura troppo lenta: salto la quadratura');
+      return;
+    }
     (r[0].data || []).forEach(function (m) {
       if (!m.banca_id) return;
       var seg = (m.tipo === 'entrata') ? 1 : -1;
@@ -3271,10 +3290,14 @@ async function _quadCaricaGiornata(dataISO, storico) {
       (_quadCausali[c.istituto_id] = _quadCausali[c.istituto_id] || []).push(c);
     });
   } catch (e) {
+    _quadNonDisponibile = true;
     console.warn('[quadratura] lettura fallita', e);
+    return;
   }
 
-  var ieri = _quadIeri(dataISO);
+  var ieri;
+  try { ieri = _quadIeri(dataISO); }
+  catch (e) { _quadNonDisponibile = true; return; }
   var contIeri = {};
   (storico || []).filter(function (x) { return x.data === ieri; })
     .forEach(function (x) {
@@ -3556,7 +3579,12 @@ async function renderBancheSituazione() {
   // e passato in banca senza passare dal programma (commissioni, RID, rate,
   // stipendi): si spiega a voci dal modale, e finche resta un residuo la
   // giornata non si chiude.
-  await _quadCaricaGiornata(_situazioneDataCorrente, storicoData);
+  try {
+    await _quadCaricaGiornata(_situazioneDataCorrente, storicoData);
+  } catch (e) {
+    _quadNonDisponibile = true;
+    console.warn('[quadratura] saltata', e);
+  }
 
   // Saldi del giorno corrente: filtra dallo storico (no nuova query)
   _situazioneSaldi = {};
@@ -3796,8 +3824,8 @@ function _renderPanelSituazioneSaldi() {
     html += '</td>';
 
     // Col NEW: Atteso e Differenza (quadratura giornaliera)
-    const atteso = _quadAtteso[c.id];
-    const diff = _quadDifferenza(c, sCont);
+    const atteso = _quadNonDisponibile ? null : _quadAtteso[c.id];
+    const diff = _quadNonDisponibile ? null : _quadDifferenza(c, sCont);
     const giaSpiegato = (_quadRighe[c.istituto_id] || [])
       .reduce(function (x, q) { return x + Number(q.importo || 0); }, 0);
 
