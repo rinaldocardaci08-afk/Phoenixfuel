@@ -1,4 +1,6 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260803a — il dettaglio della funzione server puo essere elenco o testo:
+//              prima .join() alla cieca mandava tutto in errore
 // v20260802b — la scomposizione dell accisa si vede anche quando le
 //              quotazioni mancano: prima l intera sezione usciva prima
 // v20260802a — scomposizione del prezzo: accisa scorporata dal costo dei
@@ -407,6 +409,15 @@ function _mktDisegnaGraficoAccise() {
   });
 }
 
+// v20260803a — il dettaglio puo arrivare come elenco o come testo gia
+// unito: prima si chiamava .join() alla cieca e una stringa mandava tutto
+// in errore ("d.dettaglio.join is not a function").
+function _mktDettaglio(d) {
+  if (!d) return '';
+  if (Array.isArray(d)) return d.length ? ' \u2014 ' + d.join(' \u00b7 ') : '';
+  return ' \u2014 ' + String(d);
+}
+
 async function renderMercato() {
   var el = document.getElementById('mercato-wrap');
   if (!el) return;
@@ -584,7 +595,7 @@ async function mktCaricaStorico() {
     if (res.error) throw res.error;
     var d = res.data || {};
     if (!d.ok) throw new Error((d.errore || 'risposta non valida')
-      + ((d.dettaglio && d.dettaglio.length) ? ' — ' + d.dettaglio.join(' · ') : ''));
+      + _mktDettaglio(d.dettaglio));
     if (out) { out.style.color = '#3B6D11'; out.textContent = '✓ ' + (d.messaggio || 'storico caricato'); }
     await renderMercato();
   } catch (e) {
@@ -614,7 +625,7 @@ async function mktAggiornaOra() {
     }
     // il dettaglio dice QUALE fonte ha risposto e come: senza, si resta al buio
     throw new Error((d.errore || 'risposta non valida')
-      + ((d.dettaglio && d.dettaglio.length) ? ' — ' + d.dettaglio.join(' · ') : ''));
+      + _mktDettaglio(d.dettaglio));
   } catch (e) {
     var msg = (e && e.message) || String(e);
     if (out) { out.style.color = '#A32D2D'; out.textContent = '✕ ' + msg; }
