@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260803a — contestazione prezzi al fornitore, riga per riga sulla singola
+//              fattura, con lettera da allegare alla PEC
 // v20260801b — corretto l escape del pulsante Modifica: l onclick usciva con
 //               le barre rovesciate e il clic non faceva nulla
 // v20260801a — modifica di un pagamento fornitore: data, importo, modalita,
@@ -1290,6 +1292,7 @@ function ecfStampaSelezione() {
 // documento: serve per controllare e per contestare.
 // ═══════════════════════════════════════════════════════════════════════════
 function ecfStampaFattura(fatturaId) {
+      + (f.ordini && f.ordini.length ? '<button onclick="ecfContestaFattura(\'' + f.id + '\')" style="padding:8px 14px;font-size:12px;border:0.5px solid #E4B7B7;border-radius:8px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">⚖ Contesta prezzi</button>' : '')
   var f = _ecfFatture.filter(function (x) { return x.id === fatturaId; })[0];
   if (!f) return;
   var iva = 0, imp = 0;
@@ -1806,4 +1809,218 @@ async function ecfTuttiRender() {
       + pfRfTabella('tf') + pfRfBox('tf');
   }
   body.innerHTML = h;
+}
+
+// ═══ v20260803a · CONTESTAZIONE PREZZI AL FORNITORE ════════════════
+// Si contesta il PREZZO, non i litri: quelli li certifica il DAS.
+// Il confronto e sul COSTO PURO (`costo_litro`), senza trasporto —
+// in fattura il trasporto e spesso una riga a parte, e mescolarlo
+// darebbe al fornitore il primo appiglio per smontare la contestazione.
+// Riga per riga sulla singola fattura, e in fondo una lettera da
+// allegare alla PEC.
+var _contStato = null;
+
+function ecfContestaFattura(fatturaId) {
+  var f = (_ecfFatture || []).filter(function (x) { return x.id === fatturaId; })[0];
+  if (!f || !(f.ordini || []).length) { toast('Fattura senza ordini agganciati'); return; }
+  _contStato = {
+    fatturaId: fatturaId,
+    numero: f.numero || null,
+    dataFattura: f.data || null,
+    fornitore: _ecfSel ? _ecfSel.nome : '',
+    righe: f.ordini.map(function (o) {
+      return { ordineId: o.id, data: o.data, prodotto: o.prodotto,
+               litri: Number(o.litri || 0), prezzoOrdine: Number(o.costo_litro || 0),
+               prezzoFatt: null };
+    })
+  };
+  _contRender();
+}
+
+function _contRender() {
+  var S = _contStato; if (!S) return;
+  var inp = 'width:112px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right;font-family:var(--font-mono)';
+  var h = '<div style="max-width:820px">';
+  h += '<div style="font-size:16px;font-weight:600">Contestazione prezzi &mdash; ' + esc(S.fornitore) + '</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Fattura '
+     + (S.numero ? esc(S.numero) : '(da numerare)') + (S.dataFattura ? ' del ' + _pfIsoToIt(S.dataFattura) : '')
+     + ' &middot; ' + S.righe.length + ' ordini</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Confronto sul <strong>costo puro</strong>, senza trasporto. '
+     + 'Scrivi il prezzo che ti hanno fatturato: la differenza si calcola da sola.</div>';
+
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  h += '<tr style="color:var(--text-muted);text-align:right">'
+     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Data</th>'
+     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Prodotto</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Litri</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Prezzo ordine</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Prezzo fatturato</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Differenza</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Importo</th></tr>';
+
+  S.righe.forEach(function (r, i) {
+    var d = (r.prezzoFatt === null) ? null : Math.round((r.prezzoFatt - r.prezzoOrdine) * 1000000) / 1000000;
+    var imp = (d === null) ? null : Math.round(d * r.litri * 100) / 100;
+    var col = (d === null) ? 'var(--text-muted)' : (d > 0 ? '#A32D2D' : (d < 0 ? '#27500A' : 'var(--text-muted)'));
+    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+      + '<td style="text-align:left;padding:7px 8px">' + _pfIsoToIt(r.data) + '</td>'
+      + '<td style="text-align:left;padding:7px 8px">' + esc(r.prodotto || '') + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + Number(r.litri).toLocaleString('it-IT') + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + r.prezzoOrdine.toFixed(6) + '</td>'
+      + '<td style="padding:7px 8px"><input type="number" step="0.000001" value="' + (r.prezzoFatt === null ? '' : r.prezzoFatt) + '"'
+        + ' oninput="_contImposta(' + i + ', this.value)" placeholder="' + r.prezzoOrdine.toFixed(6) + '" style="' + inp + '"></td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);color:' + col + '">' + (d === null ? '&mdash;' : (d > 0 ? '+' : '') + d.toFixed(6)) + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700;color:' + col + '">' + (imp === null ? '&mdash;' : fmtE(imp)) + '</td></tr>';
+  });
+  var tot = _contTotale();
+  h += '<tr style="border-top:0.5px solid var(--border);background:var(--bg-kpi);text-align:right">'
+    + '<td colspan="6" style="text-align:left;padding:9px 8px;font-weight:700">Totale contestato</td>'
+    + '<td style="padding:9px 8px;font-family:var(--font-mono);font-weight:700;font-size:14px;color:' + (tot > 0 ? '#A32D2D' : 'var(--text-muted)') + '">' + fmtE(tot) + '</td></tr>';
+  h += '</table></div>';
+
+  h += '<div style="margin-top:12px"><label style="font-size:11px;color:var(--text-muted)">Nota per il fornitore</label>'
+     + '<textarea id="cont-nota" rows="2" placeholder="Prezzi applicati difformi da quelli concordati" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;resize:vertical"></textarea></div>';
+
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
+  h += '<button onclick="chiudiModal()" style="padding:8px 14px;font-size:12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Annulla</button>';
+  h += '<button onclick="_contStampa()" style="padding:8px 14px;font-size:12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">&#128424; Lettera da inviare</button>';
+  h += '<button onclick="_contSalva()" class="btn-primary" style="padding:8px 16px;font-size:12px">&#128190; Registra contestazione</button>';
+  h += '</div></div>';
+  apriModal(h);
+}
+
+function _contImposta(i, v) {
+  var S = _contStato; if (!S) return;
+  S.righe[i].prezzoFatt = (v === '' || isNaN(Number(v))) ? null : Number(v);
+  // ridisegno solo i due valori della riga e il totale, senza rifare la
+  // modale: rifacendola si perderebbe il cursore mentre si digita
+  var celle = document.querySelectorAll('table tr');
+  _contAggiornaTotale();
+}
+
+function _contTotale() {
+  var S = _contStato; if (!S) return 0;
+  return Math.round(S.righe.reduce(function (a, r) {
+    if (r.prezzoFatt === null) return a;
+    return a + (r.prezzoFatt - r.prezzoOrdine) * r.litri;
+  }, 0) * 100) / 100;
+}
+
+function _contAggiornaTotale() {
+  var S = _contStato; if (!S) return;
+  var righe = document.querySelectorAll('table tr');
+  for (var i = 0; i < S.righe.length; i++) {
+    var r = S.righe[i];
+    var tr = righe[i + 1];
+    if (!tr) continue;
+    var td = tr.querySelectorAll('td');
+    if (td.length < 7) continue;
+    var d = (r.prezzoFatt === null) ? null : Math.round((r.prezzoFatt - r.prezzoOrdine) * 1000000) / 1000000;
+    var imp = (d === null) ? null : Math.round(d * r.litri * 100) / 100;
+    var col = (d === null) ? 'var(--text-muted)' : (d > 0 ? '#A32D2D' : (d < 0 ? '#27500A' : 'var(--text-muted)'));
+    td[5].innerHTML = (d === null ? '&mdash;' : (d > 0 ? '+' : '') + d.toFixed(6));
+    td[5].style.color = col;
+    td[6].innerHTML = (imp === null ? '&mdash;' : fmtE(imp));
+    td[6].style.color = col;
+  }
+  var tot = _contTotale();
+  var ultima = righe[S.righe.length + 1];
+  if (ultima) {
+    var c = ultima.querySelectorAll('td');
+    if (c.length >= 2) { c[1].innerHTML = fmtE(tot); c[1].style.color = tot > 0 ? '#A32D2D' : 'var(--text-muted)'; }
+  }
+}
+
+async function _contSalva() {
+  var S = _contStato; if (!S) return;
+  var righe = S.righe.filter(function (r) {
+    return r.prezzoFatt !== null && Math.abs(r.prezzoFatt - r.prezzoOrdine) > 0.0000005;
+  });
+  if (!righe.length) { toast('Nessuna differenza di prezzo da contestare'); return; }
+  var tot = _contTotale();
+  var nota = ((document.getElementById('cont-nota') || {}).value || '').trim() || null;
+  try {
+    var ins = await sb.from('contestazioni_fornitore').insert([{
+      fattura_ricevuta_id: S.fatturaId, fornitore: S.fornitore,
+      numero_fattura: S.numero, data_fattura: S.dataFattura,
+      importo_contestato: tot, motivo: 'prezzo', nota: nota, stato: 'aperta'
+    }]).select('id').single();
+    if (ins.error) throw ins.error;
+    var payload = righe.map(function (r) {
+      var d = Math.round((r.prezzoFatt - r.prezzoOrdine) * 1000000) / 1000000;
+      return { contestazione_id: ins.data.id, ordine_id: r.ordineId, data_ordine: r.data,
+               prodotto: r.prodotto, litri: r.litri, prezzo_ordine: r.prezzoOrdine,
+               prezzo_fatturato: r.prezzoFatt, differenza: d,
+               importo: Math.round(d * r.litri * 100) / 100 };
+    });
+    var insR = await sb.from('contestazioni_righe').insert(payload);
+    if (insR.error) throw insR.error;
+    if (typeof _auditLog === 'function') {
+      _auditLog('contestazione_prezzi', 'contestazioni_fornitore',
+        S.fornitore + ' fattura ' + (S.numero || 's.n.') + ' — ' + righe.length + ' righe per ' + fmtE(tot));
+    }
+    toast('\u2713 Contestazione registrata: ' + fmtE(tot));
+    chiudiModal();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
+}
+
+// Lettera da allegare a una PEC. Deve reggere davanti al fornitore:
+// riferimento alla fattura, ogni riga con prezzo concordato e prezzo
+// fatturato, il totale e la richiesta di nota di credito.
+function _contStampa() {
+  var S = _contStato; if (!S) return;
+  var righe = S.righe.filter(function (r) {
+    return r.prezzoFatt !== null && Math.abs(r.prezzoFatt - r.prezzoOrdine) > 0.0000005;
+  });
+  if (!righe.length) { toast('Nessuna differenza da riportare nella lettera'); return; }
+  var tot = _contTotale();
+  var nota = ((document.getElementById('cont-nota') || {}).value || '').trim();
+  var w = window.open('', '_blank');
+  if (!w) { toast('Il browser ha bloccato la finestra: consenti i popup e riprova'); return; }
+  var oggi = new Date().toLocaleDateString('it-IT');
+  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Contestazione fattura '
+    + (S.numero || '') + '</title><style>'
+    + 'body{font-family:Calibri,Arial,sans-serif;color:#222;margin:2cm;font-size:12.5px;line-height:1.6}'
+    + 'h1{font-size:17px;margin:0 0 4px}.mitt{font-size:11px;color:#555;margin-bottom:22px}'
+    + '.dest{margin-bottom:18px}.ogg{font-weight:700;margin-bottom:14px}'
+    + 'table{width:100%;border-collapse:collapse;margin:14px 0}'
+    + 'th{font-size:10.5px;color:#555;font-weight:600;border-bottom:1.5px solid #999;padding:6px 8px;text-align:right}'
+    + 'th.l{text-align:left}td{border-bottom:1px solid #eee;padding:6px 8px;text-align:right;font-family:Consolas,monospace}'
+    + 'td.l{text-align:left;font-family:Calibri,Arial,sans-serif}'
+    + 'tr.tot td{border-top:1.5px solid #999;border-bottom:none;font-weight:700;font-size:13.5px}'
+    + '.firma{margin-top:34px}@media print{body{margin:1.6cm}}</style></head><body>';
+  doc += '<h1>PHOENIX FUEL S.R.L.</h1>';
+  doc += '<div class="mitt">Zona Industriale &mdash; 89900 Vibo Valentia (VV) &middot; P.IVA 02744150802 &middot; phoenixfuel@legalmail.it</div>';
+  doc += '<div class="dest">Spett.le<br><strong>' + S.fornitore + '</strong></div>';
+  doc += '<div style="text-align:right;margin-bottom:14px">Vibo Valentia, ' + oggi + '</div>';
+  doc += '<div class="ogg">Oggetto: contestazione prezzi &mdash; fattura ' + (S.numero || 'in oggetto')
+      + (S.dataFattura ? ' del ' + S.dataFattura.split('-').reverse().join('/') : '') + '</div>';
+  doc += '<p>Con la presente si contesta l\'applicazione di prezzi difformi da quelli concordati '
+      + 'e registrati nei relativi ordini, come di seguito dettagliato.</p>';
+  doc += '<table><tr><th class="l">Data</th><th class="l">Prodotto</th><th>Litri</th>'
+      + '<th>Prezzo concordato</th><th>Prezzo fatturato</th><th>Differenza</th><th>Importo &euro;</th></tr>';
+  righe.forEach(function (r) {
+    var d = r.prezzoFatt - r.prezzoOrdine;
+    doc += '<tr><td class="l">' + r.data.split('-').reverse().join('/') + '</td>'
+      + '<td class="l">' + (r.prodotto || '') + '</td>'
+      + '<td>' + Number(r.litri).toLocaleString('it-IT') + '</td>'
+      + '<td>' + r.prezzoOrdine.toFixed(6) + '</td>'
+      + '<td>' + r.prezzoFatt.toFixed(6) + '</td>'
+      + '<td>' + (d > 0 ? '+' : '') + d.toFixed(6) + '</td>'
+      + '<td>' + (d * r.litri).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td></tr>';
+  });
+  doc += '<tr class="tot"><td class="l" colspan="6">TOTALE CONTESTATO</td><td>'
+      + tot.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td></tr></table>';
+  if (nota) doc += '<p>' + nota + '</p>';
+  doc += '<p>Si richiede pertanto l\'emissione di nota di credito per l\'importo sopra indicato, '
+      + 'restando a disposizione per ogni chiarimento.</p>';
+  doc += '<p>I prezzi indicati come concordati sono quelli registrati nei nostri ordini alla data di ciascuna consegna, '
+      + 'al netto del trasporto.</p>';
+  doc += '<div class="firma">Distinti saluti<br><br>Phoenix Fuel S.r.l.<br>_______________________</div>';
+  doc += '</body></html>';
+  w.document.write(doc);
+  w.document.close();
+  setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
 }
