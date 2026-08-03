@@ -1,4 +1,10 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260803b — tutto sullo stesso piano: la linea sale al livello dei carichi
+//              (petrolio + accisa + scarto medio) e i pallini si colorano da
+//              rosso a verde secondo quanto stanno sopra o sotto; vista per
+//              giorno/settimana/mese; solo gasolio autotrazione nel grafico;
+//              scomposizione del prezzo a settimane navigabili, gasolio e
+//              benzina soltanto
 // v20260803a — il dettaglio della funzione server puo essere elenco o testo:
 //              prima .join() alla cieca mandava tutto in errore
 // v20260802b — la scomposizione dell accisa si vede anche quando le
@@ -242,6 +248,46 @@ function _mktMedia(arr, n) {
 
 function mktPeriodo(g) { _mktGiorni = g; renderMercato(); }
 
+// v20260803b — vista giorno / settimana / mese
+var _mktGran = 'settimana';
+function mktGranularita(g) { _mktGran = g; renderMercato(); }
+
+// Etichetta del periodo a cui appartiene una data.
+function _mktBucket(dataISO) {
+  if (_mktGran === 'mese') return dataISO.substring(0, 7);
+  if (_mktGran === 'giorno') return dataISO;
+  // settimana ISO: si usa il LUNEDI come chiave, cosi l'ordine alfabetico
+  // e anche quello cronologico
+  var d = new Date(dataISO + 'T12:00:00');
+  var g = (d.getDay() + 6) % 7;          // 0 = lunedi
+  d.setDate(d.getDate() - g);
+  return d.toISOString().split('T')[0];
+}
+
+function _mktEtichettaBucket(k) {
+  if (_mktGran === 'mese') {
+    var mesi = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+    return mesi[Number(k.substring(5, 7)) - 1] + ' ' + k.substring(2, 4);
+  }
+  if (_mktGran === 'giorno') return fmtD(k).substring(0, 5);
+  return fmtD(k).substring(0, 5);   // lunedi della settimana
+}
+
+// Media dei valori dentro ogni periodo, in ordine cronologico.
+function _mktAggrega(righe, valore) {
+  var m = {};
+  righe.forEach(function (r) {
+    var k = _mktBucket(r.data);
+    var v = valore(r);
+    if (v === null || v === undefined || isNaN(v)) return;
+    (m[k] = m[k] || []).push(v);
+  });
+  return Object.keys(m).sort().map(function (k) {
+    var somma = m[k].reduce(function (a, b) { return a + b; }, 0);
+    return { chiave: k, etichetta: _mktEtichettaBucket(k), valore: somma / m[k].length, n: m[k].length };
+  });
+}
+
 // ═══ v20260802a · ACCISE ═══════════════════════════════════════════
 // Il costo di un carico non e tutto prodotto: dentro c'e l'accisa, che
 // cambia per legge e non c'entra col mercato. Senza scorporarla ogni
@@ -300,7 +346,29 @@ function _mktProssimoScalino(oggiISO) {
 // Scompone il costo dei carichi: prodotto puro, accisa, e confronto col
 // mercato di quel giorno. Solo i carichi SENZA trasporto fornitore, perche
 // il trasporto sporcherebbe il paragone (regola sua del 29/07).
-function _mktSezioneAccise(carichi, serie) {
+var _mktSettSel = null;
+function mktSettimana(passo) {
+  // passo +1 = una settimana piu indietro. Lo spostamento si fa sulla data
+  // gia scelta: sette giorni avanti o indietro, poi la sezione riaggancia
+  // la settimana piu vicina fra quelle che hanno carichi.
+  if (!_mktSettSel) return;
+  var d = new Date(_mktSettSel + 'T12:00:00');
+  d.setDate(d.getDate() - 7 * passo);
+  _mktSettSel = d.toISOString().split('T')[0];
+  renderMercato();
+}
+// Lunedi della settimana di una data: chiave stabile e ordinabile.
+function _mktLunedi(dataISO) {
+  var d = new Date(dataISO + 'T12:00:00');
+  var g = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - g);
+  return d.toISOString().split('T')[0];
+}
+
+function _mktSezioneAccise(carichi, serie, carichiTutti) {
+  // se non arriva l'elenco completo si usa quello filtrato: meglio una
+  // tabella parziale che una sezione che va in errore
+  if (!carichiTutti) carichiTutti = carichi || [];
   if (!_mktAccise.length) {
     return '<div class="card" style="margin-top:14px;padding:14px;font-size:12px;color:var(--text-muted)">'
       + 'Composizione del prezzo non disponibile: non ci sono accise registrate.</div>';
@@ -326,17 +394,58 @@ function _mktSezioneAccise(carichi, serie) {
       + ' &euro;</strong> in piu. Non e il mercato che sale: e lo Stato che riprende quanto aveva sospeso.</div></div>';
   }
 
-  // tabella di scomposizione, ultimi carichi puliti
-  var puliti = carichi.filter(function (o) {
-    return !(Number(o.trasporto_litro) > 0) && _mktAccisaAl(o.data, o.prodotto);
-  }).slice(-12).reverse();
+  // v20260803b — Qui si guarda UNA SETTIMANA alla volta, navigabile.
+  // Con tre mesi di carichi la tabella diventava un elenco illeggibile.
+  // Prodotti: solo gasolio e benzina (regola sua del 03/08).
+  var idonei = carichiTutti.filter(function (o) {
+    var k = _mktProdottoChiave(o.prodotto);
+    return !(Number(o.trasporto_litro) > 0)
+      && (k === 'gasolio' || k === 'benzina')
+      && String(o.prodotto || '').toLowerCase().indexOf('agricol') < 0
+      && _mktAccisaAl(o.data, o.prodotto);
+  });
 
   h += '<div class="card" style="margin-top:14px;padding:14px">';
   h += '<div style="font-size:13px;font-weight:600;margin-bottom:4px">Di cosa e fatto il prezzo che paghi</div>';
-  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Solo i carichi senza trasporto del fornitore: sono gli unici confrontabili col mercato senza correzioni.</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Gasolio e benzina, una settimana alla volta. Solo i carichi senza trasporto del fornitore: sono gli unici confrontabili col mercato senza correzioni.</div>';
 
-  if (!puliti.length) {
+  if (!idonei.length) {
     h += '<div style="font-size:12px;color:var(--text-muted)">Nessun carico confrontabile nel periodo scelto.</div></div>';
+    return h;
+  }
+
+  // settimane disponibili, dalla piu recente
+  var settimane = [];
+  idonei.forEach(function (o) {
+    var k = _mktLunedi(o.data);
+    if (settimane.indexOf(k) < 0) settimane.push(k);
+  });
+  settimane.sort().reverse();
+  if (!_mktSettSel) _mktSettSel = settimane[0];
+  if (settimane.indexOf(_mktSettSel) < 0) {
+    // la settimana scelta non ha carichi: si prende la piu vicina che ne ha
+    var mig = settimane[0], dist = Infinity;
+    settimane.forEach(function (k) {
+      var d = Math.abs(new Date(k + 'T12:00:00') - new Date(_mktSettSel + 'T12:00:00'));
+      if (d < dist) { dist = d; mig = k; }
+    });
+    _mktSettSel = mig;
+  }
+  var iSett = settimane.indexOf(_mktSettSel);
+
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">';
+  h += '<button onclick="mktSettimana(1)"' + (iSett >= settimane.length - 1 ? ' disabled' : '')
+     + ' style="font-size:12px;padding:6px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:' + (iSett >= settimane.length - 1 ? 'not-allowed;opacity:0.4' : 'pointer') + '">&#8249; precedente</button>';
+  h += '<strong style="font-size:12.5px">Settimana del ' + fmtD(_mktSettSel) + '</strong>';
+  h += '<button onclick="mktSettimana(-1)"' + (iSett <= 0 ? ' disabled' : '')
+     + ' style="font-size:12px;padding:6px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:' + (iSett <= 0 ? 'not-allowed;opacity:0.4' : 'pointer') + '">successiva &#8250;</button>';
+  h += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">' + settimane.length + ' settimane con carichi nel periodo</span>';
+  h += '</div>';
+
+  var puliti = idonei.filter(function (o) { return _mktLunedi(o.data) === _mktSettSel; })
+                     .sort(function (a, b) { return a.data < b.data ? 1 : -1; });
+  if (!puliti.length) {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessun carico in questa settimana.</div></div>';
     return h;
   }
 
@@ -426,7 +535,7 @@ async function renderMercato() {
   var dal = new Date(); dal.setDate(dal.getDate() - _mktGiorni);
   var dalISO = dal.toISOString().split('T')[0];
 
-  var serie = [], carichi = [];
+  var serie = [], carichi = [], carichiTutti = [];
   try {
     var r = await Promise.all([
       sb.from('futures_storico').select('*').gte('data', dalISO).order('data', { ascending: true }),
@@ -441,8 +550,15 @@ async function renderMercato() {
     // delle accise, dove il trasporto del fornitore falserebbe il conto. Qui
     // si distinguono per DATO, non per nome: chi non ha trasporto e'
     // confrontabile col mercato in modo pulito, gli altri lo includono.
-    carichi = (r[1].data || []).filter(function (o) {
+    // v20260803b — In QUESTA pagina si ragiona SOLO sul gasolio autotrazione:
+    // il Brent e il suo riferimento, e mettere accanto benzina e agricolo
+    // confonde e basta (regola sua del 03/08).
+    carichiTutti = (r[1].data || []).filter(function (o) {
       return Number(o.litri) > 0 && Number(o.costo_litro) > 0;
+    });
+    carichi = carichiTutti.filter(function (o) {
+      return _mktProdottoChiave(o.prodotto) === 'gasolio'
+        && String(o.prodotto || '').toLowerCase().indexOf('agricol') < 0;
     });
   } catch (e) {
     el.innerHTML = '<div class="card"><div style="color:#A32D2D;font-size:13px">Errore lettura dati: ' + esc((e && e.message) || e) + '</div></div>';
@@ -457,6 +573,15 @@ async function renderMercato() {
     + [[30, '1M'], [90, '3M'], [180, '6M'], [365, '1A']].map(function (p) {
         var on = _mktGiorni === p[0];
         return '<button onclick="mktPeriodo(' + p[0] + ')" style="font-size:12px;padding:6px 14px;border:0.5px solid ' + (on ? '#185FA5' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#185FA5' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '500') + '">' + p[1] + '</button>';
+      }).join('')
+    + '</div>';
+  // v20260803b — Aggregazione: con un punto al giorno su tre mesi il grafico
+  // e illeggibile. Raggruppando per settimana o mese le variazioni si vedono.
+  h += '<div style="display:flex;gap:6px;align-items:center">'
+    + '<span style="font-size:11px;color:var(--text-muted);margin-right:2px">vista</span>'
+    + [['giorno', 'Giorno'], ['settimana', 'Settimana'], ['mese', 'Mese']].map(function (p) {
+        var on = _mktGran === p[0];
+        return '<button onclick="mktGranularita(\'' + p[0] + '\')" style="font-size:12px;padding:6px 12px;border:0.5px solid ' + (on ? '#185FA5' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#185FA5' : 'var(--bg)') + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '500') + '">' + p[1] + '</button>';
       }).join('')
     + '</div>';
   h += '<div style="display:flex;gap:8px;align-items:center">'
@@ -474,14 +599,44 @@ async function renderMercato() {
     // prodotto puro = costo meno accisa. Senza quotazioni restano vuote solo
     // le colonne Mercato e Scarto. Prima si usciva di qui e la sezione non
     // compariva affatto.
-    h += _mktSezioneAccise(carichi, serie);
+    h += _mktSezioneAccise(carichi, serie, carichiTutti);
     el.innerHTML = h;
     _mktDisegnaGraficoAccise();
     return;
   }
 
-  var lab = serie.map(function (r) { return fmtD(r.data).substring(0, 5); });
-  var prezzi = serie.map(function (r) { return Number(r.prezzo_euro_litro || 0); });
+  // v20260803b — TUTTO SULLO STESSO PIANO (regola sua del 03/08).
+  // Prima la linea del mercato stava a 0,49 e i carichi a 1,45: le
+  // variazioni della linea sparivano schiacciate in basso. Ora la linea
+  // viene ALZATA fino al piano dei carichi, aggiungendo l'accisa del
+  // giorno e lo scarto medio del periodo (che e il salto petrolio→gasolio
+  // piu il margine del fornitore). Cosi i pallini cadono ATTORNO alla
+  // linea e si vede subito se abbiamo comprato sopra o sotto.
+  // Quando arrivera la formula del vecchio Excel prendera il posto dello
+  // scarto medio, e la linea diventera una previsione vera.
+  var puliti = carichi.filter(function (o) { return !(Number(o.trasporto_litro) > 0); });
+  var _mktAtteso = function (dataISO) {
+    var acc = _mktAccisaAl(dataISO, 'gasolio');
+    return acc ? acc.applicata : 0;
+  };
+  var scartoMedio = 0, nScarto = 0;
+  puliti.forEach(function (o) {
+    var q = null;
+    for (var i = serie.length - 1; i >= 0; i--) {
+      if (serie[i].data <= o.data) { q = Number(serie[i].prezzo_euro_litro || 0); break; }
+    }
+    if (q === null) return;
+    scartoMedio += Number(o.costo_litro) - q - _mktAtteso(o.data);
+    nScarto++;
+  });
+  scartoMedio = nScarto ? scartoMedio / nScarto : 0;
+
+  var serieAtt = serie.map(function (r) {
+    return { data: r.data, v: Number(r.prezzo_euro_litro || 0) + _mktAtteso(r.data) + scartoMedio };
+  });
+  var aggSerie = _mktAggrega(serieAtt, function (r) { return r.v; });
+  var lab = aggSerie.map(function (b) { return b.etichetta; });
+  var prezzi = aggSerie.map(function (b) { return Math.round(b.valore * 10000) / 10000; });
   var ma7 = _mktMedia(prezzi, 7), ma30 = _mktMedia(prezzi, 30);
   var ultimo = prezzi[prezzi.length - 1];
   var prec = prezzi.length > 1 ? prezzi[prezzi.length - 2] : ultimo;
@@ -506,21 +661,32 @@ async function renderMercato() {
       + (sub ? '<div style="font-size:11px;color:var(--text-muted)">' + sub + '</div>' : '') + '</div>';
   };
   h += '<div class="grid4" style="margin-bottom:16px">'
-    + kpi('Mercato ' + fmtD(serie[serie.length - 1].data), ultimo.toFixed(4),
+    + kpi('Costo atteso ' + fmtD(serie[serie.length - 1].data), ultimo.toFixed(4),
           (varG >= 0 ? '+' : '') + varG.toFixed(4) + ' sul giorno', varG >= 0 ? '#A32D2D' : '#3B6D11')
     + kpi('Tendenza', tendenza, (m7 != null && m30 != null) ? 'MA7 ' + (m7 > m30 ? 'sopra' : 'sotto') + ' MA30' : 'servono più giorni', colTend)
     + kpi('Tuo ultimo carico', costoUlt != null ? costoUlt.toFixed(4) : '—',
           ultC ? esc(ultC.fornitore) + ' · ' + fmtD(ultC.data) + (Number(ultC.trasporto_litro || 0) > 0 ? ' · trasporto incluso' : '') : 'nessun carico nel periodo')
-    + kpi('Scarto sul mercato', (costoUlt != null && mktQuelGiorno) ? ((costoUlt - mktQuelGiorno) >= 0 ? '+' : '') + (costoUlt - mktQuelGiorno).toFixed(4) : '—',
-          'prodotto + accisa + margine fornitore')
+    + (function () {
+        var conS = carichi.filter(function (o) { return o._scarto !== null && o._scarto !== undefined; });
+        var sotto = conS.filter(function (o) { return o._scarto < 0; }).length;
+        var medio = conS.length ? conS.reduce(function (a, o) { return a + o._scarto; }, 0) / conS.length : null;
+        return kpi('Come abbiamo comprato',
+          conS.length ? sotto + ' su ' + conS.length + ' sotto' : '—',
+          medio === null ? 'nessun carico confrontabile'
+            : 'scarto medio ' + (medio >= 0 ? '+' : '') + medio.toFixed(4) + ' €/L',
+          medio === null ? null : (medio <= 0 ? '#3B6D11' : '#A32D2D'));
+      })()
     + '</div>';
 
   h += '<div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:8px;font-size:11.5px;color:var(--text-muted)">'
-    + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;margin-right:5px"></span>Mercato €/L</span>'
+    + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;margin-right:5px"></span>Costo atteso €/L (petrolio + accisa + scarto medio ' + scartoMedio.toFixed(4) + ')</span>'
     + '<span><span style="display:inline-block;width:10px;height:2px;background:#eb6834;margin-right:5px;vertical-align:middle"></span>Media 7 giorni</span>'
     + '<span><span style="display:inline-block;width:10px;height:2px;background:#898781;margin-right:5px;vertical-align:middle"></span>Media 30 giorni</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#1baf7a;margin-right:5px"></span>Carichi senza trasporto fornitore</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid #1baf7a;margin-right:5px"></span>Carichi con trasporto incluso</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(200,80,80);margin-right:4px"></span>'
+      + '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(160,160,160);margin-right:4px"></span>'
+      + '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(60,158,60);margin-right:5px"></span>'
+      + 'Pagato sopra · in linea · sotto il mercato</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(120,140,120);border:2px solid #555;margin-right:5px"></span>Carichi con trasporto incluso</span>'
     + '</div>';
   h += '<div class="card"><div style="position:relative;height:300px"><canvas id="mkt-chart"></canvas></div></div>';
 
@@ -534,20 +700,41 @@ async function renderMercato() {
     + '</div>';
 
   // ═══ Composizione del prezzo · accise ═══
-  h += _mktSezioneAccise(carichi, serie);
+  h += _mktSezioneAccise(carichi, serie, carichiTutti);
 
   el.innerHTML = h;
 
   // grafico
-  var _punto = function (o) {
-    var iLab = -1;
-    for (var i = 0; i < serie.length; i++) { if (serie[i].data === o.data) { iLab = i; break; } }
-    if (iLab < 0) return null;
-    return { x: lab[iLab], y: Math.round((Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * 10000) / 10000,
-             _f: o.fornitore, _l: o.litri, _t: Number(o.trasporto_litro || 0) };
+  // Ogni carico si colloca nel suo periodo, e il colore dipende da QUANTO
+  // sta sopra o sotto la linea: rosso acceso = pagato molto sopra il
+  // mercato, verde pieno = molto sotto, grigio = in linea.
+  var attesoPerBucket = {};
+  aggSerie.forEach(function (b) { attesoPerBucket[b.chiave] = b.valore; });
+  var scarti = [];
+  carichi.forEach(function (o) {
+    var k = _mktBucket(o.data);
+    if (attesoPerBucket[k] === undefined) { o._scarto = null; return; }
+    o._scarto = (Number(o.costo_litro) + Number(o.trasporto_litro || 0)) - attesoPerBucket[k];
+    scarti.push(Math.abs(o._scarto));
+  });
+  var maxScarto = scarti.length ? Math.max.apply(null, scarti) : 0.01;
+  if (maxScarto < 0.005) maxScarto = 0.005;
+  var _colore = function (sc) {
+    var q = Math.max(-1, Math.min(1, sc / maxScarto));
+    if (q >= 0) return 'rgb(' + Math.round(200 - 40 * (1 - q)) + ',' + Math.round(80 + 100 * (1 - q)) + ',' + Math.round(80 + 100 * (1 - q)) + ')';
+    return 'rgb(' + Math.round(60 + 130 * (1 + q)) + ',' + Math.round(158 - 18 * (1 + q)) + ',' + Math.round(60 + 120 * (1 + q)) + ')';
   };
-  var puntiPuliti = carichi.filter(function (o) { return !(Number(o.trasporto_litro) > 0); }).map(_punto).filter(Boolean);
+  var _punto = function (o) {
+    var k = _mktBucket(o.data);
+    if (attesoPerBucket[k] === undefined) return null;
+    return { x: _mktEtichettaBucket(k),
+             y: Math.round((Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * 10000) / 10000,
+             _f: o.fornitore, _l: o.litri, _t: Number(o.trasporto_litro || 0), _s: o._scarto };
+  };
+  var puntiPuliti = puliti.map(_punto).filter(Boolean);
   var puntiTrasp  = carichi.filter(function (o) { return Number(o.trasporto_litro) > 0; }).map(_punto).filter(Boolean);
+  var coloriPuliti = puntiPuliti.map(function (p) { return _colore(p._s || 0); });
+  var coloriTrasp  = puntiTrasp.map(function (p) { return _colore(p._s || 0); });
 
   if (_mktChart) _mktChart.destroy();
   var cv = document.getElementById('mkt-chart');
@@ -559,8 +746,8 @@ async function renderMercato() {
           { type: 'line', label: 'Mercato', data: prezzi, borderColor: '#2a78d6', backgroundColor: 'rgba(42,120,214,0.10)', fill: true, borderWidth: 2, pointRadius: 0, tension: 0.3 },
           { type: 'line', label: 'MA7', data: ma7, borderColor: '#eb6834', borderWidth: 2, borderDash: [5, 3], pointRadius: 0, fill: false, tension: 0.3 },
           { type: 'line', label: 'MA30', data: ma30, borderColor: '#898781', borderWidth: 2, borderDash: [2, 3], pointRadius: 0, fill: false, tension: 0.3 },
-          { type: 'scatter', label: 'Carichi', data: puntiPuliti, backgroundColor: '#1baf7a', pointRadius: 7, pointHoverRadius: 9, borderColor: '#fff', borderWidth: 2 },
-          { type: 'scatter', label: 'Carichi', data: puntiTrasp, backgroundColor: '#fff', pointRadius: 6, pointHoverRadius: 8, borderColor: '#1baf7a', borderWidth: 2 }
+          { type: 'scatter', label: 'Carichi', data: puntiPuliti, backgroundColor: coloriPuliti, pointRadius: 7, pointHoverRadius: 9, borderColor: '#fff', borderWidth: 2 },
+          { type: 'scatter', label: 'Carichi con trasporto', data: puntiTrasp, backgroundColor: coloriTrasp, pointRadius: 6, pointHoverRadius: 8, borderColor: '#555', borderWidth: 2 }
         ]
       },
       options: {
