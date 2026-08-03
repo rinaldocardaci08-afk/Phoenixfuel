@@ -1,4 +1,6 @@
 // PhoenixFuel — Benchmark mercato, trend, previsioni
+// v20260803a — vista giorno/settimana/mese sul grafico storico: con un
+//              punto al giorno i dati erano troppo schiacciati
 let _chartBenchmark = null;
 
 async function salvaBenchmark() {
@@ -11,6 +13,38 @@ async function salvaBenchmark() {
   toast('Benchmark salvato!');
   document.getElementById('bench-prezzo').value = '';
   caricaBenchmark();
+}
+
+// v20260803a — vista giorno / settimana / mese, come nel Mercato gasolio.
+var _benchGran = 'settimana';
+function benchGranularita(g) { _benchGran = g; caricaBenchmark(); }
+
+function _benchBucket(dataISO) {
+  if (_benchGran === 'mese') return dataISO.substring(0, 7);
+  if (_benchGran === 'giorno') return dataISO;
+  var d = new Date(dataISO + 'T12:00:00');
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // lunedi
+  return d.toISOString().split('T')[0];
+}
+
+function _benchEtichetta(k) {
+  if (_benchGran === 'mese') {
+    var mesi = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+    return mesi[Number(k.substring(5, 7)) - 1] + ' ' + k.substring(2, 4);
+  }
+  return k.substring(8, 10) + '/' + k.substring(5, 7);
+}
+
+function _benchBarraVista() {
+  return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">'
+    + '<span style="font-size:11px;color:var(--text-muted);margin-right:2px">vista</span>'
+    + [['giorno', 'Giorno'], ['settimana', 'Settimana'], ['mese', 'Mese']].map(function (p) {
+        var on = _benchGran === p[0];
+        return '<button onclick="benchGranularita(\'' + p[0] + '\')" style="font-size:12px;padding:6px 12px;border:0.5px solid '
+          + (on ? '#185FA5' : 'var(--border)') + ';border-radius:7px;background:' + (on ? '#185FA5' : 'var(--bg)')
+          + ';color:' + (on ? '#fff' : 'var(--text)') + ';cursor:pointer;font-weight:' + (on ? '600' : '500') + '">' + p[1] + '</button>';
+      }).join('')
+    + '</div>';
 }
 
 async function caricaBenchmark() {
@@ -192,9 +226,43 @@ async function caricaBenchmark() {
     '</div>';
 
   // ═══ GRAFICO ═══
-  var labels = benchDati.map(function(b) { return b.data.substring(5); });
-  var dataBench = prezziArr;
-  var dataMa7 = ma7;
+  // v20260803a — Con un punto al giorno su mesi di dati il grafico si
+  // schiaccia e non si legge piu nulla. Qui si raggruppa per giorno,
+  // settimana o mese facendo la media dentro ogni periodo: il confronto
+  // fra il nostro CMP e il mercato resta lo stesso, ma le variazioni si
+  // vedono. Il selettore sta sopra il grafico.
+  var _agg = function (righe, valore) {
+    var m = {}, ordine = [];
+    righe.forEach(function (r, i) {
+      var k = _benchBucket(r.data);
+      var v = valore(r, i);
+      if (v === null || v === undefined || isNaN(v)) return;
+      if (!m[k]) { m[k] = []; ordine.push(k); }
+      m[k].push(Number(v));
+    });
+    ordine.sort();
+    return ordine.map(function (k) {
+      var a = m[k];
+      return { chiave: k, valore: a.reduce(function (x, y) { return x + y; }, 0) / a.length };
+    });
+  };
+
+  var aggBench = _agg(benchDati, function (b, i) { return prezziArr[i]; });
+  var aggMa7   = _agg(benchDati, function (b, i) { return ma7[i]; });
+  var aggCmp   = _agg(benchDati, function (b) { return _cmpAlGiorno(b.data); });
+  var chiavi   = aggBench.map(function (x) { return x.chiave; });
+  var perChiave = function (arr) {
+    var m = {}; arr.forEach(function (x) { m[x.chiave] = Math.round(x.valore * 1000000) / 1000000; });
+    return chiavi.map(function (k) { return m[k] === undefined ? null : m[k]; });
+  };
+
+  var labels = chiavi.map(_benchEtichetta);
+  var dataBench = perChiave(aggBench);
+  var dataMa7 = perChiave(aggMa7);
+  var dataCmp = perChiave(aggCmp);
+
+  var barra = document.getElementById('bench-vista');
+  if (barra) barra.innerHTML = _benchBarraVista();
 
   if (_chartBenchmark) _chartBenchmark.destroy();
   var ctx = document.getElementById('chart-benchmark');
@@ -207,10 +275,10 @@ async function caricaBenchmark() {
           { label: 'Benchmark', data: dataBench, borderColor: '#BA7517', backgroundColor: 'rgba(186,117,23,0.1)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2 },
           { label: 'MA7', data: dataMa7, borderColor: '#6B5FCC', borderWidth: 1.5, borderDash: [5, 3], fill: false, tension: 0.3, pointRadius: 0 },
           // CMP giornaliero ricostruito (non più costante)
-          { label: 'CMP', data: benchDati.map(function(b) { return _cmpAlGiorno(b.data); }), borderColor: '#639922', borderWidth: 1.5, borderDash: [3, 3], fill: false, pointRadius: 0, spanGaps: true }
+          { label: 'CMP', data: dataCmp, borderColor: '#639922', borderWidth: 1.5, borderDash: [3, 3], fill: false, pointRadius: 0, spanGaps: true }
         ]
       },
-      options: { responsive: true, plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } }, scales: { y: { beginAtZero: false } } }
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } }, scales: { y: { beginAtZero: false } } }
     });
   }
 

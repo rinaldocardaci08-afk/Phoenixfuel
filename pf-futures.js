@@ -1,4 +1,6 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260803c — pulsante Guarda adesso: legge il mercato in tempo reale ma
+//              NON registra niente e non entra nel previsionale
 // v20260803b — tutto sullo stesso piano: la linea sale al livello dei carichi
 //              (petrolio + accisa + scarto medio) e i pallini si colorano da
 //              rosso a verde secondo quanto stanno sopra o sotto; vista per
@@ -587,8 +589,11 @@ async function renderMercato() {
   h += '<div style="display:flex;gap:8px;align-items:center">'
     + '<span id="mkt-esito" style="font-size:11.5px;color:var(--text-muted);max-width:420px;text-align:right;line-height:1.5"></span>'
     + '<button id="mkt-btn-stor" onclick="mktCaricaStorico()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">↧ Carica storico</button>'
+    + '<button id="mkt-btn-ora" onclick="mktGuardaAdesso()" title="Legge il mercato in questo momento senza registrare niente" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">&#128065; Guarda adesso</button>'
     + '<button id="mkt-btn-agg" onclick="mktAggiornaOra()" style="font-size:12px;padding:7px 15px;border:0.5px solid #378ADD;border-radius:7px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">⟳ Aggiorna adesso</button>'
     + '</div></div>';
+
+  h += '<div id="mkt-ora-box"></div>';
 
   if (!serie.length) {
     h += '<div class="card"><div style="font-size:13px;color:var(--text-muted);line-height:1.7">'
@@ -796,6 +801,52 @@ async function mktCaricaStorico() {
 
 // Chiama la funzione sul server che prende chiusura di Londra e cambio.
 // Stessa funzione che poi girera' da sola alle 17:35: qui la si prova subito.
+// v20260803c — SGUARDO ESTEMPORANEO.
+// Legge il mercato in questo momento e lo mostra, ma NON scrive niente:
+// non entra nella serie storica e non partecipa al previsionale. Serve a
+// dare un'occhiata durante la giornata senza sporcare i dati, perche il
+// valore su cui si decide e la CHIUSURA delle 17:30, non il prezzo delle
+// undici del mattino. Usa il modo { prova: true } della funzione server,
+// che per costruzione non tocca il database.
+async function mktGuardaAdesso() {
+  var btn = document.getElementById('mkt-btn-ora');
+  var box = document.getElementById('mkt-ora-box');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardo…'; }
+  try {
+    var res = await sb.functions.invoke('mercato-gasolio', { body: { prova: true } });
+    if (res.error) throw res.error;
+    var d = res.data || {};
+    if (!d.ok) throw new Error((d.errore || 'nessuna risposta') + _mktDettaglio(d.dettaglio));
+
+    var acc = _mktAccisaAl(new Date().toISOString().split('T')[0], 'gasolio');
+    var pet = Number(d.petrolio_euro_litro || 0);
+    var ora = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+
+    var t = '<div style="margin-bottom:14px;background:var(--bg-kpi);border:0.5px solid var(--border);border-left:3px solid #8E8CA8;border-radius:10px;padding:12px 15px">';
+    t += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">';
+    t += '<div><strong style="font-size:13px">&#128065; Sguardo delle ' + ora + '</strong>'
+       + '<span style="font-size:11px;color:var(--text-muted);margin-left:8px">non registrato, non entra nel previsionale</span></div>';
+    t += '<button onclick="var b=document.getElementById(\'mkt-ora-box\'); if(b) b.innerHTML=\'\';" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">chiudi</button>';
+    t += '</div>';
+    t += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:8px;font-size:12.5px">';
+    t += '<span style="color:var(--text-muted)">Brent <strong style="font-family:var(--font-mono);color:var(--text)">' + Number(d.brent || 0).toFixed(2) + '</strong> $/bbl</span>';
+    t += '<span style="color:var(--text-muted)">Cambio <strong style="font-family:var(--font-mono);color:var(--text)">' + Number(d.cambio || 0).toFixed(4) + '</strong></span>';
+    t += '<span style="color:var(--text-muted)">Petrolio <strong style="font-family:var(--font-mono);color:var(--text)">' + pet.toFixed(4) + '</strong> &euro;/L</span>';
+    if (acc) {
+      t += '<span style="color:var(--text-muted)">con accisa <strong style="font-family:var(--font-mono);color:var(--text)">' + (pet + acc.applicata).toFixed(4) + '</strong> &euro;/L</span>';
+    }
+    t += '</div>';
+    t += '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Il valore su cui si decide resta la chiusura delle 17:30: questo e solo uno sguardo durante la giornata.</div>';
+    t += '</div>';
+    if (box) box.innerHTML = t;
+  } catch (e) {
+    var msg = (e && e.message) || String(e);
+    if (box) box.innerHTML = '<div style="margin-bottom:14px;font-size:12px;color:#A32D2D">&#10005; ' + esc(msg) + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#128065; Guarda adesso'; }
+  }
+}
+
 async function mktAggiornaOra() {
   var btn = document.getElementById('mkt-btn-agg');
   var out = document.getElementById('mkt-esito');
