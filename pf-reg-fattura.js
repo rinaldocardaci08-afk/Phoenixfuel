@@ -1,4 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260803c — le funzioni prodotto/destinazione portate a livello di file:
+//              dentro pfRfTabella non erano viste dalla modale e il pulsante
+//              "Registra fattura" non faceva niente
 // v20260803b — prodotto in etichetta colorata: giallo gasolio, verde benzina,
 //              verde acqua agricolo, grigio il resto
 // v20260803a — sotto il prodotto compare a chi e andato il carico: cliente,
@@ -177,6 +180,40 @@ function pfRfBox(ns) {
 }
 
 // ── tabella ordini (elenco o raggruppata per scadenza) ──────────────
+// v20260803c — Queste due stanno FUORI da pfRfTabella: le usa anche
+// _rfRenderModale, e dichiararle dentro un'altra funzione faceva
+// fallire il clic su "Registra fattura" senza dire niente.
+// v20260803b — ETICHETTA COLORATA DEL PRODOTTO.
+// Il colore si ricava dal NOME, non da un elenco fisso: cosi regge
+// anche "Gasolio autotrazione BEST" o "Benzina RON 95". L'agricolo va
+// riconosciuto PRIMA dell'autotrazione, altrimenti finirebbe in giallo
+// come quello normale — e sono due cose diverse, accisa e uso vincolato.
+function _rfProdotto(nome) {
+  var t = String(nome || '').toLowerCase();
+  var stile;
+  if (t.indexOf('agricol') >= 0)      stile = 'background:#E1F5EE;color:#085041';
+  else if (t.indexOf('benzina') >= 0) stile = 'background:#EAF3DE;color:#27500A';
+  else if (t.indexOf('gasolio') >= 0 || t.indexOf('diesel') >= 0) stile = 'background:#FAEEDA;color:#854F0B';
+  else                                stile = 'background:var(--bg);color:var(--text-muted)';
+  return '<span style="display:inline-block;padding:2px 9px;border-radius:9px;font-weight:700;font-size:12px;white-space:nowrap;'
+    + stile + '">' + _rfEsc(nome || '—') + '</span>';
+}
+
+function _rfDestinazione(o) {
+  var pezzi = [];
+  var cli = (o.cliente || '').trim();
+  var sede = (o.sede_scarico_nome || '').trim();
+  var dest = (o.destinazione || '').trim();
+  if (cli) pezzi.push('<strong style="font-weight:600">' + _rfEsc(cli) + '</strong>');
+  else if (dest) pezzi.push('<strong style="font-weight:600">' + _rfEsc(dest) + '</strong>');
+  if (sede && sede !== cli) pezzi.push(_rfEsc(sede));
+  if (o.baseNome) pezzi.push('da ' + _rfEsc(o.baseNome));
+  if (!pezzi.length) return '';
+  return '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px;line-height:1.35">'
+    + pezzi.join(' <span style="opacity:0.5">&middot;</span> ') + '</div>';
+}
+
+
 function pfRfTabella(ns) {
   var c = _rfC(ns); if (!c) return '';
   var vista = _rfVista[ns] || 'elenco';
@@ -226,36 +263,6 @@ function pfRfTabella(ns) {
   // dato, guardando l'elenco non si capisce a cosa si riferisce la riga.
   // Sta sotto il prodotto e non ruba una colonna: la tabella ne ha gia
   // dieci.
-  // v20260803b — ETICHETTA COLORATA DEL PRODOTTO.
-  // Il colore si ricava dal NOME, non da un elenco fisso: cosi regge
-  // anche "Gasolio autotrazione BEST" o "Benzina RON 95". L'agricolo va
-  // riconosciuto PRIMA dell'autotrazione, altrimenti finirebbe in giallo
-  // come quello normale — e sono due cose diverse, accisa e uso vincolato.
-  var _rfProdotto = function (nome) {
-    var t = String(nome || '').toLowerCase();
-    var stile;
-    if (t.indexOf('agricol') >= 0)      stile = 'background:#E1F5EE;color:#085041';
-    else if (t.indexOf('benzina') >= 0) stile = 'background:#EAF3DE;color:#27500A';
-    else if (t.indexOf('gasolio') >= 0 || t.indexOf('diesel') >= 0) stile = 'background:#FAEEDA;color:#854F0B';
-    else                                stile = 'background:var(--bg);color:var(--text-muted)';
-    return '<span style="display:inline-block;padding:2px 9px;border-radius:9px;font-weight:700;font-size:12px;white-space:nowrap;'
-      + stile + '">' + _rfEsc(nome || '—') + '</span>';
-  };
-
-  var _rfDestinazione = function (o) {
-    var pezzi = [];
-    var cli = (o.cliente || '').trim();
-    var sede = (o.sede_scarico_nome || '').trim();
-    var dest = (o.destinazione || '').trim();
-    if (cli) pezzi.push('<strong style="font-weight:600">' + _rfEsc(cli) + '</strong>');
-    else if (dest) pezzi.push('<strong style="font-weight:600">' + _rfEsc(dest) + '</strong>');
-    if (sede && sede !== cli) pezzi.push(_rfEsc(sede));
-    if (o.baseNome) pezzi.push('da ' + _rfEsc(o.baseNome));
-    if (!pezzi.length) return '';
-    return '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px;line-height:1.35">'
-      + pezzi.join(' <span style="opacity:0.5">&middot;</span> ') + '</div>';
-  };
-
   var rigaOrdine = function (o, figlio) {
     var bg = figlio ? 'background:#FCFDFE;' : '';
     var pad = figlio ? 'padding-left:22px;' : '';
