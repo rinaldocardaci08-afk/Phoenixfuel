@@ -1,4 +1,7 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260803d — Guarda adesso mostra due grafici a confronto (Brent e cambio,
+//              ultime due chiusure piu il valore di adesso), il suggerimento
+//              in evidenza e un foglio stampabile da salvare in PDF
 // v20260803c — pulsante Guarda adesso: legge il mercato in tempo reale ma
 //              NON registra niente e non entra nel previsionale
 // v20260803b — tutto sullo stesso piano: la linea sale al livello dei carichi
@@ -693,7 +696,7 @@ async function renderMercato() {
       + 'Pagato sopra · in linea · sotto il mercato</span>'
     + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(120,140,120);border:2px solid #555;margin-right:5px"></span>Carichi con trasporto incluso</span>'
     + '</div>';
-  h += '<div class="card"><div style="position:relative;height:300px"><canvas id="mkt-chart"></canvas></div></div>';
+  h += '<div class="card" id="mkt-card-graf"><div style="position:relative;height:300px"><canvas id="mkt-chart"></canvas></div></div>';
 
   // nota IVA: si lavora in imponibile, il finito e' solo informativo
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">'
@@ -808,9 +811,67 @@ async function mktCaricaStorico() {
 // valore su cui si decide e la CHIUSURA delle 17:30, non il prezzo delle
 // undici del mattino. Usa il modo { prova: true } della funzione server,
 // che per costruzione non tocca il database.
+// v20260803d — SGUARDO ESTEMPORANEO, con i due andamenti a confronto.
+// Legge il mercato ADESSO e lo mette accanto alle ultime due chiusure, per
+// Brent e per cambio. Non scrive NIENTE: non entra nella serie storica e
+// non partecipa al previsionale — il numero su cui si decide resta la
+// chiusura delle 17:30. Serve a capire durante la giornata se conviene
+// rimandare un carico al giorno dopo.
+// Le due chiusure sono gli ultimi due giorni CON DATI, non gli ultimi due
+// di calendario: di lunedi sabato e domenica non esistono.
+var _mktSguardo = null;
+
+function _mktSpark(punti, colore) {
+  // tre punti: due chiusure e adesso. Scala sui valori stessi, con un po'
+  // di margine sopra e sotto per non appiattire la linea sui bordi.
+  var vals = punti.map(function (p) { return p.v; });
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  if (hi === lo) { hi = lo + 1; lo = lo - 1; }
+  var marg = (hi - lo) * 0.28; lo -= marg; hi += marg;
+  var W = 300, H = 80;
+  var xy = punti.map(function (p, i) {
+    return { x: W * i / (punti.length - 1), y: H - H * (p.v - lo) / (hi - lo), p: p };
+  });
+  var d = 'M' + xy.map(function (q) { return q.x.toFixed(1) + ',' + q.y.toFixed(1); }).join(' L');
+  var h = '<svg viewBox="-4 -10 308 100" style="width:100%;height:auto">';
+  h += '<line x1="0" y1="' + H + '" x2="' + W + '" y2="' + H + '" stroke="var(--border)" stroke-width="0.5"/>';
+  h += '<path d="' + d + '" fill="none" stroke="' + colore + '" stroke-width="2.5"/>';
+  xy.forEach(function (q, i) {
+    var ultimo = (i === xy.length - 1);
+    h += '<circle cx="' + q.x.toFixed(1) + '" cy="' + q.y.toFixed(1) + '" r="' + (ultimo ? 6 : 4) + '" fill="' + colore + '"'
+       + (ultimo ? ' stroke="#fff" stroke-width="2"' : '') + '/>';
+    var anchor = i === 0 ? 'start' : (ultimo ? 'end' : 'middle');
+    h += '<text x="' + q.x.toFixed(1) + '" y="' + Math.max(-2, q.y - 10).toFixed(1) + '" text-anchor="' + anchor
+       + '" font-size="10" fill="' + (ultimo ? colore : 'var(--text-muted)') + '"' + (ultimo ? ' font-weight="600"' : '') + '>' + q.p.et + '</text>';
+    h += '<text x="' + q.x.toFixed(1) + '" y="' + (H + 14) + '" text-anchor="' + anchor + '" font-size="10" fill="'
+       + (ultimo ? 'var(--text)' : 'var(--text-muted)') + '"' + (ultimo ? ' font-weight="600"' : '') + '>' + q.p.lab + '</text>';
+  });
+  h += '</svg>';
+  return h;
+}
+
+function _mktCartaSguardo(titolo, punti, dec, suffisso) {
+  var ora = punti[punti.length - 1].v, prec = punti[punti.length - 2].v;
+  var delta = ora - prec;
+  var pct = prec ? (delta / Math.abs(prec) * 100) : 0;
+  var giu = delta < 0;
+  var col = Math.abs(delta) < 1e-9 ? 'var(--text-muted)' : (giu ? '#A32D2D' : '#27500A');
+  var frec = Math.abs(delta) < 1e-9 ? '=' : (giu ? '\u25bc' : '\u25b2');
+  var h = '<div style="flex:1;min-width:280px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:12px;padding:14px 16px">';
+  h += '<div style="font-size:12px;color:var(--text-muted)">' + titolo + '</div>';
+  h += '<div style="display:flex;align-items:baseline;gap:10px;margin:2px 0 10px;flex-wrap:wrap">';
+  h += '<span style="font-size:29px;font-weight:700;font-family:var(--font-mono)">' + ora.toFixed(dec) + '</span>';
+  h += '<span style="font-size:15px;font-weight:700;color:' + col + '">' + frec + ' ' + (delta >= 0 ? '+' : '') + delta.toFixed(dec) + '</span>';
+  h += '<span style="font-size:13px;color:' + col + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</span>';
+  h += '</div>';
+  h += _mktSpark(punti, col === 'var(--text-muted)' ? '#8E8CA8' : col);
+  return h + '</div>';
+}
+
 async function mktGuardaAdesso() {
   var btn = document.getElementById('mkt-btn-ora');
   var box = document.getElementById('mkt-ora-box');
+  var graf = document.getElementById('mkt-card-graf');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardo…'; }
   try {
     var res = await sb.functions.invoke('mercato-gasolio', { body: { prova: true } });
@@ -818,35 +879,149 @@ async function mktGuardaAdesso() {
     var d = res.data || {};
     if (!d.ok) throw new Error((d.errore || 'nessuna risposta') + _mktDettaglio(d.dettaglio));
 
-    var acc = _mktAccisaAl(new Date().toISOString().split('T')[0], 'gasolio');
+    // ultime due chiusure con dati veri
+    var st = await sb.from('futures_storico').select('data,brent_usd,eurusd')
+      .not('brent_usd', 'is', null).order('data', { ascending: false }).limit(2);
+    var chius = (st.data || []).slice().reverse();
+
+    var oggiISO = new Date().toISOString().split('T')[0];
+    var acc = _mktAccisaAl(oggiISO, 'gasolio');
     var pet = Number(d.petrolio_euro_litro || 0);
     var ora = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 
-    var t = '<div style="margin-bottom:14px;background:var(--bg-kpi);border:0.5px solid var(--border);border-left:3px solid #8E8CA8;border-radius:10px;padding:12px 15px">';
-    t += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">';
-    t += '<div><strong style="font-size:13px">&#128065; Sguardo delle ' + ora + '</strong>'
-       + '<span style="font-size:11px;color:var(--text-muted);margin-left:8px">non registrato, non entra nel previsionale</span></div>';
-    t += '<button onclick="var b=document.getElementById(\'mkt-ora-box\'); if(b) b.innerHTML=\'\';" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">chiudi</button>';
-    t += '</div>';
-    t += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:8px;font-size:12.5px">';
-    t += '<span style="color:var(--text-muted)">Brent <strong style="font-family:var(--font-mono);color:var(--text)">' + Number(d.brent || 0).toFixed(2) + '</strong> $/bbl</span>';
-    t += '<span style="color:var(--text-muted)">Cambio <strong style="font-family:var(--font-mono);color:var(--text)">' + Number(d.cambio || 0).toFixed(4) + '</strong></span>';
-    t += '<span style="color:var(--text-muted)">Petrolio <strong style="font-family:var(--font-mono);color:var(--text)">' + pet.toFixed(4) + '</strong> &euro;/L</span>';
-    if (acc) {
-      t += '<span style="color:var(--text-muted)">con accisa <strong style="font-family:var(--font-mono);color:var(--text)">' + (pet + acc.applicata).toFixed(4) + '</strong> &euro;/L</span>';
+    var puntiB = chius.map(function (r) { return { v: Number(r.brent_usd), et: Number(r.brent_usd).toFixed(2), lab: 'ch. ' + fmtD(r.data).substring(0, 5) }; });
+    puntiB.push({ v: Number(d.brent || 0), et: Number(d.brent || 0).toFixed(2), lab: 'adesso' });
+    var puntiC = chius.map(function (r) { return { v: Number(r.eurusd), et: Number(r.eurusd).toFixed(4), lab: 'ch. ' + fmtD(r.data).substring(0, 5) }; });
+    puntiC.push({ v: Number(d.cambio || 0), et: Number(d.cambio || 0).toFixed(4), lab: 'adesso' });
+
+    var h = '<div style="margin-bottom:16px">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:12px">';
+    h += '<div style="font-size:14px;font-weight:700">&#128065; Sguardo delle ' + ora + '</div>';
+    h += '<div style="font-size:11.5px;color:var(--text-muted)">non registrato &middot; non entra nel previsionale &middot; '
+       + '<span onclick="mktChiudiSguardo()" style="text-decoration:underline;cursor:pointer">torna al grafico</span></div>';
+    h += '</div>';
+
+    if (puntiB.length < 3) {
+      h += '<div style="font-size:12px;color:#854F0B;margin-bottom:10px">Mancano le chiusure precedenti: il confronto non e disponibile. Premi &#8595; Carica storico.</div>';
+      h += '<div style="font-size:13px">Brent <strong style="font-family:var(--font-mono)">' + Number(d.brent || 0).toFixed(2) + '</strong> $/bbl &middot; '
+         + 'cambio <strong style="font-family:var(--font-mono)">' + Number(d.cambio || 0).toFixed(4) + '</strong></div>';
+      h += '</div>';
+      if (box) box.innerHTML = h;
+      if (graf) graf.style.display = '';
+      return;
     }
-    t += '</div>';
-    t += '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Il valore su cui si decide resta la chiusura delle 17:30: questo e solo uno sguardo durante la giornata.</div>';
-    t += '</div>';
-    if (box) box.innerHTML = t;
+
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+    h += _mktCartaSguardo('Brent ICE &middot; $/barile', puntiB, 2);
+    h += _mktCartaSguardo('Cambio EUR / USD', puntiC, 4);
+    h += '</div>';
+
+    // ═══ IL SUGGERIMENTO, in evidenza ═══
+    var dB = puntiB[2].v - puntiB[1].v;
+    var dC = puntiC[2].v - puntiC[1].v;
+    // petrolio giu = costo giu · dollaro debole (cambio EUR/USD in salita) = costo giu
+    var spinta = (dB < 0 ? 1 : (dB > 0 ? -1 : 0)) + (dC > 0 ? 1 : (dC < 0 ? -1 : 0));
+    var petPrec = Number(chius[chius.length - 1].brent_usd) / 158.987 / Number(chius[chius.length - 1].eurusd);
+    var deltaEuroL = pet - petPrec;
+    var litri = 35000;
+    var eff = deltaEuroL * litri;
+
+    var cfg;
+    if (spinta >= 1 && deltaEuroL < 0) {
+      cfg = { bg: '#EAF3DE', bordo: '#639922', col: '#27500A', tit: '&#128071; Dati in calo &mdash; conviene aspettare',
+              txt: 'Petrolio e cambio spingono nella stessa direzione: il costo atteso scende. <strong>Se hai un carico programmato per oggi, valuta di spostarlo a domani.</strong>' };
+    } else if (spinta <= -1 && deltaEuroL > 0) {
+      cfg = { bg: '#FCEBEB', bordo: '#E24B4A', col: '#A32D2D', tit: '&#128070; Dati in salita &mdash; meglio non rimandare',
+              txt: 'Petrolio e cambio spingono verso l\'alto: il costo atteso sale. <strong>Se devi caricare, conviene farlo oggi.</strong>' };
+    } else {
+      cfg = { bg: '#FAEEDA', bordo: '#BA7517', col: '#854F0B', tit: '&#9878; Segnali contrastanti',
+              txt: 'Petrolio e cambio tirano in direzioni diverse: il movimento del costo e incerto. <strong>Nessun motivo per cambiare i piani.</strong>' };
+    }
+
+    h += '<div style="margin-top:14px;background:' + cfg.bg + ';border:0.5px solid ' + cfg.bordo + ';border-left:5px solid ' + cfg.bordo + ';border-radius:12px;padding:16px 18px">';
+    h += '<div style="font-size:17px;font-weight:700;color:' + cfg.col + ';margin-bottom:6px">' + cfg.tit + '</div>';
+    h += '<div style="font-size:13.5px;color:' + cfg.col + ';line-height:1.65">' + cfg.txt + '</div>';
+    h += '<div style="font-size:13px;color:' + cfg.col + ';margin-top:8px">Effetto stimato sul carico da ' + litri.toLocaleString('it-IT') + ' L: '
+       + '<strong style="font-family:var(--font-mono);font-size:16px">' + (eff >= 0 ? '+' : '') + eff.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' &euro;</strong></div>';
+    h += '<div style="font-size:11px;color:' + cfg.col + ';opacity:0.8;margin-top:8px">Stima sul valore di adesso, non sulla chiusura. Il numero buono arriva alle 17:30.</div>';
+    h += '</div>';
+
+    h += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--text-muted)">';
+    h += '<span>Petrolio <strong style="font-family:var(--font-mono);color:var(--text)">' + pet.toFixed(4) + '</strong> &euro;/L</span>';
+    if (acc) h += '<span>con accisa <strong style="font-family:var(--font-mono);color:var(--text)">' + (pet + acc.applicata).toFixed(4) + '</strong> &euro;/L</span>';
+    h += '<span style="margin-left:auto"><button onclick="mktStampaSguardo()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">&#128424; Stampa o salva in PDF</button></span>';
+    h += '</div></div>';
+
+    _mktSguardo = { ora: ora, brent: puntiB, cambio: puntiC, pet: pet,
+                    accisa: acc ? acc.applicata : null, cfg: cfg, eff: eff, litri: litri };
+    if (box) box.innerHTML = h;
+    if (graf) graf.style.display = 'none';
   } catch (e) {
     var msg = (e && e.message) || String(e);
     if (box) box.innerHTML = '<div style="margin-bottom:14px;font-size:12px;color:#A32D2D">&#10005; ' + esc(msg) + '</div>';
+    if (graf) graf.style.display = '';
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '&#128065; Guarda adesso'; }
   }
 }
 
+function mktChiudiSguardo() {
+  var box = document.getElementById('mkt-ora-box');
+  var graf = document.getElementById('mkt-card-graf');
+  if (box) box.innerHTML = '';
+  if (graf) graf.style.display = '';
+}
+
+// Foglio stampabile: si apre in una finestra pulita e si salva in PDF dal
+// dialogo di stampa. Nessuna libreria, come la stampa dell'estratto conto.
+function mktStampaSguardo() {
+  var S = _mktSguardo;
+  if (!S) { if (typeof toast === 'function') toast('Premi prima "Guarda adesso"'); return; }
+  var oggi = new Date().toLocaleDateString('it-IT');
+  var riga = function (etichetta, punti, dec, unita) {
+    var ora = punti[punti.length - 1].v, prec = punti[punti.length - 2].v;
+    var delta = ora - prec, pct = prec ? delta / Math.abs(prec) * 100 : 0;
+    var col = delta < 0 ? '#A32D2D' : (delta > 0 ? '#27500A' : '#666');
+    return '<tr><td><strong>' + etichetta + '</strong></td>'
+      + punti.map(function (p) { return '<td class="n">' + p.v.toFixed(dec) + '<div class="s">' + p.lab + '</div></td>'; }).join('')
+      + '<td class="n" style="color:' + col + '"><strong>' + (delta >= 0 ? '+' : '') + delta.toFixed(dec) + '</strong>'
+      + '<div class="s" style="color:' + col + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</div></td></tr>';
+  };
+  var w = window.open('', '_blank');
+  if (!w) { if (typeof toast === 'function') toast('Il browser ha bloccato la finestra: consenti i popup e riprova'); return; }
+  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Sguardo mercato ' + oggi + '</title><style>'
+    + 'body{font-family:Segoe UI,Arial,sans-serif;color:#222;margin:26px;font-size:13px}'
+    + 'h1{font-size:19px;margin:0 0 2px}.sub{color:#666;font-size:12px;margin-bottom:18px}'
+    + 'table{width:100%;border-collapse:collapse;margin-bottom:18px}'
+    + 'th,td{border-bottom:1px solid #ddd;padding:8px 10px;text-align:left}'
+    + 'td.n{text-align:right;font-family:Consolas,monospace}'
+    + '.s{font-size:10px;color:#888;font-weight:400}'
+    + '.box{border:1px solid ' + S.cfg.bordo + ';border-left:5px solid ' + S.cfg.bordo + ';background:' + S.cfg.bg + ';padding:14px 16px;border-radius:8px;color:' + S.cfg.col + '}'
+    + '.box h2{font-size:15px;margin:0 0 6px}'
+    + '.note{color:#777;font-size:11px;margin-top:18px;border-top:1px solid #eee;padding-top:10px}'
+    + '@media print{body{margin:12px}}'
+    + '</style></head><body>';
+  doc += '<h1>Phoenix Fuel &mdash; sguardo sul mercato</h1>';
+  doc += '<div class="sub">' + oggi + ' alle ' + S.ora + ' &middot; rilevazione infragiornaliera, non e la chiusura ufficiale</div>';
+  doc += '<table><tr><th></th><th class="n">chiusura</th><th class="n">chiusura</th><th class="n">adesso</th><th class="n">variazione</th></tr>';
+  doc += riga('Brent ICE ($/barile)', S.brent, 2);
+  doc += riga('Cambio EUR/USD', S.cambio, 4);
+  doc += '</table>';
+  doc += '<div class="box"><h2>' + S.cfg.tit + '</h2><div>' + S.cfg.txt + '</div>'
+      + '<div style="margin-top:8px">Effetto stimato sul carico da ' + S.litri.toLocaleString('it-IT') + ' L: <strong>'
+      + (S.eff >= 0 ? '+' : '') + S.eff.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' &euro;</strong></div></div>';
+  doc += '<table style="margin-top:18px"><tr><th>Petrolio in euro/litro</th><td class="n">' + S.pet.toFixed(4) + '</td></tr>';
+  if (S.accisa !== null) {
+    doc += '<tr><th>Con accisa del giorno</th><td class="n">' + (S.pet + S.accisa).toFixed(4) + '</td></tr>';
+  }
+  doc += '</table>';
+  doc += '<div class="note">Rilevazione delle ' + S.ora + ', non registrata nel sistema e non usata per il previsionale. '
+      + 'Il valore su cui si decide resta la chiusura delle 17:30. Documento generato da PhoenixFuel.</div>';
+  doc += '</body></html>';
+  w.document.write(doc);
+  w.document.close();
+  setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+}
 async function mktAggiornaOra() {
   var btn = document.getElementById('mkt-btn-agg');
   var out = document.getElementById('mkt-esito');
