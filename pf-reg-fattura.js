@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260803b — prodotto in etichetta colorata: giallo gasolio, verde benzina,
+//              verde acqua agricolo, grigio il resto
 // v20260803a — sotto il prodotto compare a chi e andato il carico: cliente,
 //              sede di scarico e base di carico
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
@@ -224,6 +226,22 @@ function pfRfTabella(ns) {
   // dato, guardando l'elenco non si capisce a cosa si riferisce la riga.
   // Sta sotto il prodotto e non ruba una colonna: la tabella ne ha gia
   // dieci.
+  // v20260803b — ETICHETTA COLORATA DEL PRODOTTO.
+  // Il colore si ricava dal NOME, non da un elenco fisso: cosi regge
+  // anche "Gasolio autotrazione BEST" o "Benzina RON 95". L'agricolo va
+  // riconosciuto PRIMA dell'autotrazione, altrimenti finirebbe in giallo
+  // come quello normale — e sono due cose diverse, accisa e uso vincolato.
+  var _rfProdotto = function (nome) {
+    var t = String(nome || '').toLowerCase();
+    var stile;
+    if (t.indexOf('agricol') >= 0)      stile = 'background:#E1F5EE;color:#085041';
+    else if (t.indexOf('benzina') >= 0) stile = 'background:#EAF3DE;color:#27500A';
+    else if (t.indexOf('gasolio') >= 0 || t.indexOf('diesel') >= 0) stile = 'background:#FAEEDA;color:#854F0B';
+    else                                stile = 'background:var(--bg);color:var(--text-muted)';
+    return '<span style="display:inline-block;padding:2px 9px;border-radius:9px;font-weight:700;font-size:12px;white-space:nowrap;'
+      + stile + '">' + _rfEsc(nome || '—') + '</span>';
+  };
+
   var _rfDestinazione = function (o) {
     var pezzi = [];
     var cli = (o.cliente || '').trim();
@@ -244,7 +262,7 @@ function pfRfTabella(ns) {
     return '<tr style="' + bg + '">'
       + cellaSel(o)
       + '<td style="font-family:var(--font-mono);' + pad + '">' + _rfD(o.data) + '</td>'
-      + '<td>' + _rfEsc(o.prodotto || '—') + _rfDestinazione(o) + '</td>'
+      + '<td>' + _rfProdotto(o.prodotto) + _rfDestinazione(o) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + _rfL(o.litri) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono);font-size:12px">' + Number(o.costoL || 0).toFixed(4).replace('.', ',') + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + _rfE(o.imponibile) + '</td>'
@@ -451,7 +469,7 @@ function _rfRenderModale() {
     + S.ordini.map(function (o) {
         return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:0.5px solid var(--border);font-size:12px">'
           + '<span style="font-family:var(--font-mono);min-width:82px">' + _rfD(o.data) + '</span>'
-          + '<span style="flex:1">' + _rfEsc(o.prodotto || '—') + _rfDestinazione(o) + '</span>'
+          + '<span style="flex:1">' + _rfProdotto(o.prodotto) + _rfDestinazione(o) + '</span>'
           + '<span style="font-family:var(--font-mono);color:var(--text-muted);min-width:82px;text-align:right">scad. ' + (o.scadenza ? _rfD(o.scadenza) : '—') + '</span>'
           + '<span style="font-family:var(--font-mono);font-weight:700;min-width:96px;text-align:right">' + _rfE(o.totale) + '</span>'
           + '<button onclick="pfRfSganciaMod(\'' + o.id + '\')" title="Togli questo ordine dalla fattura" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:3px 8px;cursor:pointer">✕</button>'
