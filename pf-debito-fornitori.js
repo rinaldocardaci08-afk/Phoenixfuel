@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260803a — la query madre porta anche la base di carico, oltre a cliente,
+//              sede di scarico e destinazione
 // pf-debito-fornitori.js — QUERY MADRE del DEBITO FORNITORI
 // v20260724a — sugli ordini di fatture con acconti sono esposti anche
 //   fattPagatoVal (acconti versati) e fattResiduo (residuo della fattura),
@@ -80,7 +82,7 @@ async function pfDebitoDati(force) {
     sb.from('fornitori').select('id,nome,fido_massimo,giorni_pagamento,colore').order('nome'),
     _pfFetchAllPages(function () {
       return sb.from('ordini')
-        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore,fattura_ricevuta_id,das_firmato_url,cliente,sede_scarico_nome,destinazione')
+        .select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,stato,tipo_ordine,pagato_fornitore,data_pagamento_fornitore,fattura_ricevuta_id,das_firmato_url,cliente,sede_scarico_nome,destinazione,base_carico_id,basi_carico(nome)')
         .neq('stato', 'annullato')
         .gte('data', da)
         .order('data', { ascending: false });
@@ -125,6 +127,11 @@ async function pfDebitoDati(force) {
     o.scadenza = pfScadenzaFornitore(o.data, gg, fatt ? fatt.data_scadenza : null);
     o.pagato = !!o.pagato_fornitore;
     o.fatturaId = o.fattura_ricevuta_id || null;
+    // v20260803a — dove e finito quel carico: serve nell'estratto conto
+    // fornitore, perche un ordine dello stesso fornitore puo essere andato
+    // a un cliente, a una stazione o al deposito, e la base di carico
+    // cambia il costo del trasporto.
+    o.baseNome = (o.basi_carico && o.basi_carico.nome) ? o.basi_carico.nome : null;
     o.costoL = Number(o.costo_litro || 0);
   });
 

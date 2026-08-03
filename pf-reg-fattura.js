@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260803a — sotto il prodotto compare a chi e andato il carico: cliente,
+//              sede di scarico e base di carico
 // pf-reg-fattura.js — REGISTRAZIONE FATTURA FORNITORE (senza pagamento)
 // v20260724b — con un ACCONTO sulla fattura, in riga compare anche il
 //   DETTAGLIO: acconto versato e residuo della fattura (sotto il badge);
@@ -215,13 +217,34 @@ function pfRfTabella(ns) {
       + ' onclick="pfRfToggle(\'' + ns + '\',\'' + o.id + '\',this)" style="width:17px;height:17px;cursor:pointer;accent-color:#639922"></td>';
   };
 
+  // v20260803a — DOVE E FINITO IL CARICO.
+  // Nell'estratto conto fornitore due ordini dello stesso giorno e dello
+  // stesso fornitore possono essere andati a clienti diversi, a una
+  // stazione o al deposito, e da basi di carico diverse. Senza questo
+  // dato, guardando l'elenco non si capisce a cosa si riferisce la riga.
+  // Sta sotto il prodotto e non ruba una colonna: la tabella ne ha gia
+  // dieci.
+  var _rfDestinazione = function (o) {
+    var pezzi = [];
+    var cli = (o.cliente || '').trim();
+    var sede = (o.sede_scarico_nome || '').trim();
+    var dest = (o.destinazione || '').trim();
+    if (cli) pezzi.push('<strong style="font-weight:600">' + _rfEsc(cli) + '</strong>');
+    else if (dest) pezzi.push('<strong style="font-weight:600">' + _rfEsc(dest) + '</strong>');
+    if (sede && sede !== cli) pezzi.push(_rfEsc(sede));
+    if (o.baseNome) pezzi.push('da ' + _rfEsc(o.baseNome));
+    if (!pezzi.length) return '';
+    return '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px;line-height:1.35">'
+      + pezzi.join(' <span style="opacity:0.5">&middot;</span> ') + '</div>';
+  };
+
   var rigaOrdine = function (o, figlio) {
     var bg = figlio ? 'background:#FCFDFE;' : '';
     var pad = figlio ? 'padding-left:22px;' : '';
     return '<tr style="' + bg + '">'
       + cellaSel(o)
       + '<td style="font-family:var(--font-mono);' + pad + '">' + _rfD(o.data) + '</td>'
-      + '<td>' + _rfEsc(o.prodotto || '—') + '</td>'
+      + '<td>' + _rfEsc(o.prodotto || '—') + _rfDestinazione(o) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + _rfL(o.litri) + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono);font-size:12px">' + Number(o.costoL || 0).toFixed(4).replace('.', ',') + '</td>'
       + '<td style="text-align:right;font-family:var(--font-mono)">' + _rfE(o.imponibile) + '</td>'
@@ -428,7 +451,7 @@ function _rfRenderModale() {
     + S.ordini.map(function (o) {
         return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:0.5px solid var(--border);font-size:12px">'
           + '<span style="font-family:var(--font-mono);min-width:82px">' + _rfD(o.data) + '</span>'
-          + '<span style="flex:1">' + _rfEsc(o.prodotto || '—') + '</span>'
+          + '<span style="flex:1">' + _rfEsc(o.prodotto || '—') + _rfDestinazione(o) + '</span>'
           + '<span style="font-family:var(--font-mono);color:var(--text-muted);min-width:82px;text-align:right">scad. ' + (o.scadenza ? _rfD(o.scadenza) : '—') + '</span>'
           + '<span style="font-family:var(--font-mono);font-weight:700;min-width:96px;text-align:right">' + _rfE(o.totale) + '</span>'
           + '<button onclick="pfRfSganciaMod(\'' + o.id + '\')" title="Togli questo ordine dalla fattura" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:3px 8px;cursor:pointer">✕</button>'
