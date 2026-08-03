@@ -1,4 +1,6 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260802b — la scomposizione dell accisa si vede anche quando le
+//              quotazioni mancano: prima l intera sezione usciva prima
 // v20260802a — scomposizione del prezzo: accisa scorporata dal costo dei
 //              carichi, confronto col mercato sul prodotto puro e avviso
 //              prima che la deroga decada
@@ -457,7 +459,13 @@ async function renderMercato() {
       + 'Nessuna quotazione nel periodo. Premi <strong>↧ Carica storico</strong> per ricostruire gli ultimi mesi in una volta sola, '
       + 'oppure <strong>⟳ Aggiorna adesso</strong> per la sola chiusura di oggi. '
       + 'Resta possibile inserire a mano dalla linguetta <strong>Futures ICE</strong>.</div></div>';
+    // v20260802b: la scomposizione dell'accisa NON dipende dal mercato —
+    // prodotto puro = costo meno accisa. Senza quotazioni restano vuote solo
+    // le colonne Mercato e Scarto. Prima si usciva di qui e la sezione non
+    // compariva affatto.
+    h += _mktSezioneAccise(carichi, serie);
     el.innerHTML = h;
+    _mktDisegnaGraficoAccise();
     return;
   }
 
