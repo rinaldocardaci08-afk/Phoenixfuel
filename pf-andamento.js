@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260803d — i ricavi si calcolano come nella sezione Vendite: prima
+//              escludevo per errore le vendite dal nostro deposito
 // v20260803c — due linguette separate: Giacenza Magazzini e Trimestrali
 // v20260803b — aggiunto il CONTO ECONOMICO trimestrale
 // v20260803a — primo pannello: VALORIZZAZIONE GIACENZE.
@@ -297,16 +299,32 @@ async function _ceCalcola(q, anno) {
   if (r[0].error) throw r[0].error;
 
   // ── ingrosso e acquisti ──
-  var ordini = (r[0].data || []).filter(function (o) {
-    return String(o.fornitore || '').toLowerCase().indexOf('phoenix') < 0;
-  });
-  var ricaviIngrosso = 0, acquisti = 0, litriIngrosso = 0, margineIngrosso = 0;
+  // v20260803d — I RICAVI SI CALCOLANO COME IN VENDITE, non a modo mio.
+  // pf-vendite-prodotto.js fa: prezzoNoIva(o) x litri sugli ordini
+  // 'cliente' non annullati. Stessa identica cosa qui, cosi i due numeri
+  // non possono divergere.
+  // L'ERRORE che avevo fatto: escludevo il fornitore PhoenixFuel anche
+  // dai RICAVI. Ma quelli sono le vendite dal NOSTRO deposito — nel 2026
+  // 1.436 ordini per 7,67 milioni — e buttarli via faceva uscire tutto
+  // negativo. Phoenix va escluso SOLO dagli acquisti: un prelievo dal
+  // proprio deposito non e un acquisto da terzi, e gia stato comprato
+  // quando e entrato.
+  var _noIva = function (o) {
+    return (typeof prezzoNoIva === 'function')
+      ? prezzoNoIva(o)
+      : Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0);
+  };
+  var ordini = r[0].data || [];
+  var ricaviIngrosso = 0, acquisti = 0, litriIngrosso = 0, margineIngrosso = 0, litriAcquistati = 0;
   ordini.forEach(function (o) {
     var l = Number(o.litri || 0);
-    var costo = (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0)) * l;
-    acquisti += costo;
+    var interno = String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0;
+    if (!interno) {
+      acquisti += (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0)) * l;
+      litriAcquistati += l;
+    }
     if (o.tipo_ordine === 'cliente') {
-      ricaviIngrosso += (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0)) * l;
+      ricaviIngrosso += _noIva(o) * l;
       margineIngrosso += Number(o.margine || 0) * l;
       litriIngrosso += l;
     }
@@ -364,7 +382,7 @@ async function _ceCalcola(q, anno) {
     periodo: per, anno: anno, q: q,
     ricaviIngrosso: ricaviIngrosso, ricaviDettaglio: ricaviDettaglio, ricavi: ricavi,
     litriIngrosso: litriIngrosso, litriDettaglio: litriDettaglio,
-    margineIngrosso: margineIngrosso, senzaPrezzo: senzaPrezzo,
+    margineIngrosso: margineIngrosso, senzaPrezzo: senzaPrezzo, litriAcquistati: litriAcquistati,
     acquisti: acquisti, rimIniziale: rimIniziale, rimFinale: rimFinale,
     costoVenduto: costoVenduto, margineLordo: margineLordo,
     budget: bud, costiFissi: costiFissi,
