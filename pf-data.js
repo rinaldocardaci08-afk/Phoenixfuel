@@ -1,4 +1,7 @@
 // VERSIONE 26/05/2026 d - FIX BUG LIMIT 1000 esteso a branch stazione_oppido
+// v20260803a — query madre della VALORIZZAZIONE giacenze: getCmpAllaData e
+//              getValoreGiacenze, che leggono il sistema esistente senza
+//              ricalcolare niente
 // ═══════════════════════════════════════════════════════════════════
 // pf-data.js — STRATO DATI CANONICO
 // ═══════════════════════════════════════════════════════════════════
@@ -359,6 +362,76 @@ window.pfData = {
       calcolata: calcolata,
       fonteIniziale: fonteIniziale
     };
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // getCmpAllaData(sede, prodotto, data)
+  // v20260803a — Costo medio ponderato IN VIGORE a una certa data.
+  // Prende l'ULTIMO valore registrato FINO a quella data, mai uno
+  // successivo: un carico del 2 luglio non puo valorizzare la giacenza
+  // del 30 giugno, quel costo quel giorno non esisteva ancora.
+  // Ripiego: `cisterne.costo_medio` (che e il CMP di oggi) solo se non
+  // c'e nessuno storico, e in quel caso lo dichiara.
+  // ─────────────────────────────────────────────────────────────────
+  async getCmpAllaData(sede, prodotto, data) {
+    var r = await sb.from('stazione_cmp_storico')
+      .select('cmp_nuovo,data')
+      .eq('sede', sede).eq('prodotto', prodotto).lte('data', data)
+      .order('data', { ascending: false }).limit(1);
+    if (r.data && r.data.length && Number(r.data[0].cmp_nuovo) > 0) {
+      return { cmp: Number(r.data[0].cmp_nuovo), dataCmp: r.data[0].data, fonte: 'storico' };
+    }
+    if (sede === 'deposito_vibo') {
+      var c = await sb.from('cisterne')
+        .select('costo_medio,livello_attuale')
+        .eq('sede', sede).eq('prodotto', prodotto);
+      var righe = (c.data || []).filter(function (x) { return Number(x.costo_medio) > 0; });
+      if (righe.length) {
+        var litri = righe.reduce(function (a, x) { return a + Number(x.livello_attuale || 0); }, 0);
+        var val = righe.reduce(function (a, x) { return a + Number(x.costo_medio) * Number(x.livello_attuale || 0); }, 0);
+        var cmp = litri > 0 ? val / litri : Number(righe[0].costo_medio);
+        return { cmp: cmp, dataCmp: null, fonte: 'cisterna (CMP di oggi)' };
+      }
+    }
+    return { cmp: null, dataCmp: null, fonte: 'nessun costo disponibile' };
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // getValoreGiacenze(data)
+  // v20260803a — QUERY MADRE DELLA VALORIZZAZIONE.
+  // Non ricalcola niente: chiede i litri a getGiacenzaAllaData, che gia
+  // tiene dentro entrate, uscite e RETTIFICHE conciliate con DAS e
+  // registro, e li moltiplica per il CMP di quella data.
+  // Un solo punto: da qui leggono il pannello giacenze, i trimestrali e
+  // chiunque servira dopo.
+  // ─────────────────────────────────────────────────────────────────
+  async getValoreGiacenze(data) {
+    var el = await sb.from('giacenze_annuali').select('sede,prodotto');
+    var visti = {}, coppie = [];
+    (el.data || []).forEach(function (x) {
+      var k = x.sede + '|' + x.prodotto;
+      if (!visti[k]) { visti[k] = true; coppie.push({ sede: x.sede, prodotto: x.prodotto }); }
+    });
+    coppie.sort(function (a, b) {
+      return a.sede === b.sede ? (a.prodotto < b.prodotto ? -1 : 1) : (a.sede < b.sede ? -1 : 1);
+    });
+
+    var righe = [];
+    for (var i = 0; i < coppie.length; i++) {
+      var c = coppie[i];
+      var g = await window.pfData.getGiacenzaAllaData(c.sede, c.prodotto, data);
+      var v = await window.pfData.getCmpAllaData(c.sede, c.prodotto, data);
+      var litri = Number(g.calcolata || 0);
+      righe.push({
+        sede: c.sede, prodotto: c.prodotto,
+        litri: litri,
+        cmp: v.cmp,
+        valore: (v.cmp !== null) ? Math.round(litri * v.cmp * 100) / 100 : null,
+        dataCmp: v.dataCmp, fonteCmp: v.fonte,
+        rettifiche: g.rettifiche, fonteIniziale: g.fonteIniziale
+      });
+    }
+    return { data: data, righe: righe };
   }
 
 };
