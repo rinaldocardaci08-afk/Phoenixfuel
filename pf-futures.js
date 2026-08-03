@@ -1,4 +1,12 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260803g — con lo sguardo aperto la previsione sale subito sotto i due
+//              grafici: mercato adesso e prossimo listino in un blocco solo
+// v20260803f — previsione del prossimo listino: matrice Eni Vibo, variazione
+//              in millesimi propagata agli altri fornitori col loro scarto,
+//              coefficiente e scarti RIMISURATI dai listini veri
+// v20260803e — foglio stampabile con SOLI grafici e andamento (niente prezzo
+//              atteso ne consigli), e riquadri dei grafici allargati perche
+//              i valori esterni erano tagliati
 // v20260803d — Guarda adesso mostra due grafici a confronto (Brent e cambio,
 //              ultime due chiusure piu il valore di adesso), il suggerimento
 //              in evidenza e un foglio stampabile da salvare in PDF
@@ -532,6 +540,177 @@ function _mktDettaglio(d) {
   return ' \u2014 ' + String(d);
 }
 
+
+// ═══ v20260803f · PREVISIONE DEL PROSSIMO LISTINO ══════════════════
+// Misurata sui dati veri di Rinaldo (79 giorni Ludoil + 70 Eni Vibo,
+// maggio-agosto 2026), non ipotizzata:
+//
+//   1. Il listino di un giorno NON nasce dalla chiusura del giorno prima.
+//      Guardando indietro di una quotazione la correlazione e 0,15-0,18;
+//      di DUE quotazioni sale a 0,45-0,70; di tre ricade a 0,10.
+//      Quindi il movimento del petrolio di oggi si vede sul listino di
+//      DOPODOMANI, non di domani. E un giorno in piu per decidere.
+//   2. Il listino si muove piu del greggio: coefficiente misurato fra
+//      0,86 (Eni Vibo) e 1,45 (Ludoil).
+//   3. MATRICE = ENI VIBO, il fornitore su cui si fanno i volumi. Gli
+//      altri ricevono la STESSA variazione in millesimi, partendo dal
+//      loro scarto (Ludoil sta ~6 millesimi sotto Eni).
+//
+// Coefficiente e scarti NON sono fissati nel codice: il programma li
+// rimisura sulla finestra mostrata, cosi se il fornitore cambia
+// condizioni se ne accorge da solo. In pagina si vede su quanti giorni.
+var _mktListini = [];
+var MKT_MATRICE = 'eni';
+
+// Giorni in cui i fornitori si separano in modo anomalo: variazioni di
+// accisa non registrate su tutti, o errori di battitura. Vanno esclusi
+// dalla misura, altrimenti sporcano il coefficiente.
+function _mktScartaAnomali(serie) {
+  var d = serie.slice();
+  var var_ = [];
+  for (var i = 1; i < d.length; i++) var_.push(Math.abs(d[i].costo - d[i - 1].costo));
+  if (var_.length < 5) return d;
+  var ord = var_.slice().sort(function (a, b) { return a - b; });
+  var mediana = ord[Math.floor(ord.length / 2)];
+  var soglia = Math.max(0.08, mediana * 8);   // salti fuori scala
+  var fuori = {};
+  for (var j = 1; j < d.length; j++) {
+    if (Math.abs(d[j].costo - d[j - 1].costo) > soglia) fuori[d[j].data] = true;
+  }
+  return d.filter(function (x) { return !fuori[x.data]; });
+}
+
+function _mktSerieFornitore(nome) {
+  var m = {};
+  _mktListini.forEach(function (x) {
+    if (String(x.fornitore || '').toLowerCase().indexOf(nome) < 0) return;
+    m[x.data] = Number(x.costo_litro);
+  });
+  return Object.keys(m).sort().map(function (d) { return { data: d, costo: m[d] }; });
+}
+
+// Regressione della variazione del listino sulla variazione del petrolio
+// di DUE quotazioni prima. Restituisce anche quanto e affidabile.
+function _mktCalibra(serie, quot) {
+  var qd = quot.map(function (x) { return x.data; });
+  var xs = [], ys = [];
+  for (var i = 1; i < serie.length; i++) {
+    var dc = serie[i].costo - serie[i - 1].costo;
+    if (Math.abs(dc) < 1e-9) continue;              // listino non aggiornato
+    var prec = [];
+    for (var j = 0; j < qd.length; j++) if (qd[j] < serie[i].data) prec.push(j);
+    if (prec.length < 3) continue;
+    xs.push(quot[prec[prec.length - 2]].v - quot[prec[prec.length - 3]].v);
+    ys.push(dc);
+  }
+  if (xs.length < 12) return null;
+  var n = xs.length;
+  var mx = xs.reduce(function (a, b) { return a + b; }, 0) / n;
+  var my = ys.reduce(function (a, b) { return a + b; }, 0) / n;
+  var sxy = 0, sxx = 0, syy = 0;
+  for (var k = 0; k < n; k++) { sxy += (xs[k] - mx) * (ys[k] - my); sxx += Math.pow(xs[k] - mx, 2); syy += Math.pow(ys[k] - my, 2); }
+  if (!sxx || !syy) return null;
+  var b = sxy / sxx, a = my - b * mx;
+  var r = sxy / Math.sqrt(sxx * syy);
+  // errore medio della previsione, e quanto sbaglierebbe dire "non cambia"
+  var e1 = 0, e0 = 0;
+  for (var z = 0; z < n; z++) { e1 += Math.abs(a + b * xs[z] - ys[z]); e0 += Math.abs(ys[z]); }
+  return { n: n, a: a, b: b, r: r, errore: e1 / n, erroreFermo: e0 / n };
+}
+
+// Scarto di un fornitore rispetto alla matrice, misurato sugli ultimi
+// giorni in cui entrambi hanno listino.
+function _mktScarto(serieAltro, serieMatrice, giorni) {
+  var m = {};
+  serieMatrice.forEach(function (x) { m[x.data] = x.costo; });
+  var d = serieAltro.filter(function (x) { return m[x.data] !== undefined; }).slice(-(giorni || 10));
+  if (!d.length) return null;
+  var v = d.map(function (x) { return x.costo - m[x.data]; }).sort(function (a, b) { return a - b; });
+  return { mediana: v[Math.floor(v.length / 2)], n: v.length };
+}
+
+function _mktSezionePrevisione(serie) {
+  if (!_mktListini.length || !serie.length) return '';
+  var quot = serie.map(function (r) {
+    return { data: r.data, v: Number(r.prezzo_euro_litro || 0) };
+  }).filter(function (x) { return x.v > 0; });
+  if (quot.length < 4) return '';
+
+  var matrice = _mktScartaAnomali(_mktSerieFornitore(MKT_MATRICE));
+  if (matrice.length < 15) return '';
+  var cal = _mktCalibra(matrice, quot);
+  if (!cal) return '';
+
+  var ultimo = matrice[matrice.length - 1];
+  // il prossimo listino si regge sul movimento di DUE quotazioni fa
+  var dProx = quot[quot.length - 2].v - quot[quot.length - 3].v;
+  var varProx = cal.a + cal.b * dProx;
+  // quello dopo ancora si reggera sul movimento di oggi
+  var dDopo = quot[quot.length - 1].v - quot[quot.length - 2].v;
+  var varDopo = cal.a + cal.b * dDopo;
+
+  var mill = function (x) { return (x >= 0 ? '+' : '') + Math.round(x * 1000) + ' millesimi'; };
+  var col = function (x) { return x > 0.0005 ? '#A32D2D' : (x < -0.0005 ? '#27500A' : 'var(--text-muted)'); };
+
+  var h = '<div class="card" id="mkt-card-prev" style="margin-top:14px;padding:14px">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Previsione del prossimo listino</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">'
+     + 'Matrice <strong>Eni Vibo</strong>. Il movimento del petrolio si riflette sul listino dopo <strong>due quotazioni</strong>: '
+     + 'quello di oggi si vedra fra due giorni, non domani.</div>';
+
+  h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<div style="flex:1;min-width:210px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
+     + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Prossimo listino</div>'
+     + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + col(varProx) + '">' + mill(varProx) + '</div>'
+     + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">da ' + ultimo.costo.toFixed(6) + ' del ' + fmtD(ultimo.data)
+     + ' a <strong style="color:var(--text)">' + (ultimo.costo + varProx).toFixed(6) + '</strong></div></div>';
+  h += '<div style="flex:1;min-width:210px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
+     + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Il listino dopo</div>'
+     + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + col(varDopo) + '">' + mill(varDopo) + '</div>'
+     + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">dal movimento del petrolio di oggi</div></div>';
+  h += '</div>';
+
+  // gli altri fornitori: stessa variazione, base loro
+  var altri = [];
+  ['ludoil', 'q8'].forEach(function (nome) {
+    var sr = _mktSerieFornitore(nome);
+    if (!sr.length) return;
+    var sc = _mktScarto(sr, matrice, 10);
+    if (!sc) return;
+    altri.push({ nome: nome, ultimo: sr[sr.length - 1], scarto: sc });
+  });
+
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  h += '<tr style="color:var(--text-muted);text-align:right">'
+     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Fornitore</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Scarto su Eni</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Ultimo listino</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Atteso</th></tr>';
+  h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+     + '<td style="text-align:left;padding:7px 8px"><strong>Eni Vibo</strong> <span style="font-size:10px;color:var(--text-muted)">matrice</span></td>'
+     + '<td style="padding:7px 8px;color:var(--text-muted)">&mdash;</td>'
+     + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + ultimo.costo.toFixed(6) + '</td>'
+     + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700">' + (ultimo.costo + varProx).toFixed(6) + '</td></tr>';
+  altri.forEach(function (x) {
+    var nome = x.nome === 'ludoil' ? 'Ludoil Vibo' : 'Q8 Vibo';
+    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+       + '<td style="text-align:left;padding:7px 8px">' + nome + '</td>'
+       + '<td style="padding:7px 8px;font-family:var(--font-mono);color:var(--text-muted)" title="mediana degli ultimi ' + x.scarto.n + ' giorni in comune">'
+         + (x.scarto.mediana >= 0 ? '+' : '') + Math.round(x.scarto.mediana * 1000) + ' mill.</td>'
+       + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + x.ultimo.costo.toFixed(6) + '</td>'
+       + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700">' + (ultimo.costo + x.scarto.mediana + varProx).toFixed(6) + '</td></tr>';
+  });
+  h += '</table>';
+
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">'
+     + 'Coefficiente <strong>' + cal.b.toFixed(2) + '</strong> misurato su <strong>' + cal.n + '</strong> aggiornamenti di listino di questo periodo '
+     + '(affidabilita ' + Math.round(Math.abs(cal.r) * 100) + '%). Errore medio <strong>' + Math.round(cal.errore * 1000) + ' millesimi</strong>, '
+     + 'contro ' + Math.round(cal.erroreFermo * 1000) + ' se si dicesse "non cambia niente". '
+     + 'E un indicatore di tendenza per decidere se rimandare un carico, non un prezzo.</div>';
+  h += '</div>';
+  return h;
+}
+
 async function renderMercato() {
   var el = document.getElementById('mercato-wrap');
   if (!el) return;
@@ -547,8 +726,14 @@ async function renderMercato() {
       sb.from('ordini').select('data,fornitore,prodotto,litri,costo_litro,trasporto_litro,tipo_ordine,stato')
         .eq('tipo_ordine', 'entrata_deposito').neq('stato', 'annullato')
         .gte('data', dalISO).order('data', { ascending: true }),
-      sb.from('accise_storico').select('*').order('data_inizio')
+      sb.from('accise_storico').select('*').order('data_inizio'),
+      sb.from('prezzi').select('data,fornitore,costo_litro,base_carico_id,basi_carico(nome)')
+        .ilike('prodotto', '%gasolio%auto%').gte('data', dalISO).order('data')
     ]);
+    _mktListini = (r[3] && !r[3].error ? (r[3].data || []) : []).filter(function (x) {
+      var b = x.basi_carico && x.basi_carico.nome ? x.basi_carico.nome : '';
+      return /vibo/i.test(b) && Number(x.costo_litro) > 0;
+    });
     _mktAccise = r[2] && !r[2].error ? (r[2].data || []) : [];
     serie = r[0].data || [];
     // TUTTI i carichi (29/07): il filtro Eni/Ludoil vale solo per l'analisi
@@ -707,6 +892,8 @@ async function renderMercato() {
       + '<div style="font-size:11px;color:var(--text-muted)">l\'IVA la recuperi: non entra mai nei confronti</div></div>'
     + '</div>';
 
+  h += _mktSezionePrevisione(serie);
+
   // ═══ Composizione del prezzo · accise ═══
   h += _mktSezioneAccise(carichi, serie, carichiTutti);
 
@@ -821,7 +1008,7 @@ async function mktCaricaStorico() {
 // di calendario: di lunedi sabato e domenica non esistono.
 var _mktSguardo = null;
 
-function _mktSpark(punti, colore) {
+function _mktSpark(punti, colore, perStampa) {
   // tre punti: due chiusure e adesso. Scala sui valori stessi, con un po'
   // di margine sopra e sotto per non appiattire la linea sui bordi.
   var vals = punti.map(function (p) { return p.v; });
@@ -833,8 +1020,13 @@ function _mktSpark(punti, colore) {
     return { x: W * i / (punti.length - 1), y: H - H * (p.v - lo) / (hi - lo), p: p };
   });
   var d = 'M' + xy.map(function (q) { return q.x.toFixed(1) + ',' + q.y.toFixed(1); }).join(' L');
-  var h = '<svg viewBox="-4 -10 308 100" style="width:100%;height:auto">';
-  h += '<line x1="0" y1="' + H + '" x2="' + W + '" y2="' + H + '" stroke="var(--border)" stroke-width="0.5"/>';
+  // viewBox largo: le etichette del primo e dell'ultimo punto sporgono oltre
+  // la linea e venivano tagliate ai bordi.
+  var h = '<svg viewBox="-34 -16 368 116" style="width:100%;height:auto">';
+  var cAsse = perStampa ? '#ccc' : 'var(--border)';
+  var cTesto = perStampa ? '#888' : 'var(--text-muted)';
+  var cUlt = perStampa ? '#333' : 'var(--text)';
+  h += '<line x1="0" y1="' + H + '" x2="' + W + '" y2="' + H + '" stroke="' + cAsse + '" stroke-width="0.5"/>';
   h += '<path d="' + d + '" fill="none" stroke="' + colore + '" stroke-width="2.5"/>';
   xy.forEach(function (q, i) {
     var ultimo = (i === xy.length - 1);
@@ -842,9 +1034,9 @@ function _mktSpark(punti, colore) {
        + (ultimo ? ' stroke="#fff" stroke-width="2"' : '') + '/>';
     var anchor = i === 0 ? 'start' : (ultimo ? 'end' : 'middle');
     h += '<text x="' + q.x.toFixed(1) + '" y="' + Math.max(-2, q.y - 10).toFixed(1) + '" text-anchor="' + anchor
-       + '" font-size="10" fill="' + (ultimo ? colore : 'var(--text-muted)') + '"' + (ultimo ? ' font-weight="600"' : '') + '>' + q.p.et + '</text>';
+       + '" font-size="10" fill="' + (ultimo ? colore : cTesto) + '"' + (ultimo ? ' font-weight="600"' : '') + '>' + q.p.et + '</text>';
     h += '<text x="' + q.x.toFixed(1) + '" y="' + (H + 14) + '" text-anchor="' + anchor + '" font-size="10" fill="'
-       + (ultimo ? 'var(--text)' : 'var(--text-muted)') + '"' + (ultimo ? ' font-weight="600"' : '') + '>' + q.p.lab + '</text>';
+       + (ultimo ? cUlt : cTesto) + '"' + (ultimo ? ' font-weight="600"' : '') + '>' + q.p.lab + '</text>';
   });
   h += '</svg>';
   return h;
@@ -954,6 +1146,14 @@ async function mktGuardaAdesso() {
 
     _mktSguardo = { ora: ora, brent: puntiB, cambio: puntiC, pet: pet,
                     accisa: acc ? acc.applicata : null, cfg: cfg, eff: eff, litri: litri };
+
+    // v20260803g — Sotto i due grafici va SUBITO la valutazione sui prezzi:
+    // come si e mosso il mercato adesso, e cosa vuol dire sul prossimo
+    // listino. Un blocco solo, senza i KPI e la legenda in mezzo. Quando si
+    // chiude lo sguardo la previsione torna al suo posto piu in basso.
+    var prev = document.getElementById('mkt-card-prev');
+    if (prev) { h += prev.outerHTML; prev.style.display = 'none'; }
+
     if (box) box.innerHTML = h;
     if (graf) graf.style.display = 'none';
   } catch (e) {
@@ -970,53 +1170,56 @@ function mktChiudiSguardo() {
   var graf = document.getElementById('mkt-card-graf');
   if (box) box.innerHTML = '';
   if (graf) graf.style.display = '';
+  var prev = document.getElementById('mkt-card-prev');
+  if (prev) prev.style.display = '';
 }
 
 // Foglio stampabile: si apre in una finestra pulita e si salva in PDF dal
 // dialogo di stampa. Nessuna libreria, come la stampa dell'estratto conto.
+// v20260803e — Nel foglio ci vanno SOLO I GRAFICI E L'ANDAMENTO (regola sua
+// del 03/08): niente prezzo atteso, niente consiglio sui carichi. Chi lo
+// riceve deve vedere come si sono mossi Brent e cambio, punto.
 function mktStampaSguardo() {
   var S = _mktSguardo;
   if (!S) { if (typeof toast === 'function') toast('Premi prima "Guarda adesso"'); return; }
   var oggi = new Date().toLocaleDateString('it-IT');
-  var riga = function (etichetta, punti, dec, unita) {
+
+  var blocco = function (titolo, punti, dec) {
     var ora = punti[punti.length - 1].v, prec = punti[punti.length - 2].v;
     var delta = ora - prec, pct = prec ? delta / Math.abs(prec) * 100 : 0;
     var col = delta < 0 ? '#A32D2D' : (delta > 0 ? '#27500A' : '#666');
-    return '<tr><td><strong>' + etichetta + '</strong></td>'
-      + punti.map(function (p) { return '<td class="n">' + p.v.toFixed(dec) + '<div class="s">' + p.lab + '</div></td>'; }).join('')
-      + '<td class="n" style="color:' + col + '"><strong>' + (delta >= 0 ? '+' : '') + delta.toFixed(dec) + '</strong>'
-      + '<div class="s" style="color:' + col + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</div></td></tr>';
+    var frec = Math.abs(delta) < 1e-9 ? '=' : (delta < 0 ? '\u25bc' : '\u25b2');
+    var b = '<div class="blk">';
+    b += '<div class="tit">' + titolo + '</div>';
+    b += '<div class="val">' + ora.toFixed(dec)
+       + ' <span style="color:' + col + ';font-size:15px">' + frec + ' ' + (delta >= 0 ? '+' : '') + delta.toFixed(dec)
+       + ' <span style="font-size:12px">(' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%)</span></span></div>';
+    b += _mktSpark(punti, col === '#666' ? '#8E8CA8' : col, true);
+    b += '<table class="t"><tr>'
+       + punti.map(function (p) { return '<th>' + p.lab + '</th>'; }).join('') + '</tr><tr>'
+       + punti.map(function (p) { return '<td>' + p.v.toFixed(dec) + '</td>'; }).join('') + '</tr></table>';
+    return b + '</div>';
   };
+
   var w = window.open('', '_blank');
   if (!w) { if (typeof toast === 'function') toast('Il browser ha bloccato la finestra: consenti i popup e riprova'); return; }
-  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Sguardo mercato ' + oggi + '</title><style>'
-    + 'body{font-family:Segoe UI,Arial,sans-serif;color:#222;margin:26px;font-size:13px}'
-    + 'h1{font-size:19px;margin:0 0 2px}.sub{color:#666;font-size:12px;margin-bottom:18px}'
-    + 'table{width:100%;border-collapse:collapse;margin-bottom:18px}'
-    + 'th,td{border-bottom:1px solid #ddd;padding:8px 10px;text-align:left}'
-    + 'td.n{text-align:right;font-family:Consolas,monospace}'
-    + '.s{font-size:10px;color:#888;font-weight:400}'
-    + '.box{border:1px solid ' + S.cfg.bordo + ';border-left:5px solid ' + S.cfg.bordo + ';background:' + S.cfg.bg + ';padding:14px 16px;border-radius:8px;color:' + S.cfg.col + '}'
-    + '.box h2{font-size:15px;margin:0 0 6px}'
-    + '.note{color:#777;font-size:11px;margin-top:18px;border-top:1px solid #eee;padding-top:10px}'
-    + '@media print{body{margin:12px}}'
+  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Andamento mercato ' + oggi + '</title><style>'
+    + 'body{font-family:Calibri,Arial,sans-serif;color:#222;margin:2cm;font-size:13px}'
+    + 'h1{font-size:19px;margin:0 0 2px}.sub{color:#666;font-size:12px;margin-bottom:22px}'
+    + '.blk{margin-bottom:26px;page-break-inside:avoid}'
+    + '.tit{font-size:13px;color:#555;margin-bottom:2px}'
+    + '.val{font-size:26px;font-weight:700;font-family:Consolas,monospace;margin-bottom:6px}'
+    + 'table.t{width:100%;border-collapse:collapse;margin-top:6px}'
+    + 'table.t th{font-size:10px;color:#888;font-weight:400;border-bottom:1px solid #ddd;padding:4px 6px;text-align:center}'
+    + 'table.t td{font-family:Consolas,monospace;font-size:13px;padding:5px 6px;text-align:center}'
+    + '.note{color:#777;font-size:11px;margin-top:26px;border-top:1px solid #eee;padding-top:10px}'
+    + '@media print{body{margin:1.6cm}}'
     + '</style></head><body>';
-  doc += '<h1>Phoenix Fuel &mdash; sguardo sul mercato</h1>';
+  doc += '<h1>Phoenix Fuel &mdash; andamento del mercato</h1>';
   doc += '<div class="sub">' + oggi + ' alle ' + S.ora + ' &middot; rilevazione infragiornaliera, non e la chiusura ufficiale</div>';
-  doc += '<table><tr><th></th><th class="n">chiusura</th><th class="n">chiusura</th><th class="n">adesso</th><th class="n">variazione</th></tr>';
-  doc += riga('Brent ICE ($/barile)', S.brent, 2);
-  doc += riga('Cambio EUR/USD', S.cambio, 4);
-  doc += '</table>';
-  doc += '<div class="box"><h2>' + S.cfg.tit + '</h2><div>' + S.cfg.txt + '</div>'
-      + '<div style="margin-top:8px">Effetto stimato sul carico da ' + S.litri.toLocaleString('it-IT') + ' L: <strong>'
-      + (S.eff >= 0 ? '+' : '') + S.eff.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' &euro;</strong></div></div>';
-  doc += '<table style="margin-top:18px"><tr><th>Petrolio in euro/litro</th><td class="n">' + S.pet.toFixed(4) + '</td></tr>';
-  if (S.accisa !== null) {
-    doc += '<tr><th>Con accisa del giorno</th><td class="n">' + (S.pet + S.accisa).toFixed(4) + '</td></tr>';
-  }
-  doc += '</table>';
-  doc += '<div class="note">Rilevazione delle ' + S.ora + ', non registrata nel sistema e non usata per il previsionale. '
-      + 'Il valore su cui si decide resta la chiusura delle 17:30. Documento generato da PhoenixFuel.</div>';
+  doc += blocco('Brent ICE &mdash; dollari al barile', S.brent, 2);
+  doc += blocco('Cambio EUR / USD', S.cambio, 4);
+  doc += '<div class="note">Ultime due chiusure e valore delle ' + S.ora + '. Documento generato da PhoenixFuel.</div>';
   doc += '</body></html>';
   w.document.write(doc);
   w.document.close();
