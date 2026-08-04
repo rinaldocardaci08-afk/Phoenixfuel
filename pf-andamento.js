@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804f — cursore fermo nella maschera costi, riga utile leggibile
+//              anche nel confronto, e note allineate alla struttura vera
 // v20260804e — trasporti nei costi della produzione anche nel conto
 //              economico, codici in colonna e riga utile leggibile
 // v20260804d — tre viste dentro Trimestrali (conto economico, budget costi,
@@ -651,7 +653,7 @@ function _ceBarra(d) {
 
 function _ceNote(d) {
   var h = '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.7">';
-  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti come nel <strong>Report acquisti</strong>: solo il costo del prodotto, esclusi i prelievi dal nostro deposito. I <strong>trasporti terzisti</strong> non entrano nel primo margine: sono la voce 5.1 dentro i Servizi, calcolata carico per carico dagli ordini, quindi la voce di budget \'Altri servizi\' va tenuta al NETTO dei trasporti. '
+  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti come nel <strong>Report acquisti</strong>: solo il costo del prodotto, esclusi i prelievi dal nostro deposito. Le <strong>spese di trasporto</strong> sono la voce <strong>610143</strong> dentro i costi della produzione, come nella situazione contabile: calcolate carico per carico dagli ordini, incidono quindi sul primo margine. '
      + 'Rimanenze dal sistema di carico e scarico riconciliato con DAS e registro, valorizzate al costo medio del giorno. '
      + 'Le voci in <span style="color:' + C_CE.ambra + '">ambra</span> vengono dal budget annuale, non dai movimenti.';
   if (d.senzaPrezzo > 0) {
@@ -986,6 +988,11 @@ async function _budConfronto() {
   }
 }
 
+// v20260804f — IL CURSORE NON SI MUOVE PIU.
+// Prima ogni cifra digitata rifaceva l'intera tabella: i campi venivano
+// distrutti e ricreati, e il cursore saltava. Ora si aggiornano solo le
+// celle che cambiano davvero — i quattro trimestri, la percentuale e i
+// totali — lasciando intatto il campo in cui si sta scrivendo.
 function _budAnnuo(i, v) {
   var b = _bud[i]; if (!b) return;
   b.annuo = Number(v || 0);
@@ -993,7 +1000,42 @@ function _budAnnuo(i, v) {
     var q = Math.round(b.annuo / 4 * 100) / 100;
     b.q1 = b.q2 = b.q3 = q;
     b.q4 = Math.round((b.annuo - q * 3) * 100) / 100;   // l'ultimo assorbe l'arrotondamento
-    _budRender();
+    var righe = document.querySelectorAll('#and-vista table tr');
+    var tr = righe[i + 1];
+    if (tr) {
+      var inp = tr.querySelectorAll('input');
+      ['q1', 'q2', 'q3', 'q4'].forEach(function (k, j) {
+        if (inp[j + 1] && document.activeElement !== inp[j + 1]) inp[j + 1].value = b[k];
+      });
+    }
+  }
+  _budAggiornaTotali();
+}
+
+// Ricalcola solo i totali e le percentuali, senza toccare i campi.
+function _budAggiornaTotali() {
+  var righe = document.querySelectorAll('#and-vista table tr');
+  if (!righe.length) return;
+  var tot = { annuo: 0, q1: 0, q2: 0, q3: 0, q4: 0 }, totA = 0;
+  _bud.forEach(function (b) {
+    ['annuo', 'q1', 'q2', 'q3', 'q4'].forEach(function (k) { tot[k] += Number(b[k] || 0); });
+    if (b.voce !== 'proventi_finanziari') totA += Number(b.annuo || 0);
+  });
+  _bud.forEach(function (b, i) {
+    var tr = righe[i + 1]; if (!tr) return;
+    var td = tr.querySelectorAll('td');
+    if (td.length >= 8) {
+      var quota = (totA && b.voce !== 'proventi_finanziari') ? Number(b.annuo || 0) / totA * 100 : null;
+      td[7].innerHTML = (quota === null ? '<span style="opacity:0.4">\u2014</span>' : _andNum(quota, 1) + '%');
+    }
+  });
+  var ult = righe[_bud.length + 1];
+  if (ult) {
+    var c = ult.querySelectorAll('td');
+    if (c.length >= 7) {
+      c[2].innerHTML = _andNum(tot.annuo, 2);
+      ['q1', 'q2', 'q3', 'q4'].forEach(function (k, j) { c[j + 3].innerHTML = _andNum(tot[k], 2); });
+    }
   }
 }
 
@@ -1002,6 +1044,13 @@ function _budTrim(i, k, v) {
   b[k] = Number(v || 0);
   b.override = true;                       // toccato a mano: non si ridivide piu
   b.annuo = Math.round((Number(b.q1) + Number(b.q2) + Number(b.q3) + Number(b.q4)) * 100) / 100;
+  var righe = document.querySelectorAll('#and-vista table tr');
+  var tr = righe[i + 1];
+  if (tr) {
+    var inp = tr.querySelectorAll('input');
+    if (inp[0] && document.activeElement !== inp[0]) inp[0].value = b.annuo;
+  }
+  _budAggiornaTotali();
 }
 
 async function budSalva() {
@@ -1177,14 +1226,20 @@ function _cfrHtml(d, bil, anno) {
     }
     var frec = (delta === null) ? '' : (delta > 0 ? '\u25b2' : (delta < 0 ? '\u25bc' : ''));
     alt++;
-    h += '<tr style="background:' + (ban ? ban.bg : (alt % 2 ? '#FAFAF8' : '#fff')) + ';color:' + (ban ? ban.tx : '#333') + '">';
+    // v20260804f — stesso trattamento del conto economico: sulla banda blu
+    // notte il colore va scritto su OGNI cella, altrimenti i valori
+    // ereditano e spariscono. Una correzione di colore va riportata in
+    // tutti i report che usano la stessa banda.
+    var fin = (r.banda === 'finale');
+    var cTx = fin ? '#FFFFFF' : (ban ? ban.tx : '#333');
+    h += '<tr style="background:' + (ban ? ban.bg : (alt % 2 ? '#FAFAF8' : '#fff')) + ';color:' + cTx + '">';
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 8px;font-size:10.5px;' + (ban ? 'font-weight:700' : 'color:#999') + '">' + r.cod + '</td>';
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 8px;' + (ban ? 'font-weight:700' : 'padding-left:22px;color:' + (r.sotto ? '#666' : '#333')) + '">'
        + r.l + (r.dai ? ' <span style="font-size:10px;color:#1D9E75">\u00b7 dai carichi</span>' : '') + '</td>';
-    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono)' + (ban ? ';font-weight:700' : '') + '">' + _andNum(r.a, 2) + '</td>';
-    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono)">'
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + cTx + (ban ? ';font-weight:700' : '') + '">' + _andNum(r.a, 2) + '</td>';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + cTx + '">'
        + (r.b === null ? '<span style="opacity:0.4">\u2014</span>' : _andNum(r.b, 2) + (div > 1 ? ' <span style="font-size:9.5px;opacity:0.6">stima</span>' : '')) + '</td>';
-    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + (r.banda === 'finale' && col === '#27500A' ? '#7BE0B0' : col) + (ban ? ';font-weight:700' : '') + '">'
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + (fin ? (col === '#27500A' ? '#7BE0B0' : (col === '#A32D2D' ? '#FF9B9B' : '#FFFFFF')) : col) + (ban ? ';font-weight:700' : '') + '">'
        + (delta === null ? '' : frec + ' ' + (delta >= 0 ? '+' : '') + _andNum(delta, 2)
           + (pct !== null ? '<div style="font-size:11px;font-weight:400">' + (pct >= 0 ? '+' : '') + _andNum(pct, 2) + '%</div>' : '')) + '</td>';
     h += '</tr>';
