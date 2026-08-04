@@ -1,4 +1,10 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804j — voce 59 altri ricavi e proventi, e valorizzazione giacenze
+//              col primo costo successivo quando manca quello precedente
+// v20260804i — il confronto legge ricavi, margine e litri dell anno prima
+//              da vendite_storiche: dati veri, niente bilancio diviso
+// v20260804h — in 610143 chi ci FATTURA: Talarico, Costa, SDM e i viaggi
+//              da Ludoil; fuori Q8 (gia nel prezzo) e i mezzi propri
 // v20260804g — in 610143 solo i trasporti dei TERZISTI: quelli coi mezzi
 //              propri sono una tariffa figurata e il costo vero e gia
 //              sparso in carburante, manutenzione e personale
@@ -170,6 +176,11 @@ function _andRenderGiacenze(res) {
   if (daCisterna.length) {
     h += '<br><span style="color:#854F0B">Per ' + daCisterna.map(function (r) { return esc(r.prodotto); }).join(', ')
        + ' non c\'e storico del costo a quella data: usato il costo medio di oggi.</span>';
+  }
+  var daDopo = vive.filter(function (r) { return r.fonteCmp === 'primo costo successivo'; });
+  if (daDopo.length) {
+    h += '<br><span style="color:#854F0B">Per ' + daDopo.map(function (r) { return esc(r.prodotto) + ' (' + _andSede(r.sede) + ')'; }).join(', ')
+       + ' non c\'era ancora un costo a quella data: usato il primo registrato dopo.</span>';
   }
   if (senzaCosto.length) {
     h += '<br><span style="color:#A32D2D">Senza costo e quindi non valorizzati: '
@@ -344,7 +355,7 @@ function _ceGiornoPrima(iso) {
 var _ceCache = {};        // anno -> { mesi:[12] }
 var _ceCacheGiac = {};    // data -> valorizzazione giacenze
 var _ceCacheBud = {};     // anno -> righe di budget
-function ceSvuotaCache() { _ceCache = {}; _ceCacheGiac = {}; _ceCacheBud = {}; }
+function ceSvuotaCache() { _ceCache = {}; _ceCacheGiac = {}; _ceCacheBud = {}; _cfrStorico = null; }
 
 // La chiusura di un trimestre e l'apertura del successivo sono LA STESSA
 // data: calcolandola una volta sola, passare da Q1 a Q2 non ricalcola
@@ -409,24 +420,9 @@ async function _ceCaricaAnno(anno) {
       function (q) { return q.order('data'); }),
     sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a),
     sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a),
-    // v20260804g — CHI HA FATTO IL VIAGGIO.
-    // Il vettore sta sui CARICHI, non sugli ordini: `trasportatore_id`
-    // nullo vuol dire mezzi propri, valorizzato vuol dire terzista.
-    // Serve perche in 610143 vanno SOLO i terzisti — quelli sono fatture
-    // vere. Il trasporto con mezzi nostri e una tariffa figurata (0,019):
-    // il costo vero e gia sparso in carburante, manutenzione, assicurazioni
-    // e personale, e metterlo anche qui lo conterebbe due volte.
-    sb.from('carichi').select('id,data,trasportatore_id,carico_ordini(ordine_id)')
-      .gte('data', da).lte('data', a)
   ]);
 
   var allIng = r[0], allOrd = r[1];
-  // ordine -> true se il viaggio l'ha fatto un terzista
-  var terzista = {};
-  ((r[6] && r[6].data) || []).forEach(function (c) {
-    var t = !!c.trasportatore_id;
-    (c.carico_ordini || []).forEach(function (co) { if (co.ordine_id) terzista[co.ordine_id] = t; });
-  });
   var pompeMap = {}; (r[2].data || []).forEach(function (p) { pompeMap[p.id] = p; });
   var prezziMap = {}; (r[4].data || []).forEach(function (p) { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
   var costiMap = {}; (r[5].data || []).forEach(function (c) { costiMap[c.data + '_' + c.prodotto] = Number(c.costo_litro); });
@@ -484,17 +480,25 @@ async function _ceCaricaAnno(anno) {
     // Il trasporto resta un costo dell'azienda, ma sta in una riga sua.
     allOrd.forEach(function (o) {
       if (String(o.data).indexOf(pref) !== 0) return;
-      if (String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0) return;
+      if (String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0) {
+        // uscita dal nostro deposito: il viaggio l'hanno fatto i nostri
+        // camion. Il trasporto qui e una TARIFFA figurata, non un costo
+        // che esce: serve solo a misurare quanto ci costa portare noi.
+        x.trasportiPropri += Number(o.trasporto_litro || 0) * Number(o.litri || 0);
+        x.litriPropri += Number(o.litri || 0);
+        return;
+      }
       var l = Number(o.litri || 0);
       x.acquisti += Number(o.costo_litro || 0) * l;
       var tr = Number(o.trasporto_litro || 0) * l;
-      // in 610143 solo i viaggi dei terzisti; quelli coi mezzi nostri
-      // restano a parte, come informazione, e non entrano nel conto
-      if (terzista[o.id] === false) x.trasportiPropri += tr;
-      else x.trasporti += tr;
+      // Q8 porta a Vibo da Milazzo e Napoli, ma quel trasporto e GIA
+      // dentro il prezzo del carburante: metterlo in 610143 lo
+      // conterebbe due volte. Talarico, Costa e SDM invece emettono
+      // fattura, e i viaggi da Ludoil li facciamo noi o li affidiamo a
+      // loro: quelli sono costo vero e restano dentro.
+      if (!_ceTrasportoNelPrezzo(o.fornitore)) x.trasporti += tr;
       x.litriAcq += l;
       x.nOrdiniAcq++;
-      if (terzista[o.id] === false) x.litriPropri += l;
     });
     Object.keys(dettPerGiorno).forEach(function (d) {
       if (d.indexOf(pref) !== 0) return;
@@ -540,7 +544,12 @@ async function _ceCalcola(q, anno) {
 
   var ricavi = acc.ingFatt + acc.dettInc;
   var costoVenduto = acc.acquisti + rimIniziale - rimFinale;
-  var margineLordo = ricavi - costoVenduto - acc.trasporti;
+  // v20260804j — ALTRI RICAVI E PROVENTI, codice 59.
+  // Penalita ai clienti, sopravvenienze, abbuoni, contributi: nel 2025
+  // valgono 42.162 (la differenza fra valore_produzione 19.106.559 e
+  // fatturato 19.064.397) e senza di loro il risultato usciva basso.
+  var altriRicavi = bud.altri_ricavi || 0;
+  var margineLordo = ricavi + altriRicavi - costoVenduto - acc.trasporti;
   var costiFissi = _CE_VOCI_BUDGET.reduce(function (a, v) { return a + (bud[v.id] || 0); }, 0);
   // v20260804e — i trasporti stanno nei COSTI DELLA PRODUZIONE, con il
   // codice 610143 del commercialista: incidono quindi sul primo margine,
@@ -566,7 +575,7 @@ async function _ceCalcola(q, anno) {
     trasportiPropri: acc.trasportiPropri, litriPropri: acc.litriPropri,
     rimIniziale: rimIniziale, rimFinale: rimFinale,
     costoVenduto: costoVenduto, margineLordo: margineLordo,
-    budget: bud, costiFissi: costiFissi,
+    budget: bud, costiFissi: costiFissi, altriRicavi: altriRicavi,
     ebitda: ebitda, ammortamenti: amm, ebit: ebit,
     oneriFin: onFin, proventiFin: provFin, risultato: risultato,
     budgetMancante: !righeBud.length,
@@ -624,6 +633,7 @@ var C_CE = { navy: '#0B2545', blu: '#185FA5', bluL: '#E8F4FD', bluL2: '#E6F1FB',
 function _ceVoci(d) {
   return [
     { cod: CE_CODICI.ricavi, l: 'Ricavi delle vendite', v: d.ricavi, tipo: 'reale' },
+    { cod: '59', l: 'Altri ricavi e proventi', v: d.altriRicavi || 0, tipo: 'stima' },
     // il dettaglio non si perde: chi legge deve vedere quanto e magazzino
     { cod: CE_CODICI.acquisti, l: 'Acquisti del periodo', v: -d.acquisti, tipo: 'reale', sotto: true },
     { l: 'Rimanenze iniziali', v: -d.rimIniziale, tipo: 'reale', sotto: true },
@@ -775,6 +785,48 @@ function _ceStileB(d) {
   h += card('Utile netto stimato', d.utile, pctOf(d.utile), col(d.utile));
   h += '</div>';
 
+  // v20260804h — CHI TRASPORTA MEGLIO.
+  // Il confronto che gli serve per decidere se internalizzare ancora:
+  // quanto costa portare coi nostri camion contro quanto ci fatturano i
+  // terzisti. Il primo e la tariffa figurata sugli ordini in uscita dal
+  // deposito, il secondo il costo vero degli acquisti da fornitore.
+  var eLProprio = d.litriPropri > 0 ? d.trasportiPropri / d.litriPropri : null;
+  var litriTerzi = d.litriAcquistati;
+  var eLTerzi = litriTerzi > 0 ? d.trasporti / litriTerzi : null;
+  if (eLProprio !== null || eLTerzi !== null) {
+    var megliaNoi = (eLProprio !== null && eLTerzi !== null && eLProprio < eLTerzi);
+    h += '<div class="card" style="padding:14px;margin-bottom:12px">';
+    h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Quanto ci costa trasportare</div>';
+    h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">'
+       + 'Il trasporto coi mezzi propri e una tariffa figurata sugli ordini in uscita dal deposito: '
+       + 'il costo vero sta in carburante, manutenzione e personale, e non e ancora misurato.</div>';
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+    h += '<div style="flex:1;min-width:200px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px'
+       + (megliaNoi ? ';border:0.5px solid #A9D18E' : '') + '">'
+       + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Mezzi propri</div>'
+       + '<div style="font-size:20px;font-weight:700;font-family:var(--font-mono);margin-top:3px">'
+       + (eLProprio === null ? '\u2014' : eLProprio.toFixed(4) + ' <span style="font-size:12px">&euro;/L</span>') + '</div>'
+       + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">' + _andNum(d.litriPropri) + ' L dal deposito &middot; '
+       + _andEuro(d.trasportiPropri) + '</div></div>';
+    h += '<div style="flex:1;min-width:200px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px'
+       + (!megliaNoi && eLTerzi !== null ? ';border:0.5px solid #A9D18E' : '') + '">'
+       + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Terzisti che ci fatturano</div>'
+       + '<div style="font-size:20px;font-weight:700;font-family:var(--font-mono);margin-top:3px">'
+       + (eLTerzi === null ? '\u2014' : eLTerzi.toFixed(4) + ' <span style="font-size:12px">&euro;/L</span>') + '</div>'
+       + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">' + _andNum(litriTerzi) + ' L acquistati &middot; '
+       + _andEuro(d.trasporti) + '</div></div>';
+    if (eLProprio !== null && eLTerzi !== null) {
+      var diff = (eLTerzi - eLProprio) * d.litriPropri;
+      h += '<div style="flex:1;min-width:200px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
+        + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Differenza sul periodo</div>'
+        + '<div style="font-size:20px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + (diff >= 0 ? '#27500A' : '#A32D2D') + '">'
+        + (diff >= 0 ? '+' : '') + _andEuro(diff) + '</div>'
+        + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">'
+        + (diff >= 0 ? 'risparmiati portando noi' : 'in piu rispetto ai terzisti') + '</div></div>';
+    }
+    h += '</div></div>';
+  }
+
   h += '<div class="card" style="padding:14px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">';
   _ceVoci(d).forEach(function (r) {
     var forte = !!r.banda;
@@ -791,14 +843,6 @@ function _ceStileB(d) {
   h += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--text-muted)">';
   h += '<span>Litri ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriIngrosso) + '</strong></span>';
   h += '<span>Litri stazione <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriDettaglio) + '</strong></span>';
-  if (d.litriPropri > 0) {
-    h += '<span>Trasporto proprio <strong style="color:var(--text);font-family:var(--font-mono)">'
-      + (d.trasportiPropri / d.litriPropri).toFixed(4) + '</strong> &euro;/L su ' + _andNum(d.litriPropri) + ' L</span>';
-  }
-  if (d.trasporti > 0 && (d.litriAcquistati - d.litriPropri) > 0) {
-    h += '<span>Terzisti <strong style="color:var(--text);font-family:var(--font-mono)">'
-      + (d.trasporti / (d.litriAcquistati - d.litriPropri)).toFixed(4) + '</strong> &euro;/L</span>';
-  }
   h += '<span>Acquistati <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriAcquistati) + '</strong> L in '
      + _andNum(d.nOrdiniAcq) + ' ordini &middot; medio <strong style="color:var(--text);font-family:var(--font-mono)">'
      + (d.litriAcquistati ? (d.acquisti / d.litriAcquistati).toFixed(4) : '—') + '</strong> &euro;/L</span>';
@@ -877,6 +921,10 @@ function ceStampa() {
 // piu (resta la ripartizione decisa a mano).
 var _bud = [];
 var _budAnno = new Date().getFullYear();
+// Proventi finanziari e altri ricavi sono RICAVI: non entrano nel totale
+// dei costi ne nella percentuale di incidenza.
+function _budRicavo(voce) { return voce === 'proventi_finanziari' || voce === 'altri_ricavi'; }
+
 var _BUD_VOCI = [
   { id: 'personale', label: 'Costi del personale' },
   { id: 'servizi', label: 'Altri servizi (esclusi trasporti terzisti)' },
@@ -884,7 +932,8 @@ var _BUD_VOCI = [
   { id: 'oneri_diversi', label: 'Oneri diversi di gestione' },
   { id: 'ammortamenti', label: 'Ammortamenti' },
   { id: 'oneri_finanziari', label: 'Oneri finanziari' },
-  { id: 'proventi_finanziari', label: 'Proventi finanziari' }
+  { id: 'proventi_finanziari', label: 'Proventi finanziari' },
+  { id: 'altri_ricavi', label: 'Altri ricavi e proventi' }
 ];
 
 async function caricaBudget() {
@@ -915,10 +964,11 @@ function _budRender() {
   var inpA = 'width:132px;padding:8px 10px;border:0.5px solid #A9C9EC;border-radius:7px;background:var(--bg);color:var(--text);font-size:15px;font-weight:700;text-align:right;font-family:var(--font-mono)';
   var inpQ = 'width:104px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;text-align:right;font-family:var(--font-mono)';
   var codici = { personale: '67', servizi: '63', godimento_beni: '65', oneri_diversi: '69',
-                 ammortamenti: '68', oneri_finanziari: '85', proventi_finanziari: '81' };
+                 ammortamenti: '68', oneri_finanziari: '85', proventi_finanziari: '81',
+                 altri_ricavi: '59' };
 
   var totA = 0;
-  _bud.forEach(function (b) { if (b.voce !== 'proventi_finanziari') totA += Number(b.annuo || 0); });
+  _bud.forEach(function (b) { if (!_budRicavo(b.voce)) totA += Number(b.annuo || 0); });
 
   var h = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
   h += '<span style="font-size:12px;color:var(--text-muted)">Costi dell\'anno</span>';
@@ -943,7 +993,7 @@ function _budRender() {
   var tot = { annuo: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
   _bud.forEach(function (b, i) {
     ['annuo', 'q1', 'q2', 'q3', 'q4'].forEach(function (k) { tot[k] += Number(b[k] || 0); });
-    var quota = (totA && b.voce !== 'proventi_finanziari') ? Number(b.annuo || 0) / totA * 100 : null;
+    var quota = (totA && !_budRicavo(b.voce)) ? Number(b.annuo || 0) / totA * 100 : null;
     h += '<tr style="background:' + (i % 2 ? '#FAFAF8' : '#fff') + '">'
       + '<td style="padding:8px;text-align:center;font-size:10.5px;color:#999;font-family:var(--font-mono)">' + (codici[b.voce] || '') + '</td>'
       + '<td style="padding:8px;text-align:left">' + b.label + (b.override ? ' <span style="font-size:10px;color:#854F0B">a mano</span>' : '') + '</td>'
@@ -1053,13 +1103,13 @@ function _budAggiornaTotali() {
   var tot = { annuo: 0, q1: 0, q2: 0, q3: 0, q4: 0 }, totA = 0;
   _bud.forEach(function (b) {
     ['annuo', 'q1', 'q2', 'q3', 'q4'].forEach(function (k) { tot[k] += Number(b[k] || 0); });
-    if (b.voce !== 'proventi_finanziari') totA += Number(b.annuo || 0);
+    if (!_budRicavo(b.voce)) totA += Number(b.annuo || 0);
   });
   _bud.forEach(function (b, i) {
     var tr = righe[i + 1]; if (!tr) return;
     var td = tr.querySelectorAll('td');
     if (td.length >= 8) {
-      var quota = (totA && b.voce !== 'proventi_finanziari') ? Number(b.annuo || 0) / totA * 100 : null;
+      var quota = (totA && !_budRicavo(b.voce)) ? Number(b.annuo || 0) / totA * 100 : null;
       td[7].innerHTML = (quota === null ? '<span style="opacity:0.4">\u2014</span>' : _andNum(quota, 1) + '%');
     }
   });
@@ -1117,6 +1167,14 @@ var _trimVista = 'ce';
 // dalla sua situazione contabile: 61 costi della produzione, 610107
 // acquisti carburanti, 610143 spese di trasporto, 63 servizi, 65
 // godimento beni di terzi. Gli altri sono allineati alla stessa logica.
+// Fornitori il cui trasporto e gia compreso nel prezzo del prodotto:
+// non genera un costo nuovo e non va in 610143.
+var CE_TRASPORTO_NEL_PREZZO = ['q8'];
+function _ceTrasportoNelPrezzo(fornitore) {
+  var f = String(fornitore || '').toLowerCase();
+  return CE_TRASPORTO_NEL_PREZZO.some(function (x) { return f.indexOf(x) >= 0; });
+}
+
 var CE_CODICI = {
   ricavi: '51', ricaviIngrosso: '510101', ricaviDettaglio: '510107',
   costiProd: '61', acquisti: '610107', trasporti: '610143',
@@ -1160,6 +1218,22 @@ async function caricaTrimestrali() {
 // entrambi gli anni.
 var _cfrQ = null;
 var _cfrBilanci = null;
+var _cfrStorico = null;
+
+// Somma i mesi dell'archivio che cadono nel periodo scelto.
+function _cfrPeriodo(righe, q) {
+  var fin = _ceFinestra(q);
+  var a = { litri: 0, fatturato: 0, margine: 0, mesi: 0 };
+  (righe || []).forEach(function (r) {
+    var m = Number(r.mese) - 1;
+    if (m < fin.da || m >= fin.da + fin.quanti) return;
+    a.litri += Number(r.ing_litri || 0) + Number(r.dett_litri || 0);
+    a.fatturato += Number(r.ing_fatturato || 0) + Number(r.dett_incasso || 0);
+    a.margine += Number(r.ing_margine || 0) + Number(r.dett_margine || 0);
+    a.mesi++;
+  });
+  return a.mesi ? a : null;
+}
 
 function cfrVai(q) { _cfrQ = q; _cfrRender(); }
 
@@ -1176,7 +1250,17 @@ async function _cfrRender() {
       _cfrBilanci = {};
       (rb.data || []).forEach(function (b) { _cfrBilanci[b.esercizio] = b; });
     }
-    box.innerHTML = _cfrHtml(d, _cfrBilanci[anno - 1], anno);
+    // v20260804i — RICAVI E MARGINE DELL'ANNO PRIMA DAI DATI VERI.
+    // `vendite_storiche` ha litri, fatturato e margine mese per mese,
+    // caricati da Access: e il dato reale, non il bilancio diviso quattro.
+    // Il suo margine e al netto di TUTTI i trasporti, propri compresi;
+    // per confrontare sulla stessa base, al 2026 si toglie anche il
+    // trasporto proprio. Cosi nessuno dei due numeri e stimato.
+    if (!_cfrStorico) {
+      var rs = await sb.from('vendite_storiche').select('*').eq('anno', anno - 1);
+      _cfrStorico = rs.data || [];
+    }
+    box.innerHTML = _cfrHtml(d, _cfrBilanci[anno - 1], anno, _cfrPeriodo(_cfrStorico, _cfrQ));
   } catch (e) {
     box.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Non riesco a fare il confronto: '
       + esc((e && e.message) || String(e)) + '</div>';
@@ -1189,7 +1273,7 @@ function _cfrQuota(q) {
   return 4;
 }
 
-function _cfrHtml(d, bil, anno) {
+function _cfrHtml(d, bil, anno, sto) {
   var div = _cfrQuota(_cfrQ);
   var p = function (v) { return (Number(v || 0)) / div; };
   var ebitdaBil = null;
@@ -1198,14 +1282,22 @@ function _cfrHtml(d, bil, anno) {
     ebitdaBil = p(bil.fatturato) - costiBil;
   }
 
+  // margine al netto di TUTTI i trasporti, la stessa base dell'archivio
+  var margNetto = d.margineLordo - d.trasportiPropri;
   var righe = bil ? [
-    { cod: CE_CODICI.ricavi, l: 'VALORE DELLA PRODUZIONE', a: d.ricavi, b: p(bil.fatturato), buono: 1, banda: 'ricavi' },
+    { cod: CE_CODICI.ricavi, l: 'VALORE DELLA PRODUZIONE', a: d.ricavi,
+      b: sto ? sto.fatturato : p(bil.fatturato), vero: !!sto, buono: 1, banda: 'ricavi' },
     { cod: CE_CODICI.ricaviIngrosso, l: 'Ricavi ingrosso', a: d.ricaviIngrosso, b: null, sotto: true },
     { cod: CE_CODICI.ricaviDettaglio, l: 'Ricavi stazione Oppido', a: d.ricaviDettaglio, b: null, sotto: true },
     { cod: CE_CODICI.costiProd, l: 'COSTI DELLA PRODUZIONE', a: d.costoVenduto + d.trasporti, b: p(bil.costo_merci), buono: -1, banda: 'costi' },
     { cod: CE_CODICI.acquisti, l: 'Acquisti carburanti', a: d.acquisti, b: null, sotto: true },
     { cod: CE_CODICI.trasporti, l: 'Spese di trasporto', a: d.trasporti, b: null, sotto: true, dai: true },
-    { cod: 'R1', l: 'MARGINE LORDO', a: d.margineLordo, b: p(bil.fatturato) - p(bil.costo_merci), buono: 1, banda: 'margine' },
+    { cod: 'R1', l: 'MARGINE LORDO', a: d.margineLordo,
+      b: p(bil.fatturato) - p(bil.costo_merci), buono: 1, banda: 'margine' },
+    { cod: '', l: 'Margine al netto anche del trasporto proprio', a: margNetto,
+      b: sto ? sto.margine : null, vero: !!sto, buono: 1, sotto: true },
+    { cod: '', l: 'Litri venduti', a: d.litriIngrosso + d.litriDettaglio,
+      b: sto ? sto.litri : null, vero: !!sto, buono: 1, sotto: true, litri: true },
     { cod: CE_CODICI.personale, l: 'Per il personale', a: d.budget.personale || 0, b: p(bil.personale), buono: -1 },
     { cod: CE_CODICI.servizi, l: 'Per servizi', a: d.servizi, b: p(bil.servizi), buono: -1 },
     { cod: CE_CODICI.godimento, l: 'Per godimento beni di terzi', a: d.budget.godimento_beni || 0, b: p(bil.godimento_beni), buono: -1 },
@@ -1270,9 +1362,11 @@ function _cfrHtml(d, bil, anno) {
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 8px;font-size:10.5px;' + (ban ? 'font-weight:700' : 'color:#999') + '">' + r.cod + '</td>';
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 8px;' + (ban ? 'font-weight:700' : 'padding-left:22px;color:' + (r.sotto ? '#666' : '#333')) + '">'
        + r.l + (r.dai ? ' <span style="font-size:10px;color:#1D9E75">\u00b7 dai carichi</span>' : '') + '</td>';
-    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + cTx + (ban ? ';font-weight:700' : '') + '">' + _andNum(r.a, 2) + '</td>';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + cTx + (ban ? ';font-weight:700' : '') + '">' + _andNum(r.a, r.litri ? 0 : 2) + '</td>';
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + cTx + '">'
-       + (r.b === null ? '<span style="opacity:0.4">\u2014</span>' : _andNum(r.b, 2) + (div > 1 ? ' <span style="font-size:9.5px;opacity:0.6">stima</span>' : '')) + '</td>';
+       + (r.b === null ? '<span style="opacity:0.4">\u2014</span>'
+          : (r.litri ? _andNum(r.b, 0) : _andNum(r.b, 2))
+            + (r.vero ? '' : (div > 1 ? ' <span style="font-size:9.5px;opacity:0.6">stima</span>' : ''))) + '</td>';
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + (fin ? (col === '#27500A' ? '#7BE0B0' : (col === '#A32D2D' ? '#FF9B9B' : '#FFFFFF')) : col) + (ban ? ';font-weight:700' : '') + '">'
        + (delta === null ? '' : frec + ' ' + (delta >= 0 ? '+' : '') + _andNum(delta, 2)
           + (pct !== null ? '<div style="font-size:11px;font-weight:400">' + (pct >= 0 ? '+' : '') + _andNum(pct, 2) + '%</div>' : '')) + '</td>';
@@ -1281,7 +1375,9 @@ function _cfrHtml(d, bil, anno) {
   h += '</table>';
   h += '<div style="padding:10px 14px;background:#f7f7f5;font-size:10.5px;color:#666;border-top:1px solid #eee">'
      + 'Sui <strong>ricavi</strong> il verde e crescita. Sui <strong>costi</strong> il verde e risparmio: rosso quando aumentano.'
-     + (div > 1 ? '<br>Il ' + (anno - 1) + ' viene dal bilancio annuale diviso ' + div + ': e una ripartizione uniforme, serve a leggere la direzione, non a chiudere un periodo.' : '')
+     + (sto ? '<br>Ricavi, margine e litri del ' + (anno - 1) + ' vengono dall\'archivio vendite, mese per mese: sono dati veri, non ripartiti. '
+         + 'Il <strong>margine al netto anche del trasporto proprio</strong> e la riga da confrontare, perche l\'archivio lo tiene gia dentro.'
+         : '')     + (div > 1 ? '<br>Le voci senza dato d\'archivio vengono dal bilancio annuale diviso ' + div + ': ripartizione uniforme, serve a leggere la direzione.' : '')
      + '</div></div>';
   return h;
 }

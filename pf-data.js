@@ -1,4 +1,6 @@
 // VERSIONE 26/05/2026 d - FIX BUG LIMIT 1000 esteso a branch stazione_oppido
+// v20260804b — se non c'e un costo prima della data si usa il primo dopo,
+//              dichiarandolo: la stazione al 1 gennaio restava senza valore
 // v20260804a — le giacenze si calcolano tutte in parallelo, non in fila
 // v20260803a — query madre della VALORIZZAZIONE giacenze: getCmpAllaData e
 //              getValoreGiacenze, che leggono il sistema esistente senza
@@ -382,6 +384,20 @@ window.pfData = {
     if (r.data && r.data.length && Number(r.data[0].cmp_nuovo) > 0) {
       return { cmp: Number(r.data[0].cmp_nuovo), dataCmp: r.data[0].data, fonte: 'storico' };
     }
+    // v20260804b — Se non c'e NESSUN costo prima di quella data, prende il
+    // primo disponibile DOPO e lo dichiara. Succedeva sulla stazione al
+    // 1 gennaio: lo storico parte dal 5, e ventimila litri restavano senza
+    // valore. Meglio un costo di quattro giorni dopo che una giacenza a
+    // zero — purche si sappia da dove viene.
+    var dopo = await sb.from('stazione_cmp_storico')
+      .select('cmp_nuovo,data')
+      .eq('sede', sede).eq('prodotto', prodotto).gt('data', data)
+      .order('data', { ascending: true }).limit(1);
+    if (dopo.data && dopo.data.length && Number(dopo.data[0].cmp_nuovo) > 0) {
+      return { cmp: Number(dopo.data[0].cmp_nuovo), dataCmp: dopo.data[0].data,
+               fonte: 'primo costo successivo' };
+    }
+
     if (sede === 'deposito_vibo') {
       var c = await sb.from('cisterne')
         .select('costo_medio,livello_attuale')
