@@ -1,4 +1,5 @@
 // PhoenixFuel — Dashboard, Cockpit, Grafici, Alert
+// v20260803a — avvia il controllo degli scostamenti prezzo ordine/listino
 // ── DASHBOARD ─────────────────────────────────────────────────────
 // Colori prodotto (Gasolio Autotrazione = giallo)
 const COLORI_DASH = {
@@ -12,6 +13,10 @@ async function caricaDashboard() {
   if (typeof caricaFidoFornitoriDashboard === 'function') { try { caricaFidoFornitoriDashboard(); } catch (e) { console.warn('fido fornitori', e); } }
   if (typeof caricaAnticipiDashboard === 'function') { try { caricaAnticipiDashboard(); } catch (e) { console.warn('anticipi dashboard', e); } }
   if (typeof caricaSettimanaDashboard === 'function') { try { caricaSettimanaDashboard(); } catch (e) { console.warn('settimana dashboard', e); } }
+  // v20260803a — controllo prezzi ordine/listino: gira in sottofondo e
+  // mette l'avviso solo se c'e qualcosa da decidere. Non deve mai
+  // bloccare la bacheca, per questo e in try e senza await.
+  if (typeof scostAvvio === 'function') { try { scostAvvio(); } catch (e) { console.warn('scostamenti', e); } }
   var ieri = new Date(oggi); ieri.setDate(ieri.getDate()-1);
   var ieriISO = ieri.toISOString().split('T')[0];
   var meseInizio = oggiISO.substring(0,8) + '01';
