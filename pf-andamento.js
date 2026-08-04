@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804e — trasporti nei costi della produzione anche nel conto
+//              economico, codici in colonna e riga utile leggibile
 // v20260804d — tre viste dentro Trimestrali (conto economico, budget costi,
 //              confronto anni) e nessuna nuova linguetta in cima
 // v20260804c — trasporti terzisti come voce 5.1 dentro Servizi: fuori dal
@@ -511,10 +513,14 @@ async function _ceCalcola(q, anno) {
 
   var ricavi = acc.ingFatt + acc.dettInc;
   var costoVenduto = acc.acquisti + rimIniziale - rimFinale;
-  var margineLordo = ricavi - costoVenduto;
+  var margineLordo = ricavi - costoVenduto - acc.trasporti;
   var costiFissi = _CE_VOCI_BUDGET.reduce(function (a, v) { return a + (bud[v.id] || 0); }, 0);
-  var servizi = (bud.servizi || 0) + acc.trasporti;   // 5.1 + 5.2
-  var ebitda = margineLordo - acc.trasporti - costiFissi;
+  // v20260804e — i trasporti stanno nei COSTI DELLA PRODUZIONE, con il
+  // codice 610143 del commercialista: incidono quindi sul primo margine,
+  // come nella sua situazione contabile. Servizi torna a essere il solo
+  // budget, senza sottovoci.
+  var servizi = bud.servizi || 0;
+  var ebitda = margineLordo - costiFissi;
   var amm = bud.ammortamenti || 0;
   var ebit = ebitda - amm;
   var onFin = bud.oneri_finanziari || 0;
@@ -589,30 +595,29 @@ var C_CE = { navy: '#0B2545', blu: '#185FA5', bluL: '#E8F4FD', bluL2: '#E6F1FB',
 
 function _ceVoci(d) {
   return [
-    { l: 'Ricavi delle vendite', v: d.ricavi, tipo: 'reale' },
+    { cod: CE_CODICI.ricavi, l: 'Ricavi delle vendite', v: d.ricavi, tipo: 'reale' },
     // il dettaglio non si perde: chi legge deve vedere quanto e magazzino
-    { l: 'Acquisti del periodo', v: -d.acquisti, tipo: 'reale', sotto: true },
+    { cod: CE_CODICI.acquisti, l: 'Acquisti del periodo', v: -d.acquisti, tipo: 'reale', sotto: true },
     { l: 'Rimanenze iniziali', v: -d.rimIniziale, tipo: 'reale', sotto: true },
     { l: 'Rimanenze finali', v: d.rimFinale, tipo: 'reale', sotto: true },
-    { l: 'Costo del venduto', v: -d.costoVenduto, tipo: 'reale' },
+    { cod: CE_CODICI.trasporti, l: 'Spese di trasporto', v: -d.trasporti, tipo: 'reale', sotto: true, dai: true },
+    { l: 'Costo del venduto', v: -(d.costoVenduto + d.trasporti), tipo: 'reale' },
     { cod: 'R1', l: 'MARGINE LORDO COMMERCIALE', v: d.margineLordo, pct: true, banda: 1 },
-    { l: 'Personale', v: -(d.budget.personale || 0), tipo: 'stima' },
+    { cod: CE_CODICI.personale, l: 'Personale', v: -(d.budget.personale || 0), tipo: 'stima' },
     // v20260804c — SERVIZI COME NEL BILANCIO DEL COMMERCIALISTA.
     // I trasporti terzisti sono la voce 5.1 DENTRO i servizi, non un
     // costo a se: restano cosi FUORI dal primo margine e pesano sul
     // secondo. E il valore non e stimato — si calcola carico per carico
     // dagli ordini, quindi il budget "servizi" va inteso al NETTO dei
     // trasporti, altrimenti lo stesso costo verrebbe contato due volte.
-    { l: 'Servizi', v: -(d.servizi || 0), tipo: 'reale', gruppo: true },
-    { l: '5.1 Trasporti terzisti', v: -d.trasporti, tipo: 'reale', sotto: true },
-    { l: '5.2 Altri servizi', v: -(d.budget.servizi || 0), tipo: 'stima', sotto: true },
-    { l: 'Godimento beni di terzi', v: -(d.budget.godimento_beni || 0), tipo: 'stima' },
-    { l: 'Oneri diversi di gestione', v: -(d.budget.oneri_diversi || 0), tipo: 'stima' },
+    { cod: CE_CODICI.servizi, l: 'Servizi', v: -(d.budget.servizi || 0), tipo: 'stima' },
+    { cod: CE_CODICI.godimento, l: 'Godimento beni di terzi', v: -(d.budget.godimento_beni || 0), tipo: 'stima' },
+    { cod: CE_CODICI.oneriDiversi, l: 'Oneri diversi di gestione', v: -(d.budget.oneri_diversi || 0), tipo: 'stima' },
     { cod: 'R2', l: 'EBITDA', v: d.ebitda, pct: true, banda: 2 },
-    { l: 'Ammortamenti', v: -(d.ammortamenti || 0), tipo: 'stima' },
+    { cod: CE_CODICI.ammortamenti, l: 'Ammortamenti', v: -(d.ammortamenti || 0), tipo: 'stima' },
     { cod: 'R3', l: 'RISULTATO OPERATIVO (EBIT)', v: d.ebit, pct: true, banda: 3 },
-    { l: 'Oneri finanziari', v: -(d.oneriFin || 0), tipo: 'stima' },
-    { l: 'Proventi finanziari', v: d.proventiFin || 0, tipo: 'stima' },
+    { cod: CE_CODICI.oneriFin, l: 'Oneri finanziari', v: -(d.oneriFin || 0), tipo: 'stima' },
+    { cod: CE_CODICI.proventiFin, l: 'Proventi finanziari', v: d.proventiFin || 0, tipo: 'stima' },
     { cod: 'R4', l: 'RISULTATO ANTE IMPOSTE', v: d.risultato, pct: true, banda: 4 },
     { l: 'Imposte stimate (' + (CE_ALIQUOTA * 100).toFixed(1).replace('.', ',') + '%)', v: -d.imposte, tipo: 'stima' },
     { cod: '\u2605', l: 'UTILE NETTO STIMATO', v: d.utile, pct: true, banda: 5 }
@@ -694,17 +699,21 @@ function _ceStileA(d) {
     if (r.banda) {
       var b = bande[r.banda];
       var finale = (r.banda === 5);
-      h += '<tr style="background:' + (finale ? C_CE.navy : b.bg) + ';color:' + (finale ? '#fff' : b.testo) + '">'
+      var cTx = finale ? '#FFFFFF' : b.testo;
+      h += '<tr style="background:' + (finale ? C_CE.navy : b.bg) + ';color:' + cTx + '">'
         + '<td style="padding:11px 6px;text-align:center;font-size:11px;font-weight:700;opacity:0.85">' + (r.cod || '') + '</td>'
         + '<td style="padding:11px 8px;font-weight:700;letter-spacing:0.3px">' + r.l + '</td>'
-        + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-weight:700;font-size:14.5px">' + _andEuro(r.v) + '</td>'
-        + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-size:12px">' + _andNum(pctOf(r.v), 2) + '%</td></tr>';
+        + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-weight:700;font-size:14.5px;color:' + cTx + '">' + _andEuro(r.v) + '</td>'
+        + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-size:12px;color:' + cTx + '">' + _andNum(pctOf(r.v), 2) + '%</td></tr>';
     } else {
       alt++;
       h += '<tr style="background:' + (r.gruppo ? '#F2F4F7' : (alt % 2 ? '#FAFAF8' : '#fff')) + '">'
-        + '<td style="padding:8px 6px;text-align:center;color:' + C_CE.ambra + ';font-weight:700">' + (r.tipo === 'stima' ? '*' : '') + '</td>'
+        + '<td style="padding:8px 6px;text-align:center;font-size:10px;color:' + (r.cod ? '#999' : C_CE.ambra) + ';font-weight:700">'
+          + (r.cod ? r.cod : (r.tipo === 'stima' ? '*' : '')) + '</td>'
         + '<td style="padding:8px 8px;padding-left:' + (r.sotto ? '30px' : '16px') + ';color:' + (r.sotto ? '#666' : '#333')
-          + ';font-size:' + (r.sotto ? '12px' : '13px') + (r.gruppo ? ';font-weight:600' : '') + '">' + r.l + '</td>'
+          + ';font-size:' + (r.sotto ? '12px' : '13px') + (r.gruppo ? ';font-weight:600' : '') + '">' + r.l
+          + (r.dai ? ' <span style="font-size:10px;color:#1D9E75">\u00b7 dai carichi</span>' : '')
+          + (r.tipo === 'stima' && r.cod ? ' <span style="color:' + C_CE.ambra + '">*</span>' : '') + '</td>'
         + '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + (neg ? C_CE.rosso : '#222') + '">' + _andEuro(r.v) + '</td>'
         + '<td></td></tr>';
     }
@@ -796,12 +805,11 @@ function ceStampa() {
   doc += riga('Acquisti del periodo', -d.acquisti, { indenta: true });
   doc += riga('Rimanenze iniziali', -d.rimIniziale, { indenta: true });
   doc += riga('Rimanenze finali', d.rimFinale, { indenta: true });
-  doc += riga('Costo del venduto', -d.costoVenduto, { forte: true });
+  doc += riga('610143 Spese di trasporto', -d.trasporti, { indenta: true });
+  doc += riga('Costo del venduto', -(d.costoVenduto + d.trasporti), { forte: true });
   doc += riga('MARGINE LORDO', d.margineLordo, { forte: true });
   doc += riga('Personale', -(d.budget.personale || 0), { indenta: true, stima: true });
-  doc += riga('Servizi', -(d.servizi || 0), { indenta: true });
-  doc += riga('5.1 Trasporti terzisti', -d.trasporti, { indenta: true });
-  doc += riga('5.2 Altri servizi', -(d.budget.servizi || 0), { indenta: true, stima: true });
+  doc += riga('Servizi', -(d.budget.servizi || 0), { indenta: true, stima: true });
   doc += riga('Godimento beni di terzi', -(d.budget.godimento_beni || 0), { indenta: true, stima: true });
   doc += riga('Oneri diversi di gestione', -(d.budget.oneri_diversi || 0), { indenta: true, stima: true });
   doc += riga('EBITDA', d.ebitda, { forte: true });
@@ -864,41 +872,118 @@ function budAnnoCambia(a) { _budAnno = Number(a); caricaBudget(); }
 function _budRender() {
   var box = document.getElementById('and-vista') || document.getElementById('and-budget');
   if (!box) return;
-  var inp = 'width:110px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right;font-family:var(--font-mono)';
+  // v20260804e — maschera rifatta come chiesto: codici del commercialista
+  // accanto a ogni voce, intestazioni centrate, l'importo ANNUO piu grande
+  // dei trimestrali (e lui il dato che si scrive), la percentuale sul
+  // totale costi, e sotto il confronto con l'anno prima preso dal bilancio.
+  var inpA = 'width:132px;padding:8px 10px;border:0.5px solid #A9C9EC;border-radius:7px;background:var(--bg);color:var(--text);font-size:15px;font-weight:700;text-align:right;font-family:var(--font-mono)';
+  var inpQ = 'width:104px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;text-align:right;font-family:var(--font-mono)';
+  var codici = { personale: '67', servizi: '63', godimento_beni: '65', oneri_diversi: '69',
+                 ammortamenti: '68', oneri_finanziari: '85', proventi_finanziari: '81' };
+
+  var totA = 0;
+  _bud.forEach(function (b) { if (b.voce !== 'proventi_finanziari') totA += Number(b.annuo || 0); });
+
   var h = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
   h += '<span style="font-size:12px;color:var(--text-muted)">Costi dell\'anno</span>';
   h += '<input type="number" value="' + _budAnno + '" onchange="budAnnoCambia(this.value)" style="width:88px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)">';
   h += '<span style="margin-left:auto"><button onclick="budSalva()" class="btn-primary" style="font-size:12px;padding:8px 16px">&#128190; Salva</button></span>';
   h += '</div>';
-  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Scrivi l\'importo annuo: i trimestri si dividono da soli. '
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Scrivi l\'importo <strong>annuo</strong>: i trimestri si dividono da soli. '
      + 'Se correggi un singolo trimestre, quella voce non si ridivide piu.</div>';
 
-  h += '<div class="card" style="padding:14px"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">';
-  h += '<tr style="color:var(--text-muted);text-align:right">'
-     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Voce</th>'
-     + '<th style="padding:6px 8px;font-weight:500">Annuo</th>'
-     + '<th style="padding:6px 8px;font-weight:500">Q1</th><th style="padding:6px 8px;font-weight:500">Q2</th>'
-     + '<th style="padding:6px 8px;font-weight:500">Q3</th><th style="padding:6px 8px;font-weight:500">Q4</th>'
-     + '<th style="padding:6px 8px;font-weight:500"></th></tr>';
+  h += '<div style="background:#fff;border:0.5px solid var(--border);border-radius:10px;overflow:hidden">';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;color:#222;table-layout:fixed">';
+  h += '<tr style="background:#f7f7f5;color:#666;font-size:10.5px;letter-spacing:0.4px">'
+     + '<th style="width:56px;padding:9px 8px;text-align:center">COD.</th>'
+     + '<th style="padding:9px 8px;text-align:left">VOCE</th>'
+     + '<th style="width:150px;padding:9px 10px;text-align:center">ANNUO</th>'
+     + '<th style="width:120px;padding:9px 8px;text-align:center">Q1</th>'
+     + '<th style="width:120px;padding:9px 8px;text-align:center">Q2</th>'
+     + '<th style="width:120px;padding:9px 8px;text-align:center">Q3</th>'
+     + '<th style="width:120px;padding:9px 8px;text-align:center">Q4</th>'
+     + '<th style="width:76px;padding:9px 8px;text-align:center">% TOT.</th></tr>';
+
   var tot = { annuo: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
   _bud.forEach(function (b, i) {
     ['annuo', 'q1', 'q2', 'q3', 'q4'].forEach(function (k) { tot[k] += Number(b[k] || 0); });
-    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
-      + '<td style="text-align:left;padding:7px 8px">' + b.label + '</td>'
-      + '<td style="padding:7px 8px"><input type="number" step="0.01" value="' + b.annuo + '" oninput="_budAnnuo(' + i + ',this.value)" style="' + inp + ';border-color:#A9C9EC"></td>';
+    var quota = (totA && b.voce !== 'proventi_finanziari') ? Number(b.annuo || 0) / totA * 100 : null;
+    h += '<tr style="background:' + (i % 2 ? '#FAFAF8' : '#fff') + '">'
+      + '<td style="padding:8px;text-align:center;font-size:10.5px;color:#999;font-family:var(--font-mono)">' + (codici[b.voce] || '') + '</td>'
+      + '<td style="padding:8px;text-align:left">' + b.label + (b.override ? ' <span style="font-size:10px;color:#854F0B">a mano</span>' : '') + '</td>'
+      + '<td style="padding:8px 10px;text-align:center"><input type="number" step="0.01" value="' + b.annuo + '" oninput="_budAnnuo(' + i + ',this.value)" style="' + inpA + '"></td>';
     ['q1', 'q2', 'q3', 'q4'].forEach(function (k) {
-      h += '<td style="padding:7px 8px"><input type="number" step="0.01" value="' + b[k] + '" oninput="_budTrim(' + i + ',\'' + k + '\',this.value)" style="' + inp + ';width:96px"></td>';
+      h += '<td style="padding:8px;text-align:center"><input type="number" step="0.01" value="' + b[k] + '" oninput="_budTrim(' + i + ',\'' + k + '\',this.value)" style="' + inpQ + '"></td>';
     });
-    h += '<td style="padding:7px 8px;text-align:left;font-size:10.5px;color:#854F0B">' + (b.override ? 'a mano' : '') + '</td></tr>';
+    h += '<td style="padding:8px;text-align:center;font-family:var(--font-mono);color:#666">'
+       + (quota === null ? '<span style="opacity:0.4">\u2014</span>' : _andNum(quota, 1) + '%') + '</td></tr>';
   });
-  h += '<tr style="border-top:0.5px solid var(--border);background:var(--bg-kpi);text-align:right">'
-    + '<td style="text-align:left;padding:9px 8px;font-weight:700">Totale</td>'
-    + '<td style="padding:9px 8px;font-family:var(--font-mono);font-weight:700">' + _andNum(tot.annuo, 2) + '</td>';
+  h += '<tr style="background:#0B2545;color:#fff">'
+    + '<td style="padding:11px 8px"></td>'
+    + '<td style="padding:11px 8px;text-align:left;font-weight:700">TOTALE</td>'
+    + '<td style="padding:11px 10px;text-align:center;font-family:var(--font-mono);font-weight:700;font-size:15px;color:#fff">' + _andNum(tot.annuo, 2) + '</td>';
   ['q1', 'q2', 'q3', 'q4'].forEach(function (k) {
-    h += '<td style="padding:9px 8px;font-family:var(--font-mono);font-weight:700">' + _andNum(tot[k], 2) + '</td>';
+    h += '<td style="padding:11px 8px;text-align:center;font-family:var(--font-mono);font-weight:700;color:#fff">' + _andNum(tot[k], 2) + '</td>';
   });
-  h += '<td></td></tr></table></div></div>';
+  h += '<td style="padding:11px 8px;text-align:center;color:#fff">100%</td></tr>';
+  h += '</table></div>';
+
+  h += '<div id="bud-confronto" style="margin-top:14px"></div>';
   box.innerHTML = h;
+  _budConfronto();
+}
+
+// Sotto la tabella: quanto sono cambiati i costi rispetto all'anno prima,
+// preso dal bilancio depositato. Rosso se crescono, verde se scendono.
+async function _budConfronto() {
+  var box = document.getElementById('bud-confronto');
+  if (!box) return;
+  try {
+    if (!_cfrBilanci) {
+      var rb = await sb.from('bilanci_annuali').select('*');
+      _cfrBilanci = {};
+      (rb.data || []).forEach(function (b) { _cfrBilanci[b.esercizio] = b; });
+    }
+    var bil = _cfrBilanci[_budAnno - 1];
+    if (!bil) { box.innerHTML = ''; return; }
+    var mappa = { personale: 'personale', servizi: 'servizi', godimento_beni: 'godimento_beni',
+                  oneri_diversi: 'oneri_diversi', ammortamenti: 'ammortamenti',
+                  oneri_finanziari: 'oneri_finanziari' };
+    var righe = _bud.filter(function (b) { return mappa[b.voce]; }).map(function (b) {
+      return { l: b.label, a: Number(b.annuo || 0), b: Number(bil[mappa[b.voce]] || 0) };
+    });
+    var maxV = Math.max.apply(null, righe.map(function (r) { return Math.max(r.a, r.b); })) || 1;
+
+    var h = '<div class="card" style="padding:14px">';
+    h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Costi ' + _budAnno + ' contro ' + (_budAnno - 1) + '</div>';
+    h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">L\'anno scorso viene dal bilancio depositato. Rosso se il costo cresce, verde se scende.</div>';
+    righe.forEach(function (r) {
+      var d = r.a - r.b;
+      var pct = r.b ? d / r.b * 100 : null;
+      var col = Math.abs(d) < 0.5 ? 'var(--text-muted)' : (d > 0 ? '#A32D2D' : '#27500A');
+      h += '<div style="margin-bottom:11px">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:3px">'
+        + '<span>' + r.l + '</span>'
+        + '<span style="font-family:var(--font-mono);color:' + col + ';font-weight:600">'
+        + (Math.abs(d) < 0.5 ? '=' : (d > 0 ? '\u25b2' : '\u25bc')) + ' ' + (d >= 0 ? '+' : '') + _andNum(d, 2)
+        + (pct !== null ? '  <span style="font-size:11px">' + (pct >= 0 ? '+' : '') + _andNum(pct, 1) + '%</span>' : '') + '</span></div>';
+      h += '<div style="display:flex;gap:4px;align-items:center">';
+      h += '<span style="font-size:10px;color:var(--text-muted);width:38px">' + _budAnno + '</span>';
+      h += '<div style="flex:1;height:11px;background:var(--bg-kpi);border-radius:3px;overflow:hidden">'
+        + '<div style="height:100%;width:' + (r.a / maxV * 100).toFixed(1) + '%;background:#185FA5"></div></div>';
+      h += '<span style="font-size:11px;font-family:var(--font-mono);width:96px;text-align:right">' + _andNum(r.a, 0) + '</span></div>';
+      h += '<div style="display:flex;gap:4px;align-items:center;margin-top:2px">';
+      h += '<span style="font-size:10px;color:var(--text-muted);width:38px">' + (_budAnno - 1) + '</span>';
+      h += '<div style="flex:1;height:11px;background:var(--bg-kpi);border-radius:3px;overflow:hidden">'
+        + '<div style="height:100%;width:' + (r.b / maxV * 100).toFixed(1) + '%;background:#8E8CA8"></div></div>';
+      h += '<span style="font-size:11px;font-family:var(--font-mono);width:96px;text-align:right">' + _andNum(r.b, 0) + '</span></div>';
+      h += '</div>';
+    });
+    h += '</div>';
+    box.innerHTML = h;
+  } catch (e) {
+    box.innerHTML = '';
+  }
 }
 
 function _budAnnuo(i, v) {
