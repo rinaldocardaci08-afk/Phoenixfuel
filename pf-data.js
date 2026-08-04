@@ -1,4 +1,5 @@
 // VERSIONE 26/05/2026 d - FIX BUG LIMIT 1000 esteso a branch stazione_oppido
+// v20260804a — le giacenze si calcolano tutte in parallelo, non in fila
 // v20260803a — query madre della VALORIZZAZIONE giacenze: getCmpAllaData e
 //              getValoreGiacenze, che leggono il sistema esistente senza
 //              ricalcolare niente
@@ -416,21 +417,27 @@ window.pfData = {
       return a.sede === b.sede ? (a.prodotto < b.prodotto ? -1 : 1) : (a.sede < b.sede ? -1 : 1);
     });
 
-    var righe = [];
-    for (var i = 0; i < coppie.length; i++) {
-      var c = coppie[i];
-      var g = await window.pfData.getGiacenzaAllaData(c.sede, c.prodotto, data);
-      var v = await window.pfData.getCmpAllaData(c.sede, c.prodotto, data);
+    // v20260804a — TUTTE INSIEME, non una dopo l'altra.
+    // getGiacenzaAllaData fa ~8 query per coppia sede/prodotto: con 7
+    // coppie in fila diventavano oltre cinquanta viaggi in sequenza, e
+    // l'attesa era la somma di tutte. In parallelo e l'attesa della piu
+    // lenta.
+    var righe = await Promise.all(coppie.map(async function (c) {
+      var r = await Promise.all([
+        window.pfData.getGiacenzaAllaData(c.sede, c.prodotto, data),
+        window.pfData.getCmpAllaData(c.sede, c.prodotto, data)
+      ]);
+      var g = r[0], v = r[1];
       var litri = Number(g.calcolata || 0);
-      righe.push({
+      return {
         sede: c.sede, prodotto: c.prodotto,
         litri: litri,
         cmp: v.cmp,
         valore: (v.cmp !== null) ? Math.round(litri * v.cmp * 100) / 100 : null,
         dataCmp: v.dataCmp, fonteCmp: v.fonte,
         rettifiche: g.rettifiche, fonteIniziale: g.fonteIniziale
-      });
-    }
+      };
+    }));
     return { data: data, righe: righe };
   }
 

@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804a — via i colli di bottiglia: giacenze e budget tenuti in
+//              memoria per data e per anno, e le due date in parallelo
 // v20260803g — anche i due semestri accanto ai trimestri
 // v20260803f — un calcolo solo per anno tenuto in memoria, ricavi con lo
 //              stesso algoritmo di Vendite, e maschera dei costi
@@ -326,8 +328,41 @@ function _ceGiornoPrima(iso) {
 // E soprattutto: ricavi ingrosso e dettaglio sono calcolati con LO
 // STESSO ALGORITMO della sezione Vendite (pf-anagrafica.js), prezzo
 // diverso in giornata compreso. Cosi i due numeri non possono divergere.
-var _ceCache = {};        // anno -> { mesi:[12], acquisti:[12] }
-function ceSvuotaCache() { _ceCache = {}; }
+var _ceCache = {};        // anno -> { mesi:[12] }
+var _ceCacheGiac = {};    // data -> valorizzazione giacenze
+var _ceCacheBud = {};     // anno -> righe di budget
+function ceSvuotaCache() { _ceCache = {}; _ceCacheGiac = {}; _ceCacheBud = {}; }
+
+// La chiusura di un trimestre e l'apertura del successivo sono LA STESSA
+// data: calcolandola una volta sola, passare da Q1 a Q2 non ricalcola
+// niente. E le giacenze sono la parte lenta.
+async function _ceGiacenze(data) {
+  if (!_ceCacheGiac[data]) _ceCacheGiac[data] = await window.pfData.getValoreGiacenze(data);
+  return _ceCacheGiac[data];
+}
+
+// v20260804a — Le cinque date di confine dell'anno (chiusura precedente e
+// fine di ogni trimestre) si calcolano TUTTE INSIEME la prima volta.
+// Cosi qualunque trimestre, semestre o anno si apra dopo, le giacenze
+// sono gia pronte e non si aspetta piu nulla.
+async function _ceGiacenzeAnno(anno) {
+  var date = [(anno - 1) + '-12-31', anno + '-03-31', anno + '-06-30',
+              anno + '-09-30', anno + '-12-31'];
+  var mancanti = date.filter(function (d) { return !_ceCacheGiac[d]; });
+  if (!mancanti.length) return;
+  var res = await Promise.all(mancanti.map(function (d) {
+    return window.pfData.getValoreGiacenze(d);
+  }));
+  mancanti.forEach(function (d, i) { _ceCacheGiac[d] = res[i]; });
+}
+
+async function _ceBudget(anno) {
+  if (!_ceCacheBud[anno]) {
+    var rb = await sb.from('budget_costi_annuali').select('*').eq('anno', anno);
+    _ceCacheBud[anno] = rb.data || [];
+  }
+  return _ceCacheBud[anno];
+}
 
 async function _cePagina(tab, campi, da, a, extra) {
   var out = [], from = 0;
@@ -436,6 +471,7 @@ async function _ceCalcola(q, anno) {
   var primaDelDal = _ceGiornoPrima(per.dal);
 
   var cache = await _ceCaricaAnno(anno);
+  await _ceGiacenzeAnno(anno);
   var fin = _ceFinestra(q);
   var da = fin.da, quanti = fin.quanti;
   var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0, acquisti: 0, litriAcq: 0 };
@@ -445,15 +481,16 @@ async function _ceCalcola(q, anno) {
   }
 
   var bud = {};
-  var rb = await sb.from('budget_costi_annuali').select('*').eq('anno', anno);
+  var righeBud = await _ceBudget(anno);
   var trim = _ceTrimestriDi(q);
-  (rb.data || []).forEach(function (b) {
+  righeBud.forEach(function (b) {
     bud[b.voce] = (q === 'anno') ? Number(b.annuo || 0)
       : trim.reduce(function (a, t) { return a + Number(b['q' + t] || 0); }, 0);
   });
 
-  var apertura = await window.pfData.getValoreGiacenze(primaDelDal);
-  var chiusura = await window.pfData.getValoreGiacenze(per.al);
+  // le due date insieme, non in fila
+  var due = await Promise.all([_ceGiacenze(primaDelDal), _ceGiacenze(per.al)]);
+  var apertura = due[0], chiusura = due[1];
   var somma = function (g) { return (g.righe || []).reduce(function (a, x) { return a + (x.valore || 0); }, 0); };
   var rimIniziale = somma(apertura), rimFinale = somma(chiusura);
 
@@ -481,7 +518,7 @@ async function _ceCalcola(q, anno) {
     budget: bud, costiFissi: costiFissi,
     ebitda: ebitda, ammortamenti: amm, ebit: ebit,
     oneriFin: onFin, proventiFin: provFin, risultato: risultato,
-    budgetMancante: !(rb.data || []).length,
+    budgetMancante: !righeBud.length,
     mesi: cache.mesi
   };
 }
