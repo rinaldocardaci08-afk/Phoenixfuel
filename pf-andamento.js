@@ -1,4 +1,5 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260803g — anche i due semestri accanto ai trimestri
 // v20260803f — un calcolo solo per anno tenuto in memoria, ricavi con lo
 //              stesso algoritmo di Vendite, e maschera dei costi
 // v20260803e — le DUE VISTE del documento: A istituzionale e B operativo,
@@ -277,8 +278,35 @@ var _CE_VOCI_BUDGET = [
 ];
 
 function _ceTrimestre(q, anno) {
-  var m = { 1: ['01-01', '03-31'], 2: ['04-01', '06-30'], 3: ['07-01', '09-30'], 4: ['10-01', '12-31'] }[q];
+  // v20260803g — anche i due semestri: H1 e H2. Costano nulla, perche i
+  // periodi sono somme di mesi gia calcolati, e servono per confrontare
+  // col totale di Vendite, che si legge al 30 giugno.
+  var m = { 1: ['01-01', '03-31'], 2: ['04-01', '06-30'], 3: ['07-01', '09-30'], 4: ['10-01', '12-31'],
+            h1: ['01-01', '06-30'], h2: ['07-01', '12-31'] }[q];
   return { dal: anno + '-' + m[0], al: anno + '-' + m[1] };
+}
+
+// Da quale mese parte il periodo e quanti mesi prende.
+function _ceFinestra(q) {
+  if (q === 'anno') return { da: 0, quanti: 12 };
+  if (q === 'h1') return { da: 0, quanti: 6 };
+  if (q === 'h2') return { da: 6, quanti: 6 };
+  return { da: (q - 1) * 3, quanti: 3 };
+}
+
+// I trimestri di budget che compongono il periodo.
+function _ceTrimestriDi(q) {
+  if (q === 'anno') return [1, 2, 3, 4];
+  if (q === 'h1') return [1, 2];
+  if (q === 'h2') return [3, 4];
+  return [q];
+}
+
+function _ceEtichetta(q, anno) {
+  if (q === 'anno') return 'Esercizio ' + anno;
+  if (q === 'h1') return 'Primo semestre ' + anno;
+  if (q === 'h2') return 'Secondo semestre ' + anno;
+  return 'Trimestre Q' + q + ' ' + anno;
 }
 
 // Giorno precedente, per la rimanenza di apertura: la giacenza al 31/03
@@ -408,8 +436,8 @@ async function _ceCalcola(q, anno) {
   var primaDelDal = _ceGiornoPrima(per.dal);
 
   var cache = await _ceCaricaAnno(anno);
-  var da = (q === 'anno') ? 0 : (q - 1) * 3;
-  var quanti = (q === 'anno') ? 12 : 3;
+  var fin = _ceFinestra(q);
+  var da = fin.da, quanti = fin.quanti;
   var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0, acquisti: 0, litriAcq: 0 };
   for (var i = da; i < da + quanti; i++) {
     var m = cache.mesi[i];
@@ -418,8 +446,10 @@ async function _ceCalcola(q, anno) {
 
   var bud = {};
   var rb = await sb.from('budget_costi_annuali').select('*').eq('anno', anno);
+  var trim = _ceTrimestriDi(q);
   (rb.data || []).forEach(function (b) {
-    bud[b.voce] = (q === 'anno') ? Number(b.annuo || 0) : Number(b['q' + q] || 0);
+    bud[b.voce] = (q === 'anno') ? Number(b.annuo || 0)
+      : trim.reduce(function (a, t) { return a + Number(b['q' + t] || 0); }, 0);
   });
 
   var apertura = await window.pfData.getValoreGiacenze(primaDelDal);
@@ -536,9 +566,11 @@ function _ceBarra(d) {
     h += '<button onclick="ceVai(' + q + ')" style="font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:600;'
       + (on ? 'background:' + C_CE.navy + ';color:#fff;border:0.5px solid ' + C_CE.navy : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">Q' + q + '</button>';
   });
-  var onA = _ceQ === 'anno';
-  h += '<button onclick="ceVai(\'anno\')" style="font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:600;'
-    + (onA ? 'background:' + C_CE.navy + ';color:#fff;border:0.5px solid ' + C_CE.navy : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">Totale ' + d.anno + '</button>';
+  [['h1', '1\u00b0 semestre'], ['h2', '2\u00b0 semestre'], ['anno', 'Totale ' + d.anno]].forEach(function (x) {
+    var on = _ceQ === x[0];
+    h += '<button onclick="ceVai(\'' + x[0] + '\')" style="font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:600;'
+      + (on ? 'background:' + C_CE.navy + ';color:#fff;border:0.5px solid ' + C_CE.navy : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">' + x[1] + '</button>';
+  });
   h += '<input type="number" value="' + d.anno + '" onchange="ceAnnoCambia(this.value)" style="width:82px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono);margin-left:6px">';
   h += '<span style="display:flex;gap:3px;background:var(--bg-kpi);border-radius:8px;padding:3px;margin-left:8px">';
   [['A', 'A \u2014 Istituzionale'], ['B', 'B \u2014 Operativo']].forEach(function (x) {
@@ -588,7 +620,7 @@ function _ceStileA(d) {
   h += '<div style="background:' + C_CE.navy + ';color:#fff;padding:16px 18px">'
      + '<div style="font-size:16px;font-weight:700;letter-spacing:0.5px">PHOENIX FUEL S.R.L.</div>'
      + '<div style="font-size:12px;opacity:0.85;margin-top:2px">'
-     + (d.q === 'anno' ? 'Esercizio ' + d.anno : 'Trimestre Q' + d.q + ' ' + d.anno)
+     + _ceEtichetta(d.q, d.anno)
      + ' \u00b7 dal ' + _andIt(d.periodo.dal) + ' al ' + _andIt(d.periodo.al) + '</div></div>';
   h += '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#222">';
   h += '<tr style="background:#f7f7f5;color:#666;font-size:10.5px;text-transform:uppercase;letter-spacing:0.4px">'
@@ -680,7 +712,7 @@ function ceStampa() {
       + l + (o.stima ? ' *' : '') + '</td><td>' + _andNum(v, 2) + '</td><td>'
       + (d.ricavi ? _andNum(v / d.ricavi * 100, 2) + '%' : '') + '</td></tr>';
   };
-  var titolo = (d.q === 'anno' ? 'Esercizio ' + d.anno : 'Trimestre Q' + d.q + ' ' + d.anno);
+  var titolo = _ceEtichetta(d.q, d.anno);
   var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Conto economico ' + titolo + '</title><style>'
     + 'body{font-family:Calibri,Arial,sans-serif;color:#222;margin:2cm;font-size:12.5px}'
     + 'h1{font-size:19px;margin:0 0 2px}.sub{color:#666;font-size:12px;margin-bottom:20px}'
