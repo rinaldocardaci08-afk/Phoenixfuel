@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804d — tre viste dentro Trimestrali (conto economico, budget costi,
+//              confronto anni) e nessuna nuova linguetta in cima
 // v20260804c — trasporti terzisti come voce 5.1 dentro Servizi: fuori dal
 //              primo margine, dentro il secondo, e contati una volta sola
 // v20260804b — acquisti al solo costo prodotto, come nel Report acquisti:
@@ -540,10 +542,8 @@ async function _ceCalcola(q, anno) {
 
 // v20260803c — I trimestrali stanno in una linguetta LORO: mescolarli
 // alle giacenze confondeva due cose diverse.
-async function caricaTrimestrali() { await _ceRender(); }
-
 async function _ceRender() {
-  var box = document.getElementById('and-ce');
+  var box = document.getElementById('and-vista') || document.getElementById('and-ce');
   if (!box) return;
   if (_ceQ === null) {
     var m = new Date().getMonth();
@@ -844,7 +844,7 @@ var _BUD_VOCI = [
 ];
 
 async function caricaBudget() {
-  var box = document.getElementById('and-budget');
+  var box = document.getElementById('and-vista') || document.getElementById('and-budget');
   if (!box) return;
   box.innerHTML = '<div class="loading" style="padding:24px">Carico i costi...</div>';
   var r = await sb.from('budget_costi_annuali').select('*').eq('anno', _budAnno);
@@ -862,7 +862,7 @@ async function caricaBudget() {
 function budAnnoCambia(a) { _budAnno = Number(a); caricaBudget(); }
 
 function _budRender() {
-  var box = document.getElementById('and-budget');
+  var box = document.getElementById('and-vista') || document.getElementById('and-budget');
   if (!box) return;
   var inp = 'width:110px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right;font-family:var(--font-mono)';
   var h = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
@@ -938,4 +938,176 @@ async function budSalva() {
   } catch (e) {
     toast('Errore: ' + ((e && e.message) || e));
   }
+}
+
+// ═══ v20260804d · TRE VISTE DENTRO TRIMESTRALI ═════════════════════
+// Niente altre linguette in cima: conto economico, budget costi e
+// confronto anni stanno tutti dentro Trimestrali.
+var _trimVista = 'ce';
+
+// I codici sono quelli del piano dei conti del commercialista, presi
+// dalla sua situazione contabile: 61 costi della produzione, 610107
+// acquisti carburanti, 610143 spese di trasporto, 63 servizi, 65
+// godimento beni di terzi. Gli altri sono allineati alla stessa logica.
+var CE_CODICI = {
+  ricavi: '51', ricaviIngrosso: '510101', ricaviDettaglio: '510107',
+  costiProd: '61', acquisti: '610107', trasporti: '610143',
+  servizi: '63', godimento: '65', personale: '67',
+  ammortamenti: '68', oneriDiversi: '69',
+  oneriFin: '85', proventiFin: '81', imposte: '90'
+};
+
+function trimVista(v) {
+  _trimVista = v;
+  if (v === 'budget') caricaBudget();
+  else if (v === 'confronto') _cfrRender();
+  else _ceRender();
+}
+
+function _trimBarra() {
+  var voci = [['ce', '\ud83d\udcca Conto economico'], ['budget', '\u2699\ufe0f Budget costi'], ['confronto', '\ud83d\udcc8 Confronto anni']];
+  var h = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">';
+  voci.forEach(function (x) {
+    var on = _trimVista === x[0];
+    h += '<button onclick="trimVista(\'' + x[0] + '\')" style="font-size:12.5px;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600;'
+      + (on ? 'background:#0B2545;color:#fff;border:0.5px solid #0B2545' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">' + x[1] + '</button>';
+  });
+  return h + '</div>';
+}
+
+async function caricaTrimestrali() {
+  var box = document.getElementById('and-ce');
+  if (!box) return;
+  box.innerHTML = _trimBarra() + '<div id="and-vista"><div class="loading" style="padding:24px">Caricamento...</div></div>';
+  trimVista(_trimVista);
+}
+
+// ═══ CONFRONTO ANNI ════════════════════════════════════════════════
+// Il 2026 arriva dai movimenti veri del programma. Il 2025 NO: nel
+// programma e incompleto e darebbe cali inesistenti. Si prende dal
+// BILANCIO depositato (`bilanci_annuali`) e si ripartisce — diviso 4
+// per un trimestre, diviso 2 per un semestre — con la nota STIMA
+// accanto. E un documento interno per capire la direzione, non da
+// mandare fuori. Dall'anno prossimo il confronto sara sui dati veri di
+// entrambi gli anni.
+var _cfrQ = null;
+var _cfrBilanci = null;
+
+function cfrVai(q) { _cfrQ = q; _cfrRender(); }
+
+async function _cfrRender() {
+  var box = document.getElementById('and-vista');
+  if (!box) return;
+  if (_cfrQ === null) _cfrQ = Math.floor(new Date().getMonth() / 3) + 1;
+  box.innerHTML = '<div class="loading" style="padding:24px">Confronto in corso...</div>';
+  try {
+    var anno = _ceAnno;
+    var d = await _ceCalcola(_cfrQ, anno);
+    if (!_cfrBilanci) {
+      var rb = await sb.from('bilanci_annuali').select('*');
+      _cfrBilanci = {};
+      (rb.data || []).forEach(function (b) { _cfrBilanci[b.esercizio] = b; });
+    }
+    box.innerHTML = _cfrHtml(d, _cfrBilanci[anno - 1], anno);
+  } catch (e) {
+    box.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Non riesco a fare il confronto: '
+      + esc((e && e.message) || String(e)) + '</div>';
+  }
+}
+
+function _cfrQuota(q) {
+  if (q === 'anno') return 1;
+  if (q === 'h1' || q === 'h2') return 2;
+  return 4;
+}
+
+function _cfrHtml(d, bil, anno) {
+  var div = _cfrQuota(_cfrQ);
+  var p = function (v) { return (Number(v || 0)) / div; };
+  var ebitdaBil = null;
+  if (bil) {
+    var costiBil = p(bil.costo_merci) + p(bil.servizi) + p(bil.personale) + p(bil.godimento_beni) + p(bil.oneri_diversi);
+    ebitdaBil = p(bil.fatturato) - costiBil;
+  }
+
+  var righe = bil ? [
+    { cod: CE_CODICI.ricavi, l: 'VALORE DELLA PRODUZIONE', a: d.ricavi, b: p(bil.fatturato), buono: 1, banda: 'ricavi' },
+    { cod: CE_CODICI.ricaviIngrosso, l: 'Ricavi ingrosso', a: d.ricaviIngrosso, b: null, sotto: true },
+    { cod: CE_CODICI.ricaviDettaglio, l: 'Ricavi stazione Oppido', a: d.ricaviDettaglio, b: null, sotto: true },
+    { cod: CE_CODICI.costiProd, l: 'COSTI DELLA PRODUZIONE', a: d.costoVenduto + d.trasporti, b: p(bil.costo_merci), buono: -1, banda: 'costi' },
+    { cod: CE_CODICI.acquisti, l: 'Acquisti carburanti', a: d.acquisti, b: null, sotto: true },
+    { cod: CE_CODICI.trasporti, l: 'Spese di trasporto', a: d.trasporti, b: null, sotto: true, dai: true },
+    { cod: 'R1', l: 'MARGINE LORDO', a: d.margineLordo, b: p(bil.fatturato) - p(bil.costo_merci), buono: 1, banda: 'margine' },
+    { cod: CE_CODICI.personale, l: 'Per il personale', a: d.budget.personale || 0, b: p(bil.personale), buono: -1 },
+    { cod: CE_CODICI.servizi, l: 'Per servizi', a: d.servizi, b: p(bil.servizi), buono: -1 },
+    { cod: CE_CODICI.godimento, l: 'Per godimento beni di terzi', a: d.budget.godimento_beni || 0, b: p(bil.godimento_beni), buono: -1 },
+    { cod: 'R2', l: 'EBITDA', a: d.ebitda, b: ebitdaBil, buono: 1, banda: 'margine' },
+    { cod: CE_CODICI.ammortamenti, l: 'Ammortamenti', a: d.ammortamenti, b: p(bil.ammortamenti), buono: -1 },
+    { cod: CE_CODICI.oneriFin, l: 'Oneri finanziari', a: d.oneriFin, b: p(bil.oneri_finanziari), buono: -1 },
+    { cod: '\u2605', l: 'RISULTATO ANTE IMPOSTE', a: d.risultato, b: p(bil.utile_netto), buono: 1, banda: 'finale' }
+  ] : [];
+
+  var h = '';
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px">';
+  [[1, 'Q1'], [2, 'Q2'], [3, 'Q3'], [4, 'Q4'], ['h1', '1\u00b0 sem.'], ['h2', '2\u00b0 sem.'], ['anno', 'Anno']].forEach(function (x) {
+    var on = String(_cfrQ) === String(x[0]);
+    h += '<button onclick="cfrVai(' + (typeof x[0] === 'number' ? x[0] : '\'' + x[0] + '\'') + ')" style="font-size:12px;padding:8px 15px;border-radius:7px;cursor:pointer;font-weight:600;'
+      + (on ? 'background:#0B2545;color:#fff;border:0.5px solid #0B2545' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">' + x[1] + '</button>';
+  });
+  h += '<span style="margin-left:auto;font-size:11.5px;color:var(--text-muted)">' + _andIt(d.periodo.dal) + ' \u2014 ' + _andIt(d.periodo.al) + '</span>';
+  h += '</div>';
+
+  if (!bil) {
+    return h + '<div style="padding:20px;background:' + C_CE.goldL + ';border-radius:10px;color:' + C_CE.goldT + ';font-size:13px">'
+      + 'Manca il bilancio ' + (anno - 1) + ' in archivio: senza quello non c\'e niente da confrontare.</div>';
+  }
+
+  var bande = { ricavi: { bg: C_CE.bluL, tx: C_CE.navy }, costi: { bg: '#FCEBEB', tx: '#8B2020' },
+                margine: { bg: C_CE.verdeL, tx: C_CE.verdeT }, finale: { bg: C_CE.navy, tx: '#fff' } };
+
+  h += '<div style="background:#fff;border:0.5px solid var(--border);border-radius:10px;overflow:hidden">';
+  h += '<div style="background:' + C_CE.navy + ';color:#fff;padding:13px 16px">'
+     + '<div style="font-size:15px;font-weight:700;letter-spacing:0.5px">PHOENIX FUEL S.R.L. \u2014 confronto ' + _ceEtichetta(_cfrQ, anno).toLowerCase() + '</div>'
+     + '<div style="font-size:11.5px;opacity:0.85;margin-top:2px">' + anno + ' dai movimenti \u00b7 ' + (anno - 1)
+     + ' dal bilancio depositato' + (div > 1 ? ', ripartito in ' + div + ' (stima)' : '') + '</div></div>';
+
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;color:#222;table-layout:fixed">';
+  h += '<tr style="background:#f7f7f5;color:#666;font-size:10.5px">'
+     + '<th style="width:72px;padding:7px 8px;text-align:left">CODICE</th>'
+     + '<th style="padding:7px 8px;text-align:left">DESCRIZIONE</th>'
+     + '<th style="width:120px;padding:7px 10px;text-align:right">' + anno + '</th>'
+     + '<th style="width:120px;padding:7px 10px;text-align:right">' + (anno - 1) + '</th>'
+     + '<th style="width:158px;padding:7px 10px;text-align:right">SCOSTAMENTO</th></tr>';
+
+  var alt = 0;
+  righe.forEach(function (r) {
+    var ban = r.banda ? bande[r.banda] : null;
+    var delta = (r.b === null || r.b === undefined) ? null : r.a - r.b;
+    var pct = (delta !== null && r.b) ? delta / Math.abs(r.b) * 100 : null;
+    // il verde e quando fa BENE: ricavi che salgono, costi che scendono
+    var col = 'var(--text-muted)';
+    if (delta !== null && Math.abs(delta) > 0.005) {
+      var meglio = (delta * (r.buono || 1)) > 0;
+      col = meglio ? '#27500A' : '#A32D2D';
+    }
+    var frec = (delta === null) ? '' : (delta > 0 ? '\u25b2' : (delta < 0 ? '\u25bc' : ''));
+    alt++;
+    h += '<tr style="background:' + (ban ? ban.bg : (alt % 2 ? '#FAFAF8' : '#fff')) + ';color:' + (ban ? ban.tx : '#333') + '">';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 8px;font-size:10.5px;' + (ban ? 'font-weight:700' : 'color:#999') + '">' + r.cod + '</td>';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 8px;' + (ban ? 'font-weight:700' : 'padding-left:22px;color:' + (r.sotto ? '#666' : '#333')) + '">'
+       + r.l + (r.dai ? ' <span style="font-size:10px;color:#1D9E75">\u00b7 dai carichi</span>' : '') + '</td>';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono)' + (ban ? ';font-weight:700' : '') + '">' + _andNum(r.a, 2) + '</td>';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono)">'
+       + (r.b === null ? '<span style="opacity:0.4">\u2014</span>' : _andNum(r.b, 2) + (div > 1 ? ' <span style="font-size:9.5px;opacity:0.6">stima</span>' : '')) + '</td>';
+    h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + (r.banda === 'finale' && col === '#27500A' ? '#7BE0B0' : col) + (ban ? ';font-weight:700' : '') + '">'
+       + (delta === null ? '' : frec + ' ' + (delta >= 0 ? '+' : '') + _andNum(delta, 2)
+          + (pct !== null ? '<div style="font-size:11px;font-weight:400">' + (pct >= 0 ? '+' : '') + _andNum(pct, 2) + '%</div>' : '')) + '</td>';
+    h += '</tr>';
+  });
+  h += '</table>';
+  h += '<div style="padding:10px 14px;background:#f7f7f5;font-size:10.5px;color:#666;border-top:1px solid #eee">'
+     + 'Sui <strong>ricavi</strong> il verde e crescita. Sui <strong>costi</strong> il verde e risparmio: rosso quando aumentano.'
+     + (div > 1 ? '<br>Il ' + (anno - 1) + ' viene dal bilancio annuale diviso ' + div + ': e una ripartizione uniforme, serve a leggere la direzione, non a chiudere un periodo.' : '')
+     + '</div></div>';
+  return h;
 }
