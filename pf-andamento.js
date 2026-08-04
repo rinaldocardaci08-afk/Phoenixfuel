@@ -1,4 +1,8 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804c — trasporti terzisti come voce 5.1 dentro Servizi: fuori dal
+//              primo margine, dentro il secondo, e contati una volta sola
+// v20260804b — acquisti al solo costo prodotto, come nel Report acquisti:
+//              il trasporto e un debito verso il vettore e ha una riga sua
 // v20260804a — via i colli di bottiglia: giacenze e budget tenuti in
 //              memoria per data e per anno, e le due date in parallelo
 // v20260803g — anche i due semestri accanto ai trimestri
@@ -441,18 +445,26 @@ async function _ceCaricaAnno(anno) {
   for (var m = 0; m < 12; m++) {
     var pref = anno + '-' + String(m + 1).padStart(2, '0');
     var x = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
-              acquisti: 0, litriAcq: 0, senzaPrezzo: 0 };
+              acquisti: 0, trasporti: 0, litriAcq: 0, nOrdiniAcq: 0, senzaPrezzo: 0 };
     allIng.forEach(function (o) {
       if (String(o.data).indexOf(pref) !== 0) return;
       var l = Number(o.litri || 0);
       x.ingLitri += l; x.ingFatt += _noIva(o) * l; x.ingMarg += Number(o.margine || 0) * l;
     });
+    // v20260804b — ACQUISTI COME NEL REPORT ACQUISTI.
+    // Regola scritta in pf-fornitore-analisi.js riga 20: il costo verso il
+    // fornitore e SOLO `costo_litro`; il `trasporto_litro` e un debito
+    // verso il VETTORE e si tiene separato. Sommandoli, i Trimestrali non
+    // potevano combaciare col Report acquisti.
+    // Il trasporto resta un costo dell'azienda, ma sta in una riga sua.
     allOrd.forEach(function (o) {
       if (String(o.data).indexOf(pref) !== 0) return;
       if (String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0) return;
       var l = Number(o.litri || 0);
-      x.acquisti += (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0)) * l;
+      x.acquisti += Number(o.costo_litro || 0) * l;
+      x.trasporti += Number(o.trasporto_litro || 0) * l;
       x.litriAcq += l;
+      x.nOrdiniAcq++;
     });
     Object.keys(dettPerGiorno).forEach(function (d) {
       if (d.indexOf(pref) !== 0) return;
@@ -474,7 +486,8 @@ async function _ceCalcola(q, anno) {
   await _ceGiacenzeAnno(anno);
   var fin = _ceFinestra(q);
   var da = fin.da, quanti = fin.quanti;
-  var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0, acquisti: 0, litriAcq: 0 };
+  var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
+              acquisti: 0, trasporti: 0, litriAcq: 0, nOrdiniAcq: 0 };
   for (var i = da; i < da + quanti; i++) {
     var m = cache.mesi[i];
     Object.keys(acc).forEach(function (k) { acc[k] += m[k]; });
@@ -498,7 +511,8 @@ async function _ceCalcola(q, anno) {
   var costoVenduto = acc.acquisti + rimIniziale - rimFinale;
   var margineLordo = ricavi - costoVenduto;
   var costiFissi = _CE_VOCI_BUDGET.reduce(function (a, v) { return a + (bud[v.id] || 0); }, 0);
-  var ebitda = margineLordo - costiFissi;
+  var servizi = (bud.servizi || 0) + acc.trasporti;   // 5.1 + 5.2
+  var ebitda = margineLordo - acc.trasporti - costiFissi;
   var amm = bud.ammortamenti || 0;
   var ebit = ebitda - amm;
   var onFin = bud.oneri_finanziari || 0;
@@ -513,7 +527,8 @@ async function _ceCalcola(q, anno) {
     ricaviIngrosso: acc.ingFatt, ricaviDettaglio: acc.dettInc, ricavi: ricavi,
     litriIngrosso: acc.ingLitri, litriDettaglio: acc.dettLitri,
     margineIngrosso: acc.ingMarg, senzaPrezzo: 0, litriAcquistati: acc.litriAcq,
-    acquisti: acc.acquisti, rimIniziale: rimIniziale, rimFinale: rimFinale,
+    acquisti: acc.acquisti, trasporti: acc.trasporti, servizi: servizi, nOrdiniAcq: acc.nOrdiniAcq,
+    rimIniziale: rimIniziale, rimFinale: rimFinale,
     costoVenduto: costoVenduto, margineLordo: margineLordo,
     budget: bud, costiFissi: costiFissi,
     ebitda: ebitda, ammortamenti: amm, ebit: ebit,
@@ -582,7 +597,15 @@ function _ceVoci(d) {
     { l: 'Costo del venduto', v: -d.costoVenduto, tipo: 'reale' },
     { cod: 'R1', l: 'MARGINE LORDO COMMERCIALE', v: d.margineLordo, pct: true, banda: 1 },
     { l: 'Personale', v: -(d.budget.personale || 0), tipo: 'stima' },
-    { l: 'Servizi', v: -(d.budget.servizi || 0), tipo: 'stima' },
+    // v20260804c — SERVIZI COME NEL BILANCIO DEL COMMERCIALISTA.
+    // I trasporti terzisti sono la voce 5.1 DENTRO i servizi, non un
+    // costo a se: restano cosi FUORI dal primo margine e pesano sul
+    // secondo. E il valore non e stimato — si calcola carico per carico
+    // dagli ordini, quindi il budget "servizi" va inteso al NETTO dei
+    // trasporti, altrimenti lo stesso costo verrebbe contato due volte.
+    { l: 'Servizi', v: -(d.servizi || 0), tipo: 'reale', gruppo: true },
+    { l: '5.1 Trasporti terzisti', v: -d.trasporti, tipo: 'reale', sotto: true },
+    { l: '5.2 Altri servizi', v: -(d.budget.servizi || 0), tipo: 'stima', sotto: true },
     { l: 'Godimento beni di terzi', v: -(d.budget.godimento_beni || 0), tipo: 'stima' },
     { l: 'Oneri diversi di gestione', v: -(d.budget.oneri_diversi || 0), tipo: 'stima' },
     { cod: 'R2', l: 'EBITDA', v: d.ebitda, pct: true, banda: 2 },
@@ -623,7 +646,7 @@ function _ceBarra(d) {
 
 function _ceNote(d) {
   var h = '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.7">';
-  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti dagli ordini, esclusi i prelievi dal nostro deposito. '
+  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti come nel <strong>Report acquisti</strong>: solo il costo del prodotto, esclusi i prelievi dal nostro deposito. I <strong>trasporti terzisti</strong> non entrano nel primo margine: sono la voce 5.1 dentro i Servizi, calcolata carico per carico dagli ordini, quindi la voce di budget \'Altri servizi\' va tenuta al NETTO dei trasporti. '
      + 'Rimanenze dal sistema di carico e scarico riconciliato con DAS e registro, valorizzate al costo medio del giorno. '
      + 'Le voci in <span style="color:' + C_CE.ambra + '">ambra</span> vengono dal budget annuale, non dai movimenti.';
   if (d.senzaPrezzo > 0) {
@@ -678,9 +701,10 @@ function _ceStileA(d) {
         + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-size:12px">' + _andNum(pctOf(r.v), 2) + '%</td></tr>';
     } else {
       alt++;
-      h += '<tr style="background:' + (alt % 2 ? '#FAFAF8' : '#fff') + '">'
+      h += '<tr style="background:' + (r.gruppo ? '#F2F4F7' : (alt % 2 ? '#FAFAF8' : '#fff')) + '">'
         + '<td style="padding:8px 6px;text-align:center;color:' + C_CE.ambra + ';font-weight:700">' + (r.tipo === 'stima' ? '*' : '') + '</td>'
-        + '<td style="padding:8px 8px;padding-left:' + (r.sotto ? '30px' : '16px') + ';color:' + (r.sotto ? '#666' : '#333') + ';font-size:' + (r.sotto ? '12px' : '13px') + '">' + r.l + '</td>'
+        + '<td style="padding:8px 8px;padding-left:' + (r.sotto ? '30px' : '16px') + ';color:' + (r.sotto ? '#666' : '#333')
+          + ';font-size:' + (r.sotto ? '12px' : '13px') + (r.gruppo ? ';font-weight:600' : '') + '">' + r.l + '</td>'
         + '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + (neg ? C_CE.rosso : '#222') + '">' + _andEuro(r.v) + '</td>'
         + '<td></td></tr>';
     }
@@ -730,6 +754,9 @@ function _ceStileB(d) {
   h += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--text-muted)">';
   h += '<span>Litri ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriIngrosso) + '</strong></span>';
   h += '<span>Litri stazione <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriDettaglio) + '</strong></span>';
+  h += '<span>Acquistati <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriAcquistati) + '</strong> L in '
+     + _andNum(d.nOrdiniAcq) + ' ordini &middot; medio <strong style="color:var(--text);font-family:var(--font-mono)">'
+     + (d.litriAcquistati ? (d.acquisti / d.litriAcquistati).toFixed(4) : '—') + '</strong> &euro;/L</span>';
   if (d.litriIngrosso) {
     h += '<span>Margine ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">'
       + _andNum(d.margineIngrosso / d.litriIngrosso, 4) + ' &euro;/L</strong></span>';
@@ -771,7 +798,12 @@ function ceStampa() {
   doc += riga('Rimanenze finali', d.rimFinale, { indenta: true });
   doc += riga('Costo del venduto', -d.costoVenduto, { forte: true });
   doc += riga('MARGINE LORDO', d.margineLordo, { forte: true });
-  _CE_VOCI_BUDGET.forEach(function (v) { doc += riga(v.label, -(d.budget[v.id] || 0), { indenta: true, stima: true }); });
+  doc += riga('Personale', -(d.budget.personale || 0), { indenta: true, stima: true });
+  doc += riga('Servizi', -(d.servizi || 0), { indenta: true });
+  doc += riga('5.1 Trasporti terzisti', -d.trasporti, { indenta: true });
+  doc += riga('5.2 Altri servizi', -(d.budget.servizi || 0), { indenta: true, stima: true });
+  doc += riga('Godimento beni di terzi', -(d.budget.godimento_beni || 0), { indenta: true, stima: true });
+  doc += riga('Oneri diversi di gestione', -(d.budget.oneri_diversi || 0), { indenta: true, stima: true });
   doc += riga('EBITDA', d.ebitda, { forte: true });
   doc += riga('Ammortamenti', -(d.ammortamenti || 0), { indenta: true, stima: true });
   doc += riga('Risultato operativo', d.ebit, { forte: true });
@@ -803,7 +835,7 @@ var _bud = [];
 var _budAnno = new Date().getFullYear();
 var _BUD_VOCI = [
   { id: 'personale', label: 'Costi del personale' },
-  { id: 'servizi', label: 'Servizi' },
+  { id: 'servizi', label: 'Altri servizi (esclusi trasporti terzisti)' },
   { id: 'godimento_beni', label: 'Godimento beni di terzi' },
   { id: 'oneri_diversi', label: 'Oneri diversi di gestione' },
   { id: 'ammortamenti', label: 'Ammortamenti' },
