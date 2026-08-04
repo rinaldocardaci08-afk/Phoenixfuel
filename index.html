@@ -1162,6 +1162,7 @@
           <button class="btn-primary fin-subtab" data-tab="fin-tab-bilanci" onclick="switchFinanzeSubTab(this); if (typeof caricaAnalisiBilanci === 'function') caricaAnalisiBilanci();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📈 Analisi Bilanci</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-andamento" onclick="switchFinanzeSubTab(this); if (typeof caricaAndamento === 'function') caricaAndamento();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Giacenza Magazzini</button>
           <button class="btn-primary fin-subtab" data-tab="fin-tab-trimestrali" onclick="switchFinanzeSubTab(this); if (typeof caricaTrimestrali === 'function') caricaTrimestrali();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Trimestrali</button>
+          <button class="btn-primary fin-subtab" data-tab="fin-tab-budget" onclick="switchFinanzeSubTab(this); if (typeof caricaBudget === 'function') caricaBudget();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⚙️ Budget costi</button>
         </div>
 
         <!-- PANEL: CALENDARIO (esistente, immutato) -->
@@ -1227,6 +1228,10 @@
 
         <div class="fin-subpanel" id="fin-tab-trimestrali" style="display:none">
           <div id="and-ce"><div class="loading">Caricamento...</div></div>
+        </div>
+
+        <div class="fin-subpanel" id="fin-tab-budget" style="display:none">
+          <div id="and-budget"><div class="loading">Caricamento...</div></div>
         </div>
         <div class="fin-subpanel" id="fin-tab-scadenzario-rimosso" style="display:none"></div>
       </div>
@@ -3173,7 +3178,7 @@
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=20260801a"></script>
 <script src="pf-bilanci.js?v=20260802b"></script>
-<script src="pf-andamento.js?v=20260803e"></script>
+<script src="pf-andamento.js?v=20260803f"></script>
 <script src="pf-scostamenti.js?v=20260803a"></script>
 <script src="pf-foglio-giornale.js?v=20260728a"></script>
 <script src="pf-finanze-sostenibilita.js?v=20260727a"></script>

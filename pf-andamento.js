@@ -1,4 +1,8 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260803f — un calcolo solo per anno tenuto in memoria, ricavi con lo
+//              stesso algoritmo di Vendite, e maschera dei costi
+// v20260803e — le DUE VISTE del documento: A istituzionale e B operativo,
+//              piu imposte stimate e utile netto in fondo alla cascata
 // v20260803d — i ricavi si calcolano come nella sezione Vendite: prima
 //              escludevo per errore le vendite dal nostro deposito
 // v20260803c — due linguette separate: Giacenza Magazzini e Trimestrali
@@ -257,6 +261,10 @@ function andStampaGiacenze() {
 // prese dal budget e marcate con l'asterisco: sono stime finche non
 // arriva il bilancio.
 
+var CE_ALIQUOTA = 0.427;   // IRES + IRAP, aliquota usata nel suo bilancio
+var _ceStile = 'A';        // A istituzionale · B operativo
+function ceStile(x) { _ceStile = x; _ceRender(); }
+
 var _ceAnno = new Date().getFullYear();
 var _ceQ = null;         // 1..4 oppure 'anno'
 var _ceDati = null;
@@ -281,94 +289,146 @@ function _ceGiornoPrima(iso) {
   return d.toISOString().split('T')[0];
 }
 
-async function _ceCalcola(q, anno) {
-  var per = (q === 'anno') ? { dal: anno + '-01-01', al: anno + '-12-31' } : _ceTrimestre(q, anno);
-  var primaDelDal = _ceGiornoPrima(per.dal);
+// ═══ v20260803f · UN CALCOLO SOLO PER ANNO ═════════════════════════
+// Prima ogni clic su Q1 o Q2 rifaceva tutte le query: lento e inutile,
+// perche i mesi passati non cambiano. Ora l'anno si calcola UNA volta,
+// resta in memoria, e i trimestri sono somme di mesi. Si rifa solo
+// cambiando anno o toccando i costi.
+//
+// E soprattutto: ricavi ingrosso e dettaglio sono calcolati con LO
+// STESSO ALGORITMO della sezione Vendite (pf-anagrafica.js), prezzo
+// diverso in giornata compreso. Cosi i due numeri non possono divergere.
+var _ceCache = {};        // anno -> { mesi:[12], acquisti:[12] }
+function ceSvuotaCache() { _ceCache = {}; }
+
+async function _cePagina(tab, campi, da, a, extra) {
+  var out = [], from = 0;
+  for (var g = 0; g < 60; g++) {
+    var q = sb.from(tab).select(campi).gte('data', da).lte('data', a);
+    if (extra) q = extra(q);
+    var r = await q.range(from, from + 999);
+    if (r.error) throw r.error;
+    var b = r.data || [];
+    out = out.concat(b);
+    if (b.length < 1000) break;
+    from += 1000;
+  }
+  return out;
+}
+
+async function _ceCaricaAnno(anno) {
+  if (_ceCache[anno]) return _ceCache[anno];
+  var da = anno + '-01-01', a = anno + '-12-31';
+  var daPrev = (anno - 1) + '-12-25';   // serve la lettura precedente al 1 gennaio
 
   var r = await Promise.all([
-    sb.from('ordini')
-      .select('data,tipo_ordine,stato,fornitore,litri,costo_litro,trasporto_litro,margine')
-      .gte('data', per.dal).lte('data', per.al).neq('stato', 'annullato'),
-    sb.from('stazione_letture').select('data,pompa_id,lettura')
-      .gte('data', primaDelDal).lte('data', per.al).order('data'),
-    sb.from('stazione_pompe').select('id,prodotto,attiva'),
-    sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro')
-      .gte('data', per.dal).lte('data', per.al),
-    sb.from('budget_costi_annuali').select('*').eq('anno', anno)
+    // ingrosso: identico a Vendite
+    _cePagina('ordini', 'data,litri,costo_litro,trasporto_litro,margine,iva', da, a,
+      function (q) { return q.neq('stato', 'annullato').eq('tipo_ordine', 'cliente'); }),
+    // acquisti: tutti gli ordini non annullati, i giri interni si tolgono dopo
+    _cePagina('ordini', 'data,litri,costo_litro,trasporto_litro,fornitore,tipo_ordine', da, a,
+      function (q) { return q.neq('stato', 'annullato'); }),
+    sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true),
+    _cePagina('stazione_letture', 'data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso', daPrev, a,
+      function (q) { return q.order('data'); }),
+    sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a),
+    sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a)
   ]);
-  if (r[0].error) throw r[0].error;
 
-  // ── ingrosso e acquisti ──
-  // v20260803d — I RICAVI SI CALCOLANO COME IN VENDITE, non a modo mio.
-  // pf-vendite-prodotto.js fa: prezzoNoIva(o) x litri sugli ordini
-  // 'cliente' non annullati. Stessa identica cosa qui, cosi i due numeri
-  // non possono divergere.
-  // L'ERRORE che avevo fatto: escludevo il fornitore PhoenixFuel anche
-  // dai RICAVI. Ma quelli sono le vendite dal NOSTRO deposito — nel 2026
-  // 1.436 ordini per 7,67 milioni — e buttarli via faceva uscire tutto
-  // negativo. Phoenix va escluso SOLO dagli acquisti: un prelievo dal
-  // proprio deposito non e un acquisto da terzi, e gia stato comprato
-  // quando e entrato.
+  var allIng = r[0], allOrd = r[1];
+  var pompeMap = {}; (r[2].data || []).forEach(function (p) { pompeMap[p.id] = p; });
+  var prezziMap = {}; (r[4].data || []).forEach(function (p) { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
+  var costiMap = {}; (r[5].data || []).forEach(function (c) { costiMap[c.data + '_' + c.prodotto] = Number(c.costo_litro); });
+
+  // dettaglio giorno per giorno, stesso identico calcolo di Vendite
+  var lettPerData = {};
+  (r[3] || []).forEach(function (l) { (lettPerData[l.data] = lettPerData[l.data] || []).push(l); });
+  var dateOrd = Object.keys(lettPerData).sort();
+  var dettPerGiorno = {};
+  for (var di = 0; di < dateOrd.length; di++) {
+    var data = dateOrd[di], prevD = di > 0 ? dateOrd[di - 1] : null;
+    var litriG = 0, incassoG = 0, costoG = 0;
+    if (prevD) {
+      lettPerData[data].forEach(function (l) {
+        var pompa = pompeMap[l.pompa_id]; if (!pompa) return;
+        var pl = (lettPerData[prevD] || []).filter(function (x) { return x.pompa_id === l.pompa_id; })[0];
+        if (!pl) return;
+        var lv = Number(l.lettura) - Number(pl.lettura); if (lv <= 0) return;
+        var pr = (prezziMap[data + '_' + pompa.prodotto] || 0) / 1.22;
+        var co = costiMap[data + '_' + pompa.prodotto] || 0;
+        var litriPD = Number(l.litri_prezzo_diverso || 0);
+        var prezzoPD = Number(l.prezzo_diverso || 0) / 1.22;
+        var hasCambio = litriPD > 0 && prezzoPD > 0;
+        var litriStd = hasCambio ? Math.max(0, lv - litriPD) : lv;
+        litriG += lv;
+        incassoG += (litriStd * pr) + (hasCambio ? litriPD * prezzoPD : 0);
+        costoG += lv * co;
+      });
+    }
+    dettPerGiorno[data] = { litri: litriG, incasso: incassoG, costo: costoG };
+  }
+
   var _noIva = function (o) {
     return (typeof prezzoNoIva === 'function')
       ? prezzoNoIva(o)
       : Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0);
   };
-  var ordini = r[0].data || [];
-  var ricaviIngrosso = 0, acquisti = 0, litriIngrosso = 0, margineIngrosso = 0, litriAcquistati = 0;
-  ordini.forEach(function (o) {
-    var l = Number(o.litri || 0);
-    var interno = String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0;
-    if (!interno) {
-      acquisti += (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0)) * l;
-      litriAcquistati += l;
-    }
-    if (o.tipo_ordine === 'cliente') {
-      ricaviIngrosso += _noIva(o) * l;
-      margineIngrosso += Number(o.margine || 0) * l;
-      litriIngrosso += l;
-    }
+
+  var mesi = [];
+  for (var m = 0; m < 12; m++) {
+    var pref = anno + '-' + String(m + 1).padStart(2, '0');
+    var x = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
+              acquisti: 0, litriAcq: 0, senzaPrezzo: 0 };
+    allIng.forEach(function (o) {
+      if (String(o.data).indexOf(pref) !== 0) return;
+      var l = Number(o.litri || 0);
+      x.ingLitri += l; x.ingFatt += _noIva(o) * l; x.ingMarg += Number(o.margine || 0) * l;
+    });
+    allOrd.forEach(function (o) {
+      if (String(o.data).indexOf(pref) !== 0) return;
+      if (String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0) return;
+      var l = Number(o.litri || 0);
+      x.acquisti += (Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0)) * l;
+      x.litriAcq += l;
+    });
+    Object.keys(dettPerGiorno).forEach(function (d) {
+      if (d.indexOf(pref) !== 0) return;
+      x.dettLitri += dettPerGiorno[d].litri;
+      x.dettInc += dettPerGiorno[d].incasso;
+      x.dettCosto += dettPerGiorno[d].costo;
+    });
+    mesi.push(x);
+  }
+  _ceCache[anno] = { mesi: mesi };
+  return _ceCache[anno];
+}
+
+async function _ceCalcola(q, anno) {
+  var per = (q === 'anno') ? { dal: anno + '-01-01', al: anno + '-12-31' } : _ceTrimestre(q, anno);
+  var primaDelDal = _ceGiornoPrima(per.dal);
+
+  var cache = await _ceCaricaAnno(anno);
+  var da = (q === 'anno') ? 0 : (q - 1) * 3;
+  var quanti = (q === 'anno') ? 12 : 3;
+  var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0, acquisti: 0, litriAcq: 0 };
+  for (var i = da; i < da + quanti; i++) {
+    var m = cache.mesi[i];
+    Object.keys(acc).forEach(function (k) { acc[k] += m[k]; });
+  }
+
+  var bud = {};
+  var rb = await sb.from('budget_costi_annuali').select('*').eq('anno', anno);
+  (rb.data || []).forEach(function (b) {
+    bud[b.voce] = (q === 'anno') ? Number(b.annuo || 0) : Number(b['q' + q] || 0);
   });
 
-  // ── dettaglio: litri erogati dalle pompe x prezzo netto del giorno ──
-  var pompe = {};
-  (r[2].data || []).forEach(function (p) { pompe[p.id] = p.prodotto; });
-  var prezzi = {};
-  (r[3].data || []).forEach(function (p) { prezzi[p.data + '|' + p.prodotto] = Number(p.prezzo_litro || 0); });
-  var perPompa = {};
-  (r[1].data || []).forEach(function (x) { (perPompa[x.pompa_id] = perPompa[x.pompa_id] || []).push(x); });
-  var ricaviDettaglio = 0, litriDettaglio = 0, senzaPrezzo = 0;
-  Object.keys(perPompa).forEach(function (pid) {
-    var arr = perPompa[pid].sort(function (a, b) { return a.data < b.data ? -1 : 1; });
-    var prod = pompe[pid];
-    for (var i = 1; i < arr.length; i++) {
-      if (arr[i].data < per.dal) continue;
-      var l = Number(arr[i].lettura) - Number(arr[i - 1].lettura);
-      if (!(l > 0)) continue;
-      litriDettaglio += l;
-      var pIva = prezzi[arr[i].data + '|' + prod];
-      if (!pIva) { senzaPrezzo += l; continue; }
-      ricaviDettaglio += l * (pIva / 1.22);
-    }
-  });
-
-  // ── rimanenze ──
   var apertura = await window.pfData.getValoreGiacenze(primaDelDal);
   var chiusura = await window.pfData.getValoreGiacenze(per.al);
-  var somma = function (g) {
-    return (g.righe || []).reduce(function (a, x) { return a + (x.valore || 0); }, 0);
-  };
+  var somma = function (g) { return (g.righe || []).reduce(function (a, x) { return a + (x.valore || 0); }, 0); };
   var rimIniziale = somma(apertura), rimFinale = somma(chiusura);
 
-  // ── voci da budget ──
-  var bud = {};
-  (r[4].data || []).forEach(function (b) {
-    var v = (q === 'anno') ? Number(b.annuo || 0) : Number(b['q' + q] || 0);
-    bud[b.voce] = v;
-  });
-
-  var ricavi = ricaviIngrosso + ricaviDettaglio;
-  var costoVenduto = acquisti + rimIniziale - rimFinale;
+  var ricavi = acc.ingFatt + acc.dettInc;
+  var costoVenduto = acc.acquisti + rimIniziale - rimFinale;
   var margineLordo = ricavi - costoVenduto;
   var costiFissi = _CE_VOCI_BUDGET.reduce(function (a, v) { return a + (bud[v.id] || 0); }, 0);
   var ebitda = margineLordo - costiFissi;
@@ -377,18 +437,22 @@ async function _ceCalcola(q, anno) {
   var onFin = bud.oneri_finanziari || 0;
   var provFin = bud.proventi_finanziari || 0;
   var risultato = ebit - onFin + provFin;
+  var imposte = Math.max(0, risultato * CE_ALIQUOTA);
+  var utile = risultato - imposte;
 
   return {
+    imposte: imposte, utile: utile,
     periodo: per, anno: anno, q: q,
-    ricaviIngrosso: ricaviIngrosso, ricaviDettaglio: ricaviDettaglio, ricavi: ricavi,
-    litriIngrosso: litriIngrosso, litriDettaglio: litriDettaglio,
-    margineIngrosso: margineIngrosso, senzaPrezzo: senzaPrezzo, litriAcquistati: litriAcquistati,
-    acquisti: acquisti, rimIniziale: rimIniziale, rimFinale: rimFinale,
+    ricaviIngrosso: acc.ingFatt, ricaviDettaglio: acc.dettInc, ricavi: ricavi,
+    litriIngrosso: acc.ingLitri, litriDettaglio: acc.dettLitri,
+    margineIngrosso: acc.ingMarg, senzaPrezzo: 0, litriAcquistati: acc.litriAcq,
+    acquisti: acc.acquisti, rimIniziale: rimIniziale, rimFinale: rimFinale,
     costoVenduto: costoVenduto, margineLordo: margineLordo,
     budget: bud, costiFissi: costiFissi,
     ebitda: ebitda, ammortamenti: amm, ebit: ebit,
     oneriFin: onFin, proventiFin: provFin, risultato: risultato,
-    budgetMancante: !(r[4].data || []).length
+    budgetMancante: !(rb.data || []).length,
+    mesi: cache.mesi
   };
 }
 
@@ -430,79 +494,176 @@ function _ceRiga(label, valore, opt) {
       + (opt.pct !== undefined && opt.pct !== null ? _andNum(opt.pct, 2) + '%' : '') + '</td></tr>';
 }
 
-function _ceHtml(d) {
-  var pct = function (v) { return d.ricavi ? v / d.ricavi * 100 : 0; };
-  var h = '';
+// ═══ v20260803e · DUE VISTE ════════════════════════════════════════
+// A — ISTITUZIONALE: tabella formale, intestazione blu notte, bande
+//     colorate sui risultati intermedi. Per la banca e per la stampa.
+// B — OPERATIVO: riquadri con barre sui margini. Per la consultazione
+//     di tutti i giorni.
+// Stessi numeri, stessa cascata: cambia solo come si leggono.
+var C_CE = { navy: '#0B2545', blu: '#185FA5', bluL: '#E8F4FD', bluL2: '#E6F1FB',
+             verde: '#1D9E75', verdeL: '#D4F5E8', verdeT: '#0F6E56',
+             gold: '#C49B2A', goldL: '#FFF3D6', goldT: '#8B5A00',
+             rosso: '#E24B4A', ambra: '#BA7517', bianco: '#FFFFFF' };
 
-  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px">';
+function _ceVoci(d) {
+  return [
+    { l: 'Ricavi delle vendite', v: d.ricavi, tipo: 'reale' },
+    // il dettaglio non si perde: chi legge deve vedere quanto e magazzino
+    { l: 'Acquisti del periodo', v: -d.acquisti, tipo: 'reale', sotto: true },
+    { l: 'Rimanenze iniziali', v: -d.rimIniziale, tipo: 'reale', sotto: true },
+    { l: 'Rimanenze finali', v: d.rimFinale, tipo: 'reale', sotto: true },
+    { l: 'Costo del venduto', v: -d.costoVenduto, tipo: 'reale' },
+    { cod: 'R1', l: 'MARGINE LORDO COMMERCIALE', v: d.margineLordo, pct: true, banda: 1 },
+    { l: 'Personale', v: -(d.budget.personale || 0), tipo: 'stima' },
+    { l: 'Servizi', v: -(d.budget.servizi || 0), tipo: 'stima' },
+    { l: 'Godimento beni di terzi', v: -(d.budget.godimento_beni || 0), tipo: 'stima' },
+    { l: 'Oneri diversi di gestione', v: -(d.budget.oneri_diversi || 0), tipo: 'stima' },
+    { cod: 'R2', l: 'EBITDA', v: d.ebitda, pct: true, banda: 2 },
+    { l: 'Ammortamenti', v: -(d.ammortamenti || 0), tipo: 'stima' },
+    { cod: 'R3', l: 'RISULTATO OPERATIVO (EBIT)', v: d.ebit, pct: true, banda: 3 },
+    { l: 'Oneri finanziari', v: -(d.oneriFin || 0), tipo: 'stima' },
+    { l: 'Proventi finanziari', v: d.proventiFin || 0, tipo: 'stima' },
+    { cod: 'R4', l: 'RISULTATO ANTE IMPOSTE', v: d.risultato, pct: true, banda: 4 },
+    { l: 'Imposte stimate (' + (CE_ALIQUOTA * 100).toFixed(1).replace('.', ',') + '%)', v: -d.imposte, tipo: 'stima' },
+    { cod: '\u2605', l: 'UTILE NETTO STIMATO', v: d.utile, pct: true, banda: 5 }
+  ];
+}
+
+function _ceBarra(d) {
+  var h = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px">';
   [1, 2, 3, 4].forEach(function (q) {
     var on = _ceQ === q;
     h += '<button onclick="ceVai(' + q + ')" style="font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:600;'
-      + (on ? 'background:#26215C;color:#fff;border:0.5px solid #26215C' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">Q' + q + '</button>';
+      + (on ? 'background:' + C_CE.navy + ';color:#fff;border:0.5px solid ' + C_CE.navy : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">Q' + q + '</button>';
   });
   var onA = _ceQ === 'anno';
   h += '<button onclick="ceVai(\'anno\')" style="font-size:12px;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:600;'
-    + (onA ? 'background:#26215C;color:#fff;border:0.5px solid #26215C' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">Anno</button>';
+    + (onA ? 'background:' + C_CE.navy + ';color:#fff;border:0.5px solid ' + C_CE.navy : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">Totale ' + d.anno + '</button>';
   h += '<input type="number" value="' + d.anno + '" onchange="ceAnnoCambia(this.value)" style="width:82px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono);margin-left:6px">';
-  h += '<span style="font-size:11.5px;color:var(--text-muted)">dal ' + _andIt(d.periodo.dal) + ' al ' + _andIt(d.periodo.al) + '</span>';
+  h += '<span style="display:flex;gap:3px;background:var(--bg-kpi);border-radius:8px;padding:3px;margin-left:8px">';
+  [['A', 'A \u2014 Istituzionale'], ['B', 'B \u2014 Operativo']].forEach(function (x) {
+    var on = _ceStile === x[0];
+    h += '<button onclick="ceStile(\'' + x[0] + '\')" style="padding:6px 14px;font-size:12px;border:none;border-radius:6px;cursor:pointer;font-weight:'
+      + (on ? '600' : '400') + ';background:' + (on ? C_CE.navy : 'transparent') + ';color:' + (on ? '#fff' : 'var(--text-muted)') + '">' + x[1] + '</button>';
+  });
+  h += '</span>';
   h += '<span style="margin-left:auto"><button onclick="ceStampa()" style="font-size:12px;padding:7px 15px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">&#128424; Stampa o salva in PDF</button></span>';
   h += '</div>';
+  return h;
+}
 
-  if (d.budgetMancante) {
-    h += '<div style="background:#FAEEDA;border:0.5px solid #E4C892;border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:12.5px;color:#854F0B">'
-      + 'Nessun budget caricato per il ' + d.anno + ': personale, servizi, ammortamenti e oneri finanziari risultano a zero e il risultato non e attendibile.</div>';
+function _ceNote(d) {
+  var h = '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.7">';
+  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti dagli ordini, esclusi i prelievi dal nostro deposito. '
+     + 'Rimanenze dal sistema di carico e scarico riconciliato con DAS e registro, valorizzate al costo medio del giorno. '
+     + 'Le voci in <span style="color:' + C_CE.ambra + '">ambra</span> vengono dal budget annuale, non dai movimenti.';
+  if (d.senzaPrezzo > 0) {
+    h += '<br><span style="color:' + C_CE.ambra + '">' + _andNum(d.senzaPrezzo) + ' litri erogati in stazione senza prezzo del giorno: non sono nei ricavi.</span>';
   }
+  h += '</div>';
+  return h;
+}
 
-  h += '<div class="card" style="padding:14px">';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
-  h += '<tr style="color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.4px">'
-    + '<th style="text-align:left;padding:6px 8px;font-weight:500">Voce</th>'
-    + '<th style="text-align:right;padding:6px 8px;font-weight:500;width:130px">Importo</th>'
-    + '<th style="text-align:right;padding:6px 8px;font-weight:500;width:70px">% ricavi</th></tr>';
+function _ceHtml(d) {
+  var h = _ceBarra(d);
+  if (d.budgetMancante) {
+    h += '<div style="background:' + C_CE.goldL + ';border:0.5px solid #E4C892;border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:12.5px;color:' + C_CE.goldT + '">'
+      + 'Nessun budget caricato per il ' + d.anno + ': personale, servizi, ammortamenti e oneri finanziari sono a zero e il risultato non e attendibile.</div>';
+  }
+  h += (_ceStile === 'B') ? _ceStileB(d) : _ceStileA(d);
+  h += _ceNote(d);
+  return h;
+}
 
-  h += _ceRiga('Ricavi ingrosso', d.ricaviIngrosso, { pct: pct(d.ricaviIngrosso) });
-  h += _ceRiga('Ricavi stazione Oppido', d.ricaviDettaglio, { pct: pct(d.ricaviDettaglio) });
-  h += _ceRiga('RICAVI', d.ricavi, { forte: true, sfondo: true, pct: 100 });
-
-  h += _ceRiga('Acquisti del periodo', -d.acquisti, { indenta: true });
-  h += _ceRiga('Rimanenze iniziali', -d.rimIniziale, { indenta: true });
-  h += _ceRiga('Rimanenze finali', d.rimFinale, { indenta: true, coloreVal: '#27500A' });
-  h += _ceRiga('Costo del venduto', -d.costoVenduto, { forte: true, pct: pct(d.costoVenduto) });
-
-  h += _ceRiga('MARGINE LORDO', d.margineLordo, { forte: true, sfondo: true, pct: pct(d.margineLordo),
-        coloreVal: d.margineLordo >= 0 ? '#27500A' : '#A32D2D' });
-
-  _CE_VOCI_BUDGET.forEach(function (v) {
-    h += _ceRiga(v.label, -(d.budget[v.id] || 0), { indenta: true, stima: true });
+// ── A · ISTITUZIONALE ──────────────────────────────────────────────
+function _ceStileA(d) {
+  var pctOf = function (v) { return d.ricavi ? v / d.ricavi * 100 : 0; };
+  var bande = {
+    1: { bg: C_CE.bluL,  bordo: C_CE.blu,   testo: C_CE.navy },
+    2: { bg: C_CE.verdeL, bordo: C_CE.verde, testo: C_CE.verdeT },
+    3: { bg: C_CE.bluL2, bordo: C_CE.blu,   testo: C_CE.navy },
+    4: { bg: C_CE.goldL, bordo: C_CE.gold,  testo: C_CE.goldT }
+  };
+  var h = '<div style="background:#fff;border-radius:10px;overflow:hidden;border:0.5px solid var(--border)">';
+  h += '<div style="background:' + C_CE.navy + ';color:#fff;padding:16px 18px">'
+     + '<div style="font-size:16px;font-weight:700;letter-spacing:0.5px">PHOENIX FUEL S.R.L.</div>'
+     + '<div style="font-size:12px;opacity:0.85;margin-top:2px">'
+     + (d.q === 'anno' ? 'Esercizio ' + d.anno : 'Trimestre Q' + d.q + ' ' + d.anno)
+     + ' \u00b7 dal ' + _andIt(d.periodo.dal) + ' al ' + _andIt(d.periodo.al) + '</div></div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#222">';
+  h += '<tr style="background:#f7f7f5;color:#666;font-size:10.5px;text-transform:uppercase;letter-spacing:0.4px">'
+     + '<th style="width:34px;padding:7px 6px"></th>'
+     + '<th style="text-align:left;padding:7px 8px;font-weight:600">Voce</th>'
+     + '<th style="text-align:right;padding:7px 10px;font-weight:600;width:140px">Importo</th>'
+     + '<th style="text-align:right;padding:7px 10px;font-weight:600;width:78px">% Fatt.</th></tr>';
+  var alt = 0;
+  _ceVoci(d).forEach(function (r) {
+    var neg = Number(r.v) < 0;
+    if (r.banda) {
+      var b = bande[r.banda];
+      var finale = (r.banda === 5);
+      h += '<tr style="background:' + (finale ? C_CE.navy : b.bg) + ';color:' + (finale ? '#fff' : b.testo) + '">'
+        + '<td style="padding:11px 6px;text-align:center;font-size:11px;font-weight:700;opacity:0.85">' + (r.cod || '') + '</td>'
+        + '<td style="padding:11px 8px;font-weight:700;letter-spacing:0.3px">' + r.l + '</td>'
+        + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-weight:700;font-size:14.5px">' + _andEuro(r.v) + '</td>'
+        + '<td style="padding:11px 10px;text-align:right;font-family:var(--font-mono);font-size:12px">' + _andNum(pctOf(r.v), 2) + '%</td></tr>';
+    } else {
+      alt++;
+      h += '<tr style="background:' + (alt % 2 ? '#FAFAF8' : '#fff') + '">'
+        + '<td style="padding:8px 6px;text-align:center;color:' + C_CE.ambra + ';font-weight:700">' + (r.tipo === 'stima' ? '*' : '') + '</td>'
+        + '<td style="padding:8px 8px;padding-left:' + (r.sotto ? '30px' : '16px') + ';color:' + (r.sotto ? '#666' : '#333') + ';font-size:' + (r.sotto ? '12px' : '13px') + '">' + r.l + '</td>'
+        + '<td style="padding:8px 10px;text-align:right;font-family:var(--font-mono);color:' + (neg ? C_CE.rosso : '#222') + '">' + _andEuro(r.v) + '</td>'
+        + '<td></td></tr>';
+    }
   });
-  h += _ceRiga('EBITDA', d.ebitda, { forte: true, sfondo: true, pct: pct(d.ebitda),
-        coloreVal: d.ebitda >= 0 ? '#27500A' : '#A32D2D' });
-
-  h += _ceRiga('Ammortamenti', -(d.ammortamenti || 0), { indenta: true, stima: true });
-  h += _ceRiga('Risultato operativo', d.ebit, { forte: true, pct: pct(d.ebit),
-        coloreVal: d.ebit >= 0 ? '#27500A' : '#A32D2D' });
-
-  h += _ceRiga('Oneri finanziari', -(d.oneriFin || 0), { indenta: true, stima: true });
-  h += _ceRiga('Proventi finanziari', d.proventiFin || 0, { indenta: true, stima: true });
-  h += _ceRiga('RISULTATO ANTE IMPOSTE', d.risultato, { forte: true, sfondo: true, pct: pct(d.risultato),
-        coloreVal: d.risultato >= 0 ? '#27500A' : '#A32D2D' });
   h += '</table>';
+  h += '<div style="padding:10px 14px;background:#f7f7f5;font-size:10.5px;color:#666;border-top:1px solid #eee">'
+     + '<span style="color:' + C_CE.ambra + ';font-weight:700">*</span> valori stimati su base budget annuale</div>';
+  h += '</div>';
+  return h;
+}
 
+// ── B · OPERATIVO ──────────────────────────────────────────────────
+function _ceStileB(d) {
+  var pctOf = function (v) { return d.ricavi ? v / d.ricavi * 100 : 0; };
+  var card = function (titolo, valore, pct, colore, largh) {
+    var p = Math.max(0, Math.min(100, Math.abs(pct) * 8));   // scala leggibile su margini sottili
+    return '<div style="flex:1;min-width:' + (largh || 210) + 'px;background:var(--bg-kpi);border-radius:10px;padding:13px 15px">'
+      + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">' + titolo + '</div>'
+      + '<div style="font-size:21px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + colore + '">' + _andEuro(valore) + '</div>'
+      + '<div style="height:6px;border-radius:3px;background:var(--bg);margin-top:7px;overflow:hidden">'
+      + '<div style="height:100%;width:' + p.toFixed(1) + '%;background:' + colore + '"></div></div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">' + _andNum(pct, 2) + '% dei ricavi</div></div>';
+  };
+  var verde = '#27500A', rosso = '#A32D2D';
+  var col = function (v) { return v >= 0 ? verde : rosso; };
+
+  var h = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+  h += card('Ricavi', d.ricavi, 100, 'var(--text)');
+  h += card('Margine lordo', d.margineLordo, pctOf(d.margineLordo), col(d.margineLordo));
+  h += card('EBITDA', d.ebitda, pctOf(d.ebitda), col(d.ebitda));
+  h += card('Utile netto stimato', d.utile, pctOf(d.utile), col(d.utile));
+  h += '</div>';
+
+  h += '<div class="card" style="padding:14px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  _ceVoci(d).forEach(function (r) {
+    var forte = !!r.banda;
+    var neg = Number(r.v) < 0;
+    h += '<tr style="' + (forte ? 'background:var(--bg-kpi);' : '') + 'border-top:0.5px solid var(--border)">'
+      + '<td style="padding:' + (forte ? '9px' : '7px') + ' 8px;' + (forte ? 'font-weight:700;' : 'padding-left:20px;color:var(--text-muted);') + '">'
+      + r.l + (r.tipo === 'stima' ? ' <span style="color:' + C_CE.ambra + '" title="voce da budget, non da movimenti">*</span>' : '') + '</td>'
+      + '<td style="padding:' + (forte ? '9px' : '7px') + ' 8px;text-align:right;font-family:var(--font-mono);'
+      + (forte ? 'font-weight:700;font-size:14px;color:' + col(r.v) + ';' : 'color:' + (neg ? rosso : 'var(--text)') + ';') + '">' + _andEuro(r.v) + '</td>'
+      + '<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted)">'
+      + (r.pct ? _andNum(pctOf(r.v), 2) + '%' : '') + '</td></tr>';
+  });
+  h += '</table>';
   h += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--text-muted)">';
-  h += '<span>Litri venduti ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriIngrosso) + '</strong></span>';
+  h += '<span>Litri ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriIngrosso) + '</strong></span>';
   h += '<span>Litri stazione <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriDettaglio) + '</strong></span>';
   if (d.litriIngrosso) {
     h += '<span>Margine ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">'
       + _andNum(d.margineIngrosso / d.litriIngrosso, 4) + ' &euro;/L</strong></span>';
-  }
-  h += '</div>';
-
-  h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.7">';
-  h += 'Le voci con <span style="color:#854F0B">*</span> vengono dal budget annuale, non dai movimenti: sono stime finche non arriva il bilancio. '
-     + 'Ricavi e acquisti sono presi dagli ordini; le rimanenze dal sistema di carico e scarico riconciliato con DAS e registro, '
-     + 'valorizzate al costo medio del giorno.';
-  if (d.senzaPrezzo > 0) {
-    h += '<br><span style="color:#854F0B">' + _andNum(d.senzaPrezzo) + ' litri erogati in stazione non hanno il prezzo del giorno: non sono nei ricavi.</span>';
   }
   h += '</div></div>';
   return h;
@@ -548,6 +709,8 @@ function ceStampa() {
   doc += riga('Oneri finanziari', -(d.oneriFin || 0), { indenta: true, stima: true });
   doc += riga('Proventi finanziari', d.proventiFin || 0, { indenta: true, stima: true });
   doc += riga('RISULTATO ANTE IMPOSTE', d.risultato, { forte: true });
+  doc += riga('Imposte stimate (' + (CE_ALIQUOTA * 100).toFixed(1).replace('.', ',') + '%)', -d.imposte, { indenta: true, stima: true });
+  doc += riga('UTILE NETTO STIMATO', d.utile, { forte: true });
   doc += '</table>';
   doc += '<div class="note"><strong>* Voci da budget.</strong> Personale, servizi, godimento beni, oneri diversi, ammortamenti e oneri finanziari '
       + 'sono ripartiti dal budget annuale e non derivano dai movimenti: sono stime fino al bilancio.<br>'
@@ -559,4 +722,119 @@ function ceStampa() {
   w.document.write(doc);
   w.document.close();
   setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+}
+
+// ═══ v20260803f · MASCHERA DEI COSTI ═══════════════════════════════
+// I costi che il programma non puo ricavare dai movimenti si inseriscono
+// qui: personale, servizi, godimento beni, oneri diversi, ammortamenti,
+// oneri e proventi finanziari. Si scrive l'annuo e i quattro trimestri si
+// dividono da soli; toccando un trimestre quella voce non si ridivide
+// piu (resta la ripartizione decisa a mano).
+var _bud = [];
+var _budAnno = new Date().getFullYear();
+var _BUD_VOCI = [
+  { id: 'personale', label: 'Costi del personale' },
+  { id: 'servizi', label: 'Servizi' },
+  { id: 'godimento_beni', label: 'Godimento beni di terzi' },
+  { id: 'oneri_diversi', label: 'Oneri diversi di gestione' },
+  { id: 'ammortamenti', label: 'Ammortamenti' },
+  { id: 'oneri_finanziari', label: 'Oneri finanziari' },
+  { id: 'proventi_finanziari', label: 'Proventi finanziari' }
+];
+
+async function caricaBudget() {
+  var box = document.getElementById('and-budget');
+  if (!box) return;
+  box.innerHTML = '<div class="loading" style="padding:24px">Carico i costi...</div>';
+  var r = await sb.from('budget_costi_annuali').select('*').eq('anno', _budAnno);
+  var m = {};
+  (r.data || []).forEach(function (b) { m[b.voce] = b; });
+  _bud = _BUD_VOCI.map(function (v) {
+    var b = m[v.id] || {};
+    return { voce: v.id, label: v.label, annuo: Number(b.annuo || 0),
+             q1: Number(b.q1 || 0), q2: Number(b.q2 || 0), q3: Number(b.q3 || 0), q4: Number(b.q4 || 0),
+             override: !!b.override_trimestre, nuovo: !m[v.id] };
+  });
+  _budRender();
+}
+
+function budAnnoCambia(a) { _budAnno = Number(a); caricaBudget(); }
+
+function _budRender() {
+  var box = document.getElementById('and-budget');
+  if (!box) return;
+  var inp = 'width:110px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right;font-family:var(--font-mono)';
+  var h = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
+  h += '<span style="font-size:12px;color:var(--text-muted)">Costi dell\'anno</span>';
+  h += '<input type="number" value="' + _budAnno + '" onchange="budAnnoCambia(this.value)" style="width:88px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)">';
+  h += '<span style="margin-left:auto"><button onclick="budSalva()" class="btn-primary" style="font-size:12px;padding:8px 16px">&#128190; Salva</button></span>';
+  h += '</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Scrivi l\'importo annuo: i trimestri si dividono da soli. '
+     + 'Se correggi un singolo trimestre, quella voce non si ridivide piu.</div>';
+
+  h += '<div class="card" style="padding:14px"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  h += '<tr style="color:var(--text-muted);text-align:right">'
+     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Voce</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Annuo</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Q1</th><th style="padding:6px 8px;font-weight:500">Q2</th>'
+     + '<th style="padding:6px 8px;font-weight:500">Q3</th><th style="padding:6px 8px;font-weight:500">Q4</th>'
+     + '<th style="padding:6px 8px;font-weight:500"></th></tr>';
+  var tot = { annuo: 0, q1: 0, q2: 0, q3: 0, q4: 0 };
+  _bud.forEach(function (b, i) {
+    ['annuo', 'q1', 'q2', 'q3', 'q4'].forEach(function (k) { tot[k] += Number(b[k] || 0); });
+    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+      + '<td style="text-align:left;padding:7px 8px">' + b.label + '</td>'
+      + '<td style="padding:7px 8px"><input type="number" step="0.01" value="' + b.annuo + '" oninput="_budAnnuo(' + i + ',this.value)" style="' + inp + ';border-color:#A9C9EC"></td>';
+    ['q1', 'q2', 'q3', 'q4'].forEach(function (k) {
+      h += '<td style="padding:7px 8px"><input type="number" step="0.01" value="' + b[k] + '" oninput="_budTrim(' + i + ',\'' + k + '\',this.value)" style="' + inp + ';width:96px"></td>';
+    });
+    h += '<td style="padding:7px 8px;text-align:left;font-size:10.5px;color:#854F0B">' + (b.override ? 'a mano' : '') + '</td></tr>';
+  });
+  h += '<tr style="border-top:0.5px solid var(--border);background:var(--bg-kpi);text-align:right">'
+    + '<td style="text-align:left;padding:9px 8px;font-weight:700">Totale</td>'
+    + '<td style="padding:9px 8px;font-family:var(--font-mono);font-weight:700">' + _andNum(tot.annuo, 2) + '</td>';
+  ['q1', 'q2', 'q3', 'q4'].forEach(function (k) {
+    h += '<td style="padding:9px 8px;font-family:var(--font-mono);font-weight:700">' + _andNum(tot[k], 2) + '</td>';
+  });
+  h += '<td></td></tr></table></div></div>';
+  box.innerHTML = h;
+}
+
+function _budAnnuo(i, v) {
+  var b = _bud[i]; if (!b) return;
+  b.annuo = Number(v || 0);
+  if (!b.override) {
+    var q = Math.round(b.annuo / 4 * 100) / 100;
+    b.q1 = b.q2 = b.q3 = q;
+    b.q4 = Math.round((b.annuo - q * 3) * 100) / 100;   // l'ultimo assorbe l'arrotondamento
+    _budRender();
+  }
+}
+
+function _budTrim(i, k, v) {
+  var b = _bud[i]; if (!b) return;
+  b[k] = Number(v || 0);
+  b.override = true;                       // toccato a mano: non si ridivide piu
+  b.annuo = Math.round((Number(b.q1) + Number(b.q2) + Number(b.q3) + Number(b.q4)) * 100) / 100;
+}
+
+async function budSalva() {
+  try {
+    var righe = _bud.map(function (b) {
+      return { anno: _budAnno, voce: b.voce, annuo: b.annuo,
+               q1: b.q1, q2: b.q2, q3: b.q3, q4: b.q4,
+               override_trimestre: b.override, updated_at: new Date().toISOString() };
+    });
+    var up = await sb.from('budget_costi_annuali').upsert(righe, { onConflict: 'anno,voce' });
+    if (up.error) throw up.error;
+    if (typeof _auditLog === 'function') {
+      _auditLog('budget_costi', 'budget_costi_annuali', 'anno ' + _budAnno + ' aggiornato');
+    }
+    // i costi sono cambiati: il conto economico va rifatto
+    ceSvuotaCache();
+    toast('\u2713 Costi salvati');
+    caricaBudget();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
 }
