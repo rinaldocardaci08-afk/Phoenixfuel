@@ -2679,6 +2679,7 @@
           <button class="btn-primary log-tab active" data-tab="log-carichi" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px">🚛 Carichi</button>
           <button class="btn-primary log-tab" data-tab="log-mezzi-propri" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🚗 Mezzi propri</button>
           <button class="btn-primary log-tab" data-tab="log-vettori" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏭 Crea Vettori</button>
+          <button class="btn-primary log-tab" data-tab="log-report-vettori" onclick="switchLogisticaTab(this); if (typeof caricaReportVettori === 'function') caricaReportVettori();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Report vettori</button>
         </div>
 
         <!-- PANEL: CARICHI -->
@@ -2799,6 +2800,10 @@
             <table><thead><tr><th>Nome</th><th>Telefono</th><th>Autisti</th><th>Mezzi</th><th></th></tr></thead>
             <tbody id="tabella-trasportatori"><tr><td colspan="5" class="loading">Caricamento...</td></tr></tbody></table>
           </div>
+        </div>
+
+        <div class="log-panel" id="log-report-vettori" style="display:none">
+          <div id="vet-content"><div class="loading">Caricamento...</div></div>
         </div>
 
       </div>
@@ -3164,6 +3169,7 @@
 <script src="pf-movimenti-dettaglio.js?v=20260716a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
 <script src="pf-logistica.js?v=20260722e"></script>
+<script src="pf-vettori.js?v=20260804a"></script>
 <script src="pf-admin.js?v=20260717a"></script>
 <script src="pf-dashboard.js?v=20260803a"></script>
 <script src="pf-home.js?v=20260419a"></script>
@@ -3173,7 +3179,7 @@
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=20260801a"></script>
 <script src="pf-bilanci.js?v=20260802b"></script>
-<script src="pf-andamento.js?v=20260804j"></script>
+<script src="pf-andamento.js?v=20260804k"></script>
 <script src="pf-scostamenti.js?v=20260803a"></script>
 <script src="pf-foglio-giornale.js?v=20260728a"></script>
 <script src="pf-finanze-sostenibilita.js?v=20260727a"></script>

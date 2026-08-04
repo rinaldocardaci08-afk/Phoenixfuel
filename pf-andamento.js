@@ -1,4 +1,6 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804k — la rimanenza di apertura viene dal BILANCIO depositato,
+//              non ricalcolata dalle giacenze
 // v20260804j — voce 59 altri ricavi e proventi, e valorizzazione giacenze
 //              col primo costo successivo quando manca quello precedente
 // v20260804i — il confronto legge ricavi, margine e litri dell anno prima
@@ -380,6 +382,16 @@ async function _ceGiacenzeAnno(anno) {
   mancanti.forEach(function (d, i) { _ceCacheGiac[d] = res[i]; });
 }
 
+// Il bilancio depositato di un anno, tenuto in memoria.
+async function _ceBilancio(anno) {
+  if (!_cfrBilanci) {
+    var rb = await sb.from('bilanci_annuali').select('*');
+    _cfrBilanci = {};
+    (rb.data || []).forEach(function (b) { _cfrBilanci[b.esercizio] = b; });
+  }
+  return _cfrBilanci[anno] || null;
+}
+
 async function _ceBudget(anno) {
   if (!_ceCacheBud[anno]) {
     var rb = await sb.from('budget_costi_annuali').select('*').eq('anno', anno);
@@ -541,6 +553,20 @@ async function _ceCalcola(q, anno) {
   var apertura = due[0], chiusura = due[1];
   var somma = function (g) { return (g.righe || []).reduce(function (a, x) { return a + (x.valore || 0); }, 0); };
   var rimIniziale = somma(apertura), rimFinale = somma(chiusura);
+  var rimIniDaBilancio = false;
+
+  // v20260804k — L'APERTURA VIENE DAL BILANCIO, non ricalcolata.
+  // La rimanenza finale del 2025 e l'apertura del 2026 sono lo stesso
+  // numero, ed e un dato DEPOSITATO: 57.356,54. Ricalcolarlo dalle
+  // giacenze e valorizzarlo al CMP dava un valore diverso, e fra un dato
+  // di bilancio e uno ricostruito vince il bilancio.
+  if (primaDelDal === (anno - 1) + '-12-31') {
+    var rbil = await _ceBilancio(anno - 1);
+    if (rbil && Number(rbil.rimanenze) > 0) {
+      rimIniziale = Number(rbil.rimanenze);
+      rimIniDaBilancio = true;
+    }
+  }
 
   var ricavi = acc.ingFatt + acc.dettInc;
   var costoVenduto = acc.acquisti + rimIniziale - rimFinale;
@@ -573,7 +599,7 @@ async function _ceCalcola(q, anno) {
     margineIngrosso: acc.ingMarg, senzaPrezzo: 0, litriAcquistati: acc.litriAcq,
     acquisti: acc.acquisti, trasporti: acc.trasporti, servizi: servizi, nOrdiniAcq: acc.nOrdiniAcq,
     trasportiPropri: acc.trasportiPropri, litriPropri: acc.litriPropri,
-    rimIniziale: rimIniziale, rimFinale: rimFinale,
+    rimIniziale: rimIniziale, rimFinale: rimFinale, rimIniDaBilancio: rimIniDaBilancio,
     costoVenduto: costoVenduto, margineLordo: margineLordo,
     budget: bud, costiFissi: costiFissi, altriRicavi: altriRicavi,
     ebitda: ebitda, ammortamenti: amm, ebit: ebit,
@@ -636,7 +662,7 @@ function _ceVoci(d) {
     { cod: '59', l: 'Altri ricavi e proventi', v: d.altriRicavi || 0, tipo: 'stima' },
     // il dettaglio non si perde: chi legge deve vedere quanto e magazzino
     { cod: CE_CODICI.acquisti, l: 'Acquisti del periodo', v: -d.acquisti, tipo: 'reale', sotto: true },
-    { l: 'Rimanenze iniziali', v: -d.rimIniziale, tipo: 'reale', sotto: true },
+    { l: 'Rimanenze iniziali' + (d.rimIniDaBilancio ? ' (da bilancio)' : ''), v: -d.rimIniziale, tipo: 'reale', sotto: true },
     { l: 'Rimanenze finali', v: d.rimFinale, tipo: 'reale', sotto: true },
     { cod: CE_CODICI.trasporti, l: 'Spese di trasporto (terzisti)', v: -d.trasporti, tipo: 'reale', sotto: true, dai: true },
     { l: 'Costo del venduto', v: -(d.costoVenduto + d.trasporti), tipo: 'reale' },
@@ -937,7 +963,7 @@ var _BUD_VOCI = [
 ];
 
 async function caricaBudget() {
-  var box = document.getElementById('and-vista') || document.getElementById('and-budget');
+  var box = document.getElementById('and-vista');
   if (!box) return;
   box.innerHTML = '<div class="loading" style="padding:24px">Carico i costi...</div>';
   var r = await sb.from('budget_costi_annuali').select('*').eq('anno', _budAnno);
@@ -955,7 +981,7 @@ async function caricaBudget() {
 function budAnnoCambia(a) { _budAnno = Number(a); caricaBudget(); }
 
 function _budRender() {
-  var box = document.getElementById('and-vista') || document.getElementById('and-budget');
+  var box = document.getElementById('and-vista');
   if (!box) return;
   // v20260804e — maschera rifatta come chiesto: codici del commercialista
   // accanto a ogni voce, intestazioni centrate, l'importo ANNUO piu grande
