@@ -1,4 +1,7 @@
 // PhoenixFuel — Finanze: Andamento
+// v20260804g — in 610143 solo i trasporti dei TERZISTI: quelli coi mezzi
+//              propri sono una tariffa figurata e il costo vero e gia
+//              sparso in carburante, manutenzione e personale
 // v20260804f — cursore fermo nella maschera costi, riga utile leggibile
 //              anche nel confronto, e note allineate alla struttura vera
 // v20260804e — trasporti nei costi della produzione anche nel conto
@@ -399,16 +402,31 @@ async function _ceCaricaAnno(anno) {
     _cePagina('ordini', 'data,litri,costo_litro,trasporto_litro,margine,iva', da, a,
       function (q) { return q.neq('stato', 'annullato').eq('tipo_ordine', 'cliente'); }),
     // acquisti: tutti gli ordini non annullati, i giri interni si tolgono dopo
-    _cePagina('ordini', 'data,litri,costo_litro,trasporto_litro,fornitore,tipo_ordine', da, a,
+    _cePagina('ordini', 'id,data,litri,costo_litro,trasporto_litro,fornitore,tipo_ordine', da, a,
       function (q) { return q.neq('stato', 'annullato'); }),
     sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true),
     _cePagina('stazione_letture', 'data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso', daPrev, a,
       function (q) { return q.order('data'); }),
     sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a),
-    sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a)
+    sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a),
+    // v20260804g — CHI HA FATTO IL VIAGGIO.
+    // Il vettore sta sui CARICHI, non sugli ordini: `trasportatore_id`
+    // nullo vuol dire mezzi propri, valorizzato vuol dire terzista.
+    // Serve perche in 610143 vanno SOLO i terzisti — quelli sono fatture
+    // vere. Il trasporto con mezzi nostri e una tariffa figurata (0,019):
+    // il costo vero e gia sparso in carburante, manutenzione, assicurazioni
+    // e personale, e metterlo anche qui lo conterebbe due volte.
+    sb.from('carichi').select('id,data,trasportatore_id,carico_ordini(ordine_id)')
+      .gte('data', da).lte('data', a)
   ]);
 
   var allIng = r[0], allOrd = r[1];
+  // ordine -> true se il viaggio l'ha fatto un terzista
+  var terzista = {};
+  ((r[6] && r[6].data) || []).forEach(function (c) {
+    var t = !!c.trasportatore_id;
+    (c.carico_ordini || []).forEach(function (co) { if (co.ordine_id) terzista[co.ordine_id] = t; });
+  });
   var pompeMap = {}; (r[2].data || []).forEach(function (p) { pompeMap[p.id] = p; });
   var prezziMap = {}; (r[4].data || []).forEach(function (p) { prezziMap[p.data + '_' + p.prodotto] = Number(p.prezzo_litro); });
   var costiMap = {}; (r[5].data || []).forEach(function (c) { costiMap[c.data + '_' + c.prodotto] = Number(c.costo_litro); });
@@ -451,7 +469,8 @@ async function _ceCaricaAnno(anno) {
   for (var m = 0; m < 12; m++) {
     var pref = anno + '-' + String(m + 1).padStart(2, '0');
     var x = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
-              acquisti: 0, trasporti: 0, litriAcq: 0, nOrdiniAcq: 0, senzaPrezzo: 0 };
+              acquisti: 0, trasporti: 0, trasportiPropri: 0, litriPropri: 0,
+              litriAcq: 0, nOrdiniAcq: 0, senzaPrezzo: 0 };
     allIng.forEach(function (o) {
       if (String(o.data).indexOf(pref) !== 0) return;
       var l = Number(o.litri || 0);
@@ -468,9 +487,14 @@ async function _ceCaricaAnno(anno) {
       if (String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0) return;
       var l = Number(o.litri || 0);
       x.acquisti += Number(o.costo_litro || 0) * l;
-      x.trasporti += Number(o.trasporto_litro || 0) * l;
+      var tr = Number(o.trasporto_litro || 0) * l;
+      // in 610143 solo i viaggi dei terzisti; quelli coi mezzi nostri
+      // restano a parte, come informazione, e non entrano nel conto
+      if (terzista[o.id] === false) x.trasportiPropri += tr;
+      else x.trasporti += tr;
       x.litriAcq += l;
       x.nOrdiniAcq++;
+      if (terzista[o.id] === false) x.litriPropri += l;
     });
     Object.keys(dettPerGiorno).forEach(function (d) {
       if (d.indexOf(pref) !== 0) return;
@@ -493,7 +517,8 @@ async function _ceCalcola(q, anno) {
   var fin = _ceFinestra(q);
   var da = fin.da, quanti = fin.quanti;
   var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
-              acquisti: 0, trasporti: 0, litriAcq: 0, nOrdiniAcq: 0 };
+              acquisti: 0, trasporti: 0, trasportiPropri: 0, litriPropri: 0,
+              litriAcq: 0, nOrdiniAcq: 0 };
   for (var i = da; i < da + quanti; i++) {
     var m = cache.mesi[i];
     Object.keys(acc).forEach(function (k) { acc[k] += m[k]; });
@@ -538,6 +563,7 @@ async function _ceCalcola(q, anno) {
     litriIngrosso: acc.ingLitri, litriDettaglio: acc.dettLitri,
     margineIngrosso: acc.ingMarg, senzaPrezzo: 0, litriAcquistati: acc.litriAcq,
     acquisti: acc.acquisti, trasporti: acc.trasporti, servizi: servizi, nOrdiniAcq: acc.nOrdiniAcq,
+    trasportiPropri: acc.trasportiPropri, litriPropri: acc.litriPropri,
     rimIniziale: rimIniziale, rimFinale: rimFinale,
     costoVenduto: costoVenduto, margineLordo: margineLordo,
     budget: bud, costiFissi: costiFissi,
@@ -602,7 +628,7 @@ function _ceVoci(d) {
     { cod: CE_CODICI.acquisti, l: 'Acquisti del periodo', v: -d.acquisti, tipo: 'reale', sotto: true },
     { l: 'Rimanenze iniziali', v: -d.rimIniziale, tipo: 'reale', sotto: true },
     { l: 'Rimanenze finali', v: d.rimFinale, tipo: 'reale', sotto: true },
-    { cod: CE_CODICI.trasporti, l: 'Spese di trasporto', v: -d.trasporti, tipo: 'reale', sotto: true, dai: true },
+    { cod: CE_CODICI.trasporti, l: 'Spese di trasporto (terzisti)', v: -d.trasporti, tipo: 'reale', sotto: true, dai: true },
     { l: 'Costo del venduto', v: -(d.costoVenduto + d.trasporti), tipo: 'reale' },
     { cod: 'R1', l: 'MARGINE LORDO COMMERCIALE', v: d.margineLordo, pct: true, banda: 1 },
     { cod: CE_CODICI.personale, l: 'Personale', v: -(d.budget.personale || 0), tipo: 'stima' },
@@ -653,7 +679,7 @@ function _ceBarra(d) {
 
 function _ceNote(d) {
   var h = '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.7">';
-  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti come nel <strong>Report acquisti</strong>: solo il costo del prodotto, esclusi i prelievi dal nostro deposito. Le <strong>spese di trasporto</strong> sono la voce <strong>610143</strong> dentro i costi della produzione, come nella situazione contabile: calcolate carico per carico dagli ordini, incidono quindi sul primo margine. '
+  h += 'Ricavi calcolati come nella sezione <strong>Vendite</strong>. Acquisti come nel <strong>Report acquisti</strong>: solo il costo del prodotto, esclusi i prelievi dal nostro deposito. In <strong>610143</strong> ci sono i soli trasporti dei <strong>terzisti</strong>, che sono fatture vere: il trasporto coi mezzi propri e una tariffa figurata e il suo costo reale e gia dentro carburante, manutenzione e personale, quindi metterlo anche qui lo conterebbe due volte. '
      + 'Rimanenze dal sistema di carico e scarico riconciliato con DAS e registro, valorizzate al costo medio del giorno. '
      + 'Le voci in <span style="color:' + C_CE.ambra + '">ambra</span> vengono dal budget annuale, non dai movimenti.';
   if (d.senzaPrezzo > 0) {
@@ -765,6 +791,14 @@ function _ceStileB(d) {
   h += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:11.5px;color:var(--text-muted)">';
   h += '<span>Litri ingrosso <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriIngrosso) + '</strong></span>';
   h += '<span>Litri stazione <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriDettaglio) + '</strong></span>';
+  if (d.litriPropri > 0) {
+    h += '<span>Trasporto proprio <strong style="color:var(--text);font-family:var(--font-mono)">'
+      + (d.trasportiPropri / d.litriPropri).toFixed(4) + '</strong> &euro;/L su ' + _andNum(d.litriPropri) + ' L</span>';
+  }
+  if (d.trasporti > 0 && (d.litriAcquistati - d.litriPropri) > 0) {
+    h += '<span>Terzisti <strong style="color:var(--text);font-family:var(--font-mono)">'
+      + (d.trasporti / (d.litriAcquistati - d.litriPropri)).toFixed(4) + '</strong> &euro;/L</span>';
+  }
   h += '<span>Acquistati <strong style="color:var(--text);font-family:var(--font-mono)">' + _andNum(d.litriAcquistati) + '</strong> L in '
      + _andNum(d.nOrdiniAcq) + ' ordini &middot; medio <strong style="color:var(--text);font-family:var(--font-mono)">'
      + (d.litriAcquistati ? (d.acquisti / d.litriAcquistati).toFixed(4) : '—') + '</strong> &euro;/L</span>';
