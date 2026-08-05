@@ -1,4 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260804a — filtro per data ORDINE sull'elenco, accanto a Solo da pagare
 // v20260803a — contestazione prezzi al fornitore, riga per riga sulla singola
 //              fattura, con lettera da allegare alla PEC
 // v20260801b — corretto l escape del pulsante Modifica: l onclick usciva con
@@ -455,9 +456,13 @@ function _ecfRender() {
   // e mischiare fornitori diversi non serve a nulla.
   btnPag += '<button onclick="ecfStampaSelezione()" style="width:100%;margin-top:6px;font-size:11.5px;padding:7px 10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card,#fff);color:var(--text);cursor:pointer">🖨 Visualizza dettagli</button>';
 
+  // il filtro per data tocca SOLO l'elenco: i totali in cima restano interi
+  _ecfElencoTutti = elenco;
+  _ecfElencoFiltrato = (_ecfDal || _ecfAl) ? elenco.filter(_ecfNelPeriodo) : elenco;
+
   if (typeof pfRfCtx === 'function') {
     pfRfCtx('ecf', {
-      ordini: elenco,
+      ordini: _ecfElencoFiltrato,
       sel: _ecfSelezione,
       fornitore: _ecfSel,
       selezionabile: true,
@@ -516,8 +521,10 @@ function _ecfRender() {
 
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">'
       + '<div style="font-size:13px;font-weight:600">Ordini e fatture — per scadenza</div>'
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap">' + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti')
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + _ecfBarraData()
+        + btnF('aperti', 'Solo da pagare') + btnF('tutti', 'Tutti')
         + (typeof pfRfBtnVista === 'function' ? pfRfBtnVista('ecf') : '') + '</div></div>'
+    + _ecfRiepilogoData(_ecfElencoTutti || [], _ecfElencoFiltrato || [])
     + '<div style="margin-bottom:22px">' + (typeof pfRfTabella === 'function' ? pfRfTabella('ecf') : '') + '</div>'
     + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
       + '<div style="font-size:10.5px;color:var(--text-muted)">Clicca il numero fattura in riga per il dettaglio, il pagamento o la modifica del numero.</div>'
@@ -1819,6 +1826,73 @@ async function ecfTuttiRender() {
 // Riga per riga sulla singola fattura, e in fondo una lettera da
 // allegare alla PEC.
 var _contStato = null;
+
+// ═══ v20260804a · FILTRO PER DATA ORDINE ═══════════════════════════
+// Filtra per la data dell'ORDINE, non per la scadenza. Vale SOLO
+// sull'elenco: il debito verso il fornitore in cima resta quello che e,
+// e vederlo cambiare mentre si filtra per data confonderebbe. Il totale
+// del periodo si legge nella riga di riepilogo sotto la barra.
+var _ecfElencoTutti = [];
+var _ecfElencoFiltrato = [];
+var _ecfDal = '';
+var _ecfAl = '';
+
+function ecfFiltroData(campo, valore) {
+  if (campo === 'dal') _ecfDal = valore || '';
+  else _ecfAl = valore || '';
+  if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore();
+}
+
+function ecfFiltroDataPulisci() { _ecfDal = ''; _ecfAl = ''; if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore(); }
+
+function ecfFiltroDataRapido(quale) {
+  var oggi = new Date();
+  if (quale === 'mese') {
+    var p = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1);
+    var u = new Date(oggi.getFullYear(), oggi.getMonth(), 0);
+    _ecfDal = p.toISOString().split('T')[0];
+    _ecfAl = u.toISOString().split('T')[0];
+  } else if (quale === 'anno') {
+    _ecfDal = oggi.getFullYear() + '-01-01';
+    _ecfAl = oggi.toISOString().split('T')[0];
+  }
+  if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore();
+}
+
+function _ecfNelPeriodo(o) {
+  var d = String(o.data || '');
+  if (_ecfDal && d < _ecfDal) return false;
+  if (_ecfAl && d > _ecfAl) return false;
+  return true;
+}
+
+function _ecfBarraData() {
+  var inp = 'width:118px;padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono)';
+  var bt = function (q, l) {
+    return '<button onclick="ecfFiltroDataRapido(\'' + q + '\')" style="font-size:11.5px;padding:6px 11px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">' + l + '</button>';
+  };
+  var h = '<div style="display:flex;gap:4px;align-items:center;background:var(--bg-kpi);border-radius:8px;padding:4px 8px">';
+  h += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap">ordini dal</span>';
+  h += '<input type="date" value="' + _ecfDal + '" onchange="ecfFiltroData(\'dal\', this.value)" style="' + inp + '">';
+  h += '<span style="font-size:11px;color:var(--text-muted)">al</span>';
+  h += '<input type="date" value="' + _ecfAl + '" onchange="ecfFiltroData(\'al\', this.value)" style="' + inp + '">';
+  if (_ecfDal || _ecfAl) {
+    h += '<button onclick="ecfFiltroDataPulisci()" title="Togli il filtro" style="font-size:12px;padding:3px 7px;border:none;border-radius:5px;background:transparent;color:var(--text-muted);cursor:pointer">&#10005;</button>';
+  }
+  h += '</div>' + bt('mese', 'Mese scorso') + bt('anno', 'Quest\'anno');
+  h += '<span style="width:1px;height:22px;background:var(--border)"></span>';
+  return h;
+}
+
+function _ecfRiepilogoData(tutti, filtrati) {
+  if (!_ecfDal && !_ecfAl) return '';
+  var imp = filtrati.reduce(function (a, o) { return a + Number(o.imponibile || o.totale || 0); }, 0);
+  return '<div style="background:var(--bg-kpi);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:11.5px;color:var(--text-muted)">'
+    + 'Filtrati per <strong>data ordine</strong>'
+    + (_ecfDal ? ' dal ' + _pfIsoToIt(_ecfDal) : '') + (_ecfAl ? ' al ' + _pfIsoToIt(_ecfAl) : '')
+    + ' &middot; <strong style="color:var(--text)">' + filtrati.length + ' ordini</strong> su ' + tutti.length
+    + ' &middot; imponibile <strong style="color:var(--text);font-family:var(--font-mono)">' + fmtE(imp) + '</strong></div>';
+}
 
 function ecfContestaFattura(fatturaId) {
   var f = (_ecfFatture || []).filter(function (x) { return x.id === fatturaId; })[0];
