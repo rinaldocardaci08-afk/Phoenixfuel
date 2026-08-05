@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260804c — il filtro non partiva: chiamavo renderEstrattoFornitore, che
+//              NON ESISTE (la funzione vera e _ecfRender). Aggiunto Filtra
 // v20260804b — il filtro regge anche il giorno singolo (le date con l'ora
 //              venivano escluse) e non ha piu le scorciatoie mese/anno
 // v20260804a — filtro per data ORDINE sull'elenco, accanto a Solo da pagare
@@ -1839,15 +1841,24 @@ var _ecfElencoFiltrato = [];
 var _ecfDal = '';
 var _ecfAl = '';
 
+// v20260804c — Le date si scrivono nello stato SENZA ridisegnare: il
+// ridisegno a ogni cifra ricreava i campi e faceva perdere il fuoco
+// mentre si digitava. Si applica con il pulsante Filtra o uscendo dal
+// campo dopo aver scelto dal calendario.
 function ecfFiltroData(campo, valore) {
-  var v = valore || '';
-  if (campo === 'dal') { if (v === _ecfDal) return; _ecfDal = v; }
-  else { if (v === _ecfAl) return; _ecfAl = v; }
-  // parte da solo, senza premere niente
-  if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore();
+  if (campo === 'dal') _ecfDal = valore || '';
+  else _ecfAl = valore || '';
 }
 
-function ecfFiltroDataPulisci() { _ecfDal = ''; _ecfAl = ''; if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore(); }
+function ecfApplicaFiltroData() {
+  var d = document.getElementById('ecf-data-dal');
+  var a = document.getElementById('ecf-data-al');
+  if (d) _ecfDal = d.value || '';
+  if (a) _ecfAl = a.value || '';
+  _ecfRender();
+}
+
+function ecfFiltroDataPulisci() { _ecfDal = ''; _ecfAl = ''; _ecfRender(); }
 
 function _ecfNelPeriodo(o) {
   // v20260804b — SOLO I PRIMI DIECI CARATTERI.
@@ -1868,9 +1879,10 @@ function _ecfBarraData() {
   var inp = 'width:104px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:11.5px;font-family:var(--font-mono)';
   var h = '<div style="display:flex;gap:3px;align-items:center;background:var(--bg-kpi);border-radius:7px;padding:3px 7px">';
   h += '<span style="font-size:10.5px;color:var(--text-muted);white-space:nowrap">dal</span>';
-  h += '<input type="date" value="' + _ecfDal + '" onchange="ecfFiltroData(\'dal\', this.value)" oninput="ecfFiltroData(\'dal\', this.value)" style="' + inp + '">';
+  h += '<input type="date" id="ecf-data-dal" value="' + _ecfDal + '" onchange="ecfFiltroData(\'dal\', this.value)" style="' + inp + '">';
   h += '<span style="font-size:10.5px;color:var(--text-muted)">al</span>';
-  h += '<input type="date" value="' + _ecfAl + '" onchange="ecfFiltroData(\'al\', this.value)" oninput="ecfFiltroData(\'al\', this.value)" style="' + inp + '">';
+  h += '<input type="date" id="ecf-data-al" value="' + _ecfAl + '" onchange="ecfFiltroData(\'al\', this.value)" style="' + inp + '">';
+  h += '<button onclick="ecfApplicaFiltroData()" style="font-size:11px;padding:4px 11px;border:0.5px solid #185FA5;border-radius:6px;background:#185FA5;color:#fff;font-weight:600;cursor:pointer;white-space:nowrap">Filtra</button>';
   if (_ecfDal || _ecfAl) {
     h += '<button onclick="ecfFiltroDataPulisci()" title="Togli il filtro" style="font-size:12px;padding:2px 6px;border:none;border-radius:5px;background:transparent;color:var(--text-muted);cursor:pointer">&#10005;</button>';
   }
