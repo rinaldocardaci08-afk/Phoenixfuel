@@ -1,4 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
+// v20260804b — il filtro regge anche il giorno singolo (le date con l'ora
+//              venivano escluse) e non ha piu le scorciatoie mese/anno
 // v20260804a — filtro per data ORDINE sull'elenco, accanto a Solo da pagare
 // v20260803a — contestazione prezzi al fornitore, riga per riga sulla singola
 //              fattura, con lettera da allegare alla PEC
@@ -1838,49 +1840,42 @@ var _ecfDal = '';
 var _ecfAl = '';
 
 function ecfFiltroData(campo, valore) {
-  if (campo === 'dal') _ecfDal = valore || '';
-  else _ecfAl = valore || '';
+  var v = valore || '';
+  if (campo === 'dal') { if (v === _ecfDal) return; _ecfDal = v; }
+  else { if (v === _ecfAl) return; _ecfAl = v; }
+  // parte da solo, senza premere niente
   if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore();
 }
 
 function ecfFiltroDataPulisci() { _ecfDal = ''; _ecfAl = ''; if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore(); }
 
-function ecfFiltroDataRapido(quale) {
-  var oggi = new Date();
-  if (quale === 'mese') {
-    var p = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1);
-    var u = new Date(oggi.getFullYear(), oggi.getMonth(), 0);
-    _ecfDal = p.toISOString().split('T')[0];
-    _ecfAl = u.toISOString().split('T')[0];
-  } else if (quale === 'anno') {
-    _ecfDal = oggi.getFullYear() + '-01-01';
-    _ecfAl = oggi.toISOString().split('T')[0];
-  }
-  if (typeof renderEstrattoFornitore === 'function') renderEstrattoFornitore();
-}
-
 function _ecfNelPeriodo(o) {
-  var d = String(o.data || '');
+  // v20260804b — SOLO I PRIMI DIECI CARATTERI.
+  // Se la data porta anche l'ora ("2026-07-08T00:00:00") il confronto con
+  // l'estremo finale la escludeva: cercando un giorno solo non usciva
+  // niente, perche "2026-07-08T00:00:00" > "2026-07-08".
+  var d = String(o.data || '').substring(0, 10);
+  if (!d) return true;
   if (_ecfDal && d < _ecfDal) return false;
   if (_ecfAl && d > _ecfAl) return false;
   return true;
 }
 
 function _ecfBarraData() {
-  var inp = 'width:118px;padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono)';
-  var bt = function (q, l) {
-    return '<button onclick="ecfFiltroDataRapido(\'' + q + '\')" style="font-size:11.5px;padding:6px 11px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">' + l + '</button>';
-  };
-  var h = '<div style="display:flex;gap:4px;align-items:center;background:var(--bg-kpi);border-radius:8px;padding:4px 8px">';
-  h += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap">ordini dal</span>';
-  h += '<input type="date" value="' + _ecfDal + '" onchange="ecfFiltroData(\'dal\', this.value)" style="' + inp + '">';
-  h += '<span style="font-size:11px;color:var(--text-muted)">al</span>';
-  h += '<input type="date" value="' + _ecfAl + '" onchange="ecfFiltroData(\'al\', this.value)" style="' + inp + '">';
+  // v20260804b — senza le scorciatoie mese/anno: le fatture si pagano a 30
+  // giorni, quei due pulsanti non servivano e rubavano spazio. Il filtro
+  // parte da solo appena si sceglie una data.
+  var inp = 'width:104px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:11.5px;font-family:var(--font-mono)';
+  var h = '<div style="display:flex;gap:3px;align-items:center;background:var(--bg-kpi);border-radius:7px;padding:3px 7px">';
+  h += '<span style="font-size:10.5px;color:var(--text-muted);white-space:nowrap">dal</span>';
+  h += '<input type="date" value="' + _ecfDal + '" onchange="ecfFiltroData(\'dal\', this.value)" oninput="ecfFiltroData(\'dal\', this.value)" style="' + inp + '">';
+  h += '<span style="font-size:10.5px;color:var(--text-muted)">al</span>';
+  h += '<input type="date" value="' + _ecfAl + '" onchange="ecfFiltroData(\'al\', this.value)" oninput="ecfFiltroData(\'al\', this.value)" style="' + inp + '">';
   if (_ecfDal || _ecfAl) {
-    h += '<button onclick="ecfFiltroDataPulisci()" title="Togli il filtro" style="font-size:12px;padding:3px 7px;border:none;border-radius:5px;background:transparent;color:var(--text-muted);cursor:pointer">&#10005;</button>';
+    h += '<button onclick="ecfFiltroDataPulisci()" title="Togli il filtro" style="font-size:12px;padding:2px 6px;border:none;border-radius:5px;background:transparent;color:var(--text-muted);cursor:pointer">&#10005;</button>';
   }
-  h += '</div>' + bt('mese', 'Mese scorso') + bt('anno', 'Quest\'anno');
-  h += '<span style="width:1px;height:22px;background:var(--border)"></span>';
+  h += '</div>';
+  h += '<span style="width:1px;height:20px;background:var(--border)"></span>';
   return h;
 }
 
