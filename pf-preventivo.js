@@ -1,4 +1,6 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260805b — il dettaglio del margine si apre SOPRA il preventivo, con una
+//              finestrella sua: chiudendolo il preventivo resta
 // v20260805a
 //
 // Dal listino prezzi: scelto cliente, deposito e prodotto, mostra per
@@ -97,16 +99,95 @@ async function pvCambia(campo, valore) {
   _pvRender();
 }
 
-// Il dettaglio: lo stesso popup che si apre in Ordini.
-function pvDettaglioMargine() {
+// ═══ v20260805b · IL DETTAGLIO SI APRE SOPRA, NON AL POSTO ══════════
+// Il popup di Ordini usa lo STESSO modale del preventivo: aprirlo lo
+// sostituiva, e chiudendolo si perdeva tutto il lavoro fatto. Qui si
+// apre una finestrella propria, sopra il modale, che si chiude da sola
+// senza toccare quello che c'e sotto — il preventivo resta com'era.
+// I dati sono gli stessi: stessa query degli ordini, stesse colonne.
+async function pvDettaglioMargine() {
   if (!_pvState.clienteId) { toast('Scegli prima il cliente'); return; }
-  if (typeof mostraUltimiOrdiniClienteAnagrafica === 'function') {
-    var f = /benzina/i.test(_pvState.prodotto) ? 'benzina'
-          : (/gasolio/i.test(_pvState.prodotto) ? 'gasolio' : 'tutti');
-    mostraUltimiOrdiniClienteAnagrafica(_pvState.clienteId, _pvState.clienteNome, f);
-  } else {
-    toast('Dettaglio non disponibile');
+  var vecchio = document.getElementById('pv-overlay');
+  if (vecchio) vecchio.remove();
+
+  var d = document.createElement('div');
+  d.id = 'pv-overlay';
+  d.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.45);'
+    + 'display:flex;align-items:center;justify-content:center;padding:20px';
+  d.innerHTML = '<div style="background:var(--bg-card);border-radius:14px;padding:20px;max-width:680px;width:100%;'
+    + 'max-height:86vh;overflow:auto;box-shadow:0 16px 44px rgba(0,0,0,0.4)" id="pv-overlay-box">'
+    + '<div style="padding:24px;text-align:center;color:var(--text-muted)">Carico gli ultimi ordini...</div></div>';
+  d.addEventListener('click', function (e) { if (e.target === d) pvChiudiDettaglio(); });
+  document.body.appendChild(d);
+
+  try {
+    // stessa query del margine proposto, con i campi per il dettaglio
+    var r = await sb.from('ordini')
+      .select('data,prodotto,litri,costo_litro,trasporto_litro,margine')
+      .or('cliente_id.eq.' + _pvState.clienteId + ',cliente.eq.' + (_pvState.clienteNome || '').replace(/'/g, "\\'"))
+      .neq('stato', 'annullato').eq('tipo_ordine', 'cliente')
+      .eq('prodotto', _pvState.prodotto)
+      .order('data', { ascending: false }).limit(5);
+    if (r.error) throw r.error;
+    var righe = r.data || [];
+    var box = document.getElementById('pv-overlay-box');
+    if (!box) return;
+
+    var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">';
+    h += '<div><div style="font-size:15px;font-weight:600;color:#0C447C">Ultimi 5 ordini</div>'
+      + '<div style="font-size:12px;color:var(--text-muted)"><strong>' + esc(_pvState.clienteNome) + '</strong> &middot; ' + esc(_pvState.prodotto) + '</div></div>';
+    h += '<button onclick="pvChiudiDettaglio()" style="border:none;background:transparent;font-size:22px;line-height:1;color:var(--text-muted);cursor:pointer">&times;</button>';
+    h += '</div>';
+
+    if (!righe.length) {
+      h += '<div style="padding:20px;color:var(--text-muted);font-size:13px">Nessun ordine di questo prodotto per questo cliente.</div>';
+    } else {
+      var totL = 0, sommaM = 0;
+      h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:14px">';
+      h += '<tr style="background:var(--bg-kpi);color:var(--text-muted);text-align:right">'
+        + '<th style="text-align:left;padding:7px 9px;font-weight:500">Data</th>'
+        + '<th style="padding:7px 9px;font-weight:500">Litri</th>'
+        + '<th style="padding:7px 9px;font-weight:500">Prezzo netto/L</th>'
+        + '<th style="padding:7px 9px;font-weight:500">Margine/L</th></tr>';
+      righe.forEach(function (o) {
+        var netto = Number(o.costo_litro || 0) + Number(o.trasporto_litro || 0) + Number(o.margine || 0);
+        totL += Number(o.litri || 0); sommaM += Number(o.margine || 0);
+        h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+          + '<td style="text-align:left;padding:8px 9px;font-family:var(--font-mono)">' + _pfIsoToIt(o.data) + '</td>'
+          + '<td style="padding:8px 9px;font-family:var(--font-mono)">' + Number(o.litri || 0).toLocaleString('it-IT') + ' L</td>'
+          + '<td style="padding:8px 9px;font-family:var(--font-mono)">&euro; ' + netto.toFixed(6) + '</td>'
+          + '<td style="padding:8px 9px;font-family:var(--font-mono);color:#27500A">+&euro; ' + Number(o.margine || 0).toFixed(4) + '</td></tr>';
+      });
+      var media = sommaM / righe.length;
+      h += '<tr style="border-top:0.5px solid var(--border);background:var(--bg-kpi);text-align:right;font-weight:700">'
+        + '<td style="text-align:left;padding:9px">Media</td>'
+        + '<td style="padding:9px;font-family:var(--font-mono)">' + totL.toLocaleString('it-IT') + ' L</td>'
+        + '<td></td>'
+        + '<td style="padding:9px;font-family:var(--font-mono);color:#27500A">+&euro; ' + media.toFixed(4) + '</td></tr>';
+      h += '</table>';
+      h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
+      h += '<button onclick="pvChiudiDettaglio()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button>';
+      h += '<button onclick="pvUsaMedia(' + media + ')" class="btn-primary" style="padding:9px 18px">Usa questa media</button>';
+      h += '</div>';
+    }
+    box.innerHTML = h;
+  } catch (e) {
+    var b2 = document.getElementById('pv-overlay-box');
+    if (b2) b2.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Errore: ' + esc((e && e.message) || e) + '</div>'
+      + '<div style="display:flex;justify-content:flex-end"><button onclick="pvChiudiDettaglio()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button></div>';
   }
+}
+
+// Chiude SOLO la finestrella: il preventivo sotto resta intatto.
+function pvChiudiDettaglio() {
+  var d = document.getElementById('pv-overlay');
+  if (d) d.remove();
+}
+
+function pvUsaMedia(m) {
+  pvChiudiDettaglio();
+  _pvState.margine = Number(m || 0);
+  _pvRender();
 }
 
 function _pvRighe() {
