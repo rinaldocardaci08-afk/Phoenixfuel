@@ -1,4 +1,6 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260805c — scegliendo una base di Vibo il nostro deposito entra sempre
+//              fra i fornitori: fisicamente sta li
 // v20260805b — il dettaglio del margine si apre SOPRA il preventivo, con una
 //              finestrella sua: chiudendolo il preventivo resta
 // v20260805a
@@ -190,11 +192,24 @@ function pvUsaMedia(m) {
   _pvRender();
 }
 
+// v20260805c — IL NOSTRO DEPOSITO STA A VIBO MARINA.
+// Nel listino PhoenixFuel ha una base sua ("Deposito Vibo PhoenixFuel"),
+// quindi scegliendo Vibo Marina spariva dal confronto. Ma fisicamente e
+// li: quando la base scelta e a Vibo, il nostro deposito entra sempre
+// fra i fornitori, con la sua base scritta accanto.
+function _pvVibo(nome) { return /vibo/i.test(String(nome || '')); }
+function _pvNostro(forn) { return /phoenix/i.test(String(forn || '')); }
+
 function _pvRighe() {
   var S = _pvState;
+  var baseScelta = _pvBasi.filter(function (b) { return b.id === S.baseId; })[0];
+  var sceltaVibo = baseScelta && _pvVibo(baseScelta.nome);
   return _pvPrezzi
     .filter(function (p) {
-      return p.basi_carico && p.basi_carico.id === S.baseId && p.prodotto === S.prodotto;
+      if (!p.basi_carico || p.prodotto !== S.prodotto) return false;
+      if (p.basi_carico.id === S.baseId) return true;
+      // il nostro deposito di Vibo entra anche scegliendo un'altra base di Vibo
+      return sceltaVibo && _pvNostro(p.fornitore) && _pvVibo(p.basi_carico.nome);
     })
     .map(function (p) {
       var costo = Number(p.costo_litro || 0);
@@ -282,7 +297,9 @@ function _pvRender() {
 
   h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">'
     + 'Costo e fornitori vengono dal listino del giorno, in sola lettura. Trasporto e margine sono quelli scelti sopra: '
-    + 'per cambiarli si usano i campi, non la tabella.</div>';
+    + 'per cambiarli si usano i campi, non la tabella.'
+    + (righe.some(function (r) { return _pvNostro(r.fornitore); })
+        ? ' Il <strong>nostro deposito</strong> compare fra le fonti perche si trova a Vibo Marina.' : '') + '</div>';
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
   h += '<button onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button>';
