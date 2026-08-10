@@ -27,7 +27,7 @@ function switchLogisticaTab(btn) {
 }
 
 async function caricaLogistica() {
-  await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi()]);
+  await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi(), caricaCostiTrasporto()]);
   // Carica trasportatori nel dropdown
   const { data: trasps } = await sb.from('trasportatori').select('id,nome').eq('attivo',true).order('nome');
   const selT = document.getElementById('car-trasportatore');
@@ -2553,4 +2553,82 @@ async function pfRettificaCisternaOrdine(ordineId, deltaLitri, verso, data) {
     console.warn('rettifica cisterna', e);
     return '⚠ Litri aggiornati, ma la cisterna non è stata mossa: verificala';
   }
+}
+
+// ═══ v20260805d · COSTI DI TRASPORTO ═══════════════════════════════
+// I valori al litro che si applicano ai viaggi, gestiti qui invece che
+// scritti nel codice: servono al preventivo cliente e a chiunque altro
+// li chieda. Tabella `costi_trasporto`.
+var _ctVoci = [];
+
+async function caricaCostiTrasporto() {
+  var box = document.getElementById('costi-trasporto-wrap');
+  if (!box) return;
+  try {
+    var r = await sb.from('costi_trasporto').select('*').order('valore');
+    if (r.error) throw r.error;
+    _ctVoci = r.data || [];
+    _ctRender();
+  } catch (e) {
+    box.innerHTML = '<div style="padding:12px;font-size:12px;color:#A32D2D">Non riesco a leggere i costi di trasporto: '
+      + esc((e && e.message) || e) + '</div>';
+  }
+}
+
+function _ctRender() {
+  var box = document.getElementById('costi-trasporto-wrap');
+  if (!box) return;
+  var h = '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">'
+    + 'Valori al litro proposti quando si compone un preventivo o un ordine.</div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  h += '<tr style="color:var(--text-muted);text-align:right">'
+    + '<th style="text-align:left;padding:6px 8px;font-weight:500">Descrizione</th>'
+    + '<th style="padding:6px 8px;font-weight:500;width:130px">&euro;/litro</th>'
+    + '<th style="padding:6px 8px;font-weight:500;width:90px">Attivo</th>'
+    + '<th style="width:60px"></th></tr>';
+  _ctVoci.forEach(function (v) {
+    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
+      + '<td style="text-align:left;padding:7px 8px">' + esc(v.descrizione || '') + '</td>'
+      + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:600">' + Number(v.valore).toFixed(6) + '</td>'
+      + '<td style="padding:7px 8px">' + (v.attivo === false ? '<span style="color:var(--text-muted)">no</span>' : '<span style="color:#27500A">si</span>') + '</td>'
+      + '<td style="padding:7px 8px;text-align:right"><button class="btn-danger" onclick="ctElimina(\'' + v.id + '\')" style="padding:3px 8px">x</button></td></tr>';
+  });
+  h += '</table>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">';
+  h += '<div style="flex:2;min-width:180px"><label style="font-size:11px;color:var(--text-muted)">Descrizione</label>'
+    + '<input type="text" id="ct-descr" placeholder="Es. Milazzo / lunga tratta" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px"></div>';
+  h += '<div style="flex:1;min-width:130px"><label style="font-size:11px;color:var(--text-muted)">&euro;/litro</label>'
+    + '<input type="number" step="0.000001" id="ct-valore" placeholder="0,019" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right;font-family:var(--font-mono)"></div>';
+  h += '<button class="btn-primary" onclick="ctAggiungi()" style="padding:9px 16px;font-size:12.5px">Aggiungi</button>';
+  h += '</div>';
+  box.innerHTML = h;
+}
+
+async function ctAggiungi() {
+  var d = (document.getElementById('ct-descr') || {}).value || '';
+  var v = Number((document.getElementById('ct-valore') || {}).value || 0);
+  if (!(v > 0)) { toast('Inserisci un valore maggiore di zero'); return; }
+  try {
+    var r = await sb.from('costi_trasporto').insert([{ descrizione: d.trim() || (v.toFixed(3) + ' \u20ac/L'), valore: v, attivo: true }]);
+    if (r.error) throw r.error;
+    toast('\u2713 Costo aggiunto');
+    caricaCostiTrasporto();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
+}
+
+async function ctElimina(id) {
+  if (!confirm('Eliminare questo costo di trasporto?')) return;
+  try {
+    var r = await sb.from('costi_trasporto').delete().eq('id', id);
+    if (r.error) throw r.error;
+    caricaCostiTrasporto();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
+}
+
+// Usata dal preventivo cliente: l'elenco da cui scegliere.
+async function pfCostiTrasporto() {
+  if (_ctVoci.length) return _ctVoci.filter(function (v) { return v.attivo !== false; });
+  var r = await sb.from('costi_trasporto').select('*').eq('attivo', true).order('valore');
+  _ctVoci = r.data || [];
+  return _ctVoci;
 }

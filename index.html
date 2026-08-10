@@ -547,6 +547,7 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>Listino prezzi</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#185FA5" onclick="apriPreventivoCliente()">💬 Preventivo cliente</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
               <button onclick="scorriGiornoPrezzi(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
@@ -2736,6 +2737,10 @@
         <!-- PANEL: MEZZI PROPRI -->
         <div class="log-panel" id="log-mezzi-propri" style="display:none">
           <div class="card" style="margin-bottom:16px">
+            <div class="card-title">Costi di trasporto</div>
+            <div id="costi-trasporto-wrap"><div class="loading">Caricamento...</div></div>
+          </div>
+          <div class="card" style="margin-bottom:16px">
             <div class="card-title">Aggiungi mezzo proprio</div>
             <div class="form-grid">
               <div class="form-group"><label>Targa</label><input type="text" id="mz-targa" placeholder="Es. CS 384 AC" /></div>
@@ -3168,7 +3173,8 @@
 <script src="pf-movimenti-totali.js?v=20260526a"></script>
 <script src="pf-movimenti-dettaglio.js?v=20260716a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
-<script src="pf-logistica.js?v=20260805c"></script>
+<script src="pf-logistica.js?v=20260805d"></script>
+<script src="pf-preventivo.js?v=20260805a"></script>
 <script src="pf-vettori.js?v=20260804b"></script>
 <script src="pf-aggiornamenti.js?v=20260804a"></script>
 <script src="pf-admin.js?v=20260717a"></script>
