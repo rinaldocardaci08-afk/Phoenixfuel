@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica
+// v20260805b — popup "Aggiungi al viaggio" con anteprima del riempimento, e
+//              consegne raggruppate per prodotto nella scheda
 // v20260805a — barra di riempimento nel dettaglio carico e possibilita di
 //              aggiungere una consegna gia programmata allo stesso viaggio
 // v20260628a — modifica/elimina viaggio (solo senza DAS): vettore/camion/autista/quantità,
@@ -1349,19 +1351,42 @@ function _renderCardCarico(c, opts) {
     }
     html += '<button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')" style="padding:4px 8px">🖨️</button>';
     html += '<button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')" style="padding:4px 8px">👁</button>';
+    html += '<button class="btn-primary" title="Aggiungi una consegna gia programmata a questo viaggio" onclick="caricoPopupAggiungi(\'' + c.id + '\')" style="padding:4px 10px;font-size:11px">&#10133; Aggiungi</button>';
     html += '<button class="btn-danger" title="Elimina viaggio" onclick="pfEliminaViaggio(\'' + c.id + '\')" style="padding:4px 8px">×</button>';
     html += '</div>';
   }
   html += '</div></div>';
-  // Sezione clienti+prodotti con badge colorato
+  // v20260805b — ELENCO RAGGRUPPATO PER PRODOTTO.
+  // Prima l'etichetta del prodotto si ripeteva su ogni riga e spariva nel
+  // rumore. Ora compare UNA volta in testa al gruppo, coi litri totali di
+  // quel prodotto — il numero che serve quando si riempiono gli scomparti,
+  // e che la barra complessiva non dice. La numerazione resta quella
+  // originale, perche e l'ordine di consegna del foglio viaggio.
   if (ordini.length) {
-    html += '<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;font-size:12px">';
-    ordini.forEach(function(o, i) {
-      var prodColors = window._COL_PROD_BADGE[o.prodotto] || { bg:'var(--bg)', col:'var(--text)', border:'var(--border)' };
-      html += '<div style="display:flex;align-items:center;gap:6px"><span style="color:var(--text-muted);font-weight:500;min-width:18px">' + (i+1) + '.</span>';
-      html += '<span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(o.cliente||'') + '">' + esc(o.cliente||'—') + '</span>';
-      html += '<span style="background:' + prodColors.bg + ';color:' + prodColors.col + ';padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;white-space:nowrap">' + esc(o.prodotto || '—') + '</span>';
-      html += '<span style="font-family:var(--font-mono);color:var(--text-muted);font-size:11px">' + fmtL(o.litri||0) + ' L</span>';
+    var gruppi = {}, ordineG = [];
+    ordini.forEach(function (o, i) {
+      var p = o.prodotto || '—';
+      if (!gruppi[p]) { gruppi[p] = { prodotto: p, litri: 0, righe: [] }; ordineG.push(p); }
+      gruppi[p].litri += Number(o.litri || 0);
+      gruppi[p].righe.push({ n: i + 1, cliente: o.cliente, litri: o.litri });
+    });
+    // il prodotto piu caricato per primo
+    ordineG.sort(function (a, b) { return gruppi[b].litri - gruppi[a].litri; });
+
+    html += '<div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--border)">';
+    ordineG.forEach(function (p, gi) {
+      var pc = window._COL_PROD_BADGE[p] || { bg:'var(--bg)', col:'var(--text)', border:'var(--border)' };
+      html += '<div style="display:flex;align-items:center;gap:9px;' + (gi ? 'margin-top:11px;' : '') + 'margin-bottom:5px">'
+        + '<span style="background:' + pc.bg + ';color:' + pc.col + ';padding:2px 10px;border-radius:9px;font-size:11px;font-weight:700;white-space:nowrap">' + esc(p) + '</span>'
+        + '<span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">' + fmtL(gruppi[p].litri) + ' L</span>'
+        + '<span style="flex:1;height:1px;background:var(--border)"></span></div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;font-size:12px;padding-left:4px">';
+      gruppi[p].righe.forEach(function (r) {
+        html += '<div style="display:flex;align-items:center;gap:6px">'
+          + '<span style="color:var(--text-muted);font-weight:500;min-width:18px">' + r.n + '.</span>'
+          + '<span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.cliente||'') + '">' + esc(r.cliente||'—') + '</span>'
+          + '<span style="font-family:var(--font-mono);color:var(--text-muted);font-size:11px">' + fmtL(r.litri||0) + ' L</span></div>';
+      });
       html += '</div>';
     });
     html += '</div>';
@@ -1547,44 +1572,113 @@ function _logBarraRiempimento(carico, ordini) {
   return h;
 }
 
-// Le consegne di quel giorno che non stanno ancora su nessun viaggio.
-async function caricoAggiungiConsegna(caricoId) {
-  var box = document.getElementById('det-aggiungi');
-  if (!box) return;
-  box.innerHTML = '<div class="loading" style="padding:14px;font-size:12px">Cerco le consegne libere...</div>';
+// ═══ v20260805b · POPUP AGGIUNGI AL VIAGGIO ════════════════════════
+// La vista della scheda resta quella che c'era: il popup si apre solo
+// premendo il pulsante. Dentro si sceglie fra le consegne gia
+// programmate per quel giorno e non ancora assegnate, e si vede SUBITO
+// come cambia il riempimento — in ambra quello che c'e gia, in blu
+// quello che si sta aggiungendo. Se si sfora la capacita diventa rosso.
+var _cargAgg = null;   // { caricoId, data, cap, litriOra, libere }
+
+async function caricoPopupAggiungi(caricoId) {
   try {
-    var c = await sb.from('carichi').select('data').eq('id', caricoId).single();
-    if (!c.data) throw new Error('carico non trovato');
+    var c = await sb.from('carichi')
+      .select('id,data,autista,mezzo_targa,mezzi(targa,capacita_totale),carico_ordini(ordini(litri))')
+      .eq('id', caricoId).single();
+    if (c.error || !c.data) throw (c.error || new Error('carico non trovato'));
+    var cc = c.data;
+    var litriOra = (cc.carico_ordini || []).reduce(function (s, x) {
+      return s + Number((x.ordini || {}).litri || 0);
+    }, 0);
+    var cap = (cc.mezzi && cc.mezzi.capacita_totale) ? Number(cc.mezzi.capacita_totale) : 0;
+
     var r = await sb.from('ordini')
-      .select('id,data,cliente,prodotto,litri,destinazione,stato,carico_ordini(carico_id)')
-      .eq('data', c.data.data).neq('stato', 'annullato');
+      .select('id,cliente,prodotto,litri,destinazione,sede_scarico_nome,carico_ordini(carico_id)')
+      .eq('data', cc.data).neq('stato', 'annullato');
     if (r.error) throw r.error;
     var libere = (r.data || []).filter(function (o) { return !(o.carico_ordini || []).length; });
-    if (!libere.length) {
-      box.innerHTML = '<div style="padding:12px;background:var(--bg-kpi);border-radius:8px;font-size:12px;color:var(--text-muted)">'
-        + 'Nessuna consegna libera per il ' + fmtD(c.data.data) + ': sono tutte gia assegnate a un viaggio.</div>';
-      return;
-    }
-    var h = '<div style="background:var(--bg-kpi);border-radius:10px;padding:12px 14px">';
-    h += '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Consegne programmate per il ' + fmtD(c.data.data) + ' e non ancora assegnate</div>';
-    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
-    h += '<select id="det-scelta" style="flex:1;min-width:240px;padding:8px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12.5px">';
-    libere.forEach(function (o) {
-      h += '<option value="' + o.id + '">' + esc(o.cliente || o.destinazione || 'senza cliente')
-        + ' \u00b7 ' + esc(o.prodotto || '') + ' \u00b7 ' + fmtL(o.litri) + '</option>';
-    });
-    h += '</select>';
-    h += '<button onclick="caricoConfermaConsegna(\'' + caricoId + '\')" class="btn-primary" style="padding:8px 16px;font-size:12.5px">Aggiungi al viaggio</button>';
-    h += '<button onclick="document.getElementById(\'det-aggiungi\').innerHTML=\'\';" style="padding:8px 12px;font-size:12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text-muted);cursor:pointer">Annulla</button>';
-    h += '</div></div>';
-    box.innerHTML = h;
+
+    _cargAgg = { caricoId: caricoId, data: cc.data, cap: cap, litriOra: litriOra, libere: libere,
+                 targa: (cc.mezzi && cc.mezzi.targa) || cc.mezzo_targa || '—', autista: cc.autista || '—' };
+    _cargRender();
   } catch (e) {
-    box.innerHTML = '<div style="padding:12px;color:#A32D2D;font-size:12px">Errore: ' + esc((e && e.message) || e) + '</div>';
+    toast('Errore: ' + ((e && e.message) || e));
   }
 }
 
+function _cargRender() {
+  var S = _cargAgg; if (!S) return;
+  var h = '<div style="max-width:640px">';
+  h += '<div style="font-size:15px;font-weight:600">Aggiungi una consegna al viaggio</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">Mezzo ' + esc(S.targa)
+     + ' &middot; ' + esc(S.autista) + ' &middot; ' + fmtD(S.data) + '</div>';
+
+  if (!S.libere.length) {
+    h += '<div style="padding:16px;background:var(--bg-kpi);border-radius:10px;font-size:13px;color:var(--text-muted)">'
+      + 'Nessuna consegna libera per il ' + fmtD(S.data) + ': sono tutte gia assegnate a un viaggio.</div>';
+    h += '<div style="display:flex;justify-content:flex-end;margin-top:14px">'
+      + '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button></div></div>';
+    apriModal(h);
+    return;
+  }
+
+  h += '<div style="font-size:12px;margin-bottom:6px">Consegne programmate per il ' + fmtD(S.data) + ' e non ancora assegnate</div>';
+  h += '<select id="carg-scelta" onchange="_cargAnteprima()" style="width:100%;padding:10px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:12px">';
+  S.libere.forEach(function (o) {
+    var dove = o.sede_scarico_nome || o.destinazione || '';
+    h += '<option value="' + o.id + '">' + esc(o.cliente || dove || 'senza cliente')
+      + ' \u00b7 ' + esc(o.prodotto || '') + ' \u00b7 ' + fmtL(o.litri) + (dove ? ' \u00b7 ' + esc(dove) : '') + '</option>';
+  });
+  h += '</select>';
+  h += '<div id="carg-antep"></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
+  h += '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Annulla</button>';
+  h += '<button onclick="caricoConfermaConsegna(\'' + S.caricoId + '\')" class="btn-primary" style="padding:9px 18px">Aggiungi al viaggio</button>';
+  h += '</div></div>';
+  apriModal(h);
+  _cargAnteprima();
+}
+
+// Come cambia il riempimento con la consegna scelta.
+function _cargAnteprima() {
+  var S = _cargAgg; if (!S) return;
+  var box = document.getElementById('carg-antep');
+  var sel = document.getElementById('carg-scelta');
+  if (!box || !sel) return;
+  var o = S.libere.filter(function (x) { return x.id === sel.value; })[0];
+  if (!o) { box.innerHTML = ''; return; }
+  var agg = Number(o.litri || 0);
+  var dopo = S.litriOra + agg;
+  var pctOra = S.cap > 0 ? Math.round(S.litriOra / S.cap * 100) : 0;
+  var pctDopo = S.cap > 0 ? Math.round(dopo / S.cap * 100) : 0;
+  var sfora = S.cap > 0 && dopo > S.cap;
+  var colAgg = sfora ? '#A32D2D' : '#185FA5';
+
+  var h = '<div style="background:var(--bg-kpi);border-radius:10px;padding:12px 14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:6px">';
+  h += '<span style="font-size:11px;color:var(--text-muted)">Riempimento dopo l\'aggiunta</span>';
+  h += '<span style="font-size:13px;font-family:var(--font-mono)">' + fmtL(S.litriOra) + ' &rarr; <strong style="color:' + colAgg + '">' + fmtL(dopo) + '</strong></span>';
+  h += '</div>';
+  if (S.cap > 0) {
+    var wOra = Math.min(100, pctOra);
+    var wAgg = Math.min(100 - wOra, Math.round(agg / S.cap * 100));
+    h += '<div style="height:11px;border-radius:6px;background:var(--bg);overflow:hidden;display:flex">'
+      + '<div style="width:' + wOra + '%;background:#BA7517"></div>'
+      + '<div style="width:' + wAgg + '%;background:' + colAgg + ';opacity:0.7"></div></div>';
+    h += '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text-muted);margin-top:5px">';
+    h += '<span>da <strong>' + pctOra + '%</strong> a <strong style="color:' + (sfora ? '#A32D2D' : 'var(--text)') + '">' + pctDopo + '%</strong></span>';
+    h += '<span>' + (sfora ? '<strong style="color:#A32D2D">supera la capacita di ' + fmtL(dopo - S.cap) + '</strong>'
+                           : 'restano ' + fmtL(S.cap - dopo)) + '</span>';
+    h += '</div>';
+  } else {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Capacita del mezzo non registrata: non posso calcolare il riempimento.</div>';
+  }
+  h += '</div>';
+  box.innerHTML = h;
+}
+
 async function caricoConfermaConsegna(caricoId) {
-  var sel = document.getElementById('det-scelta');
+  var sel = document.getElementById('carg-scelta');
   if (!sel || !sel.value) return;
   try {
     var q = await sb.from('carico_ordini').select('sequenza').eq('carico_id', caricoId);
@@ -1593,6 +1687,7 @@ async function caricoConfermaConsegna(caricoId) {
     if (ins.error) throw ins.error;
     if (typeof _auditLog === 'function') _auditLog('consegna_aggiunta', 'carico_ordini', 'carico ' + caricoId + ' + ordine ' + sel.value);
     toast('\u2713 Consegna aggiunta al viaggio');
+    if (typeof chiudiModalePermessi === 'function') chiudiModalePermessi();
     apriDettaglioCarico(caricoId);          // ridisegna: la barra si aggiorna
     if (typeof caricaCarichi === 'function') caricaCarichi();
   } catch (e) {
@@ -1677,8 +1772,7 @@ async function apriDettaglioCarico(caricoId) {
   if (nonConfermati.length) {
     html += '<button class="btn-primary" style="flex:1;background:#639922" onclick="confermaTutteConsegneCarico(\'' + caricoId + '\')">✅ Conferma tutte (' + nonConfermati.length + ')</button>';
   }
-  html += '<div id="det-aggiungi" style="margin-bottom:14px"></div>';
-  html += '<button onclick="caricoAggiungiConsegna(\'' + caricoId + '\')" style="width:100%;padding:11px;margin-bottom:14px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px;font-weight:600">&#10133; Inserisci un\'altra consegna</button>';
+  html += '<button onclick="caricoPopupAggiungi(\'' + caricoId + '\')" style="width:100%;padding:11px;margin-bottom:14px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px;font-weight:600">&#10133; Inserisci un\'altra consegna</button>';
   html += '<button class="btn-primary" style="flex:1" onclick="apriFoglioViaggio(\'' + caricoId + '\')">🖨️ Foglio viaggio</button><button onclick="chiudiModalePermessi()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
   apriModal(html);
 }
