@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica
+// v20260805a — barra di riempimento nel dettaglio carico e possibilita di
+//              aggiungere una consegna gia programmata allo stesso viaggio
 // v20260628a — modifica/elimina viaggio (solo senza DAS): vettore/camion/autista/quantità,
 //   togli consegna → ordine torna confermato, elimina sicuro con conferma + blocco se DAS
 // v20260625f — DAS X+1 + modifica DAS + collegamento USCITE registro + guardia anti-negativo
@@ -1518,8 +1520,88 @@ function apriReportMensile() {
   window.open('report_mensile.html', '_blank');
 }
 
+// ═══ v20260805a · RIEMPIMENTO E CONSEGNE AGGIUNTE ══════════════════
+// Prima, composto un carico, per aggiungere una consegna bisognava
+// creare un secondo viaggio con lo stesso autista e lo stesso camion.
+// Ora si aggiunge dal dettaglio, scegliendo fra le consegne gia
+// programmate per quel giorno e non ancora assegnate a nessun viaggio.
+function _logBarraRiempimento(carico, ordini) {
+  var tot = ordini.reduce(function (s, o) { return s + Number((o.ordini || o).litri || 0); }, 0);
+  var cap = (carico.mezzi && carico.mezzi.capacita_totale) ? Number(carico.mezzi.capacita_totale)
+          : Number(carico.capacita_totale || 0);
+  var pct = cap > 0 ? Math.round(tot / cap * 100) : 0;
+  var col = pct > 100 ? '#A32D2D' : (pct < 50 ? '#639922' : (pct < 80 ? '#BA7517' : '#185FA5'));
+  var h = '<div id="det-riempimento" style="background:var(--bg-kpi);border-radius:10px;padding:12px 15px;margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:7px">';
+  h += '<span style="font-style:italic;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-weight:500">Riempimento '
+     + (cap > 0 ? pct + '%' : '\u2014') + (cap > 0 ? ' (cap. ' + fmtL(cap) + ')' : '') + '</span>';
+  h += '<span style="font-size:13px;font-weight:700;font-family:var(--font-mono);color:' + col + '">' + fmtL(tot)
+     + (cap > 0 && tot > cap ? ' <span style="font-size:11px">oltre la capacita</span>' : '') + '</span>';
+  h += '</div>';
+  h += '<div style="height:10px;border-radius:5px;background:var(--bg);overflow:hidden">'
+     + '<div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + col + ';transition:width .3s"></div></div>';
+  if (cap > 0 && tot < cap) {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:5px">Restano <strong>' + fmtL(cap - tot) + '</strong> da caricare</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+// Le consegne di quel giorno che non stanno ancora su nessun viaggio.
+async function caricoAggiungiConsegna(caricoId) {
+  var box = document.getElementById('det-aggiungi');
+  if (!box) return;
+  box.innerHTML = '<div class="loading" style="padding:14px;font-size:12px">Cerco le consegne libere...</div>';
+  try {
+    var c = await sb.from('carichi').select('data').eq('id', caricoId).single();
+    if (!c.data) throw new Error('carico non trovato');
+    var r = await sb.from('ordini')
+      .select('id,data,cliente,prodotto,litri,destinazione,stato,carico_ordini(carico_id)')
+      .eq('data', c.data.data).neq('stato', 'annullato');
+    if (r.error) throw r.error;
+    var libere = (r.data || []).filter(function (o) { return !(o.carico_ordini || []).length; });
+    if (!libere.length) {
+      box.innerHTML = '<div style="padding:12px;background:var(--bg-kpi);border-radius:8px;font-size:12px;color:var(--text-muted)">'
+        + 'Nessuna consegna libera per il ' + fmtD(c.data.data) + ': sono tutte gia assegnate a un viaggio.</div>';
+      return;
+    }
+    var h = '<div style="background:var(--bg-kpi);border-radius:10px;padding:12px 14px">';
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Consegne programmate per il ' + fmtD(c.data.data) + ' e non ancora assegnate</div>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+    h += '<select id="det-scelta" style="flex:1;min-width:240px;padding:8px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12.5px">';
+    libere.forEach(function (o) {
+      h += '<option value="' + o.id + '">' + esc(o.cliente || o.destinazione || 'senza cliente')
+        + ' \u00b7 ' + esc(o.prodotto || '') + ' \u00b7 ' + fmtL(o.litri) + '</option>';
+    });
+    h += '</select>';
+    h += '<button onclick="caricoConfermaConsegna(\'' + caricoId + '\')" class="btn-primary" style="padding:8px 16px;font-size:12.5px">Aggiungi al viaggio</button>';
+    h += '<button onclick="document.getElementById(\'det-aggiungi\').innerHTML=\'\';" style="padding:8px 12px;font-size:12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text-muted);cursor:pointer">Annulla</button>';
+    h += '</div></div>';
+    box.innerHTML = h;
+  } catch (e) {
+    box.innerHTML = '<div style="padding:12px;color:#A32D2D;font-size:12px">Errore: ' + esc((e && e.message) || e) + '</div>';
+  }
+}
+
+async function caricoConfermaConsegna(caricoId) {
+  var sel = document.getElementById('det-scelta');
+  if (!sel || !sel.value) return;
+  try {
+    var q = await sb.from('carico_ordini').select('sequenza').eq('carico_id', caricoId);
+    var prossima = ((q.data || []).reduce(function (m, x) { return Math.max(m, Number(x.sequenza || 0)); }, 0)) + 1;
+    var ins = await sb.from('carico_ordini').insert([{ carico_id: caricoId, ordine_id: sel.value, sequenza: prossima }]);
+    if (ins.error) throw ins.error;
+    if (typeof _auditLog === 'function') _auditLog('consegna_aggiunta', 'carico_ordini', 'carico ' + caricoId + ' + ordine ' + sel.value);
+    toast('\u2713 Consegna aggiunta al viaggio');
+    apriDettaglioCarico(caricoId);          // ridisegna: la barra si aggiorna
+    if (typeof caricaCarichi === 'function') caricaCarichi();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
+}
+
 async function apriDettaglioCarico(caricoId) {
-  const { data: carico } = await sb.from('carichi').select('*, carico_ordini(sequenza, ordine_id, ordini(id,cliente,cliente_id,prodotto,litri,note,stato,fornitore,destinazione,costo_litro,trasporto_litro,margine,iva))').eq('id', caricoId).single();
+  const { data: carico } = await sb.from('carichi').select('*, mezzi(targa,capacita_totale), carico_ordini(sequenza, ordine_id, ordini(id,cliente,cliente_id,prodotto,litri,note,stato,fornitore,destinazione,costo_litro,trasporto_litro,margine,iva))').eq('id', caricoId).single();
   if (!carico) return;
   const ordini = carico.carico_ordini ? [...carico.carico_ordini].sort((a,b)=>a.sequenza-b.sequenza) : [];
   const nonConfermati = ordini.filter(o => o.ordini && o.ordini.stato !== 'confermato');
@@ -1535,7 +1617,12 @@ async function apriDettaglioCarico(caricoId) {
   var html = '<div style="font-size:15px;font-weight:500;margin-bottom:4px">Dettaglio carico — ' + fmtD(carico.data) + '</div>';
   html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Mezzo: ' + (carico.mezzo_targa||'—') + ' · Autista: ' + (carico.autista||'—') + ' · ' + ordini.length + ' consegne' + (nonConfermati.length ? ' · <span style="color:#BA7517">' + nonConfermati.length + ' da confermare</span>' : ' · <span style="color:#639922">tutte confermate</span>') + '</div>';
 
-  html += '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">';
+  // v20260805a — BARRA DI RIEMPIMENTO in cima all'elenco: aggiungendo una
+  // consegna si vede subito come cresce il carico, senza chiudere e
+  // riaprire.
+  html += _logBarraRiempimento(carico, ordini);
+
+  html += '<div id="det-consegne" style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">';
   ordini.forEach(function(o) {
     var r = o.ordini; if (!r) return;
     var dasOrdine = dasMap[r.id] || [];
@@ -1590,6 +1677,8 @@ async function apriDettaglioCarico(caricoId) {
   if (nonConfermati.length) {
     html += '<button class="btn-primary" style="flex:1;background:#639922" onclick="confermaTutteConsegneCarico(\'' + caricoId + '\')">✅ Conferma tutte (' + nonConfermati.length + ')</button>';
   }
+  html += '<div id="det-aggiungi" style="margin-bottom:14px"></div>';
+  html += '<button onclick="caricoAggiungiConsegna(\'' + caricoId + '\')" style="width:100%;padding:11px;margin-bottom:14px;border:1px dashed var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:13px;font-weight:600">&#10133; Inserisci un\'altra consegna</button>';
   html += '<button class="btn-primary" style="flex:1" onclick="apriFoglioViaggio(\'' + caricoId + '\')">🖨️ Foglio viaggio</button><button onclick="chiudiModalePermessi()" style="flex:1;padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Chiudi</button></div>';
   apriModal(html);
 }
