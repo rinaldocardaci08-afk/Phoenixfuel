@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica
+// v20260805c — barra di riempimento sopra a tutta larghezza e pulsante
+//              Aggiungi accanto ai litri, come chiesto
 // v20260805b — popup "Aggiungi al viaggio" con anteprima del riempimento, e
 //              consegne raggruppate per prodotto nella scheda
 // v20260805a — barra di riempimento nel dettaglio carico e possibilita di
@@ -1326,14 +1328,38 @@ function _renderCardCarico(c, opts) {
   var boxStyle = 'background:var(--surface);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;margin-top:4px;font-weight:500';
 
   var html = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-left:3px solid ' + barColor + ';border-radius:12px;padding:14px 18px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">';
-  // Riga principale a 5 colonne
-  html += '<div style="display:grid;grid-template-columns:1.2fr 1.2fr 1fr 1.6fr 1fr;gap:14px;align-items:start;font-size:13px">';
+
+  // v20260805c — LA BARRA DI RIEMPIMENTO VA SOPRA, A TUTTA LARGHEZZA.
+  // Prima era una colonna stretta in mezzo alle altre e con capacita
+  // mancante restava un rettangolo vuoto che non diceva niente.
+  html += '<div style="display:flex;gap:14px;align-items:flex-start">';
+  html += '<div style="flex:1;min-width:0">';
+  html += '<div style="margin-bottom:10px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px">'
+    + '<span style="' + lblStyle + '">Riempimento ' + pctTxt + (capacita>0?' (cap. '+fmtL(capacita)+')':'') + '</span>'
+    + '<span style="font-size:12.5px;font-weight:600;font-family:var(--font-mono);color:' + barColor + '">' + fmtL(totLitri) + ' L</span></div>';
+  if (capacita > 0) {
+    html += '<div style="height:9px;background:var(--bg);border-radius:999px;overflow:hidden">'
+      + '<div style="height:100%;width:' + Math.min(pct,100) + '%;background:' + barColor + ';border-radius:999px"></div></div>';
+    if (totLitri < capacita) {
+      html += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px">Restano ' + fmtL(capacita - totLitri) + ' L da caricare</div>';
+    }
+  } else {
+    html += '<div style="font-size:10.5px;color:#854F0B;margin-top:2px">Capacita del mezzo non registrata</div>';
+  }
+  html += '</div>';
+
+  // Riga: mezzo, autista, litri e il pulsante Aggiungi
+  html += '<div style="display:grid;grid-template-columns:1.2fr 1.4fr 1fr auto;gap:12px;align-items:end;font-size:13px">';
   html += '<div><span style="' + lblStyle + '">Mezzo</span><div style="' + boxStyle + ';font-family:var(--font-mono)">' + esc(c.mezzo_targa || '—') + '</div></div>';
   html += '<div><span style="' + lblStyle + '">Autista</span><div style="' + boxStyle + '">' + esc(c.autista || '—') + '</div></div>';
   html += '<div><span style="' + lblStyle + '">Litri</span><div style="' + boxStyle + ';font-family:var(--font-mono);text-align:right">' + fmtL(totLitri) + ' L</div></div>';
-  html += '<div><span style="' + lblStyle + '">Riempimento ' + pctTxt + (capacita>0?' (cap. '+fmtL(capacita)+' L)':'') + '</span>';
-  html += '<div style="' + boxStyle + ';padding:10px 12px"><div style="height:8px;background:var(--bg);border-radius:999px;overflow:hidden"><div style="height:100%;width:' + Math.min(pct,100) + '%;background:' + barColor + ';border-radius:999px"></div></div></div></div>';
-  html += '<div style="text-align:center"><span style="' + lblStyle + '">Stato</span><div style="margin-top:6px">' + (typeof badgeStato==='function' ? badgeStato(c.stato) : c.stato) + '</div>';
+  if (opts.mostraAzioni) {
+    html += '<button class="btn-primary" title="Aggiungi una consegna gia programmata a questo viaggio" onclick="caricoPopupAggiungi(\'' + c.id + '\')" style="padding:10px 18px;font-size:13px;font-weight:600;white-space:nowrap">&#10133; Aggiungi</button>';
+  } else { html += '<div></div>'; }
+  html += '</div></div>';
+
+  html += '<div style="text-align:center;min-width:150px"><span style="' + lblStyle + '">Stato</span><div style="margin-top:6px">' + (typeof badgeStato==='function' ? badgeStato(c.stato) : c.stato) + '</div>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;font-weight:500">' + ordini.length + ' consegne</div>';
   // Semaforo DAS
   var haDas = !!opts.haDas;
@@ -1351,7 +1377,6 @@ function _renderCardCarico(c, opts) {
     }
     html += '<button class="btn-edit" title="Foglio viaggio" onclick="apriFoglioViaggio(\'' + c.id + '\')" style="padding:4px 8px">🖨️</button>';
     html += '<button class="btn-edit" onclick="apriDettaglioCarico(\'' + c.id + '\')" style="padding:4px 8px">👁</button>';
-    html += '<button class="btn-primary" title="Aggiungi una consegna gia programmata a questo viaggio" onclick="caricoPopupAggiungi(\'' + c.id + '\')" style="padding:4px 10px;font-size:11px">&#10133; Aggiungi</button>';
     html += '<button class="btn-danger" title="Elimina viaggio" onclick="pfEliminaViaggio(\'' + c.id + '\')" style="padding:4px 8px">×</button>';
     html += '</div>';
   }
