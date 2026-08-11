@@ -1,4 +1,6 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260805d — confronto prodotti senza maiuscole/spazi e deposito incluso
+//              comunque si chiami la sua base
 // v20260805c — scegliendo una base di Vibo il nostro deposito entra sempre
 //              fra i fornitori: fisicamente sta li
 // v20260805b — il dettaglio del margine si apre SOPRA il preventivo, con una
@@ -199,6 +201,13 @@ function pvUsaMedia(m) {
 // fra i fornitori, con la sua base scritta accanto.
 function _pvVibo(nome) { return /vibo/i.test(String(nome || '')); }
 function _pvNostro(forn) { return /phoenix/i.test(String(forn || '')); }
+// v20260805d — il confronto fra prodotti va fatto senza badare a
+// maiuscole e spazi: "Gasolio autotrazione" e "Gasolio Autotrazione"
+// sono lo stesso prodotto, e un solo carattere diverso faceva sparire
+// una riga dal preventivo.
+function _pvStessoProd(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
 
 function _pvRighe() {
   var S = _pvState;
@@ -206,10 +215,11 @@ function _pvRighe() {
   var sceltaVibo = baseScelta && _pvVibo(baseScelta.nome);
   return _pvPrezzi
     .filter(function (p) {
-      if (!p.basi_carico || p.prodotto !== S.prodotto) return false;
+      if (!p.basi_carico || !_pvStessoProd(p.prodotto, S.prodotto)) return false;
       if (p.basi_carico.id === S.baseId) return true;
-      // il nostro deposito di Vibo entra anche scegliendo un'altra base di Vibo
-      return sceltaVibo && _pvNostro(p.fornitore) && _pvVibo(p.basi_carico.nome);
+      // Il nostro deposito e a Vibo Marina: scegliendo una base di Vibo
+      // entra SEMPRE, come si chiami la sua base nel listino.
+      return sceltaVibo && _pvNostro(p.fornitore);
     })
     .map(function (p) {
       var costo = Number(p.costo_litro || 0);
