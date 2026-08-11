@@ -1,4 +1,9 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260805g — la base la decide pfBasePerRiga, la stessa regola del listino
+// v20260805f — le righe del deposito si prendono dal listino gia calcolato:
+//              non stanno nella tabella prezzi, sono ricavate dal CMP
+// v20260805e — se il nostro deposito manca dal confronto, la pagina dice
+//              perche: non ha il prezzo di quel prodotto oggi
 // v20260805d — confronto prodotti senza maiuscole/spazi e deposito incluso
 //              comunque si chiami la sua base
 // v20260805c — scegliendo una base di Vibo il nostro deposito entra sempre
@@ -37,6 +42,12 @@ async function apriPreventivoCliente() {
   var data = _pvData();
   apriModal('<div style="padding:24px;text-align:center;color:var(--text-muted)">Carico il listino del ' + _pfIsoToIt(data) + '...</div>');
   try {
+    // v20260805f — IL LISTINO COMPLETO, NON SOLO LA TABELLA `prezzi`.
+    // Le righe del NOSTRO DEPOSITO non stanno in `prezzi`: la pagina del
+    // listino le calcola dal CMP e dalla giacenza delle cisterne e le
+    // lascia in `window._pfListinoCompleto`. Ecco perche il preventivo
+    // non le vedeva: leggeva solo la tabella. Ora prende quelle, e usa
+    // la tabella solo se il listino non e ancora stato aperto.
     var r = await Promise.all([
       sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', data),
       sb.from('clienti').select('id,nome').eq('attivo', true).order('nome'),
@@ -44,16 +55,21 @@ async function apriPreventivoCliente() {
         ? pfCostiTrasporto()
         : sb.from('costi_trasporto').select('*').eq('attivo', true).order('valore').then(function (x) { return x.data || []; })
     ]);
-    _pvPrezzi = (r[0].data || []).filter(function (p) { return Number(p.costo_litro) > 0; });
+    var pronte = (window._pfListinoCompleto && window._pfListinoCompleto.data === data)
+      ? (window._pfListinoCompleto.righe || []) : null;
+    _pvPrezzi = (pronte || r[0].data || []).filter(function (p) { return Number(p.costo_litro) > 0; });
+
     _pvClienti = r[1].data || [];
     _pvTrasporti = r[2] || [];
 
     // basi e prodotti: solo quelli che hanno davvero un prezzo oggi
+    // le stesse basi del listino: vibo, milazzo, altre
+    var ETICHETTE = { vibo: 'Vibo Marina', milazzo: 'Milazzo', altre: 'Altre basi' };
     var vistiB = {}, vistiP = {};
     _pvBasi = []; _pvProdotti = [];
     _pvPrezzi.forEach(function (p) {
-      var b = p.basi_carico;
-      if (b && !vistiB[b.id]) { vistiB[b.id] = true; _pvBasi.push({ id: b.id, nome: b.nome }); }
+      var k = _pvBase(p);
+      if (!vistiB[k]) { vistiB[k] = true; _pvBasi.push({ id: k, nome: ETICHETTE[k] || k }); }
       if (p.prodotto && !vistiP[p.prodotto]) { vistiP[p.prodotto] = true; _pvProdotti.push(p.prodotto); }
     });
     _pvBasi.sort(function (a, b) { return a.nome < b.nome ? -1 : 1; });
@@ -199,7 +215,16 @@ function pvUsaMedia(m) {
 // quindi scegliendo Vibo Marina spariva dal confronto. Ma fisicamente e
 // li: quando la base scelta e a Vibo, il nostro deposito entra sempre
 // fra i fornitori, con la sua base scritta accanto.
-function _pvVibo(nome) { return /vibo/i.test(String(nome || '')); }
+// v20260805g — LA BASE LA DECIDE `pfBasePerRiga`, non io.
+// Il listino ha gia questa regola da mesi (pf-ordini.js): 'vibo',
+// 'milazzo' o 'altre', col deposito Phoenix che vale come Vibo. Io ne
+// avevo scritta un'altra, ed era sbagliata. Ora si usa quella, e il
+// selettore del deposito lavora sugli stessi tre valori invece che
+// sugli id delle basi: cosi scegliendo Vibo esce esattamente quello che
+// esce nel listino filtrato su Vibo.
+function _pvBase(riga) {
+  return (typeof pfBasePerRiga === 'function') ? pfBasePerRiga(riga) : 'altre';
+}
 function _pvNostro(forn) { return /phoenix/i.test(String(forn || '')); }
 // v20260805d — il confronto fra prodotti va fatto senza badare a
 // maiuscole e spazi: "Gasolio autotrazione" e "Gasolio Autotrazione"
@@ -211,15 +236,9 @@ function _pvStessoProd(a, b) {
 
 function _pvRighe() {
   var S = _pvState;
-  var baseScelta = _pvBasi.filter(function (b) { return b.id === S.baseId; })[0];
-  var sceltaVibo = baseScelta && _pvVibo(baseScelta.nome);
   return _pvPrezzi
     .filter(function (p) {
-      if (!p.basi_carico || !_pvStessoProd(p.prodotto, S.prodotto)) return false;
-      if (p.basi_carico.id === S.baseId) return true;
-      // Il nostro deposito e a Vibo Marina: scegliendo una base di Vibo
-      // entra SEMPRE, come si chiami la sua base nel listino.
-      return sceltaVibo && _pvNostro(p.fornitore);
+      return _pvStessoProd(p.prodotto, S.prodotto) && _pvBase(p) === S.baseId;
     })
     .map(function (p) {
       var costo = Number(p.costo_litro || 0);
@@ -310,6 +329,23 @@ function _pvRender() {
     + 'per cambiarli si usano i campi, non la tabella.'
     + (righe.some(function (r) { return _pvNostro(r.fornitore); })
         ? ' Il <strong>nostro deposito</strong> compare fra le fonti perche si trova a Vibo Marina.' : '') + '</div>';
+
+  // v20260805e — Se il nostro deposito manca, dire PERCHE.
+  // Capita spesso: il prezzo del deposito viene inserito solo su alcuni
+  // prodotti, e senza una spiegazione sembra che il preventivo lo ignori.
+  if (!righe.some(function (r) { return _pvNostro(r.fornitore); })) {
+    var altriProd = [];
+    _pvPrezzi.forEach(function (p) {
+      if (_pvNostro(p.fornitore) && !_pvStessoProd(p.prodotto, S.prodotto) && altriProd.indexOf(p.prodotto) < 0) {
+        altriProd.push(p.prodotto);
+      }
+    });
+    if (altriProd.length) {
+      h += '<div style="background:#FAEEDA;border:0.5px solid #E4C892;border-radius:8px;padding:10px 13px;margin-top:10px;font-size:11.5px;color:#854F0B">'
+        + 'Il <strong>nostro deposito</strong> non ha il prezzo di <strong>' + esc(S.prodotto) + '</strong> nel listino di oggi: '
+        + 'lo ha su ' + altriProd.map(function (x) { return esc(x); }).join(', ') + '. Per vederlo qui va inserito il prezzo di questo prodotto.</div>';
+    }
+  }
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
   h += '<button onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button>';

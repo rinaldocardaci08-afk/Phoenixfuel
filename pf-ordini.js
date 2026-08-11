@@ -1,4 +1,7 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260805b — pfBasePerRiga globale: la regola della base in un posto solo
+// v20260805a — il listino completo (righe deposito comprese) resta in
+//              window._pfListinoCompleto, per chi deve riusarlo
 // v20260731b — cliente in grassetto, fornitore come etichetta colorata,
 //               costo in rosso e grassetto nell elenco ordini
 // v20260731a — guardiano del prezzo di vendita: le celle Trasporto/L e
@@ -254,6 +257,19 @@ function setFiltroBaseListino(base) {
   caricaPrezzi();
 }
 
+// v20260805b — LA REGOLA DELLA BASE STA IN UN POSTO SOLO.
+// Era chiusa dentro caricaPrezzi, quindi chi ne aveva bisogno (il
+// preventivo cliente) doveva riscriverla — e infatti l'ho riscritta
+// sbagliata. Ora e qui, e la usano tutti.
+// PhoenixFuel deposito e fisicamente a Vibo Marina.
+window.pfBasePerRiga = function (r) {
+  if (r && r._isDeposito) return 'vibo';
+  var nome = (r && r.basi_carico && r.basi_carico.nome) ? String(r.basi_carico.nome).toLowerCase() : '';
+  if (nome.indexOf('vibo') >= 0) return 'vibo';
+  if (nome.indexOf('milazzo') >= 0) return 'milazzo';
+  return 'altre';
+};
+
 async function caricaPrezzi() {
   // Carica fornitori/clienti solo se cache vuota
   if (!cacheFornitori.length) await caricaSelectFornitori('pr-fornitore');
@@ -323,6 +339,11 @@ async function caricaPrezzi() {
   }
 
   const tuttiPrezzi = [...righeDeposito, ...(data||[])];
+  // v20260805a — Le righe del deposito NON stanno in `prezzi`: si
+  // calcolano qui dal CMP e dalla giacenza delle cisterne. Chi le vuole
+  // (il preventivo cliente) le prende da questa memoria invece di
+  // rifare il calcolo — un ramo solo, come tutto il resto.
+  window._pfListinoCompleto = { data: (filtroData || oggiISO), righe: tuttiPrezzi };
 
   // Patch v20260503p: filtro per base di carico
   // _filtroBaseListino: 'tutte' (default) | 'vibo' | 'milazzo'
@@ -330,13 +351,7 @@ async function caricaPrezzi() {
   var _filtroBase = (typeof window._filtroBaseListino !== 'undefined' && window._filtroBaseListino) || localStorage.getItem('pf-listino-filtro-base') || 'tutte';
   window._filtroBaseListino = _filtroBase;
 
-  function _basePerRiga(r) {
-    if (r._isDeposito) return 'vibo';   // PhoenixFuel deposito è fisicamente a Vibo Marina
-    var nome = (r.basi_carico && r.basi_carico.nome) ? r.basi_carico.nome.toLowerCase() : '';
-    if (nome.indexOf('vibo') >= 0) return 'vibo';
-    if (nome.indexOf('milazzo') >= 0) return 'milazzo';
-    return 'altre';
-  }
+  var _basePerRiga = window.pfBasePerRiga;
 
   // Conteggi per badge bottoni (calcolati su tuttiPrezzi prima del filtro)
   var conteggi = { tutte: tuttiPrezzi.length, vibo: 0, milazzo: 0 };
