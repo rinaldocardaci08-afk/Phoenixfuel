@@ -1,4 +1,7 @@
 // PhoenixFuel — Logistica
+// v20260805e — i rifornimenti al deposito si vedono sempre fra le consegne
+//              e il costo del trasporto si mette dalla riga
+// v20260805d — tabella dei costi di trasporto in Mezzi propri
 // v20260805c — barra di riempimento sopra a tutta larghezza e pulsante
 //              Aggiungi accanto ai litri, come chiesto
 // v20260805b — popup "Aggiungi al viaggio" con anteprima del riempimento, e
@@ -873,7 +876,13 @@ async function caricaOrdiniPerCarico() {
     const ordiniFiltrati = (ordini||[]).filter(o => {
       if (idsInCarico.has(o.id)) return false;
       if (o.tipo_ordine === 'cliente' || o.tipo_ordine === 'autoconsumo') return true;
-      if ((o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') && Number(o.trasporto_litro||0) > 0) return true;
+      // v20260805e — I RIFORNIMENTI AL DEPOSITO SI VEDONO SEMPRE.
+      // Prima entravano solo se il trasporto era GIA valorizzato: ma il
+      // trasporto lo si mette quando si sa chi fa il viaggio, e chi fa il
+      // viaggio si decide da qui. Cosi non comparivano mai e restavano
+      // senza costo — 205 su 258 nel 2026. Ora si vedono comunque, con
+      // l'avviso quando il costo manca.
+      if (o.tipo_ordine === 'entrata_deposito' || o.tipo_ordine === 'stazione_servizio') return true;
       return false;
     });
 
@@ -1720,6 +1729,26 @@ async function caricoConfermaConsegna(caricoId) {
   }
 }
 
+// Il costo del trasporto della singola consegna, salvato dal dettaglio
+// carico. Serve a valorizzare la fattura del terzista: senza, quel
+// viaggio non entra ne in 610143 ne nella prefattura.
+async function salvaTrasportoConsegna(ordineId, valore, caricoId) {
+  var v = Number(valore || 0);
+  if (v < 0) { toast('Il costo non puo essere negativo'); return; }
+  try {
+    var r = await sb.from('ordini').update({ trasporto_litro: v }).eq('id', ordineId);
+    if (r.error) throw r.error;
+    if (typeof _auditLog === 'function') {
+      _auditLog('trasporto_consegna', 'ordini', 'ordine ' + ordineId + ' trasporto ' + v.toFixed(6));
+    }
+    if (typeof pfDebitoInvalida === 'function') pfDebitoInvalida();
+    toast('\u2713 Costo di trasporto salvato');
+    apriDettaglioCarico(caricoId);
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
+}
+
 async function apriDettaglioCarico(caricoId) {
   const { data: carico } = await sb.from('carichi').select('*, mezzi(targa,capacita_totale), carico_ordini(sequenza, ordine_id, ordini(id,cliente,cliente_id,prodotto,litri,note,stato,fornitore,destinazione,costo_litro,trasporto_litro,margine,iva))').eq('id', caricoId).single();
   if (!carico) return;
@@ -1752,7 +1781,23 @@ async function apriDettaglioCarico(caricoId) {
     html += '<div style="border:0.5px solid var(--border);border-left:4px solid ' + borderCol + ';border-radius:0;padding:14px 18px">';
     html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">';
     html += '<div><div style="font-size:14px;font-weight:500">' + o.sequenza + '. ' + esc(r.cliente) + '</div>';
-    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(r.prodotto) + ' · <span style="font-family:var(--font-mono);font-weight:500">' + fmtL(r.litri) + '</span>' + (r.destinazione ? ' · 📍 ' + esc(r.destinazione) : '') + '</div></div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(r.prodotto) + ' · <span style="font-family:var(--font-mono);font-weight:500">' + fmtL(r.litri) + '</span>' + (r.destinazione ? ' · 📍 ' + esc(r.destinazione) : '') + '</div>';
+    // v20260805e — IL COSTO DEL TRASPORTO SI METTE DA QUI.
+    // Deciso chi fa il viaggio, se e un terzista quel viaggio va pagato:
+    // il costo si inserisce sulla riga, senza passare dagli ordini. Se
+    // manca lo dice in ambra, perche un trasporto a zero su un viaggio
+    // affidato fuori vuol dire una fattura fornitore non valorizzata.
+    var _tr = Number(r.trasporto_litro || 0);
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-top:5px">'
+      + '<span style="font-size:10.5px;color:var(--text-muted)">Trasporto &euro;/L</span>'
+      + '<input type="number" step="0.000001" value="' + (_tr || '') + '" placeholder="0,000000"'
+      + ' onchange="salvaTrasportoConsegna(\'' + r.id + '\', this.value, \'' + caricoId + '\')"'
+      + ' style="width:104px;padding:4px 7px;border:0.5px solid ' + (_tr > 0 ? 'var(--border)' : '#E4C892')
+      + ';border-radius:6px;background:var(--bg);color:var(--text);font-size:11.5px;text-align:right;font-family:var(--font-mono)">'
+      + (_tr > 0
+          ? '<span style="font-size:10.5px;color:var(--text-muted);font-family:var(--font-mono)">= ' + fmtE(_tr * Number(r.litri || 0)) + '</span>'
+          : '<span style="font-size:10.5px;color:#854F0B">nessun costo: se il viaggio e di un terzista va inserito</span>')
+      + '</div></div>';
     html += '<div style="display:flex;gap:4px;align-items:center">' + badgeStato(r.stato, r);
     if (r.stato !== 'confermato' && r.stato !== 'annullato') {
       html += ' <button class="btn-primary" style="font-size:10px;padding:3px 10px" onclick="confermaOrdineSingoloCarico(\'' + r.id + '\',\'' + caricoId + '\')">✅ Conferma</button>';
