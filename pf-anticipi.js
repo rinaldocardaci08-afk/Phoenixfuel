@@ -1,4 +1,5 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260811a — la casella di ricerca non perde piu il cursore a ogni cifra
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
 // v20260801e — la percentuale di anticipo si cambia sul singolo modulo:
@@ -748,7 +749,7 @@ async function _antRenderTabBanca(affidamentoId) {
     html += '<option value="' + s + '"' + (_antFiltri.stato === s ? ' selected' : '') + '>' + lab + '</option>';
   });
   html += '</select>';
-  html += '<input type="text" placeholder="🔍 Cliente o n. fattura..." value="' + esc(_antFiltri.search) + '" oninput="_antSetFiltro(\'search\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);min-width:200px;color:var(--text)">';
+  html += '<input id="ant-cerca" type="text" placeholder="🔍 Cliente o n. fattura..." value="' + esc(_antFiltri.search) + '" oninput="_antSetFiltro(\'search\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);min-width:200px;color:var(--text)">';
   // due modi di guardare la stessa cosa (30/07): per MODULI, come li presenti
   // alla banca, o per FATTURE, tutte in fila dalla scadenza piu vicina — che
   // e' come le cerchi quando una viene pagata.
@@ -1450,10 +1451,40 @@ function _antRenderModuloCard(p, aff) {
 }
 
 // ─── FILTRI ───────────────────────────────────────────────────────────────
+// v20260811a — IL CURSORE NON SE NE VA PIU DALLA CASELLA DI RICERCA.
+// Ogni carattere digitato ridisegnava tutta la pagina: il campo veniva
+// distrutto e ricreato, il fuoco si perdeva e si riusciva a scrivere una
+// cifra sola. Stesso difetto gia corretto nel modale Presenta: qui ci si
+// ricorda quale campo era attivo e dove stava il cursore, e dopo il
+// ridisegno si rimette dov'era.
+// La ricerca aspetta anche 250 ms prima di ridisegnare: scrivendo in
+// fretta si evitano dieci ridisegni inutili di fila.
+var _antSetFiltroTimer = null;
+
 function _antSetFiltro(campo, val) {
   _antFiltri[campo] = val;
-  // Per ora rerender: in futuro filtra solo lato client
+  if (campo !== 'search') { _antRidisegnaTenendoIlFuoco(); return; }
+  if (_antSetFiltroTimer) clearTimeout(_antSetFiltroTimer);
+  _antSetFiltroTimer = setTimeout(_antRidisegnaTenendoIlFuoco, 250);
+}
+
+function _antRidisegnaTenendoIlFuoco() {
+  var attivo = document.activeElement;
+  var id = (attivo && attivo.id) ? attivo.id : null;
+  var pos = null;
+  if (id && attivo.selectionStart !== undefined) {
+    try { pos = attivo.selectionStart; } catch (e) { pos = null; }
+  }
   renderBancheAnticipi();
+  if (!id) return;
+  setTimeout(function () {
+    var el = document.getElementById(id);
+    if (!el) return;
+    try {
+      el.focus();
+      if (pos !== null && el.setSelectionRange) el.setSelectionRange(pos, pos);
+    } catch (e) { /* campo non piu presente: pazienza */ }
+  }, 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
