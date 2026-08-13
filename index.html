@@ -548,8 +548,8 @@
             <span>Listino prezzi</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#185FA5" onclick="apriPreventivoCliente()">💬 Preventivo cliente</button>
-              <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
-              <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
+              <button id="lp-btn-pdf" class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
+              <button id="lp-btn-stampa" class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
               <button onclick="scorriGiornoPrezzi(-1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">◀</button>
               <input type="date" id="filtro-data-prezzi" data-nav="day" style="font-size:16px;padding:9px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;min-width:170px;text-align:center" onchange="_renderLabelPrezzi();caricaPrezzi()" />
               <button onclick="scorriGiornoPrezzi(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
@@ -3157,7 +3157,7 @@
 <script src="pf-config.js?v=20260720c"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
-<script src="pf-ordini.js?v=20260813b"></script>
+<script src="pf-ordini.js?v=20260813c"></script>
 <script src="pf-deposito.js?v=20260724b"></script>
 <script src="pf-anagrafica.js?v=20260813a"></script>
 <script src="pf-vendite-cliente.js?v=20260720b"></script>

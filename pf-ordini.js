@@ -1,4 +1,6 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260813c — si usa prodotti.categoria che c era gia (benzine/altro) e in
+//              NON OIL spariscono i pulsanti delle funzioni oil
 // v20260813b — il listino non puo piu restare vuoto: oil salvo prova
 //              contraria, e rete di sicurezza se la vista e vuota
 // v20260813a — pulsanti OIL / NON OIL nel listino, sempre su OIL all apertura
@@ -275,6 +277,14 @@ function setFiltroBaseListino(base) {
 // chiama AdBlue: qualunque altra cosa resta OIL, cioe come e sempre
 // stato. Un errore nei dati puo far comparire un prodotto di troppo,
 // mai far sparire il listino.
+// v20260813c — SI USA LA CATEGORIA CHE C'ERA GIA.
+// `prodotti.categoria` esiste da sempre coi valori **benzine** e
+// **altro**: e la stessa divisione che la pagina Deposito usa per
+// separare le cisterne dal magazzino altri prodotti. Non serviva un
+// concetto nuovo — bastava leggere quello. Il mio "add column if not
+// exists" non aveva fatto nulla, e il codice leggeva "benzine" senza
+// riconoscerlo: da li il listino vuoto.
+//   benzine  -> OIL      altro -> NON OIL
 window.pfCategoriaProdotto = function (nomeProdotto) {
   var nome = String(nomeProdotto || '');
   if (/adblue/i.test(nome)) return 'non_oil';
@@ -284,7 +294,9 @@ window.pfCategoriaProdotto = function (nomeProdotto) {
     return String(x.nome || '').trim().toLowerCase() === nome.trim().toLowerCase();
   })[0];
   var cat = (p && p.categoria) ? String(p.categoria).trim().toLowerCase() : '';
-  return (cat === 'non_oil') ? 'non_oil' : 'oil';
+  // e non-oil solo chi lo dice espressamente: qualunque altro valore,
+  // noto o sconosciuto, resta oil e quindi visibile.
+  return (cat === 'altro' || cat === 'non_oil') ? 'non_oil' : 'oil';
 };
 
 window.pfBasePerRiga = function (r) {
@@ -421,6 +433,16 @@ async function caricaPrezzi() {
   var _av = document.getElementById('lp-cat-avviso');
   if (_av) _av.textContent = _catRotto ? 'Categoria non riconosciuta: mostrati tutti i prezzi' : '';
 
+  // v20260813c — In NON OIL spariscono anche le funzioni che riguardano
+  // solo i petroliferi: il listino PDF, la stampa del listino del giorno
+  // e il filtro per base di carico — i prodotti non oil una base non ce
+  // l'hanno. Restano solo i pulsanti che servono davvero.
+  var soloOil = (_filtroCat === 'oil');
+  ['lp-btn-pdf', 'lp-btn-stampa', 'prezzi-filtro-base'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = soloOil ? '' : 'none';
+  });
+
   ['tutte','vibo','milazzo'].forEach(function(k) {
     var b = document.getElementById('lp-fbase-' + k);
     if (!b) return;
@@ -446,13 +468,23 @@ async function caricaPrezzi() {
 
   // Genera tabelle prezzi dinamicamente dai prodotti
   const container = document.getElementById('container-tabelle-prezzi');
+  // v20260813c — Premendo NON OIL i prodotti petroliferi spariscono del
+  // tutto: non la tabella vuota con "Nessun prezzo", ma proprio la
+  // sezione e i suoi pulsanti. E viceversa.
+  var _catVista = (typeof window._filtroCatListino !== 'undefined' && window._filtroCatListino) || 'oil';
+  var _prodottiVista = cacheProdotti.filter(function (p) {
+    return p.attivo && pfCategoriaProdotto(p.nome) === _catVista;
+  });
+  // se la categoria non riconosce nulla, si mostrano tutti i prodotti
+  if (!_prodottiVista.length) _prodottiVista = cacheProdotti.filter(function (p) { return p.attivo; });
+
   const tabMap = {};
-  cacheProdotti.filter(p => p.attivo).forEach(p => {
+  _prodottiVista.forEach(p => {
     const tbId = 'tabella-prezzi-' + (p.tipo_cisterna || p.nome.toLowerCase().replace(/\s+/g,'-'));
     tabMap[p.nome] = tbId;
   });
   if (container) {
-    container.innerHTML = cacheProdotti.filter(p => p.attivo).map(p => {
+    container.innerHTML = _prodottiVista.map(p => {
       const tbId = tabMap[p.nome];
       return '<div style="margin-bottom:24px;padding-bottom:8px;border-bottom:3px solid ' + (p.colore||'#888') + '"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="width:14px;height:14px;border-radius:50%;background:' + (p.colore||'#888') + '"></div><span style="font-size:16px;font-weight:600">' + esc(p.nome) + '</span></div><div style="overflow-x:auto"><table class="prezzi-table"><thead><tr><th>Data</th><th>Fornitore</th><th>Base</th><th>Costo/L</th><th>Trasporto/L</th><th>Margine/L</th><th>Prezzo IVA esc.</th><th>Prezzo IVA inc.</th><th></th></tr></thead><tbody id="' + tbId + '"><tr><td colspan="9" class="loading">Caricamento...</td></tr></tbody></table></div></div>';
     }).join('');
