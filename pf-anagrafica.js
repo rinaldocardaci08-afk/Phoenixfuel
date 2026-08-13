@@ -1,4 +1,5 @@
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
+// v20260813a — categoria fornitore oil / non_oil: i non oil non hanno basi
 // v20260630g — fix: la card marginalità usava la classe 'section' (nascosta di default);
 //   ora usa solo 'card' e si vede sempre dopo il confronto.
 // v20260630f — confronto annuale: sezione marginalità (tabella litri+margine+€/L, grafico, PDF).
@@ -2497,15 +2498,27 @@ async function caricaCheckboxBasi(selectedIds=[]) {
   wrap.innerHTML = data ? data.map(b => '<label class="check-label"><input type="checkbox" value="' + b.id + '"' + (selectedIds.includes(b.id)?' checked':'') + '/> ' + b.nome + '</label>').join('') : '';
 }
 
+// v20260813a — I fornitori NON OIL non hanno basi di carico: i loro
+// prodotti (per ora il solo AdBlue) non passano da un deposito fiscale.
+// Il riquadro delle basi si nasconde e al salvataggio non se ne scrive
+// nessuna, cosi non restano agganci vecchi se si cambia categoria.
+function foAggiornaCategoria() {
+  var cat = (document.getElementById('fo-categoria') || {}).value || 'oil';
+  var box = document.getElementById('fo-basi-check');
+  var avviso = document.getElementById('fo-basi-nonoil');
+  if (box) box.style.display = (cat === 'non_oil') ? 'none' : 'flex';
+  if (avviso) avviso.style.display = (cat === 'non_oil') ? 'block' : 'none';
+}
+
 async function salvaFornitore(id=null) {
-  const record = { nome:document.getElementById('fo-nome').value.trim(), ragione_sociale:document.getElementById('fo-ragione').value, piva:document.getElementById('fo-piva').value, indirizzo:document.getElementById('fo-indirizzo').value, citta:document.getElementById('fo-citta').value, telefono:document.getElementById('fo-telefono').value, email:document.getElementById('fo-email').value, contatto:document.getElementById('fo-contatto').value, fido_massimo:parseFloat(document.getElementById('fo-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('fo-gg').value), note:document.getElementById('fo-note').value, colore:document.getElementById('fo-colore').value||'#FAEEDA' };
+  const record = { nome:document.getElementById('fo-nome').value.trim(), ragione_sociale:document.getElementById('fo-ragione').value, piva:document.getElementById('fo-piva').value, indirizzo:document.getElementById('fo-indirizzo').value, citta:document.getElementById('fo-citta').value, telefono:document.getElementById('fo-telefono').value, email:document.getElementById('fo-email').value, contatto:document.getElementById('fo-contatto').value, fido_massimo:parseFloat(document.getElementById('fo-fido').value)||0, giorni_pagamento:parseInt(document.getElementById('fo-gg').value), note:document.getElementById('fo-note').value, colore:document.getElementById('fo-colore').value||'#FAEEDA' , categoria: (document.getElementById('fo-categoria')||{}).value || 'oil' };
   if (!record.nome) { toast('Inserisci il nome'); return; }
   let foId = id;
   if (id) { const{error}=await sb.from('fornitori').update(record).eq('id',id); if(error){toast('Errore: '+error.message);return;} }
   else { const{data:fo,error}=await sb.from('fornitori').insert([record]).select().single(); if(error){toast('Errore: '+error.message);return;} foId=fo.id; }
   await sb.from('fornitori_basi').delete().eq('fornitore_id',foId);
   const checks = document.querySelectorAll('#fo-basi-check input:checked');
-  if (checks.length) await sb.from('fornitori_basi').insert(Array.from(checks).map(c=>({fornitore_id:foId,base_carico_id:c.value})));
+  if (record.categoria !== 'non_oil' && checks.length) await sb.from('fornitori_basi').insert(Array.from(checks).map(c=>({fornitore_id:foId,base_carico_id:c.value})));
   toast(id?'Fornitore aggiornato!':'Fornitore salvato!');
   cacheFornitori=[]; chiudiModal(); caricaFornitori();
 }
@@ -2518,7 +2531,7 @@ async function apriModaleFornitore(id=null) {
   let selectedBasi=[];
   if (id) {
     const{data}=await sb.from('fornitori').select('*, fornitori_basi(base_carico_id)').eq('id',id).single();
-    if(data){ document.getElementById('fo-nome').value=data.nome||''; document.getElementById('fo-ragione').value=data.ragione_sociale||''; document.getElementById('fo-piva').value=data.piva||''; document.getElementById('fo-indirizzo').value=data.indirizzo||''; document.getElementById('fo-citta').value=data.citta||''; document.getElementById('fo-telefono').value=data.telefono||''; document.getElementById('fo-email').value=data.email||''; document.getElementById('fo-contatto').value=data.contatto||''; document.getElementById('fo-fido').value=data.fido_massimo||0; document.getElementById('fo-gg').value=data.giorni_pagamento||30; document.getElementById('fo-note').value=data.note||''; document.getElementById('fo-colore').value=data.colore||'#FAEEDA'; selectedBasi=data.fornitori_basi?data.fornitori_basi.map(fb=>fb.base_carico_id):[]; }
+    if(data){ document.getElementById('fo-nome').value=data.nome||''; document.getElementById('fo-ragione').value=data.ragione_sociale||''; document.getElementById('fo-piva').value=data.piva||''; document.getElementById('fo-indirizzo').value=data.indirizzo||''; document.getElementById('fo-citta').value=data.citta||''; document.getElementById('fo-telefono').value=data.telefono||''; document.getElementById('fo-email').value=data.email||''; document.getElementById('fo-contatto').value=data.contatto||''; document.getElementById('fo-fido').value=data.fido_massimo||0; document.getElementById('fo-gg').value=data.giorni_pagamento||30; document.getElementById('fo-note').value=data.note||''; document.getElementById('fo-colore').value=data.colore||'#FAEEDA'; var _fc=document.getElementById('fo-categoria'); if(_fc) _fc.value=data.categoria||'oil'; selectedBasi=data.fornitori_basi?data.fornitori_basi.map(fb=>fb.base_carico_id):[]; if(typeof foAggiornaCategoria==='function') foAggiornaCategoria(); }
   }
   await caricaCheckboxBasi(selectedBasi);
   document.getElementById('modal-overlay').style.display='flex';

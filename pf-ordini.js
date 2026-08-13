@@ -1,4 +1,5 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260813a — pulsanti OIL / NON OIL nel listino, sempre su OIL all apertura
 // v20260805b — pfBasePerRiga globale: la regola della base in un posto solo
 // v20260805a — il listino completo (righe deposito comprese) resta in
 //              window._pfListinoCompleto, per chi deve riusarlo
@@ -262,6 +263,20 @@ function setFiltroBaseListino(base) {
 // preventivo cliente) doveva riscriverla — e infatti l'ho riscritta
 // sbagliata. Ora e qui, e la usano tutti.
 // PhoenixFuel deposito e fisicamente a Vibo Marina.
+// v20260813a — La categoria di un prodotto: 'oil' o 'non_oil'.
+// Viene dall'anagrafica prodotti; se per qualche motivo manca, si guarda
+// il nome — meglio classificarlo che farlo sparire dal listino.
+window.pfCategoriaProdotto = function (nomeProdotto) {
+  // ATTENZIONE: `cacheProdotti` e dichiarata con `let` in pf-config.js,
+  // quindi NON sta su window — va letta per nome, non come proprieta.
+  var elenco = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti : [];
+  var p = elenco.filter(function (x) {
+    return String(x.nome || '').toLowerCase() === String(nomeProdotto || '').toLowerCase();
+  })[0];
+  if (p && p.categoria) return p.categoria;
+  return /adblue/i.test(String(nomeProdotto || '')) ? 'non_oil' : 'oil';
+};
+
 window.pfBasePerRiga = function (r) {
   if (r && r._isDeposito) return 'vibo';
   var nome = (r && r.basi_carico && r.basi_carico.nome) ? String(r.basi_carico.nome).toLowerCase() : '';
@@ -269,6 +284,11 @@ window.pfBasePerRiga = function (r) {
   if (nome.indexOf('milazzo') >= 0) return 'milazzo';
   return 'altre';
 };
+
+function pfFiltroCategoria(cat) {
+  window._filtroCatListino = cat;
+  caricaPrezzi();
+}
 
 async function caricaPrezzi() {
   // Carica fornitori/clienti solo se cache vuota
@@ -348,14 +368,24 @@ async function caricaPrezzi() {
   // Patch v20260503p: filtro per base di carico
   // _filtroBaseListino: 'tutte' (default) | 'vibo' | 'milazzo'
   // Persistito in localStorage. PhoenixFuel deposito è considerato di Vibo Marina.
+  // v20260813a — OIL / NON OIL.
+  // Il listino mostra un blocco alla volta: OIL i prodotti petroliferi,
+  // NON OIL il resto (per ora il solo AdBlue). All'apertura e SEMPRE oil,
+  // che e il lavoro di tutti i giorni: non si ricorda l'ultima scelta,
+  // altrimenti si rischia di aprire il programma su una vista quasi
+  // vuota senza capire perche.
+  var _filtroCat = (typeof window._filtroCatListino !== 'undefined' && window._filtroCatListino) || 'oil';
+  window._filtroCatListino = _filtroCat;
+
   var _filtroBase = (typeof window._filtroBaseListino !== 'undefined' && window._filtroBaseListino) || localStorage.getItem('pf-listino-filtro-base') || 'tutte';
   window._filtroBaseListino = _filtroBase;
 
   var _basePerRiga = window.pfBasePerRiga;
 
   // Conteggi per badge bottoni (calcolati su tuttiPrezzi prima del filtro)
-  var conteggi = { tutte: tuttiPrezzi.length, vibo: 0, milazzo: 0 };
-  tuttiPrezzi.forEach(function(r) {
+  var _perConteggi = tuttiPrezzi.filter(function (r) { return pfCategoriaProdotto(r.prodotto) === _filtroCat; });
+  var conteggi = { tutte: _perConteggi.length, vibo: 0, milazzo: 0 };
+  _perConteggi.forEach(function(r) {
     var b = _basePerRiga(r);
     if (b === 'vibo') conteggi.vibo++;
     else if (b === 'milazzo') conteggi.milazzo++;
@@ -365,6 +395,20 @@ async function caricaPrezzi() {
   var elV = document.getElementById('lp-cnt-vibo');      if (elV) elV.textContent = '(' + conteggi.vibo + ')';
   var elM = document.getElementById('lp-cnt-milazzo');   if (elM) elM.textContent = '(' + conteggi.milazzo + ')';
   // Stato visivo bottoni (active = blu pieno, altri = outline)
+  var nOil = tuttiPrezzi.filter(function (r) { return pfCategoriaProdotto(r.prodotto) === 'oil'; }).length;
+  var nNon = tuttiPrezzi.length - nOil;
+  [['oil', nOil], ['non_oil', nNon]].forEach(function (x) {
+    var b = document.getElementById('lp-cat-' + x[0]);
+    if (!b) return;
+    var att = (x[0] === _filtroCat);
+    b.style.background = att ? '#26215C' : 'var(--bg)';
+    b.style.color = att ? '#fff' : 'var(--text)';
+    b.style.fontWeight = att ? '700' : '500';
+    b.style.border = att ? '0' : '0.5px solid var(--border)';
+    var c = document.getElementById('lp-cnt-' + x[0]);
+    if (c) c.textContent = '(' + x[1] + ')';
+  });
+
   ['tutte','vibo','milazzo'].forEach(function(k) {
     var b = document.getElementById('lp-fbase-' + k);
     if (!b) return;
@@ -376,7 +420,8 @@ async function caricaPrezzi() {
   });
 
   // Filtro effettivo
-  var prezziVisibili = (_filtroBase === 'tutte') ? tuttiPrezzi : tuttiPrezzi.filter(function(r) { return _basePerRiga(r) === _filtroBase; });
+  var perCategoria = tuttiPrezzi.filter(function (r) { return pfCategoriaProdotto(r.prodotto) === _filtroCat; });
+  var prezziVisibili = (_filtroBase === 'tutte') ? perCategoria : perCategoria.filter(function(r) { return _basePerRiga(r) === _filtroBase; });
 
   const best = {};
   prezziVisibili.forEach(r => { const k=r.data+'_'+r.prodotto; if(!best[k]||prezzoNoIva(r)<prezzoNoIva(best[k])) best[k]=r; });

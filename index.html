@@ -547,6 +547,8 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>Listino prezzi</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button id="lp-cat-oil" onclick="pfFiltroCategoria('oil')" style="font-size:12px;padding:8px 18px;border-radius:8px;cursor:pointer;background:#26215C;color:#fff;font-weight:700;border:0">OIL <span id="lp-cnt-oil" style="font-size:10px;opacity:0.8"></span></button>
+              <button id="lp-cat-non_oil" onclick="pfFiltroCategoria('non_oil')" style="font-size:12px;padding:8px 18px;border-radius:8px;cursor:pointer;background:var(--bg);color:var(--text);font-weight:500;border:0.5px solid var(--border)">NON OIL <span id="lp-cnt-non_oil" style="font-size:10px;opacity:0.7"></span></button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#185FA5" onclick="apriPreventivoCliente()">💬 Preventivo cliente</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
@@ -3122,10 +3124,12 @@
         <div class="form-group"><label>Giorni pagamento</label><select id="fo-gg"><option value="30">30 gg</option><option value="45">45 gg</option><option value="60">60 gg</option></select></div>
         <div class="form-group"><label>Note</label><input type="text" id="fo-note" /></div>
         <div class="form-group"><label>Colore etichetta</label><input type="color" id="fo-colore" value="#FAEEDA" style="height:36px;padding:2px;cursor:pointer" /></div>
+        <div class="form-group"><label>Categoria</label><select id="fo-categoria" onchange="foAggiornaCategoria()"><option value="oil">Prodotti petroliferi (OIL)</option><option value="non_oil">Altri prodotti (NON OIL)</option></select></div>
       </div>
       <div style="margin-bottom:14px">
         <div style="font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Basi di carico associate</div>
         <div id="fo-basi-check" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        <div id="fo-basi-nonoil" style="display:none;font-size:12px;color:var(--text-muted)">I fornitori non petroliferi non hanno basi di carico: la consegna si indica sull'ordine.</div>
       </div>
     </div>
     <button id="modal-save-btn" class="btn-primary" style="width:100%;margin-top:8px">Salva</button>
@@ -3150,9 +3154,9 @@
 <script src="pf-config.js?v=20260720c"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
-<script src="pf-ordini.js?v=20260805b"></script>
+<script src="pf-ordini.js?v=20260813a"></script>
 <script src="pf-deposito.js?v=20260724b"></script>
-<script src="pf-anagrafica.js?v=20260722g"></script>
+<script src="pf-anagrafica.js?v=20260813a"></script>
 <script src="pf-vendite-cliente.js?v=20260720b"></script>
 <script src="pf-vendite-prodotto.js?v=20260720b"></script>
 <script src="pf-data.js?v=20260804b"></script>
