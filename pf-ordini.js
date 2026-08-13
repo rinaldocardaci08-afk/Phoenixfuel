@@ -1,4 +1,6 @@
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
+// v20260813b — il listino non puo piu restare vuoto: oil salvo prova
+//              contraria, e rete di sicurezza se la vista e vuota
 // v20260813a — pulsanti OIL / NON OIL nel listino, sempre su OIL all apertura
 // v20260805b — pfBasePerRiga globale: la regola della base in un posto solo
 // v20260805a — il listino completo (righe deposito comprese) resta in
@@ -266,15 +268,23 @@ function setFiltroBaseListino(base) {
 // v20260813a — La categoria di un prodotto: 'oil' o 'non_oil'.
 // Viene dall'anagrafica prodotti; se per qualche motivo manca, si guarda
 // il nome — meglio classificarlo che farlo sparire dal listino.
+// v20260813b — SI E OIL SALVO PROVA CONTRARIA.
+// Prima restituivo quello che diceva l'anagrafica: e bastato un valore
+// inatteso perche TUTTI i prodotti finissero in NON OIL e il listino
+// restasse vuoto. Ora e non-oil SOLO chi lo dichiara espressamente o si
+// chiama AdBlue: qualunque altra cosa resta OIL, cioe come e sempre
+// stato. Un errore nei dati puo far comparire un prodotto di troppo,
+// mai far sparire il listino.
 window.pfCategoriaProdotto = function (nomeProdotto) {
-  // ATTENZIONE: `cacheProdotti` e dichiarata con `let` in pf-config.js,
-  // quindi NON sta su window — va letta per nome, non come proprieta.
+  var nome = String(nomeProdotto || '');
+  if (/adblue/i.test(nome)) return 'non_oil';
+  // `cacheProdotti` e dichiarata con `let` in pf-config.js: non sta su window
   var elenco = (typeof cacheProdotti !== 'undefined' && cacheProdotti) ? cacheProdotti : [];
   var p = elenco.filter(function (x) {
-    return String(x.nome || '').toLowerCase() === String(nomeProdotto || '').toLowerCase();
+    return String(x.nome || '').trim().toLowerCase() === nome.trim().toLowerCase();
   })[0];
-  if (p && p.categoria) return p.categoria;
-  return /adblue/i.test(String(nomeProdotto || '')) ? 'non_oil' : 'oil';
+  var cat = (p && p.categoria) ? String(p.categoria).trim().toLowerCase() : '';
+  return (cat === 'non_oil') ? 'non_oil' : 'oil';
 };
 
 window.pfBasePerRiga = function (r) {
@@ -408,6 +418,8 @@ async function caricaPrezzi() {
     var c = document.getElementById('lp-cnt-' + x[0]);
     if (c) c.textContent = '(' + x[1] + ')';
   });
+  var _av = document.getElementById('lp-cat-avviso');
+  if (_av) _av.textContent = _catRotto ? 'Categoria non riconosciuta: mostrati tutti i prezzi' : '';
 
   ['tutte','vibo','milazzo'].forEach(function(k) {
     var b = document.getElementById('lp-fbase-' + k);
@@ -421,6 +433,12 @@ async function caricaPrezzi() {
 
   // Filtro effettivo
   var perCategoria = tuttiPrezzi.filter(function (r) { return pfCategoriaProdotto(r.prodotto) === _filtroCat; });
+  // RETE DI SICUREZZA: se ci sono prezzi ma questa vista ne mostra zero,
+  // meglio mostrarli tutti che lasciare la pagina vuota. Un listino vuoto
+  // blocca il lavoro; un prodotto di troppo no.
+  var _catRotto = false;
+  if (!perCategoria.length && tuttiPrezzi.length) { perCategoria = tuttiPrezzi; _catRotto = true; }
+  window._pfCatRotto = _catRotto;
   var prezziVisibili = (_filtroBase === 'tutte') ? perCategoria : perCategoria.filter(function(r) { return _basePerRiga(r) === _filtroBase; });
 
   const best = {};

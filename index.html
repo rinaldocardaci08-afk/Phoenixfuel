@@ -547,8 +547,6 @@
           <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>Listino prezzi</span>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button id="lp-cat-oil" onclick="pfFiltroCategoria('oil')" style="font-size:12px;padding:8px 18px;border-radius:8px;cursor:pointer;background:#26215C;color:#fff;font-weight:700;border:0">OIL <span id="lp-cnt-oil" style="font-size:10px;opacity:0.8"></span></button>
-              <button id="lp-cat-non_oil" onclick="pfFiltroCategoria('non_oil')" style="font-size:12px;padding:8px 18px;border-radius:8px;cursor:pointer;background:var(--bg);color:var(--text);font-weight:500;border:0.5px solid var(--border)">NON OIL <span id="lp-cnt-non_oil" style="font-size:10px;opacity:0.7"></span></button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#185FA5" onclick="apriPreventivoCliente()">💬 Preventivo cliente</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px" onclick="apriListinoFascePDF()">📊 Genera listino PDF</button>
               <button class="btn-primary" style="font-size:12px;padding:8px 14px;background:#BA7517" onclick="stampaListinoPrezziGiorno()">🖨️ Listino prezzi del giorno</button>
@@ -556,6 +554,11 @@
               <input type="date" id="filtro-data-prezzi" data-nav="day" style="font-size:16px;padding:9px 14px;border:2px solid #378ADD;border-radius:10px;background:var(--bg-card);color:var(--text);font-weight:700;min-width:170px;text-align:center" onchange="_renderLabelPrezzi();caricaPrezzi()" />
               <button onclick="scorriGiornoPrezzi(1)" style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;width:36px;height:36px;cursor:pointer;font-size:16px;font-weight:bold;color:var(--text);display:flex;align-items:center;justify-content:center">▶</button>
             </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin:2px 0 16px 0;padding-bottom:12px;border-bottom:0.5px solid var(--border)">
+            <button id="lp-cat-oil" onclick="pfFiltroCategoria('oil')" style="font-size:13px;padding:10px 26px;border-radius:9px;cursor:pointer;background:#26215C;color:#fff;font-weight:700;border:0;letter-spacing:0.5px">OIL <span id="lp-cnt-oil" style="font-size:11px;opacity:0.75;font-weight:500"></span></button>
+            <button id="lp-cat-non_oil" onclick="pfFiltroCategoria('non_oil')" style="font-size:13px;padding:10px 26px;border-radius:9px;cursor:pointer;background:var(--bg);color:var(--text);font-weight:500;border:0.5px solid var(--border);letter-spacing:0.5px">NON OIL <span id="lp-cnt-non_oil" style="font-size:11px;opacity:0.65"></span></button>
+            <span id="lp-cat-avviso" style="font-size:11.5px;color:#854F0B"></span>
           </div>
           <div id="prezzi-label-giorno" style="text-align:center;margin:14px 0 18px"></div>
 
@@ -3154,7 +3157,7 @@
 <script src="pf-config.js?v=20260720c"></script>
 <script src="pf-date-nav.js?v=20260420c"></script>
 <script src="pf-das-densita.js?v=20260420b"></script>
-<script src="pf-ordini.js?v=20260813a"></script>
+<script src="pf-ordini.js?v=20260813b"></script>
 <script src="pf-deposito.js?v=20260724b"></script>
 <script src="pf-anagrafica.js?v=20260813a"></script>
 <script src="pf-vendite-cliente.js?v=20260720b"></script>
