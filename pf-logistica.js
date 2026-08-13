@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica
+// v20260811a — niente DAS sui carichi in arrivo al nostro deposito e
+//              sull AdBlue: quei documenti li emette il fornitore
 // v20260805e — i rifornimenti al deposito si vedono sempre fra le consegne
 //              e il costo del trasporto si mette dalla riga
 // v20260805d — tabella dei costi di trasporto in Mezzi propri
@@ -1082,6 +1084,23 @@ async function _pfOrdiniCarico(caricoId) {
   return ord || [];
 }
 
+// ═══ v20260811a · CHI IL DAS NON LO VUOLE ═══════════════════════════
+// I carichi che ARRIVANO al nostro deposito non hanno bisogno del DAS:
+// quel documento lo emette il fornitore, per noi e in ricezione. E
+// l'AdBlue non e un prodotto petrolifero: niente DAS e niente registri.
+// In un viaggio misto — due consegne a cliente e una al deposito — il
+// pulsante resta attivo e si generano SOLO i DAS che servono.
+function _pfSenzaDas(o) {
+  if (!o) return false;
+  if (o.tipo_ordine === 'entrata_deposito') return true;
+  if (/adblue/i.test(String(o.prodotto || ''))) return true;
+  return false;
+}
+
+function _pfOrdiniConDas(ordini) {
+  return (ordini || []).filter(function (o) { return !_pfSenzaDas(o); });
+}
+
 // Esegue: genera DAS + scarico deposito per UN carico, con densità già scelte.
 // Guardia anti-negativo: avvisa (non blocca) se la giacenza deposito di un
 // prodotto non basta a coprire le uscite che stanno per essere generate.
@@ -1121,7 +1140,11 @@ async function _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto) {
   var { data: carico } = await sb.from('carichi').select('*').eq('id', caricoId).single();
   if (!carico) { toast('Carico non trovato'); return; }
   var targa = (carico.mezzo_targa || '').split(' (')[0];
-  await _generaDasPerCarico(caricoId, ordiniCarico, targa, carico.autista, carico.data, densitaByProdotto);
+  var conDas = _pfOrdiniConDas(ordiniCarico);
+  var esclusi = (ordiniCarico || []).length - conDas.length;
+  if (conDas.length) {
+    await _generaDasPerCarico(caricoId, conDas, targa, carico.autista, carico.data, densitaByProdotto);
+  }
 
   // Scarico deposito per gli ordini dal deposito PhoenixFuel (movimenta le giacenze ORA)
   var ordiniDeposito = (ordiniCarico || []).filter(function (o) { return o.fornitore && o.fornitore.toLowerCase().includes('phoenix'); });
@@ -1130,7 +1153,7 @@ async function _pfEseguiGeneraDas(caricoId, ordiniCarico, densitaByProdotto) {
     try { await confermaUscitaDeposito(ordiniDeposito[i].id, true); scaricati++; }
     catch (e) { console.error('scarico deposito ordine ' + ordiniDeposito[i].id, e); }
   }
-  return { das: ordiniCarico.length, scaricati: scaricati };
+  return { das: conDas.length, scaricati: scaricati, esclusi: esclusi };
 }
 
 // Pulsante "Genera DAS" su UN viaggio: apre popup densità → genera.
@@ -1372,15 +1395,17 @@ function _renderCardCarico(c, opts) {
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;font-weight:500">' + ordini.length + ' consegne</div>';
   // Semaforo DAS
   var haDas = !!opts.haDas;
-  var semColor = haDas ? '#1D9E75' : '#E24B4A';
-  var semText = haDas ? 'DAS generati' : 'DAS da generare';
-  var semTextCol = haDas ? '#0F6E56' : '#A32D2D';
+  var semColor = (!_pfOrdiniConDas(ordini).length) ? '#8E8CA8' : (haDas ? '#1D9E75' : '#E24B4A');
+  var _nDas = _pfOrdiniConDas(ordini).length;
+  var semText = (!_nDas) ? 'DAS non necessari' : (haDas ? 'DAS generati' : 'DAS da generare');
+  var semTextCol = (!_nDas) ? 'var(--text-muted)' : (haDas ? '#0F6E56' : '#A32D2D');
   html += '<div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px">'
     + '<span style="width:9px;height:9px;border-radius:50%;background:' + semColor + ';display:inline-block"></span>'
     + '<span style="font-size:10px;color:' + semTextCol + ';font-weight:500">' + semText + '</span></div>';
   if (opts.mostraAzioni) {
     html += '<div style="display:flex;gap:4px;justify-content:center;margin-top:6px;flex-wrap:wrap">';
-    if (!haDas) {
+    var _servono = _pfOrdiniConDas(ordini).length;
+    if (!haDas && _servono) {
       html += '<button class="btn-primary" title="Genera i DAS di questo viaggio" onclick="pfGeneraDasViaggio(\'' + c.id + '\')" style="padding:4px 10px;font-size:11px;background:#185FA5">📄 Genera DAS</button>';
       html += '<button class="btn-edit" title="Modifica viaggio (vettore, camion, autista, quantità, consegne)" onclick="pfApriModificaViaggio(\'' + c.id + '\')" style="padding:4px 8px">✏️</button>';
     }
