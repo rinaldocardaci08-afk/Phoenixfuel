@@ -1109,33 +1109,91 @@ async function mktGuardaAdesso() {
     h += '</div>';
 
     // ═══ IL SUGGERIMENTO, in evidenza ═══
-    var dB = puntiB[2].v - puntiB[1].v;
-    var dC = puntiC[2].v - puntiC[1].v;
-    // petrolio giu = costo giu · dollaro debole (cambio EUR/USD in salita) = costo giu
-    var spinta = (dB < 0 ? 1 : (dB > 0 ? -1 : 0)) + (dC > 0 ? 1 : (dC < 0 ? -1 : 0));
-    var petPrec = Number(chius[chius.length - 1].brent_usd) / 158.987 / Number(chius[chius.length - 1].eurusd);
-    var deltaEuroL = pet - petPrec;
+    // v20260818a — Il verso lo decide l'EFFETTO IN EURO, non il conteggio dei segnali.
+    // Prima si sommava +1/-1 per petrolio e per cambio come se pesassero uguale: con
+    // Brent +8,86% e cambio +0,50% il punteggio si annullava e usciva "segnali
+    // contrastanti" mentre il costo saliva di 1.331 € sul carico. Il petrolio muove il
+    // costo molto piu' del cambio, quindi si guarda quanto pesano davvero in €/L.
+    //
+    // SCOMPOSIZIONE ESATTA (le due parti sommate ridanno il delta totale):
+    //   effPetrolio = brent di adesso al cambio VECCHIO, meno la chiusura precedente
+    //   effCambio   = il resto, cioe' quanto ha spostato il solo cambio
+    var brentOra  = Number(puntiB[2].v);
+    var brentPrec = Number(puntiB[1].v);
+    var camOra    = Number(puntiC[2].v);
+    var camPrec   = Number(puntiC[1].v);
+
+    var petPrec  = brentPrec / 158.987 / camPrec;
+    var petCamFermo = brentOra / 158.987 / camPrec;
+    var effPetrolio = petCamFermo - petPrec;
+    var effCambio   = pet - petCamFermo;
+    var deltaEuroL  = pet - petPrec;
+
     var litri = 35000;
     var eff = deltaEuroL * litri;
 
-    var cfg;
-    if (spinta >= 1 && deltaEuroL < 0) {
-      cfg = { bg: '#EAF3DE', bordo: '#639922', col: '#27500A', tit: '&#128071; Dati in calo &mdash; conviene aspettare',
-              txt: 'Petrolio e cambio spingono nella stessa direzione: il costo atteso scende. <strong>Se hai un carico programmato per oggi, valuta di spostarlo a domani.</strong>' };
-    } else if (spinta <= -1 && deltaEuroL > 0) {
-      cfg = { bg: '#FCEBEB', bordo: '#E24B4A', col: '#A32D2D', tit: '&#128070; Dati in salita &mdash; meglio non rimandare',
-              txt: 'Petrolio e cambio spingono verso l\'alto: il costo atteso sale. <strong>Se devi caricare, conviene farlo oggi.</strong>' };
-    } else {
-      cfg = { bg: '#FAEEDA', bordo: '#BA7517', col: '#854F0B', tit: '&#9878; Segnali contrastanti',
-              txt: 'Petrolio e cambio tirano in direzioni diverse: il movimento del costo e incerto. <strong>Nessun motivo per cambiare i piani.</strong>' };
+    // Sotto questa cifra spostare un carico costa piu' in rotture di magazzino
+    // che in risparmio: il consiglio deve dire di stare fermi.
+    var MKT_SOGLIA_EURO = 350;
+
+    var pctB = brentPrec ? (brentOra - brentPrec) / brentPrec * 100 : 0;
+    var pctC = camPrec ? (camOra - camPrec) / camPrec * 100 : 0;
+
+    function _mktSeg(n, d) {
+      return (n >= 0 ? '+' : '\u2212') + Math.abs(n).toFixed(d);
     }
 
+    // Racconto dei due fattori, uno per riga.
+    var rigaPet = 'Brent <strong style="font-family:var(--font-mono)">' + brentPrec.toFixed(2)
+      + ' \u2192 ' + brentOra.toFixed(2) + '</strong> $/barile (' + _mktSeg(pctB, 2) + '%): '
+      + (effPetrolio > 0 ? 'spinge il costo in su' : (effPetrolio < 0 ? 'spinge il costo in giu' : 'fermo'))
+      + ' di <strong style="font-family:var(--font-mono)">' + _mktSeg(effPetrolio, 4) + ' &euro;/L</strong>.';
+
+    var rigaCam = 'Cambio <strong style="font-family:var(--font-mono)">' + camPrec.toFixed(4)
+      + ' \u2192 ' + camOra.toFixed(4) + '</strong> (' + _mktSeg(pctC, 2) + '%): '
+      + (effCambio < 0 ? 'l\'euro si rafforza e, siccome il petrolio si compra in dollari, restituisce'
+        : (effCambio > 0 ? 'l\'euro si indebolisce e aggiunge' : 'il cambio non sposta niente,'))
+      + ' <strong style="font-family:var(--font-mono)">' + _mktSeg(effCambio, 4) + ' &euro;/L</strong>.';
+
+    // I due fattori si compensano davvero solo se tirano in direzioni opposte
+    // E il risultato netto resta sotto soglia.
+    var opposti = (effPetrolio > 0 && effCambio < 0) || (effPetrolio < 0 && effCambio > 0);
+    var sottoSoglia = Math.abs(eff) < MKT_SOGLIA_EURO;
+
+    var cfg, consiglio;
+    if (sottoSoglia) {
+      consiglio = '<strong>Consiglio non vincolante:</strong> lo scarto resta sotto la soglia di '
+        + MKT_SOGLIA_EURO + ' &euro; a carico. Non vale la pena anticipare o rinviare: '
+        + 'spostare un carico per questa cifra costa piu\' in rotture di magazzino che in risparmio.';
+      cfg = { bg: '#FAEEDA', bordo: '#BA7517', col: '#854F0B',
+              tit: '&#9878; ' + (opposti ? 'I due fattori si compensano' : 'Movimento sotto soglia'),
+              txt: rigaPet + '<br/>' + rigaCam };
+    } else if (eff > 0) {
+      consiglio = '<strong>Consiglio non vincolante:</strong> i segnali puntano al rialzo. '
+        + 'Se devi caricare per il deposito nei prossimi giorni, va ragionata la possibilita\' di <strong>anticipare</strong> l\'acquisto.';
+      cfg = { bg: '#FCEBEB', bordo: '#E24B4A', col: '#A32D2D',
+              tit: '&#128070; Costo in salita' + (opposti ? ' \u2014 il cambio attutisce' : ''),
+              txt: rigaPet + '<br/>' + rigaCam };
+    } else {
+      consiglio = '<strong>Consiglio non vincolante:</strong> i segnali puntano al ribasso. '
+        + 'Se hai un carico programmato, va ragionata la possibilita\' di <strong>rinviarlo</strong> di qualche giorno.';
+      cfg = { bg: '#EAF3DE', bordo: '#639922', col: '#27500A',
+              tit: '&#128071; Costo in calo' + (opposti ? ' \u2014 il petrolio frena la discesa' : ''),
+              txt: rigaPet + '<br/>' + rigaCam };
+    }
+    cfg.consiglio = consiglio;
+
     h += '<div style="margin-top:14px;background:' + cfg.bg + ';border:0.5px solid ' + cfg.bordo + ';border-left:5px solid ' + cfg.bordo + ';border-radius:12px;padding:16px 18px">';
-    h += '<div style="font-size:17px;font-weight:700;color:' + cfg.col + ';margin-bottom:6px">' + cfg.tit + '</div>';
-    h += '<div style="font-size:13.5px;color:' + cfg.col + ';line-height:1.65">' + cfg.txt + '</div>';
-    h += '<div style="font-size:13px;color:' + cfg.col + ';margin-top:8px">Effetto stimato sul carico da ' + litri.toLocaleString('it-IT') + ' L: '
-       + '<strong style="font-family:var(--font-mono);font-size:16px">' + (eff >= 0 ? '+' : '') + eff.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' &euro;</strong></div>';
-    h += '<div style="font-size:11px;color:' + cfg.col + ';opacity:0.8;margin-top:8px">Stima sul valore di adesso, non sulla chiusura. Il numero buono arriva alle 17:30.</div>';
+    h += '<div style="font-size:17px;font-weight:700;color:' + cfg.col + ';margin-bottom:8px">' + cfg.tit + '</div>';
+    h += '<div style="font-size:13.5px;color:' + cfg.col + ';line-height:1.75">' + cfg.txt + '</div>';
+    h += '<div style="font-size:13px;color:' + cfg.col + ';margin-top:10px;padding-top:10px;border-top:0.5px solid ' + cfg.bordo + '">';
+    h += 'Effetto netto <strong style="font-family:var(--font-mono)">' + _mktSeg(deltaEuroL, 4) + ' &euro;/L</strong>'
+       + ' &middot; sul carico da ' + litri.toLocaleString('it-IT') + ' L: '
+       + '<strong style="font-family:var(--font-mono);font-size:16px">' + (eff >= 0 ? '+' : '\u2212')
+       + Math.abs(eff).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' &euro;</strong>';
+    h += '</div>';
+    h += '<div style="font-size:13px;color:' + cfg.col + ';margin-top:10px;line-height:1.65">' + cfg.consiglio + '</div>';
+    h += '<div style="font-size:11px;color:' + cfg.col + ';opacity:0.8;margin-top:10px">Stima sul valore di adesso, non sulla chiusura. Il numero buono arriva alle 17:30. Soglia di intervento ' + MKT_SOGLIA_EURO + ' &euro; a carico.</div>';
     h += '</div>';
 
     h += '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--text-muted)">';
