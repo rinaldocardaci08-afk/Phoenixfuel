@@ -1,4 +1,7 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260819b — anche "Registra incasso cliente" ha la lancetta e la scelta del
+//               conto: il rientro lo scriveva gia, ma la banca la deduceva in
+//               silenzio e l esposizione del cliente non si vedeva
 // v20260819a — la scheda fattura del modulo: mettere "Estinta" ora estingue
 //               davvero (prima l update secco lasciava importo_estinto a zero,
 //               il fido occupato e il conto fermo). Data di estinzione,
@@ -3141,6 +3144,22 @@ async function _antRenderModaleIncasso(fatturaAntId) {
   var defaultImporto = Number(f.importo_anticipato_calcolato || 0);
   var oggiISO = new Date().toISOString().split('T')[0];
 
+  // v20260819b — stesso corredo della scheda fattura: banca del modulo,
+  // massimale del cliente ed esposizione, per la lancetta. Prima questo
+  // modale scriveva il rientro ma non diceva su quale conto ne' quanto
+  // pesasse il cliente.
+  var fidoI = null;
+  try {
+    var rpI = await sb.from('anticipi_sbf_presentazioni').select('affidamento_id').eq('id', f.presentazione_id).single();
+    if (rpI.data) fidoI = (_bancheAffidamenti || []).filter(function (a) { return a.id === rpI.data.affidamento_id; })[0] || null;
+  } catch (e) { /* senza fido restano i campi, sparisce solo la lancetta */ }
+  var massI = await _antMassimaleCliente(fidoI, f.cliente_id);
+  var espostoI = fidoI ? await _antEspostoCliente(fidoI.id, f.cliente_id) : 0;
+  var residuoI = Math.max(0, Number(f.importo_anticipato_calcolato || 0) - Number(f.importo_estinto || 0));
+  _antModInc = { id: fatturaAntId, f: f, fido: fidoI, residuo: residuoI,
+                 massimale: massI.massimale, origineMass: massI.origine, esposto: espostoI,
+                 bancaDefault: fidoI ? fidoI.istituto_id : null };
+
   var html = '<div style="max-width:520px">';
   html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px;color:#27500A">✓ Registra incasso cliente</div>';
   html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Fattura <strong style="font-family:var(--font-mono)">' + esc(f.numero_fattura || '?') + '</strong> · ' + esc(f.cliente_nome || '?') + '</div>';
@@ -3154,22 +3173,36 @@ async function _antRenderModaleIncasso(fatturaAntId) {
   if (f.scadenza_cliente) html += '<div><span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;font-size:9px;display:block">Scad. cliente</span><strong>' + fmtD(f.scadenza_cliente) + '</strong></div>';
   html += '</div>';
 
+  html += '<div style="display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:16px;align-items:start"><div>';
+
   // Form
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data incasso *</label>';
   html += '<input id="ant-inc-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px"></div>';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Importo estinto (€) *</label>';
-  html += '<input id="ant-inc-importo" type="number" step="0.01" min="0" value="' + defaultImporto.toFixed(2) + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);font-weight:600"></div>';
+  html += '<input id="ant-inc-importo" type="number" step="0.01" min="0" oninput="_antModIncAggiorna()" value="' + defaultImporto.toFixed(2) + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);font-weight:600"></div>';
   html += '</div>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:6px">Default = importo anticipato. Modifica solo se la banca ha trattenuto un valore diverso.</div>';
+
+  // v20260819b — conto su cui gira il rientro: prima lo deduceva in
+  // silenzio dalla presentazione, ora si vede e si puo' cambiare.
+  html += '<div style="margin-top:10px"><label style="font-size:11px;color:var(--text-muted);font-weight:500">Conto su cui gira il movimento</label>';
+  html += '<select id="ant-inc-banca" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px">';
+  (_bancheIstituti || []).forEach(function (b) {
+    html += '<option value="' + esc(b.id) + '"' + (b.id === _antModInc.bancaDefault ? ' selected' : '') + '>' + esc(b.nome) + '</option>';
+  });
+  html += '</select>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Preselezionata la banca del modulo.</div></div>';
 
   // Opzione insoluta
   html += '<div style="margin-top:14px;padding:10px 14px;background:#FCEBEB;border-left:4px solid #E24B4A;border-radius:6px">';
   html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">';
-  html += '<input type="checkbox" id="ant-inc-insoluta"> ';
+  html += '<input type="checkbox" id="ant-inc-insoluta" onchange="_antModIncAggiorna()"> ';
   html += '<span><strong style="color:#791F1F">Cliente non ha pagato (insoluta)</strong> — segna la fattura come "insoluta". Il modulo resta aperto.</span>';
   html += '</label>';
   html += '</div>';
+
+  html += '</div><div id="ant-inc-lancetta" style="background:var(--bg);border-radius:10px;padding:12px 10px"></div></div>';
 
   // Pulsanti
   html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
@@ -3179,6 +3212,31 @@ async function _antRenderModaleIncasso(fatturaAntId) {
   html += '</div>';
 
   apriModal(html);
+  _antModIncAggiorna();
+}
+
+
+// La lancetta scende dell'importo che si sta per far rientrare. Se la
+// fattura viene segnata insoluta il rientro non c'e': l'esposizione resta
+// dov'e' e la lancetta non si muove.
+function _antModIncAggiorna() {
+  var S = _antModInc;
+  if (!S) return;
+  var el = document.getElementById('ant-inc-lancetta');
+  if (!el) return;
+  var ins = document.getElementById('ant-inc-insoluta');
+  var inp = document.getElementById('ant-inc-importo');
+  var quota = (ins && ins.checked) ? 0 : (inp ? (parseFloat(inp.value) || 0) : S.residuo);
+  if (quota > S.residuo) quota = S.residuo;
+  var dopo = Math.max(0, S.esposto - quota);
+  var sotto = quota > 0 ? 'da ' + fmtE(S.esposto) + ' · −' + fmtE(quota) : 'esposizione invariata';
+  el.innerHTML = _antLancetta(S.esposto, dopo, S.massimale, S.f.cliente_nome, sotto)
+    + (S.origineMass === 'regola'
+        ? '<div style="border-top:0.5px solid var(--border);margin-top:9px;padding-top:8px;font-size:10.5px;color:var(--text-muted);line-height:1.5">Massimale impostato sul cliente</div>'
+        : (S.origineMass === 'pct' && S.fido
+            ? '<div style="border-top:0.5px solid var(--border);margin-top:9px;padding-top:8px;font-size:10.5px;color:var(--text-muted);line-height:1.5">'
+              + Number(S.fido.massimale_cliente_pct).toFixed(0) + '% del fido da ' + fmtE(S.fido.importo_accordato) + '</div>'
+            : ''));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3279,10 +3337,11 @@ async function _antSalvaIncasso(fatturaAntId) {
     // stessa funzione usata dall'estratto conto clienti: aggiorna la riga E
     // scrive l'uscita dal conto (rientro dell'anticipo alla banca)
     try {
+      var elBI = document.getElementById('ant-inc-banca');
       await antEstinguiAnticipo(fatturaAntId, {
         importo: Number(importoRaw),
         data: data,
-        bancaId: null   // la ricava da se dalla presentazione
+        bancaId: (elBI && elBI.value) ? elBI.value : null   // se vuoto la ricava dalla presentazione
       });
     } catch (e) { toast('❌ Errore: ' + ((e && e.message) || e)); return; }
   }
@@ -3580,6 +3639,7 @@ function _antLancetta(attuale, dopo, massimale, titolo, sottotitolo) {
 // di prima, invariato.
 // ═══════════════════════════════════════════════════════════════════════════
 var _antModFatt = null;
+var _antModInc = null;
 
 async function _antRenderModaleFattura(fatturaAntId) {
   if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
