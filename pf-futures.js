@@ -1,4 +1,14 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20260819a — BENCHMARK MERCATO rifatto sui listini VERI: la linea non e'
+//              piu' petrolio + accisa + uno scarto medio ricavato all'indietro
+//              dai carichi (numero costruito, confronto senza significato),
+//              ma la media dei listini dei fornitori base Vibo Marina letta
+//              da `prezzi`. Fascia = forbice min-max fra fornitori dello
+//              stesso giorno. Pallini = carichi su costo_litro, verdi sotto
+//              la media e rossi sopra. KPI con lo scarto in millesimi e in
+//              euro sui litri comprati. Proiezione tratteggiata dall'ultimo
+//              listino col ritardo di due quotazioni della matrice Eni.
+// v20260818a — note mercati scomposte petrolio/cambio, soglia 350 € a carico
 // v20260803g — con lo sguardo aperto la previsione sale subito sotto i due
 //              grafici: mercato adesso e prossimo listino in un blocco solo
 // v20260803f — previsione del prossimo listino: matrice Eni Vibo, variazione
@@ -783,103 +793,178 @@ async function renderMercato() {
 
   h += '<div id="mkt-ora-box"></div>';
 
+  // v20260819a — Il grafico ora si regge sui LISTINI, non sulle quotazioni.
+  // Senza quotazioni resta fuori solo la proiezione: il benchmark si disegna
+  // lo stesso. Il vecchio codice usciva di qui e faceva sparire tutta la
+  // pagina (regola: un filtro nuovo deve fallire aperto).
   if (!serie.length) {
+    h += '<div class="card" style="margin-bottom:14px"><div style="font-size:12.5px;color:var(--text-muted);line-height:1.7">'
+      + 'Nessuna quotazione nel periodo: il confronto sui listini resta, manca solo la proiezione. '
+      + 'Premi <strong>↧ Carica storico</strong> per ricostruire gli ultimi mesi in una volta sola, '
+      + 'oppure <strong>⟳ Aggiorna adesso</strong> per la sola chiusura di oggi.</div></div>';
+  }
+
+  if (!_mktListini.length) {
     h += '<div class="card"><div style="font-size:13px;color:var(--text-muted);line-height:1.7">'
-      + 'Nessuna quotazione nel periodo. Premi <strong>↧ Carica storico</strong> per ricostruire gli ultimi mesi in una volta sola, '
-      + 'oppure <strong>⟳ Aggiorna adesso</strong> per la sola chiusura di oggi. '
-      + 'Resta possibile inserire a mano dalla linguetta <strong>Futures ICE</strong>.</div></div>';
+      + 'Nessun listino <strong>gasolio autotrazione</strong> con base <strong>Vibo Marina</strong> in questo periodo: '
+      + 'senza listini non c\'è niente contro cui confrontare i carichi. Allarga il periodo con 3M / 6M / 1A.</div></div>';
     // v20260802b: la scomposizione dell'accisa NON dipende dal mercato —
-    // prodotto puro = costo meno accisa. Senza quotazioni restano vuote solo
-    // le colonne Mercato e Scarto. Prima si usciva di qui e la sezione non
-    // compariva affatto.
+    // prodotto puro = costo meno accisa. Prima si usciva di qui e la sezione
+    // non compariva affatto.
     h += _mktSezioneAccise(carichi, serie, carichiTutti);
     el.innerHTML = h;
     _mktDisegnaGraficoAccise();
     return;
   }
 
-  // v20260803b — TUTTO SULLO STESSO PIANO (regola sua del 03/08).
-  // Prima la linea del mercato stava a 0,49 e i carichi a 1,45: le
-  // variazioni della linea sparivano schiacciate in basso. Ora la linea
-  // viene ALZATA fino al piano dei carichi, aggiungendo l'accisa del
-  // giorno e lo scarto medio del periodo (che e il salto petrolio→gasolio
-  // piu il margine del fornitore). Cosi i pallini cadono ATTORNO alla
-  // linea e si vede subito se abbiamo comprato sopra o sotto.
-  // Quando arrivera la formula del vecchio Excel prendera il posto dello
-  // scarto medio, e la linea diventera una previsione vera.
-  var puliti = carichi.filter(function (o) { return !(Number(o.trasporto_litro) > 0); });
-  var _mktAtteso = function (dataISO) {
-    var acc = _mktAccisaAl(dataISO, 'gasolio');
-    return acc ? acc.applicata : 0;
-  };
-  var scartoMedio = 0, nScarto = 0;
-  puliti.forEach(function (o) {
-    var q = null;
-    for (var i = serie.length - 1; i >= 0; i--) {
-      if (serie[i].data <= o.data) { q = Number(serie[i].prezzo_euro_litro || 0); break; }
-    }
-    if (q === null) return;
-    scartoMedio += Number(o.costo_litro) - q - _mktAtteso(o.data);
-    nScarto++;
-  });
-  scartoMedio = nScarto ? scartoMedio / nScarto : 0;
+  // ═══════════════════════════════════════════════════════════════════
+  // v20260819a — BENCHMARK SUI LISTINI VERI
+  // Prima la linea era petrolio + accisa + uno "scarto medio" ricavato
+  // all'indietro dai carichi stessi: un numero costruito, contro cui il
+  // confronto non diceva niente (infatti in alto usciva "nessun carico
+  // confrontabile"). Ora la linea e' la MEDIA DEI LISTINI VERI dei
+  // fornitori base Vibo Marina su gasolio autotrazione, letta da `prezzi`.
+  // I fornitori Vibo sono tutti FRANCO PARTENZA: si confronta il solo
+  // costo_litro e il trasporto resta fuori, perche' e' costo di logistica
+  // e non prezzo del fornitore.
+  // ═══════════════════════════════════════════════════════════════════
 
-  var serieAtt = serie.map(function (r) {
-    return { data: r.data, v: Number(r.prezzo_euro_litro || 0) + _mktAtteso(r.data) + scartoMedio };
+  // Un valore per fornitore e per giorno: l'ultima riga vince, come fa gia'
+  // _mktSerieFornitore. Le righe del Deposito sono costruite dal programma
+  // (_isDeposito) e non sono un fornitore: fuori da ogni media di mercato.
+  var perGiorno = {};
+  _mktListini.forEach(function (x) {
+    var f = String(x.fornitore || '').trim();
+    if (!f || /phoenix|deposito/i.test(f)) return;
+    if (!(Number(x.costo_litro) > 0)) return;
+    (perGiorno[x.data] = perGiorno[x.data] || {})[f.toLowerCase()] = Number(x.costo_litro);
   });
-  var aggSerie = _mktAggrega(serieAtt, function (r) { return r.v; });
-  var lab = aggSerie.map(function (b) { return b.etichetta; });
-  var prezzi = aggSerie.map(function (b) { return Math.round(b.valore * 10000) / 10000; });
-  var ma7 = _mktMedia(prezzi, 7), ma30 = _mktMedia(prezzi, 30);
-  var ultimo = prezzi[prezzi.length - 1];
-  var prec = prezzi.length > 1 ? prezzi[prezzi.length - 2] : ultimo;
-  var varG = ultimo - prec;
-  var m7 = ma7[ma7.length - 1], m30 = ma30[ma30.length - 1];
-  var tendenza = (m7 != null && m30 != null) ? (m7 > m30 ? 'In salita' : 'In discesa') : '—';
-  var colTend = (m7 != null && m30 != null) ? (m7 > m30 ? '#A32D2D' : '#3B6D11') : 'var(--text-muted)';
+  var benchGiorno = Object.keys(perGiorno).sort().map(function (d) {
+    var nomi = Object.keys(perGiorno[d]);
+    var v = nomi.map(function (k) { return perGiorno[d][k]; });
+    var somma = v.reduce(function (a, b) { return a + b; }, 0);
+    return { data: d, media: somma / v.length,
+             min: Math.min.apply(null, v), max: Math.max.apply(null, v),
+             n: v.length, nomi: nomi };
+  });
 
-  // ultimo carico e confronto col mercato di quel giorno
-  var ultC = carichi.length ? carichi[carichi.length - 1] : null;
-  var costoUlt = ultC ? (Number(ultC.costo_litro) + Number(ultC.trasporto_litro || 0)) : null;
-  var mktQuelGiorno = null;
-  if (ultC) {
-    for (var i = serie.length - 1; i >= 0; i--) {
-      if (serie[i].data <= ultC.data) { mktQuelGiorno = Number(serie[i].prezzo_euro_litro || 0); break; }
+  if (!benchGiorno.length) {
+    h += '<div class="card"><div style="font-size:13px;color:var(--text-muted);line-height:1.7">'
+      + 'I listini letti sono tutti a costo zero o del solo Deposito: niente da confrontare.</div></div>';
+    h += _mktSezioneAccise(carichi, serie, carichiTutti);
+    el.innerHTML = h;
+    _mktDisegnaGraficoAccise();
+    return;
+  }
+
+  // Aggregazione nel periodo scelto (giorno / settimana / mese). Il metodo
+  // e' quello che c'e' gia': _mktAggrega, stessa chiave di bucket dei carichi.
+  var aggMedia = _mktAggrega(benchGiorno, function (r) { return r.media; });
+  var aggMin   = _mktAggrega(benchGiorno, function (r) { return r.min; });
+  var aggMax   = _mktAggrega(benchGiorno, function (r) { return r.max; });
+  var mapMin = {}, mapMax = {};
+  aggMin.forEach(function (b) { mapMin[b.chiave] = b.valore; });
+  aggMax.forEach(function (b) { mapMax[b.chiave] = b.valore; });
+
+  var lab     = aggMedia.map(function (b) { return b.etichetta; });
+  var linMed  = aggMedia.map(function (b) { return Math.round(b.valore * 1000000) / 1000000; });
+  var linMin  = aggMedia.map(function (b) { return mapMin[b.chiave] !== undefined ? Math.round(mapMin[b.chiave] * 1000000) / 1000000 : null; });
+  var linMax  = aggMedia.map(function (b) { return mapMax[b.chiave] !== undefined ? Math.round(mapMax[b.chiave] * 1000000) / 1000000 : null; });
+
+  var ultimoG = benchGiorno[benchGiorno.length - 1];
+  var ultimo  = aggMedia[aggMedia.length - 1].valore;
+  var prec    = aggMedia.length > 1 ? aggMedia[aggMedia.length - 2].valore : ultimo;
+  var varG    = ultimo - prec;
+
+  // ── Carichi: scarto sulla media dei listini dello stesso periodo ─────
+  // Solo costo_litro: il trasporto e' fuori dal confronto (franco partenza).
+  var mediaPerBucket = {};
+  aggMedia.forEach(function (b) { mediaPerBucket[b.chiave] = b.valore; });
+  var nConf = 0, nSotto = 0, totLitri = 0, totEuro = 0;
+  carichi.forEach(function (o) {
+    var k = _mktBucket(o.data);
+    if (mediaPerBucket[k] === undefined) { o._scarto = null; return; }
+    o._scarto = Number(o.costo_litro) - mediaPerBucket[k];
+    nConf++;
+    if (o._scarto < 0) nSotto++;
+    totLitri += Number(o.litri);
+    totEuro  += o._scarto * Number(o.litri);
+  });
+  var scartoPesato = totLitri ? totEuro / totLitri : null;
+
+  // ── Proiezione: si riusa la calibrazione della Previsione ────────────
+  // Il movimento del petrolio arriva sul listino dopo DUE quotazioni. Se
+  // le quotazioni mancano o la regressione non regge, la proiezione non
+  // si disegna: meglio niente che una riga inventata.
+  var proiez = null;
+  if (serie.length) {
+    var quotP = serie.map(function (r) { return { data: r.data, v: Number(r.prezzo_euro_litro || 0) }; })
+                     .filter(function (x) { return x.v > 0; });
+    if (quotP.length >= 4) {
+      var matriceP = _mktScartaAnomali(_mktSerieFornitore(MKT_MATRICE));
+      if (matriceP.length >= 15) {
+        var calP = _mktCalibra(matriceP, quotP);
+        if (calP) {
+          var dProxP = quotP[quotP.length - 2].v - quotP[quotP.length - 3].v;
+          var varProxP = calP.a + calP.b * dProxP;
+          proiez = { varProx: varProxP, r: calP.r, valore: ultimo + varProxP };
+        }
+      }
     }
   }
+  if (proiez) {
+    lab.push('atteso');
+    linMed.push(null); linMin.push(null); linMax.push(null);
+  }
+  var linProi = lab.map(function (_, i) {
+    if (!proiez) return null;
+    if (i === lab.length - 2) return Math.round(ultimo * 1000000) / 1000000;
+    if (i === lab.length - 1) return Math.round(proiez.valore * 1000000) / 1000000;
+    return null;
+  });
+
+  var mill = function (x) { return (x >= 0 ? '+' : '') + Math.round(x * 1000); };
+  var forbiceUlt = ultimoG.max - ultimoG.min;
 
   var kpi = function (lab2, val, sub, col) {
     return '<div class="kpi"><div class="kpi-label">' + lab2 + '</div>'
       + '<div class="kpi-value" style="font-family:var(--font-mono);color:' + (col || 'var(--text)') + '">' + val + '</div>'
       + (sub ? '<div style="font-size:11px;color:var(--text-muted)">' + sub + '</div>' : '') + '</div>';
   };
+
   h += '<div class="grid4" style="margin-bottom:16px">'
-    + kpi('Costo atteso ' + fmtD(serie[serie.length - 1].data), ultimo.toFixed(4),
-          (varG >= 0 ? '+' : '') + varG.toFixed(4) + ' sul giorno', varG >= 0 ? '#A32D2D' : '#3B6D11')
-    + kpi('Tendenza', tendenza, (m7 != null && m30 != null) ? 'MA7 ' + (m7 > m30 ? 'sopra' : 'sotto') + ' MA30' : 'servono più giorni', colTend)
-    + kpi('Tuo ultimo carico', costoUlt != null ? costoUlt.toFixed(4) : '—',
-          ultC ? esc(ultC.fornitore) + ' · ' + fmtD(ultC.data) + (Number(ultC.trasporto_litro || 0) > 0 ? ' · trasporto incluso' : '') : 'nessun carico nel periodo')
+    + kpi('Listino medio ' + fmtD(ultimoG.data), ultimo.toFixed(4),
+          (varG >= 0 ? '+' : '') + Math.round(varG * 1000) + ' millesimi sul periodo precedente',
+          varG >= 0 ? '#A32D2D' : '#3B6D11')
+    + kpi('Forbice fra fornitori', mill(forbiceUlt).replace('+', '') + ' mill.',
+          ultimoG.n > 1 ? 'da ' + ultimoG.min.toFixed(4) + ' a ' + ultimoG.max.toFixed(4) + ' · ' + ultimoG.n + ' fornitori'
+                        : 'un solo listino quel giorno')
     + (function () {
-        var conS = carichi.filter(function (o) { return o._scarto !== null && o._scarto !== undefined; });
-        var sotto = conS.filter(function (o) { return o._scarto < 0; }).length;
-        var medio = conS.length ? conS.reduce(function (a, o) { return a + o._scarto; }, 0) / conS.length : null;
-        return kpi('Come abbiamo comprato',
-          conS.length ? sotto + ' su ' + conS.length + ' sotto' : '—',
-          medio === null ? 'nessun carico confrontabile'
-            : 'scarto medio ' + (medio >= 0 ? '+' : '') + medio.toFixed(4) + ' €/L',
-          medio === null ? null : (medio <= 0 ? '#3B6D11' : '#A32D2D'));
+        var ultC = carichi.length ? carichi[carichi.length - 1] : null;
+        if (!ultC) return kpi('Tuo ultimo carico', '—', 'nessun carico nel periodo');
+        var sc = (ultC._scarto === null || ultC._scarto === undefined) ? null : ultC._scarto;
+        return kpi('Tuo ultimo carico', Number(ultC.costo_litro).toFixed(4),
+          esc(ultC.fornitore) + ' · ' + fmtD(ultC.data)
+            + (sc === null ? '' : ' · ' + mill(sc) + ' mill. sulla media'),
+          sc === null ? null : (sc <= 0 ? '#3B6D11' : '#A32D2D'));
+      })()
+    + (function () {
+        if (!nConf) return kpi('Come abbiamo comprato', '—', 'nessun carico nel periodo dei listini');
+        return kpi('Come abbiamo comprato', nSotto + ' su ' + nConf + ' sotto',
+          mill(scartoPesato) + ' millesimi · '
+            + (totEuro >= 0 ? '+' : '−') + ' € ' + Math.abs(Math.round(totEuro)).toLocaleString('it-IT') + ' su ' + fmtL(totLitri) + ' L',
+          scartoPesato <= 0 ? '#3B6D11' : '#A32D2D');
       })()
     + '</div>';
 
   h += '<div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:8px;font-size:11.5px;color:var(--text-muted)">'
-    + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;margin-right:5px"></span>Costo atteso €/L (petrolio + accisa + scarto medio ' + scartoMedio.toFixed(4) + ')</span>'
-    + '<span><span style="display:inline-block;width:10px;height:2px;background:#eb6834;margin-right:5px;vertical-align:middle"></span>Media 7 giorni</span>'
-    + '<span><span style="display:inline-block;width:10px;height:2px;background:#898781;margin-right:5px;vertical-align:middle"></span>Media 30 giorni</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(200,80,80);margin-right:4px"></span>'
-      + '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(160,160,160);margin-right:4px"></span>'
-      + '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(60,158,60);margin-right:5px"></span>'
-      + 'Pagato sopra · in linea · sotto il mercato</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:rgb(120,140,120);border:2px solid #555;margin-right:5px"></span>Carichi con trasporto incluso</span>'
+    + '<span><span style="display:inline-block;width:10px;height:2px;background:#26215C;margin-right:5px;vertical-align:middle"></span>Media listini fornitori · base Vibo Marina</span>'
+    + '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(217,222,13,0.55);margin-right:5px"></span>Forbice min–max fra fornitori</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#639922;margin-right:4px"></span>'
+      + '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#A32D2D;margin-right:5px"></span>'
+      + 'Carichi sotto · sopra la media</span>'
+    + (proiez ? '<span><span style="display:inline-block;width:12px;height:2px;background:#BA7517;margin-right:5px;vertical-align:middle"></span>Proiezione dal petrolio di due quotazioni fa</span>' : '')
+    + '<span>Confronto sul solo <strong>costo_litro</strong>: i fornitori Vibo sono franco partenza, il trasporto è logistica</span>'
     + '</div>';
   h += '<div class="card" id="mkt-card-graf"><div style="position:relative;height:300px"><canvas id="mkt-chart"></canvas></div></div>';
 
@@ -891,7 +976,6 @@ async function renderMercato() {
       + '<div class="kpi-value" style="font-family:var(--font-mono);color:var(--text-muted)">' + (ultimo * (1 + _MKT_IVA)).toFixed(4) + '</div>'
       + '<div style="font-size:11px;color:var(--text-muted)">l\'IVA la recuperi: non entra mai nei confronti</div></div>'
     + '</div>';
-
   h += _mktSezionePrevisione(serie);
 
   // ═══ Composizione del prezzo · accise ═══
@@ -899,37 +983,34 @@ async function renderMercato() {
 
   el.innerHTML = h;
 
-  // grafico
-  // Ogni carico si colloca nel suo periodo, e il colore dipende da QUANTO
-  // sta sopra o sotto la linea: rosso acceso = pagato molto sopra il
-  // mercato, verde pieno = molto sotto, grigio = in linea.
-  var attesoPerBucket = {};
-  aggSerie.forEach(function (b) { attesoPerBucket[b.chiave] = b.valore; });
-  var scarti = [];
-  carichi.forEach(function (o) {
-    var k = _mktBucket(o.data);
-    if (attesoPerBucket[k] === undefined) { o._scarto = null; return; }
-    o._scarto = (Number(o.costo_litro) + Number(o.trasporto_litro || 0)) - attesoPerBucket[k];
-    scarti.push(Math.abs(o._scarto));
-  });
-  var maxScarto = scarti.length ? Math.max.apply(null, scarti) : 0.01;
-  if (maxScarto < 0.005) maxScarto = 0.005;
-  var _colore = function (sc) {
-    var q = Math.max(-1, Math.min(1, sc / maxScarto));
-    if (q >= 0) return 'rgb(' + Math.round(200 - 40 * (1 - q)) + ',' + Math.round(80 + 100 * (1 - q)) + ',' + Math.round(80 + 100 * (1 - q)) + ')';
-    return 'rgb(' + Math.round(60 + 130 * (1 + q)) + ',' + Math.round(158 - 18 * (1 + q)) + ',' + Math.round(60 + 120 * (1 + q)) + ')';
+  // ── Grafico ─────────────────────────────────────────────────────────
+  // I pallini sono i carichi, collocati nel loro periodo. Il colore non e'
+  // piu' una sfumatura: verde se sotto la media dei listini, rosso se sopra.
+  // Il diametro cresce coi litri, cosi un carico grosso comprato male si
+  // vede subito.
+  var litriPunti = carichi.map(function (o) { return Number(o.litri) || 0; });
+  var maxLitri = litriPunti.length ? Math.max.apply(null, litriPunti) : 0;
+  var _raggio = function (l) {
+    if (!(maxLitri > 0)) return 6;
+    return 5 + Math.round(4 * Math.min(1, (Number(l) || 0) / maxLitri));
   };
   var _punto = function (o) {
     var k = _mktBucket(o.data);
-    if (attesoPerBucket[k] === undefined) return null;
+    if (mediaPerBucket[k] === undefined) return null;
     return { x: _mktEtichettaBucket(k),
-             y: Math.round((Number(o.costo_litro) + Number(o.trasporto_litro || 0)) * 10000) / 10000,
-             _f: o.fornitore, _l: o.litri, _t: Number(o.trasporto_litro || 0), _s: o._scarto };
+             y: Math.round(Number(o.costo_litro) * 1000000) / 1000000,
+             _f: o.fornitore, _l: o.litri, _d: o.data,
+             _t: Number(o.trasporto_litro || 0), _s: o._scarto };
   };
-  var puntiPuliti = puliti.map(_punto).filter(Boolean);
-  var puntiTrasp  = carichi.filter(function (o) { return Number(o.trasporto_litro) > 0; }).map(_punto).filter(Boolean);
-  var coloriPuliti = puntiPuliti.map(function (p) { return _colore(p._s || 0); });
-  var coloriTrasp  = puntiTrasp.map(function (p) { return _colore(p._s || 0); });
+  var puntiSotto = carichi.filter(function (o) { return o._scarto !== null && o._scarto !== undefined && o._scarto < 0; }).map(_punto).filter(Boolean);
+  var puntiSopra = carichi.filter(function (o) { return o._scarto !== null && o._scarto !== undefined && o._scarto >= 0; }).map(_punto).filter(Boolean);
+
+  var _tipCarico = function (p) {
+    return (p._f || '') + ' · ' + fmtD(p._d) + ': € ' + Number(p.y).toFixed(4) + '/L · ' + fmtL(p._l) + ' L'
+      + (p._s === null || p._s === undefined ? ''
+         : ' · ' + (p._s >= 0 ? '+' : '') + Math.round(p._s * 1000) + ' mill. sulla media')
+      + (p._t > 0 ? ' · trasporto ' + Number(p._t).toFixed(4) + ' fuori confronto' : '');
+  };
 
   if (_mktChart) _mktChart.destroy();
   var cv = document.getElementById('mkt-chart');
@@ -938,19 +1019,22 @@ async function renderMercato() {
       data: {
         labels: lab,
         datasets: [
-          { type: 'line', label: 'Mercato', data: prezzi, borderColor: '#2a78d6', backgroundColor: 'rgba(42,120,214,0.10)', fill: true, borderWidth: 2, pointRadius: 0, tension: 0.3 },
-          { type: 'line', label: 'MA7', data: ma7, borderColor: '#eb6834', borderWidth: 2, borderDash: [5, 3], pointRadius: 0, fill: false, tension: 0.3 },
-          { type: 'line', label: 'MA30', data: ma30, borderColor: '#898781', borderWidth: 2, borderDash: [2, 3], pointRadius: 0, fill: false, tension: 0.3 },
-          { type: 'scatter', label: 'Carichi', data: puntiPuliti, backgroundColor: coloriPuliti, pointRadius: 7, pointHoverRadius: 9, borderColor: '#fff', borderWidth: 2 },
-          { type: 'scatter', label: 'Carichi con trasporto', data: puntiTrasp, backgroundColor: coloriTrasp, pointRadius: 6, pointHoverRadius: 8, borderColor: '#555', borderWidth: 2 }
+          // la fascia: il min fa da base, il max ci riempie sopra (fill '-1')
+          { type: 'line', label: 'Minimo fornitori', data: linMin, borderColor: 'rgba(217,222,13,0.55)', borderWidth: 1, pointRadius: 0, fill: false, tension: 0.25, spanGaps: true },
+          { type: 'line', label: 'Massimo fornitori', data: linMax, borderColor: 'rgba(217,222,13,0.55)', backgroundColor: 'rgba(217,222,13,0.30)', borderWidth: 1, pointRadius: 0, fill: '-1', tension: 0.25, spanGaps: true },
+          { type: 'line', label: 'Media listini', data: linMed, borderColor: '#26215C', borderWidth: 2.5, pointRadius: 0, fill: false, tension: 0.25, spanGaps: true },
+          { type: 'line', label: 'Proiezione', data: linProi, borderColor: '#BA7517', borderWidth: 2, borderDash: [5, 4], pointRadius: 3, pointBackgroundColor: '#BA7517', fill: false, spanGaps: true },
+          { type: 'scatter', label: 'Comprato sotto la media', data: puntiSotto, backgroundColor: '#639922', pointRadius: puntiSotto.map(function (p) { return _raggio(p._l); }), pointHoverRadius: 10, borderColor: '#fff', borderWidth: 2 },
+          { type: 'scatter', label: 'Comprato sopra la media', data: puntiSopra, backgroundColor: '#A32D2D', pointRadius: puntiSopra.map(function (p) { return _raggio(p._l); }), pointHoverRadius: 10, borderColor: '#fff', borderWidth: 2 }
         ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) {
-          if (c.dataset.label === 'Carichi') { var p = c.raw;
-            return (p._f || '') + ': € ' + Number(p.y).toFixed(4) + '/L · ' + fmtL(p._l) + (p._t > 0 ? ' · trasporto incluso' : ''); }
-          return c.dataset.label + ': € ' + Number(c.parsed.y).toFixed(4) + '/L';
+          var d = c.dataset.label;
+          if (d === 'Comprato sotto la media' || d === 'Comprato sopra la media') return _tipCarico(c.raw);
+          if (c.parsed.y === null || c.parsed.y === undefined) return null;
+          return d + ': € ' + Number(c.parsed.y).toFixed(4) + '/L';
         } } } },
         interaction: { mode: 'index', intersect: false },
         scales: { x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 9 } },
