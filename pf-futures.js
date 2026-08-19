@@ -599,18 +599,51 @@ function _mktSerieFornitore(nome) {
   return Object.keys(m).sort().map(function (d) { return { data: d, costo: m[d] }; });
 }
 
+// ═══ v20260819b · QUANDO LA PREVISIONE DEVE TACERE ══════════════════
+// `futures_storico` si riempie solo aprendo la pagina, quindi ha buchi:
+// il 19/08 le ultime tre chiusure erano 31/07, 03/08 e 19/08. La
+// previsione fa quot[n-2] − quot[n-3] credendo di misurare due giorni,
+// e misurava invece SEDICI giorni: usciva "prossimo listino −47
+// millesimi" mentre i listini veri salivano da 1,6286 a 1,6822.
+// Due chiusure si considerano consecutive se distano al massimo cinque
+// giorni: copre venerdi→lunedi e i ponti. Oltre, il salto non e' un
+// movimento di mercato ma un pezzo di serie che manca, e non si usa.
+var MKT_MAX_GAP = 5;          // giorni fra due chiusure consecutive
+var MKT_LISTINO_VECCHIO = 7;  // oltre, il listino e' fermo e non si proietta
+
+function _mktGiorniFra(dataA, dataB) {
+  return Math.round((new Date(dataB + 'T12:00:00') - new Date(dataA + 'T12:00:00')) / 86400000);
+}
+
+function _mktOggi() {
+  var d = new Date();
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+
 // Regressione della variazione del listino sulla variazione del petrolio
 // di DUE quotazioni prima. Restituisce anche quanto e affidabile.
+// v20260819b — si calibra SOLO su catene consecutive: se fra le quotazioni
+// usate, o fra queste e il listino, c'e' un buco, la coppia si scarta.
+// Prima entravano anche i salti a cavallo dei buchi e gonfiavano il
+// coefficiente.
 function _mktCalibra(serie, quot) {
   var qd = quot.map(function (x) { return x.data; });
-  var xs = [], ys = [];
+  var xs = [], ys = [], scartate = 0;
   for (var i = 1; i < serie.length; i++) {
     var dc = serie[i].costo - serie[i - 1].costo;
     if (Math.abs(dc) < 1e-9) continue;              // listino non aggiornato
+    if (_mktGiorniFra(serie[i - 1].data, serie[i].data) > MKT_MAX_GAP) { scartate++; continue; }
     var prec = [];
     for (var j = 0; j < qd.length; j++) if (qd[j] < serie[i].data) prec.push(j);
     if (prec.length < 3) continue;
-    xs.push(quot[prec[prec.length - 2]].v - quot[prec[prec.length - 3]].v);
+    var qA = quot[prec[prec.length - 3]];
+    var qB = quot[prec[prec.length - 2]];
+    var qC = quot[prec[prec.length - 1]];
+    // la catena qA → qB → qC → listino dev'essere tutta senza buchi
+    if (_mktGiorniFra(qA.data, qB.data) > MKT_MAX_GAP) { scartate++; continue; }
+    if (_mktGiorniFra(qB.data, qC.data) > MKT_MAX_GAP) { scartate++; continue; }
+    if (_mktGiorniFra(qC.data, serie[i].data) > MKT_MAX_GAP) { scartate++; continue; }
+    xs.push(qB.v - qA.v);
     ys.push(dc);
   }
   if (xs.length < 12) return null;
@@ -625,7 +658,7 @@ function _mktCalibra(serie, quot) {
   // errore medio della previsione, e quanto sbaglierebbe dire "non cambia"
   var e1 = 0, e0 = 0;
   for (var z = 0; z < n; z++) { e1 += Math.abs(a + b * xs[z] - ys[z]); e0 += Math.abs(ys[z]); }
-  return { n: n, a: a, b: b, r: r, errore: e1 / n, erroreFermo: e0 / n };
+  return { n: n, a: a, b: b, r: r, errore: e1 / n, erroreFermo: e0 / n, scartate: scartate };
 }
 
 // Scarto di un fornitore rispetto alla matrice, misurato sugli ultimi
@@ -639,28 +672,85 @@ function _mktScarto(serieAltro, serieMatrice, giorni) {
   return { mediana: v[Math.floor(v.length / 2)], n: v.length };
 }
 
-function _mktSezionePrevisione(serie) {
-  if (!_mktListini.length || !serie.length) return '';
+// ═══ v20260819b · IL CALCOLO, UNO SOLO ══════════════════════════════
+// Lo usano sia la sezione Previsione sia la proiezione tratteggiata del
+// grafico: un metodo solo, cosi non possono dire due cose diverse.
+// Restituisce sempre un oggetto: { ok:false, motivo } quando i dati non
+// reggono, { ok:true, ... } quando reggono. Il chiamante decide come
+// mostrarlo, ma non decide SE i numeri valgono.
+function _mktPrevisioneCalcolo(serie) {
+  if (!_mktListini.length) return { ok: false, motivo: 'Nessun listino nel periodo.' };
+  if (!serie.length) return { ok: false, motivo: 'Nessuna chiusura di mercato nel periodo.' };
+
   var quot = serie.map(function (r) {
     return { data: r.data, v: Number(r.prezzo_euro_litro || 0) };
   }).filter(function (x) { return x.v > 0; });
-  if (quot.length < 4) return '';
+  if (quot.length < 4) {
+    return { ok: false, motivo: 'Servono almeno quattro chiusure di mercato: ce ne sono ' + quot.length + '.' };
+  }
+
+  // ── Le ultime tre chiusure devono essere davvero consecutive ────────
+  // Il modello legge la differenza fra la penultima e la terzultima
+  // credendo di misurare un giorno di mercato. Se in mezzo mancano
+  // giorni, quella differenza e' un pezzo di serie assente, non un
+  // movimento: si tace.
+  var n = quot.length;
+  var g1 = _mktGiorniFra(quot[n - 2].data, quot[n - 1].data);
+  var g2 = _mktGiorniFra(quot[n - 3].data, quot[n - 2].data);
+  if (g1 > MKT_MAX_GAP || g2 > MKT_MAX_GAP) {
+    var da = g2 > MKT_MAX_GAP ? quot[n - 3].data : quot[n - 2].data;
+    var a  = g2 > MKT_MAX_GAP ? quot[n - 2].data : quot[n - 1].data;
+    var gg = Math.max(g1, g2);
+    return { ok: false, buco: true, da: da, a: a, giorni: gg,
+      motivo: 'Fra le ultime chiusure di mercato manca un pezzo di serie: da ' + fmtD(da)
+        + ' si salta a ' + fmtD(a) + ', ' + gg + ' giorni. Il modello leggerebbe quel salto come se fosse '
+        + 'il movimento di un giorno solo e sbaglierebbe di parecchi centesimi.' };
+  }
 
   var matrice = _mktScartaAnomali(_mktSerieFornitore(MKT_MATRICE));
-  if (matrice.length < 15) return '';
-  var cal = _mktCalibra(matrice, quot);
-  if (!cal) return '';
+  if (matrice.length < 15) {
+    return { ok: false, motivo: 'Servono almeno quindici listini della matrice Eni Vibo: ce ne sono ' + matrice.length + '.' };
+  }
 
+  // La matrice stessa non dev'essere ferma: proiettare da un prezzo di
+  // due settimane fa vuol dire spacciare per attuale una base morta.
   var ultimo = matrice[matrice.length - 1];
-  // il prossimo listino si regge sul movimento di DUE quotazioni fa
-  var dProx = quot[quot.length - 2].v - quot[quot.length - 3].v;
-  var varProx = cal.a + cal.b * dProx;
-  // quello dopo ancora si reggera sul movimento di oggi
-  var dDopo = quot[quot.length - 1].v - quot[quot.length - 2].v;
-  var varDopo = cal.a + cal.b * dDopo;
+  var eta = _mktGiorniFra(ultimo.data, _mktOggi());
+  if (eta > MKT_LISTINO_VECCHIO) {
+    return { ok: false, motivo: 'L\'ultimo listino Eni Vibo e\' del ' + fmtD(ultimo.data)
+      + ', fermo da ' + eta + ' giorni: non c\'e\' una base attuale da cui proiettare.' };
+  }
+
+  var cal = _mktCalibra(matrice, quot);
+  if (!cal) {
+    return { ok: false, motivo: 'Non ci sono abbastanza aggiornamenti di listino consecutivi per misurare il legame col petrolio.' };
+  }
+
+  // ── Il modello deve battere il non far niente ───────────────────────
+  // Se l'errore medio della previsione e' pari o peggiore di quello che
+  // si farebbe dicendo "domani il listino non cambia", la previsione non
+  // aggiunge informazione: meglio il silenzio di un numero grande a
+  // schermo che il numero non lo merita.
+  if (cal.errore >= cal.erroreFermo) {
+    return { ok: false, cal: cal,
+      motivo: 'Il modello sbaglia in media ' + Math.round(cal.errore * 1000) + ' millesimi, '
+        + 'contro ' + Math.round(cal.erroreFermo * 1000) + ' di chi dicesse "domani non cambia niente": '
+        + 'non aggiunge niente e resta muto.' };
+  }
+
+  var dProx = quot[n - 2].v - quot[n - 3].v;
+  var dDopo = quot[n - 1].v - quot[n - 2].v;
+  return { ok: true, cal: cal, matrice: matrice, ultimo: ultimo, quot: quot,
+           varProx: cal.a + cal.b * dProx, varDopo: cal.a + cal.b * dDopo };
+}
+
+function _mktSezionePrevisione(serie) {
+  if (!_mktListini.length) return '';
+  var P = _mktPrevisioneCalcolo(serie);
 
   var mill = function (x) { return (x >= 0 ? '+' : '') + Math.round(x * 1000) + ' millesimi'; };
   var col = function (x) { return x > 0.0005 ? '#A32D2D' : (x < -0.0005 ? '#27500A' : 'var(--text-muted)'); };
+  var oggi = _mktOggi();
 
   var h = '<div class="card" id="mkt-card-prev" style="margin-top:14px;padding:14px">';
   h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Previsione del prossimo listino</div>';
@@ -668,27 +758,57 @@ function _mktSezionePrevisione(serie) {
      + 'Matrice <strong>Eni Vibo</strong>. Il movimento del petrolio si riflette sul listino dopo <strong>due quotazioni</strong>: '
      + 'quello di oggi si vedra fra due giorni, non domani.</div>';
 
-  h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
-  h += '<div style="flex:1;min-width:210px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
-     + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Prossimo listino</div>'
-     + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + col(varProx) + '">' + mill(varProx) + '</div>'
-     + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">da ' + ultimo.costo.toFixed(6) + ' del ' + fmtD(ultimo.data)
-     + ' a <strong style="color:var(--text)">' + (ultimo.costo + varProx).toFixed(6) + '</strong></div></div>';
-  h += '<div style="flex:1;min-width:210px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
-     + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Il listino dopo</div>'
-     + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + col(varDopo) + '">' + mill(varDopo) + '</div>'
-     + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">dal movimento del petrolio di oggi</div></div>';
-  h += '</div>';
+  if (!P.ok) {
+    // v20260819b — La previsione tace, ma la pagina non sparisce: la
+    // tabella dei listini resta, perche' quelli sono un dato di fatto e
+    // non una stima.
+    h += '<div style="background:rgba(186,117,23,0.10);border-left:3px solid #BA7517;border-radius:6px;padding:11px 13px;margin-bottom:12px">'
+       + '<div style="font-size:12.5px;font-weight:600;color:#BA7517;margin-bottom:3px">Previsione sospesa</div>'
+       + '<div style="font-size:11.5px;color:var(--text);line-height:1.6">' + esc(P.motivo) + '</div>'
+       + (P.buco ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">'
+           + 'Lo storico si riempie solo aprendo questa pagina: i buchi nascono cosi. '
+           + 'Premi <strong>↧ Carica storico</strong> per ricostruire i giorni mancanti.</div>' : '')
+       + '</div>';
+  } else {
+    h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+    h += '<div style="flex:1;min-width:210px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
+       + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Prossimo listino</div>'
+       + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + col(P.varProx) + '">' + mill(P.varProx) + '</div>'
+       + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">da ' + P.ultimo.costo.toFixed(6) + ' del ' + fmtD(P.ultimo.data)
+       + ' a <strong style="color:var(--text)">' + (P.ultimo.costo + P.varProx).toFixed(6) + '</strong></div></div>';
+    h += '<div style="flex:1;min-width:210px;background:var(--bg-kpi);border-radius:10px;padding:12px 14px">'
+       + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px">Il listino dopo</div>'
+       + '<div style="font-size:22px;font-weight:700;font-family:var(--font-mono);margin-top:3px;color:' + col(P.varDopo) + '">' + mill(P.varDopo) + '</div>'
+       + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">dal movimento del petrolio di oggi</div></div>';
+    h += '</div>';
+  }
 
-  // gli altri fornitori: stessa variazione, base loro
-  var altri = [];
+  // ── Tabella listini: c'e' SEMPRE, previsione o no ────────────────────
+  // v20260819b — Ogni fornitore porta la data del suo ultimo listino. Se
+  // e' fermo da piu' di una settimana, l'Atteso va a trattino: Q8 il
+  // 19/08 mostrava 1,520000 del 06/08 e ci sommava sopra la variazione,
+  // sputando un 1,634568 che nessuno aveva mai quotato.
+  var matriceT = P.ok ? P.matrice : _mktScartaAnomali(_mktSerieFornitore(MKT_MATRICE));
+  var ultimoT = matriceT.length ? matriceT[matriceT.length - 1] : null;
+
+  var righe = [];
+  if (ultimoT) {
+    righe.push({ nome: 'Eni Vibo', matrice: true, ultimo: ultimoT, scarto: null,
+                 eta: _mktGiorniFra(ultimoT.data, oggi) });
+  }
   ['ludoil', 'q8'].forEach(function (nome) {
     var sr = _mktSerieFornitore(nome);
     if (!sr.length) return;
-    var sc = _mktScarto(sr, matrice, 10);
-    if (!sc) return;
-    altri.push({ nome: nome, ultimo: sr[sr.length - 1], scarto: sc });
+    var u = sr[sr.length - 1];
+    righe.push({ nome: nome === 'ludoil' ? 'Ludoil Vibo' : 'Q8 Vibo', matrice: false, ultimo: u,
+                 scarto: ultimoT ? _mktScarto(sr, matriceT, 10) : null,
+                 eta: _mktGiorniFra(u.data, oggi) });
   });
+
+  if (!righe.length) {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessun listino da mostrare.</div></div>';
+    return h;
+  }
 
   h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
   h += '<tr style="color:var(--text-muted);text-align:right">'
@@ -696,27 +816,46 @@ function _mktSezionePrevisione(serie) {
      + '<th style="padding:6px 8px;font-weight:500">Scarto su Eni</th>'
      + '<th style="padding:6px 8px;font-weight:500">Ultimo listino</th>'
      + '<th style="padding:6px 8px;font-weight:500">Atteso</th></tr>';
-  h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
-     + '<td style="text-align:left;padding:7px 8px"><strong>Eni Vibo</strong> <span style="font-size:10px;color:var(--text-muted)">matrice</span></td>'
-     + '<td style="padding:7px 8px;color:var(--text-muted)">&mdash;</td>'
-     + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + ultimo.costo.toFixed(6) + '</td>'
-     + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700">' + (ultimo.costo + varProx).toFixed(6) + '</td></tr>';
-  altri.forEach(function (x) {
-    var nome = x.nome === 'ludoil' ? 'Ludoil Vibo' : 'Q8 Vibo';
-    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
-       + '<td style="text-align:left;padding:7px 8px">' + nome + '</td>'
-       + '<td style="padding:7px 8px;font-family:var(--font-mono);color:var(--text-muted)" title="mediana degli ultimi ' + x.scarto.n + ' giorni in comune">'
-         + (x.scarto.mediana >= 0 ? '+' : '') + Math.round(x.scarto.mediana * 1000) + ' mill.</td>'
-       + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + x.ultimo.costo.toFixed(6) + '</td>'
-       + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700">' + (ultimo.costo + x.scarto.mediana + varProx).toFixed(6) + '</td></tr>';
+
+  var qualcunoFermo = false;
+  righe.forEach(function (x) {
+    var vecchio = x.eta > MKT_LISTINO_VECCHIO;
+    if (vecchio) qualcunoFermo = true;
+    var colData = vecchio ? 'var(--text-muted)' : 'var(--text-muted)';
+    var atteso = '<span style="color:var(--text-muted)">&mdash;</span>';
+    if (P.ok && !vecchio) {
+      if (x.matrice) atteso = (x.ultimo.costo + P.varProx).toFixed(6);
+      else if (x.scarto) atteso = (P.ultimo.costo + x.scarto.mediana + P.varProx).toFixed(6);
+    }
+    h += '<tr style="border-top:0.5px solid var(--border);text-align:right' + (vecchio ? ';opacity:0.55' : '') + '">'
+       + '<td style="text-align:left;padding:7px 8px">' + esc(x.nome)
+         + (x.matrice ? ' <span style="font-size:10px;color:var(--text-muted)">matrice</span>' : '')
+         + (vecchio ? ' <span style="font-size:10px;color:#BA7517">fermo da ' + x.eta + ' giorni</span>' : '')
+         + '</td>'
+       + '<td style="padding:7px 8px;font-family:var(--font-mono);color:var(--text-muted)"'
+         + (x.scarto ? ' title="mediana degli ultimi ' + x.scarto.n + ' giorni in comune"' : '') + '>'
+         + (x.matrice ? '&mdash;' : (x.scarto ? (x.scarto.mediana >= 0 ? '+' : '') + Math.round(x.scarto.mediana * 1000) + ' mill.' : '&mdash;'))
+       + '</td>'
+       + '<td style="padding:7px 8px;font-family:var(--font-mono)">' + x.ultimo.costo.toFixed(6)
+         + '<div style="font-size:10px;color:' + colData + ';font-family:var(--font-sans)">' + fmtD(x.ultimo.data) + '</div></td>'
+       + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:700">' + atteso + '</td></tr>';
   });
   h += '</table>';
 
-  h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">'
-     + 'Coefficiente <strong>' + cal.b.toFixed(2) + '</strong> misurato su <strong>' + cal.n + '</strong> aggiornamenti di listino di questo periodo '
-     + '(affidabilita ' + Math.round(Math.abs(cal.r) * 100) + '%). Errore medio <strong>' + Math.round(cal.errore * 1000) + ' millesimi</strong>, '
-     + 'contro ' + Math.round(cal.erroreFermo * 1000) + ' se si dicesse "non cambia niente". '
-     + 'E un indicatore di tendenza per decidere se rimandare un carico, non un prezzo.</div>';
+  if (qualcunoFermo) {
+    h += '<div style="font-size:11px;color:#BA7517;margin-top:8px;line-height:1.6">'
+       + 'I fornitori fermi da piu\' di ' + MKT_LISTINO_VECCHIO + ' giorni restano in elenco con la loro data, '
+       + 'ma senza Atteso: proiettare una variazione su un prezzo vecchio produce un numero che nessuno ha mai quotato.</div>';
+  }
+
+  if (P.ok) {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">'
+       + 'Coefficiente <strong>' + P.cal.b.toFixed(2) + '</strong> misurato su <strong>' + P.cal.n + '</strong> aggiornamenti di listino consecutivi '
+       + '(affidabilita ' + Math.round(Math.abs(P.cal.r) * 100) + '%). Errore medio <strong>' + Math.round(P.cal.errore * 1000) + ' millesimi</strong>, '
+       + 'contro ' + Math.round(P.cal.erroreFermo * 1000) + ' se si dicesse "non cambia niente". '
+       + (P.cal.scartate ? P.cal.scartate + ' aggiornamenti scartati perche a cavallo di un buco nello storico. ' : '')
+       + 'E un indicatore di tendenza per decidere se rimandare un carico, non un prezzo.</div>';
+  }
   h += '</div>';
   return h;
 }
@@ -892,26 +1031,14 @@ async function renderMercato() {
   });
   var scartoPesato = totLitri ? totEuro / totLitri : null;
 
-  // ── Proiezione: si riusa la calibrazione della Previsione ────────────
-  // Il movimento del petrolio arriva sul listino dopo DUE quotazioni. Se
-  // le quotazioni mancano o la regressione non regge, la proiezione non
-  // si disegna: meglio niente che una riga inventata.
+  // ── Proiezione: si riusa lo STESSO calcolo della sezione Previsione ──
+  // v20260819b — Un metodo solo: se la previsione tace perche' lo storico
+  // ha un buco o perche' il modello non batte il "non cambia niente", la
+  // riga tratteggiata non si disegna. Prima erano due strade diverse e
+  // potevano contraddirsi.
   var proiez = null;
-  if (serie.length) {
-    var quotP = serie.map(function (r) { return { data: r.data, v: Number(r.prezzo_euro_litro || 0) }; })
-                     .filter(function (x) { return x.v > 0; });
-    if (quotP.length >= 4) {
-      var matriceP = _mktScartaAnomali(_mktSerieFornitore(MKT_MATRICE));
-      if (matriceP.length >= 15) {
-        var calP = _mktCalibra(matriceP, quotP);
-        if (calP) {
-          var dProxP = quotP[quotP.length - 2].v - quotP[quotP.length - 3].v;
-          var varProxP = calP.a + calP.b * dProxP;
-          proiez = { varProx: varProxP, r: calP.r, valore: ultimo + varProxP };
-        }
-      }
-    }
-  }
+  var _P = _mktPrevisioneCalcolo(serie);
+  if (_P.ok) proiez = { varProx: _P.varProx, r: _P.cal.r, valore: ultimo + _P.varProx };
   if (proiez) {
     lab.push('atteso');
     linMed.push(null); linMin.push(null); linMax.push(null);
