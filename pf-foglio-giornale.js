@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260819b — 🏦 accanto al numero delle fatture anticipate, con la banca
+//   sotto; contatore "da assegnare" popolato subito alla scelta del cliente
 // v20260819a — INCASSO CLIENTE CON FLAG E STORNO ANTICIPO
 //   · elenco fatture del cliente con spunta per assegnare l'intera fattura,
 //     contatore "da assegnare" che scala a ogni riga, e avviso di acconto
@@ -770,6 +772,10 @@ async function _fgSelezionaContraente(id, nome, tipo) {
     // ancora aperto, e presso quale banca
     _fgModale.anticipiPerFattura = await _fgCaricaAnticipi(_fgModale.fattureTrovate);
     elFatt.innerHTML = _fgRenderListaFatture();
+    // v20260819b — il contatore "da assegnare" va riempito subito: prima
+    // restava vuoto finche' non si toccava una riga, e con l'importo gia'
+    // scritto sembrava che non funzionasse.
+    _fgAggiornaStatusModale();
   } else if (_fgModale.modo === 'D') {
     // Modo D: ordini SENZA fattura ricevuta (per pagamento anticipato)
     // TUTTI gli ordini al fornitore (deposito e non), non solo le entrate deposito
@@ -888,7 +894,8 @@ function _fgRenderListaFatture() {
 
   var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap">';
   html += '<div style="font-size:11px;color:var(--text-muted)">Fatture aperte (' + f.length + ')'
-        + (nAnt ? ' · <span style="color:#26215C;font-weight:600">' + nAnt + (nAnt === 1 ? ' anticipata' : ' anticipate') + '</span>' : '') + '</div>';
+        + (nAnt ? ' · <span style="color:#26215C;font-weight:600">&#127974; ' + nAnt
+                + (nAnt === 1 ? ' anticipata in banca' : ' anticipate in banca') + '</span>' : '') + '</div>';
   html += '<div id="fg-da-assegnare" style="font-size:11px"></div>';
   html += '</div>';
 
@@ -911,10 +918,18 @@ function _fgRenderListaFatture() {
     html += '<tr style="border-bottom:0.5px solid var(--border)">';
     html += '<td style="padding:5px 6px;text-align:center"><input type="checkbox" ' + (imp !== '' && Number(imp) > 0 ? 'checked' : '')
           + ' onchange="_fgFlagFattura(\'' + fa.fattura_id + '\',this.checked)" title="Assegna l\'intera fattura, o quel che resta da assegnare" style="cursor:pointer"/></td>';
-    html += '<td style="padding:5px 6px;font-family:var(--font-mono);font-weight:500">' + esc(String(fa.numero || '')) + '/' + esc(String(fa.anno || ''));
+    html += '<td style="padding:5px 6px;font-family:var(--font-mono);font-weight:500">';
     if (a) {
-      html += '<div style="font-size:9px;color:#26215C;font-weight:600;margin-top:1px">anticipata'
-            + (a._banca ? ' · ' + esc(a._banca) : '') + '</div>';
+      // v20260819b — il simbolo sta ACCANTO al numero: si deve capire a
+      // colpo d'occhio che si sta toccando una fattura gia' scontata in
+      // banca, senza doversi leggere una riga di testo sotto.
+      html += '<span title="Anticipata' + (a._banca ? ' su ' + esc(a._banca) : '') + ' · '
+            + _fgFmtImporto(a.importo_anticipato_calcolato) + ' € in banca" '
+            + 'style="cursor:help;margin-right:4px">&#127974;</span>';
+    }
+    html += esc(String(fa.numero || '')) + '/' + esc(String(fa.anno || ''));
+    if (a && a._banca) {
+      html += '<div style="font-size:9px;color:#26215C;font-weight:600;margin-top:1px">' + esc(a._banca) + '</div>';
     }
     html += '</td>';
     html += '<td style="padding:5px 6px">' + _fgFmtData(fa.data) + '</td>';
