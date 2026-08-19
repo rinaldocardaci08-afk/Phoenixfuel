@@ -1,4 +1,9 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260819d — controllo: la lista presentazioni non si rilegge piu una volta
+//               per cliente; se il foglio giornale non e leggibile lo dice
+//               invece di far credere che l entrata manchi; corretto il
+//               pulsante Stampa PDF sulla scheda modulo (nome funzione e
+//               parametro sbagliati, era rotto da sempre)
 // v20260819c — nel modale Presenta un pannello a lato mostra l esposizione del
 //               cliente dell ultima fattura spuntata, con una barra per ogni
 //               altro cliente selezionato: chi sfora resta visibile. Non
@@ -1387,7 +1392,7 @@ function _antRenderModuloCard(p, aff) {
     html += '<button onclick="_antApriModaleModulo(\'' + p.id + '\')" title="Modifica modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">✏️</button>';
   }
   // Patch v20260503e: bottone stampa PDF banca
-  html += '<button onclick="_antStampaPdfBanca(\'' + p.id + '\')" title="Stampa modulo PDF da consegnare alla banca" style="background:#185FA5;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">📄 Stampa PDF</button>';
+  html += '<button onclick="_antStampaPDFBanca(\'' + p.affidamento_id + '\')" title="Stampa modulo PDF da consegnare alla banca" style="background:#185FA5;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">📄 Stampa PDF</button>';
   html += '<button onclick="_antApriDettaglioModulo(\'' + p.id + '\')" title="Dettaglio completo modulo" style="background:none;border:0.5px solid var(--border);color:var(--text);padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px">🔍</button>';
   html += '</div>';
   html += '</div>';
@@ -2734,6 +2739,7 @@ async function _antPresentaConfermaInterna() {
 
   chiudiModal();
   _antPresentaState = null;
+  _antSvuotaCachePresIds();
   toast('✓ Modulo creato: ' + righe.length + ' fatture, anticipo ' + fmtE(totAnticipo));
   // Refresh tab banca
   _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
@@ -3496,7 +3502,8 @@ async function _antSalvaIncasso(fatturaAntId) {
 
   chiudiModal();
   toast(insoluta ? '⚠ Fattura segnata come insoluta' : '✓ Fattura estinta');
-  _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
+  _antValDati = null;
+  _antSvuotaCachePresIds();   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
 }
 
@@ -3691,12 +3698,22 @@ async function _antMassimaleCliente(fido, clienteId) {
 
 // Somma di quanto e' anticipato e non ancora rientrato per un cliente su
 // un affidamento. Gli id delle presentazioni si mandano a blocchi.
+// v20260819d — le presentazioni dell'affidamento si leggevano UNA VOLTA PER
+// CLIENTE: nel pannello Presenta, con dieci clienti selezionati, erano dieci
+// query identiche. Ora la lista si tiene da parte finche' il modale e' aperto.
+var _antPresIdsCache = {};
+function _antSvuotaCachePresIds() { _antPresIdsCache = {}; }
+
 async function _antEspostoCliente(affidamentoId, clienteId, clienteNome) {
   if (!affidamentoId || (!clienteId && !clienteNome)) return 0;
   try {
-    var rp = await sb.from('anticipi_sbf_presentazioni').select('id')
-      .eq('affidamento_id', affidamentoId).not('stato', 'in', '(estinta,rifiutata)');
-    var ids = (rp.data || []).map(function (p) { return p.id; });
+    var ids = _antPresIdsCache[affidamentoId];
+    if (!ids) {
+      var rp = await sb.from('anticipi_sbf_presentazioni').select('id')
+        .eq('affidamento_id', affidamentoId).not('stato', 'in', '(estinta,rifiutata)');
+      ids = (rp.data || []).map(function (p) { return p.id; });
+      _antPresIdsCache[affidamentoId] = ids;
+    }
     if (!ids.length) return 0;
     var tot = 0;
     for (var i = 0; i < ids.length; i += 50) {
@@ -3821,21 +3838,44 @@ async function _antRenderModaleFattura(fatturaAntId) {
 
   // data in cui il cliente ha pagato: se l'entrata e' gia' a foglio giornale
   // la si trova dalla riconciliazione, e si propone come promemoria
-  var dataPagamento = null;
+  // v20260819d — Se questa lettura fallisce si crede che l'entrata non ci
+  // sia, e si finisce col proporre di registrarla una seconda volta. Il
+  // join annidato dipende da come e' dichiarata la chiave esterna, quindi
+  // quando non risolve si rifa' in due passi invece di arrendersi.
+  var dataPagamento = null, letturaEntrataOk = false;
   if (f.fattura_id) {
     try {
       var rr = await sb.from('foglio_giornale_riconciliazioni')
         .select('movimento_id,foglio_giornale_movimenti(data,tipo)')
-        .eq('fattura_emessa_id', f.fattura_id).limit(5);
+        .eq('fattura_emessa_id', f.fattura_id).limit(20);
+      if (rr.error) throw rr.error;
+      letturaEntrataOk = true;
       (rr.data || []).forEach(function (x) {
         var mv = x.foglio_giornale_movimenti;
         if (mv && mv.tipo === 'entrata' && (!dataPagamento || mv.data > dataPagamento)) dataPagamento = mv.data;
       });
-    } catch (e) { /* nessun movimento trovato: si chiedera' la data */ }
+    } catch (e) {
+      try {
+        var r1 = await sb.from('foglio_giornale_riconciliazioni').select('movimento_id')
+          .eq('fattura_emessa_id', f.fattura_id).limit(20);
+        if (r1.error) throw r1.error;
+        var movIds = (r1.data || []).map(function (x) { return x.movimento_id; }).filter(Boolean);
+        if (movIds.length) {
+          var r2 = await sb.from('foglio_giornale_movimenti').select('data,tipo').in('id', movIds.slice(0, 50));
+          if (r2.error) throw r2.error;
+          (r2.data || []).forEach(function (mv) {
+            if (mv.tipo === 'entrata' && (!dataPagamento || mv.data > dataPagamento)) dataPagamento = mv.data;
+          });
+        }
+        letturaEntrataOk = true;
+      } catch (e2) {
+        console.warn('[ant] entrata cliente non verificabile:', (e2 && e2.message) || e2);
+      }
+    }
   }
 
   var oggiISO = new Date().toISOString().split('T')[0];
-  _antModFatt = { id: fatturaAntId, f: f, fido: fido, residuo: residuo,
+  _antModFatt = { id: fatturaAntId, f: f, fido: fido, residuo: residuo, letturaEntrataOk: letturaEntrataOk,
                   massimale: mass.massimale, origineMass: mass.origine,
                   esposto: esposto, dataPagamento: dataPagamento,
                   bancaDefault: fido ? fido.istituto_id : null };
@@ -3926,9 +3966,11 @@ function _antModFattStato() {
            + '</strong>: l\'entrata e\' gia\' a foglio giornale. Qui va la data in cui hai estinto l\'anticipo in banca.</div>';
       } else {
         h += '<div style="background:var(--bg-card);border-radius:6px;padding:8px 10px;margin-top:2px">'
+           + (S.letturaEntrataOk ? '' :
+               '<div style="font-size:11px;color:#854F0B;margin-bottom:6px;line-height:1.5">&#9888; Non sono riuscito a controllare il foglio giornale: verifica a mano prima di spuntare, o registreresti l\'entrata due volte.</div>')
            + '<label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;font-size:11.5px;line-height:1.5">'
            + '<input type="checkbox" id="mod-fat-creaentrata" onchange="_antModFattStato()" style="margin-top:2px">'
-           + '<span>Non trovo l\'entrata del cliente a foglio giornale. Registrala anche tu, per <strong>'
+           + '<span>' + (S.letturaEntrataOk ? 'Non trovo l\'entrata del cliente a foglio giornale.' : 'Entrata non verificata.') + ' Registrala anche tu, per <strong>'
            + fmtE(Number(S.f.totale_fattura || 0)) + '</strong> alla data qui sotto.</span></label>'
            + '<input id="mod-fat-dataincasso" type="date" value="' + dataProp + '" style="width:100%;margin-top:7px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px"></div>';
       }
@@ -4028,6 +4070,7 @@ async function _antSalvaFattura(fatturaAntId) {
     chiudiModal();
     toast('✓ Anticipo estinto e rientro registrato');
     _antValDati = null;
+    _antSvuotaCachePresIds();
     if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
     if (typeof caricaFoglioGiornale === 'function') { try { caricaFoglioGiornale(); } catch (e) {} }
     return;
