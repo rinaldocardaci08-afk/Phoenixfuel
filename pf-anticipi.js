@@ -1,4 +1,8 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260819c — nel modale Presenta un pannello a lato mostra l esposizione del
+//               cliente dell ultima fattura spuntata, con una barra per ogni
+//               altro cliente selezionato: chi sfora resta visibile. Non
+//               blocca la presentazione, avvisa e basta
 // v20260819b — anche "Registra incasso cliente" ha la lancetta e la scelta del
 //               conto: il rientro lo scriveva gia, ma la banca la deduceva in
 //               silenzio e l esposizione del cliente non si vedeva
@@ -2209,7 +2213,9 @@ function _antPresentaRender() {
   html += '</div>';
 
   html += '</div>';
+  html += _antPresPannelloHTML();   // v20260819c
   apriModal(html);
+  _antPresPannelloDisegna();
 
   // Restore valori form (se rerender)
   // (data/protocollo/scadenza/note non si conservano: l'utente li (re)inserisce solo a fine selezione)
@@ -2318,9 +2324,15 @@ function _antPresentaSetFilter(campo, val) {
 }
 
 function _antPresentaToggleFatt(fid, checked) {
-  if (!_antPresentaState) return;
-  if (checked) _antPresentaState.selezionate.add(fid);
-  else _antPresentaState.selezionate.delete(fid);
+  var st = _antPresentaState;
+  if (!st) return;
+  if (checked) st.selezionate.add(fid);
+  else st.selezionate.delete(fid);
+  // v20260819c — la lancetta grande segue l'ultima fattura spuntata
+  if (checked) {
+    var fSel = (st.fatture || []).filter(function (x) { return x.id === fid; })[0];
+    if (fSel) st.clienteFocus = _antPresChiave(fSel);
+  }
   _antPresentaSalvaForm();
   _antPresentaRender();
   _antPresentaRipristinaForm();
@@ -2351,6 +2363,142 @@ function _antPresentaToggleAll(checked) {
   _antPresentaSalvaForm();
   _antPresentaRender();
   _antPresentaRipristinaForm();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v20260819c · PANNELLO ESPOSIZIONE CLIENTE NEL MODALE PRESENTA
+// ═══════════════════════════════════════════════════════════════════════════
+// Il modale lavora a selezione multipla e le fatture di clienti diversi si
+// mescolano, quindi una lancetta sola non basterebbe: quella grande segue
+// l'ultima fattura spuntata, e sotto resta una barra per ogni altro cliente
+// gia' in elenco. Cosi un cliente che sfora non sparisce dalla vista appena
+// se ne guarda un altro.
+// Non blocca niente: si presenta lo stesso, ma il dato lo si e' visto.
+// Deselezionando tutto il pannello sparisce.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Danea non popola cliente_id su fatture_emesse: c'e' solo la denominazione.
+// La chiave usa l'id quando c'e' e ripiega sul nome, come fa gia' il filtro
+// per cliente di questo stesso modale.
+function _antPresChiave(f) {
+  return f.cliente_id || ('nome:' + String(f.cessionario_denominazione || '?'));
+}
+function _antPresNome(f) {
+  return f.cessionario_denominazione || f.cliente_nome || '—';
+}
+
+// Esposizione gia' in essere, letta una volta per cliente e tenuta in cache:
+// senza cache ogni spunta rifarebbe le query.
+async function _antPresCaricaEsposto(chiave, f) {
+  var st = _antPresentaState;
+  if (!st) return;
+  st.espostoCache = st.espostoCache || {};
+  st.massCache = st.massCache || {};
+  if (st.espostoCache[chiave] !== undefined) return;
+  st.espostoCache[chiave] = null;   // in corso
+  try {
+    st.espostoCache[chiave] = await _antEspostoCliente(st.affidamentoId, f.cliente_id, _antPresNome(f));
+    var m = await _antMassimaleCliente(st.fido, f.cliente_id);
+    st.massCache[chiave] = m;
+  } catch (e) {
+    st.espostoCache[chiave] = 0;
+  }
+  _antPresPannelloDisegna();
+}
+
+// Quanto si sta aggiungendo a un cliente con le fatture spuntate adesso.
+function _antPresInAggiunta(chiave) {
+  var st = _antPresentaState;
+  if (!st) return 0;
+  var tot = 0;
+  (st.fatture || []).forEach(function (f) {
+    if (!st.selezionate.has(f.id)) return;
+    if (_antPresChiave(f) !== chiave) return;
+    tot += Number(f._anticipo_calc || 0);
+  });
+  return Math.round(tot * 100) / 100;
+}
+
+// Il contenitore vive DENTRO il modale, cosi muore insieme a lui e non
+// resta appeso a schermo quando si chiude.
+function _antPresPannelloHTML() {
+  return '<div id="ant-pres-pannello" style="position:fixed;right:18px;top:50%;transform:translateY(-50%);width:226px;z-index:100000"></div>';
+}
+
+function _antPresPannelloDisegna() {
+  var box = document.getElementById('ant-pres-pannello');
+  if (!box) return;
+  var st = _antPresentaState;
+  if (!st || !st.selezionate.size) { box.innerHTML = ''; return; }
+
+  st.espostoCache = st.espostoCache || {};
+  st.massCache = st.massCache || {};
+
+  // clienti coinvolti, in ordine di comparsa
+  var chiavi = [], vista = {}, perChiave = {};
+  (st.fatture || []).forEach(function (f) {
+    if (!st.selezionate.has(f.id)) return;
+    var k = _antPresChiave(f);
+    if (!vista[k]) { vista[k] = 1; chiavi.push(k); perChiave[k] = f; }
+  });
+  if (!chiavi.length) { box.innerHTML = ''; return; }
+
+  var focus = (st.clienteFocus && perChiave[st.clienteFocus]) ? st.clienteFocus : chiavi[chiavi.length - 1];
+  st.clienteFocus = focus;
+
+  // carica quel che manca, poi la funzione si richiama da sola
+  chiavi.forEach(function (k) {
+    if (st.espostoCache[k] === undefined) _antPresCaricaEsposto(k, perChiave[k]);
+  });
+
+  var fF = perChiave[focus];
+  var espF = st.espostoCache[focus];
+  var massF = (st.massCache[focus] && st.massCache[focus].massimale != null)
+    ? st.massCache[focus].massimale : st.massEuro;
+  var aggF = _antPresInAggiunta(focus);
+
+  var h = '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:12px;padding:13px 11px;box-shadow:0 6px 24px rgba(0,0,0,0.18)">';
+
+  if (espF === null || espF === undefined) {
+    h += '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:22px 6px">Leggo l\'esposizione di<br><strong style="color:var(--text)">' + esc(_antPresNome(fF)) + '</strong>…</div>';
+  } else {
+    h += _antLancetta(espF, espF + aggF, massF, _antPresNome(fF),
+                      'da ' + fmtE(espF) + ' · +' + fmtE(aggF));
+  }
+
+  // gli altri clienti selezionati: barra corta, cliccabile
+  var altri = chiavi.filter(function (k) { return k !== focus; });
+  if (altri.length) {
+    h += '<div style="border-top:0.5px solid var(--border);margin-top:10px;padding-top:9px">';
+    h += '<div style="font-size:10.5px;color:var(--text-muted);margin-bottom:6px">Altri clienti selezionati</div>';
+    altri.forEach(function (k) {
+      var fk = perChiave[k];
+      var esp = st.espostoCache[k];
+      var mk = (st.massCache[k] && st.massCache[k].massimale != null) ? st.massCache[k].massimale : st.massEuro;
+      var dopo = (esp || 0) + _antPresInAggiunta(k);
+      var pct = (mk > 0) ? Math.min(140, Math.round((dopo / mk) * 100)) : null;
+      var col = (pct === null) ? '#888780' : (pct > 100 ? '#A32D2D' : (pct > 80 ? '#BA7517' : '#639922'));
+      h += '<div onclick="_antPresFocusCliente(\'' + esc(String(k)).replace(/'/g, "\\'") + '\')" style="display:flex;align-items:center;gap:7px;cursor:pointer;margin-bottom:6px" title="Mostra la lancetta di questo cliente">';
+      h += '<div style="flex:1;min-width:0">';
+      h += '<div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(_antPresNome(fk)) + '</div>';
+      h += '<div style="height:5px;background:var(--bg);border-radius:3px;margin-top:3px;overflow:hidden">'
+         + '<div style="width:' + (pct === null ? 0 : Math.min(100, pct)) + '%;height:5px;background:' + col + '"></div></div>';
+      h += '</div>';
+      h += '<div style="font-size:10.5px;font-family:var(--font-mono);color:' + col + '">'
+         + (esp === null || esp === undefined ? '…' : (pct === null ? fmtE(dopo) : pct + '%')) + '</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+
+  h += '</div>';
+  box.innerHTML = h;
+}
+
+function _antPresFocusCliente(chiave) {
+  if (!_antPresentaState) return;
+  _antPresentaState.clienteFocus = chiave;
+  _antPresPannelloDisegna();
 }
 
 function _antPresentaSelezionaTutte() { _antPresentaToggleAll(true); }
@@ -3543,8 +3691,8 @@ async function _antMassimaleCliente(fido, clienteId) {
 
 // Somma di quanto e' anticipato e non ancora rientrato per un cliente su
 // un affidamento. Gli id delle presentazioni si mandano a blocchi.
-async function _antEspostoCliente(affidamentoId, clienteId) {
-  if (!affidamentoId || !clienteId) return 0;
+async function _antEspostoCliente(affidamentoId, clienteId, clienteNome) {
+  if (!affidamentoId || (!clienteId && !clienteNome)) return 0;
   try {
     var rp = await sb.from('anticipi_sbf_presentazioni').select('id')
       .eq('affidamento_id', affidamentoId).not('stato', 'in', '(estinta,rifiutata)');
@@ -3552,11 +3700,14 @@ async function _antEspostoCliente(affidamentoId, clienteId) {
     if (!ids.length) return 0;
     var tot = 0;
     for (var i = 0; i < ids.length; i += 50) {
-      var rf = await sb.from('anticipi_sbf_fatture')
+      var q = sb.from('anticipi_sbf_fatture')
         .select('importo_anticipato_calcolato,importo_estinto,stato')
         .in('presentazione_id', ids.slice(i, i + 50))
-        .eq('cliente_id', clienteId)
         .in('stato', ['presentata', 'anticipata', 'anticipata_parziale']);
+      // Danea non popola cliente_id su fatture_emesse: quando manca si
+      // ripiega sul nome, come fa gia il filtro cliente di questo modale.
+      q = clienteId ? q.eq('cliente_id', clienteId) : q.eq('cliente_nome', clienteNome);
+      var rf = await q;
       (rf.data || []).forEach(function (x) {
         tot += Math.max(0, Number(x.importo_anticipato_calcolato || 0) - Number(x.importo_estinto || 0));
       });
