@@ -1,5 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260819a — INCASSO CLIENTE CON FLAG E STORNO ANTICIPO
+//   · elenco fatture del cliente con spunta per assegnare l'intera fattura,
+//     contatore "da assegnare" che scala a ogni riga, e avviso di acconto
+//     quando il residuo non basta a coprire la fattura
+//   · le fatture anticipate portano il nome della banca accanto al numero
+//   · alla conferma, per ogni fattura anticipata incassata, chiede se il
+//     pagamento e' stato comunicato alla banca: se si', chiede la data e
+//     storna l'anticipo chiamando antEstinguiAnticipo (pf-anticipi.js);
+//     se no, l'anticipo non si tocca
 // Patch v20260502b — STEP 2 SKELETON
 // ═══════════════════════════════════════════════════════════════════════════
 // Modulo nuovo per la sub-tab "📓 Foglio giornale" dentro la sezione Finanze.
@@ -506,7 +515,8 @@ var _fgModale = {
   contraenteSelezionato: null,  // {id, nome, tipo: 'cliente'|'fornitore'} o null
   fattureTrovate: [],
   ordiniTrovati: [],
-  imputazioni: {}       // { fatturaId/ordineId: importo_imputato }
+  imputazioni: {},      // { fatturaId/ordineId: importo_imputato }
+  anticipiPerFattura: {} // v20260819a { fattura_id: riga anticipi_sbf_fatture + _banca }
 };
 
 var _fgListaBanche = null; // cache banche_istituti
@@ -542,7 +552,8 @@ async function _fgApriModale(iso, tipo) {
     contraenteSelezionato: null,
     fattureTrovate: [],
     ordiniTrovati: [],
-    imputazioni: {}
+    imputazioni: {},
+    anticipiPerFattura: {}
   };
 
   // Carica banche se non in cache
@@ -650,6 +661,7 @@ function _fgCambiaModo(letterId) {
   _fgModale.ordiniTrovati = [];
   _fgModale.fattureRicevuteTrovate = [];
   _fgModale.imputazioni = {};
+  _fgModale.anticipiPerFattura = {};
   document.getElementById('fg-modo-content').innerHTML = _fgRenderModoContent();
 }
 
@@ -754,6 +766,9 @@ async function _fgSelezionaContraente(id, nome, tipo) {
   if (tipo === 'cliente') {
     var resV = await sb.from('estratto_conto_cliente').select('*').eq('cliente_id', id).gt('saldo_residuo', 0.01).order('data', { ascending: false }).limit(20);
     _fgModale.fattureTrovate = resV.data || [];
+    // v20260819a — quali di queste fatture sono in un modulo di anticipo
+    // ancora aperto, e presso quale banca
+    _fgModale.anticipiPerFattura = await _fgCaricaAnticipi(_fgModale.fattureTrovate);
     elFatt.innerHTML = _fgRenderListaFatture();
   } else if (_fgModale.modo === 'D') {
     // Modo D: ordini SENZA fattura ricevuta (per pagamento anticipato)
@@ -775,10 +790,91 @@ function _fgRisetContraente() {
   _fgModale.fattureTrovate = [];
   _fgModale.ordiniTrovati = [];
   _fgModale.imputazioni = {};
+  _fgModale.anticipiPerFattura = {};
   document.getElementById('fg-risultati-cerca').innerHTML = '';
   document.getElementById('fg-fatture-trovate').innerHTML = '';
   document.getElementById('fg-cerca-contraente').value = '';
   document.getElementById('fg-cerca-contraente').focus();
+}
+
+
+// ════════════════════════════════════════════════════════════════════════
+// v20260819a · ANTICIPI SULLE FATTURE DEL CLIENTE
+// ════════════════════════════════════════════════════════════════════════
+// Una fattura anticipata e' gia' stata scontata in banca: quando il cliente
+// paga, i soldi entrano sul conto ma la banca si riprende la sua parte.
+// Qui si guarda soltanto QUALI fatture sono anticipate e presso chi. Lo
+// storno vero lo fa antEstinguiAnticipo() in pf-anticipi.js, che e' il
+// punto unico dal 27/07 e non si riscrive.
+// Gli id si mandano a blocchi: centinaia di UUID dentro l'URL fanno
+// rispondere 400 al server e tornerebbe un elenco vuoto senza dirlo.
+function _fgAblocchi(arr, n) {
+  var out = [];
+  for (var i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+async function _fgCaricaAnticipi(fatture) {
+  var mappa = {};
+  var ids = (fatture || []).map(function (f) { return f.fattura_id; }).filter(Boolean);
+  if (!ids.length) return mappa;
+
+  try {
+    var righe = [];
+    var blocchi = _fgAblocchi(ids, 50);
+    for (var i = 0; i < blocchi.length; i++) {
+      var r = await sb.from('anticipi_sbf_fatture')
+        .select('id,fattura_id,numero_fattura,cliente_nome,totale_fattura,importo_anticipato_calcolato,importo_estinto,stato,presentazione_id')
+        .in('fattura_id', blocchi[i])
+        .in('stato', ['anticipata', 'anticipata_parziale']);
+      if (r.error) throw r.error;
+      righe = righe.concat(r.data || []);
+    }
+    if (!righe.length) return mappa;
+
+    // catena per il nome della banca: presentazione → affidamento → istituto
+    var presIds = [], visti = {};
+    righe.forEach(function (x) { if (x.presentazione_id && !visti[x.presentazione_id]) { visti[x.presentazione_id] = 1; presIds.push(x.presentazione_id); } });
+    var affPerPres = {}, istPerAff = {};
+    if (presIds.length) {
+      var rp = await sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id').in('id', presIds);
+      (rp.data || []).forEach(function (p) { affPerPres[p.id] = p.affidamento_id; });
+      var affIds = [], vistiA = {};
+      Object.keys(affPerPres).forEach(function (k) {
+        var a = affPerPres[k];
+        if (a && !vistiA[a]) { vistiA[a] = 1; affIds.push(a); }
+      });
+      if (affIds.length) {
+        var ra = await sb.from('banche_affidamenti').select('id,istituto_id').in('id', affIds);
+        (ra.data || []).forEach(function (a) { istPerAff[a.id] = a.istituto_id; });
+      }
+    }
+    var nomeBanca = {};
+    (_fgListaBanche || []).forEach(function (b) { nomeBanca[b.id] = b.nome; });
+
+    righe.forEach(function (x) {
+      var istId = istPerAff[affPerPres[x.presentazione_id]];
+      x._banca = nomeBanca[istId] || null;
+      x._residuoAnticipo = Math.max(0, Number(x.importo_anticipato_calcolato || 0) - Number(x.importo_estinto || 0));
+      mappa[x.fattura_id] = x;
+    });
+  } catch (e) {
+    // fallire aperto: senza questa informazione l'incasso si registra lo
+    // stesso, semplicemente non verra' proposto lo storno
+    console.warn('[fg] anticipi non letti:', (e && e.message) || e);
+  }
+  return mappa;
+}
+
+
+// Quanto resta da assegnare fra le fatture: importo del movimento meno la
+// somma di quanto gia' imputato.
+function _fgDaAssegnare() {
+  var el = document.getElementById('fg-mod-importo');
+  var imp = el ? (parseFloat(el.value) || 0) : 0;
+  var tot = 0;
+  Object.keys(_fgModale.imputazioni).forEach(function (k) { tot += _fgModale.imputazioni[k]; });
+  return Math.round((imp - tot) * 100) / 100;
 }
 
 
@@ -787,21 +883,114 @@ function _fgRenderListaFatture() {
   if (!f.length) {
     return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:4px">Nessuna fattura aperta per questo cliente</div>';
   }
-  var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Fatture aperte (' + f.length + '):</div>';
+  var ant = _fgModale.anticipiPerFattura || {};
+  var nAnt = f.filter(function (fa) { return ant[fa.fattura_id]; }).length;
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap">';
+  html += '<div style="font-size:11px;color:var(--text-muted)">Fatture aperte (' + f.length + ')'
+        + (nAnt ? ' · <span style="color:#26215C;font-weight:600">' + nAnt + (nAnt === 1 ? ' anticipata' : ' anticipate') + '</span>' : '') + '</div>';
+  html += '<div id="fg-da-assegnare" style="font-size:11px"></div>';
+  html += '</div>';
+
   html += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
-  html += '<thead><tr style="background:var(--bg)"><th style="text-align:left;padding:5px 6px">N°</th><th style="text-align:left;padding:5px 6px">Data</th><th style="text-align:right;padding:5px 6px">Totale</th><th style="text-align:right;padding:5px 6px">Saldo</th><th style="text-align:right;padding:5px 6px">Imputa €</th></tr></thead><tbody>';
-  f.forEach(function(fa) {
+  html += '<thead><tr style="background:var(--bg)">'
+        + '<th style="width:26px;padding:5px 6px"></th>'
+        + '<th style="text-align:left;padding:5px 6px">N°</th>'
+        + '<th style="text-align:left;padding:5px 6px">Data</th>'
+        + '<th style="text-align:right;padding:5px 6px">Totale</th>'
+        + '<th style="text-align:right;padding:5px 6px">Saldo</th>'
+        + '<th style="text-align:right;padding:5px 6px">Imputa €</th></tr></thead><tbody>';
+
+  f.forEach(function (fa) {
     var imp = _fgModale.imputazioni['fatt:' + fa.fattura_id] || '';
+    var residuo = Number(fa.saldo_residuo || 0);
+    var a = ant[fa.fattura_id];
+    var pieno = imp !== '' && Math.abs(Number(imp) - residuo) < 0.01;
+    var parziale = imp !== '' && Number(imp) > 0 && Number(imp) < residuo - 0.005;
+
     html += '<tr style="border-bottom:0.5px solid var(--border)">';
-    html += '<td style="padding:5px 6px;font-family:var(--font-mono);font-weight:500">' + esc(String(fa.numero || '')) + '/' + esc(String(fa.anno || '')) + '</td>';
+    html += '<td style="padding:5px 6px;text-align:center"><input type="checkbox" ' + (imp !== '' && Number(imp) > 0 ? 'checked' : '')
+          + ' onchange="_fgFlagFattura(\'' + fa.fattura_id + '\',this.checked)" title="Assegna l\'intera fattura, o quel che resta da assegnare" style="cursor:pointer"/></td>';
+    html += '<td style="padding:5px 6px;font-family:var(--font-mono);font-weight:500">' + esc(String(fa.numero || '')) + '/' + esc(String(fa.anno || ''));
+    if (a) {
+      html += '<div style="font-size:9px;color:#26215C;font-weight:600;margin-top:1px">anticipata'
+            + (a._banca ? ' · ' + esc(a._banca) : '') + '</div>';
+    }
+    html += '</td>';
     html += '<td style="padding:5px 6px">' + _fgFmtData(fa.data) + '</td>';
     html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + _fgFmtImporto(fa.importo_totale) + '</td>';
-    html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:#BA7517;font-weight:500">' + _fgFmtImporto(fa.saldo_residuo) + '</td>';
-    html += '<td style="padding:5px 6px;text-align:right"><input type="number" step="0.01" min="0" max="' + fa.saldo_residuo + '" value="' + imp + '" placeholder="0,00" oninput="_fgImputaFattura(\'' + fa.fattura_id + '\',this.value)" style="width:90px;font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:3px;text-align:right"/></td>';
+    html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:#BA7517;font-weight:500">' + _fgFmtImporto(residuo) + '</td>';
+    html += '<td style="padding:5px 6px;text-align:right">'
+          + '<input type="number" step="0.01" min="0" max="' + residuo + '" value="' + imp + '" placeholder="0,00" '
+          + 'oninput="_fgImputaFattura(\'' + fa.fattura_id + '\',this.value)" '
+          + 'style="width:90px;font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:3px;text-align:right"/>'
+          + '<div id="fg-nota-' + esc(fa.fattura_id) + '" style="font-size:9px;margin-top:2px;color:'
+          + (parziale ? '#BA7517' : '#27500A') + '">'
+          + (parziale ? 'acconto · restano ' + _fgFmtImporto(residuo - Number(imp)) : (pieno ? 'saldo' : ''))
+          + '</div></td>';
     html += '</tr>';
   });
   html += '</tbody></table>';
   return html;
+}
+
+
+// v20260819a — La spunta assegna l'intera fattura. Se quel che resta da
+// assegnare non basta, ci mette dentro il residuo e la riga diventa un
+// acconto: cosi un incasso da 10.000 copre una fattura da 5.000 per intero
+// e la successiva da 8.000 solo per 5.000, dicendo che restano 3.000.
+function _fgFlagFattura(id, checked) {
+  var chiave = 'fatt:' + id;
+  if (!checked) {
+    delete _fgModale.imputazioni[chiave];
+    _fgRidisegnaFatture();
+    return;
+  }
+  var fa = (_fgModale.fattureTrovate || []).filter(function (x) { return x.fattura_id === id; })[0];
+  if (!fa) return;
+  var residuo = Number(fa.saldo_residuo || 0);
+  var resta = _fgDaAssegnare();
+  if (resta <= 0.005) {
+    if (typeof toast === 'function') toast('Importo gia assegnato tutto: libera qualche riga o alza l\'importo');
+    _fgRidisegnaFatture();
+    return;
+  }
+  _fgModale.imputazioni[chiave] = Math.round(Math.min(residuo, resta) * 100) / 100;
+  _fgRidisegnaFatture();
+}
+
+
+function _fgRidisegnaFatture() {
+  var el = document.getElementById('fg-fatture-trovate');
+  if (el) el.innerHTML = _fgRenderListaFatture();
+  _fgAggiornaStatusModale();
+}
+
+
+function _fgImputaFattura(id, val) {
+  var v = parseFloat(val) || 0;
+  if (v <= 0) delete _fgModale.imputazioni['fatt:' + id];
+  else _fgModale.imputazioni['fatt:' + id] = v;
+  // v20260819a — si aggiorna solo la nota di questa riga, non tutta la
+  // tabella: ridisegnarla mentre si digita farebbe perdere il fuoco.
+  var fa = (_fgModale.fattureTrovate || []).filter(function (x) { return x.fattura_id === id; })[0];
+  var nota = document.getElementById('fg-nota-' + id);
+  if (fa && nota) {
+    var residuo = Number(fa.saldo_residuo || 0);
+    if (v > 0 && v < residuo - 0.005) {
+      nota.style.color = '#BA7517';
+      nota.textContent = 'acconto · restano ' + _fgFmtImporto(residuo - v);
+    } else if (v > 0 && Math.abs(v - residuo) < 0.01) {
+      nota.style.color = '#27500A';
+      nota.textContent = 'saldo';
+    } else if (v > residuo + 0.005) {
+      nota.style.color = '#A32D2D';
+      nota.textContent = 'oltre il saldo della fattura';
+    } else {
+      nota.textContent = '';
+    }
+  }
+  _fgAggiornaStatusModale();
 }
 
 
@@ -828,13 +1017,6 @@ function _fgRenderListaOrdini() {
   return html;
 }
 
-
-function _fgImputaFattura(id, val) {
-  var v = parseFloat(val) || 0;
-  if (v <= 0) delete _fgModale.imputazioni['fatt:' + id];
-  else _fgModale.imputazioni['fatt:' + id] = v;
-  _fgAggiornaStatusModale();
-}
 
 function _fgImputaOrdine(id, val) {
   var v = parseFloat(val) || 0;
@@ -878,6 +1060,27 @@ function _fgImputaFatturaRicevuta(id, val) {
 
 
 function _fgAggiornaStatusModale() {
+  // v20260819a — contatore "da assegnare" sopra l'elenco fatture: scala a
+  // ogni riga assegnata, cosi si vede sempre quanto manca senza fare i
+  // conti a mente.
+  var box = document.getElementById('fg-da-assegnare');
+  if (box) {
+    var elImp = document.getElementById('fg-mod-importo');
+    var totMov = elImp ? (parseFloat(elImp.value) || 0) : 0;
+    if (totMov <= 0) {
+      box.innerHTML = '<span style="color:var(--text-muted)">Inserisci prima l\'importo del movimento</span>';
+    } else {
+      var resta = _fgDaAssegnare();
+      if (Math.abs(resta) < 0.01) {
+        box.innerHTML = '<span style="color:#27500A;font-weight:600">✓ tutto assegnato</span>';
+      } else if (resta > 0) {
+        box.innerHTML = '<span style="color:#BA7517;font-weight:600">da assegnare ' + _fgFmtImporto(resta) + ' €</span>';
+      } else {
+        box.innerHTML = '<span style="color:#A32D2D;font-weight:600">assegnati ' + _fgFmtImporto(-resta) + ' € in piu\' dell\'importo</span>';
+      }
+    }
+  }
+
   var st = document.getElementById('fg-mod-status');
   if (!st) return;
   var imp = parseFloat(document.getElementById('fg-mod-importo').value) || 0;
@@ -932,6 +1135,120 @@ function _fgRenderModoC() {
 // ────────────────────────────────────────────────────────────────────────
 // CONFERMA: scrittura DB
 // ────────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// v20260819a · STORNO DELL'ANTICIPO DOPO L'INCASSO
+// ════════════════════════════════════════════════════════════════════════
+// Quando il cliente paga una fattura gia' anticipata, i soldi entrano sul
+// conto ma la banca si riprende la sua parte. Monte dei Paschi e BCC vanno
+// avvisate a mano; Intesa a volte scarica da sola. Quindi il programma non
+// decide: CHIEDE se il pagamento e' stato comunicato alla banca.
+//   · Si'  → chiede la data e chiama antEstinguiAnticipo(), che aggiorna il
+//            modulo E scrive l'uscita di rientro sul conto
+//   · No   → l'anticipo resta com'e', la fattura risulta pagata dal cliente
+// La quota proposta e' PROPORZIONALE: su una fattura da 5.000 anticipata
+// all'80%, un incasso di 5.000 ne manda 4.000 alla banca e ne lascia 1.000
+// sul conto. Su un acconto di 2.500 ne andrebbero 2.000. Il numero resta
+// modificabile, perche' la banca puo' trattenere altro.
+function _fgQuotaStorno(anticipo, incassato) {
+  var tot = Number(anticipo.totale_fattura || 0);
+  var antic = Number(anticipo.importo_anticipato_calcolato || 0);
+  if (!(tot > 0) || !(antic > 0)) return 0;
+  var quota = Number(incassato) * (antic / tot);
+  var residuo = Number(anticipo._residuoAnticipo != null ? anticipo._residuoAnticipo : antic);
+  if (quota > residuo) quota = residuo;
+  return Math.round(quota * 100) / 100;
+}
+
+
+// Un modale per volta, in fila. Restituisce una promessa che si risolve
+// con { storna: bool, importo, data } quando l'utente decide.
+function _fgChiediStorno(anticipo, incassato, dataMovimento) {
+  return new Promise(function (resolve) {
+    var quota = _fgQuotaStorno(anticipo, incassato);
+    var idOv = 'fg-storno-ov';
+    var vecchio = document.getElementById(idOv);
+    if (vecchio) vecchio.remove();
+
+    var h = '<div id="' + idOv + '" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px">';
+    h += '<div style="background:white;border-radius:12px;padding:20px;width:520px;max-width:100%;box-shadow:0 12px 40px rgba(0,0,0,0.3)">';
+
+    h += '<div style="font-size:15px;font-weight:600;color:#26215C;margin-bottom:4px">Fattura anticipata'
+       + (anticipo._banca ? ' su ' + esc(anticipo._banca) : '') + '</div>';
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Fattura <strong style="font-family:var(--font-mono)">'
+       + esc(anticipo.numero_fattura || '?') + '</strong>'
+       + (anticipo.cliente_nome ? ' · ' + esc(anticipo.cliente_nome) : '') + '</div>';
+
+    h += '<div style="background:var(--bg);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px">';
+    h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Incassato ora</span><strong style="font-family:var(--font-mono)">' + _fgFmtImporto(incassato) + ' €</strong></div>';
+    h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Anticipato in banca</span><strong style="font-family:var(--font-mono);color:#26215C">' + _fgFmtImporto(anticipo.importo_anticipato_calcolato) + ' €</strong></div>';
+    h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Resta sul conto</span><strong style="font-family:var(--font-mono);color:#27500A">' + _fgFmtImporto(Number(incassato) - quota) + ' €</strong></div>';
+    h += '</div>';
+
+    h += '<div style="font-size:12.5px;line-height:1.6;margin-bottom:12px">Hai gia\' <strong>comunicato il pagamento alla banca</strong>? '
+       + 'Se si\', l\'anticipo si storna e viene registrata l\'uscita di rientro sul conto.</div>';
+
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">';
+    h += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Data comunicazione</label>'
+       + '<input type="date" id="fg-storno-data" value="' + esc(dataMovimento || '') + '" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+    h += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Importo da stornare €</label>'
+       + '<input type="number" step="0.01" min="0" id="fg-storno-importo" value="' + quota.toFixed(2) + '" style="width:100%;font-family:var(--font-mono);font-weight:600;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px;text-align:right"/></div>';
+    h += '</div>';
+    h += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:14px">Proposto in proporzione alla percentuale anticipata. Cambialo se la banca ha trattenuto altro.</div>';
+
+    h += '<div style="display:flex;justify-content:flex-end;gap:8px">';
+    h += '<button id="fg-storno-no" style="font-size:12px;padding:7px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">No, non toccare l\'anticipo</button>';
+    h += '<button id="fg-storno-si" style="font-size:12px;padding:7px 14px;background:#26215C;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">Si\', storna l\'anticipo</button>';
+    h += '</div>';
+
+    h += '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', h);
+
+    function chiudi(esito) {
+      var ov = document.getElementById(idOv);
+      if (ov) ov.remove();
+      resolve(esito);
+    }
+    document.getElementById('fg-storno-no').onclick = function () { chiudi({ storna: false }); };
+    document.getElementById('fg-storno-si').onclick = function () {
+      var d = document.getElementById('fg-storno-data').value;
+      var v = parseFloat(document.getElementById('fg-storno-importo').value) || 0;
+      if (!d) { alert('Indica la data della comunicazione alla banca'); return; }
+      if (!(v > 0)) { alert('L\'importo da stornare dev\'essere maggiore di zero'); return; }
+      chiudi({ storna: true, importo: v, data: d });
+    };
+  });
+}
+
+
+// Passa in rassegna le fatture appena incassate che risultano anticipate e
+// chiede una per una. Non blocca mai la registrazione: se qualcosa va
+// storto lo dice e va avanti, il movimento e' gia' salvato.
+async function _fgStornaAnticipiIncassati(imputazioni, mappaAnticipi, dataMovimento) {
+  if (typeof antEstinguiAnticipo !== 'function') return 0;
+  var fatti = 0;
+  for (var i = 0; i < imputazioni.length; i++) {
+    var imp = imputazioni[i];
+    if (imp.tipo !== 'fattura') continue;
+    var a = mappaAnticipi[imp.id];
+    if (!a) continue;
+    var esito = await _fgChiediStorno(a, imp.importo, dataMovimento);
+    if (!esito || !esito.storna) continue;
+    try {
+      await antEstinguiAnticipo(a.id, {
+        importo: esito.importo,
+        data: esito.data,
+        note: 'Storno da incasso cliente del ' + _fgFmtData(dataMovimento)
+      });
+      fatti++;
+    } catch (e) {
+      alert('Storno non riuscito per la fattura ' + (a.numero_fattura || '?') + ': ' + ((e && e.message) || e)
+        + '\n\nL\'incasso resta registrato. Puoi stornare a mano dalla sezione Anticipi.');
+    }
+  }
+  return fatti;
+}
+
+
 async function _fgConfermaMovimento() {
   var m = _fgModale;
   var importo = parseFloat(document.getElementById('fg-mod-importo').value) || 0;
@@ -1095,6 +1412,19 @@ async function _fgConfermaMovimento() {
 
   toast('✅ ' + (m.tipo === 'entrata' ? 'Entrata' : 'Uscita') + ' di € ' + _fgFmtImporto(importo) + ' registrata');
   _fgChiudiModale();
+
+  // v20260819a — Fatture anticipate: si chiede DOPO aver registrato il
+  // movimento, cosi se l'utente annulla lo storno l'incasso resta salvato.
+  // Lo storno vero lo fa antEstinguiAnticipo() di pf-anticipi.js.
+  var anticipiDaChiedere = _fgModale.anticipiPerFattura || {};
+  if (m.tipo === 'entrata' && imputazioni.length) {
+    try {
+      await _fgStornaAnticipiIncassati(imputazioni, anticipiDaChiedere, m.data);
+    } catch (e) {
+      console.warn('[fg] storno anticipi interrotto:', (e && e.message) || e);
+    }
+  }
+
   caricaFoglioGiornale();
   // Patch v20260503d: se la vista fullscreen è aperta, ricarico anche quella
   if (typeof _fgFullscreenGiornoIso !== 'undefined' && _fgFullscreenGiornoIso) {
