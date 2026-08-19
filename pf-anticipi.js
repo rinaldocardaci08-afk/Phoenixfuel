@@ -1,4 +1,10 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260819a — la scheda fattura del modulo: mettere "Estinta" ora estingue
+//               davvero (prima l update secco lasciava importo_estinto a zero,
+//               il fido occupato e il conto fermo). Data di estinzione,
+//               importo che rientra, conto su cui girarlo, e lancetta con
+//               l esposizione del cliente su quella banca che scende prima
+//               ancora di salvare
 // v20260811a — la casella di ricerca non perde piu il cursore a ogni cifra
 // pf-anticipi.js — modulo Anticipo Fatture SBF
 // Phoenix Fuel — 05/05/2026 (v20260505a)
@@ -3447,6 +3453,134 @@ async function _antEliminaModulo(presentazioneId) {
 // Se stato='esclusa', la fattura non conta più nei totali (se importo_estinto
 // era stato registrato, viene azzerato). Una fattura esclusa torna disponibile
 // per essere presentata su un altro modulo.
+// ═══════════════════════════════════════════════════════════════════════════
+// v20260819a — LANCETTA ANTICIPO PER CLIENTE (condivisa)
+// ═══════════════════════════════════════════════════════════════════════════
+// Quanto e' esposto un singolo cliente su un singolo affidamento, contro il
+// suo massimale. Il tetto si legge in due passi: se in anticipi_sbf_regole
+// c'e' un massimale_cliente valorizzato per quella coppia banca/cliente
+// vince quello; altrimenti si scende alla percentuale del fido, con la
+// stessa formula gia' usata alla riga ~1861 del modale Presenta.
+// Non blocca niente: e' un dato da vedere, non un divieto.
+// ═══════════════════════════════════════════════════════════════════════════
+async function _antMassimaleCliente(fido, clienteId) {
+  var perPct = (fido && fido.massimale_cliente_pct && fido.importo_accordato)
+    ? (Number(fido.massimale_cliente_pct) / 100) * Number(fido.importo_accordato)
+    : null;
+  if (!clienteId || !fido) return { massimale: perPct, origine: perPct != null ? 'pct' : null };
+  try {
+    var r = await sb.from('anticipi_sbf_regole')
+      .select('massimale_cliente')
+      .eq('affidamento_id', fido.id).eq('cliente_id', clienteId)
+      .limit(1);
+    var riga = (r.data || [])[0];
+    if (riga && Number(riga.massimale_cliente) > 0) {
+      return { massimale: Number(riga.massimale_cliente), origine: 'regola' };
+    }
+  } catch (e) { /* senza regola si usa la percentuale del fido */ }
+  return { massimale: perPct, origine: perPct != null ? 'pct' : null };
+}
+
+
+// Somma di quanto e' anticipato e non ancora rientrato per un cliente su
+// un affidamento. Gli id delle presentazioni si mandano a blocchi.
+async function _antEspostoCliente(affidamentoId, clienteId) {
+  if (!affidamentoId || !clienteId) return 0;
+  try {
+    var rp = await sb.from('anticipi_sbf_presentazioni').select('id')
+      .eq('affidamento_id', affidamentoId).not('stato', 'in', '(estinta,rifiutata)');
+    var ids = (rp.data || []).map(function (p) { return p.id; });
+    if (!ids.length) return 0;
+    var tot = 0;
+    for (var i = 0; i < ids.length; i += 50) {
+      var rf = await sb.from('anticipi_sbf_fatture')
+        .select('importo_anticipato_calcolato,importo_estinto,stato')
+        .in('presentazione_id', ids.slice(i, i + 50))
+        .eq('cliente_id', clienteId)
+        .in('stato', ['presentata', 'anticipata', 'anticipata_parziale']);
+      (rf.data || []).forEach(function (x) {
+        tot += Math.max(0, Number(x.importo_anticipato_calcolato || 0) - Number(x.importo_estinto || 0));
+      });
+    }
+    return Math.round(tot * 100) / 100;
+  } catch (e) {
+    console.warn('[ant] esposto cliente non calcolato:', (e && e.message) || e);
+    return 0;
+  }
+}
+
+
+// Punto sull'arco per un valore. La scala arriva al 120% del massimale,
+// cosi lo sforamento si vede invece di restare schiacciato sul fondo.
+function _antPuntoArco(v, scala, cx, cy, r) {
+  var frac = scala > 0 ? Math.max(0, Math.min(1, v / scala)) : 0;
+  var rad = (180 - frac * 180) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy - r * Math.sin(rad) };
+}
+
+function _antArco(vDa, vA, scala, cx, cy, r) {
+  var a = _antPuntoArco(vDa, scala, cx, cy, r);
+  var b = _antPuntoArco(vA, scala, cx, cy, r);
+  return 'M' + a.x.toFixed(1) + ' ' + a.y.toFixed(1) + ' A' + r + ' ' + r + ' 0 0 1 ' + b.x.toFixed(1) + ' ' + b.y.toFixed(1);
+}
+
+// attuale = dov'e' adesso (tratteggio grigio), dopo = dove finisce (lancetta
+// piena). Se non c'e' un massimale il quadrante non si disegna: meglio
+// niente che un fondoscala inventato.
+function _antLancetta(attuale, dopo, massimale, titolo, sottotitolo) {
+  if (!(massimale > 0)) {
+    return '<div style="text-align:center;padding:14px 8px">'
+      + '<div style="font-size:11px;color:var(--text-muted);line-height:1.6">Nessun massimale impostato per questo cliente su questa banca.<br>'
+      + 'Esposizione attuale <strong style="font-family:var(--font-mono);color:var(--text)">' + fmtE(dopo) + '</strong></div></div>';
+  }
+  var scala = massimale * 1.2, cx = 100, cy = 100, r = 80;
+  var oltre = dopo > massimale + 0.005;
+  var colV = oltre ? '#A32D2D' : (dopo > massimale * 0.8 ? '#BA7517' : '#27500A');
+  var pDopo = _antPuntoArco(dopo, scala, cx, cy, r - 22);
+  var pAtt  = _antPuntoArco(attuale, scala, cx, cy, r - 32);
+  var pMax  = _antPuntoArco(massimale, scala, cx, cy, r + 9);
+  var pMaxI = _antPuntoArco(massimale, scala, cx, cy, r - 7);
+
+  var h = '<div style="text-align:center">';
+  if (titolo) h += '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(titolo) + '</div>';
+  h += '<svg viewBox="0 0 200 116" style="width:100%;max-width:190px;height:auto;margin-top:2px">';
+  h += '<path d="' + _antArco(0, massimale * 0.8, scala, cx, cy, r) + '" fill="none" stroke="#639922" stroke-width="14"/>';
+  h += '<path d="' + _antArco(massimale * 0.8, massimale, scala, cx, cy, r) + '" fill="none" stroke="#EF9F27" stroke-width="14"/>';
+  h += '<path d="' + _antArco(massimale, scala, scala, cx, cy, r) + '" fill="none" stroke="#E24B4A" stroke-width="14"/>';
+  h += '<line x1="' + pMaxI.x.toFixed(1) + '" y1="' + pMaxI.y.toFixed(1) + '" x2="' + pMax.x.toFixed(1) + '" y2="' + pMax.y.toFixed(1) + '" stroke="#5F5E5A" stroke-width="2"/>';
+  if (Math.abs(attuale - dopo) > 0.005) {
+    h += '<line x1="' + cx + '" y1="' + cy + '" x2="' + pAtt.x.toFixed(1) + '" y2="' + pAtt.y.toFixed(1) + '" stroke="#B4B2A9" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="4 3"/>';
+  }
+  h += '<line x1="' + cx + '" y1="' + cy + '" x2="' + pDopo.x.toFixed(1) + '" y2="' + pDopo.y.toFixed(1) + '" stroke="' + colV + '" stroke-width="5" stroke-linecap="round"/>';
+  h += '<circle cx="' + cx + '" cy="' + cy + '" r="7" fill="var(--bg-card)" stroke="' + colV + '" stroke-width="3"/>';
+  h += '<text x="100" y="114" text-anchor="middle" font-size="9" fill="#5F5E5A">max ' + fmtE(massimale) + '</text>';
+  h += '</svg>';
+  h += '<div style="font-size:18px;font-weight:700;font-family:var(--font-mono);color:' + colV + ';margin-top:2px">' + fmtE(dopo) + '</div>';
+  if (sottotitolo) h += '<div style="font-size:11px;color:var(--text-muted)">' + sottotitolo + '</div>';
+  if (oltre) {
+    h += '<div style="background:#FCEBEB;border-left:3px solid #E24B4A;padding:7px 9px;margin-top:9px;font-size:11px;color:#791F1F;line-height:1.55;text-align:left">'
+       + 'Oltre il massimale di <strong>' + fmtE(dopo - massimale) + '</strong>. Nessun blocco: e\' solo un avviso.</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODALE MODIFICA FATTURA NEL MODULO — v20260819a
+// ═══════════════════════════════════════════════════════════════════════════
+// Prima questo modale salvava con un update secco: mettere "Estinta" NON
+// scriveva importo_estinto, NON scriveva data_incasso e NON generava
+// l'uscita di rientro sul conto. Risultato: la fattura risultava chiusa ma
+// il fido restava occupato e il conto fermo.
+// Ora, scegliendo "Estinta", compare il blocco con la data dell'estinzione,
+// l'importo che rientra e il conto su cui girarlo, e il salvataggio passa
+// da antEstinguiAnticipo() — la funzione unica del 27/07, che aggiorna la
+// riga e scrive il movimento. Sugli altri stati il comportamento e' quello
+// di prima, invariato.
+// ═══════════════════════════════════════════════════════════════════════════
+var _antModFatt = null;
+
 async function _antRenderModaleFattura(fatturaAntId) {
   if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   if (!fatturaAntId) return;
@@ -3457,22 +3591,66 @@ async function _antRenderModaleFattura(fatturaAntId) {
   if (resF.error || !resF.data) { toast('Fattura non trovata'); chiudiModal(); return; }
   var f = resF.data;
 
-  var html = '<div style="max-width:520px">';
-  html += '<div style="font-size:16px;font-weight:600;margin-bottom:6px">✏️ Modifica fattura nel modulo</div>';
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Fattura <strong style="font-family:var(--font-mono)">' + esc(f.numero_fattura || '?') + '</strong> · ' + esc(f.cliente_nome || '?') + ' · ' + fmtE(f.totale_fattura) + '</div>';
+  // banca del modulo, massimale ed esposizione del cliente
+  var fido = null, ist = {}, cc = null;
+  try {
+    var rp = await sb.from('anticipi_sbf_presentazioni').select('affidamento_id').eq('id', f.presentazione_id).single();
+    if (rp.data) {
+      fido = (_bancheAffidamenti || []).filter(function (a) { return a.id === rp.data.affidamento_id; })[0] || null;
+      if (fido) {
+        ist = (_bancheIstituti || []).filter(function (i) { return i.id === fido.istituto_id; })[0] || {};
+        cc = (_bancheConti || []).filter(function (c) { return c.id === fido.conto_id; })[0] || null;
+      }
+    }
+  } catch (e) { /* senza fido resta tutto tranne la lancetta */ }
 
-  html += '<div style="display:grid;gap:10px">';
+  var mass = await _antMassimaleCliente(fido, f.cliente_id);
+  var esposto = fido ? await _antEspostoCliente(fido.id, f.cliente_id) : 0;
+  var residuo = Math.max(0, Number(f.importo_anticipato_calcolato || 0) - Number(f.importo_estinto || 0));
 
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza cliente</label>';
-  html += '<div style="padding:8px;background:var(--bg-kpi);border-radius:6px;font-size:12px">' + (f.scadenza_cliente ? fmtD(f.scadenza_cliente) : '—') + '</div>';
+  // data in cui il cliente ha pagato: se l'entrata e' gia' a foglio giornale
+  // la si trova dalla riconciliazione, e si propone come promemoria
+  var dataPagamento = null;
+  if (f.fattura_id) {
+    try {
+      var rr = await sb.from('foglio_giornale_riconciliazioni')
+        .select('movimento_id,foglio_giornale_movimenti(data,tipo)')
+        .eq('fattura_emessa_id', f.fattura_id).limit(5);
+      (rr.data || []).forEach(function (x) {
+        var mv = x.foglio_giornale_movimenti;
+        if (mv && mv.tipo === 'entrata' && (!dataPagamento || mv.data > dataPagamento)) dataPagamento = mv.data;
+      });
+    } catch (e) { /* nessun movimento trovato: si chiedera' la data */ }
+  }
+
+  var oggiISO = new Date().toISOString().split('T')[0];
+  _antModFatt = { id: fatturaAntId, f: f, fido: fido, residuo: residuo,
+                  massimale: mass.massimale, origineMass: mass.origine,
+                  esposto: esposto, dataPagamento: dataPagamento,
+                  bancaDefault: fido ? fido.istituto_id : null };
+
+  var bancaLabel = (ist.nome || '—') + (cc && cc.numero_conto ? ' /' + String(cc.numero_conto).slice(-4) : '');
+
+  var html = '<div style="max-width:640px">';
+  html += '<div style="font-size:16px;font-weight:500;margin-bottom:3px">Modifica fattura nel modulo</div>';
+  html += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Fattura <strong style="font-family:var(--font-mono);font-weight:500">'
+        + esc(f.numero_fattura || '?') + '</strong> · ' + esc(f.cliente_nome || '?') + ' · ' + fmtE(f.totale_fattura)
+        + (fido ? ' · ' + esc(bancaLabel) : '') + '</div>';
+
+  html += '<div style="display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:18px;align-items:start">';
+
+  // ── colonna sinistra: il form ──
+  html += '<div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+  html += '<div><label style="display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:4px">Scadenza cliente</label>';
+  html += '<div style="padding:8px 10px;background:var(--bg-kpi);border-radius:6px;font-size:12.5px;font-family:var(--font-mono)">' + (f.scadenza_cliente ? fmtD(f.scadenza_cliente) : '—') + '</div>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Da fatture_pagamenti, sola lettura</div></div>';
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza banca *</label>';
-  html += '<input id="mod-fat-scad" type="date" value="' + esc(f.scadenza_banca || '') + '" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></div>';
+  html += '<div><label style="display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:4px">Scadenza banca *</label>';
+  html += '<input id="mod-fat-scad" type="date" value="' + esc(f.scadenza_banca || '') + '" style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px"></div>';
   html += '</div>';
 
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Stato</label>';
-  html += '<select id="mod-fat-stato" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">';
+  html += '<div style="margin-bottom:12px"><label style="display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:4px">Stato</label>';
+  html += '<select id="mod-fat-stato" onchange="_antModFattStato()" style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px">';
   ['presentata','anticipata','estinta','insoluta','esclusa'].forEach(function(s) {
     var lab = { presentata:'Presentata', anticipata:'Anticipata', estinta:'Estinta', insoluta:'Insoluta', esclusa:'Esclusa (riapri per altro modulo)' }[s];
     html += '<option value="' + s + '"' + (f.stato === s ? ' selected' : '') + '>' + lab + '</option>';
@@ -3480,29 +3658,171 @@ async function _antRenderModaleFattura(fatturaAntId) {
   html += '</select>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Stato "esclusa" = la fattura esce dal modulo e diventa di nuovo presentabile altrove.</div></div>';
 
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
-  html += '<textarea id="mod-fat-note" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;min-height:54px;resize:vertical">' + esc(f.note || '') + '</textarea></div>';
+  html += '<div id="mod-fat-estinzione"></div>';
+
+  html += '<div><label style="display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:4px">Note</label>';
+  html += '<textarea id="mod-fat-note" style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;font-family:inherit;min-height:52px;resize:vertical">' + esc(f.note || '') + '</textarea></div>';
+  html += '</div>';
+
+  // ── colonna destra: la lancetta ──
+  html += '<div id="mod-fat-lancetta" style="background:var(--bg);border-radius:10px;padding:12px 10px"></div>';
 
   html += '</div>';
 
-  // Pulsanti
-  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
-  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
-  html += '<button onclick="_antSalvaFattura(\'' + fatturaAntId + '\')" class="btn-primary" style="font-size:12px;padding:8px 14px">💾 Salva</button>';
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border)">';
+  html += '<button onclick="chiudiModal()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 15px;font-size:12px;cursor:pointer">Annulla</button>';
+  html += '<button onclick="_antSalvaFattura(\'' + fatturaAntId + '\')" class="btn-primary" style="font-size:12px;padding:8px 15px">Salva</button>';
   html += '</div>';
   html += '</div>';
 
   apriModal(html);
+  _antModFattStato();
 }
+
+
+// Mostra o nasconde il blocco estinzione e sposta la lancetta. Chiamata a
+// ogni cambio di stato: cosi la lancetta scende PRIMA di salvare.
+function _antModFattStato() {
+  var S = _antModFatt;
+  if (!S) return;
+  var sel = document.getElementById('mod-fat-stato');
+  var stato = sel ? sel.value : S.f.stato;
+  var box = document.getElementById('mod-fat-estinzione');
+  var giaEstinta = S.f.stato === 'estinta';
+
+  if (box) {
+    if (stato === 'estinta' && !giaEstinta && S.residuo > 0) {
+      var dataProp = S.dataPagamento || new Date().toISOString().split('T')[0];
+      var h = '<div style="background:#EAF3DE;border-left:3px solid #639922;padding:11px 13px;margin-bottom:12px">';
+      h += '<div style="font-size:12.5px;font-weight:500;color:#27500A;margin-bottom:8px">Estinzione dell\'anticipo</div>';
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:8px">';
+      h += '<div><label style="display:block;font-size:11px;color:#3B6D11;margin-bottom:3px">Data estinzione *</label>'
+         + '<input id="mod-fat-dataest" type="date" value="' + dataProp + '" oninput="_antModFattStato()" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12.5px"></div>';
+      h += '<div><label style="display:block;font-size:11px;color:#3B6D11;margin-bottom:3px">Importo che rientra €</label>'
+         + '<input id="mod-fat-impest" type="number" step="0.01" min="0" value="' + S.residuo.toFixed(2) + '" oninput="_antModFattStato()" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12.5px;font-family:var(--font-mono);font-weight:600;text-align:right"></div>';
+      h += '</div>';
+
+      h += '<div style="margin-bottom:8px"><label style="display:block;font-size:11px;color:#3B6D11;margin-bottom:3px">Conto su cui gira il movimento</label>'
+         + '<select id="mod-fat-banca" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12.5px">';
+      (_bancheIstituti || []).forEach(function (b) {
+        h += '<option value="' + esc(b.id) + '"' + (b.id === S.bancaDefault ? ' selected' : '') + '>' + esc(b.nome) + '</option>';
+      });
+      h += '</select>';
+      h += '<div style="font-size:10px;color:#3B6D11;margin-top:3px">Preselezionata la banca del modulo. In foglio_giornale_movimenti si registra l\'istituto: il singolo conto non ha una colonna dove finire.</div></div>';
+
+      if (S.dataPagamento) {
+        h += '<div style="font-size:11px;color:#3B6D11;line-height:1.6">Il cliente ha pagato il <strong>' + fmtD(S.dataPagamento)
+           + '</strong>: l\'entrata e\' gia\' a foglio giornale. Qui va la data in cui hai estinto l\'anticipo in banca.</div>';
+      } else {
+        h += '<div style="background:var(--bg-card);border-radius:6px;padding:8px 10px;margin-top:2px">'
+           + '<label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;font-size:11.5px;line-height:1.5">'
+           + '<input type="checkbox" id="mod-fat-creaentrata" onchange="_antModFattStato()" style="margin-top:2px">'
+           + '<span>Non trovo l\'entrata del cliente a foglio giornale. Registrala anche tu, per <strong>'
+           + fmtE(Number(S.f.totale_fattura || 0)) + '</strong> alla data qui sotto.</span></label>'
+           + '<input id="mod-fat-dataincasso" type="date" value="' + dataProp + '" style="width:100%;margin-top:7px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px"></div>';
+      }
+      h += '</div>';
+      box.innerHTML = h;
+    } else if (stato === 'estinta' && giaEstinta) {
+      box.innerHTML = '<div style="background:var(--bg-kpi);border-radius:6px;padding:9px 12px;margin-bottom:12px;font-size:11.5px;color:var(--text-muted);line-height:1.6">'
+        + 'Gia\' estinta' + (S.f.data_incasso ? ' il <strong>' + fmtD(S.f.data_incasso) + '</strong>' : '')
+        + ' per <strong style="font-family:var(--font-mono)">' + fmtE(S.f.importo_estinto) + '</strong>. Il rientro non viene rifatto.</div>';
+    } else {
+      box.innerHTML = '';
+    }
+  }
+
+  // lancetta: scende dell'importo che sta per rientrare
+  var el = document.getElementById('mod-fat-lancetta');
+  if (el) {
+    var quota = 0;
+    if (stato === 'estinta' && !giaEstinta) {
+      var inp = document.getElementById('mod-fat-impest');
+      quota = inp ? (parseFloat(inp.value) || 0) : S.residuo;
+      if (quota > S.residuo) quota = S.residuo;
+    }
+    var dopo = Math.max(0, S.esposto - quota);
+    var sotto = quota > 0
+      ? 'da ' + fmtE(S.esposto) + ' · −' + fmtE(quota)
+      : 'esposizione su ' + esc((_bancheIstituti || []).filter(function (b) { return b.id === S.bancaDefault; }).map(function (b) { return b.nome; })[0] || 'questa banca');
+    el.innerHTML = _antLancetta(S.esposto, dopo, S.massimale, S.f.cliente_nome, sotto)
+      + (S.origineMass === 'regola'
+          ? '<div style="border-top:0.5px solid var(--border);margin-top:9px;padding-top:8px;font-size:10.5px;color:var(--text-muted);line-height:1.5">Massimale impostato sul cliente</div>'
+          : (S.origineMass === 'pct' && S.fido
+              ? '<div style="border-top:0.5px solid var(--border);margin-top:9px;padding-top:8px;font-size:10.5px;color:var(--text-muted);line-height:1.5">'
+                + Number(S.fido.massimale_cliente_pct).toFixed(0) + '% del fido da ' + fmtE(S.fido.importo_accordato) + '</div>'
+              : ''));
+  }
+}
+
 
 async function _antSalvaFattura(fatturaAntId) {
   if (!_antPuoModificare()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
+  var S = _antModFatt || {};
   var scad = document.getElementById('mod-fat-scad').value;
   var stato = document.getElementById('mod-fat-stato').value;
   var note = (document.getElementById('mod-fat-note').value || '').trim() || null;
 
   if (!scad) { toast('Scadenza banca obbligatoria'); return; }
 
+  var giaEstinta = S.f && S.f.stato === 'estinta';
+  var vaEstinta = stato === 'estinta' && !giaEstinta && Number(S.residuo) > 0;
+
+  // v20260819a — L'estinzione passa da antEstinguiAnticipo: prima l'update
+  // secco lasciava importo_estinto a zero e il conto fermo.
+  if (vaEstinta) {
+    var elD = document.getElementById('mod-fat-dataest');
+    var elI = document.getElementById('mod-fat-impest');
+    var elB = document.getElementById('mod-fat-banca');
+    var dataEst = elD ? elD.value : null;
+    var impEst = elI ? (parseFloat(elI.value) || 0) : 0;
+    var bancaId = elB ? elB.value : (S.bancaDefault || null);
+    if (!dataEst) { toast('Indica la data di estinzione'); return; }
+    if (!(impEst > 0)) { toast('L\'importo che rientra dev\'essere maggiore di zero'); return; }
+
+    // entrata del cliente, solo se manca e se l'hai chiesta tu
+    var chk = document.getElementById('mod-fat-creaentrata');
+    if (chk && chk.checked) {
+      var elDI = document.getElementById('mod-fat-dataincasso');
+      var dataInc = elDI ? elDI.value : dataEst;
+      try {
+        var insE = await sb.from('foglio_giornale_movimenti').insert([{
+          data: dataInc,
+          tipo: 'entrata',
+          importo: Math.round(Number(S.f.totale_fattura || 0) * 100) / 100,
+          descrizione: 'Incasso cliente · fattura ' + (S.f.numero_fattura || '') + (S.f.cliente_nome ? ' · ' + S.f.cliente_nome : ''),
+          banca_id: bancaId,
+          cassa_tipo: null,
+          metodo: 'bonifico',
+          origine: 'manuale',
+          note: 'Registrata dalla scheda anticipo'
+        }]);
+        if (insE.error) throw insE.error;
+      } catch (e) {
+        toast('Entrata cliente non registrata: ' + ((e && e.message) || e));
+      }
+    }
+
+    try {
+      await antEstinguiAnticipo(fatturaAntId, { importo: impEst, data: dataEst, bancaId: bancaId,
+        note: 'Estinzione dalla scheda fattura' });
+    } catch (e) { toast('❌ Estinzione non riuscita: ' + ((e && e.message) || e)); return; }
+
+    // i campi non gestiti dall'estinzione si salvano a parte
+    var resM = await sb.from('anticipi_sbf_fatture')
+      .update({ scadenza_banca: scad, note: note, modificato_at: new Date().toISOString() })
+      .eq('id', fatturaAntId);
+    if (resM.error) { toast('Estinta, ma scadenza/note non salvate: ' + resM.error.message); }
+
+    chiudiModal();
+    toast('✓ Anticipo estinto e rientro registrato');
+    _antValDati = null;
+    if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+    if (typeof caricaFoglioGiornale === 'function') { try { caricaFoglioGiornale(); } catch (e) {} }
+    return;
+  }
+
+  // ── comportamento invariato per tutti gli altri stati ──
   var payload = {
     scadenza_banca: scad,
     stato: stato,
