@@ -1,6 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // v20260801a — lettura di anticipi_sbf_presentazioni paginata (si fermava a mille)
 // PhoenixFuel — Estratto Conto
+// v20260820c — correzione: la nota sugli ordini era finita nella tabella
+//              dell'elenco clienti invece che nella stampa, e faceva morire
+//              tutta la pagina con un ReferenceError su ordFilt
 // v20260820b — elenco ordinato per NUMERO di fattura (non piu per scadenza) e
 //              stampa dell'estratto conto REALE: ordini da fatturare compresi,
 //              costruiti dalla stessa funzione che disegna lo schermo
@@ -404,12 +407,6 @@ function _ecRenderTabellaClienti(elenco) {
     html += '<tr><td colspan="7" style="padding:8px;text-align:center;color:#888;font-size:10px;font-style:italic">... + altri ' + (elenco.length - 200) + ' clienti (filtra per cercarli)</td></tr>';
   }
   html += '</tbody></table>';
-  if (ordFilt.length) {
-    html += '<div style="font-size:7.5pt;color:#666;margin-top:6px;line-height:1.5">'
-         + 'Le righe <strong>Da fatturare</strong> sono consegne gia effettuate e non ancora fatturate: '
-         + _ecFmtDec(totOrdini) + ' su ' + ordFilt.length + (ordFilt.length === 1 ? ' ordine' : ' ordini') + '. '
-         + 'Concorrono all esposizione ma non hanno ancora un numero di fattura.</div>';
-  }
   return html;
 }
 
@@ -2466,6 +2463,12 @@ function _ecStampaEstratto() {
   html += '<td></td>';
   html += '</tr>';
   html += '</tbody></table>';
+  if (ordFilt.length) {
+    html += '<div style="font-size:7.5pt;color:#666;margin-top:6px;line-height:1.5">'
+         + 'Le righe <strong>Da fatturare</strong> sono consegne gia effettuate e non ancora fatturate: '
+         + _ecFmtDec(totOrdini) + ' su ' + ordFilt.length + (ordFilt.length === 1 ? ' ordine' : ' ordini') + '. '
+         + 'Concorrono all esposizione ma non hanno ancora un numero di fattura.</div>';
+  }
 
   // FOOTER NOTE PAGAMENTO
   html += '<div class="footer-note">';
