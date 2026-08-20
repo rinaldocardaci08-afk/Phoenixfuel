@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Presenze autisti
+// v20260820b — secondo blocco: report del mese (schede per autista, barre
+//              giornaliere con la soglia, osservazioni, stampa) e tre grafici
+//              in home per leggere tutti i mesi insieme
 // v20260820a — primo blocco: lettura del foglio .xls, import con controllo di
 //              coerenza sul calendario, e home dei mesi caricati.
 //
@@ -263,11 +266,156 @@ function _prVerificaTotali(F, righe) {
 
 
 // ══════════════════════════════════════════════════════════════════════════
+// v20260820b · GRAFICI DELLA HOME — tutti i mesi insieme
+// ══════════════════════════════════════════════════════════════════════════
+// Tre domande, tre grafici:
+//   1. la guida resta circa meta' dell'impegno, o sta scivolando?
+//   2. il monte ore cresce, e da quale parte cresce?
+//   3. quante trasferte, mese per mese?
+// GENNAIO: senza ore di impegno la percentuale NON esiste. La linea si
+// interrompe (null), non scende a zero: uno zero sembrerebbe un crollo.
+var _prGrafici = {};
+
+function _prDistruggiGrafici() {
+  Object.keys(_prGrafici).forEach(function (k) {
+    try { _prGrafici[k].destroy(); } catch (e) {}
+    delete _prGrafici[k];
+  });
+}
+
+var PR_COLORI = ['#26215C', '#BA7517', '#639922', '#A32D2D', '#185FA5'];
+
+function _prDisegnaGrafici(perMese) {
+  if (typeof Chart === 'undefined') return;
+  _prDistruggiGrafici();
+
+  // ordine cronologico crescente: i grafici si leggono da sinistra
+  var mesi = _prMesi.slice().sort(function (a, b) {
+    return (a.anno - b.anno) || (a.mese - b.mese);
+  });
+  if (mesi.length < 2) return;
+
+  var etichette = mesi.map(function (m) { return _prNomeMese(m.mese).slice(0, 3) + ' ' + String(m.anno).slice(2); });
+  var autisti = [];
+  mesi.forEach(function (m) {
+    var t = perMese[m.id];
+    if (!t) return;
+    Object.keys(t.perAutista).forEach(function (n) { if (autisti.indexOf(n) < 0) autisti.push(n); });
+  });
+
+  var opzioni = function (extra) {
+    var o = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } } },
+      scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 } } } }
+    };
+    if (extra) Object.keys(extra).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  };
+
+  // ── 1. percentuale di guida sull'impegno ──
+  var c1 = document.getElementById('pr-gr-perc');
+  if (c1) {
+    _prGrafici.perc = new Chart(c1, {
+      type: 'line',
+      data: {
+        labels: etichette,
+        datasets: autisti.map(function (n, i) {
+          return {
+            label: _prNomeBreve(n),
+            data: mesi.map(function (m) {
+              var a = perMese[m.id] && perMese[m.id].perAutista[n];
+              if (!a || a.impegno < 0.01) return null;   // gennaio: buco, non zero
+              return Math.round((a.guida / a.impegno) * 1000) / 10;
+            }),
+            borderColor: PR_COLORI[i % PR_COLORI.length],
+            backgroundColor: PR_COLORI[i % PR_COLORI.length],
+            borderWidth: 2.5, pointRadius: 3, tension: 0.25, spanGaps: false, fill: false
+          };
+        })
+      },
+      options: opzioni({
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + c.parsed.y + '% del tempo alla guida'; } } } },
+        scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                  y: { min: 0, max: 100, grid: { color: 'rgba(0,0,0,0.06)' },
+                       ticks: { font: { size: 10 }, callback: function (v) { return v + '%'; } } } }
+      })
+    });
+  }
+
+  // ── 2. ore di guida e ore non di guida, impilate ──
+  var c2 = document.getElementById('pr-gr-ore');
+  if (c2) {
+    _prGrafici.ore = new Chart(c2, {
+      type: 'bar',
+      data: {
+        labels: etichette,
+        datasets: [
+          { label: 'Ore di guida', backgroundColor: '#26215C',
+            data: mesi.map(function (m) { return perMese[m.id] ? Math.round(perMese[m.id].guida * 10) / 10 : 0; }) },
+          { label: 'Ore non di guida', backgroundColor: '#B5D4F4',
+            data: mesi.map(function (m) {
+              var t = perMese[m.id];
+              if (!t || t.impegno < 0.01) return 0;
+              return Math.round(Math.max(0, t.impegno - t.guida) * 10) / 10;
+            }) }
+        ]
+      },
+      options: opzioni({
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + _prH(c.parsed.y) + ' h'; } } } },
+        scales: { x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+                  y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 } } } }
+      })
+    });
+  }
+
+  // ── 3. trasferte per mese ──
+  var c3 = document.getElementById('pr-gr-trasf');
+  if (c3) {
+    _prGrafici.trasf = new Chart(c3, {
+      type: 'bar',
+      data: {
+        labels: etichette,
+        datasets: autisti.map(function (n, i) {
+          return {
+            label: _prNomeBreve(n),
+            backgroundColor: PR_COLORI[i % PR_COLORI.length],
+            data: mesi.map(function (m) {
+              var a = perMese[m.id] && perMese[m.id].perAutista[n];
+              return a ? a.trasferte : 0;
+            })
+          };
+        })
+      },
+      options: opzioni({
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10.5 } } },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + c.parsed.y + ' trasferte'; } } } }
+      })
+    });
+  }
+}
+
+// "CONSIGLIO FRANCESCO" -> "Consiglio F." per stare nelle legende
+function _prNomeBreve(n) {
+  var p = String(n).trim().split(/\s+/);
+  if (p.length < 2) return _prCapit(n);
+  return _prCapit(p[0]) + ' ' + p[1].charAt(0).toUpperCase() + '.';
+}
+function _prCapit(s) {
+  return String(s).toLowerCase().replace(/(^|\s)([a-zàèéìòù])/g, function (m, a, b) { return a + b.toUpperCase(); });
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
 // HOME DEI MESI
 // ══════════════════════════════════════════════════════════════════════════
 async function caricaPresenze() {
   var el = document.getElementById('pr-contenuto');
   if (!el) return;
+  _prDistruggiGrafici();
   el.innerHTML = '<div style="padding:26px;text-align:center;color:var(--text-muted);font-size:13px">Caricamento…</div>';
   try {
     var rs = await sb.from('presenze_impostazioni').select('soglia_trasferta_ore,valida_da')
@@ -289,15 +437,20 @@ async function caricaPresenze() {
           .in('mese_id', ids.slice(i, i + 50));
         if (rg.error) throw rg.error;
         (rg.data || []).forEach(function (r) {
-          var t = tot[r.mese_id] = tot[r.mese_id] || { guida: 0, impegno: 0, trasferte: 0, autisti: {} };
+          var t = tot[r.mese_id] = tot[r.mese_id] || { guida: 0, impegno: 0, trasferte: 0, autisti: {}, perAutista: {} };
           t.guida += Number(r.ore_guida || 0);
           t.impegno += Number(r.ore_impegno || 0);
           if (r.trasferta) t.trasferte++;
           t.autisti[r.autista_nome] = 1;
+          var a = t.perAutista[r.autista_nome] = t.perAutista[r.autista_nome] || { guida: 0, impegno: 0, trasferte: 0 };
+          a.guida += Number(r.ore_guida || 0);
+          a.impegno += Number(r.ore_impegno || 0);
+          if (r.trasferta) a.trasferte++;
         });
       }
     }
     _prRenderHome(tot);
+    _prDisegnaGrafici(tot);
   } catch (e) {
     el.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Errore: ' + esc((e && e.message) || String(e)) + '</div>';
   }
@@ -322,6 +475,23 @@ function _prRenderHome(tot) {
        + 'Il mese viene riconosciuto dal calendario del foglio, non dal nome del file.</div></div>';
     el.innerHTML = h;
     return;
+  }
+
+  // v20260820b — i grafici solo da due mesi in su: con uno solo non c'e'
+  // andamento da leggere, e un grafico a un punto e' rumore.
+  if (_prMesi.length >= 2) {
+    h += '<div class="card" style="margin-bottom:14px;padding:14px 16px">';
+    h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Quanto del tempo di impegno è guida</div>';
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Se un mese manca, le ore di impegno non erano state inserite nel foglio</div>';
+    h += '<div style="height:190px;position:relative"><canvas id="pr-gr-perc"></canvas></div>';
+    h += '</div>';
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px">';
+    h += '<div class="card" style="padding:14px 16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">Ore di guida e ore non di guida</div>'
+       + '<div style="height:190px;position:relative"><canvas id="pr-gr-ore"></canvas></div></div>';
+    h += '<div class="card" style="padding:14px 16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">Trasferte per mese</div>'
+       + '<div style="height:190px;position:relative"><canvas id="pr-gr-trasf"></canvas></div></div>';
+    h += '</div>';
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Mesi caricati</div>';
   }
 
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px">';
@@ -352,9 +522,285 @@ function _prRenderHome(tot) {
   el.innerHTML = h;
 }
 
-function _prApriMese(id) {
+// ══════════════════════════════════════════════════════════════════════════
+// v20260820b · REPORT DEL MESE
+// ══════════════════════════════════════════════════════════════════════════
+// Tutto si ricalcola dai dati giornalieri: nessun numero salvato, cosi se
+// domani la soglia trasferta cambia, i mesi vecchi si riallineano da soli.
+// Le TRASFERTE contate sono quelle segnate sul foglio, non ricalcolate dalla
+// soglia: comanda il foglio. La soglia serve solo per il confronto, ed e'
+// proprio dove i due numeri divergono che c'e' qualcosa da guardare.
+var _prMeseAperto = null;
+
+async function _prApriMese(id) {
   var m = _prMesi.filter(function (x) { return x.id === id; })[0];
-  toast('Report di ' + (m ? _prTitolo(m.mese, m.anno) : 'questo mese') + ': in arrivo nel prossimo blocco');
+  if (!m) return;
+  var el = document.getElementById('pr-contenuto');
+  if (!el) return;
+  _prDistruggiGrafici();
+  el.innerHTML = '<div style="padding:26px;text-align:center;color:var(--text-muted);font-size:13px">Caricamento…</div>';
+  try {
+    var r = await sb.from('presenze_giorni').select('*').eq('mese_id', id).order('data');
+    if (r.error) throw r.error;
+    // la soglia e' quella in vigore ALL'EPOCA del mese, non quella di oggi
+    var primo = m.anno + '-' + ('0' + m.mese).slice(-2) + '-01';
+    var rs = await sb.from('presenze_impostazioni').select('soglia_trasferta_ore')
+      .lte('valida_da', primo).order('valida_da', { ascending: false }).limit(1);
+    var soglia = (rs.data && rs.data[0]) ? Number(rs.data[0].soglia_trasferta_ore) : _prSoglia;
+    _prMeseAperto = { m: m, righe: r.data || [], soglia: soglia };
+    _prRenderReport();
+  } catch (e) {
+    el.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Errore: ' + esc((e && e.message) || String(e)) + '</div>';
+  }
+}
+
+function _prCalcolaReport(righe, soglia) {
+  var per = {};
+  righe.forEach(function (r) {
+    var a = per[r.autista_nome] = per[r.autista_nome] || {
+      nome: r.autista_nome, guida: 0, impegno: 0, trasferte: 0, ferie: 0, festivi: 0,
+      ggGuida: 0, ggImpegno: 0, ggSopraSoglia: 0, giorni: []
+    };
+    var g = r.ore_guida === null ? null : Number(r.ore_guida);
+    var i = r.ore_impegno === null ? null : Number(r.ore_impegno);
+    if (g !== null) { a.guida += g; if (g > 0) a.ggGuida++; }
+    if (i !== null) { a.impegno += i; if (i > 0) a.ggImpegno++; }
+    if (r.trasferta) a.trasferte++;
+    if (r.ferie) a.ferie++;
+    if (r.festivo) a.festivi++;
+    if (i !== null && i >= soglia - 0.001) a.ggSopraSoglia++;
+    a.giorni.push({ giorno: parseInt(String(r.data).slice(8, 10), 10), guida: g, impegno: i, trasferta: !!r.trasferta });
+  });
+  return Object.keys(per).map(function (k) {
+    var a = per[k];
+    a.guida = Math.round(a.guida * 100) / 100;
+    a.impegno = Math.round(a.impegno * 100) / 100;
+    a.nonGuida = Math.round(Math.max(0, a.impegno - a.guida) * 100) / 100;
+    a.senzaImpegno = a.impegno < 0.01;
+    a.pct = a.senzaImpegno ? null : Math.round((a.guida / a.impegno) * 1000) / 10;
+    // Guida e impegno si dividono per LE STESSE giornate lavorate, cosi le due
+    // medie sono confrontabili e il loro rapporto ridà la percentuale. Se le
+    // ore di impegno mancano si ripiega sui giorni con guida.
+    var ggBase = a.ggImpegno || a.ggGuida;
+    a.guidaGg = ggBase ? Math.round((a.guida / ggBase) * 10) / 10 : null;
+    a.impegnoGg = a.ggImpegno ? Math.round((a.impegno / a.ggImpegno) * 10) / 10 : null;
+    a.giorni.sort(function (x, y) { return x.giorno - y.giorno; });
+    return a;
+  }).sort(function (x, y) { return x.nome < y.nome ? -1 : 1; });
+}
+
+// Barre giornaliere: chiaro = impegno, scuro = guida, tratteggio = soglia.
+function _prSvgGiorni(a, soglia, nGiorni) {
+  var W = 640, H = 118, base = H - 16, cima = 8;
+  var max = Math.max(soglia + 2, 12);
+  a.giorni.forEach(function (g) {
+    if (g.impegno !== null && g.impegno > max) max = g.impegno;
+    if (g.guida !== null && g.guida > max) max = g.guida;
+  });
+  var passo = W / nGiorni, largh = Math.max(4, passo * 0.62);
+  var y = function (v) { return base - (v / max) * (base - cima); };
+  var h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+  h += '<line x1="0" y1="' + base + '" x2="' + W + '" y2="' + base + '" stroke="rgba(0,0,0,0.12)" stroke-width="1"/>';
+  var ys = y(soglia);
+  h += '<line x1="0" y1="' + ys.toFixed(1) + '" x2="' + W + '" y2="' + ys.toFixed(1) + '" stroke="#BA7517" stroke-width="1.2" stroke-dasharray="4 3"/>';
+  h += '<text x="3" y="' + (ys - 3).toFixed(1) + '" font-size="9" fill="#854F0B">soglia ' + _prH(soglia) + ' h</text>';
+  var mappa = {};
+  a.giorni.forEach(function (g) { mappa[g.giorno] = g; });
+  for (var d = 1; d <= nGiorni; d++) {
+    var g2 = mappa[d];
+    var x = (d - 1) * passo + (passo - largh) / 2;
+    if (g2 && g2.impegno !== null && g2.impegno > 0) {
+      h += '<rect x="' + x.toFixed(1) + '" y="' + y(g2.impegno).toFixed(1) + '" width="' + largh.toFixed(1)
+         + '" height="' + Math.max(1, base - y(g2.impegno)).toFixed(1) + '" fill="#B5D4F4" rx="1"/>';
+    }
+    if (g2 && g2.guida !== null && g2.guida > 0) {
+      h += '<rect x="' + x.toFixed(1) + '" y="' + y(g2.guida).toFixed(1) + '" width="' + largh.toFixed(1)
+         + '" height="' + Math.max(1, base - y(g2.guida)).toFixed(1) + '" fill="#26215C" rx="1"/>';
+    }
+    if (d === 1 || d % 2 === 1) {
+      h += '<text x="' + (x + largh / 2).toFixed(1) + '" y="' + (H - 4) + '" font-size="8.5" fill="#888780" text-anchor="middle">' + d + '</text>';
+    }
+  }
+  h += '</svg>';
+  return h;
+}
+
+// Osservazioni: solo cose che i numeri dicono davvero, nessun consiglio finto.
+function _prOsservazioni(dati, soglia, nGiorni) {
+  var out = [];
+  var conImpegno = dati.filter(function (a) { return !a.senzaImpegno; });
+  if (!conImpegno.length) {
+    out.push({ t: 'Ore di impegno assenti', c: 'Il foglio di questo mese non contiene la riga "Ore Impegno" per nessun autista: si vedono solo le ore di guida. Percentuali, medie di impegno e confronto con la soglia non sono calcolabili.' });
+    return out;
+  }
+  var totG = 0, totI = 0;
+  conImpegno.forEach(function (a) { totG += a.guida; totI += a.impegno; });
+  var pctTot = Math.round((totG / totI) * 1000) / 10;
+  out.push({ t: 'La guida è ' + _prH(pctTot) + '% dell\'impegno',
+    c: conImpegno.map(function (a) { return _prNomeBreve(a.nome) + ' ' + _prH(a.pct) + '% (' + _prH(a.guida) + ' su ' + _prH(a.impegno) + ')'; }).join(', ')
+      + '. In tutto ' + _prH(Math.round((totI - totG) * 10) / 10) + ' ore del mese non sono di guida.' });
+
+  // dove trasferte segnate e giorni sopra soglia non coincidono
+  var disc = conImpegno.filter(function (a) { return a.trasferte !== a.ggSopraSoglia; });
+  if (disc.length) {
+    out.push({ t: 'Trasferte e soglia non coincidono',
+      c: disc.map(function (a) {
+        return _prNomeBreve(a.nome) + ': ' + a.trasferte + ' trasferte segnate contro ' + a.ggSopraSoglia
+          + ' giorni con impegno di almeno ' + _prH(soglia) + ' h';
+      }).join('; ') + '. Le trasferte contate restano quelle del foglio: la differenza è un dato da controllare, non un errore del programma.' });
+  } else {
+    out.push({ t: 'Trasferte allineate alla soglia',
+      c: 'Per ogni autista il numero di trasferte segnate coincide con i giorni di impegno pari o superiore a ' + _prH(soglia) + ' ore.' });
+  }
+
+  // quante volte la sola guida avrebbe superato la soglia
+  var soloGuida = 0, totGiorniLav = 0;
+  conImpegno.forEach(function (a) {
+    a.giorni.forEach(function (g) {
+      if (g.impegno === null || g.impegno <= 0) return;
+      totGiorniLav++;
+      if (g.guida !== null && g.guida >= soglia - 0.001) soloGuida++;
+    });
+  });
+  out.push({ t: 'Se la trasferta seguisse la guida',
+    c: 'Su ' + totGiorniLav + ' giornate lavorate, la sola guida raggiunge le ' + _prH(soglia)
+      + ' ore in ' + soloGuida + (soloGuida === 1 ? ' caso' : ' casi') + '. Con questi numeri un criterio legato alla guida farebbe scattare la trasferta molto più di rado di uno legato alla presenza.' });
+
+  if (conImpegno.length >= 2) {
+    var mn = conImpegno.slice().sort(function (x, y) { return x.impegnoGg - y.impegnoGg; });
+    var a1 = mn[0], a2 = mn[mn.length - 1];
+    var delta = Math.round((a2.impegnoGg - a1.impegnoGg) * 10) / 10;
+    out.push({ t: delta <= 1 ? 'Gli autisti sono allineati' : 'Impegno giornaliero diverso',
+      c: conImpegno.map(function (a) { return _prNomeBreve(a.nome) + ' ' + _prH(a.impegnoGg) + ' h/giorno di impegno e ' + _prH(a.guidaGg) + ' di guida'; }).join(', ')
+        + '. Differenza di ' + _prH(delta) + ' ore al giorno fra il più e il meno impegnato.' });
+  }
+  return out;
+}
+
+function _prRenderReport() {
+  var S = _prMeseAperto;
+  var el = document.getElementById('pr-contenuto');
+  if (!S || !el) return;
+  var nGiorni = new Date(S.m.anno, S.m.mese, 0).getDate();
+  var dati = _prCalcolaReport(S.righe, S.soglia);
+
+  var h = '';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">';
+  h += '<div><button onclick="caricaPresenze()" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer">← Tutti i mesi</button>'
+     + '<span style="font-size:16px;font-weight:600;margin-left:12px">' + esc(_prTitolo(S.m.mese, S.m.anno)) + '</span></div>';
+  h += '<button onclick="_prStampaReport()" class="btn-primary" style="font-size:12px;padding:7px 14px">🖨 Stampa</button>';
+  h += '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;margin-bottom:14px">';
+  dati.forEach(function (a) {
+    h += '<div class="card" style="padding:13px 15px">';
+    h += '<div style="font-size:14px;font-weight:600">' + esc(_prCapit(a.nome)) + '</div>';
+    if (a.senzaImpegno) {
+      h += '<div style="font-size:12px;color:#854F0B;margin:8px 0;line-height:1.6">Ore di impegno non inserite nel foglio: la percentuale non è calcolabile.</div>';
+    } else {
+      h += '<div style="display:flex;align-items:baseline;gap:9px;margin:6px 0 9px">';
+      h += '<span style="font-size:27px;font-weight:700;font-family:var(--font-mono);color:#26215C">' + _prH(a.pct) + '%</span>';
+      h += '<span style="font-size:11px;color:var(--text-muted);line-height:1.3">del tempo di impegno<br>speso alla guida</span></div>';
+      h += '<div style="height:9px;border-radius:5px;overflow:hidden;display:flex;margin-bottom:9px">'
+         + '<div style="width:' + a.pct + '%;background:#26215C"></div>'
+         + '<div style="width:' + (100 - a.pct) + '%;background:#B5D4F4"></div></div>';
+    }
+    h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px 4px">';
+    var kpi = function (v, l) {
+      return '<div><div style="font-size:15px;font-weight:600;font-family:var(--font-mono)">' + v + '</div>'
+           + '<div style="font-size:10px;color:var(--text-muted)">' + l + '</div></div>';
+    };
+    h += kpi(_prH(a.guida), 'ore guida');
+    h += kpi(a.senzaImpegno ? '—' : _prH(a.impegno), 'ore impegno');
+    h += kpi(a.senzaImpegno ? '—' : _prH(a.nonGuida), 'ore non guida');
+    h += kpi(a.guidaGg === null ? '—' : _prH(a.guidaGg), 'guida / giorno');
+    h += kpi(a.impegnoGg === null ? '—' : _prH(a.impegnoGg), 'impegno / giorno');
+    h += kpi(String(a.trasferte), 'trasferte');
+    h += '</div>';
+    if (a.ferie || a.festivi) {
+      h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">'
+         + (a.ferie ? a.ferie + (a.ferie === 1 ? ' giorno di ferie' : ' giorni di ferie') : '')
+         + (a.ferie && a.festivi ? ' · ' : '')
+         + (a.festivi ? a.festivi + (a.festivi === 1 ? ' festivo' : ' festivi') : '') + '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div>';
+
+  h += '<div class="card" style="padding:14px 16px;margin-bottom:14px">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Andamento giornaliero</div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Barra chiara: ore di impegno · barra scura: ore di guida · tratteggio: soglia trasferta</div>';
+  dati.forEach(function (a) {
+    h += '<div style="font-size:11.5px;font-weight:600;margin:10px 0 1px">' + esc(_prCapit(a.nome)) + '</div>';
+    h += _prSvgGiorni(a, S.soglia, nGiorni);
+  });
+  h += '</div>';
+
+  h += '<div class="card" style="padding:14px 16px">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:9px">Cosa emerge</div>';
+  _prOsservazioni(dati, S.soglia, nGiorni).forEach(function (o) {
+    h += '<div style="margin-bottom:10px"><div style="font-size:12.5px;font-weight:600">' + esc(o.t) + '</div>'
+       + '<div style="font-size:12px;color:var(--text-muted);line-height:1.65">' + esc(o.c) + '</div></div>';
+  });
+  h += '<div style="font-size:10.5px;color:var(--text-muted);border-top:0.5px solid var(--border);padding-top:8px;margin-top:4px">'
+     + 'Fonte: ' + esc(S.m.file_nome || 'foglio presenze') + ' · soglia trasferta ' + _prH(S.soglia) + ' h in vigore nel mese</div>';
+  h += '</div>';
+
+  el.innerHTML = h;
+}
+
+function _prStampaReport() {
+  var S = _prMeseAperto;
+  if (!S) return;
+  var nGiorni = new Date(S.m.anno, S.m.mese, 0).getDate();
+  var dati = _prCalcolaReport(S.righe, S.soglia);
+  var h = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Presenze autisti — '
+        + esc(_prTitolo(S.m.mese, S.m.anno)) + '</title><style>'
+        + '@page{size:A4 portrait;margin:12mm}'
+        + 'body{font-family:system-ui,Segoe UI,Arial,sans-serif;color:#16202e;margin:0}'
+        + 'h1{font-size:19px;margin:2px 0 0}.sub{font-size:11px;color:#5b6675}'
+        + 'header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #16202e;padding-bottom:8px}'
+        + '.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}'
+        + '.card{border:1px solid #e2e6ec;border-radius:7px;padding:10px 12px}'
+        + '.nm{font-size:12.5px;font-weight:700}.pc{font-size:26px;font-weight:700;color:#26215C}'
+        + '.g{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 4px;margin-top:7px}'
+        + '.g b{font-size:14px}.g span{font-size:8.5px;color:#5b6675;display:block}'
+        + 'h2{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:#5b6675;margin:15px 0 5px}'
+        + '.oss{margin-bottom:8px}.oss b{font-size:11.5px}.oss p{font-size:11px;color:#33404f;margin:1px 0 0;line-height:1.5}'
+        + '.ft{font-size:9px;color:#5b6675;border-top:1px solid #e2e6ec;margin-top:12px;padding-top:6px}'
+        + '</style></head><body>';
+  h += '<header><div><div class="sub">Phoenix Fuel S.r.l.</div><h1>Presenze autisti — ore di guida e ore di impegno</h1></div>'
+     + '<div class="sub" style="text-align:right">Periodo<br><b style="color:#16202e;font-size:12.5px">' + esc(_prTitolo(S.m.mese, S.m.anno)) + '</b></div></header>';
+  h += '<div class="cards">';
+  dati.forEach(function (a) {
+    h += '<div class="card"><div class="nm">' + esc(_prCapit(a.nome)) + '</div>';
+    h += a.senzaImpegno
+      ? '<div style="font-size:11px;color:#854F0B;margin:6px 0">Ore di impegno non inserite nel foglio.</div>'
+      : '<div class="pc">' + _prH(a.pct) + '%</div><div class="sub">del tempo di impegno speso alla guida</div>';
+    h += '<div class="g">'
+       + '<div><b>' + _prH(a.guida) + '</b><span>ore guida</span></div>'
+       + '<div><b>' + (a.senzaImpegno ? '—' : _prH(a.impegno)) + '</b><span>ore impegno</span></div>'
+       + '<div><b>' + (a.senzaImpegno ? '—' : _prH(a.nonGuida)) + '</b><span>ore non guida</span></div>'
+       + '<div><b>' + (a.guidaGg === null ? '—' : _prH(a.guidaGg)) + '</b><span>guida / giorno</span></div>'
+       + '<div><b>' + (a.impegnoGg === null ? '—' : _prH(a.impegnoGg)) + '</b><span>impegno / giorno</span></div>'
+       + '<div><b>' + a.trasferte + '</b><span>trasferte</span></div></div></div>';
+  });
+  h += '</div>';
+  h += '<h2>Andamento giornaliero</h2>';
+  dati.forEach(function (a) {
+    h += '<div style="font-size:11px;font-weight:700;margin:7px 0 1px">' + esc(_prCapit(a.nome)) + '</div>' + _prSvgGiorni(a, S.soglia, nGiorni);
+  });
+  h += '<h2>Cosa emerge</h2>';
+  _prOsservazioni(dati, S.soglia, nGiorni).forEach(function (o) {
+    h += '<div class="oss"><b>' + esc(o.t) + '</b><p>' + esc(o.c) + '</p></div>';
+  });
+  h += '<div class="ft">Fonte: ' + esc(S.m.file_nome || 'foglio presenze') + ' · soglia trasferta ' + _prH(S.soglia)
+     + ' h · barre: scuro = guida, chiaro = impegno, tratteggio = soglia</div>';
+  h += '</body></html>';
+  var w = window.open('', '_blank');
+  if (!w) { toast('Il browser ha bloccato la finestra di stampa'); return; }
+  w.document.write(h); w.document.close();
+  setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
 }
 
 
