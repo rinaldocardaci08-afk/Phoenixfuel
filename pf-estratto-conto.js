@@ -1,6 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // v20260801a — lettura di anticipi_sbf_presentazioni paginata (si fermava a mille)
 // PhoenixFuel — Estratto Conto
+// v20260820b — elenco ordinato per NUMERO di fattura (non piu per scadenza) e
+//              stampa dell'estratto conto REALE: ordini da fatturare compresi,
+//              costruiti dalla stessa funzione che disegna lo schermo
 // v20260820a — correzione dell'importo di un pagamento gia registrato, con la
 //              quadratura dell'entrata sul conto mostrata prima di salvare Clienti (Patch v20260503k)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -401,6 +404,12 @@ function _ecRenderTabellaClienti(elenco) {
     html += '<tr><td colspan="7" style="padding:8px;text-align:center;color:#888;font-size:10px;font-style:italic">... + altri ' + (elenco.length - 200) + ' clienti (filtra per cercarli)</td></tr>';
   }
   html += '</tbody></table>';
+  if (ordFilt.length) {
+    html += '<div style="font-size:7.5pt;color:#666;margin-top:6px;line-height:1.5">'
+         + 'Le righe <strong>Da fatturare</strong> sono consegne gia effettuate e non ancora fatturate: '
+         + _ecFmtDec(totOrdini) + ' su ' + ordFilt.length + (ordFilt.length === 1 ? ' ordine' : ' ordini') + '. '
+         + 'Concorrono all esposizione ma non hanno ancora un numero di fattura.</div>';
+  }
   return html;
 }
 
@@ -1948,62 +1957,82 @@ function _ecRenderAging(aging) {
 }
 
 
-function _ecRenderEstrattoFatture(fattCli) {
-  var oggi = new Date();
-  var oggiIso = oggi.toISOString().split('T')[0];
-  var filtro = _ecStato.filtroFatture;
+// ═══════════════════════════════════════════════════════════════════
+// v20260820b · L'ELENCO DELL'ESPOSIZIONE — UNO SOLO
+// ═══════════════════════════════════════════════════════════════════
+// Prima la costruivano in due: lo schermo (con dentro gli ordini senza
+// fattura) e la stampa (senza). Risultato: il PDF non era l'estratto
+// conto vero, mostrava meno di quanto il cliente deve davvero.
+// Ora la lista si costruisce qui e la usano tutti e due.
+//
+// ORDINAMENTO — per NUMERO DI FATTURA, non piu' per scadenza. La
+// scadenza serviva a sapere cosa incassare per primo; il numero serve a
+// spuntare l'estratto conto riga per riga contro quello del cliente
+// senza saltare avanti e indietro. Gli ordini non hanno numero e
+// finiscono in fondo, dal piu' recente.
+function _ecNumOrdinabile(f) {
+  if (f._ordine) return null;
+  var n = String(f.numero || '').match(/\d+/);
+  var anno = null;
+  if (f.anno) anno = Number(f.anno);
+  else if (f.data) anno = Number(String(f.data).slice(0, 4));
+  return { anno: anno || 0, n: n ? Number(n[0]) : 0 };
+}
 
-  // Filtro
-  var fattFilt = fattCli.slice();
+function _ecElencoEsposizione(clienteId, filtro, oggiIso) {
+  var fattCli = (_ecStato.fatture || []).filter(function (f) { return f.cliente_id === clienteId; });
+  var lista = fattCli.slice();
   if (filtro === 'aperte') {
-    fattFilt = fattFilt.filter(function(f) { return f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale'; });
+    lista = lista.filter(function (f) { return f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale'; });
   } else if (filtro === 'scadute') {
-    fattFilt = fattFilt.filter(function(f) {
+    lista = lista.filter(function (f) {
       return (f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale')
           && f.data_scadenza && f.data_scadenza < oggiIso;
     });
   }
 
-  // ELENCO IBRIDO (28/07 — come nei fornitori): oltre alle fatture entrano
-  // anche gli ORDINI SENZA FATTURA, che sono gia esposizione. Non sono
-  // incassabili (l'incasso si imputa a una fattura) ma devono VEDERSI, perche'
-  // il fido li conta e altrimenti l'elenco non spiega il totale.
-  // NB: questa funzione non riceve clienteId — si prende dallo stato (era la
-  // causa dell'errore che spegneva l'estratto conto).
-  var _cliId  = _ecStato.clienteSelezionato;
-  var _cliOra = (_ecStato.clienti || []).filter(function (c) { return c.id === _cliId; })[0] || {};
-  var _ggCli = Number(_cliOra.giorni_pagamento || 0);
+  // ORDINI SENZA FATTURA: sono gia' esposizione, il fido li conta.
+  // Non sono incassabili, ma senza di loro il totale non si spiega.
+  var cli = (_ecStato.clienti || []).filter(function (c) { return c.id === clienteId; })[0] || {};
+  var ggCli = Number(cli.giorni_pagamento || 0);
   (_ecStato.ordini || []).forEach(function (o) {
-    if (!_cliId || o.cliente_id !== _cliId) return;
+    if (!clienteId || o.cliente_id !== clienteId) return;
     if (o.fattura_id || o.fattura_riga_id || o.pagato) return;
     var scad = o.data_scadenza || null;
-    if (!scad && o.data && _ggCli > 0) {
+    if (!scad && o.data && ggCli > 0) {
       var d = new Date(o.data + 'T12:00:00');
-      d.setDate(d.getDate() + _ggCli);
+      d.setDate(d.getDate() + ggCli);
       scad = d.toISOString().split('T')[0];
     }
-    fattFilt.push({
-      _ordine: true,
-      fattura_id: null,
-      numero: '(ordine)',
-      data: o.data,
-      data_scadenza: scad,
-      importo_totale: _ecValoreOrdine(o),
-      importo_incassato: 0,
-      saldo_residuo: _ecValoreOrdine(o),
-      stato_pagamento: 'aperta',
-      prodotto: o.prodotto,
-      litri: o.litri
+    if (filtro === 'scadute' && !(scad && scad < oggiIso)) return;
+    lista.push({
+      _ordine: true, fattura_id: null, numero: '(ordine)', data: o.data, data_scadenza: scad,
+      importo_totale: _ecValoreOrdine(o), importo_incassato: 0, saldo_residuo: _ecValoreOrdine(o),
+      stato_pagamento: 'aperta', prodotto: o.prodotto, litri: o.litri
     });
   });
 
-  // ORDINE (28/07): per SCADENZA crescente, dalla piu vicina alla piu lontana
-  // — stessa regola dei fornitori. Senza scadenza in fondo.
-  fattFilt.sort(function(a, b) {
-    var sa = a.data_scadenza || '9999-12-31', sb2 = b.data_scadenza || '9999-12-31';
-    if (sa !== sb2) return sa < sb2 ? -1 : 1;
-    return (a.data < b.data) ? 1 : -1;
+  lista.sort(function (a, b) {
+    var na = _ecNumOrdinabile(a), nb = _ecNumOrdinabile(b);
+    if (na && nb) {
+      if (na.anno !== nb.anno) return na.anno - nb.anno;
+      return na.n - nb.n;
+    }
+    if (na && !nb) return -1;          // le fatture prima
+    if (!na && nb) return 1;
+    return (a.data || '') < (b.data || '') ? 1 : -1;   // ordini: dal piu recente
   });
+  return lista;
+}
+
+function _ecRenderEstrattoFatture(fattCli) {
+  var oggi = new Date();
+  var oggiIso = oggi.toISOString().split('T')[0];
+  var filtro = _ecStato.filtroFatture;
+
+  // v20260820b — elenco e ordinamento vengono da _ecElencoEsposizione,
+  // la stessa che usa la stampa.
+  var fattFilt = _ecElencoEsposizione(_ecStato.clienteSelezionato, filtro, oggiIso);
 
   var nTutte = fattCli.length;
   var nAperte = fattCli.filter(function(f) { return f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale'; }).length;
@@ -2228,15 +2257,16 @@ function _ecStampaEstratto() {
   var oggiIso = oggi.toISOString().split('T')[0];
   var fattCli = _ecStato.fatture.filter(function(f) { return f.cliente_id === clienteId; });
   var filtro = _ecStato.filtroFatture;
-  var fattFilt = fattCli.slice();
-  if (filtro === 'aperte') fattFilt = fattFilt.filter(function(f) { return f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale'; });
-  else if (filtro === 'scadute') fattFilt = fattFilt.filter(function(f) { return (f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale') && f.data_scadenza && f.data_scadenza < oggiIso; });
-  fattFilt.sort(function(a, b) { return (a.data < b.data) ? 1 : -1; });
+  // v20260820b — stessa lista dello schermo: ORDINI DA FATTURARE COMPRESI.
+  // Prima la stampa se li perdeva e il PDF diceva meno del dovuto.
+  var fattFilt = _ecElencoEsposizione(clienteId, filtro, oggiIso);
+  var ordFilt = fattFilt.filter(function (f) { return f._ordine; });
+  var totOrdini = ordFilt.reduce(function (s2, o) { return s2 + Number(o.saldo_residuo || 0); }, 0);
 
   // KPI calcolati
   var fattAperte = fattCli.filter(function(f) { return f.stato_pagamento === 'aperta' || f.stato_pagamento === 'parziale'; });
   var fattScad = fattAperte.filter(function(f) { return f.data_scadenza && f.data_scadenza < oggiIso; });
-  var totAperto = fattAperte.reduce(function(s, f) { return s + Number(f.saldo_residuo || 0); }, 0);
+  var totAperto = fattAperte.reduce(function(s, f) { return s + Number(f.saldo_residuo || 0); }, 0) + totOrdini;
   var totScad = fattScad.reduce(function(s, f) { return s + Number(f.saldo_residuo || 0); }, 0);
   var totFiltrato = fattFilt.reduce(function(s, f) { return s + Number(f.saldo_residuo || 0); }, 0);
   // Indice puntualità (semplificato): % fatture saldate non scadute / totale
@@ -2380,7 +2410,8 @@ function _ecStampaEstratto() {
 
   // SECTION HEADER
   html += '<div class="section-h">';
-  html += '<div class="section-t">Dettaglio fatture · ' + _ecEsc(filtroLabel) + '</div>';
+  html += '<div class="section-t">Dettaglio esposizione · ' + _ecEsc(filtroLabel)
+       + (ordFilt.length ? ' + ordini da fatturare' : '') + '</div>';
   html += '<div class="section-c">' + fattFilt.length + ' voci · al ' + _ecFmtData(oggiIso) + '</div>';
   html += '</div>';
 
@@ -2402,13 +2433,22 @@ function _ecStampaEstratto() {
       giorni = Math.floor((d2 - d1) / 86400000);
     }
     var statoBadge = '';
-    if (f.stato_pagamento === 'saldata') statoBadge = '<span class="badge badge-grigio">Pagata</span>';
+    // v20260820b — gli ordini non hanno numero ne stato di pagamento:
+    // sono merce consegnata e non ancora fatturata, e va detto cosi.
+    if (f._ordine) statoBadge = '<span class="badge badge-grigio">Da fatturare</span>';
+    else if (f.stato_pagamento === 'saldata') statoBadge = '<span class="badge badge-grigio">Pagata</span>';
     else if (isScad) statoBadge = '<span class="badge badge-giallo">Scaduta ' + giorni + 'gg</span>';
     else if (f.stato_pagamento === 'parziale') statoBadge = '<span class="badge badge-giallo">Parziale</span>';
     else statoBadge = '<span class="badge badge-verde">In termini</span>';
 
     html += '<tr class="' + rowCls + '">';
-    html += '<td class="fmono">' + _ecEsc(f.numero || '') + '/' + _ecEsc(String(f.anno || '')) + '</td>';
+    if (f._ordine) {
+      html += '<td class="fmono" style="color:#666">Ordine'
+           + (f.prodotto ? '<div style="font-size:7.5pt;color:#888">' + _ecEsc(String(f.prodotto)) + (f.litri ? ' · ' + _ecFmt(f.litri) + ' L' : '') + '</div>' : '')
+           + '</td>';
+    } else {
+      html += '<td class="fmono">' + _ecEsc(f.numero || '') + '/' + _ecEsc(String(f.anno || '')) + '</td>';
+    }
     html += '<td>' + _ecFmtData(f.data) + '</td>';
     html += '<td>' + _ecFmtData(f.data_scadenza) + '</td>';
     html += '<td class="num">€ ' + _ecFmtDec(f.importo_totale) + '</td>';
