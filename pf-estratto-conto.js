@@ -1,6 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // v20260801a — lettura di anticipi_sbf_presentazioni paginata (si fermava a mille)
 // PhoenixFuel — Estratto Conto
+// v20260820d — anagrafica cliente: 'zona' e 'prodotti' non esistono (sono
+//              zona_consegna e prodotti_abituali) e facevano fallire l'intera
+//              update, fido massimo compreso
 // v20260820c — correzione: la nota sugli ordini era finita nella tabella
 //              dell'elenco clienti invece che nella stampa, e faceva morire
 //              tutta la pagina con un ReferenceError su ordFilt
@@ -1425,8 +1428,8 @@ function _ecRenderScheda() {
       + _ecCampo('Banca di accredito', 'banca_accredito_id', 'select', banche)
       + _ecCampo('IBAN', 'iban')
       + _ecCampo('Margine obiettivo (€/L)', 'margine_obiettivo', 'number')
-      + _ecCampo('Zona consegna', 'zona')
-      + _ecCampo('Prodotti abituali', 'prodotti')
+      + _ecCampo('Zona consegna', 'zona_consegna')
+      + _ecCampo('Prodotti abituali', 'prodotti_abituali')
       + '</div>';
     h += '<div style="margin-top:14px;background:#EAF3FB;border-left:3px solid #378ADD;border-radius:0 8px 8px 0;padding:11px 13px">'
       + '<div style="font-size:10.5px;color:#0C447C;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Marginalità applicata — come stai lavorando questo cliente</div>';
@@ -1532,7 +1535,10 @@ async function _ecSalvaScheda() {
     fido_massimo: num(c.fido_massimo), giorni_pagamento: num(c.giorni_pagamento),
     modalita_pagamento: c.modalita_pagamento || null, banca_accredito_id: c.banca_accredito_id || null,
     iban: c.iban || null, margine_obiettivo: num(c.margine_obiettivo),
-    zona: c.zona || null, prodotti: c.prodotti || null,
+    // v20260820d — si chiamano zona_consegna e prodotti_abituali. Con i nomi
+    // sbagliati PostgREST rifiutava TUTTA la update, quindi non si salvava
+    // nemmeno il fido massimo, che invece era scritto giusto.
+    zona_consegna: c.zona_consegna || null, prodotti_abituali: c.prodotti_abituali || null,
     note: c.note || null, note_bolla: c.note_bolla || null
   };
   try {
@@ -1574,7 +1580,18 @@ async function _ecSalvaScheda() {
     _ecStato.vista = 'cliente';
     await renderEstrattoConto();
   } catch (e) {
-    toast('Errore salvataggio: ' + ((e && e.message) || e));
+    // v20260820d — "Could not find the 'X' column" e' l'errore che si prende
+    // scrivendo un nome che non esiste: si mostra il nome, invece di lasciare
+    // indovinare quale dei ventotto campi ha fatto saltare tutto.
+    var msg = (e && e.message) || String(e);
+    var col = msg.match(/'([^']+)' column/);
+    if (col) {
+      toast('Salvataggio non riuscito: la colonna "' + col[1] + '" non esiste su clienti. Nessun campo e stato scritto.');
+      console.error('[ec] colonna inesistente in _ecSalvaScheda:', col[1], rec);
+    } else {
+      toast('Errore salvataggio: ' + msg);
+      console.error('[ec] salvataggio scheda cliente', e, rec);
+    }
   }
 }
 
