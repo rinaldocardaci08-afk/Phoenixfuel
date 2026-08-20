@@ -1,6 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // v20260801a — lettura di anticipi_sbf_presentazioni paginata (si fermava a mille)
-// PhoenixFuel — Estratto Conto Clienti (Patch v20260503k)
+// PhoenixFuel — Estratto Conto
+// v20260820a — correzione dell'importo di un pagamento gia registrato, con la
+//              quadratura dell'entrata sul conto mostrata prima di salvare Clienti (Patch v20260503k)
 // ═══════════════════════════════════════════════════════════════════════════
 // Tab "📋 Estratto Conto" dentro sezione Clienti.
 //
@@ -1008,21 +1010,34 @@ async function _ecModificaIncasso(fatturaId) {
   if (!f) return;
   var cliente = (_ecStato.clienti || []).filter(function (c) { return c.id === _ecStato.clienteSelezionato; })[0] || {};
 
-  var righe = [], movMap = {};
+  // v20260820a — servono anche il totale del movimento e quanto di quel
+  // movimento e' imputato su ALTRE fatture: senza, correggendo un importo
+  // si sbilancia l'entrata sul conto senza accorgersene.
+  var righe = [], movMap = {}, altrove = {};
   try {
     var r = await sb.from('foglio_giornale_riconciliazioni')
       .select('id,importo_imputato,movimento_id').eq('fattura_emessa_id', fatturaId);
     if (r.error) throw r.error;
     righe = r.data || [];
     if (righe.length) {
+      var movIds = righe.map(function (x) { return x.movimento_id; });
       var m = await sb.from('foglio_giornale_movimenti')
-        .select('id,data,metodo,banca_id').in('id', righe.map(function (x) { return x.movimento_id; }));
+        .select('id,data,metodo,banca_id,importo,descrizione').in('id', movIds);
+      if (m.error) throw m.error;
       (m.data || []).forEach(function (x) { movMap[x.id] = x; });
+      var tutte = await sb.from('foglio_giornale_riconciliazioni')
+        .select('id,movimento_id,importo_imputato,fattura_emessa_id').in('movimento_id', movIds);
+      if (tutte.error) throw tutte.error;
+      (tutte.data || []).forEach(function (x) {
+        if (x.fattura_emessa_id === fatturaId) return;
+        altrove[x.movimento_id] = (altrove[x.movimento_id] || 0) + Number(x.importo_imputato || 0);
+      });
     }
   } catch (e) {
     toast('Errore: ' + ((e && e.message) || e));
     return;
   }
+  _ecModPag = { fatturaId: fatturaId, righe: righe, movMap: movMap, altrove: altrove, f: f };
 
   var banca = function (id) {
     var b = (_ecStato.banche || []).filter(function (x) { return x.id === id; })[0];
@@ -1039,10 +1054,14 @@ async function _ecModificaIncasso(fatturaId) {
       + righe.map(function (rg) {
           var mv = movMap[rg.movimento_id] || {};
           var b = banca(mv.banca_id);
+          var alt = Number(altrove[rg.movimento_id] || 0);
           return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:0.5px solid var(--border);font-size:12.5px">'
             + '<span style="font-family:var(--font-mono)">' + _ecFmtData(mv.data) + '</span>'
-            + '<span style="flex:1;color:var(--text-muted)">' + _ecEsc(mv.metodo || '') + (b ? ' · ' + _ecEsc(b) : '') + '</span>'
+            + '<span style="flex:1;color:var(--text-muted)">' + _ecEsc(mv.metodo || '') + (b ? ' · ' + _ecEsc(b) : '')
+              + (alt > 0 ? '<div style="font-size:10.5px">entrata di ' + _ecFmtDec(mv.importo) + ', ' + _ecFmtDec(alt) + ' su altre fatture</div>' : '')
+              + '</span>'
             + '<span style="font-family:var(--font-mono);font-weight:700">' + _ecFmtDec(rg.importo_imputato) + '</span>'
+            + '<button onclick="_ecCambiaImportoIncasso(\'' + rg.id + '\')" style="font-size:11px;color:#27500A;border:0.5px solid #BBD79A;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">✎ importo</button>'
             + '<button onclick="_ecCambiaDataIncasso(\'' + rg.movimento_id + '\',\'' + fatturaId + '\')" style="font-size:11px;color:#0C447C;border:0.5px solid #B7CFE4;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">✎ data</button>'
             + '<button onclick="_ecAnnullaIncasso(\'' + rg.id + '\',\'' + rg.movimento_id + '\',\'' + fatturaId + '\')" style="font-size:11px;color:#A32D2D;border:0.5px solid #E4B7B7;background:var(--bg-card,#fff);border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">✕ Annulla</button>'
             + '</div>';
@@ -1059,6 +1078,135 @@ async function _ecModificaIncasso(fatturaId) {
       + 'Fattura anticipata da ' + _ecEsc(ant.istituto) + ': annullando l\'incasso il rientro dell\'anticipo NON viene toccato, si sistema dal Quadro anticipi.</div>';
   }
   apriModal(h);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v20260820a · CORREZIONE DELL'IMPORTO DI UN PAGAMENTO
+// ═══════════════════════════════════════════════════════════════════
+// Il saldo della fattura lo comanda `importo_imputato` sulla
+// riconciliazione: e' li' che si corregge uno sbaglio di battitura.
+// Il punto delicato e' l'entrata sul conto. Un movimento puo' coprire
+// piu' fatture (l'incasso da 10.000 spalmato su tre), quindi cambiare
+// una quota non basta: la somma delle quote non puo' superare
+// l'importo entrato, e se la si abbassa il conto resta gonfio.
+// Percio' qui non si decide da soli. Si mostra la quadratura e si
+// lascia scegliere se adeguare anche il movimento.
+// Sull'anticipo NON si tocca niente: si avvisa e basta, e' Rinaldo a
+// decidere cosa fare in banca.
+var _ecModPag = null;
+
+function _ecCambiaImportoIncasso(ricId) {
+  var S = _ecModPag;
+  if (!S) return;
+  var rg = (S.righe || []).filter(function (x) { return x.id === ricId; })[0];
+  if (!rg) return;
+  var mv = S.movMap[rg.movimento_id] || {};
+  var alt = Number(S.altrove[rg.movimento_id] || 0);
+  var totMov = Number(mv.importo || 0);
+  var attuale = Number(rg.importo_imputato || 0);
+  var libero = Math.round((totMov - alt - attuale) * 100) / 100;
+  S._calc = { mv: mv, alt: alt, attuale: attuale, ricId: ricId };
+
+  var h = '<div style="max-width:460px">';
+  h += '<div style="font-size:16px;font-weight:600;margin-bottom:2px">Correggi l\'importo del pagamento</div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px">fattura ' + _ecEsc(S.f.numero || '')
+     + ' · pagamento del ' + _ecFmtData(mv.data) + '</div>';
+
+  h += '<div style="background:var(--bg);border-radius:8px;padding:10px 13px;margin-bottom:13px;font-size:12px;line-height:1.9">';
+  h += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Entrata sul conto</span><strong style="font-family:var(--font-mono)">' + _ecFmtDec(totMov) + '</strong></div>';
+  if (alt > 0) h += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Imputato su altre fatture</span><span style="font-family:var(--font-mono)">' + _ecFmtDec(alt) + '</span></div>';
+  h += '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-muted)">Su questa fattura, ora</span><span style="font-family:var(--font-mono)">' + _ecFmtDec(attuale) + '</span></div>';
+  h += '<div style="display:flex;justify-content:space-between;border-top:0.5px solid var(--border);margin-top:4px;padding-top:4px"><span style="color:var(--text-muted)">Ancora libero sull\'entrata</span><span style="font-family:var(--font-mono);color:' + (libero > 0.005 ? '#27500A' : 'var(--text-muted)') + '">' + _ecFmtDec(libero) + '</span></div>';
+  h += '</div>';
+
+  h += '<label style="display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:4px">Nuovo importo su questa fattura €</label>';
+  h += '<input id="ec-mod-imp" type="number" step="0.01" min="0" value="' + attuale.toFixed(2) + '" oninput="_ecModImpAggiorna()" '
+     + 'style="width:100%;padding:9px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card,#fff);color:var(--text);font-size:14px;font-family:var(--font-mono);font-weight:700;text-align:right">';
+  h += '<div id="ec-mod-esito" style="font-size:11.5px;line-height:1.6;margin-top:8px"></div>';
+
+  var ant = (_ecStato.anticipiPerFattura || {})[S.fatturaId];
+  if (ant) {
+    h += '<div style="background:#FFF1DC;color:#633806;padding:10px 12px;border-radius:7px;font-size:11.5px;line-height:1.55;margin-top:12px">'
+       + 'Fattura anticipata da <strong>' + _ecEsc(ant.istituto) + '</strong> per ' + _ecFmtDec(ant.anticipato)
+       + '. Correggendo qui il rientro dell\'anticipo <strong>non viene toccato</strong>: se serve, sistemalo dal Quadro anticipi.</div>';
+  }
+
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  h += '<button onclick="_ecModificaIncasso(\'' + S.fatturaId + '\')" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 15px;font-size:12px;cursor:pointer">Indietro</button>';
+  h += '<button id="ec-mod-ok" onclick="_ecSalvaImportoIncasso(\'' + ricId + '\')" class="btn-primary" style="font-size:12px;padding:8px 15px">Salva</button>';
+  h += '</div></div>';
+
+  apriModal(h);
+  _ecModImpAggiorna();
+}
+
+
+// Dice, prima di salvare, che cosa succedera' all'entrata sul conto.
+function _ecModImpAggiorna() {
+  var S = _ecModPag;
+  var el = document.getElementById('ec-mod-esito');
+  var inp = document.getElementById('ec-mod-imp');
+  var btn = document.getElementById('ec-mod-ok');
+  if (!S || !el || !inp) return;
+  var v = parseFloat(inp.value);
+  var stato = S._calc || {};
+  var mv = stato.mv || {}, alt = stato.alt || 0, totMov = Number(mv.importo || 0);
+
+  if (!(v > 0)) {
+    el.innerHTML = '<span style="color:#A32D2D">L\'importo dev\'essere maggiore di zero. Per togliere del tutto il pagamento usa <strong>✕ Annulla</strong>.</span>';
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.4'; }
+    return;
+  }
+  var sommaQuote = Math.round((alt + v) * 100) / 100;
+  var scarto = Math.round((sommaQuote - totMov) * 100) / 100;
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
+  if (Math.abs(scarto) < 0.005) {
+    el.innerHTML = '<span style="color:#27500A">✓ L\'entrata sul conto resta di ' + _ecFmtDec(totMov) + ' e quadra.</span>';
+    S._adegua = false;
+  } else if (scarto > 0) {
+    el.innerHTML = '<span style="color:#854F0B">Le quote arriverebbero a ' + _ecFmtDec(sommaQuote) + ', cioe\' <strong>' + _ecFmtDec(scarto)
+      + ' in piu\'</strong> dell\'entrata registrata. Salvando, l\'entrata sul conto viene <strong>alzata a ' + _ecFmtDec(sommaQuote) + '</strong>.</span>';
+    S._adegua = true;
+  } else {
+    el.innerHTML = '<span style="color:#854F0B">Le quote scenderebbero a ' + _ecFmtDec(sommaQuote) + ', <strong>' + _ecFmtDec(-scarto)
+      + ' in meno</strong> dell\'entrata. Salvando, l\'entrata sul conto viene <strong>abbassata a ' + _ecFmtDec(sommaQuote)
+      + '</strong>: se invece sul conto sono entrati davvero ' + _ecFmtDec(totMov) + ', imputa la differenza a un\'altra fattura.</span>';
+    S._adegua = true;
+  }
+}
+
+
+async function _ecSalvaImportoIncasso(ricId) {
+  var S = _ecModPag;
+  if (!S) return;
+  var inp = document.getElementById('ec-mod-imp');
+  var v = inp ? parseFloat(inp.value) : 0;
+  if (!(v > 0)) { toast('L\'importo dev\'essere maggiore di zero'); return; }
+  v = Math.round(v * 100) / 100;
+
+  var stato = S._calc;
+  if (!stato || !stato.mv || !stato.mv.id) { toast('Riapri la modifica: il pagamento non e piu in memoria'); return; }
+  var mv = stato.mv, alt = stato.alt || 0;
+  var nuovoMov = Math.round((alt + v) * 100) / 100;
+
+  try {
+    var u1 = await sb.from('foglio_giornale_riconciliazioni').update({ importo_imputato: v }).eq('id', ricId);
+    if (u1.error) throw u1.error;
+    if (Math.abs(nuovoMov - Number(mv.importo || 0)) >= 0.005) {
+      var u2 = await sb.from('foglio_giornale_movimenti').update({ importo: nuovoMov }).eq('id', mv.id);
+      if (u2.error) throw u2.error;
+    }
+    if (typeof _auditLog === 'function') {
+      _auditLog('modifica_incasso', 'foglio_giornale_riconciliazioni',
+        'fattura ' + (S.f.numero || '') + ' · quota da ' + _ecFmtDec(stato.attuale) + ' a ' + _ecFmtDec(v));
+    }
+    toast('✓ Importo corretto');
+    chiudiModal();
+    await renderEstrattoConto();
+  } catch (e) {
+    toast('Errore: ' + ((e && e.message) || e));
+  }
 }
 
 async function _ecCambiaDataIncasso(movId, fatturaId) {
