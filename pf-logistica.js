@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica
+// v20260820a — linguetta Presenze autisti agganciata (il modulo vive in
+//              pf-presenze.js: qui c'e solo la chiamata)
 // v20260811a — niente DAS sui carichi in arrivo al nostro deposito e
 //              sull AdBlue: quei documenti li emette il fornitore
 // v20260805e — i rifornimenti al deposito si vedono sempre fra le consegne
@@ -28,6 +30,11 @@ function switchLogisticaTab(btn) {
   // Patch v20260501m: ricarica dashboard quando si apre la linguetta Report Vettori
   if (btn.dataset.tab === 'log-report-vettori' && typeof caricaDashboardVettori === 'function') {
     try { caricaDashboardVettori(); } catch (e) { console.warn('caricaDashboardVettori errore:', e); }
+  }
+  // v20260820a — presenze autisti (pf-presenze.js). Si carica solo aprendo
+  // la linguetta: la libreria di lettura Excel non pesa sul resto.
+  if (btn.dataset.tab === 'log-presenze' && typeof caricaPresenze === 'function') {
+    try { caricaPresenze(); } catch (e) { console.warn('caricaPresenze errore:', e); }
   }
 }
 
