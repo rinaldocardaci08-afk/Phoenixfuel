@@ -1,4 +1,5 @@
 // PhoenixFuel — Logistica
+// v20260820b — linguetta Consumi mezzi (pf-mezzi-consumi.js)
 // v20260820a — linguetta Presenze autisti agganciata (il modulo vive in
 //              pf-presenze.js: qui c'e solo la chiamata)
 // v20260811a — niente DAS sui carichi in arrivo al nostro deposito e
@@ -35,6 +36,10 @@ function switchLogisticaTab(btn) {
   // la linguetta: la libreria di lettura Excel non pesa sul resto.
   if (btn.dataset.tab === 'log-presenze' && typeof caricaPresenze === 'function') {
     try { caricaPresenze(); } catch (e) { console.warn('caricaPresenze errore:', e); }
+  }
+  // v20260820b — consumi mezzi propri (pf-mezzi-consumi.js)
+  if (btn.dataset.tab === 'log-consumi' && typeof caricaMezziConsumi === 'function') {
+    try { caricaMezziConsumi(); } catch (e) { console.warn('caricaMezziConsumi errore:', e); }
   }
 }
 

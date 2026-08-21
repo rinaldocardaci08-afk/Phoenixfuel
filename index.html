@@ -2687,6 +2687,7 @@
           <button class="btn-primary log-tab" data-tab="log-vettori" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏭 Crea Vettori</button>
           <button class="btn-primary log-tab" data-tab="log-report-vettori" onclick="switchLogisticaTab(this); if (typeof caricaReportVettori === 'function') caricaReportVettori();" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📊 Report vettori</button>
           <button class="btn-primary log-tab" data-tab="log-presenze" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🕒 Presenze autisti</button>
+          <button class="btn-primary log-tab" data-tab="log-consumi" onclick="switchLogisticaTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">⛽ Consumi mezzi</button>
         </div>
 
         <!-- PANEL: CARICHI -->
@@ -2819,6 +2820,10 @@
 
         <div class="log-panel" id="log-presenze" style="display:none">
           <div id="pr-contenuto"><div class="loading">Caricamento...</div></div>
+        </div>
+
+        <div class="log-panel" id="log-consumi" style="display:none">
+          <div id="mc-contenuto"><div class="loading">Caricamento...</div></div>
         </div>
 
       </div>
@@ -3186,8 +3191,9 @@
 <script src="pf-movimenti-totali.js?v=20260526a"></script>
 <script src="pf-movimenti-dettaglio.js?v=20260716a"></script>
 <script src="stz-sortable.js?v=20260411g"></script>
-<script src="pf-logistica.js?v=20260820a"></script>
-<script src="pf-presenze.js?v=20260820a"></script>
+<script src="pf-logistica.js?v=20260820b"></script>
+<script src="pf-presenze.js?v=20260820b"></script>
+<script src="pf-mezzi-consumi.js?v=20260820a"></script>
 <script src="pf-preventivo.js?v=20260805g"></script>
 <script src="pf-vettori.js?v=20260804b"></script>
 <script src="pf-aggiornamenti.js?v=20260804a"></script>
