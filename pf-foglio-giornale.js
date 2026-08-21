@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260821c — correzione: il ramo delle scadenze usciva con un return e il
+//              modale non veniva mai inserito nella pagina
 // v20260821b — il Paga apre il modale GIA COMPILATO: fornitore, fatture e
 //              importo dentro, niente scelta del modo, restano conto e metodo
 // v20260821a — scadenze fornitori nelle caselle dei giorni: etichetta colorata
@@ -872,7 +874,10 @@ function _fgRenderModale() {
   if (m.daScadenza) {
     html += '<div id="fg-modo-content">' + _fgRenderModoScadenza() + '</div>';
     html += _fgRenderModaleCoda();
-    return html;
+    // _fgRenderModale NON restituisce l'html: lo inserisce. Uscendo con un
+    // return il modale veniva costruito e buttato via, e non compariva nulla.
+    document.body.insertAdjacentHTML('beforeend', html);
+    return;
   }
 
   function modoTab(letterId, label) {
