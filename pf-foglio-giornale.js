@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260821b — il Paga apre il modale GIA COMPILATO: fornitore, fatture e
+//              importo dentro, niente scelta del modo, restano conto e metodo
 // v20260821a — scadenze fornitori nelle caselle dei giorni: etichetta colorata
 //              col totale per fornitore, fatture del giorno selezionato sotto,
 //              selezione multipla di un solo fornitore e pulsante Paga che
@@ -447,32 +449,41 @@ function _fgScadBarra() {
 // imputate, importo compilato. Restano modalita' e banca.
 async function _fgScadPaga() {
   if (!_fgScadFornitore) return;
-  var sel = [], tot = 0;
+  var sel = [], tot = 0, imput = {};
   Object.keys(_fgScadenze).forEach(function (iso) {
     _fgScadenze[iso].forEach(function (f) {
-      if (_fgScadSel[f.id]) { sel.push(f); tot += Number(f.saldo_residuo || 0); }
+      if (!_fgScadSel[f.id]) return;
+      sel.push(f);
+      var v = Math.round(Number(f.saldo_residuo) * 100) / 100;
+      imput['fr:' + f.id] = v;
+      tot += v;
     });
   });
   if (!sel.length) return;
+  tot = Math.round(tot * 100) / 100;
 
+  // v20260821b — tutto passa dal preset: fornitore, fatture e imputazioni
+  // sono dentro _fgModale PRIMA che il modale venga disegnato. Prima li
+  // scrivevo dopo, e il disegno li spazzava via lasciando il modale vuoto.
   var iso = _fgStato.giornoSelezionato || _fgDateToIso(new Date());
-  fgApriModaleUscita(iso);
-  _fgModale.modo = 'A';
-  await _fgSelezionaContraente(sel[0].fornitore_id || null, _fgScadFornitore, 'fornitore');
+  await _fgApriModale(iso, 'uscita', {
+    modo: 'A',
+    daScadenza: true,
+    scadenzeScelte: sel,
+    contraenteSelezionato: { id: sel[0].fornitore_id || null, nome: _fgScadFornitore, tipo: 'fornitore' },
+    fattureRicevuteTrovate: sel,
+    imputazioni: imput
+  });
 
-  // Imputa le fatture scelte e scrive l'importo totale. La chiave e' 'fr:',
-  // la stessa che usa _fgImputaFatturaRicevuta: con un prefisso diverso il
-  // modale mostrerebbe zero e la quadratura non tornerebbe.
-  _fgModale.imputazioni = {};
-  sel.forEach(function (f) { _fgModale.imputazioni['fr:' + f.id] = Math.round(Number(f.saldo_residuo) * 100) / 100; });
   var elImp = document.getElementById('fg-mod-importo');
-  if (elImp) elImp.value = (Math.round(tot * 100) / 100).toFixed(2);
-  var elFatt = document.getElementById('fg-fatture-trovate');
-  if (elFatt && typeof _fgRenderListaFattureRicevute === 'function') elFatt.innerHTML = _fgRenderListaFattureRicevute();
+  if (elImp) elImp.value = tot.toFixed(2);
+  // la descrizione la compone gia' _fgConfermaMovimento dalle imputazioni:
+  // nel modale di inserimento un campo descrizione non esiste
   _fgAggiornaStatusModale();
 
   _fgScadSel = {}; _fgScadFornitore = null;
 }
+
 
 
 function _fgRenderCalendarioSettimana(p, perGiorno) {
@@ -771,7 +782,7 @@ async function fgApriModaleUscita(iso) {
 }
 
 
-async function _fgApriModale(iso, tipo) {
+async function _fgApriModale(iso, tipo, preset) {
   // Reset stato
   _fgModale = {
     data: iso,
@@ -784,6 +795,12 @@ async function _fgApriModale(iso, tipo) {
     imputazioni: {},
     anticipiPerFattura: {}
   };
+  // v20260821b — arrivando da una scadenza il fornitore e le fatture sono
+  // gia' scelti: si portano dentro PRIMA del disegno, altrimenti il render
+  // successivo li cancellava. Era il motivo per cui il modale si apriva vuoto.
+  if (preset) {
+    Object.keys(preset).forEach(function (k) { _fgModale[k] = preset[k]; });
+  }
 
   // Carica banche se non in cache
   if (!_fgListaBanche) {
@@ -850,6 +867,14 @@ function _fgRenderModale() {
   var labelSottoTitolo = m.tipo === 'entrata' ? 'A copertura di...' : 'A pagamento di...';
   html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:8px;font-weight:500">' + labelSottoTitolo + '</div>';
 
+  // v20260821b — dalle scadenze le fatture le hai gia' scelte: mostrare
+  // "cerca fattura" o "cumulativo" vorrebbe dire rifare la stessa scelta.
+  if (m.daScadenza) {
+    html += '<div id="fg-modo-content">' + _fgRenderModoScadenza() + '</div>';
+    html += _fgRenderModaleCoda();
+    return html;
+  }
+
   function modoTab(letterId, label) {
     var attivo = m.modo === letterId;
     return '<div onclick="_fgCambiaModo(\'' + letterId + '\')" style="padding:6px 12px;font-size:12px;border-radius:4px;cursor:pointer;background:' +
@@ -870,16 +895,51 @@ function _fgRenderModale() {
   html += _fgRenderModoContent();
   html += '</div>';
 
-  // Footer azioni
-  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding-top:14px;border-top:0.5px solid var(--border)">';
+  html += _fgRenderModaleCoda();
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+
+// Footer del modale: usato sia dal percorso normale sia da quello che arriva
+// dalle scadenze, cosi i due non possono divergere.
+function _fgRenderModaleCoda() {
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding-top:14px;border-top:0.5px solid var(--border)">';
   html += '<div id="fg-mod-status" style="font-size:11px;color:var(--text-muted)"></div>';
   html += '<div style="display:flex;gap:8px">';
   html += '<button onclick="_fgChiudiModale()" style="font-size:12px;padding:6px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Annulla</button>';
   html += '<button onclick="_fgConfermaMovimento()" style="font-size:12px;padding:6px 14px;background:#185FA5;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500">Conferma e registra</button>';
   html += '</div></div>';
-
   html += '</div></div>';
-  document.body.insertAdjacentHTML('beforeend', html);
+  return html;
+}
+
+
+// Vista di pagamento che arriva dalle scadenze: le fatture sono gia' scelte,
+// si vedono e basta. Nessuna ricerca, nessun modo da scegliere.
+function _fgRenderModoScadenza() {
+  var m = _fgModale;
+  var righe = m.scadenzeScelte || [];
+  var tot = 0;
+  righe.forEach(function (f) { tot += Number(_fgModale.imputazioni['fr:' + f.id] || 0); });
+  var col = _fgColoreForn(m.contraenteSelezionato ? m.contraenteSelezionato.nome : '', 0);
+
+  var h = '<div style="border:0.5px solid ' + _fgRgba(col, 0.4) + ';border-radius:7px;overflow:hidden;margin-bottom:10px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;background:' + _fgRgba(col, 0.14) + ';padding:7px 12px">'
+     + '<span style="font-size:12.5px;font-weight:700;color:' + col + '">'
+       + esc(m.contraenteSelezionato ? m.contraenteSelezionato.nome : '—') + '</span>'
+     + '<span style="font-size:12.5px;font-weight:700;color:' + col + ';font-family:var(--font-mono)">' + _fgFmtImporto(tot) + ' €</span></div>';
+  righe.forEach(function (f) {
+    h += '<div style="display:flex;align-items:center;gap:9px;padding:7px 12px;border-top:0.5px solid ' + _fgRgba(col, 0.22) + '">'
+       + '<span style="flex:1;min-width:0;font-size:12.5px">' + esc(f.numero_fattura || 'senza numero')
+         + '<span style="color:var(--text-muted);font-size:11px"> · del ' + _fgFmtData(f.data_fattura)
+         + ' · scade ' + _fgFmtData(f.data_scadenza) + '</span></span>'
+       + '<span style="font-size:12.5px;font-family:var(--font-mono)">' + _fgFmtImporto(f.saldo_residuo) + '</span></div>';
+  });
+  h += '</div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);line-height:1.6">'
+     + righe.length + (righe.length === 1 ? ' fattura' : ' fatture') + ' scelte dalle scadenze. '
+     + 'Restano da indicare <strong>conto</strong> e <strong>metodo</strong> qui sopra.</div>';
+  return h;
 }
 
 
