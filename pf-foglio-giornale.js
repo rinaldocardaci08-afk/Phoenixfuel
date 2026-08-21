@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260821a — scadenze fornitori nelle caselle dei giorni: etichetta colorata
+//              col totale per fornitore, fatture del giorno selezionato sotto,
+//              selezione multipla di un solo fornitore e pulsante Paga che
+//              apre il modale uscite gia compilato
 // v20260819b — 🏦 accanto al numero delle fatture anticipate, con la banca
 //   sotto; contatore "da assegnare" popolato subito alla scelta del cliente
 // v20260819a — INCASSO CLIENTE CON FLAG E STORNO ANTICIPO
@@ -174,6 +178,7 @@ async function caricaFoglioGiornale() {
 
   var p = _fgCalcolaPeriodo();
   var movimenti = await _fgCaricaMovimenti(p.daISO, p.aISO);
+  await _fgCaricaScadenze(p.daISO, p.aISO);   // v20260821a
 
   // Aggrega per giorno
   var perGiorno = {};
@@ -206,9 +211,14 @@ async function caricaFoglioGiornale() {
   }
 
   // Dettaglio giorno selezionato
+  // v20260821a — scadenze del giorno scelto, sopra al dettaglio movimenti
+  html += _fgRenderScadenzeGiorno(_fgStato.giornoSelezionato);
   html += _fgRenderDettaglioGiorno(perGiorno);
 
   el.innerHTML = html;
+  var barra = document.getElementById('fg-scad-barra');   // v20260821a
+  if (barra) barra.innerHTML = _fgScadBarra();
+
 }
 
 
@@ -250,6 +260,221 @@ function _fgRenderHeader(p) {
 // ────────────────────────────────────────────────────────────────────────
 // Render calendario SETTIMANA (7 giorni in fila)
 // ────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// v20260821a · SCADENZE FORNITORI DENTRO IL FOGLIO GIORNALE
+// ══════════════════════════════════════════════════════════════════════════
+// Le fatture da pagare si vedevano solo in Finanze: per pagarle bisognava
+// uscire, cercare il fornitore e ritrovare la fattura a mano. Ora stanno
+// nelle caselle dei giorni, e il pagamento parte da qui.
+//
+// COSA C'E' NELLA CASELLA — solo l'etichetta colorata del fornitore col
+// totale che scade quel giorno. Le fatture NON si vedono li': la casella
+// deve restare compatta come adesso.
+// COSA C'E' SOTTO — selezionando un giorno, le sue fatture raggruppate per
+// fornitore, con la spunta.
+//
+// UN FORNITORE PER VOLTA: un bonifico va a un fornitore solo. Appena si
+// spunta una fattura Eni, i gruppi degli altri si bloccano. Meglio
+// impedirlo prima che dare un errore dopo.
+//
+// I dati vengono da v_fatture_ricevute_saldi, la stessa vista che il modale
+// delle uscite usa gia' in modo A: nessuna fonte nuova.
+// I colori da _finColoreFornitore (pf-finanze.js), cosi un fornitore ha lo
+// stesso colore qui e nel calendario delle finanze.
+var _fgScadenze = {};          // { 'YYYY-MM-DD': [righe] }
+var _fgScadSel = {};           // { idFattura: true }
+var _fgScadFornitore = null;   // fornitore attualmente selezionato
+
+function _fgColoreForn(nome, i) {
+  if (typeof _finColoreFornitore === 'function') {
+    var c = _finColoreFornitore(nome, null, i);
+    if (c && c.bar) return c.bar;
+  }
+  var tav = ['#A32D2D', '#185FA5', '#639922', '#BA7517', '#26215C', '#7B4397'];
+  var s = 0;
+  String(nome || '').split('').forEach(function (ch) { s += ch.charCodeAt(0); });
+  return tav[s % tav.length];
+}
+
+async function _fgCaricaScadenze(daISO, aISO) {
+  _fgScadenze = {};
+  try {
+    var r = await sb.from('v_fatture_ricevute_saldi')
+      .select('id,fornitore_id,fornitore_nome,numero_fattura,data_fattura,data_scadenza,saldo_residuo,stato_pagamento')
+      .gt('saldo_residuo', 0.01)
+      .gte('data_scadenza', daISO).lte('data_scadenza', aISO)
+      .order('data_scadenza');
+    if (r.error) throw r.error;
+    (r.data || []).forEach(function (f) {
+      if (!f.data_scadenza) return;
+      (_fgScadenze[f.data_scadenza] = _fgScadenze[f.data_scadenza] || []).push(f);
+    });
+  } catch (e) {
+    // fallire aperto: senza scadenze il foglio giornale funziona lo stesso
+    console.warn('[fg] scadenze non lette:', (e && e.message) || e);
+  }
+}
+
+// Raggruppa le fatture di un giorno per fornitore, nell'ordine dell'importo.
+function _fgScadPerFornitore(iso) {
+  var righe = _fgScadenze[iso] || [];
+  var per = {}, ordine = [];
+  righe.forEach(function (f) {
+    var k = f.fornitore_nome || '—';
+    if (!per[k]) { per[k] = { nome: k, id: f.fornitore_id, righe: [], totale: 0 }; ordine.push(k); }
+    per[k].righe.push(f);
+    per[k].totale += Number(f.saldo_residuo || 0);
+  });
+  return ordine.map(function (k, i) {
+    per[k].colore = _fgColoreForn(k, i);
+    return per[k];
+  }).sort(function (a, b) { return b.totale - a.totale; });
+}
+
+// Etichette nella casella del giorno: nome del fornitore e totale, nient'altro.
+function _fgScadEtichette(iso, compatto) {
+  var gruppi = _fgScadPerFornitore(iso);
+  if (!gruppi.length) return '';
+  var h = '<div style="margin-top:5px">';
+  gruppi.forEach(function (g) {
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;'
+       + 'background:' + _fgRgba(g.colore, 0.14) + ';border-left:3px solid ' + g.colore + ';'
+       + 'border-radius:0 3px 3px 0;padding:' + (compatto ? '1px 4px' : '2px 5px') + ';margin-bottom:2px">'
+       + '<span style="font-size:' + (compatto ? '9px' : '10px') + ';font-weight:700;color:' + g.colore
+         + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(g.nome) + '</span>'
+       + '<span style="font-size:' + (compatto ? '9px' : '10px') + ';font-weight:700;color:' + g.colore
+         + ';font-family:var(--font-mono);white-space:nowrap">' + _fgFmtImporto(g.totale) + '</span></div>';
+  });
+  h += '</div>';
+  return h;
+}
+
+function _fgRgba(hex, a) {
+  var m = String(hex).replace('#', '');
+  if (m.length === 3) m = m[0] + m[0] + m[1] + m[1] + m[2] + m[2];
+  var n = parseInt(m, 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+}
+
+
+// ── Blocco sotto: le fatture del giorno scelto ────────────────────────────
+function _fgRenderScadenzeGiorno(iso) {
+  var gruppi = _fgScadPerFornitore(iso);
+  if (!gruppi.length) return '';
+  var d = _fgIsoToDate(iso);
+  var label = _FG_GIORNI_FULL[d.getDay()] + ' ' + d.getDate() + ' ' + _FG_MESI[d.getMonth()] + ' ' + d.getFullYear();
+
+  var h = '<div style="border-top:0.5px solid var(--border);padding-top:14px;margin-bottom:14px">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:2px">Scadenze fornitori · ' + esc(label) + '</div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:11px">'
+     + 'Spunta le fatture da pagare. Un fornitore per volta: bonifici diversi non si uniscono.</div>';
+
+  gruppi.forEach(function (g) {
+    var bloccato = _fgScadFornitore && _fgScadFornitore !== g.nome;
+    h += '<div style="border:0.5px solid ' + _fgRgba(g.colore, 0.4) + ';border-radius:7px;overflow:hidden;margin-bottom:9px'
+       + (bloccato ? ';opacity:0.45' : '') + '">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;background:' + _fgRgba(g.colore, 0.14) + ';padding:6px 11px">'
+       + '<span style="font-size:12.5px;font-weight:700;color:' + g.colore + '">' + esc(g.nome) + '</span>'
+       + '<span style="font-size:12.5px;font-weight:700;color:' + g.colore + ';font-family:var(--font-mono)">' + _fgFmtImporto(g.totale) + ' €</span></div>';
+    g.righe.forEach(function (f) {
+      var sel = !!_fgScadSel[f.id];
+      h += '<label style="display:flex;align-items:center;gap:9px;padding:7px 11px;border-top:0.5px solid ' + _fgRgba(g.colore, 0.22) + ';'
+         + (bloccato ? 'cursor:not-allowed' : 'cursor:pointer') + '">'
+         + '<input type="checkbox"' + (sel ? ' checked' : '') + (bloccato ? ' disabled' : '')
+           + ' onchange="_fgScadSpunta(\'' + f.id + '\',\'' + esc(g.nome).replace(/'/g, "\\'") + '\',this.checked)" style="flex:none">'
+         + '<span style="flex:1;min-width:0;font-size:12.5px">' + esc(f.numero_fattura || 'senza numero')
+           + '<span style="color:var(--text-muted);font-size:11px"> · del ' + _fgFmtData(f.data_fattura)
+           + (f.stato_pagamento === 'parziale' ? ' · residuo' : '') + '</span></span>'
+         + '<span style="font-size:12.5px;font-family:var(--font-mono)">' + _fgFmtImporto(f.saldo_residuo) + '</span></label>';
+    });
+    h += '</div>';
+  });
+
+  if (_fgScadFornitore) {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:-3px">Hai selezionato fatture '
+       + esc(_fgScadFornitore) + ': gli altri fornitori restano bloccati finché non deselezioni.</div>';
+  }
+
+  h += '<div id="fg-scad-barra"></div>';
+  h += '</div>';
+  return h;
+}
+
+function _fgScadSpunta(id, fornitore, spuntato) {
+  if (spuntato) { _fgScadSel[id] = true; _fgScadFornitore = fornitore; }
+  else {
+    delete _fgScadSel[id];
+    if (!Object.keys(_fgScadSel).length) _fgScadFornitore = null;
+  }
+  caricaFoglioGiornale();
+}
+
+function _fgScadAnnulla() {
+  _fgScadSel = {}; _fgScadFornitore = null;
+  caricaFoglioGiornale();
+}
+
+// Barra in fondo: totale delle fatture SPUNTATE, non del fornitore intero.
+function _fgScadBarra() {
+  var ids = Object.keys(_fgScadSel);
+  if (!ids.length || !_fgScadFornitore) return '';
+  var tot = 0, n = 0, scad = null;
+  Object.keys(_fgScadenze).forEach(function (iso) {
+    _fgScadenze[iso].forEach(function (f) {
+      if (!_fgScadSel[f.id]) return;
+      tot += Number(f.saldo_residuo || 0); n++;
+      scad = f.data_scadenza;
+    });
+  });
+  if (!n) return '';
+  var col = _fgColoreForn(_fgScadFornitore, 0);
+  var h = '<div style="margin-top:11px;background:var(--bg-card);border:1.5px solid ' + col + ';border-radius:9px;'
+        + 'padding:10px 14px;display:flex;align-items:center;gap:13px;flex-wrap:wrap">';
+  h += '<span style="width:11px;height:11px;border-radius:3px;background:' + col + ';flex:none"></span>';
+  h += '<div style="flex:1;min-width:150px"><div style="font-size:12.5px;font-weight:600">Totale fatture ' + esc(_fgScadFornitore) + '</div>'
+     + '<div style="font-size:11px;color:var(--text-muted)">' + n + (n === 1 ? ' fattura' : ' fatture')
+     + (scad ? ' · scadenza ' + _fgFmtData(scad) : '') + '</div></div>';
+  h += '<div style="font-size:17px;font-weight:700;font-family:var(--font-mono)">' + _fgFmtImporto(tot) + ' €</div>';
+  if (_fgPuoRegistrare()) {
+    h += '<button onclick="_fgScadPaga()" class="btn-primary" style="font-size:12.5px;padding:7px 20px">Paga</button>';
+  }
+  h += '<button onclick="_fgScadAnnulla()" style="font-size:12.5px;padding:7px 14px;background:transparent;border:0.5px solid var(--border);color:var(--text);border-radius:5px;cursor:pointer">Annulla</button>';
+  h += '</div>';
+  return h;
+}
+
+// Apre il modale delle uscite gia' pronto: fornitore scelto, fatture
+// imputate, importo compilato. Restano modalita' e banca.
+async function _fgScadPaga() {
+  if (!_fgScadFornitore) return;
+  var sel = [], tot = 0;
+  Object.keys(_fgScadenze).forEach(function (iso) {
+    _fgScadenze[iso].forEach(function (f) {
+      if (_fgScadSel[f.id]) { sel.push(f); tot += Number(f.saldo_residuo || 0); }
+    });
+  });
+  if (!sel.length) return;
+
+  var iso = _fgStato.giornoSelezionato || _fgDateToIso(new Date());
+  fgApriModaleUscita(iso);
+  _fgModale.modo = 'A';
+  await _fgSelezionaContraente(sel[0].fornitore_id || null, _fgScadFornitore, 'fornitore');
+
+  // Imputa le fatture scelte e scrive l'importo totale. La chiave e' 'fr:',
+  // la stessa che usa _fgImputaFatturaRicevuta: con un prefisso diverso il
+  // modale mostrerebbe zero e la quadratura non tornerebbe.
+  _fgModale.imputazioni = {};
+  sel.forEach(function (f) { _fgModale.imputazioni['fr:' + f.id] = Math.round(Number(f.saldo_residuo) * 100) / 100; });
+  var elImp = document.getElementById('fg-mod-importo');
+  if (elImp) elImp.value = (Math.round(tot * 100) / 100).toFixed(2);
+  var elFatt = document.getElementById('fg-fatture-trovate');
+  if (elFatt && typeof _fgRenderListaFattureRicevute === 'function') elFatt.innerHTML = _fgRenderListaFattureRicevute();
+  _fgAggiornaStatusModale();
+
+  _fgScadSel = {}; _fgScadFornitore = null;
+}
+
+
 function _fgRenderCalendarioSettimana(p, perGiorno) {
   var oggiISO = _fgDateToIso(new Date());
   var lun = _fgIsoToDate(p.daISO);
@@ -281,6 +506,7 @@ function _fgRenderCalendarioSettimana(p, perGiorno) {
     if (dati.totEnt === 0 && dati.totUsc === 0) {
       html += '<div style="font-size:10px;color:var(--text-muted);font-style:italic">—</div>';
     }
+    html += _fgScadEtichette(iso, false);   // v20260821a
     html += '</div>';        // chiude la cella del giorno
   }
   html += '</div></div>';   // chiude griglia + contenitore scorrevole
@@ -331,6 +557,7 @@ function _fgRenderCalendarioMese(p, perGiorno) {
     if (dati.totUsc > 0) {
       html += '<div style="font-size:9px;color:#501313;font-family:var(--font-mono)">−' + (Math.round(dati.totUsc / 1000) > 0 ? Math.round(dati.totUsc / 100) / 10 + 'k' : Math.round(dati.totUsc)) + '</div>';
     }
+    html += _fgScadEtichette(iso, true);   // v20260821a
     html += '</div>';
     d.setDate(d.getDate() + 1);
     // Stop dopo l'ultima domenica che contiene l'ultimo del mese
