@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Consumi mezzi propri
+// v20260820c — tabelle rifatte: intestazioni in grassetto, linee fra i gruppi
+//              di colonne, righe alternate, km in blu e litri in ambra
 // v20260820b — i tre mezzi sono CB801LF, GJ234ZE e GJ263ZE, filtrati per
 //              targa; celle a tre per riga come i trimestri
 // v20260820a — km e litri per mezzo e per mese, come nel foglio Excel:
@@ -58,7 +60,11 @@ function _mcNomeMezzo(m) {
 }
 function _mcMezzoCella(m) {
   var d = (m.descrizione && String(m.descrizione).trim());
-  if (!d) return '<span style="font-weight:600">' + esc(m.targa || '—') + '</span>';
+  // se la descrizione manca o coincide con la targa, la targa si scrive una
+  // volta sola: prima usciva "GJ263ZE GJ263ZE"
+  if (!d || d.toUpperCase().replace(/\s/g, '') === String(m.targa || '').toUpperCase().replace(/\s/g, '')) {
+    return '<span style="font-weight:600">' + esc(m.targa || '—') + '</span>';
+  }
   return '<span style="font-weight:600">' + esc(d) + '</span>'
     + '<div style="font-size:9.5px;color:var(--text-muted);font-family:var(--font-mono);line-height:1.2">' + esc(m.targa || '') + '</div>';
 }
@@ -179,6 +185,27 @@ function _mcRender() {
   var T = _mcTotaliAnno();
   var h = '';
 
+  // v20260820c — stile della sezione: intestazioni in grassetto, linee che
+  // separano i gruppi di colonne, righe alternate. Senza, le colonne di km e
+  // litri si confondevano.
+  h += '<style>'
+     + '.mc-t{width:100%;border-collapse:collapse}'
+     + '.mc-t th{font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px;'
+       + 'color:#26215C;background:rgba(38,33,92,0.07);padding:7px 8px;text-align:right;white-space:nowrap}'
+     + '.mc-t th.l,.mc-t td.l{text-align:left}'
+     + '.mc-t td{padding:6px 8px;text-align:right;font-size:12.5px}'
+     + '.mc-t .sep{border-left:1px solid rgba(38,33,92,0.16)}'
+     + '.mc-t tbody tr:nth-child(even){background:rgba(38,33,92,0.025)}'
+     + '.mc-t tbody tr{border-top:0.5px solid var(--border)}'
+     + '.mc-t tfoot td{border-top:2px solid #26215C;font-weight:700;font-size:13px;padding:9px 8px;background:rgba(38,33,92,0.05)}'
+     + '.mc-km{font-family:var(--font-mono);color:#185FA5}'
+     + '.mc-li{font-family:var(--font-mono);color:#854F0B}'
+     + '.mc-md{font-family:var(--font-mono);font-weight:600}'
+     + '.mc-in{width:100%;text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:3px 5px;'
+       + 'border:0.5px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text)}'
+     + '.mc-in:focus{outline:none;border-color:#26215C;box-shadow:0 0 0 2px rgba(38,33,92,0.12)}'
+     + '</style>';
+
   // ── intestazione e anno ──
   h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">';
   h += '<div><div style="font-size:16px;font-weight:600">Consumi mezzi propri</div>'
@@ -229,12 +256,13 @@ function _mcRender() {
 
   // ── riepilogo anno per mezzo ──
   h += '<div class="card" style="padding:14px 16px;margin-bottom:14px">';
-  h += '<div style="font-size:13px;font-weight:600;margin-bottom:9px">Totale ' + _mcAnno + ' per mezzo</div>';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
-  h += '<tr style="color:var(--text-muted);text-align:right;font-size:11px">'
-     + '<th style="text-align:left;padding:5px 6px;font-weight:500">Mezzo</th>'
-     + '<th style="padding:5px 6px;font-weight:500">Km</th><th style="padding:5px 6px;font-weight:500">Litri</th>'
-     + '<th style="padding:5px 6px;font-weight:500">Km/litro</th><th style="padding:5px 6px;font-weight:500">% km</th></tr>';
+  h += '<div style="font-size:13.5px;font-weight:700;margin-bottom:10px;color:#26215C">Totale ' + _mcAnno + ' per mezzo</div>';
+  h += '<table class="mc-t"><thead><tr>'
+     + '<th class="l">Mezzo</th>'
+     + '<th class="sep">Km percorsi</th>'
+     + '<th class="sep">Litri</th>'
+     + '<th class="sep">Km / litro</th>'
+     + '<th class="sep">% sui km</th></tr></thead><tbody>';
   _mcMezzi.forEach(function (mz) {
     var km = 0, li = 0;
     for (var m3 = 1; m3 <= 12; m3++) {
@@ -242,23 +270,27 @@ function _mcRender() {
       if (!d) continue;
       km += d.km || 0; li += d.litri || 0;
     }
-    h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
-       + '<td style="text-align:left;padding:6px">' + esc(_mcNomeMezzo(mz))
-         + ' <span style="font-size:10.5px;color:var(--text-muted);font-family:var(--font-mono)">' + esc(mz.targa || '') + '</span></td>'
-       + '<td style="padding:6px;font-family:var(--font-mono)">' + _mcN(km) + '</td>'
-       + '<td style="padding:6px;font-family:var(--font-mono)">' + _mcN(li) + '</td>'
-       + '<td style="padding:6px;font-family:var(--font-mono)">' + (li ? _mcN(km / li, 2) : '—') + '</td>'
-       + '<td style="padding:6px;font-family:var(--font-mono);color:var(--text-muted)">' + (T.km ? _mcN(km / T.km * 100, 1) + '%' : '—') + '</td></tr>';
+    var pct = T.km ? (km / T.km * 100) : 0;
+    h += '<tr>'
+       + '<td class="l">' + _mcMezzoCella(mz) + '</td>'
+       + '<td class="sep mc-km">' + _mcN(km) + '</td>'
+       + '<td class="sep mc-li">' + _mcN(li) + '</td>'
+       + '<td class="sep mc-md">' + (li ? _mcN(km / li, 2) : '—') + '</td>'
+       + '<td class="sep" style="padding-right:8px">'
+         + '<div style="display:flex;align-items:center;gap:7px;justify-content:flex-end">'
+         + '<div style="width:54px;height:6px;background:rgba(38,33,92,0.10);border-radius:3px;overflow:hidden">'
+           + '<div style="width:' + Math.min(100, pct).toFixed(0) + '%;height:6px;background:#26215C"></div></div>'
+         + '<span style="font-family:var(--font-mono);min-width:38px">' + (T.km ? _mcN(pct, 1) + '%' : '—') + '</span></div></td>'
+       + '</tr>';
   });
-  h += '<tr style="border-top:0.5px solid var(--border-strong);text-align:right;font-weight:700">'
-     + '<td style="text-align:left;padding:7px 6px">Totale</td>'
-     + '<td style="padding:7px 6px;font-family:var(--font-mono)">' + _mcN(T.km) + '</td>'
-     + '<td style="padding:7px 6px;font-family:var(--font-mono)">' + _mcN(T.litri) + '</td>'
-     + '<td style="padding:7px 6px;font-family:var(--font-mono)">' + (T.litri ? _mcN(T.km / T.litri, 2) : '—') + '</td>'
-     + '<td style="padding:7px 6px"></td></tr>';
-  h += '</table>';
-  h += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Media mensile '
-     + _mcN(T.km / 12) + ' km e ' + _mcN(T.litri / 12) + ' litri.</div>';
+  h += '</tbody><tfoot><tr>'
+     + '<td class="l">Totale</td>'
+     + '<td class="sep mc-km">' + _mcN(T.km) + '</td>'
+     + '<td class="sep mc-li">' + _mcN(T.litri) + '</td>'
+     + '<td class="sep">' + (T.litri ? _mcN(T.km / T.litri, 2) : '—') + '</td>'
+     + '<td class="sep"></td></tr></tfoot></table>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:9px">Media mensile <strong style="color:var(--text);font-family:var(--font-mono)">'
+     + _mcN(T.km / 12) + '</strong> km e <strong style="color:var(--text);font-family:var(--font-mono)">' + _mcN(T.litri / 12) + '</strong> litri.</div>';
   h += '</div>';
 
   // ── fatture Cadogi e recuperi, per mese ──
@@ -280,38 +312,35 @@ function _mcCellaMese(mese) {
 
   var h = '<div class="card" style="padding:11px 13px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-  h += '<div style="font-size:12.5px;font-weight:600">' + MC_MESI[mese - 1] + '</div>';
+  h += '<div style="font-size:13px;font-weight:700;color:#26215C">' + MC_MESI[mese - 1] + '</div>';
   if (t.litri > 0) {
     h += '<div style="font-size:10.5px;font-family:var(--font-mono);color:' + (quadra ? '#27500A' : '#BA7517') + '">'
        + (quadra ? '✓ quadra' : _mcN(ris2) + ' L scoperti') + '</div>';
   }
   h += '</div>';
 
-  h += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed">';
-  h += '<tr style="color:var(--text-muted);font-size:10.5px;text-align:right">'
-     + '<th style="text-align:left;font-weight:500;padding:3px 4px">Mezzo</th>'
-     + '<th style="font-weight:500;padding:3px 4px;width:26%">Km</th>'
-     + '<th style="font-weight:500;padding:3px 4px;width:24%">Litri</th>'
-     + '<th style="font-weight:500;padding:3px 4px;width:16%">km/l</th></tr>';
+  h += '<table class="mc-t" style="table-layout:fixed"><thead><tr>'
+     + '<th class="l">Mezzo</th>'
+     + '<th class="sep" style="width:26%">Km</th>'
+     + '<th class="sep" style="width:24%">Litri</th>'
+     + '<th class="sep" style="width:17%">km/l</th></tr></thead><tbody>';
   _mcMezzi.forEach(function (mz) {
     var d = _mcDati[mese + '-' + mz.id] || { km: null, litri: null };
     var med = (d.km && d.litri) ? _mcN(d.km / d.litri, 2) : '—';
     var inp = function (campo, val) {
-      return '<input type="text" inputmode="decimal" value="' + (val === null || val === undefined ? '' : _mcN(val)) + '" '
-        + 'onchange="_mcScrivi(' + mese + ',\'' + mz.id + '\',\'' + campo + '\',this.value)" '
-        + 'style="width:100%;text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 4px;'
-        + 'border:0.5px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text)">';
+      return '<input class="mc-in" type="text" inputmode="decimal" value="' + (val === null || val === undefined ? '' : _mcN(val)) + '" '
+        + 'onchange="_mcScrivi(' + mese + ',\'' + mz.id + '\',\'' + campo + '\',this.value)">';
     };
-    h += '<tr><td style="padding:3px 4px;line-height:1.25">' + _mcMezzoCella(mz) + '</td>'
-       + '<td style="padding:3px 4px;vertical-align:middle">' + inp('km', d.km) + '</td>'
-       + '<td style="padding:3px 4px;vertical-align:middle">' + inp('litri', d.litri) + '</td>'
-       + '<td style="padding:3px 4px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);vertical-align:middle">' + med + '</td></tr>';
+    h += '<tr><td class="l" style="line-height:1.25;padding:4px 6px">' + _mcMezzoCella(mz) + '</td>'
+       + '<td class="sep" style="padding:4px 5px;vertical-align:middle">' + inp('km', d.km) + '</td>'
+       + '<td class="sep" style="padding:4px 5px;vertical-align:middle">' + inp('litri', d.litri) + '</td>'
+       + '<td class="sep mc-md" style="padding:4px 6px;vertical-align:middle;color:var(--text-muted)">' + med + '</td></tr>';
   });
-  h += '<tr style="border-top:0.5px solid var(--border);font-weight:700;text-align:right">'
-     + '<td style="text-align:left;padding:4px 3px">Totale</td>'
-     + '<td style="padding:4px 3px;font-family:var(--font-mono)">' + (t.vuoto ? '—' : _mcN(t.km)) + '</td>'
-     + '<td style="padding:4px 3px;font-family:var(--font-mono)">' + (t.vuoto ? '—' : _mcN(t.litri)) + '</td>'
-     + '<td style="padding:4px 3px;font-family:var(--font-mono)">' + (t.km && t.litri ? _mcN(t.km / t.litri, 2) : '—') + '</td></tr>';
+  h += '</tbody><tfoot><tr>'
+     + '<td class="l" style="padding:6px">Totale</td>'
+     + '<td class="sep mc-km" style="padding:6px 5px">' + (t.vuoto ? '—' : _mcN(t.km)) + '</td>'
+     + '<td class="sep mc-li" style="padding:6px 5px">' + (t.vuoto ? '—' : _mcN(t.litri)) + '</td>'
+     + '<td class="sep" style="padding:6px">' + (t.km && t.litri ? _mcN(t.km / t.litri, 2) : '—') + '</td></tr></tfoot>';
   h += '</table>';
 
   h += '<div style="border-top:0.5px solid var(--border);margin-top:6px;padding-top:5px;font-size:10.5px;color:var(--text-muted);line-height:1.65">';
