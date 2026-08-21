@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260821d — il pagamento va nel giorno in cui esce il denaro, non in quello
+//              della scadenza: data proposta a oggi e modificabile, e nelle
+//              note resta scritto "scadeva il 27, pagata 6 giorni prima"
 // v20260821c — correzione: il ramo delle scadenze usciva con un return e il
 //              modale non veniva mai inserito nella pagina
 // v20260821b — il Paga apre il modale GIA COMPILATO: fornitore, fatture e
@@ -404,6 +407,37 @@ function _fgRenderScadenzeGiorno(iso) {
   return h;
 }
 
+// Scarto fra scadenza e giorno di pagamento, in parole. Restituisce null
+// quando coincidono: non c'e' niente da segnalare.
+function _fgScadScarto() {
+  var m = _fgModale;
+  if (!m || !m.daScadenza || !m.scadenzeScelte || !m.scadenzeScelte.length) return null;
+  var el = document.getElementById('fg-mod-data');
+  var dataPag = el && el.value ? el.value : m.data;
+  if (!dataPag) return null;
+  // se le fatture hanno scadenze diverse si prende la piu' vicina
+  var scad = null;
+  m.scadenzeScelte.forEach(function (f) {
+    if (f.data_scadenza && (!scad || f.data_scadenza < scad)) scad = f.data_scadenza;
+  });
+  if (!scad) return null;
+  var gg = Math.round((new Date(dataPag + 'T12:00:00') - new Date(scad + 'T12:00:00')) / 86400000);
+  if (gg === 0) return { gg: 0, scad: scad, testo: 'Pagata il giorno della scadenza.' };
+  var n = Math.abs(gg), p = n === 1 ? 'giorno' : 'giorni';
+  return { gg: gg, scad: scad,
+    testo: 'Scadeva il ' + _fgFmtData(scad) + ', pagata ' + n + ' ' + p + (gg < 0 ? ' prima.' : ' dopo.') };
+}
+
+function _fgScadNota() {
+  var el = document.getElementById('fg-scad-nota');
+  if (!el) return;
+  var s = _fgScadScarto();
+  if (!s) { el.innerHTML = ''; return; }
+  var col = s.gg > 0 ? '#854F0B' : (s.gg < 0 ? '#27500A' : 'var(--text-muted)');
+  el.innerHTML = '<span style="color:' + col + '">' + esc(s.testo) + '</span>'
+    + '<div style="color:var(--text-muted);margin-top:2px">Finisce nelle note del movimento.</div>';
+}
+
 function _fgScadSpunta(id, fornitore, spuntato) {
   if (spuntato) { _fgScadSel[id] = true; _fgScadFornitore = fornitore; }
   else {
@@ -467,7 +501,11 @@ async function _fgScadPaga() {
   // v20260821b — tutto passa dal preset: fornitore, fatture e imputazioni
   // sono dentro _fgModale PRIMA che il modale venga disegnato. Prima li
   // scrivevo dopo, e il disegno li spazzava via lasciando il modale vuoto.
-  var iso = _fgStato.giornoSelezionato || _fgDateToIso(new Date());
+  // v20260821d — Il movimento va nel giorno in cui i soldi escono davvero,
+  // non nel giorno che stai guardando. Se apri il 27 per vedere una scadenza
+  // e la paghi oggi 21, l'uscita e' del 21: altrimenti il saldo del foglio
+  // giornale non torna con l'estratto conto della banca.
+  var iso = _fgDateToIso(new Date());
   await _fgApriModale(iso, 'uscita', {
     modo: 'A',
     daScadenza: true,
@@ -482,6 +520,7 @@ async function _fgScadPaga() {
   // la descrizione la compone gia' _fgConfermaMovimento dalle imputazioni:
   // nel modale di inserimento un campo descrizione non esiste
   _fgAggiornaStatusModale();
+  _fgScadNota();
 
   _fgScadSel = {}; _fgScadFornitore = null;
 }
@@ -941,6 +980,17 @@ function _fgRenderModoScadenza() {
        + '<span style="font-size:12.5px;font-family:var(--font-mono)">' + _fgFmtImporto(f.saldo_residuo) + '</span></div>';
   });
   h += '</div>';
+
+  // Data del pagamento: proposta a oggi, modificabile. Sotto, lo scarto
+  // rispetto alla scadenza, che finisce anche nelle note del movimento.
+  var oggi = _fgDateToIso(new Date());
+  h += '<div style="display:grid;grid-template-columns:170px 1fr;gap:11px;align-items:start;margin-bottom:10px">';
+  h += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Data del pagamento *</label>'
+     + '<input id="fg-mod-data" type="date" value="' + esc(m.data || oggi) + '" oninput="_fgScadNota()" '
+     + 'style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"></div>';
+  h += '<div id="fg-scad-nota" style="font-size:11px;line-height:1.6;padding-top:20px"></div>';
+  h += '</div>';
+
   h += '<div style="font-size:11px;color:var(--text-muted);line-height:1.6">'
      + righe.length + (righe.length === 1 ? ' fattura' : ' fatture') + ' scelte dalle scadenze. '
      + 'Restano da indicare <strong>conto</strong> e <strong>metodo</strong> qui sopra.</div>';
@@ -1614,6 +1664,16 @@ async function _fgConfermaMovimento() {
   }
 
   var note = (document.getElementById('fg-note-b') ? document.getElementById('fg-note-b').value : '') || null;
+
+  // v20260821d — dalle scadenze: la data la sceglie l'utente (proposta oggi)
+  // e lo scarto dalla scadenza finisce nelle note, cosi resta scritto che
+  // quella fattura scadeva un altro giorno.
+  if (m.daScadenza) {
+    var elData = document.getElementById('fg-mod-data');
+    if (elData && elData.value) m.data = elData.value;
+    var sc = _fgScadScarto();
+    if (sc && sc.gg !== 0) note = note ? (note + ' · ' + sc.testo) : sc.testo;
+  }
 
   // INSERT movimento
   var insMov = await sb.from('foglio_giornale_movimenti').insert([{
