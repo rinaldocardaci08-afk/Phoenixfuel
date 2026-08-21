@@ -1,3 +1,7 @@
+// PhoenixFuel — Estratto conto fornitore
+// v20260820a — interruttore OIL / NON OIL: menu, schede della panoramica e
+//              pillole mostrano una tipologia per volta, cosi fidi ed
+//              esposizioni dei due mondi non si sommano piu
 // ═══════════════════════════════════════════════════════════════════
 // v20260804c — il filtro non partiva: chiamavo renderEstrattoFornitore, che
 //              NON ESISTE (la funzione vera e _ecfRender). Aggiunto Filtra
@@ -88,6 +92,49 @@
 // Imponibile ordine = costo_litro × litri (stessa formula del fido in anagrafica).
 // ═══════════════════════════════════════════════════════════════════
 let _ecfFornitori = [], _ecfPop = false;
+
+// ══════════════════════════════════════════════════════════════════
+// v20260820a · OIL / NON OIL
+// ══════════════════════════════════════════════════════════════════
+// I due mondi non si sommano: il gasolio ha fidi, dilazioni e volumi che
+// non hanno niente a che vedere con AdBlue, gomme o ricambi. Mescolarli
+// in una torta sola faceva sembrare irrilevante il non oil e sporcava i
+// totali dell'esposizione.
+// La colonna fornitori.categoria esiste dal 19/08, valore di base 'oil'.
+// Nessun "Tutti": la scelta e' fra le due tipologie, come chiesto.
+let _ecfCategoria = 'oil';
+let _ecfCatMap = {};
+
+function _ecfCatDi(id) { return _ecfCatMap[id] || 'oil'; }
+function _ecfFiltraCat(lista) {
+  return (lista || []).filter(function (x) { return _ecfCatDi(x.id) === _ecfCategoria; });
+}
+function _ecfEtichettaCat() { return _ecfCategoria === 'oil' ? 'OIL' : 'NON OIL'; }
+
+function _ecfInterruttore() {
+  var b = function (val, testo) {
+    var on = _ecfCategoria === val;
+    return '<button onclick="ecfCambiaCategoria(\'' + val + '\')" style="cursor:pointer;font-size:12px;font-weight:600;'
+      + 'padding:7px 18px;border:0.5px solid var(--border);border-radius:7px;'
+      + (on ? 'background:#26215C;color:#fff;border-color:#26215C' : 'background:var(--bg);color:var(--text-muted)')
+      + '">' + testo + '</button>';
+  };
+  return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    + b('oil', 'OIL') + b('non_oil', 'NON OIL')
+    + '<span style="font-size:11px;color:var(--text-muted)">Carburanti e non carburanti restano separati: fidi ed esposizioni non si sommano</span>'
+    + '</div>';
+}
+
+async function ecfCambiaCategoria(v) {
+  if (v === _ecfCategoria) return;
+  _ecfCategoria = v;
+  // se il fornitore aperto e' dell'altra tipologia si torna alla panoramica
+  if (_ecfSel && _ecfCatDi(_ecfSel.id) !== _ecfCategoria) _ecfSel = null;
+  _ecfPop = false;                       // il menu va ricostruito filtrato
+  var sel = document.getElementById('ecf-fornitore');
+  if (sel) sel.value = '';
+  await caricaEstrattoFornitore();
+}
 let _ecfSel = null;          // { id, nome, fido, gg }
 let _ecfOrdini = [];         // ordini del fornitore (con imponibile e scadenza)
 let _ecfFatture = [];        // fatture con totale/pagato/residuo e ordini collegati
@@ -124,8 +171,13 @@ async function caricaEstrattoFornitore() {
     _ecfFornitori = r[0].fornitori;
     _ecfConti = r[1].data || [];
     (r[2].data || []).forEach(function (i) { _ecfIstituti[i.id] = i.nome; });
+    // v20260820a — categoria oil / non_oil, letta una volta sola
+    try {
+      var rc = await sb.from('fornitori').select('id,categoria');
+      (rc.data || []).forEach(function (f) { _ecfCatMap[f.id] = f.categoria || 'oil'; });
+    } catch (e) { /* senza categoria restano tutti oil */ }
     sel.innerHTML = '<option value="">— scegli un fornitore —</option>' +
-      _ecfFornitori.map(function (f) { return '<option value="' + f.id + '">' + esc(f.nome) + '</option>'; }).join('');
+      _ecfFiltraCat(_ecfFornitori).map(function (f) { return '<option value="' + f.id + '">' + esc(f.nome) + '</option>'; }).join('');
     _ecfPop = true;
   }
   if (_ecfSel) ecfCambiaFornitore(); else _ecfOverview();
@@ -136,8 +188,13 @@ async function _ecfOverview() {
   var body = document.getElementById('ecf-body');
   if (!body) return;
   body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:30px;font-size:12px">⏳ Caricamento fornitori...</div>';
-  var cards = await _ecfCalcolaFornitori(_ecfAnnoGraf);
-  if (!cards.length) { body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Nessun fornitore con movimenti.</div>'; return; }
+  var cards = _ecfFiltraCat(await _ecfCalcolaFornitori(_ecfAnnoGraf));
+  if (!cards.length) {
+    body.innerHTML = _ecfInterruttore()
+      + '<div style="text-align:center;color:var(--text-muted);padding:40px;font-size:12px">Nessun fornitore <strong>'
+      + _ecfEtichettaCat() + '</strong> con movimenti.</div>';
+    return;
+  }
   _ecfDisegnaOverview(body, cards);
 }
 
@@ -150,7 +207,9 @@ async function _ecfCalcolaFornitori(annoSel) {
 }
 
 function _ecfDisegnaOverview(body, cards) {
-  body.innerHTML = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Clicca un fornitore per aprire il suo estratto conto.</div>'
+  body.innerHTML = _ecfInterruttore()
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Fornitori <strong>' + _ecfEtichettaCat()
+      + '</strong> · clicca un fornitore per aprire il suo estratto conto.</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px">'
     + cards.map(function (c) {
         var pct = c.fido > 0 ? Math.min(100, (c.esp / c.fido) * 100) : 0;
@@ -339,7 +398,7 @@ function _ecfFascia(daPagare, nAperti) {
   if (!_ecfSel) return '';
   var pct = _ecfSel.fido > 0 ? Math.round((daPagare / _ecfSel.fido) * 100) : null;
 
-  var pillole = (_ecfFornitori || []).map(function (f) {
+  var pillole = _ecfFiltraCat(_ecfFornitori).map(function (f) {
     var on = f.id === _ecfSel.id;
     return '<span onclick="ecfVaiFornitore(\'' + f.id + '\')" title="' + esc(f.nome) + '" style="cursor:pointer;'
       + (on ? 'font-size:21px;font-weight:700;padding:4px 16px;background:rgba(255,255,255,0.22);'
