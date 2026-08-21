@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Consumi mezzi propri
+// v20260820b — i tre mezzi sono CB801LF, GJ234ZE e GJ263ZE, filtrati per
+//              targa; celle a tre per riga come i trimestri
 // v20260820a — km e litri per mezzo e per mese, come nel foglio Excel:
 //              una cella per mese coi tre camion e il totale, il riepilogo
 //              dell'anno per mezzo, e la quadratura dei litri.
@@ -32,6 +34,9 @@ var _mcRecuperi = {};   // { mese: {litri, n} }
 var _mcPrelievi = {};   // { mese: litri }  da prelievi_autoconsumo
 var _mcSalvaTimer = {};
 
+// Le targhe dei nostri tre mezzi, nell'ordine in cui vanno mostrati.
+var MC_TARGHE = ['CB801LF', 'GJ234ZE', 'GJ263ZE'];
+
 var MC_MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -51,6 +56,12 @@ function _mcVal(v) {
 function _mcNomeMezzo(m) {
   return (m.descrizione && String(m.descrizione).trim()) || m.targa || '—';
 }
+function _mcMezzoCella(m) {
+  var d = (m.descrizione && String(m.descrizione).trim());
+  if (!d) return '<span style="font-weight:600">' + esc(m.targa || '—') + '</span>';
+  return '<span style="font-weight:600">' + esc(d) + '</span>'
+    + '<div style="font-size:9.5px;color:var(--text-muted);font-family:var(--font-mono);line-height:1.2">' + esc(m.targa || '') + '</div>';
+}
 
 
 async function caricaMezziConsumi() {
@@ -60,15 +71,22 @@ async function caricaMezziConsumi() {
   try {
     var da = _mcAnno + '-01-01', a = _mcAnno + '-12-31';
 
-    var rm = await sb.from('mezzi').select('id,targa,descrizione,proprietario,attivo').order('descrizione');
+    var rm = await sb.from('mezzi').select('id,targa,descrizione,proprietario,attivo');
     if (rm.error) throw rm.error;
-    // solo i mezzi nostri: i vettori terzi non consumano il nostro gasolio
-    _mcMezzi = (rm.data || []).filter(function (m) {
-      if (m.attivo === false) return false;
-      var p = String(m.proprietario || '').toLowerCase();
-      return !p || /phoenix|propri|nostro/.test(p);
-    });
-    if (!_mcMezzi.length) _mcMezzi = (rm.data || []).filter(function (m) { return m.attivo !== false; });
+    // I nostri mezzi sono questi tre, per targa. Il proprietario non basta a
+    // distinguerli: i vettori terzi non consumano il nostro gasolio e non
+    // devono comparire qui.
+    _mcMezzi = MC_TARGHE.map(function (t) {
+      return (rm.data || []).filter(function (m) {
+        return String(m.targa || '').toUpperCase().replace(/\s/g, '') === t;
+      })[0];
+    }).filter(Boolean);
+    // se le targhe cambiassero, meglio mostrare i mezzi attivi che una
+    // pagina vuota senza spiegazione
+    if (!_mcMezzi.length) {
+      _mcMezzi = (rm.data || []).filter(function (m) { return m.attivo !== false; });
+      if (_mcMezzi.length) toast('Nessuna delle targhe attese trovata: mostro tutti i mezzi attivi');
+    }
 
     var rc = await sb.from('mezzi_consumi_mese').select('*').eq('anno', _mcAnno);
     if (rc.error) throw rc.error;
@@ -196,8 +214,17 @@ function _mcRender() {
   h += '</div></div>';
 
   // ── celle mensili ──
-  h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:11px;margin-bottom:14px">';
-  for (var m2 = 1; m2 <= 12; m2++) h += _mcCellaMese(m2);
+  // v20260820b — tre celle per riga, come i trimestri: cosi ogni cella e'
+  // larga abbastanza da leggere il nome del camion senza troncarlo.
+  h += '<style>#mc-griglia{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:14px}'
+     + '@media(min-width:760px){#mc-griglia{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+     + '@media(min-width:1080px){#mc-griglia{grid-template-columns:repeat(3,minmax(0,1fr))}}</style>';
+  h += '<div id="mc-griglia">';
+  for (var m2 = 1; m2 <= 12; m2++) {
+    h += _mcCellaMese(m2);
+    // una riga di separazione a fine trimestre, come nel foglio
+    if (m2 % 3 === 0 && m2 < 12) h += '<div style="grid-column:1/-1;border-top:0.5px solid var(--border);margin:2px 0"></div>';
+  }
   h += '</div>';
 
   // ── riepilogo anno per mezzo ──
@@ -216,7 +243,8 @@ function _mcRender() {
       km += d.km || 0; li += d.litri || 0;
     }
     h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
-       + '<td style="text-align:left;padding:6px">' + esc(_mcNomeMezzo(mz)) + '</td>'
+       + '<td style="text-align:left;padding:6px">' + esc(_mcNomeMezzo(mz))
+         + ' <span style="font-size:10.5px;color:var(--text-muted);font-family:var(--font-mono)">' + esc(mz.targa || '') + '</span></td>'
        + '<td style="padding:6px;font-family:var(--font-mono)">' + _mcN(km) + '</td>'
        + '<td style="padding:6px;font-family:var(--font-mono)">' + _mcN(li) + '</td>'
        + '<td style="padding:6px;font-family:var(--font-mono)">' + (li ? _mcN(km / li, 2) : '—') + '</td>'
@@ -260,11 +288,11 @@ function _mcCellaMese(mese) {
   h += '</div>';
 
   h += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed">';
-  h += '<tr style="color:var(--text-muted);font-size:10px;text-align:right">'
-     + '<th style="text-align:left;font-weight:500;padding:2px 3px">Mezzo</th>'
-     + '<th style="font-weight:500;padding:2px 3px;width:33%">Km</th>'
-     + '<th style="font-weight:500;padding:2px 3px;width:29%">Litri</th>'
-     + '<th style="font-weight:500;padding:2px 3px;width:17%">km/l</th></tr>';
+  h += '<tr style="color:var(--text-muted);font-size:10.5px;text-align:right">'
+     + '<th style="text-align:left;font-weight:500;padding:3px 4px">Mezzo</th>'
+     + '<th style="font-weight:500;padding:3px 4px;width:26%">Km</th>'
+     + '<th style="font-weight:500;padding:3px 4px;width:24%">Litri</th>'
+     + '<th style="font-weight:500;padding:3px 4px;width:16%">km/l</th></tr>';
   _mcMezzi.forEach(function (mz) {
     var d = _mcDati[mese + '-' + mz.id] || { km: null, litri: null };
     var med = (d.km && d.litri) ? _mcN(d.km / d.litri, 2) : '—';
@@ -274,10 +302,10 @@ function _mcCellaMese(mese) {
         + 'style="width:100%;text-align:right;font-family:var(--font-mono);font-size:11.5px;padding:2px 4px;'
         + 'border:0.5px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text)">';
     };
-    h += '<tr><td style="padding:2px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(_mcNomeMezzo(mz)) + '</td>'
-       + '<td style="padding:2px 3px">' + inp('km', d.km) + '</td>'
-       + '<td style="padding:2px 3px">' + inp('litri', d.litri) + '</td>'
-       + '<td style="padding:2px 3px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + med + '</td></tr>';
+    h += '<tr><td style="padding:3px 4px;line-height:1.25">' + _mcMezzoCella(mz) + '</td>'
+       + '<td style="padding:3px 4px;vertical-align:middle">' + inp('km', d.km) + '</td>'
+       + '<td style="padding:3px 4px;vertical-align:middle">' + inp('litri', d.litri) + '</td>'
+       + '<td style="padding:3px 4px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);vertical-align:middle">' + med + '</td></tr>';
   });
   h += '<tr style="border-top:0.5px solid var(--border);font-weight:700;text-align:right">'
      + '<td style="text-align:left;padding:4px 3px">Totale</td>'
