@@ -1,3 +1,6 @@
+// PhoenixFuel — Amministrazione
+// v20260820a — logistica granulare: sei sottosezioni che partono CHIUSE
+//              (strict), le altre sezioni conservano il comportamento di prima
 // PhoenixFuel — Admin, Permessi, Utenti, Giacenze
 // +v20260626a — Convalida chiusura fine anno (deposito) scrive nel registro:
 //   conguaglio inventario 31/12 + apertura anno successivo (giacenza reale).
@@ -45,7 +48,18 @@ const SEZIONI_SISTEMA = [
   {id:'fornitori',label:'Fornitori',icon:'🏭'},
   {id:'basi',label:'Basi di carico',icon:'📍'},
   {id:'prodotti',label:'Prodotti',icon:'📦'},
-  {id:'logistica',label:'Logistica',icon:'🚛'},
+  // v20260820a — logistica granulare. `strict:true` significa che le sue
+  // sottosezioni sono CHIUSE finche' non le apri: senza questo, un permesso
+  // mai impostato vale come "visibile" (vedi _haPermessoSub) e spaccare la
+  // logistica avrebbe aperto tutto a tutti invece di chiudere.
+  {id:'logistica',label:'Logistica',icon:'🚛', strict:true, sub:[
+    {id:'logistica.carichi',label:'Carichi e consegne'},
+    {id:'logistica.mezzi-propri',label:'Mezzi propri'},
+    {id:'logistica.vettori',label:'Vettori'},
+    {id:'logistica.report-vettori',label:'Report vettori'},
+    {id:'logistica.presenze',label:'Presenze autisti'},
+    {id:'logistica.consumi',label:'Consumi mezzi'}
+  ]},
   {id:'stazione',label:'Stazione Oppido',icon:'⛽', sub:[
     {id:'stazione.dashboard',label:'Dashboard'},
     {id:'stazione.letture',label:'Totalizzatori contatori'},
@@ -76,14 +90,31 @@ function _haPermesso(sezione) {
   // Sottosezione: check "stazione.cassa" → serve anche "stazione" abilitato
   if (sezione.indexOf('.') >= 0) {
     var parent = sezione.split('.')[0];
+    // v20260820a — nelle sezioni strette il figlio dev'essere acceso a mano
+    if (_sezioneStretta(sezione)) return _permessiUtente[parent] === true && _permessiUtente[sezione] === true;
     return _permessiUtente[parent] && _permessiUtente[sezione] !== false;
   }
   return false;
 }
 
+// Una sezione e' "stretta" quando le sue sottosezioni partono chiuse.
+function _sezioneStretta(idSezione) {
+  var p = String(idSezione).split('.')[0];
+  var s = SEZIONI_SISTEMA.filter(function (x) { return x.id === p; })[0];
+  return !!(s && s.strict);
+}
+
 function _haPermessoSub(sottosezione) {
   if (!utenteCorrente) return false;
   if (utenteCorrente.ruolo === 'admin') return true;
+  // v20260820a — nelle sezioni strette serve un SI esplicito. Altrove resta
+  // il comportamento di prima: un permesso mai impostato vale come visibile,
+  // e cambiarlo qui chiuderebbe di colpo mezzo programma a chi lavora.
+  if (_sezioneStretta(sottosezione)) {
+    if (!_permessiUtente) return false;
+    var padre = String(sottosezione).split('.')[0];
+    return _permessiUtente[padre] === true && _permessiUtente[sottosezione] === true;
+  }
   if (!_permessiUtente) return true; // Default: se non ci sono permessi sub, mostra tutto
   // Se il permesso sub esiste ed è false → nascondi
   if (_permessiUtente[sottosezione] === false) return false;
@@ -114,7 +145,10 @@ async function apriModalePermessi(utenteId, nomeUtente) {
     if (s.sub && s.sub.length) {
       html += '<div style="margin-left:28px;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px">';
       s.sub.forEach(function(sub) {
-        var subChecked = map[sub.id] !== false ? ' checked' : '';
+        // v20260820a — nelle sezioni strette la spunta e' accesa solo se il
+        // permesso e' stato dato davvero, altrimenti il modale mostrerebbe
+        // acceso cio' che a schermo e' nascosto.
+        var subChecked = (s.strict ? map[sub.id] === true : map[sub.id] !== false) ? ' checked' : '';
         html += '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-muted);padding:4px 8px;background:var(--bg);border-radius:6px"><input type="checkbox" value="' + sub.id + '"' + subChecked + ' onchange="aggiornaPermesso(\'' + utenteId + '\',\'' + sub.id + '\',this.checked)" /><span>' + sub.label + '</span></label>';
       });
       html += '</div>';
@@ -191,7 +225,8 @@ async function caricaUtentiCompleto() {
       if (s.sub && s.sub.length) {
         html += '<div style="margin-left:24px;margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:3px">';
         s.sub.forEach(function(sub) {
-          html += '<label class="check-label" style="font-size:10px;padding:3px 6px"><input type="checkbox" value="' + sub.id + '" checked /> ' + sub.label + '</label>';
+          html += '<label class="check-label" style="font-size:10px;padding:3px 6px"><input type="checkbox" value="' + sub.id + '"'
+            + (s.strict ? '' : ' checked') + ' /> ' + sub.label + '</label>';
         });
         html += '</div>';
       }

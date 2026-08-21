@@ -1,4 +1,5 @@
 // PhoenixFuel — Logistica
+// v20260820c — permessi per singola linguetta: chi non ce l'ha non la vede
 // v20260820b — linguetta Consumi mezzi (pf-mezzi-consumi.js)
 // v20260820a — linguetta Presenze autisti agganciata (il modulo vive in
 //              pf-presenze.js: qui c'e solo la chiamata)
@@ -20,6 +21,7 @@
 // ── LOGISTICA ─────────────────────────────────────────────────────
 
 function switchLogisticaTab(btn) {
+  if (!btn || !_logTabPermessa(btn.dataset.tab)) return;   // v20260820c
   document.querySelectorAll('.log-tab').forEach(function(t) {
     t.style.background = 'var(--bg)'; t.style.color = 'var(--text)';
     t.style.border = '0.5px solid var(--border)'; t.classList.remove('active');
@@ -43,7 +45,60 @@ function switchLogisticaTab(btn) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// v20260820c · PERMESSI PER SINGOLA LINGUETTA
+// ══════════════════════════════════════════════════════════════════
+// Le sei linguette sono permessi separati (logistica.carichi,
+// logistica.mezzi-propri, ...). Chi non ce l'ha NON vede la linguetta:
+// sparisce, non resta grigia.
+// Le sottosezioni della logistica sono dichiarate `strict` in pf-admin.js,
+// quindi partono CHIUSE: dopo il deploy vanno riaperte a mano, utente per
+// utente. L'admin vede sempre tutto.
+var LOG_PERMESSI = {
+  'log-carichi': 'logistica.carichi',
+  'log-mezzi-propri': 'logistica.mezzi-propri',
+  'log-vettori': 'logistica.vettori',
+  'log-report-vettori': 'logistica.report-vettori',
+  'log-presenze': 'logistica.presenze',
+  'log-consumi': 'logistica.consumi'
+};
+
+function _logTabPermessa(tab) {
+  var p = LOG_PERMESSI[tab];
+  if (!p) return true;                                   // linguetta non mappata: non la tocco
+  if (typeof _haPermessoSub !== 'function') return true;  // pf-admin non caricato: non chiudo nulla
+  return _haPermessoSub(p);
+}
+
+// Nasconde le linguette non permesse e porta l'utente sulla prima che puo'
+// vedere. Se non ne ha nessuna lo dice, invece di lasciare la pagina muta.
+function _logApplicaPermessi() {
+  var visibili = [];
+  document.querySelectorAll('.log-tab').forEach(function (b) {
+    var ok = _logTabPermessa(b.dataset.tab);
+    b.style.display = ok ? '' : 'none';
+    if (ok) visibili.push(b);
+  });
+  document.querySelectorAll('.log-panel').forEach(function (p) {
+    if (!_logTabPermessa(p.id)) p.style.display = 'none';
+  });
+  var attiva = visibili.filter(function (b) { return b.classList.contains('active'); })[0];
+  if (!attiva && visibili.length) switchLogisticaTab(visibili[0]);
+  if (!visibili.length) {
+    var primo = document.querySelector('.log-panel');
+    if (primo) {
+      primo.style.display = '';
+      primo.innerHTML = '<div style="padding:34px 20px;text-align:center;color:var(--text-muted);font-size:13px;line-height:1.7">'
+        + 'Non hai il permesso su nessuna sezione della logistica.<br>Chiedi all\'amministratore di abilitarti.</div>';
+    }
+  }
+  return visibili.length;
+}
+
 async function caricaLogistica() {
+  // v20260820c — prima si decide cosa puo' vedere, poi si carica: senza
+  // permessi non ha senso interrogare il database.
+  if (!_logApplicaPermessi()) return;
   await Promise.all([caricaMezziPropri(), caricaTrasportatori(), caricaCarichi(), caricaCostiTrasporto()]);
   // Carica trasportatori nel dropdown
   const { data: trasps } = await sb.from('trasportatori').select('id,nome').eq('attivo',true).order('nome');
