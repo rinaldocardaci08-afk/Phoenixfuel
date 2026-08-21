@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Consumi mezzi propri
+// v20260820d — una barra sola orizzontale per la quota km, e ogni mezzo col
+//              suo colore: Motrice verde, Volvo rosso, Stralis blu, targa nera
 // v20260820c — tabelle rifatte: intestazioni in grassetto, linee fra i gruppi
 //              di colonne, righe alternate, km in blu e litri in ambra
 // v20260820b — i tre mezzi sono CB801LF, GJ234ZE e GJ263ZE, filtrati per
@@ -39,6 +41,19 @@ var _mcSalvaTimer = {};
 // Le targhe dei nostri tre mezzi, nell'ordine in cui vanno mostrati.
 var MC_TARGHE = ['CB801LF', 'GJ234ZE', 'GJ263ZE'];
 
+// Nome e colore di ogni mezzo. Il nome scritto qui vince sulla descrizione
+// in anagrafica: GJ263ZE non ha descrizione e usciva come targa ripetuta,
+// mentre nel foglio si e' sempre chiamato Stralis.
+var MC_CONF = {
+  'CB801LF': { nome: 'Motrice 150', colore: '#639922' },
+  'GJ234ZE': { nome: 'Volvo Rosso', colore: '#A32D2D' },
+  'GJ263ZE': { nome: 'Stralis',     colore: '#185FA5' }
+};
+function _mcConf(m) {
+  return MC_CONF[String(m.targa || '').toUpperCase().replace(/\s/g, '')] || {};
+}
+function _mcColore(m) { return _mcConf(m).colore || '#888780'; }
+
 var MC_MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
@@ -56,17 +71,18 @@ function _mcVal(v) {
   return isFinite(n) ? n : null;
 }
 function _mcNomeMezzo(m) {
-  return (m.descrizione && String(m.descrizione).trim()) || m.targa || '—';
+  return _mcConf(m).nome || (m.descrizione && String(m.descrizione).trim()) || m.targa || '—';
 }
+// Nome del mezzo nel suo colore, targa in nero sotto: cosi il colore della
+// barra e quello della riga si riconoscono a colpo d'occhio.
 function _mcMezzoCella(m) {
-  var d = (m.descrizione && String(m.descrizione).trim());
-  // se la descrizione manca o coincide con la targa, la targa si scrive una
-  // volta sola: prima usciva "GJ263ZE GJ263ZE"
-  if (!d || d.toUpperCase().replace(/\s/g, '') === String(m.targa || '').toUpperCase().replace(/\s/g, '')) {
-    return '<span style="font-weight:600">' + esc(m.targa || '—') + '</span>';
+  var nome = _mcNomeMezzo(m);
+  var targa = String(m.targa || '');
+  if (!targa || nome.toUpperCase().replace(/\s/g, '') === targa.toUpperCase().replace(/\s/g, '')) {
+    return '<span style="font-weight:700;color:' + _mcColore(m) + '">' + esc(nome) + '</span>';
   }
-  return '<span style="font-weight:600">' + esc(d) + '</span>'
-    + '<div style="font-size:9.5px;color:var(--text-muted);font-family:var(--font-mono);line-height:1.2">' + esc(m.targa || '') + '</div>';
+  return '<span style="font-weight:700;color:' + _mcColore(m) + '">' + esc(nome) + '</span>'
+    + '<div style="font-size:9.5px;color:var(--text);font-family:var(--font-mono);line-height:1.25">' + esc(targa) + '</div>';
 }
 
 
@@ -257,12 +273,13 @@ function _mcRender() {
   // ── riepilogo anno per mezzo ──
   h += '<div class="card" style="padding:14px 16px;margin-bottom:14px">';
   h += '<div style="font-size:13.5px;font-weight:700;margin-bottom:10px;color:#26215C">Totale ' + _mcAnno + ' per mezzo</div>';
+  h += _mcBarraQuota(T);
   h += '<table class="mc-t"><thead><tr>'
      + '<th class="l">Mezzo</th>'
      + '<th class="sep">Km percorsi</th>'
      + '<th class="sep">Litri</th>'
      + '<th class="sep">Km / litro</th>'
-     + '<th class="sep">% sui km</th></tr></thead><tbody>';
+     + '<th class="sep">Quota km</th></tr></thead><tbody>';
   _mcMezzi.forEach(function (mz) {
     var km = 0, li = 0;
     for (var m3 = 1; m3 <= 12; m3++) {
@@ -276,11 +293,7 @@ function _mcRender() {
        + '<td class="sep mc-km">' + _mcN(km) + '</td>'
        + '<td class="sep mc-li">' + _mcN(li) + '</td>'
        + '<td class="sep mc-md">' + (li ? _mcN(km / li, 2) : '—') + '</td>'
-       + '<td class="sep" style="padding-right:8px">'
-         + '<div style="display:flex;align-items:center;gap:7px;justify-content:flex-end">'
-         + '<div style="width:54px;height:6px;background:rgba(38,33,92,0.10);border-radius:3px;overflow:hidden">'
-           + '<div style="width:' + Math.min(100, pct).toFixed(0) + '%;height:6px;background:#26215C"></div></div>'
-         + '<span style="font-family:var(--font-mono);min-width:38px">' + (T.km ? _mcN(pct, 1) + '%' : '—') + '</span></div></td>'
+       + '<td class="sep mc-md" style="color:' + _mcColore(mz) + '">' + (T.km ? _mcN(pct, 1) + '%' : '—') + '</td>'
        + '</tr>';
   });
   h += '</tbody><tfoot><tr>'
@@ -300,6 +313,44 @@ function _mcRender() {
   h += '</div>';
 
   el.innerHTML = h;
+}
+
+
+// Una barra sola, orizzontale: quanto pesa ogni mezzo sui km dell'anno.
+// Meglio di tre barrette separate, perche' qui le parti si confrontano fra
+// loro invece che ognuna col proprio fondo.
+function _mcBarraQuota(T) {
+  if (!(T.km > 0)) return '';
+  var parti = _mcMezzi.map(function (mz) {
+    var km = 0;
+    for (var m = 1; m <= 12; m++) {
+      var d = _mcDati[m + '-' + mz.id];
+      if (d) km += d.km || 0;
+    }
+    return { mz: mz, km: km, pct: km / T.km * 100 };
+  }).filter(function (p) { return p.km > 0; })
+    .sort(function (a, b) { return b.km - a.km; });
+  if (!parti.length) return '';
+
+  var h = '<div style="margin-bottom:13px">';
+  h += '<div style="display:flex;height:30px;border-radius:8px;overflow:hidden;border:0.5px solid var(--border)">';
+  parti.forEach(function (p) {
+    h += '<div title="' + esc(_mcNomeMezzo(p.mz)) + ' · ' + _mcN(p.km) + ' km" '
+       + 'style="width:' + p.pct.toFixed(2) + '%;background:' + _mcColore(p.mz) + ';display:flex;align-items:center;justify-content:center;'
+       + 'color:#fff;font-size:12px;font-weight:700;font-family:var(--font-mono);white-space:nowrap;overflow:hidden">'
+       + (p.pct >= 9 ? _mcN(p.pct, 1) + '%' : '') + '</div>';
+  });
+  h += '</div>';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:7px">';
+  parti.forEach(function (p) {
+    h += '<div style="display:flex;align-items:center;gap:6px;font-size:11.5px">'
+       + '<span style="width:11px;height:11px;border-radius:3px;background:' + _mcColore(p.mz) + ';flex:none"></span>'
+       + '<span style="font-weight:700;color:' + _mcColore(p.mz) + '">' + esc(_mcNomeMezzo(p.mz)) + '</span>'
+       + '<span style="color:var(--text-muted);font-family:var(--font-mono)">' + _mcN(p.km) + ' km · ' + _mcN(p.pct, 1) + '%</span>'
+       + '</div>';
+  });
+  h += '</div></div>';
+  return h;
 }
 
 
