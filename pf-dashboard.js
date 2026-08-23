@@ -13,6 +13,7 @@ async function caricaDashboard() {
   if (typeof caricaFidoFornitoriDashboard === 'function') { try { caricaFidoFornitoriDashboard(); } catch (e) { console.warn('fido fornitori', e); } }
   if (typeof caricaAnticipiDashboard === 'function') { try { caricaAnticipiDashboard(); } catch (e) { console.warn('anticipi dashboard', e); } }
   if (typeof caricaSettimanaDashboard === 'function') { try { caricaSettimanaDashboard(); } catch (e) { console.warn('settimana dashboard', e); } }
+  if (typeof _dashStzSettimana === 'function') { try { _dashStzSettimana(); } catch (e) { console.warn('settimana stazione dashboard', e); } }
   // v20260803a — controllo prezzi ordine/listino: gira in sottofondo e
   // mette l'avviso solo se c'e qualcosa da decidere. Non deve mai
   // bloccare la bacheca, per questo e in try e senza await.
@@ -393,9 +394,13 @@ async function caricaCarichiDashboard() {
 
 // ═══════════════════════════════════════════════════════════════════
 // STRISCIA SETTIMANALE STAZIONE IN DASHBOARD (23/08 — richiesta Rinaldo)
+// ATTENZIONE AI NOMI: caricaSettimanaDashboard, _dashSetLunedi e _dashSetE
+// appartengono GIA' al calendario uscite (modulo finanze, caricato DOPO
+// questo file). Qui tutto e' prefissato _dashStz per non sovrascriverli.
 // Anteprima della SOLA settimana in corso, scorrevole in orizzontale,
 // pensata per il cellulare. Sta sotto il calendario delle uscite e sopra
-// gli alert. Nessuna freccia e nessun clic: per i dati veri si va nella
+// gli alert, nel div #dash-settimana-stz scritto in index.html.
+// Nessuna freccia e nessun clic: per i dati veri si va nella
 // linguetta Stazione.
 //
 // REGOLA: il margine NON si ricalcola qui. Si passa per la funzione pura
@@ -410,33 +415,24 @@ async function caricaCarichiDashboard() {
 //   niente           -> "da compilare" (oppure "—" se il giorno e futuro)
 // ═══════════════════════════════════════════════════════════════════
 
-function _dashSetContenitore() {
-  var el = document.getElementById('dash-settimana-stz');
-  if (el) return el;
-  // si aggancia da solo sopra il blocco alert: nessuna modifica a index.html
-  var rif = document.getElementById('dash-alert-wrapper')
-         || document.getElementById('dash-alert-operativi');
-  if (!rif || !rif.parentNode) return null;
-  el = document.createElement('div');
-  el.id = 'dash-settimana-stz';
-  el.style.margin = '0 0 14px';
-  rif.parentNode.insertBefore(el, rif);
-  return el;
+function _dashStzContenitore() {
+  // il div sta in index.html fra il calendario uscite e il blocco alert
+  return document.getElementById('dash-settimana-stz');
 }
 
-function _dashSetE(v) {
+function _dashStzE(v) {
   return Number(v || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function _dashSetLunedi(iso) {
+function _dashStzLunedi(iso) {
   var d = new Date(iso + 'T12:00:00');
   var dow = d.getDay();
   d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
   return d.toISOString().split('T')[0];
 }
 
-async function caricaSettimanaDashboard() {
-  var host = _dashSetContenitore();
+async function _dashStzSettimana() {
+  var host = _dashStzContenitore();
   if (!host) return;
 
   if (typeof _uniCalcolaTotaliPerProdottoCon !== 'function') {
@@ -446,7 +442,7 @@ async function caricaSettimanaDashboard() {
   }
 
   var oggiSet = new Date().toISOString().split('T')[0];
-  var lunISO = _dashSetLunedi(oggiSet);
+  var lunISO = _dashStzLunedi(oggiSet);
   var lun = new Date(lunISO + 'T12:00:00');
   var dom = new Date(lun); dom.setDate(lun.getDate() + 6);
   var domISO = dom.toISOString().split('T')[0];
@@ -583,12 +579,12 @@ async function caricaSettimanaDashboard() {
 
       cards += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:6px">'
         + '<span style="color:var(--text-muted)">Venduto</span>'
-        + '<span style="font-family:var(--font-mono);font-weight:700">' + _dashSetE(euroIva) + '</span></div>';
+        + '<span style="font-family:var(--font-mono);font-weight:700">' + _dashStzE(euroIva) + '</span></div>';
 
       cards += '<div style="background:#16305B;border-radius:7px;padding:6px 5px;text-align:center">'
         + '<div style="font-size:7.5px;letter-spacing:.6px;color:#9FB6D9;text-transform:uppercase">Margine</div>'
         + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:' + (margG >= 0 ? '#7BE87B' : '#FF9A9A') + '">'
-        + (margG >= 0 ? '' : '&minus;') + '&euro; ' + _dashSetE(Math.abs(margG)) + '</div>'
+        + (margG >= 0 ? '' : '&minus;') + '&euro; ' + _dashStzE(Math.abs(margG)) + '</div>'
         + '<div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:' + (margL >= 0 ? '#7BE87B' : '#FF9A9A') + '">&euro; ' + margL.toFixed(4) + '/L</div>'
         + '</div>';
 
@@ -601,14 +597,19 @@ async function caricaSettimanaDashboard() {
       (impCont[data] || []).forEach(function (r) { litriPort += Number(r.litri_portale || 0); });
       if (!litriPort) litriPort = Number(ic.litri_totali || 0);
       var euroPort = Number(ic.importo_totale || 0);
+      // 23/08 — se la cassa del portale non e' ancora arrivata, i contatori ci
+      // sono ma gli importi no. Mostrare 0,00 farebbe sembrare che quel giorno
+      // non abbia incassato niente: si mette un trattino, che e' la verita'.
+      var haCassaPort = !!impCassa[data];
+      var _e = function (v) { return haCassaPort ? _dashStzE(v) : '&mdash;'; };
       cards += '<div style="background:#E6F1FB;border-radius:6px;padding:6px 4px;text-align:center;font-size:9px;color:#0C447C;line-height:1.3;font-weight:600;margin-bottom:5px">Dati pronti<br>dal portale</div>';
       cards += '<div style="font-size:10px;line-height:1.6;color:var(--text-muted)">'
         + '<div style="display:flex;justify-content:space-between"><span>Litri</span><span style="font-family:var(--font-mono);color:var(--text);font-weight:700">' + Math.round(litriPort).toLocaleString('it-IT') + '</span></div>'
-        + '<div style="display:flex;justify-content:space-between"><span>Euro</span><span style="font-family:var(--font-mono);color:var(--text)">' + _dashSetE(euroPort) + '</span></div>'
-        + '<div style="display:flex;justify-content:space-between"><span>Contanti</span><span style="font-family:var(--font-mono)">' + _dashSetE(ic.contanti) + '</span></div>'
-        + '<div style="display:flex;justify-content:space-between"><span>Elettr.</span><span style="font-family:var(--font-mono)">' + _dashSetE(Number(ic.bancomat || 0) + Number(ic.nexi || 0)) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Euro</span><span style="font-family:var(--font-mono);color:var(--text)">' + _e(euroPort) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Contanti</span><span style="font-family:var(--font-mono)">' + _e(ic.contanti) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Elettr.</span><span style="font-family:var(--font-mono)">' + _e(Number(ic.bancomat || 0) + Number(ic.nexi || 0)) + '</span></div>'
         + '</div>'
-        + '<div style="font-size:8.5px;color:#0C447C;text-align:center;margin-top:5px">anteprima &middot; non registrato</div>';
+        + '<div style="font-size:8.5px;color:#0C447C;text-align:center;margin-top:5px">' + (haCassaPort ? 'anteprima &middot; non registrato' : 'cassa portale non arrivata') + '</div>';
     } else {
       cards += '<div style="font-size:10px;color:var(--text-muted);text-align:center;padding:26px 0">' + (futuro ? '&mdash;' : 'da compilare') + '</div>';
     }
@@ -630,8 +631,8 @@ async function caricaSettimanaDashboard() {
 
   h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;border-top:0.5px solid var(--border);padding-top:9px;margin-top:2px">'
     + '<div><div style="font-size:10px;color:var(--text-muted)">Litri settimana</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + Math.round(setLitri).toLocaleString('it-IT') + '</div></div>'
-    + '<div><div style="font-size:10px;color:var(--text-muted)">Venduto</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + _dashSetE(setEuro) + '</div></div>'
-    + '<div><div style="font-size:10px;color:var(--text-muted)">Margine</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:' + (setMarg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (setMarg >= 0 ? '+' : '&minus;') + _dashSetE(Math.abs(setMarg)) + '</div>'
+    + '<div><div style="font-size:10px;color:var(--text-muted)">Venduto</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + _dashStzE(setEuro) + '</div></div>'
+    + '<div><div style="font-size:10px;color:var(--text-muted)">Margine</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:' + (setMarg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (setMarg >= 0 ? '+' : '&minus;') + _dashStzE(Math.abs(setMarg)) + '</div>'
     + '<div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">&euro;/L ' + (setLitri > 0 ? (setMarg / setLitri).toFixed(4) : '&mdash;') + '</div></div>'
     + '<div><div style="font-size:10px;color:var(--text-muted)">Giorni completi</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + setCompleti + ' / ' + setConDati + '</div></div>'
     + '</div>';
