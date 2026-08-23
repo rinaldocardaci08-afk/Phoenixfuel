@@ -1745,7 +1745,18 @@ function _uniRenderPerProdotto(data) {
 // Output: euro = VENDUTO NETTO (il pannello fa × 1,22 per ottenere IVA).
 // ═══════════════════════════════════════════════════════════════════
 function _uniCalcolaTotaliPerProdotto(data) {
-  var m = _uniData;
+  return _uniCalcolaTotaliPerProdottoCon(_uniData, data);
+}
+
+// 23/08 — stessa regola, dati passati da fuori.
+// La dashboard ha bisogno degli stessi totali ma non puo' usare _uniData
+// (esiste solo dopo aver aperto la linguetta stazione). Invece di
+// riscrivere il calcolo altrove, qui si espone la funzione pura: chi
+// chiama passa la sua mappa dati con le stesse chiavi. Cosi' dashboard e
+// stazione danno per costruzione lo stesso numero.
+// m deve contenere: pompeMap, prezziMap, costiMap, cambioPrezzoMap,
+//                   lettureByData, lettureByPompa, cmpCorrente
+function _uniCalcolaTotaliPerProdottoCon(m, data) {
   var empty = { gasolio: { litri: 0, euro: 0, marg: 0 }, benzina: { litri: 0, euro: 0, marg: 0 } };
   if (!m || !data) return empty;
 

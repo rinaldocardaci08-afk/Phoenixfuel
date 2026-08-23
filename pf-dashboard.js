@@ -391,6 +391,256 @@ async function caricaCarichiDashboard() {
   cont.innerHTML = html;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// STRISCIA SETTIMANALE STAZIONE IN DASHBOARD (23/08 — richiesta Rinaldo)
+// Anteprima della SOLA settimana in corso, scorrevole in orizzontale,
+// pensata per il cellulare. Sta sotto il calendario delle uscite e sopra
+// gli alert. Nessuna freccia e nessun clic: per i dati veri si va nella
+// linguetta Stazione.
+//
+// REGOLA: il margine NON si ricalcola qui. Si passa per la funzione pura
+// _uniCalcolaTotaliPerProdottoCon di pf-stz-unificata.js, la stessa che
+// alimenta la vista settimanale e il pannello "Marginalita live". Se quel
+// file non e caricato, la striscia semplicemente non compare: la bacheca
+// non si tocca.
+//
+// Tre stati per giornata, gli stessi della stazione:
+//   letture salvate  -> litri, venduto, margine totale e €/L
+//   solo portale     -> anteprima azzurra con litri ed euro dal portale
+//   niente           -> "da compilare" (oppure "—" se il giorno e futuro)
+// ═══════════════════════════════════════════════════════════════════
+
+function _dashSetContenitore() {
+  var el = document.getElementById('dash-settimana-stz');
+  if (el) return el;
+  // si aggancia da solo sopra il blocco alert: nessuna modifica a index.html
+  var rif = document.getElementById('dash-alert-wrapper')
+         || document.getElementById('dash-alert-operativi');
+  if (!rif || !rif.parentNode) return null;
+  el = document.createElement('div');
+  el.id = 'dash-settimana-stz';
+  el.style.margin = '0 0 14px';
+  rif.parentNode.insertBefore(el, rif);
+  return el;
+}
+
+function _dashSetE(v) {
+  return Number(v || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function _dashSetLunedi(iso) {
+  var d = new Date(iso + 'T12:00:00');
+  var dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return d.toISOString().split('T')[0];
+}
+
+async function caricaSettimanaDashboard() {
+  var host = _dashSetContenitore();
+  if (!host) return;
+
+  if (typeof _uniCalcolaTotaliPerProdottoCon !== 'function') {
+    console.warn('[settimana dashboard] pf-stz-unificata.js non caricato: striscia non mostrata');
+    host.innerHTML = '';
+    return;
+  }
+
+  var oggiSet = new Date().toISOString().split('T')[0];
+  var lunISO = _dashSetLunedi(oggiSet);
+  var lun = new Date(lunISO + 'T12:00:00');
+  var dom = new Date(lun); dom.setDate(lun.getDate() + 6);
+  var domISO = dom.toISOString().split('T')[0];
+  // le letture partono da 30 giorni prima del lunedi: senza la lettura
+  // precedente il delta del lunedi verrebbe zero
+  var daLett = new Date(lun); daLett.setDate(lun.getDate() - 30);
+  var daLettISO = daLett.toISOString().split('T')[0];
+
+  host.innerHTML = '<div style="background:var(--bg-card);border-radius:10px;padding:14px;font-size:12px;color:var(--text-muted)">Caricamento settimana stazione...</div>';
+
+  function _sd(set, label) {
+    if (set.status === 'fulfilled') {
+      if (set.value && set.value.error) { console.warn('[settimana dashboard] ' + label + ':', set.value.error.message); return []; }
+      return (set.value && set.value.data) || [];
+    }
+    console.warn('[settimana dashboard] ' + label + ' rejected:', set.reason);
+    return [];
+  }
+
+  var res;
+  try {
+    res = await Promise.allSettled([
+      sb.from('stazione_pompe').select('*').eq('attiva', true).order('ordine'),
+      sb.from('stazione_letture').select('*').gte('data', daLettISO).lte('data', domISO),
+      sb.from('stazione_prezzi').select('*').gte('data', daLettISO).lte('data', domISO),
+      sb.from('stazione_costi').select('*').gte('data', daLettISO).lte('data', domISO),
+      sb.from('cisterne').select('prodotto,livello_attuale,costo_medio').eq('sede', 'stazione_oppido'),
+      sb.from('stazione_cambio_prezzo').select('*').gte('data', lunISO).lte('data', domISO),
+      sb.from('stazione_cassa').select('*').gte('data', lunISO).lte('data', domISO),
+      sb.from('stazione_import_portale').select('data,pompa_ordine,contatore_finale,litri_portale').gte('data', lunISO).lte('data', domISO),
+      sb.from('stazione_import_cassa').select('*').gte('data', lunISO).lte('data', domISO)
+    ]);
+  } catch (e) {
+    console.warn('[settimana dashboard]', e);
+    host.innerHTML = '';
+    return;
+  }
+
+  var pompe    = _sd(res[0], 'stazione_pompe');
+  var letture  = _sd(res[1], 'stazione_letture');
+  var prezzi   = _sd(res[2], 'stazione_prezzi');
+  var costi    = _sd(res[3], 'stazione_costi');
+  var cisterne = _sd(res[4], 'cisterne');
+  var cambioP  = _sd(res[5], 'stazione_cambio_prezzo');
+  var cassaR   = _sd(res[6], 'stazione_cassa');
+  var impPortR = _sd(res[7], 'stazione_import_portale');
+  var impCassR = _sd(res[8], 'stazione_import_cassa');
+
+  if (!pompe.length) { host.innerHTML = ''; return; }
+
+  // ── mappe con le STESSE chiavi di _uniData ──
+  var pompeMap = {};       pompe.forEach(function (p) { pompeMap[p.id] = p; });
+  var prezziMap = {};      prezzi.forEach(function (p) { prezziMap[p.data + '_' + p.prodotto] = p.prezzo_litro; });
+  var costiMap = {};       costi.forEach(function (c) { costiMap[c.data + '_' + c.prodotto] = Number(c.costo_litro); });
+  var costiMapCP = {};     costi.forEach(function (c) { if (c.costo_litro_cp) costiMapCP[c.data + '_' + c.prodotto] = Number(c.costo_litro_cp); });
+  var cambioPrezzoMap = {};
+  cambioP.forEach(function (cp) {
+    cambioPrezzoMap[cp.data + '_' + cp.prodotto] = {
+      id: cp.id,
+      prezzo_iva_nuovo: Number(cp.prezzo_iva_nuovo || 0),
+      costo_netto_nuovo: Number(cp.costo_netto_nuovo || 0),
+      litri_al_nuovo_prezzo: Number(cp.litri_al_nuovo_prezzo || 0)
+    };
+  });
+  var lettureByData = {}, lettureByPompa = {};
+  letture.forEach(function (l) {
+    if (!lettureByData[l.data]) lettureByData[l.data] = [];
+    lettureByData[l.data].push(l);
+    if (!lettureByPompa[l.pompa_id]) lettureByPompa[l.pompa_id] = [];
+    lettureByPompa[l.pompa_id].push(l);
+  });
+  var cmpPerProdotto = {}, cmpCorrente = {};
+  cisterne.forEach(function (c) {
+    var p = c.prodotto;
+    if (!cmpPerProdotto[p]) cmpPerProdotto[p] = { litri: 0, valore: 0 };
+    var liv = Number(c.livello_attuale || 0);
+    cmpPerProdotto[p].litri += liv;
+    cmpPerProdotto[p].valore += liv * Number(c.costo_medio || 0);
+  });
+  Object.keys(cmpPerProdotto).forEach(function (p) {
+    var v = cmpPerProdotto[p];
+    cmpCorrente[p] = v.litri > 0 ? Math.round((v.valore / v.litri) * 1000000) / 1000000 : 0;
+  });
+
+  var m = {
+    pompeMap: pompeMap, prezziMap: prezziMap, costiMap: costiMap, costiMapCP: costiMapCP,
+    cambioPrezzoMap: cambioPrezzoMap, lettureByData: lettureByData,
+    lettureByPompa: lettureByPompa, cmpCorrente: cmpCorrente
+  };
+
+  var cassaByData = {}; cassaR.forEach(function (r) { cassaByData[r.data] = r; });
+  var impCont = {};     impPortR.forEach(function (r) { if (!impCont[r.data]) impCont[r.data] = []; impCont[r.data].push(r); });
+  var impCassa = {};    impCassR.forEach(function (r) { impCassa[r.data] = r; });
+
+  var GG = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
+  var MM = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+
+  var setLitri = 0, setEuro = 0, setMarg = 0, setCompleti = 0, setConDati = 0;
+  var cards = '';
+  var cur = new Date(lun);
+
+  for (var i = 0; i < 7; i++) {
+    var data = cur.toISOString().split('T')[0];
+    var letG = lettureByData[data] || [];
+    var haLetture = letG.length > 0;
+    var cassa = cassaByData[data] || null;
+    var staging = (impCont[data] || []).length > 0 || !!impCassa[data];
+    var futuro = data > oggiSet;
+    var isOggi = data === oggiSet;
+
+    var tot = haLetture ? _uniCalcolaTotaliPerProdottoCon(m, data) : null;
+    var litriG = tot ? (tot.gasolio.litri + tot.benzina.litri) : 0;
+    var euroIva = tot ? ((tot.gasolio.euro + tot.benzina.euro) * 1.22) : 0;
+    var margG = tot ? (tot.gasolio.marg + tot.benzina.marg) : 0;
+    var margL = litriG > 0 ? (margG / litriG) : 0;
+    if (haLetture) { setLitri += litriG; setEuro += euroIva; setMarg += margG; setConDati++; if (cassa) setCompleti++; }
+
+    var bordo = '#e8e7e3', icona = '';
+    if (haLetture && cassa) { bordo = '#639922'; icona = '<span style="color:#3B6D11;font-size:12px;line-height:1">&#9679;</span>'; }
+    else if (haLetture)     { bordo = '#E0A458'; icona = '<span style="color:#8A4F06;font-size:12px;line-height:1">&#9689;</span>'; }
+    else if (staging)       { bordo = '#378ADD'; icona = '<span style="color:#0C447C;font-size:12px;line-height:1">&#8595;</span>'; }
+
+    cards += '<div style="flex:0 0 146px;scroll-snap-align:start;border:0.5px solid var(--border);border-left:3px solid ' + bordo
+      + ';background:' + (isOggi ? '#FFF8EE' : 'var(--bg)') + ';border-radius:10px;padding:8px;box-sizing:border-box">';
+
+    cards += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+      + '<span style="font-size:12px;font-weight:700;color:' + (isOggi ? '#D85A30' : 'var(--text)') + '">'
+      + GG[cur.getDay()] + ' ' + cur.getDate() + '</span>' + icona + '</div>';
+
+    if (haLetture) {
+      cards += '<div style="border:1.5px solid var(--text);border-radius:7px;padding:4px 7px;display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">'
+        + '<span style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Litri</span>'
+        + '<span style="font-family:var(--font-mono);font-size:18px;font-weight:700">' + Math.round(litriG).toLocaleString('it-IT') + '</span></div>';
+
+      cards += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:6px">'
+        + '<span style="color:var(--text-muted)">Venduto</span>'
+        + '<span style="font-family:var(--font-mono);font-weight:700">' + _dashSetE(euroIva) + '</span></div>';
+
+      cards += '<div style="background:#16305B;border-radius:7px;padding:6px 5px;text-align:center">'
+        + '<div style="font-size:7.5px;letter-spacing:.6px;color:#9FB6D9;text-transform:uppercase">Margine</div>'
+        + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700;color:' + (margG >= 0 ? '#7BE87B' : '#FF9A9A') + '">'
+        + (margG >= 0 ? '' : '&minus;') + '&euro; ' + _dashSetE(Math.abs(margG)) + '</div>'
+        + '<div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:' + (margL >= 0 ? '#7BE87B' : '#FF9A9A') + '">&euro; ' + margL.toFixed(4) + '/L</div>'
+        + '</div>';
+
+      if (!cassa) {
+        cards += '<div style="background:#FFF1DC;border-radius:6px;padding:4px;margin-top:5px;font-size:8.5px;color:#8A4F06;text-align:center;font-weight:600">Cassa da compilare</div>';
+      }
+    } else if (staging) {
+      var ic = impCassa[data] || {};
+      var litriPort = 0;
+      (impCont[data] || []).forEach(function (r) { litriPort += Number(r.litri_portale || 0); });
+      if (!litriPort) litriPort = Number(ic.litri_totali || 0);
+      var euroPort = Number(ic.importo_totale || 0);
+      cards += '<div style="background:#E6F1FB;border-radius:6px;padding:6px 4px;text-align:center;font-size:9px;color:#0C447C;line-height:1.3;font-weight:600;margin-bottom:5px">Dati pronti<br>dal portale</div>';
+      cards += '<div style="font-size:10px;line-height:1.6;color:var(--text-muted)">'
+        + '<div style="display:flex;justify-content:space-between"><span>Litri</span><span style="font-family:var(--font-mono);color:var(--text);font-weight:700">' + Math.round(litriPort).toLocaleString('it-IT') + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Euro</span><span style="font-family:var(--font-mono);color:var(--text)">' + _dashSetE(euroPort) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Contanti</span><span style="font-family:var(--font-mono)">' + _dashSetE(ic.contanti) + '</span></div>'
+        + '<div style="display:flex;justify-content:space-between"><span>Elettr.</span><span style="font-family:var(--font-mono)">' + _dashSetE(Number(ic.bancomat || 0) + Number(ic.nexi || 0)) + '</span></div>'
+        + '</div>'
+        + '<div style="font-size:8.5px;color:#0C447C;text-align:center;margin-top:5px">anteprima &middot; non registrato</div>';
+    } else {
+      cards += '<div style="font-size:10px;color:var(--text-muted);text-align:center;padding:26px 0">' + (futuro ? '&mdash;' : 'da compilare') + '</div>';
+    }
+
+    cards += '</div>';
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  var h = '';
+  h += '<div style="background:var(--bg-card);border-radius:12px;padding:12px 12px 10px">';
+
+  h += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:9px">'
+    + '<span style="font-size:13px;font-weight:700">&#9981; Stazione &middot; settimana in corso</span>'
+    + '<span style="font-size:10.5px;color:var(--text-muted)">' + lun.getDate() + ' ' + MM[lun.getMonth()] + ' &ndash; ' + dom.getDate() + ' ' + MM[dom.getMonth()] + ' &middot; scorri &#8594;</span>'
+    + '</div>';
+
+  h += '<div style="display:flex;gap:6px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;padding-bottom:6px">'
+    + cards + '</div>';
+
+  h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;border-top:0.5px solid var(--border);padding-top:9px;margin-top:2px">'
+    + '<div><div style="font-size:10px;color:var(--text-muted)">Litri settimana</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + Math.round(setLitri).toLocaleString('it-IT') + '</div></div>'
+    + '<div><div style="font-size:10px;color:var(--text-muted)">Venduto</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + _dashSetE(setEuro) + '</div></div>'
+    + '<div><div style="font-size:10px;color:var(--text-muted)">Margine</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:' + (setMarg >= 0 ? '#3B6D11' : '#A32D2D') + '">' + (setMarg >= 0 ? '+' : '&minus;') + _dashSetE(Math.abs(setMarg)) + '</div>'
+    + '<div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">&euro;/L ' + (setLitri > 0 ? (setMarg / setLitri).toFixed(4) : '&mdash;') + '</div></div>'
+    + '<div><div style="font-size:10px;color:var(--text-muted)">Giorni completi</div><div style="font-size:16px;font-weight:700;font-family:var(--font-mono)">' + setCompleti + ' / ' + setConDati + '</div></div>'
+    + '</div>';
+
+  h += '</div>';
+
+  host.innerHTML = h;
+}
+
 // ── TOGGLE TENDINA ALERT ──
 function dashToggleAlert() {
   var t = document.getElementById('dash-alert-tendina');
