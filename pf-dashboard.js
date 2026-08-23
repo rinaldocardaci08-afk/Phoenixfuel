@@ -443,6 +443,17 @@ async function _dashStzSettimana() {
 
   var oggiSet = new Date().toISOString().split('T')[0];
   var lunISO = _dashStzLunedi(oggiSet);
+  // 23/08 — il LUNEDI la settimana nuova e' ancora vuota (il lunedi stesso si
+  // registra il giorno dopo). Fino a lunedi compreso si guarda la settimana
+  // appena chiusa, che ha anche la domenica da completare; dal martedi si
+  // passa alla nuova, dove il lunedi c'e' gia' come dato o come anteprima.
+  var _dow = new Date(oggiSet + 'T12:00:00').getDay();
+  var settScorsa = (_dow === 1);
+  if (settScorsa) {
+    var _lp = new Date(lunISO + 'T12:00:00');
+    _lp.setDate(_lp.getDate() - 7);
+    lunISO = _lp.toISOString().split('T')[0];
+  }
   var lun = new Date(lunISO + 'T12:00:00');
   var dom = new Date(lun); dom.setDate(lun.getDate() + 6);
   var domISO = dom.toISOString().split('T')[0];
@@ -622,7 +633,7 @@ async function _dashStzSettimana() {
   h += '<div style="background:var(--bg-card);border-radius:12px;padding:12px 12px 10px">';
 
   h += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:9px">'
-    + '<span style="font-size:13px;font-weight:700">&#9981; Stazione &middot; settimana in corso</span>'
+    + '<span style="font-size:13px;font-weight:700">&#9981; Stazione &middot; ' + (settScorsa ? 'settimana conclusa' : 'settimana in corso') + '</span>'
     + '<span style="font-size:10.5px;color:var(--text-muted)">' + lun.getDate() + ' ' + MM[lun.getMonth()] + ' &ndash; ' + dom.getDate() + ' ' + MM[dom.getMonth()] + ' &middot; scorri &#8594;</span>'
     + '</div>';
 
