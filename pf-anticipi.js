@@ -1438,6 +1438,11 @@ function _antRenderModuloCard(p, aff) {
     html += '</td>';
     html += '<td style="padding:5px 8px"><span style="background:' + stColors.bg + ';color:' + stColors.fg + ';padding:2px 8px;border-radius:9px;font-size:9px;font-weight:700;letter-spacing:0.3px">' + stColors.label + '</span></td>';
     html += '<td style="padding:5px 8px;text-align:right;white-space:nowrap">';
+    // 25/08 — incassata su un altro istituto: la banca che ha anticipato non
+    // ha ancora avuto il rientro. Pulsante rosso, non e' un errore ma va visto.
+    if (f.incasso_altro_istituto) {
+      html += '<button onclick="_antNotaIncassoEsterno(\'' + f.id + '\')" title="Incassata su altro istituto — anticipo ancora da rientrare" style="background:#A32D2D;border:none;color:#fff;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;margin-right:4px;font-weight:700;box-shadow:0 1px 3px rgba(163,45,45,0.4)">&#128712;</button>';
+    }
     html += '<button onclick="_calcOpenPopupCosto(\'' + f.id + '\',\'' + aff.id + '\')" title="Costo anticipo per istituto (ℹ︎)" style="background:none;border:0.5px solid #26215C;color:#26215C;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;margin-right:4px;font-weight:600">ℹ️</button>';
     if (f.stato === 'anticipata' && _antPuoIncasso()) {
       html += '<button onclick="_antRegistraIncasso(\'' + f.id + '\')" title="Registra incasso cliente" style="background:none;border:0.5px solid #27500A;color:#27500A;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;font-weight:600">✓ Incasso</button>';
@@ -1742,6 +1747,68 @@ function _antApriModaleModulo(presentazioneId) {
 function _antApriModaleFattura(fatturaAntId) {
   return _antRenderModaleFattura(fatturaAntId);
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTA "INCASSATA SU ALTRO ISTITUTO" (25/08)
+// ═══════════════════════════════════════════════════════════════════════════
+// Il cliente ha pagato su una banca diversa da quella che ha anticipato la
+// fattura. L'incasso e' avvenuto davvero, ma la banca anticipante non ha
+// ricevuto niente: l'anticipo resta aperto e occupa il fido finche' non le
+// versi il rientro. La nota la scrive l'estratto conto in
+// anticipi_sbf_fatture.incasso_altro_istituto (JSON).
+// Il pulsante "Registra il rientro" apre il modale incasso che esiste gia'.
+async function _antNotaIncassoEsterno(fatturaAntId) {
+  var r = await sb.from('anticipi_sbf_fatture').select('*').eq('id', fatturaAntId).single();
+  if (r.error || !r.data) { toast('Riga anticipo non trovata'); return; }
+  var f = r.data;
+  var n = f.incasso_altro_istituto || {};
+  if (typeof n === 'string') { try { n = JSON.parse(n); } catch (e) { n = {}; } }
+
+  var daRientrare = Math.max(0, Number(f.importo_anticipato_calcolato || 0) - Number(f.importo_estinto || 0));
+  var idOv = 'ant-nota-est-ov';
+  var vecchio = document.getElementById(idOv);
+  if (vecchio) vecchio.remove();
+
+  var h = '<div id="' + idOv + '" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px">';
+  h += '<div style="background:white;border-radius:12px;padding:20px;width:470px;max-width:100%;box-shadow:0 12px 40px rgba(0,0,0,0.3)">';
+
+  h += '<div style="display:flex;align-items:flex-start;gap:9px;margin-bottom:4px">'
+     + '<span style="color:#A32D2D;font-size:17px;line-height:1.1">&#128712;</span>'
+     + '<div style="font-size:15px;font-weight:600;color:#A32D2D">Incassata, ma non ancora rientrata</div></div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin:0 0 14px 26px">Fattura <strong style="font-family:var(--font-mono)">'
+     + esc(f.numero_fattura || '?') + '</strong>' + (f.cliente_nome ? ' &middot; ' + esc(f.cliente_nome) : '') + '</div>';
+
+  h += '<div style="background:var(--bg);border-radius:6px;padding:11px 14px;margin-bottom:13px;display:grid;grid-template-columns:1fr 1fr;gap:11px;font-size:11.5px">';
+  h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Incassato il</span><strong style="font-family:var(--font-mono)">' + (n.data ? fmtD(n.data) : '&mdash;') + '</strong></div>';
+  h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Importo incassato</span><strong style="font-family:var(--font-mono)">' + (n.importo != null ? fmtE(n.importo) : '&mdash;') + '</strong></div>';
+  h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Entrato su</span><strong style="color:#27500A">' + esc(n.istituto_incasso || '&mdash;') + '</strong></div>';
+  h += '<div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.3px;display:block">Anticipata su</span><strong style="color:#A32D2D">' + esc(n.istituto_anticipo || '&mdash;') + '</strong></div>';
+  h += '</div>';
+
+  h += '<div style="font-size:12.5px;line-height:1.65;margin-bottom:13px">Il cliente ha pagato su un istituto <strong>diverso</strong> da quello che ha anticipato la fattura. '
+     + esc(n.istituto_anticipo || 'La banca anticipante') + ' non pu&ograve; stornare da sola: l\'anticipo resta <strong>aperto</strong> e continua a occupare il fido finch&eacute; non le versi il rientro.</div>';
+
+  if (daRientrare > 0) {
+    h += '<div style="background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 7px 7px 0;padding:9px 12px;margin-bottom:16px;font-size:11.5px;color:#633806;line-height:1.55">'
+       + '<strong>Da fare:</strong> quando avrai versato a ' + esc(n.istituto_anticipo || 'la banca')
+       + ', registra il rientro di <strong style="font-family:var(--font-mono)">' + fmtE(daRientrare) + '</strong>.</div>';
+  } else {
+    h += '<div style="background:#EAF3DE;border-left:3px solid #639922;border-radius:0 7px 7px 0;padding:9px 12px;margin-bottom:16px;font-size:11.5px;color:#27500A;line-height:1.55">'
+       + 'Il rientro risulta gi&agrave; registrato: non resta niente da versare.</div>';
+  }
+
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">';
+  h += '<span style="font-size:10px;color:var(--text-hint)">' + (n.registrato_at ? 'nota del ' + fmtD(String(n.registrato_at).split('T')[0]) : '') + '</span>';
+  h += '<span><button onclick="document.getElementById(\'' + idOv + '\').remove()" style="font-size:12px;padding:7px 14px;background:transparent;border:0.5px solid var(--border);border-radius:4px;cursor:pointer">Chiudi</button>';
+  if (daRientrare > 0 && typeof _antRegistraIncasso === 'function' && _antPuoIncasso()) {
+    h += '<button onclick="document.getElementById(\'' + idOv + '\').remove(); _antRegistraIncasso(\'' + f.id + '\')" style="font-size:12px;padding:7px 14px;background:#26215C;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:500;margin-left:8px">Registra il rientro</button>';
+  }
+  h += '</span></div>';
+
+  h += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+
+
 function _antRegistraIncasso(fatturaAntId) {
   return _antRenderModaleIncasso(fatturaAntId);
 }

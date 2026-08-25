@@ -568,7 +568,20 @@ async function _ecSalvaIncasso() {
   // casella non è spuntata, si chiede prima di scrivere.
   var _ant = dist.map(function (d) { return (_ecStato.anticipiPerFattura || {})[d.f.fattura_id || d.f.id]; })
                  .filter(function (a) { return a && a.anticipato > 0; });
-  if (_ant.length && !comunicata) {
+
+  // 25/08 — ISTITUTO DIVERSO: il pannello avvisava gia' ma il confirm qui sotto
+  // partiva lo stesso e chiedeva "vuoi stornare l'anticipo?". Rispondendo si',
+  // il rientro veniva scritto e l'anticipo risultava chiuso senza che la banca
+  // anticipante avesse visto un euro (fattura 1185 Albanese: incasso su BCC,
+  // anticipo su Intesa, fido Intesa liberato per finta).
+  // Ora: se TUTTE le anticipate sono su un istituto diverso da quello
+  // dell'incasso, non si chiede niente e non si storna niente. L'incasso si
+  // registra e sulla riga anticipo resta scritto cosa e' successo.
+  var _antDiversi = _ant.filter(function (a) { return a.istitutoId && a.istitutoId !== bancaId; });
+  var _soloDiversi = _ant.length > 0 && _antDiversi.length === _ant.length;
+  if (_soloDiversi) comunicata = false;
+
+  if (_ant.length && !comunicata && !_soloDiversi) {
     var _tot = _ant.reduce(function (a, x) { return a + Number(x.anticipato || 0); }, 0);
     var _ist = _ant.map(function (x) { return x.istituto; }).filter(function (v, i, arr) { return arr.indexOf(v) === i; }).join(', ');
     comunicata = confirm(
@@ -622,6 +635,29 @@ async function _ecSalvaIncasso() {
           console.warn('[ec] estinzione anticipo fallita', e);
           toast('Incasso registrato, ma il rientro dell\'anticipo della ' + (dist[i].f.numero || '') + ' non è passato: fallo dal Quadro anticipi');
         }
+      }
+    }
+
+    // 25/08 — nota sulla riga anticipo: la fattura e' incassata ma il rientro
+    // NON e' stato fatto perche' i soldi sono entrati altrove. Serve a chi
+    // guarda il Quadro anticipi dopo, e non e' un errore da correggere.
+    if (_soloDiversi) {
+      var _nomeBanca = ((_ecStato.banche || []).filter(function (b) { return b.id === bancaId; })[0] || {}).nome || '—';
+      for (var k = 0; k < dist.length; k++) {
+        var _an = (_ecStato.anticipiPerFattura || {})[dist[k].f.fattura_id || dist[k].f.id];
+        if (!_an || !(_an.anticipato > 0)) continue;
+        try {
+          await sb.from('anticipi_sbf_fatture').update({
+            incasso_altro_istituto: {
+              data: data,
+              importo: Math.round(dist[k].quota * 100) / 100,
+              istituto_incasso: _nomeBanca,
+              istituto_anticipo: _an.istituto || null,
+              da_rientrare: Math.round(Number(_an.anticipato) * 100) / 100,
+              registrato_at: new Date().toISOString()
+            }
+          }).eq('id', _an.rigaId);
+        } catch (e) { console.warn('[ec] nota incasso altro istituto', e); }
       }
     }
 
@@ -743,7 +779,7 @@ function _ecIncAggiorna() {
   h += '<div style="font-size:12px;color:' + (diversa.length ? '#633806' : '#0C447C') + ';line-height:1.6">'
     + '<strong>' + coinvolti.length + (coinvolti.length === 1 ? ' fattura anticipata' : ' fatture anticipate') + '</strong> · rientro alla banca ' + _ecFmtDec(totAnt) + '</div>';
   if (diversa.length) {
-    h += '<div style="font-size:11.5px;color:#8A4F06;margin-top:5px">L\'incasso è su un istituto diverso da quello che ha anticipato: la banca non può stornare da sola. Registro solo l\'entrata; il rientro lo gestisci dal Quadro anticipi.</div>';
+    h += '<div style="font-size:11.5px;color:#8A4F06;margin-top:5px">L\'incasso è su un istituto diverso da quello che ha anticipato: la banca non può stornare da sola. <strong>Registro solo l\'entrata, l\'anticipo resta aperto</strong> e sulla riga resterà scritto che è stato incassato altrove. Il rientro lo farai dal Quadro anticipi quando avrai versato alla banca.</div>';
     h += '<input type="hidden" id="ec-inc-comunicata" value="0">';
   } else {
     h += '<label style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:12px;color:#0C447C;cursor:pointer">'
