@@ -2013,106 +2013,20 @@ async function _antRenderModalePresenta(affidamentoId) {
 }
 
 // Render della modale Presenta usando lo state corrente
-function _antPresentaRender() {
-  var st = _antPresentaState;
-  if (!st) return;
 
-  var oggiISO = new Date().toISOString().split('T')[0];
-
-  var html = '<div style="max-width:1080px;width:100%">';
-
-  // Header
-  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">';
-  html += '<div>';
-  html += '<div style="font-size:17px;font-weight:700">📋 Presenta nuove fatture</div>';
-  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">🏛 ' + esc(st.bancaLabel);
-  // v20260801e — La percentuale NON e piu solo scritta: si cambia qui, sul
-  // singolo modulo. Parte dal valore dell affidamento (Intesa 100, MPS 80,
-  // BCC 82) e resta quella finche non la si tocca; viene salvata riga per
-  // riga in percentuale_applicata, quindi lo storico regge anche a
-  // percentuali diverse fra un modulo e l altro.
-  html += ' · <input id="ant-pres-perc" type="number" min="1" max="100" step="0.5" value="' + Number(st.perc) + '"'
-        + ' onchange="_antPresentaCambiaPerc(this.value)" onkeyup="if(event.key===\'Enter\')this.blur()"'
-        + ' title="Percentuale di anticipo di questo modulo"'
-        + ' style="width:62px;padding:2px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:12px;font-weight:700;font-family:var(--font-mono);text-align:right">';
-  html += '% su <select id="ant-pres-base" onchange="_antPresentaCambiaBase(this.value)"'
-        + ' style="padding:2px 4px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:12px;font-weight:700">'
-        + '<option value="imponibile"' + (st.base === 'totale' ? '' : ' selected') + '>Imponibile</option>'
-        + '<option value="totale"' + (st.base === 'totale' ? ' selected' : '') + '>Totale fattura</option>'
-        + '</select>';
-  if (Number(st.perc) !== Number(st.percDefault)) {
-    html += ' <span style="font-size:10px;color:#854F0B;font-weight:600">modificata (di norma ' + Number(st.percDefault) + '%)</span>';
-  }
-  if (st.massEuro) html += ' · Max cliente <strong>' + fmtE(st.massEuro) + '</strong>';
-  html += '</div></div></div>';
-
-  // Form metadati
-  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px">';
-  html += '<div style="display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:10px">';
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data presentazione *</label>';
-  html += '<input id="ant-pres-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">N. protocollo (opzionale)</label>';
-  html += '<input id="ant-pres-prot" type="text" placeholder="Es. PRES/2026/12" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px;font-family:var(--font-mono)"></div>';
-  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza del modulo <span style="color:#A32D2D">*</span></label>';
-  html += '<input id="ant-pres-scad" type="date" oninput="_antPresentaEsitoScadenza()" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px" title="Data entro cui il modulo va rientrato in banca. Vale per tutte le fatture del modulo. Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione.">';
-  html += '<div id="ant-pres-scad-esito" style="font-size:10px;color:var(--text-muted);margin-top:3px">Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione. Vale per tutte le fatture del modulo.</div></div>';
-  html += '</div>';
-  html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
-  html += '<input id="ant-pres-note" type="text" placeholder="Note operative (opzionali)" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
-  html += '</div>';
-
-  // Filtri tabella
-  // Lista clienti unici per filtro
-  var clientiSet = {};
-  st.fatture.forEach(function(f) {
-    var k = f.cliente_id || f.cessionario_denominazione || '?';
-    if (!clientiSet[k]) clientiSet[k] = { id: k, nome: f.cessionario_denominazione || '?' };
-  });
-  var clientiOrdinati = Object.keys(clientiSet).map(function(k) { return clientiSet[k]; }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
-
-  html += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">';
-  html += '<input id="ant-pres-search" type="text" placeholder="🔍 Cerca per numero/cliente..." value="' + esc(st.filterSearch) + '" oninput="_antPresentaSetFilter(\'search\',this.value)" style="flex:1;min-width:220px;padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px">';
-  html += '<select onchange="_antPresentaSetFilter(\'cliente\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text);max-width:280px">';
-  html += '<option value="">Cliente: tutti</option>';
-  clientiOrdinati.forEach(function(c) {
-    html += '<option value="' + esc(c.id) + '"' + (st.filterCliente === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
-  });
-  html += '</select>';
-  html += '<select onchange="_antPresentaSetFilter(\'sortBy\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
-  [['banca_cli','🏦 Banca cliente (consigliato)'],['data_desc','📅 Data ↓'],['data_asc','📅 Data ↑'],['cliente','👤 Cliente'],['scad_banca','🏦 Scad. cliente'],['totale_desc','💰 Totale ↓']].forEach(function(s) {
-    html += '<option value="' + s[0] + '"' + (st.sortBy === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
-  });
-  html += '</select>';
-  // Filtro Rete/Consumo (regola Phoenix Fuel: consumo = OK anticipare; rete = NO marginalità bassa)
-  var nReteCand = st.fatture.filter(function(f){ return f._is_rete; }).length;
-  html += '<select onchange="_antPresentaSetFilter(\'rete\',this.value)" title="Filtra fatture per tipologia cliente" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
-  html += '<option value="tutti"' + (st.filterRete === 'tutti' ? ' selected' : '') + '>Tutti i clienti' + (nReteCand ? ' (' + nReteCand + ' rete)' : '') + '</option>';
-  html += '<option value="solo_consumo"' + (st.filterRete === 'solo_consumo' ? ' selected' : '') + '>🟢 Solo consumo</option>';
-  html += '<option value="solo_rete"' + (st.filterRete === 'solo_rete' ? ' selected' : '') + '>🟠 Solo rete</option>';
-  html += '</select>';
-  html += '<button onclick="_antPresentaSelezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">✓ Tutte filtrate</button>';
-  html += '<button onclick="_antPresentaDeselezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">⨯ Nessuna</button>';
-  html += '</div>';
-
-  // Mini-banner diagnostico (sempre visibile per chi è admin)
-  if (st.diag && st.fatture.length > 0) {
-    var totScartate = (st.diag.scartateTipoCredito || 0) + (st.diag.scartateBusy || 0) + (st.diag.scartateBlacklist || 0) + (st.diag.scartateSenzaImponibile || 0);
-    if (totScartate > 0) {
-      html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">';
-      html += 'DB: ' + st.diag.totaliDB + ' fatture · ';
-      html += '<strong style="color:var(--text)">' + st.diag.candidate + ' presentabili</strong>';
-      html += ' · scartate: ';
-      var parts = [];
-      if (st.diag.scartateTipoCredito) parts.push(st.diag.scartateTipoCredito + ' credito');
-      if (st.diag.scartateBusy) parts.push(st.diag.scartateBusy + ' altro modulo');
-      if (st.diag.scartateBlacklist) parts.push(st.diag.scartateBlacklist + ' blacklist');
-      if (st.diag.scartateSenzaImponibile) parts.push(st.diag.scartateSenzaImponibile + ' s/imp');
-      html += parts.join(' · ');
-      html += '</div>';
-    }
-  }
-
-  // Filtra + ordina lista
+// ═══════════════════════════════════════════════════════════════════════════
+// ELENCO FATTURE DEL MODALE PRESENTA — estratto in funzione (26/08)
+// ═══════════════════════════════════════════════════════════════════════════
+// Perche esiste: _antPresentaRender finisce con apriModal(html), che
+// DISTRUGGE e ricostruisce tutta la finestra. Filtrando con la casella di
+// ricerca il campo veniva ricreato a ogni lettera e il cursore se ne andava.
+// Le acrobazie per rimettere il fuoco dopo (31/07, e di nuovo il 25/08) sono
+// pezze: la cura e non toccare il campo. Ora l elenco vive dentro
+// #ant-pres-lista e la ricerca aggiorna SOLO quel pezzo — la casella non
+// viene mai ricostruita, quindi il cursore non ha modo di spostarsi.
+// Il codice qui dentro e lo stesso di prima, spostato e non riscritto.
+function _antPresListaHTML(st) {
+  var html = '';
   var visible = st.fatture.slice();
   if (st.filterCliente) {
     visible = visible.filter(function(f) {
@@ -2258,6 +2172,110 @@ function _antPresentaRender() {
       html += '</div>';
     }
   }
+  return html;
+}
+
+function _antPresentaRender() {
+  var st = _antPresentaState;
+  if (!st) return;
+
+  var oggiISO = new Date().toISOString().split('T')[0];
+
+  var html = '<div style="max-width:1080px;width:100%">';
+
+  // Header
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">';
+  html += '<div>';
+  html += '<div style="font-size:17px;font-weight:700">📋 Presenta nuove fatture</div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">🏛 ' + esc(st.bancaLabel);
+  // v20260801e — La percentuale NON e piu solo scritta: si cambia qui, sul
+  // singolo modulo. Parte dal valore dell affidamento (Intesa 100, MPS 80,
+  // BCC 82) e resta quella finche non la si tocca; viene salvata riga per
+  // riga in percentuale_applicata, quindi lo storico regge anche a
+  // percentuali diverse fra un modulo e l altro.
+  html += ' · <input id="ant-pres-perc" type="number" min="1" max="100" step="0.5" value="' + Number(st.perc) + '"'
+        + ' onchange="_antPresentaCambiaPerc(this.value)" onkeyup="if(event.key===\'Enter\')this.blur()"'
+        + ' title="Percentuale di anticipo di questo modulo"'
+        + ' style="width:62px;padding:2px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:12px;font-weight:700;font-family:var(--font-mono);text-align:right">';
+  html += '% su <select id="ant-pres-base" onchange="_antPresentaCambiaBase(this.value)"'
+        + ' style="padding:2px 4px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:12px;font-weight:700">'
+        + '<option value="imponibile"' + (st.base === 'totale' ? '' : ' selected') + '>Imponibile</option>'
+        + '<option value="totale"' + (st.base === 'totale' ? ' selected' : '') + '>Totale fattura</option>'
+        + '</select>';
+  if (Number(st.perc) !== Number(st.percDefault)) {
+    html += ' <span style="font-size:10px;color:#854F0B;font-weight:600">modificata (di norma ' + Number(st.percDefault) + '%)</span>';
+  }
+  if (st.massEuro) html += ' · Max cliente <strong>' + fmtE(st.massEuro) + '</strong>';
+  html += '</div></div></div>';
+
+  // Form metadati
+  html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Data presentazione *</label>';
+  html += '<input id="ant-pres-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">N. protocollo (opzionale)</label>';
+  html += '<input id="ant-pres-prot" type="text" placeholder="Es. PRES/2026/12" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px;font-family:var(--font-mono)"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Scadenza del modulo <span style="color:#A32D2D">*</span></label>';
+  html += '<input id="ant-pres-scad" type="date" oninput="_antPresentaEsitoScadenza()" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px" title="Data entro cui il modulo va rientrato in banca. Vale per tutte le fatture del modulo. Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione.">';
+  html += '<div id="ant-pres-scad-esito" style="font-size:10px;color:var(--text-muted);margin-top:3px">Massimo ' + ANT_MAX_GIORNI_MODULO + ' giorni dalla presentazione. Vale per tutte le fatture del modulo.</div></div>';
+  html += '</div>';
+  html += '<div style="margin-top:8px"><label style="font-size:11px;color:var(--text-muted);font-weight:500">Note</label>';
+  html += '<input id="ant-pres-note" type="text" placeholder="Note operative (opzionali)" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+  html += '</div>';
+
+  // Filtri tabella
+  // Lista clienti unici per filtro
+  var clientiSet = {};
+  st.fatture.forEach(function(f) {
+    var k = f.cliente_id || f.cessionario_denominazione || '?';
+    if (!clientiSet[k]) clientiSet[k] = { id: k, nome: f.cessionario_denominazione || '?' };
+  });
+  var clientiOrdinati = Object.keys(clientiSet).map(function(k) { return clientiSet[k]; }).sort(function(a,b){ return a.nome.localeCompare(b.nome); });
+
+  html += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">';
+  html += '<input id="ant-pres-search" type="text" placeholder="🔍 Cerca per numero/cliente..." value="' + esc(st.filterSearch) + '" oninput="_antPresentaSetFilter(\'search\',this.value)" style="flex:1;min-width:220px;padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px">';
+  html += '<select onchange="_antPresentaSetFilter(\'cliente\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text);max-width:280px">';
+  html += '<option value="">Cliente: tutti</option>';
+  clientiOrdinati.forEach(function(c) {
+    html += '<option value="' + esc(c.id) + '"' + (st.filterCliente === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
+  });
+  html += '</select>';
+  html += '<select onchange="_antPresentaSetFilter(\'sortBy\',this.value)" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
+  [['banca_cli','🏦 Banca cliente (consigliato)'],['data_desc','📅 Data ↓'],['data_asc','📅 Data ↑'],['cliente','👤 Cliente'],['scad_banca','🏦 Scad. cliente'],['totale_desc','💰 Totale ↓']].forEach(function(s) {
+    html += '<option value="' + s[0] + '"' + (st.sortBy === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
+  });
+  html += '</select>';
+  // Filtro Rete/Consumo (regola Phoenix Fuel: consumo = OK anticipare; rete = NO marginalità bassa)
+  var nReteCand = st.fatture.filter(function(f){ return f._is_rete; }).length;
+  html += '<select onchange="_antPresentaSetFilter(\'rete\',this.value)" title="Filtra fatture per tipologia cliente" style="padding:6px 10px;border:0.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text)">';
+  html += '<option value="tutti"' + (st.filterRete === 'tutti' ? ' selected' : '') + '>Tutti i clienti' + (nReteCand ? ' (' + nReteCand + ' rete)' : '') + '</option>';
+  html += '<option value="solo_consumo"' + (st.filterRete === 'solo_consumo' ? ' selected' : '') + '>🟢 Solo consumo</option>';
+  html += '<option value="solo_rete"' + (st.filterRete === 'solo_rete' ? ' selected' : '') + '>🟠 Solo rete</option>';
+  html += '</select>';
+  html += '<button onclick="_antPresentaSelezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">✓ Tutte filtrate</button>';
+  html += '<button onclick="_antPresentaDeselezionaTutte()" style="padding:6px 12px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg-card);color:var(--text);font-size:11px;cursor:pointer">⨯ Nessuna</button>';
+  html += '</div>';
+
+  // Mini-banner diagnostico (sempre visibile per chi è admin)
+  if (st.diag && st.fatture.length > 0) {
+    var totScartate = (st.diag.scartateTipoCredito || 0) + (st.diag.scartateBusy || 0) + (st.diag.scartateBlacklist || 0) + (st.diag.scartateSenzaImponibile || 0);
+    if (totScartate > 0) {
+      html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:var(--text-muted);font-family:var(--font-mono)">';
+      html += 'DB: ' + st.diag.totaliDB + ' fatture · ';
+      html += '<strong style="color:var(--text)">' + st.diag.candidate + ' presentabili</strong>';
+      html += ' · scartate: ';
+      var parts = [];
+      if (st.diag.scartateTipoCredito) parts.push(st.diag.scartateTipoCredito + ' credito');
+      if (st.diag.scartateBusy) parts.push(st.diag.scartateBusy + ' altro modulo');
+      if (st.diag.scartateBlacklist) parts.push(st.diag.scartateBlacklist + ' blacklist');
+      if (st.diag.scartateSenzaImponibile) parts.push(st.diag.scartateSenzaImponibile + ' s/imp');
+      html += parts.join(' · ');
+      html += '</div>';
+    }
+  }
+
+  // Filtra + ordina lista
+  html += '<div id="ant-pres-lista">' + _antPresListaHTML(st) + '</div>';
 
   // Riepilogo + bottoni
   var nSel = st.selezionate.size;
@@ -2383,9 +2401,24 @@ function _antPresentaSetFilter(campo, val) {
   else if (campo === 'sortBy') _antPresentaState.sortBy = val;
   else if (campo === 'rete') _antPresentaState.filterRete = val;
 
+  // I menu a tendina ridisegnano tutto: li non si scrive, non c'e' cursore da
+  // difendere. La CASELLA DI RICERCA invece aggiorna solo l'elenco: la finestra
+  // non viene ricostruita e il campo resta quello, vivo, col suo cursore.
   if (campo !== 'search') { _antPresentaRidisegnaTenendoIlFuoco(); return; }
   if (_antPresentaFiltroTimer) clearTimeout(_antPresentaFiltroTimer);
-  _antPresentaFiltroTimer = setTimeout(_antPresentaRidisegnaTenendoIlFuoco, 250);
+  _antPresentaFiltroTimer = setTimeout(_antPresentaAggiornaLista, 200);
+}
+
+// Ridisegna SOLO l'elenco. Non tocca la casella, i menu, la data, il
+// protocollo, la scadenza, le note ne' il riepilogo in fondo.
+function _antPresentaAggiornaLista() {
+  var st = _antPresentaState;
+  if (!st) return;
+  var box = document.getElementById('ant-pres-lista');
+  // Se il contenitore non c'e' (finestra chiusa o versione vecchia del markup)
+  // si ripiega sul ridisegno intero: meglio lento che niente.
+  if (!box) { _antPresentaRidisegnaTenendoIlFuoco(); return; }
+  box.innerHTML = _antPresListaHTML(st);
 }
 
 function _antPresentaRidisegnaTenendoIlFuoco() {
