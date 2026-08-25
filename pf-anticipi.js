@@ -2364,35 +2364,52 @@ function _antPresentaCambiaBase(val) {
   _antPresentaRicalcola();
 }
 
+// v20260825a — IL CURSORE USCIVA DALLA CASELLA A OGNI LETTERA.
+// La correzione del 31/07 rimetteva il fuoco SUBITO dopo il ridisegno, in
+// modo sincrono: il browser stava ancora ricostruendo la finestra e il fuoco
+// appena messo si perdeva. Inoltre qui non c'era nessuna attesa, quindi si
+// ridisegnava la lista intera a ogni singolo tasto.
+// Ora si usa lo stesso schema di _antRidisegnaTenendoIlFuoco (casella della
+// pagina principale, che non ha mai dato problemi): attesa di 250 ms e fuoco
+// rimesso dentro un setTimeout 0, cioe' quando il DOM e' fermo.
+// I menu a tendina (cliente, ordinamento, rete) ridisegnano subito: li non
+// si scrive, quindi non c'e' cursore da difendere.
+var _antPresentaFiltroTimer = null;
+
 function _antPresentaSetFilter(campo, val) {
   if (!_antPresentaState) return;
   if (campo === 'search') _antPresentaState.filterSearch = val;
   else if (campo === 'cliente') _antPresentaState.filterCliente = val;
   else if (campo === 'sortBy') _antPresentaState.sortBy = val;
   else if (campo === 'rete') _antPresentaState.filterRete = val;
-  // Salva data/protocollo/scadenza/note prima di rerender
-  // v20260731b: ogni lettera digitata nella casella di ricerca ridisegna
-  // TUTTA la finestra, quindi il campo viene distrutto e ricreato e il
-  // cursore se ne va — si riusciva a scrivere una lettera per volta.
-  // Qui ci si ricorda dove era il cursore e lo si rimette dov era.
+
+  if (campo !== 'search') { _antPresentaRidisegnaTenendoIlFuoco(); return; }
+  if (_antPresentaFiltroTimer) clearTimeout(_antPresentaFiltroTimer);
+  _antPresentaFiltroTimer = setTimeout(_antPresentaRidisegnaTenendoIlFuoco, 250);
+}
+
+function _antPresentaRidisegnaTenendoIlFuoco() {
   var focusId = null, curDa = null, curA = null;
   var attivo = document.activeElement;
   if (attivo && attivo.id) {
     focusId = attivo.id;
     try { curDa = attivo.selectionStart; curA = attivo.selectionEnd; } catch (e) {}
   }
+  // Salva data/protocollo/scadenza/note prima di rerender
   _antPresentaSalvaForm();
   _antPresentaRender();
   _antPresentaRipristinaForm();
-  if (focusId) {
+  if (!focusId) return;
+  setTimeout(function () {
     var rinato = document.getElementById(focusId);
-    if (rinato) {
-      try { rinato.focus(); } catch (e) {}
+    if (!rinato) return;
+    try {
+      rinato.focus();
       if (curDa !== null && typeof rinato.setSelectionRange === 'function') {
-        try { rinato.setSelectionRange(curDa, curA); } catch (e) {}
+        rinato.setSelectionRange(curDa, curA);
       }
-    }
-  }
+    } catch (e) { /* campo non piu presente: pazienza */ }
+  }, 0);
 }
 
 function _antPresentaToggleFatt(fid, checked) {
