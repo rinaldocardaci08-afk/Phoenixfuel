@@ -799,9 +799,14 @@ async function _antRenderTabBanca(affidamentoId) {
     // illeggibile. Ora: un blocco per ANNO, dentro un elenco NUMERATO di
     // moduli chiusi; si apre quello che serve e dentro c'e' la scheda intera
     // con le sue fatture — la card di prima, riusata tale e quale.
-    html += (_antVistaBanca === 'fatture')
-      ? _antRenderFattureAnticipate(_antPresentazioniByAff[affidamentoId])
-      : _antRenderModuliElenco(_antPresentazioniByAff[affidamentoId], aff);
+    // 26/08 — la lista sta in un contenitore suo: la casella di ricerca
+    // aggiorna SOLO questo pezzo e non viene mai ricostruita (vedi
+    // _antAggiornaListaBanca).
+    html += '<div id="ant-lista-banca">'
+         + ((_antVistaBanca === 'fatture')
+             ? _antRenderFattureAnticipate(_antPresentazioniByAff[affidamentoId])
+             : _antRenderModuliElenco(_antPresentazioniByAff[affidamentoId], aff))
+         + '</div>';
   }
 
   cont.innerHTML = html;
@@ -1488,7 +1493,30 @@ function _antSetFiltro(campo, val) {
   _antFiltri[campo] = val;
   if (campo !== 'search') { _antRidisegnaTenendoIlFuoco(); return; }
   if (_antSetFiltroTimer) clearTimeout(_antSetFiltroTimer);
-  _antSetFiltroTimer = setTimeout(_antRidisegnaTenendoIlFuoco, 250);
+  _antSetFiltroTimer = setTimeout(_antAggiornaListaBanca, 200);
+}
+
+// 26/08 — LA CURA VERA DEL CURSORE.
+// Prima ogni lettera chiamava renderBancheAnticipi(), che rifa l'INTERA
+// pagina: la casella veniva distrutta e ricreata, e il fuoco rimesso dopo
+// era una pezza (31/07 e 11/08: entrambe le volte sembrava risolto, e
+// ricompariva appena la lista cresceva).
+// Ora si aggiorna SOLO l'elenco dentro #ant-lista-banca. La casella non
+// viene toccata: il cursore non ha modo di spostarsi perche' il campo e'
+// sempre lo stesso, non un suo sostituto.
+function _antAggiornaListaBanca() {
+  var box = document.getElementById('ant-lista-banca');
+  // fallisce aperto: se il contenitore non c'e', si ridisegna tutto come prima
+  if (!box || !_antSubTabAttiva || _antSubTabAttiva.indexOf('banca:') !== 0) {
+    _antRidisegnaTenendoIlFuoco();
+    return;
+  }
+  var affId = _antSubTabAttiva.split(':')[1];
+  var aff = (_bancheAffidamenti || []).find(function (a) { return a.id === affId; });
+  if (!aff) { _antRidisegnaTenendoIlFuoco(); return; }
+  box.innerHTML = (_antVistaBanca === 'fatture')
+    ? _antRenderFattureAnticipate(_antPresentazioniByAff[affId])
+    : _antRenderModuliElenco(_antPresentazioniByAff[affId], aff);
 }
 
 function _antRidisegnaTenendoIlFuoco() {
