@@ -685,8 +685,24 @@ function toggleTipoOrdine() {
   aggiornaSelezioniOrdine();
 }
 
+// 26/08 — GIRI SOVRAPPOSTI: PhoenixFuel spariva dal listino e poi tornava.
+// aggiornaSelezioniOrdine e' asincrona e viene lanciata da quattro punti
+// (onchange della data in index.html, cambio tipo ordine, apertura pagina,
+// riga 1253). Non c'era nessuna guardia: cambiando data o tipo due volte di
+// seguito, il giro vecchio poteva finire DOPO quello nuovo e riscrivere le
+// tendine con i dati di prima.
+// La riga PhoenixFuel e' la piu' esposta perche' e' l'unica che aspetta
+// _cmpStoricoAllaData, due query in piu' per prodotto: e' sempre l'ultima ad
+// arrivare. Alla seconda apertura la cache _cmpStoricoCache risponde subito e
+// il difetto sparisce da solo — per questo sembrava un fantasma.
+// Ora ogni chiamata prende un numero progressivo e, prima di scrivere in
+// pagina, verifica di essere ancora l'ultima. Chi e' stato superato esce in
+// silenzio invece di sovrascrivere.
+var _ordSelGen = 0;
+
 async function aggiornaSelezioniOrdine() {
   const data = document.getElementById('ord-data')?.value; if (!data) return;
+  const _gen = ++_ordSelGen;
 
   // Esegui query in parallelo
   const [prezziRes, cisterneRes, baseDepRes] = await Promise.all([
@@ -729,6 +745,10 @@ async function aggiornaSelezioniOrdine() {
   if (tipoOrd === 'entrata_deposito') {
     fornitori = fornitori.filter(function(f){ return f.nome.toLowerCase().indexOf('phoenix') === -1; });
   }
+  // Sono ancora l'ultima chiamata? Se no, i miei dati sono vecchi: non scrivo.
+  if (_gen !== _ordSelGen) return;
+  // E la data e' ancora quella per cui ho chiesto i prezzi?
+  if ((document.getElementById('ord-data')?.value || '') !== data) return;
   const selFor = document.getElementById('ord-fornitore');
   selFor.innerHTML = '<option value="">Seleziona fornitore...</option>' + fornitori.map(f=>'<option value="'+f.nome+'">'+f.nome+'</option>').join('');
   document.getElementById('ord-base').innerHTML = '<option value="">— Prima seleziona fornitore —</option>';
@@ -742,7 +762,7 @@ async function aggiornaSelezioniOrdine() {
   document.getElementById('prev-fido-warn').style.display = 'none';
   fidoClienteCorrente = null;
   // Carica clienti solo se cache vuota
-  if (!cacheClienti.length) await caricaSelectClienti('ord-cliente');
+  if (!cacheClienti.length) { await caricaSelectClienti('ord-cliente'); if (_gen !== _ordSelGen) return; }
 }
 
 function aggiornaBasiOrdine() {
