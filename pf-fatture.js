@@ -179,23 +179,38 @@ async function _fattCaricaAnticipi(ids) {
   var mappa = {};
   if (!ids || !ids.length) return mappa;
   try {
-    var r = await sb.from('anticipi_sbf_fatture')
-      .select('fattura_id,presentazione_id,stato')
-      .in('fattura_id', ids).neq('stato', 'esclusa');
-    if (r.error || !r.data || !r.data.length) return mappa;
+    // 01/09 — A BLOCCHI DA 200. Con l'elenco intero (1566 fatture) l'indirizzo
+    // della richiesta diventava lunghissimo e PostgREST rispondeva 400 Bad
+    // Request: la mappa tornava vuota e l'icona non compariva MAI, in silenzio.
+    // Stesso accorgimento gia' usato per l'inserimento fatture negli anticipi.
+    var trovate = [];
+    for (var b = 0; b < ids.length; b += 200) {
+      var pezzo = ids.slice(b, b + 200);
+      var r = await sb.from('anticipi_sbf_fatture')
+        .select('fattura_id,presentazione_id,stato')
+        .in('fattura_id', pezzo).neq('stato', 'esclusa');
+      if (r.error) { console.warn('[fatture] anticipi, blocco ' + (b / 200 + 1) + ':', r.error.message); continue; }
+      if (r.data && r.data.length) trovate = trovate.concat(r.data);
+    }
+    if (!trovate.length) return mappa;
 
     var presIds = [];
-    r.data.forEach(function (x) {
+    trovate.forEach(function (x) {
       if (x.presentazione_id && presIds.indexOf(x.presentazione_id) < 0) presIds.push(x.presentazione_id);
     });
-    var rP = await sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id').in('id', presIds);
+    var pres = [];
+    for (var c = 0; c < presIds.length; c += 200) {
+      var rP = await sb.from('anticipi_sbf_presentazioni')
+        .select('id,affidamento_id').in('id', presIds.slice(c, c + 200));
+      if (!rP.error && rP.data) pres = pres.concat(rP.data);
+    }
     var rA = await sb.from('banche_affidamenti').select('id,istituto_id');
     var rI = await sb.from('banche_istituti').select('id,nome');
-    var mapP = {}; (rP.data || []).forEach(function (x) { mapP[x.id] = x.affidamento_id; });
+    var mapP = {}; pres.forEach(function (x) { mapP[x.id] = x.affidamento_id; });
     var mapA = {}; (rA.data || []).forEach(function (x) { mapA[x.id] = x.istituto_id; });
     var mapI = {}; (rI.data || []).forEach(function (x) { mapI[x.id] = x.nome; });
 
-    r.data.forEach(function (x) {
+    trovate.forEach(function (x) {
       mappa[x.fattura_id] = mapI[mapA[mapP[x.presentazione_id]]] || 'banca non identificata';
     });
   } catch (e) { console.warn('[fatture] lettura anticipi', e); }
