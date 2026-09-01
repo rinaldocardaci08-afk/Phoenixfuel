@@ -2365,6 +2365,63 @@ function _antPresentaRender() {
   html += '<div style="font-size:13px;color:#26215C;margin-left:auto">Anticipo richiesto: <strong style="font-family:var(--font-mono);font-size:16px">' + fmtE(totAnt) + '</strong></div>';
   html += '</div>';
 
+  // ── ELENCO DELLE FATTURE SCELTE (01/09) ───────────────────────────────
+  // Prima c'era solo il totale: si sceglievano venti fatture e non si poteva
+  // rileggere cosa era entrato senza ricercarle una per una nell'elenco lungo.
+  // Qui stanno in chiaro, e si tolgono con la crocetta.
+  if (nSel > 0) {
+    var scelte = [];
+    st.selezionate.forEach(function (fid) {
+      var f = st.fatture.find(function (x) { return x.id === fid; });
+      if (f) scelte.push(f);
+    });
+    scelte.sort(function (a, b) { return String(a.numero || '').localeCompare(String(b.numero || ''), 'it', { numeric: true }); });
+
+    html += '<div style="border:0.5px solid #6B5FCC;border-radius:8px;margin-bottom:10px;overflow:hidden">';
+    html += '<div style="background:#EEEDFE;padding:7px 12px;font-size:11.5px;font-weight:600;color:#26215C">'
+         + 'Fatture nel modulo (' + nSel + ')</div>';
+    html += '<div style="max-height:190px;overflow-y:auto">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+    scelte.forEach(function (f, i) {
+      html += '<tr style="border-top:0.5px solid var(--border)' + (i % 2 ? ';background:var(--bg-card)' : '') + '">';
+      html += '<td style="padding:4px 10px;font-family:var(--font-mono);font-weight:600;white-space:nowrap">' + esc(f.numero || '—') + '</td>';
+      html += '<td style="padding:4px 8px;white-space:nowrap;color:var(--text-muted)">' + (f.data ? fmtD(f.data) : '—') + '</td>';
+      html += '<td style="padding:4px 8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.cessionario_denominazione || '—') + '</td>';
+      html += '<td style="padding:4px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtE(f.imponibile_totale) + '</td>';
+      html += '<td style="padding:4px 8px;text-align:right;font-family:var(--font-mono);font-weight:700;color:#26215C">' + fmtE(f._anticipo_calc) + '</td>';
+      html += '<td style="padding:4px 10px;text-align:right"><button onclick="_antPresentaToggleFatt(\'' + f.id + '\',false)" title="Togli questa fattura dal modulo" style="background:none;border:0;color:#A32D2D;font-size:13px;cursor:pointer;line-height:1;padding:0 2px">&times;</button></td>';
+      html += '</tr>';
+    });
+    html += '</table></div></div>';
+  }
+
+  // ── GIA' ACCREDITATO DALLA BANCA (01/09) ──────────────────────────────
+  // Capita di caricare a posteriori un modulo che la banca ha gia' erogato.
+  // Lo stato NON si scrive a mano: lo calcola il trigger del database dagli
+  // accrediti. Quindi qui non si tocca lo stato, si registra l'accredito
+  // insieme al modulo — e lo stato ci arriva per la strada normale.
+  // L'importo e' proposto ma resta modificabile: se la banca ha accreditato
+  // meno del richiesto lo stato deve diventare "parziale", non "anticipata".
+  if (nSel > 0 && _antPuoAccredito()) {
+    var accOn = !!st.giaAccreditato;
+    html += '<div style="border:0.5px solid ' + (accOn ? '#639922' : 'var(--border)') + ';border-radius:8px;padding:10px 13px;margin-bottom:10px;background:' + (accOn ? '#F4F9EE' : 'var(--bg)') + '">';
+    html += '<label style="display:flex;align-items:flex-start;gap:9px;cursor:pointer">'
+         + '<input type="checkbox" id="ant-pres-acc-on"' + (accOn ? ' checked' : '')
+         + ' onchange="_antPresAccreditoToggle(this.checked)" style="margin-top:2px">'
+         + '<span><span style="font-size:12.5px;font-weight:600;color:' + (accOn ? '#27500A' : 'var(--text)') + '">La banca ha gi&agrave; accreditato questo modulo</span>'
+         + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px">Da spuntare solo se i soldi sono <strong>gi&agrave; arrivati</strong>. Registra il modulo e l&rsquo;accredito insieme: lo stato passa da <em>In delibera</em> ad <em>Anticipata</em> da solo.</div></span></label>';
+    if (accOn) {
+      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px;padding-top:10px;border-top:0.5px solid #C8DCA8">';
+      html += '<div><label style="font-size:10.5px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:3px">Data accredito *</label>'
+           + '<input id="ant-pres-acc-data" type="date" value="' + esc(st.accData || '') + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px"></div>';
+      html += '<div><label style="font-size:10.5px;color:var(--text-muted);font-weight:600;display:block;margin-bottom:3px">Importo accreditato</label>'
+           + '<input id="ant-pres-acc-importo" type="number" step="0.01" value="' + (st.accImporto != null ? st.accImporto : totAnt.toFixed(2)) + '" style="width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);font-size:12px;font-family:var(--font-mono)">'
+           + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Proposto l&rsquo;anticipo richiesto. Se la banca ha dato meno, correggilo: il modulo restera&rsquo; <em>parziale</em>.</div></div>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
   html += '<div style="display:flex;gap:8px;justify-content:flex-end">';
   html += '<button onclick="chiudiModal();_antPresentaState=null" style="background:var(--bg);color:var(--text);border:0.5px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer">Annulla</button>';
   var btnDisabled = (nSel === 0);
@@ -2524,6 +2581,22 @@ function _antPresentaToggleFatt(fid, checked) {
     var fSel = (st.fatture || []).filter(function (x) { return x.id === fid; })[0];
     if (fSel) st.clienteFocus = _antPresChiave(fSel);
   }
+  _antPresentaSalvaForm();
+  _antPresentaRender();
+  _antPresentaRipristinaForm();
+}
+
+// La spunta "gia' accreditato": tiene da parte quello che c'e' gia' scritto
+// nei due campi, altrimenti ridisegnando si perde.
+function _antPresAccreditoToggle(on) {
+  var st = _antPresentaState;
+  if (!st) return;
+  var d = document.getElementById('ant-pres-acc-data');
+  var i = document.getElementById('ant-pres-acc-importo');
+  if (d && d.value) st.accData = d.value;
+  if (i && i.value) st.accImporto = i.value;
+  st.giaAccreditato = !!on;
+  if (on && !st.accData) st.accData = (document.getElementById('ant-pres-data') || {}).value || null;
   _antPresentaSalvaForm();
   _antPresentaRender();
   _antPresentaRipristinaForm();
@@ -2851,6 +2924,18 @@ async function _antPresentaConfermaInterna() {
   }
   _antPuliscoErroreCampo('ant-pres-scad');
 
+  // Gia' accreditato: serve la data, l'importo e' proposto ma va sensato
+  var accOn = !!document.getElementById('ant-pres-acc-on') && document.getElementById('ant-pres-acc-on').checked;
+  var accData = null, accImporto = 0;
+  if (accOn) {
+    accData = (document.getElementById('ant-pres-acc-data') || {}).value || null;
+    if (!accData) { _antErroreCampo('ant-pres-acc-data', 'Indica la data in cui la banca ha accreditato.'); return; }
+    _antPuliscoErroreCampo('ant-pres-acc-data');
+    accImporto = Number((document.getElementById('ant-pres-acc-importo') || {}).value);
+    if (!isFinite(accImporto) || accImporto <= 0) { _antErroreCampo('ant-pres-acc-importo', 'Importo accreditato non valido.'); return; }
+    _antPuliscoErroreCampo('ant-pres-acc-importo');
+  }
+
   // Compongo le righe da inserire
   var righe = [];
   var totAnticipo = 0;
@@ -3000,6 +3085,26 @@ async function _antPresentaConfermaInterna() {
     return;
   }
 
+  // 01/09 — modulo gia' accreditato dalla banca: si scrive l'accredito subito
+  // dopo le fatture. Lo stato NON si tocca: ci pensa il trigger, che legge
+  // gli accrediti e aggiorna importo_anticipato_totale e stato.
+  // Se questo fallisce il modulo resta comunque buono, solo in delibera:
+  // meglio un modulo da accreditare a mano che un modulo perso.
+  var _accFatto = false;
+  if (accOn) {
+    var resAcc = await sb.from('anticipi_sbf_accrediti').insert([{
+      presentazione_id: presId,
+      data_accredito: accData,
+      importo: accImporto,
+      note: 'Registrato insieme al modulo'
+    }]);
+    if (resAcc.error) {
+      toast('Modulo creato, ma l\'accredito non e passato: ' + resAcc.error.message + ' — registralo dal pulsante Accredito');
+    } else {
+      _accFatto = true;
+    }
+  }
+
   chiudiModal();
   var _bancaCreato = st.bancaLabel;
   var _affCreato = st.affidamentoId;
@@ -3013,7 +3118,7 @@ async function _antPresentaConfermaInterna() {
   // DOPO. Ora esce un riquadro con la conferma e la barra dell'istituto
   // ricalcolata sul nuovo utilizzo: si vede subito se c'e' ancora spazio per
   // presentare altro su quella banca, senza aprire la scheda.
-  _antPopupModuloCreato(_affCreato, _bancaCreato, righe.length, totAnticipo);
+  _antPopupModuloCreato(_affCreato, _bancaCreato, righe.length, totAnticipo, _accFatto ? accImporto : null);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3023,7 +3128,7 @@ async function _antPresentaConfermaInterna() {
 // con la stessa formula di utilizzo e in-attesa (righe 683-690). L'unica
 // differenza e' che qui i dati sono quelli RILETTI dopo il salvataggio,
 // quindi il modulo appena creato e' gia' dentro il conto.
-function _antPopupModuloCreato(affidamentoId, bancaLabel, nFatture, totAnticipo) {
+function _antPopupModuloCreato(affidamentoId, bancaLabel, nFatture, totAnticipo, accreditato) {
   var aff = (_bancheAffidamenti || []).filter(function (a) { return a.id === affidamentoId; })[0];
   if (!aff) { toast('✓ Modulo creato: ' + nFatture + ' fatture, anticipo ' + fmtE(totAnticipo)); return; }
 
@@ -3055,6 +3160,10 @@ function _antPopupModuloCreato(affidamentoId, bancaLabel, nFatture, totAnticipo)
   h += '<div style="font-size:12px;color:var(--text-muted);margin:0 0 14px 29px">'
      + nFatture + (nFatture === 1 ? ' fattura' : ' fatture') + ' &middot; anticipo richiesto <strong style="font-family:var(--font-mono);color:var(--text)">'
      + fmtE(totAnticipo) + '</strong> su <strong>' + esc(bancaLabel || '') + '</strong></div>';
+  if (accreditato != null) {
+    h += '<div style="background:#EAF3DE;border-left:3px solid #639922;border-radius:0 7px 7px 0;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#27500A">'
+       + '&#10003; Registrato anche l\'accredito di <strong style="font-family:var(--font-mono)">' + fmtE(accreditato) + '</strong>: lo stato del modulo si aggiorna da solo.</div>';
+  }
 
   h += _antBarraIstituto(bancaLabel || '', utilizzo, monteAcc, inAttesa);
 
