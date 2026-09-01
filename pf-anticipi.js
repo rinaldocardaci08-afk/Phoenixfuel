@@ -2818,8 +2818,41 @@ async function _antPresentaConfermaInterna() {
     return;
   }
   if (giaDentro.data && giaDentro.data.length) {
+    // 01/09 — prima diceva solo "sono gia dentro un altro anticipo" senza dire
+    // DOVE. Capitato il 28/08: il primo salvataggio era riuscito, Rinaldo ha
+    // riprovato, e il programma ha trovato le fatture nel modulo che aveva
+    // appena creato lui. Il messaggio era giusto ma sembrava assurdo.
+    // Ora si va a leggere il modulo che le contiene e lo si nomina: data,
+    // banca e stato. Se e' nato pochi minuti fa, lo si dice chiaramente.
     var elenco = giaDentro.data.map(function(x) { return x.numero_fattura || '?'; }).join(', ');
-    _antAvvisoCreazione('Queste fatture sono gia dentro un altro anticipo e non possono entrare in due moduli: <strong>' + esc(elenco) + '</strong>.<br><br>Toglile dalla selezione e riprova. Se ti aspettavi di poterle presentare, vuol dire che risultano ancora impegnate: guarda il modulo che le contiene dalla scheda della banca.');
+    var dove = '';
+    try {
+      var presIds = [];
+      giaDentro.data.forEach(function (x) {
+        if (x.presentazione_id && presIds.indexOf(x.presentazione_id) < 0) presIds.push(x.presentazione_id);
+      });
+      var rP = await sb.from('anticipi_sbf_presentazioni')
+        .select('id,data_presentazione,stato,numero_protocollo,inserito_at,affidamento_id')
+        .in('id', presIds);
+      var rA = await sb.from('banche_affidamenti').select('id,istituto_id');
+      var rI = await sb.from('banche_istituti').select('id,nome');
+      var mapA = {}; (rA.data || []).forEach(function (a) { mapA[a.id] = a.istituto_id; });
+      var mapI = {}; (rI.data || []).forEach(function (i) { mapI[i.id] = i.nome; });
+      var righeDove = (rP.data || []).map(function (pr) {
+        var banca = mapI[mapA[pr.affidamento_id]] || '?';
+        var quando = pr.inserito_at ? new Date(pr.inserito_at) : null;
+        var minuti = quando ? Math.round((Date.now() - quando.getTime()) / 60000) : null;
+        var appena = (minuti !== null && minuti >= 0 && minuti < 30)
+          ? ' &mdash; <strong>creato ' + (minuti < 1 ? 'poco fa' : minuti + ' minuti fa') + '</strong>' : '';
+        return '&bull; modulo del <strong>' + fmtD(pr.data_presentazione) + '</strong> su <strong>'
+             + esc(banca) + '</strong> (' + esc(pr.stato || '?') + ')' + appena;
+      });
+      if (righeDove.length) dove = '<br><br>Si trovano qui:<br>' + righeDove.join('<br>');
+    } catch (e) { console.warn('[ant] lettura modulo che contiene le fatture', e); }
+
+    _antAvvisoCreazione('Queste fatture sono gia dentro un altro anticipo e non possono entrare in due moduli: <strong>'
+      + esc(elenco) + '</strong>.' + dove
+      + '<br><br>Se il modulo l\'hai appena creato tu, il salvataggio era gia riuscito: chiudi questa finestra e lo trovi nella scheda della banca. Altrimenti togli quelle fatture dalla selezione e riprova.');
     return;
   }
 
@@ -2883,12 +2916,79 @@ async function _antPresentaConfermaInterna() {
   }
 
   chiudiModal();
+  var _bancaCreato = st.bancaLabel;
+  var _affCreato = st.affidamentoId;
   _antPresentaState = null;
   _antSvuotaCachePresIds();
-  toast('✓ Modulo creato: ' + righe.length + ' fatture, anticipo ' + fmtE(totAnticipo));
   // Refresh tab banca
   _antValDati = null;   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
+
+  // 01/09 — il toast spariva in tre secondi e non diceva come stava il fido
+  // DOPO. Ora esce un riquadro con la conferma e la barra dell'istituto
+  // ricalcolata sul nuovo utilizzo: si vede subito se c'e' ancora spazio per
+  // presentare altro su quella banca, senza aprire la scheda.
+  _antPopupModuloCreato(_affCreato, _bancaCreato, righe.length, totAnticipo);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFERMA DOPO LA CREAZIONE DEL MODULO (01/09)
+// ═══════════════════════════════════════════════════════════════════════════
+// La barra non e' rifatta: e' la stessa _antBarraIstituto della scheda banca,
+// con la stessa formula di utilizzo e in-attesa (righe 683-690). L'unica
+// differenza e' che qui i dati sono quelli RILETTI dopo il salvataggio,
+// quindi il modulo appena creato e' gia' dentro il conto.
+function _antPopupModuloCreato(affidamentoId, bancaLabel, nFatture, totAnticipo) {
+  var aff = (_bancheAffidamenti || []).filter(function (a) { return a.id === affidamentoId; })[0];
+  if (!aff) { toast('✓ Modulo creato: ' + nFatture + ' fatture, anticipo ' + fmtE(totAnticipo)); return; }
+
+  var monteAcc = Number(aff.importo_accordato || 0);
+  var utilizzo = 0, inAttesa = 0;
+  ((_antPresentazioniByAff || {})[affidamentoId] || []).forEach(function (pr) {
+    var fatt = pr._fatture || [];
+    var totEstinto = fatt.reduce(function (x, f) { return x + Number(f.importo_estinto || 0); }, 0);
+    utilizzo += Math.max(0, Number(pr.importo_anticipato_totale || 0) - totEstinto);
+    if (pr.stato !== 'rifiutata' && pr.stato !== 'estinta') {
+      var richiesto = Number(pr.importo_richiesto || 0);
+      if (!richiesto) richiesto = fatt.reduce(function (x, f) { return x + Number(f.importo_anticipato_calcolato || 0); }, 0);
+      inAttesa += Math.max(0, richiesto - Number(pr.importo_anticipato_totale || 0));
+    }
+  });
+  var disponibile = Math.max(0, monteAcc - utilizzo - inAttesa);
+  var pct = monteAcc > 0 ? Math.round((utilizzo + inAttesa) / monteAcc * 100) : 0;
+
+  var idOv = 'ant-popup-creato';
+  var vecchio = document.getElementById(idOv);
+  if (vecchio) vecchio.remove();
+
+  var h = '<div id="' + idOv + '" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px">';
+  h += '<div style="background:white;border-radius:12px;padding:20px;width:540px;max-width:100%;box-shadow:0 12px 40px rgba(0,0,0,0.3)">';
+
+  h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
+     + '<span style="color:#3B6D11;font-size:19px;line-height:1">&#10003;</span>'
+     + '<div style="font-size:16px;font-weight:700;color:#27500A">Modulo inserito</div></div>';
+  h += '<div style="font-size:12px;color:var(--text-muted);margin:0 0 14px 29px">'
+     + nFatture + (nFatture === 1 ? ' fattura' : ' fatture') + ' &middot; anticipo richiesto <strong style="font-family:var(--font-mono);color:var(--text)">'
+     + fmtE(totAnticipo) + '</strong> su <strong>' + esc(bancaLabel || '') + '</strong></div>';
+
+  h += _antBarraIstituto(bancaLabel || '', utilizzo, monteAcc, inAttesa);
+
+  if (monteAcc > 0) {
+    var col = disponibile <= 0 ? '#A32D2D' : (pct >= 85 ? '#BA7517' : '#27500A');
+    var frase = disponibile <= 0
+      ? 'Il fido su questo istituto e&#768; <strong>esaurito</strong>: per presentare altro bisogna aspettare un rientro.'
+      : (pct >= 85
+          ? 'Resta poco margine: <strong>' + fmtE(disponibile) + '</strong> ancora presentabili su questo istituto.'
+          : 'Puoi ancora presentare fino a <strong>' + fmtE(disponibile) + '</strong> su questo istituto.');
+    h += '<div style="background:var(--bg);border-left:3px solid ' + col + ';border-radius:0 7px 7px 0;padding:10px 13px;margin-top:12px;font-size:12.5px;line-height:1.6;color:' + col + '">'
+       + frase + '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Il calcolo comprende i moduli presentati e non ancora erogati.</div></div>';
+  }
+
+  h += '<div style="text-align:right;margin-top:16px">'
+     + '<button onclick="document.getElementById(\'' + idOv + '\').remove()" style="font-size:13px;padding:8px 18px;background:#26215C;color:white;border:none;border-radius:5px;cursor:pointer;font-weight:500">Ho capito</button></div>';
+
+  h += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

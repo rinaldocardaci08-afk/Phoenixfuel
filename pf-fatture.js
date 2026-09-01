@@ -166,6 +166,42 @@ function apriRigheExtraMese(mese) {
   apriModal(html);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LANCETTA BANCA SULLE FATTURE ANTICIPATE (01/09)
+// ═══════════════════════════════════════════════════════════════════════════
+// Una fattura gia' presentata in SBF non e' piu' disponibile per un altro
+// modulo. Prima lo si scopriva solo aprendo gli anticipi. Ora nell'elenco
+// compare l'icona della banca col nome dell'istituto.
+// UNA SOLA query per pagina: si passano gli id delle fatture visibili, non
+// una richiesta per riga. Le righe 'esclusa' non contano: quella fattura e'
+// stata tolta dal modulo ed e' di nuovo presentabile.
+async function _fattCaricaAnticipi(ids) {
+  var mappa = {};
+  if (!ids || !ids.length) return mappa;
+  try {
+    var r = await sb.from('anticipi_sbf_fatture')
+      .select('fattura_id,presentazione_id,stato')
+      .in('fattura_id', ids).neq('stato', 'esclusa');
+    if (r.error || !r.data || !r.data.length) return mappa;
+
+    var presIds = [];
+    r.data.forEach(function (x) {
+      if (x.presentazione_id && presIds.indexOf(x.presentazione_id) < 0) presIds.push(x.presentazione_id);
+    });
+    var rP = await sb.from('anticipi_sbf_presentazioni').select('id,affidamento_id').in('id', presIds);
+    var rA = await sb.from('banche_affidamenti').select('id,istituto_id');
+    var rI = await sb.from('banche_istituti').select('id,nome');
+    var mapP = {}; (rP.data || []).forEach(function (x) { mapP[x.id] = x.affidamento_id; });
+    var mapA = {}; (rA.data || []).forEach(function (x) { mapA[x.id] = x.istituto_id; });
+    var mapI = {}; (rI.data || []).forEach(function (x) { mapI[x.id] = x.nome; });
+
+    r.data.forEach(function (x) {
+      mappa[x.fattura_id] = mapI[mapA[mapP[x.presentazione_id]]] || 'banca non identificata';
+    });
+  } catch (e) { console.warn('[fatture] lettura anticipi', e); }
+  return mappa;
+}
+
 async function caricaFatture(){
   const anno     = document.getElementById('fatt-filtro-anno')?.value || new Date().getFullYear();
   const mese     = document.getElementById('fatt-filtro-mese')?.value || '';
@@ -242,12 +278,15 @@ async function caricaFatture(){
     return map[st] || `<span style="background:#ccc;padding:2px 8px;border-radius:10px;font-size:10px">${_esc(st||'—')}</span>`;
   };
 
+  const _antMap = await _fattCaricaAnticipi(fatture.map(function(x){ return x.id; }));
+
   tb.innerHTML = fatture.map(f=>{
     const clienteShow = f.cessionario_denominazione || '—';
+    const _banca = _antMap[f.id] || null;
     const pivaShow = f.cessionario_piva || '—';
     return `
       <tr>
-        <td style="font-family:var(--font-mono);font-weight:600">${_esc(f.numero)}/${f.anno||'?'}</td>
+        <td style="font-family:var(--font-mono);font-weight:600">${_esc(f.numero)}/${f.anno||'?'}${_banca ? `<div style="font-family:inherit;font-weight:600;font-size:9.5px;color:#0C447C;margin-top:2px;white-space:nowrap" title="Gia presentata in anticipo SBF su ${_esc(_banca)}: non e disponibile per un altro modulo">🏦 ${_esc(_banca)}</div>` : ''}</td>
         <td>${_fmtD(f.data)}</td>
         <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(clienteShow)}">${_esc(clienteShow)}</td>
         <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">${_esc(pivaShow)}</td>
