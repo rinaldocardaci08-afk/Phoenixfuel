@@ -1889,7 +1889,7 @@ async function _antRenderModalePresenta(affidamentoId) {
   // (prima erano 3 await sequenziali = 3 round-trip; ora 1 round-trip parallelo)
   var [resBL, resBusy, resF] = await Promise.all([
     sb.from('anticipi_sbf_regole').select('cliente_id').eq('affidamento_id', affidamentoId).eq('stato', 'esclusa'),
-    _antLeggiTutte('anticipi_sbf_fatture', 'fattura_id', function(q) { return q.not('fattura_id', 'is', null).neq('stato', 'esclusa'); }),
+    _antLeggiTutte('anticipi_sbf_fatture', 'fattura_id,presentazione_id', function(q) { return q.not('fattura_id', 'is', null).neq('stato', 'esclusa'); }),
     // Fatture emesse: query molto larga, filtraggio fine in JS dopo.
     // - Includiamo tutti i tipi vendita (TD01/TD06/TD24/TD25) — note credito TD04 escluse perché negative
     // - Niente filtro temporale duro: prendiamo le 1500 più recenti
@@ -1902,6 +1902,32 @@ async function _antRenderModalePresenta(affidamentoId) {
   ]);
   var blacklistSet = new Set((resBL.data || []).map(function(r) { return r.cliente_id; }).filter(Boolean));
   var fattureBusy = new Set((resBusy.data || []).map(function(r) { return r.fattura_id; }));
+
+  // 01/09 — DA DOVE VIENE IL BLOCCO. Prima le fatture gia' impegnate sparivano
+  // e basta: si cercava la 1357, non usciva, e non si capiva se fosse colpa
+  // del filtro, della data o di un anticipo gia' fatto. Ora restano in elenco,
+  // in grigio e non selezionabili, con scritto su quale istituto sono.
+  var busyBanca = {};
+  try {
+    var presIdsBusy = [];
+    (resBusy.data || []).forEach(function (r) {
+      if (r.presentazione_id && presIdsBusy.indexOf(r.presentazione_id) < 0) presIdsBusy.push(r.presentazione_id);
+    });
+    var presBusy = [];
+    for (var bb = 0; bb < presIdsBusy.length; bb += 200) {
+      var rPB = await sb.from('anticipi_sbf_presentazioni')
+        .select('id,affidamento_id').in('id', presIdsBusy.slice(bb, bb + 200));
+      if (!rPB.error && rPB.data) presBusy = presBusy.concat(rPB.data);
+    }
+    var rAB = await sb.from('banche_affidamenti').select('id,istituto_id');
+    var rIB = await sb.from('banche_istituti').select('id,nome');
+    var mPB = {}; presBusy.forEach(function (x) { mPB[x.id] = x.affidamento_id; });
+    var mAB = {}; (rAB.data || []).forEach(function (x) { mAB[x.id] = x.istituto_id; });
+    var mIB = {}; (rIB.data || []).forEach(function (x) { mIB[x.id] = x.nome; });
+    (resBusy.data || []).forEach(function (r) {
+      if (r.fattura_id) busyBanca[r.fattura_id] = mIB[mAB[mPB[r.presentazione_id]]] || 'altro modulo';
+    });
+  } catch (e) { console.warn('[ant] banca delle fatture gia impegnate', e); }
 
   if (resF.error) {
     apriModal('<div style="max-width:520px;padding:20px"><div style="color:#A32D2D;font-weight:600">❌ Errore caricamento fatture: ' + esc(resF.error.message) + '</div><div style="margin-top:12px;text-align:right"><button onclick="chiudiModal()" style="padding:8px 14px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Chiudi</button></div></div>');
@@ -1923,7 +1949,11 @@ async function _antRenderModalePresenta(affidamentoId) {
       diag.scartateTipoCredito++;
       return false;
     }
-    if (fattureBusy.has(f.id)) { diag.scartateBusy++; return false; }
+    if (fattureBusy.has(f.id)) {
+      diag.scartateBusy++;
+      f._busy_banca = busyBanca[f.id] || 'altro modulo';   // resta in elenco, ma spenta
+      return true;
+    }
     if (blacklistSet.has(f.cliente_id)) { diag.scartateBlacklist++; return false; }
     if (!f.imponibile_totale || Number(f.imponibile_totale) <= 0) { diag.scartateSenzaImponibile++; return false; }
     return true;
@@ -2075,6 +2105,8 @@ function _antPresListaHTML(st) {
     });
   }
   visible.sort(function(a, b) {
+    // le gia' impegnate scendono in fondo: restano cercabili ma non intralciano
+    if (!!a._busy_banca !== !!b._busy_banca) return a._busy_banca ? 1 : -1;
     if (st.sortBy === 'data_asc') return (a.data || '').localeCompare(b.data || '');
     if (st.sortBy === 'data_desc') return (b.data || '').localeCompare(a.data || '');
     if (st.sortBy === 'cliente') return (a.cessionario_denominazione || '').localeCompare(b.cessionario_denominazione || '');
@@ -2157,15 +2189,24 @@ function _antPresListaHTML(st) {
 
       // Sfondi cumulabili: rete (arancione tenue) ha priorità su massimale solo se non selezionata; se selezionata vince selezionato
       var bgRow = '';
-      if (sopraMassimale) bgRow = ';background:#FCEBEB';
+      var busy = f._busy_banca || null;
+      if (busy) bgRow = ';background:#F4F3F0;opacity:0.62';   // gia' in un altro modulo: si vede ma e' spenta
+      else if (sopraMassimale) bgRow = ';background:#FCEBEB';
       else if (checked) bgRow = ';background:rgba(107,95,204,0.08)';
       else if (isRete) bgRow = ';background:#FFF3E0'; // arancione tenue per rete non selezionate
 
       html += '<tr style="border-bottom:0.5px solid var(--border)' + bgRow + '">';
-      html += '<td style="padding:5px 8px;text-align:center"><input type="checkbox" data-fid="' + f.id + '" onchange="_antPresentaToggleFatt(\'' + f.id + '\',this.checked)"' + (checked ? ' checked' : '') + '></td>';
+      if (busy) {
+        html += '<td style="padding:5px 8px;text-align:center" title="Gia presentata su ' + esc(busy) + ': non puo entrare in due moduli">&#128274;</td>';
+      } else {
+        html += '<td style="padding:5px 8px;text-align:center"><input type="checkbox" data-fid="' + f.id + '" onchange="_antPresentaToggleFatt(\'' + f.id + '\',this.checked)"' + (checked ? ' checked' : '') + '></td>';
+      }
       html += '<td style="padding:5px 8px;font-family:var(--font-mono);font-weight:600">' + esc(f.numero || '—') + '</td>';
       html += '<td style="padding:5px 8px">' + (f.data ? fmtD(f.data) : '—') + '</td>';
       html += '<td style="padding:5px 8px">' + esc(f.cessionario_denominazione || '—');
+      if (busy) {
+        html += ' <span title="Gia presentata in anticipo: non puo entrare in due moduli" style="display:inline-block;background:#E6F1FB;color:#0C447C;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:0.3px;white-space:nowrap">&#127974; ANTICIPATA &middot; ' + esc(busy) + '</span>';
+      }
       if (isRete) {
         html += ' <span title="Cliente Rete: pagamento stretto, marginalità bassa — sconsigliato anticipare" style="display:inline-block;background:#F4A26A;color:#5C2C0C;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:0.3px">RETE</span>';
       }
@@ -2507,6 +2548,10 @@ function _antPresentaToggleAll(checked) {
     });
   }
   visible.forEach(function(f) {
+    // le gia' impegnate in un altro modulo NON si selezionano nemmeno da qui:
+    // altrimenti "seleziona tutte" le raccatterebbe e il salvataggio verrebbe
+    // rifiutato alla fine, dopo aver compilato tutto
+    if (f._busy_banca) { st.selezionate.delete(f.id); return; }
     if (checked) st.selezionate.add(f.id);
     else st.selezionate.delete(f.id);
   });
