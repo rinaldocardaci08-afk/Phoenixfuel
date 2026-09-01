@@ -2767,6 +2767,40 @@ async function _antLeggiTutte(tabella, colonne, filtri) {
 // Avviso VISIBILE e che resta a schermo. Il toast sparisce da solo e su
 // una schermata piena non lo si vede: per un errore che blocca la
 // creazione di un anticipo serve qualcosa che vada chiuso a mano.
+// 01/09 — ERRORI DI COMPILAZIONE: non si butta via il lavoro.
+// _antAvvisoCreazione qui sotto usa apriModal, che SOSTITUISCE la finestra:
+// dimenticando la scadenza si perdeva tutta la selezione delle fatture, che
+// pure era ancora in memoria. Per quello che manca da compilare si resta
+// dentro il modale: campo in rosso, spiegazione sotto, fuoco sul campo.
+// apriModal resta per gli errori veri (scrittura fallita, fattura gia in un
+// altro modulo), dove il modulo davvero non e' stato creato.
+function _antErroreCampo(idCampo, testoHtml, idEsito) {
+  var campo = document.getElementById(idCampo);
+  if (!campo) { _antAvvisoCreazione(testoHtml); return; }   // modale non piu' a schermo: si ripiega
+  campo.style.border = '1.5px solid #A32D2D';
+  campo.style.background = '#FFF6F6';
+  var esito = idEsito ? document.getElementById(idEsito) : null;
+  if (esito) {
+    esito.innerHTML = '<span style="color:#A32D2D;font-weight:600">&#9888; ' + testoHtml + '</span>';
+  } else {
+    var vecchio = document.getElementById('ant-pres-err-' + idCampo);
+    if (vecchio) vecchio.remove();
+    campo.insertAdjacentHTML('afterend',
+      '<div id="ant-pres-err-' + idCampo + '" style="font-size:10.5px;color:#A32D2D;font-weight:600;margin-top:3px">&#9888; ' + testoHtml + '</div>');
+  }
+  try { campo.focus(); campo.scrollIntoView({ block: 'center' }); } catch (e) {}
+}
+
+// Toglie il rosso quando si ricompila: se resta acceso sembra sempre sbagliato
+function _antPuliscoErroreCampo(idCampo) {
+  var campo = document.getElementById(idCampo);
+  if (!campo) return;
+  campo.style.border = '0.5px solid var(--border)';
+  campo.style.background = 'var(--bg-card)';
+  var vecchio = document.getElementById('ant-pres-err-' + idCampo);
+  if (vecchio) vecchio.remove();
+}
+
 function _antAvvisoCreazione(testoHtml) {
   apriModal('<div style="max-width:560px;padding:20px">'
     + '<div style="font-size:15px;font-weight:600;color:#A32D2D;margin-bottom:10px">&#9888; Modulo non creato</div>'
@@ -2800,7 +2834,8 @@ async function _antPresentaConfermaInterna() {
   var elNote = document.getElementById('ant-pres-note');
   if (!elData) { _antAvvisoCreazione('Il modulo non e piu a schermo: chiudi e riapri "Presenta nuove fatture", poi riprova.'); return; }
   var dataPres = elData.value;
-  if (!dataPres) { toast('Indica la data di presentazione'); return; }
+  if (!dataPres) { _antErroreCampo('ant-pres-data', 'Indica la data di presentazione del modulo.'); return; }
+  _antPuliscoErroreCampo('ant-pres-data');
   var prot = ((elProt && elProt.value) || '').trim() || null;
   var scadDefault = (elScad && elScad.value) || null;
   var note = ((elNote && elNote.value) || '').trim() || null;
@@ -2809,7 +2844,12 @@ async function _antPresentaConfermaInterna() {
   // Prima era facoltativa: lasciata vuota, ogni fattura senza rate finiva
   // con scadenza banca = giorno di creazione del modulo.
   var erroreScad = _antControllaScadenza(dataPres, (elScad && elScad.value) || null);
-  if (erroreScad) { _antAvvisoCreazione(esc(erroreScad)); return; }
+  if (erroreScad) {
+    // non si chiude niente: le fatture selezionate restano dove sono
+    _antErroreCampo('ant-pres-scad', esc(erroreScad), 'ant-pres-scad-esito');
+    return;
+  }
+  _antPuliscoErroreCampo('ant-pres-scad');
 
   // Compongo le righe da inserire
   var righe = [];
