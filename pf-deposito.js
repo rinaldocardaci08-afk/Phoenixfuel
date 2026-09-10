@@ -1,3 +1,5 @@
+// v20260910a — GIORNALIERA: apertura = giacenza CALCOLATA del giorno prima (query madre), MAI la rilevata
+//   (rilevata = solo osservazione, come mensile e settimanale); teorica include le rettifiche confermate del giorno.
 // PhoenixFuel — Deposito, Rettifiche, Autoconsumo
 // +v20260625c — Modulo entrate "Accetta carico" (deposito sale in litri ambiente,
 //   scrive registro E) + rettifiche confermate scrivono nel registro (E/U, dal 26/06).
@@ -1700,7 +1702,8 @@ async function caricaGiacenzeGiornaliere() {
   var { data: precSalv } = await sb.from('giacenze_giornaliere').select('prodotto,giacenza_rilevata,giacenza_teorica')
     .eq('data', giornoPrima).eq('sede','deposito_vibo');
   var precMap = {};
-  (precSalv||[]).forEach(function(g) { precMap[g.prodotto] = g.giacenza_rilevata !== null ? Number(g.giacenza_rilevata) : Number(g.giacenza_teorica); });
+  // 10/09: la rilevata NON entra mai nella catena — fallback solo sulla teorica salvata
+  (precSalv||[]).forEach(function(g) { precMap[g.prodotto] = g.giacenza_teorica !== null ? Number(g.giacenza_teorica) : null; });
 
   // Giacenza già salvata per oggi
   var { data: oggiSalv } = await sb.from('giacenze_giornaliere').select('*').eq('data', data).eq('sede','deposito_vibo');
@@ -1726,6 +1729,11 @@ async function caricaGiacenzeGiornaliere() {
   [uscCl, uscSt, uscAu].forEach(function(arr) {
     (arr||[]).forEach(function(o) { usciteMap[o.prodotto] = (usciteMap[o.prodotto]||0) + Number(o.litri); });
   });
+  // Rettifiche confermate del giorno: entrano nella teorica (stessa catena di settimanale/mensile/query madre)
+  var { data: rettGg } = await sb.from('rettifiche_inventario').select('prodotto,differenza,causale,origine')
+    .eq('tipo','deposito').eq('confermata', true).eq('data', data);
+  var rettMap = {};
+  (rettGg||[]).forEach(function(r) { rettMap[r.prodotto] = (rettMap[r.prodotto]||0) + Number(r.differenza||0); });
 
   // Render tabella compatta multi-prodotto
   _ggDatiGiorno = {};
@@ -1805,29 +1813,30 @@ async function caricaGiacenzeGiornaliere() {
   prodottiOrdinati.forEach(function(prod) {
     var pi = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===prod;}) : null;
     var col = pi ? pi.colore : (coloriProd[prod] || '#888');
-    // Priorità apertura:
-    // 1. rilevata salvata gg prec (precMap) — il proprietario l'ha misurata
-    // 2. calcolata pfData del gg prec — fiume dei litri
+    // Priorità apertura (10/09 — rilevata = solo osservazione):
+    // 1. calcolata pfData del gg prec — query madre, stessa catena delle altre viste
+    // 2. teorica salvata gg prec (precMap) — solo se pfData non risponde
     // 3. 0 (prodotto nuovo o senza dati)
     var inizio;
-    if (precMap[prod] !== undefined && precMap[prod] !== null) {
-      inizio = precMap[prod];
-    } else if (aperturaCalcolata[prod] !== undefined) {
+    if (aperturaCalcolata[prod] !== undefined && aperturaCalcolata[prod] !== null) {
       inizio = aperturaCalcolata[prod];
+    } else if (precMap[prod] !== undefined && precMap[prod] !== null) {
+      inizio = precMap[prod];
     } else {
       inizio = 0;
     }
     var ent = entrateMap[prod] || 0;
     var usc = usciteMap[prod] || 0;
+    var rett = rettMap[prod] || 0;
     var deltaGiornoVal = ent - usc;
     var salvata = oggiMap[prod];
     var caliEcc = salvata ? Number(salvata.cali_eccedenze || 0) : 0;
-    var teorica = Math.round(inizio + ent - usc + caliEcc);
+    var teorica = Math.round(inizio + ent - usc + rett + caliEcc);
     var rilevata = salvata && salvata.giacenza_rilevata !== null ? Number(salvata.giacenza_rilevata) : '';
     var diff = rilevata !== '' ? Math.round(rilevata - teorica) : null;
     var nota = salvata ? (salvata.note||'') : '';
 
-    _ggDatiGiorno[prod] = { inizio:inizio, entrate:ent, uscite:usc, caliEcc:caliEcc, teorica:teorica };
+    _ggDatiGiorno[prod] = { inizio:inizio, entrate:ent, uscite:usc, rett:rett, caliEcc:caliEcc, teorica:teorica };
 
     var colDelta, txtDelta;
     if (deltaGiornoVal > 0) { colDelta = '#639922'; txtDelta = '+' + fmtL(deltaGiornoVal); }
@@ -1839,7 +1848,8 @@ async function caricaGiacenzeGiornaliere() {
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + fmtL(inizio) + '</td>';
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;color:' + (ent>0?'#185FA5':'var(--text-muted)') + '">' + (ent>0?'+':'') + fmtL(ent) + '</td>';
     h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:500;color:' + (usc>0?'#A32D2D':'var(--text-muted)') + '">' + (usc>0?'−':'') + fmtL(usc) + '</td>';
-    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + colDelta + '">' + txtDelta + '</td>';
+    h += '<td style="padding:12px 10px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + colDelta + '">' + txtDelta
+       + (rett !== 0 ? '<div style="font-size:10px;font-weight:400;color:' + (rett > 0 ? '#639922' : '#A32D2D') + '" title="Rettifiche confermate del giorno">🔧 ' + (rett > 0 ? '+' : '') + fmtL(rett) + '</div>' : '') + '</td>';
     h += '<td style="padding:12px 10px;text-align:right">';
     h += '<input type="number" class="gg-cali" data-prodotto="' + esc(prod) + '" value="' + caliEcc + '" step="1" oninput="_ggRicalcola(\'' + esc(prod) + '\')" style="width:80px;font-family:var(--font-mono);font-size:12px;padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:' + (caliEcc>=0?(caliEcc>0?'#639922':'var(--text)'):'#A32D2D') + ';text-align:right" />';
     h += '</td>';
@@ -1960,7 +1970,7 @@ function _ggRicalcola(prod) {
   var cali = caliEl ? parseFloat(caliEl.value) || 0 : 0;
   // Aggiorna colore cali
   if (caliEl) caliEl.style.color = cali > 0 ? '#639922' : cali < 0 ? '#A32D2D' : 'var(--text)';
-  var nuovaTeor = Math.round(dati.inizio + dati.entrate - dati.uscite + cali);
+  var nuovaTeor = Math.round(dati.inizio + dati.entrate - dati.uscite + (dati.rett || 0) + cali);
   dati.caliEcc = cali;
   dati.teorica = nuovaTeor;
   var teorEl = document.querySelector('.gg-teorica-display[data-prodotto="' + prod + '"]');
@@ -2015,7 +2025,7 @@ async function salvaGiacenzeGiornaliere() {
     var caliEcc = caliEl ? parseFloat(caliEl.value) || 0 : 0;
     var nota = notaEl ? notaEl.value : '';
     var dati = _ggDatiGiorno[prod] || {};
-    var teorica = Math.round((dati.inizio || 0) + (dati.entrate || 0) - (dati.uscite || 0) + caliEcc);
+    var teorica = Math.round((dati.inizio || 0) + (dati.entrate || 0) - (dati.uscite || 0) + (dati.rett || 0) + caliEcc);
     var diff = rilevata !== null ? Math.round(rilevata - teorica) : null;
 
     var record = {

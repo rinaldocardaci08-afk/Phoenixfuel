@@ -1,3 +1,6 @@
+// VERSIONE 10/09/2026 a - riga "Δ settimana da rilevate giornaliere" (somma dei Δ dei giorni con rilevata);
+//   suggerimento casella = calcolata del giorno (non piu' la rilevata del giorno prima);
+//   teorica salvata = calcolata (con rettifiche) + cali/eccedenze del giorno, stessa catena delle altre viste.
 // VERSIONE 25/05/2026 c - FIX BUG LIMIT 1000 RIGHE SUPABASE con PAGINAZIONE VERA
 // PhoenixFuel — Deposito: Vista settimanale giacenze calcolate
 // ═══════════════════════════════════════════════════════════════════
@@ -484,10 +487,8 @@ function _dgwRender() {
     var sugg;
     if (rilevataValSalv !== null) {
       sugg = rilevataValSalv;
-    } else if (rilevataPrev !== null) {
-      sugg = Math.round(rilevataPrev + s.entrate - s.uscite + (s.rettifica || 0));
     } else {
-      sugg = Math.round(s.calcolata);
+      sugg = Math.round(s.calcolata);   // 10/09: la rilevata e' solo osservazione, il suggerimento e' la calcolata
     }
     var inputVal = rilevataValSalv !== null ? rilevataValSalv : '';
     html += '<div style="font-size:10px;color:'+txtM+';margin-top:6px">Rilevata</div>';
@@ -515,6 +516,25 @@ function _dgwRender() {
     rilevataPrev = rilevataValSalv;
   }
   html += '</div></div>';   // chiude griglia + contenitore scorrevole
+
+  // Δ settimana dalle rilevate giornaliere (sola lettura): somma dei Δ dei giorni con rilevata
+  var dSum = 0, dN = 0, dList = [];
+  for (var k = 0; k < 7; k++) {
+    var isoK = _dgwISO(_dgwAddDays(_dgwInizioSett, k));
+    var sK = serieMap[isoK], gK = _dgwGiornaliere[isoK];
+    if (sK && gK && gK.giacenza_rilevata !== null && gK.giacenza_rilevata !== undefined) {
+      var dK = Math.round(Number(gK.giacenza_rilevata) - sK.calcolata);
+      dSum += dK; dN++;
+      dList.push(_DGW_GIORNI[k] + ' ' + isoK.substring(8,10) + '/' + isoK.substring(5,7) + ': ' + (dK >= 0 ? '+' : '') + Math.round(dK) + ' L');
+    }
+  }
+  var dCol = dN === 0 ? 'var(--text-muted)' : dSum === 0 ? '#639922' : Math.abs(dSum) < 500 ? '#BA7517' : '#A32D2D';
+  html += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg-card);font-size:12px;flex-wrap:wrap">';
+  html += '<span style="color:var(--text-muted)">Δ settimana da rilevate giornaliere</span>';
+  html += '<strong style="font-family:var(--font-mono);color:' + dCol + '">' + (dN ? (dSum >= 0 ? '+' : '') + fmtL(dSum) : '—') + '</strong>';
+  html += '<span style="color:var(--text-muted)">' + (dN ? dN + ' giorn' + (dN === 1 ? 'o' : 'i') + ' con rilevata' : 'nessuna rilevata nella settimana') + '</span>';
+  if (dN) html += '<span title="' + dList.join(' · ') + '" style="cursor:help;color:#185FA5;font-weight:700">ⓘ</span>';
+  html += '</div>';
 
   // Container per il pannello dettaglio giornata (popolato on-demand da dgwMostraDettaglioGiorno)
   html += '<div id="dgw-dettaglio-box" style="margin-top:14px"></div>';
@@ -624,7 +644,7 @@ async function dgwSalvaRilevata(input) {
   if (isNaN(rilevata)) { toast('Valore non valido'); return; }
 
   var caliEcc = existing && existing.cali_eccedenze !== null ? Number(existing.cali_eccedenze) : 0;
-  var teorica = Math.round(s.iniziale + s.entrate - s.uscite + caliEcc);
+  var teorica = Math.round(s.calcolata + caliEcc);   // calcolata = iniziale + entrate - uscite + rettifiche del giorno
   var diff = Math.round(rilevata - teorica);
 
   var record = {

@@ -1,3 +1,7 @@
+// VERSIONE 10/09/2026 f - riga "Δ da vista giornaliera": somma dei Δ (rilevata − teorica) dei giorni del mese
+//   salvati in giacenze_giornaliere, con ⓘ elenco giorno per giorno. Sola lettura, fuori dalla catena.
+// VERSIONE 10/09/2026 e - RILEVATA: si salva DA SOLA appena scritta (autosave, come giornaliera/settimanale),
+//   niente pulsanti nuovi; con CHIUDI si blocca insieme alle altre caselle, con RIAPRI torna modificabile.
 // VERSIONE 10/09/2026 d - casella rilevata allargata (120px).
 // VERSIONE 10/09/2026 c - REGOLA: la rilevata e' SOLO osservazione (muove Δ e cumulata, mai la catena);
 //   la giacenza inizio mese = teorica del mese prima, sempre. Nuova riga "± Rettifiche" = rettifiche
@@ -103,7 +107,7 @@ async function caricaGiacenzeMensiliDeposito() {
   // che includeva anche 'in_attesa' e 'programmato' gonfiando i totali.
   // FIX 25/05/2026: PostgREST cappa a 1000 righe. Paginazione vera in batch da 1000.
   var STATI_VALIDI = ['confermato','consegnato'];
-  var [entrateArr, uscCliArr, uscStaArr, uscAutoArr, rettArr] = await Promise.all([
+  var [entrateArr, uscCliArr, uscStaArr, uscAutoArr, rettArr, ggArr] = await Promise.all([
     _pfFetchAllPages(function() {
       return sb.from('ordini').select('data,prodotto,litri')
         .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI)
@@ -131,8 +135,23 @@ async function caricaGiacenzeMensiliDeposito() {
       return sb.from('rettifiche_inventario').select('data,prodotto,differenza,causale,origine,note')
         .eq('tipo','deposito').eq('confermata', true)
         .gte('data', daISO).lte('data', aISO);
+    }),
+    // Rilevate giornaliere (vista Singolo giorno / settimanale): per la riga "Δ da vista giornaliera"
+    _pfFetchAllPages(function() {
+      return sb.from('giacenze_giornaliere').select('data,prodotto,giacenza_teorica,giacenza_rilevata,differenza')
+        .eq('sede','deposito_vibo').not('giacenza_rilevata','is',null)
+        .gte('data', daISO).lte('data', aISO);
     })
   ]);
+  var ggMese = {}, ggLista = {};
+  (ggArr||[]).forEach(function(g){
+    var m = parseInt(g.data.substring(5,7));
+    var k = g.prodotto+'_'+m;
+    var dif = (g.differenza !== null && g.differenza !== undefined) ? Number(g.differenza)
+            : Math.round(Number(g.giacenza_rilevata) - Number(g.giacenza_teorica||0));
+    ggMese[k] = (ggMese[k]||0) + dif;
+    (ggLista[k] = ggLista[k] || []).push({ data:g.data, teorica:Number(g.giacenza_teorica||0), rilevata:Number(g.giacenza_rilevata), diff:dif });
+  });
   var rettMese = {}, rettLista = {};
   (rettArr||[]).forEach(function(r){
     if (r.origine === 'chiusura_mese') return;
@@ -178,6 +197,7 @@ async function caricaGiacenzeMensiliDeposito() {
         caliSuggeriti:caliSug, caliTecnici:(caliManuale ? Number(salv.cali_tecnici) : caliSug),
         caliManuale:caliManuale, caliManualeDb:caliManuale, coeff:coeff,
         rettifiche:(rettMese[k]||0), rettLista:(rettLista[k]||[]),
+        ggDelta:(ggMese[k]||0), ggLista:(ggLista[k]||[]),
         giacPresunta:0, giacRilevata:giacRilev,
         diffMese:null, diffCumulata:null,
         // Stato chiusura (19/04/2026) - NUOVO
@@ -219,6 +239,41 @@ function _depGmFmtL(v) { return v !== null && v !== undefined ? _sep(Math.round(
 function _depGmDiffTxt(v) { return v === null || v === undefined ? '—' : (v > 0 ? '+' : '') + Math.round(v).toLocaleString('it-IT') + ' L'; }
 function _depGmDiffCol(v) { return v === null || v === undefined ? 'var(--text-muted)' : v === 0 ? '#639922' : Math.abs(v) < 200 ? '#BA7517' : '#A32D2D'; }
 function _depGmCumCol(v) { return v === null || v === undefined ? 'var(--text-muted)' : Math.abs(v) < 500 ? '#639922' : Math.abs(v) < 2000 ? '#BA7517' : '#A32D2D'; }
+// Autosave della rilevata (osservazione): parte al cambio valore (onchange = quando esci dalla casella
+// o premi Invio), senza ricaricare la tabella. Vuoto = null a DB.
+async function _depGmAutosaveRilevata(input) {
+  if (!_depGmDati) return;
+  var prod = input.dataset.prod, mese = parseInt(input.dataset.mese), anno = _depGmDati.anno;
+  var d = _depGmDati.mesi[prod] && _depGmDati.mesi[prod][mese-1];
+  if (!d || d.chiusoIl) return;
+  var v = input.value;
+  var num = (v === '' || v === null) ? null : parseFloat(v);
+  if (num !== null && isNaN(num)) return;
+  var rec = { anno:anno, sede:'deposito_vibo', prodotto:prod, mese:mese, giacenza_rilevata:num };
+  var res = await sb.from('giacenze_mensili').upsert(rec, { onConflict:'anno,sede,prodotto,mese' }).select('id').single();
+  if (res.error) { toast('Rilevata NON salvata: ' + res.error.message); input.style.borderColor = '#A32D2D'; return; }
+  if (res.data && res.data.id) d.id = res.data.id;
+  input.style.borderColor = '#1D7A4D';
+  setTimeout(function(){ input.style.borderColor = '#D85A30'; }, 900);
+}
+function _depGmInfoGg(pi, mese) {
+  if (!_depGmDati) return;
+  var prod = _depGmDati.prodotti[pi]; var d = _depGmDati.mesi[prod][mese-1]; if (!d) return;
+  var html = '<div style="max-width:520px">'
+    + '<div style="font-size:15px;font-weight:600;margin-bottom:8px">Rilevate giornaliere · ' + esc(prod) + ' · ' + _depGmMesi[mese-1] + ' ' + _depGmDati.anno + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Giorni del mese con giacenza rilevata (vista Singolo giorno / settimanale). Δ = rilevata − teorica del giorno.</div>'
+    + '<table style="font-size:13px;border-collapse:collapse;width:100%">'
+    + '<tr style="font-size:11px;color:var(--text-muted)"><td>Giorno</td><td style="text-align:right">Teorica</td><td style="text-align:right">Rilevata</td><td style="text-align:right">Δ</td></tr>';
+  (d.ggLista||[]).slice().sort(function(a,b){ return a.data < b.data ? -1 : 1; }).forEach(function(g){
+    html += '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 6px 5px 0">' + g.data.substring(8,10) + '/' + g.data.substring(5,7) + '</td>'
+      + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + _depGmFmtL(g.teorica) + '</td>'
+      + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + _depGmFmtL(g.rilevata) + '</td>'
+      + '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);color:' + _depGmDiffCol(g.diff) + '">' + _depGmDiffTxt(g.diff) + '</td></tr>';
+  });
+  html += '<tr style="border-top:1px solid var(--text-muted)"><td colspan="3" style="padding:6px 0;font-weight:600">Somma Δ del mese</td><td style="text-align:right;font-family:var(--font-mono);font-weight:600">' + _depGmDiffTxt(d.ggDelta) + '</td></tr></table></div>';
+  if (typeof apriModal === 'function') apriModal(html);
+  else alert((d.ggLista||[]).map(function(g){ return g.data + ': ' + g.diff + ' L'; }).join('\n'));
+}
 function _depGmRettTxt(d) {
   var n = (d.rettLista||[]).length;
   if (!n) return '<span style="color:var(--text-muted)">—</span>';
@@ -357,8 +412,9 @@ function renderGiacenzeMensiliDeposito() {
       html += '<input type="number" class="dep-gm-input" ';
       html += 'data-prod="'+esc(prod)+'" data-mese="'+(i+1)+'" data-campo="giacenza_rilevata" ';
       html += 'value="'+(rilev!==null&&rilev!==undefined?rilev:'')+'" placeholder="Litri rilevati" step="1" ';
-      html += 'oninput="aggiornaRigheDeposito(this)" ';
-      html += 'style="width:120px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:1.5px solid #D85A30;border-radius:4px;background:#fff;color:#1a1a18;text-align:right">';
+      html += 'oninput="aggiornaRigheDeposito(this)" onchange="_depGmAutosaveRilevata(this)" ';
+      if (d.chiusoIl) html += 'disabled title="Mese chiuso: riapri per modificare" ';
+      html += 'style="width:120px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:1.5px solid '+(d.chiusoIl?'var(--border)':'#D85A30')+';border-radius:4px;background:'+(d.chiusoIl?'#eee':'#fff')+';color:#1a1a18;text-align:right">';
       html += '</td>';
     });
     html += '</tr>';
@@ -378,6 +434,16 @@ function renderGiacenzeMensiliDeposito() {
     mesiIdx.forEach(function(i){
       var d = dati[i];
       html += '<td id="dgm-'+pIdx+'-'+(i+1)+'-cum" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;font-weight:600;color:'+_depGmCumCol(d.diffCumulata)+'">'+_depGmDiffTxt(d.diffCumulata)+'</td>';
+    });
+    html += '</tr>';
+
+    // Riga Δ da vista giornaliera (somma dei Δ dei giorni con rilevata, sola lettura)
+    html += '<tr style="background:#f4f6fb">';
+    html += '<td style="padding:5px 8px;border:0.5px solid var(--border);font-size:10px;color:var(--text-muted)">Δ da vista giornaliera <span style="font-size:9px">(somma dei giorni con rilevata)</span></td>';
+    mesiIdx.forEach(function(i){
+      var d = dati[i]; var n = (d.ggLista||[]).length;
+      html += '<td style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;color:'+(n?_depGmDiffCol(d.ggDelta):'var(--text-muted)')+'">'
+        + (n ? _depGmDiffTxt(d.ggDelta) + ' <span style="font-size:9px;color:var(--text-muted)">' + n + ' gg</span> <span onclick="_depGmInfoGg(' + pIdx + ',' + (i+1) + ')" title="Elenco giorni" style="cursor:pointer;color:#185FA5;font-weight:700">ⓘ</span>' : '—') + '</td>';
     });
     html += '</tr>';
 
