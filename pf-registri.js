@@ -1,4 +1,8 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
+// v20260910d — STAMPA nel formato del registro Azimut (ADM): colonne Data | dens amb | dens 15 |
+//   carico kg | scarico kg | carico l15 | scarico l15 | Controparte + Documento | carico l amb | scarico l amb;
+//   riga "GIACENZA CONTABILE DI FINE GIORNATA" del giorno prima del periodo; totali Caricati (riporto
+//   incluso, come fa Azimut) / Scaricati / Giacenza in kg, l15 e l amb. Riporta il periodo selezionato.
 // v20260910c — riepilogo a DUE RIQUADRI affiancati: PERIODO selezionato (sinistra, bordo blu) | AD OGGI (anno).
 //   Ogni riquadro: righe iniziale/carico/scarico/finale × colonne kg, l@15, l amb. Con "Anno intero" solo AD OGGI.
 // v20260910a — REGISTRO PROVA: seconda fonte 'derivato' = vista v_registro_derivato (ordini della query madre
@@ -522,53 +526,89 @@ function _pfRegStampa() {
   var prod = c.prod, anno = c.anno;
   var pred = _pfRegPredicato();
   var visible = c.rows.filter(pred);
-  var openKg = c.apertura ? Number(c.apertura.giac_kg || 0) : 0;
-  var pOpenKg = openKg;
+  var ap = c.apertura || {};
+  var open = { kg: Number(ap.giac_kg || 0), l15: Number(ap.giac_lt15 || 0), amb: Number(ap.giac_ltamb || 0) };
+  var dataRip = anno + '-01-01';
   if (_pfRegFiltroAttivo() && visible.length) {
     var idx = c.rows.indexOf(visible[0]);
-    if (idx > 0) pOpenKg = Number(c.rows[idx - 1].giac_kg || 0);
-  }
-  var codNC = (prod.indexOf('Benzina') >= 0) ? '2710 12 45' : '2710 19 43';
-  var rowsHtml = '';
+    if (idx > 0) { var pr = c.rows[idx - 1]; open = { kg: Number(pr.giac_kg || 0), l15: Number(pr.giac_lt15 || 0), amb: Number(pr.giac_ltamb || 0) }; }
+    dataRip = visible[0].data;
+  } else if (visible.length) { dataRip = visible[0].data; }
+  // giorno prima dell'inizio periodo (riga "giacenza contabile di fine giornata")
+  var dRip = new Date(dataRip + 'T00:00:00'); dRip.setDate(dRip.getDate() - 1);
+  var ripLabel = dRip.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  var per = _pfRegPeriodoDalAl(anno, visible);
+  var fmtD = function (v) { return (v === null || v === undefined || v === '') ? '' : Number(v).toFixed(5).replace('.', ','); };
+  var fmtQ = function (v) { return Number(v || 0).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 3 }); };
+  var d2 = function (iso) { return iso ? iso.substring(8, 10) + '/' + iso.substring(5, 7) + '/' + iso.substring(2, 4) : ''; };
+  var d4 = function (iso) { return iso ? iso.substring(8, 10) + '/' + iso.substring(5, 7) + '/' + iso.substring(0, 4) : ''; };
+  var tC = { kg: 0, l15: 0, amb: 0 }, tS = { kg: 0, l15: 0, amb: 0 };
+  var rows = '';
+  rows += '<tr class="rip"><td>' + ripLabel + '</td><td></td><td></td>'
+    + '<td class="num">' + fmtQ(open.kg) + '</td><td class="num">0,000</td>'
+    + '<td class="num">' + fmtQ(open.l15) + '</td><td class="num">0,000</td>'
+    + '<td><div class="cp">** GIACENZA CONTABILE DI FINE GIORNATA **</div><div class="doc">&nbsp;0 ()</div></td>'
+    + '<td class="num">' + fmtQ(open.amb) + '</td><td class="num">0,000</td></tr>';
   visible.forEach(function (r) {
     var isCar = (r.direzione === 'E');
-    rowsHtml += '<tr><td>' + r._n + '</td><td>' + _pfRegData(r.data) + '</td>'
-      + '<td>' + _pfRegEsc((r.tipo_doc || '') + ' ' + (r.arc || r.progressivo || '')) + '</td>'
-      + '<td>' + (r.controparte ? _pfRegEsc(r.controparte) : '') + '</td>'
-      + '<td class="num">' + (isCar ? _pfRegN(r.car_kg) : '') + '</td>'
-      + '<td class="num">' + (!isCar ? _pfRegN(r.sca_kg) : '') + '</td>'
-      + '<td class="num b">' + _pfRegN(r.giac_kg) + '</td></tr>';
+    var tipo = (r.tipo_doc === 'RETT') ? 'RETT' : (isCar ? 'RDR' : 'EDS');
+    var doc = tipo + ' ' + (r.arc || '') + ' ' + d4(r.data) + ' (' + (r.progressivo ? _pfRegEsc(String(r.progressivo)) : '') + ')';
+    tC.kg += Number(r.car_kg || 0); tC.l15 += Number(r.car_lt15 || 0); tC.amb += Number(r.car_ltamb || 0);
+    tS.kg += Number(r.sca_kg || 0); tS.l15 += Number(r.sca_lt15 || 0); tS.amb += Number(r.sca_ltamb || 0);
+    rows += '<tr><td>' + d2(r.data) + '</td><td class="num">' + fmtD(r.dens_amb) + '</td><td class="num">' + fmtD(r.dens_15) + '</td>'
+      + '<td class="num">' + fmtQ(r.car_kg) + '</td><td class="num">' + fmtQ(r.sca_kg) + '</td>'
+      + '<td class="num">' + fmtQ(r.car_lt15) + '</td><td class="num">' + fmtQ(r.sca_lt15) + '</td>'
+      + '<td><div class="cp">' + _pfRegEsc(r.controparte || '') + '</div><div class="doc">' + _pfRegEsc(doc) + '</div></td>'
+      + '<td class="num">' + fmtQ(r.car_ltamb) + '</td><td class="num">' + fmtQ(r.sca_ltamb) + '</td></tr>';
   });
-  var pCkg = 0, pSkg = 0;
-  visible.forEach(function (r) { pCkg += Number(r.car_kg || 0); pSkg += Number(r.sca_kg || 0); });
-  var pCloseKg = pOpenKg + pCkg - pSkg;
+  // Totali "alla Azimut": Caricati = riporto + carichi del periodo; Giacenza = Caricati − Scaricati
+  var carT = { kg: open.kg + tC.kg, l15: open.l15 + tC.l15, amb: open.amb + tC.amb };
+  var giac = { kg: carT.kg - tS.kg, l15: carT.l15 - tS.l15, amb: carT.amb - tS.amb };
+  var fine = visible.length ? visible[visible.length - 1].data : (per.al || dataRip);
   var win = window.open('', '_blank');
   if (!win) { if (typeof toast === 'function') toast('Abilita i popup per stampare'); return; }
   var html = '<!doctype html><html><head><meta charset="utf-8"><title>Registro ' + _pfRegEsc(prod) + ' ' + anno + '</title>'
-    + '<style>body{font-family:Arial,sans-serif;font-size:11px;color:#000;margin:18px}'
-    + 'h1{font-size:15px;margin:0 0 2px}.sub{font-size:11px;color:#333;margin:0 0 12px}'
-    + 'table{width:100%;border-collapse:collapse}th,td{border:0.5px solid #555;padding:3px 5px}'
-    + 'th{background:#eee;font-size:9px;text-transform:uppercase;text-align:left}'
-    + 'td.num{text-align:right;font-variant-numeric:tabular-nums}td.b{font-weight:bold}'
-    + 'tr.rip td{font-style:italic;background:#fafafa}tfoot td{font-weight:bold;border-top:1.5px solid #000}'
-    + '@media print{body{margin:0}}</style></head><body>'
-    + '<h1>Registro di carico e scarico — ' + _pfRegEsc(prod) + '</h1>'
-    + '<p class="sub">Phoenix Fuel S.r.l. — Deposito di Vibo Valentia (Porto Salvo Z.I.) · Codice NC ' + codNC
-    + ' · Periodo: ' + _pfRegPeriodLabel(anno) + ' · unità fiscale: kg</p>'
-    + '<table><thead><tr><th>N.</th><th>Data</th><th>Documento</th><th>Controparte</th>'
-    + '<th>Carico kg</th><th>Scarico kg</th><th>Giacenza kg</th></tr></thead><tbody>'
-    + '<tr class="rip"><td colspan="6">Riporto a inizio periodo</td><td class="num b">' + _pfRegN(pOpenKg) + '</td></tr>'
-    + rowsHtml + '</tbody><tfoot><tr><td colspan="4" style="text-align:right">Totali</td>'
-    + '<td class="num">' + _pfRegN(pCkg) + '</td><td class="num">' + _pfRegN(pSkg) + '</td>'
-    + '<td class="num">' + _pfRegN(pCloseKg) + '</td></tr></tfoot></table></body></html>';
+    + '<style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:9.5px;color:#000;margin:0}'
+    + '.hd{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}'
+    + 'h1{font-size:14px;margin:0;letter-spacing:.3px}.sub{font-size:10px;margin:2px 0 0}'
+    + 'table{width:100%;border-collapse:collapse;table-layout:fixed}th{font-size:8.5px;text-align:right;border-bottom:1px solid #000;padding:3px 4px;vertical-align:bottom}'
+    + 'th.l{text-align:left}td{padding:3px 4px;border-bottom:0.5px solid #bbb;vertical-align:top}'
+    + 'td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
+    + '.cp{font-weight:600}.doc{font-size:8.5px;color:#222}tr.rip td{background:#f2f2f2}'
+    + 'tfoot td{border-top:1.5px solid #000;border-bottom:0;font-weight:bold;padding-top:6px}'
+    + 'thead{display:table-header-group}tr{page-break-inside:avoid}</style></head><body>'
+    + '<div class="hd"><div><h1>REGISTRO DI CARICO/SCARICO</h1>'
+    + '<p class="sub">Periodo dal ' + d2(per.dal) + ' al ' + d2(per.al) + ' &nbsp;·&nbsp; ' + _pfRegEsc(_pfRegNomeAzimut(prod)) + '</p></div>'
+    + '<div style="text-align:right;font-size:9px">Phoenix Fuel S.r.l. — Deposito di Vibo Valentia (Porto Salvo Z.I.)<br>' + _pfRegEsc(prod) + ' · anno ' + anno + '</div></div>'
+    + '<table><colgroup><col style="width:52px"><col style="width:52px"><col style="width:52px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col><col style="width:70px"><col style="width:70px"></colgroup>'
+    + '<thead><tr><th class="l">Data</th><th>Densità<br>Ambiente</th><th>Densità<br>a 15°C</th>'
+    + '<th>Carico<br>KG</th><th>Scarico<br>KG</th><th>Carico<br>LT 15C</th><th>Scarico<br>LT 15C</th>'
+    + '<th class="l">Controparte<br>Documento</th><th>Carico<br>LT amb</th><th>Scarico<br>LT amb</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody>'
+    + '<tfoot>'
+    + '<tr><td colspan="3">Totali al ' + d2(fine) + '</td><td class="num">Caricati</td><td class="num">' + fmtQ(carT.kg) + '</td><td class="num">' + fmtQ(carT.l15) + '</td><td></td><td></td><td class="num">' + fmtQ(carT.amb) + '</td><td></td></tr>'
+    + '<tr><td colspan="3"></td><td class="num">Scaricati</td><td class="num">' + fmtQ(tS.kg) + '</td><td class="num">' + fmtQ(tS.l15) + '</td><td></td><td></td><td class="num">' + fmtQ(tS.amb) + '</td><td></td></tr>'
+    + '<tr><td colspan="3"></td><td class="num">Giacenza</td><td class="num">' + fmtQ(giac.kg) + '</td><td class="num">' + fmtQ(giac.l15) + '</td><td></td><td></td><td class="num">' + fmtQ(giac.amb) + '</td><td></td></tr>'
+    + '<tr><td colspan="10" style="font-weight:normal;font-size:8.5px;border-top:0;color:#444">KG &nbsp;·&nbsp; LT a 15C &nbsp;·&nbsp; LT amb. — "Caricati" comprende la giacenza contabile iniziale di ' + fmtQ(open.kg) + ' kg / ' + fmtQ(open.l15) + ' l15 / ' + fmtQ(open.amb) + ' l amb (' + ripLabel + ').</td></tr>'
+    + '</tfoot></table></body></html>';
   win.document.write(html);
   win.document.close();
   win.focus();
   setTimeout(function () { try { win.print(); } catch (e) {} }, 300);
 }
+// dal→al del periodo di stampa (anno intero, mese o dal/al)
+function _pfRegPeriodoDalAl(anno, visible) {
+  var st = _pfRegState;
+  if (st.dal || st.al) return { dal: st.dal || (anno + '-01-01'), al: st.al || (anno + '-12-31') };
+  if (st.mese) { var m = ('0' + st.mese).slice(-2); var last = new Date(anno, st.mese, 0).getDate(); return { dal: anno + '-' + m + '-01', al: anno + '-' + m + '-' + ('0' + last).slice(-2) }; }
+  return { dal: anno + '-01-01', al: anno + '-12-31' };
+}
+function _pfRegNomeAzimut(prod) {
+  if (prod === 'Gasolio Autotrazione') return 'Autotrazione';
+  if (prod === 'Gasolio Agricolo') return 'Agricolo';
+  return prod;
+}
 
-// ── Report periodo: modale sintetico (totali + tolleranza rettifiche) ──
-var _pfRegReportData = null;
 function _pfRegReportPeriodo() {
   var c = _pfRegCache;
   if (!c) { if (typeof toast === 'function') toast('Apri prima un registro'); return; }
