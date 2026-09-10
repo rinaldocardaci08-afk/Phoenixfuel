@@ -1,6 +1,6 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
-// v20260910d — STAMPA nel formato del registro Azimut (ADM): colonne Data | dens amb | dens 15 |
-//   carico kg | scarico kg | carico l15 | scarico l15 | Controparte + Documento | carico l amb | scarico l amb;
+// v20260910e — STAMPA nel formato del registro Azimut (ADM): colonne Data | dens amb | dens 15 |
+//   carico kg | scarico kg | carico l15 | scarico l15 | carico l amb | scarico l amb | Controparte + Documento (ultima);
 //   riga "GIACENZA CONTABILE DI FINE GIORNATA" del giorno prima del periodo; totali Caricati (riporto
 //   incluso, come fa Azimut) / Scaricati / Giacenza in kg, l15 e l amb. Riporta il periodo selezionato.
 // v20260910c — riepilogo a DUE RIQUADRI affiancati: PERIODO selezionato (sinistra, bordo blu) | AD OGGI (anno).
@@ -547,8 +547,8 @@ function _pfRegStampa() {
   rows += '<tr class="rip"><td>' + ripLabel + '</td><td></td><td></td>'
     + '<td class="num">' + fmtQ(open.kg) + '</td><td class="num">0,000</td>'
     + '<td class="num">' + fmtQ(open.l15) + '</td><td class="num">0,000</td>'
-    + '<td><div class="cp">** GIACENZA CONTABILE DI FINE GIORNATA **</div><div class="doc">&nbsp;0 ()</div></td>'
-    + '<td class="num">' + fmtQ(open.amb) + '</td><td class="num">0,000</td></tr>';
+    + '<td class="num">' + fmtQ(open.amb) + '</td><td class="num">0,000</td>'
+    + '<td><div class="cp">** GIACENZA CONTABILE DI FINE GIORNATA **</div><div class="doc">&nbsp;0 ()</div></td></tr>';
   visible.forEach(function (r) {
     var isCar = (r.direzione === 'E');
     var tipo = (r.tipo_doc === 'RETT') ? 'RETT' : (isCar ? 'RDR' : 'EDS');
@@ -558,8 +558,8 @@ function _pfRegStampa() {
     rows += '<tr><td>' + d2(r.data) + '</td><td class="num">' + fmtD(r.dens_amb) + '</td><td class="num">' + fmtD(r.dens_15) + '</td>'
       + '<td class="num">' + fmtQ(r.car_kg) + '</td><td class="num">' + fmtQ(r.sca_kg) + '</td>'
       + '<td class="num">' + fmtQ(r.car_lt15) + '</td><td class="num">' + fmtQ(r.sca_lt15) + '</td>'
-      + '<td><div class="cp">' + _pfRegEsc(r.controparte || '') + '</div><div class="doc">' + _pfRegEsc(doc) + '</div></td>'
-      + '<td class="num">' + fmtQ(r.car_ltamb) + '</td><td class="num">' + fmtQ(r.sca_ltamb) + '</td></tr>';
+      + '<td class="num">' + fmtQ(r.car_ltamb) + '</td><td class="num">' + fmtQ(r.sca_ltamb) + '</td>'
+      + '<td><div class="cp">' + _pfRegEsc(r.controparte || '') + '</div><div class="doc">' + _pfRegEsc(doc) + '</div></td></tr>';
   });
   // Totali "alla Azimut": Caricati = riporto + carichi del periodo; Giacenza = Caricati − Scaricati
   var carT = { kg: open.kg + tC.kg, l15: open.l15 + tC.l15, amb: open.amb + tC.amb };
@@ -580,15 +580,15 @@ function _pfRegStampa() {
     + '<div class="hd"><div><h1>REGISTRO DI CARICO/SCARICO</h1>'
     + '<p class="sub">Periodo dal ' + d2(per.dal) + ' al ' + d2(per.al) + ' &nbsp;·&nbsp; ' + _pfRegEsc(_pfRegNomeAzimut(prod)) + '</p></div>'
     + '<div style="text-align:right;font-size:9px">Phoenix Fuel S.r.l. — Deposito di Vibo Valentia (Porto Salvo Z.I.)<br>' + _pfRegEsc(prod) + ' · anno ' + anno + '</div></div>'
-    + '<table><colgroup><col style="width:52px"><col style="width:52px"><col style="width:52px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col><col style="width:70px"><col style="width:70px"></colgroup>'
+    + '<table><colgroup><col style="width:52px"><col style="width:52px"><col style="width:52px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col style="width:70px"><col></colgroup>'
     + '<thead><tr><th class="l">Data</th><th>Densità<br>Ambiente</th><th>Densità<br>a 15°C</th>'
     + '<th>Carico<br>KG</th><th>Scarico<br>KG</th><th>Carico<br>LT 15C</th><th>Scarico<br>LT 15C</th>'
-    + '<th class="l">Controparte<br>Documento</th><th>Carico<br>LT amb</th><th>Scarico<br>LT amb</th></tr></thead>'
+    + '<th>Carico<br>LT amb</th><th>Scarico<br>LT amb</th><th class="l">Controparte<br>Documento</th></tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '<tfoot>'
-    + '<tr><td colspan="3">Totali al ' + d2(fine) + '</td><td class="num">Caricati</td><td class="num">' + fmtQ(carT.kg) + '</td><td class="num">' + fmtQ(carT.l15) + '</td><td></td><td></td><td class="num">' + fmtQ(carT.amb) + '</td><td></td></tr>'
-    + '<tr><td colspan="3"></td><td class="num">Scaricati</td><td class="num">' + fmtQ(tS.kg) + '</td><td class="num">' + fmtQ(tS.l15) + '</td><td></td><td></td><td class="num">' + fmtQ(tS.amb) + '</td><td></td></tr>'
-    + '<tr><td colspan="3"></td><td class="num">Giacenza</td><td class="num">' + fmtQ(giac.kg) + '</td><td class="num">' + fmtQ(giac.l15) + '</td><td></td><td></td><td class="num">' + fmtQ(giac.amb) + '</td><td></td></tr>'
+    + '<tr><td colspan="3">Totali al ' + d2(fine) + '</td><td class="num">Caricati</td><td class="num">' + fmtQ(carT.kg) + '</td><td class="num">' + fmtQ(carT.l15) + '</td><td></td><td class="num">' + fmtQ(carT.amb) + '</td><td></td><td></td></tr>'
+    + '<tr><td colspan="3"></td><td class="num">Scaricati</td><td class="num">' + fmtQ(tS.kg) + '</td><td class="num">' + fmtQ(tS.l15) + '</td><td></td><td class="num">' + fmtQ(tS.amb) + '</td><td></td><td></td></tr>'
+    + '<tr><td colspan="3"></td><td class="num">Giacenza</td><td class="num">' + fmtQ(giac.kg) + '</td><td class="num">' + fmtQ(giac.l15) + '</td><td></td><td class="num">' + fmtQ(giac.amb) + '</td><td></td><td></td></tr>'
     + '<tr><td colspan="10" style="font-weight:normal;font-size:8.5px;border-top:0;color:#444">KG &nbsp;·&nbsp; LT a 15C &nbsp;·&nbsp; LT amb. — "Caricati" comprende la giacenza contabile iniziale di ' + fmtQ(open.kg) + ' kg / ' + fmtQ(open.l15) + ' l15 / ' + fmtQ(open.amb) + ' l amb (' + ripLabel + ').</td></tr>'
     + '</tfoot></table></body></html>';
   win.document.write(html);
