@@ -1,3 +1,4 @@
+// VERSIONE 10/09/2026 d - casella rilevata allargata (120px).
 // VERSIONE 10/09/2026 c - REGOLA: la rilevata e' SOLO osservazione (muove Δ e cumulata, mai la catena);
 //   la giacenza inizio mese = teorica del mese prima, sempre. Nuova riga "± Rettifiche" = rettifiche
 //   manuali confermate del mese (rettifiche_inventario tipo deposito, ESCLUSE quelle di chiusura mese,
@@ -357,7 +358,7 @@ function renderGiacenzeMensiliDeposito() {
       html += 'data-prod="'+esc(prod)+'" data-mese="'+(i+1)+'" data-campo="giacenza_rilevata" ';
       html += 'value="'+(rilev!==null&&rilev!==undefined?rilev:'')+'" placeholder="Litri rilevati" step="1" ';
       html += 'oninput="aggiornaRigheDeposito(this)" ';
-      html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:1.5px solid #D85A30;border-radius:4px;background:#fff;color:#1a1a18;text-align:right">';
+      html += 'style="width:120px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:1.5px solid #D85A30;border-radius:4px;background:#fff;color:#1a1a18;text-align:right">';
       html += '</td>';
     });
     html += '</tr>';
