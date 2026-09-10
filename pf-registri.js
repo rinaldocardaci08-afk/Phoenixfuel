@@ -1,5 +1,6 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
-// v20260910b — riepilogo a doppia cella: PERIODO selezionato (mese/dal-al) | AD OGGI (anno intero).
+// v20260910c — riepilogo a DUE RIQUADRI affiancati: PERIODO selezionato (sinistra, bordo blu) | AD OGGI (anno).
+//   Ogni riquadro: righe iniziale/carico/scarico/finale × colonne kg, l@15, l amb. Con "Anno intero" solo AD OGGI.
 // v20260910a — REGISTRO PROVA: seconda fonte 'derivato' = vista v_registro_derivato (ordini della query madre
 //   + dato fiscale da movimenti_fiscali / DAS Logistica). Il registro attuale resta la fonte di default.
 // v20260626a — registro kg+l@15+l amb, cruscotto calo 3‰, REPORT PERIODO (totali + tolleranza rettifiche).
@@ -267,37 +268,44 @@ function _pfRegDraw() {
     + '⚠ Nessuna giacenza iniziale per ' + _pfRegEsc(prod) + ' nel ' + anno + ': i saldi partono da zero.</div>';
   var filtroOn = _pfRegFiltroAttivo();
   var etPer = _pfRegPeriodLabel(anno);
-  function kpiCol(sub, kg, l15, lamb, col, big) {
-    return '<div style="flex:1;min-width:0">'
-      + (sub ? '<div style="font-size:9px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + sub + '</div>' : '')
-      + '<div style="font-size:' + (big ? 18 : 15) + 'px;font-weight:600;color:' + (col || 'var(--text)') + ';font-family:monospace">' + _pfRegN(kg) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div>'
-      + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(l15) + ' l@15</div>'
-      + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(lamb) + ' l amb</div></div>';
-  }
-  // kpi: una cella. Con filtro attivo si divide in due: PERIODO selezionato | AD OGGI (anno intero).
-  function kpi(label, kg, l15, col, lamb, pKg, p15, pAmb) {
-    var inner = filtroOn
-      ? '<div style="display:flex;gap:10px">'
-        + kpiCol(etPer, pKg, p15, pAmb, col, true)
-        + '<div style="width:0.5px;background:var(--border)"></div>'
-        + kpiCol('ad oggi · ' + anno, kg, l15, lamb, col, false)
-        + '</div>'
-      : kpiCol('', kg, l15, lamb, col, true);
-    return '<div style="flex:1;min-width:' + (filtroOn ? 260 : 130) + 'px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px">'
-      + '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' + label + '</div>'
-      + inner + '</div>';
-  }
   var pCloseKg = pOpenKg + pCkg - pSkg, pClose15 = pOpen15 + pC15 - pS15, pCloseAmb = pOpenAmb + pCamb - pSamb;
+  // Riquadro riepilogo: 4 righe (iniziale / carico / scarico / finale) × 3 colonne (kg, l@15, l amb).
+  // Con filtro attivo ne compaiono DUE affiancati: PERIODO selezionato (sinistra, bordo blu) | AD OGGI (destra).
+  function riga(label, kg, l15, lamb, colKg, segno, finale) {
+    var tdN = 'text-align:right;font-family:monospace;padding:6px 0 6px 6px;white-space:nowrap';
+    return '<tr style="border-top:0.5px solid ' + (finale ? 'var(--text-hint)' : 'var(--border)') + '">'
+      + '<td style="padding:6px 0;color:var(--text-hint);' + (finale ? 'font-weight:600;color:var(--text)' : '') + '">' + label + '</td>'
+      + '<td style="' + tdN + ';color:' + (colKg || 'var(--text)') + ';font-weight:600;font-size:' + (finale ? 17 : 14) + 'px">' + (segno || '') + _pfRegN(kg) + '</td>'
+      + '<td style="' + tdN + ';color:var(--text-hint)">' + _pfRegN(l15) + '</td>'
+      + '<td style="' + tdN + ';color:var(--text-hint)">' + _pfRegN(lamb) + '</td></tr>';
+  }
+  function riquadro(titolo, badge, badgeStyle, box, oKg, o15, oAmb, cKg, c15, cAmb, sKg, s15, sAmb, fKg, f15, fAmb) {
+    return '<div style="flex:1;min-width:300px;' + box + ';border-radius:10px;padding:12px 14px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">'
+      + '<span style="font-size:13px;font-weight:600">' + titolo + '</span>'
+      + '<span style="font-size:11px;padding:2px 9px;border-radius:6px;white-space:nowrap;' + badgeStyle + '">' + badge + '</span></div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">'
+      + '<tr style="font-size:10px;color:var(--text-hint)"><td style="width:36%"></td><td style="text-align:right">kg</td><td style="text-align:right">l@15</td><td style="text-align:right">l amb</td></tr>'
+      + riga('Giacenza iniziale', oKg, o15, oAmb, null, '', false)
+      + riga('Carico', cKg, c15, cAmb, '#1D7A4D', '+', false)
+      + riga('Scarico', sKg, s15, sAmb, '#A32D2D', '−', false)
+      + riga('Giacenza finale', fKg, f15, fAmb, '#185FA5', '', true)
+      + '</table></div>';
+  }
+  var oggiTxt = 'anno ' + anno + ' · ' + new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+  var boxOggi = riquadro('Ad oggi', oggiTxt, 'background:var(--bg);border:0.5px solid var(--border);color:var(--text-hint)',
+    'background:var(--card,var(--bg));border:0.5px solid var(--border)',
+    openKg, open15, openAmb, aCkg, aC15, aCamb, aSkg, aS15, aSamb, aFinKg, aFin15, aFinAmb);
+  var boxPer = filtroOn
+    ? riquadro('Periodo selezionato', etPer, 'background:#E6F1FB;color:#0C447C',
+        'background:var(--card,var(--bg));border:2px solid #185FA5',
+        pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, pCloseKg, pClose15, pCloseAmb)
+    : '';
   var riep = '<div style="background:var(--card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:14px">'
     + '<div style="font-size:14px;font-weight:600;margin-bottom:4px">Riepilogo ' + _pfRegEsc(prod) + ' · ' + anno + '</div>'
     + '<div style="font-size:11px;color:var(--text-hint);margin-bottom:10px">registro carburanti denaturati · dato fiscale: <strong>kg</strong></div>'
     + warn
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    + kpi('Giacenza iniziale', openKg, open15, null, openAmb, pOpenKg, pOpen15, pOpenAmb)
-    + kpi('Totale carico', aCkg, aC15, '#1D7A4D', aCamb, pCkg, pC15, pCamb)
-    + kpi('Totale scarico', aSkg, aS15, '#A32D2D', aSamb, pSkg, pS15, pSamb)
-    + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb, pCloseKg, pClose15, pCloseAmb)
-    + '</div>'
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap">' + boxPer + boxOggi + '</div>'
     + _pfRegCoerenzaHtml({ regKg: aFinKg, regAmb: aFinAmb, caricoKg: aCkg, giacFisicaLamb: c.giacFisica, prodotto: prod, anno: anno, densita: _pfRegUltimaDensita(rows) })
     + _pfRegQueryMadreHtml(c.qmGiac, c.derivato ? (rows.length ? Number(rows[rows.length - 1].giac_litri || 0) : (apertura ? Number(apertura.giac_litri || 0) : 0)) : aFinAmb, prod, anno, c.derivato)
     + '</div>';
