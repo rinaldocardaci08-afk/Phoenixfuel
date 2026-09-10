@@ -1,4 +1,5 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
+// v20260910b — riepilogo a doppia cella: PERIODO selezionato (mese/dal-al) | AD OGGI (anno intero).
 // v20260910a — REGISTRO PROVA: seconda fonte 'derivato' = vista v_registro_derivato (ordini della query madre
 //   + dato fiscale da movimenti_fiscali / DAS Logistica). Il registro attuale resta la fonte di default.
 // v20260626a — registro kg+l@15+l amb, cruscotto calo 3‰, REPORT PERIODO (totali + tolleranza rettifiche).
@@ -264,22 +265,38 @@ function _pfRegDraw() {
   var warn = apertura ? '' :
     '<div style="background:#FFF4E5;border:0.5px solid #E0A040;color:#8A5800;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:10px">'
     + '⚠ Nessuna giacenza iniziale per ' + _pfRegEsc(prod) + ' nel ' + anno + ': i saldi partono da zero.</div>';
-  function kpi(label, kg, l15, col, lamb) {
-    return '<div style="flex:1;min-width:130px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px">'
-      + '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px">' + label + '</div>'
-      + '<div style="font-size:18px;font-weight:600;color:' + (col || 'var(--text)') + ';font-family:monospace">' + _pfRegN(kg) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div>'
+  var filtroOn = _pfRegFiltroAttivo();
+  var etPer = _pfRegPeriodLabel(anno);
+  function kpiCol(sub, kg, l15, lamb, col, big) {
+    return '<div style="flex:1;min-width:0">'
+      + (sub ? '<div style="font-size:9px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + sub + '</div>' : '')
+      + '<div style="font-size:' + (big ? 18 : 15) + 'px;font-weight:600;color:' + (col || 'var(--text)') + ';font-family:monospace">' + _pfRegN(kg) + ' <span style="font-size:11px;color:var(--text-hint)">kg</span></div>'
       + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(l15) + ' l@15</div>'
       + '<div style="font-size:12px;color:var(--text-hint);font-family:monospace">' + _pfRegN(lamb) + ' l amb</div></div>';
   }
+  // kpi: una cella. Con filtro attivo si divide in due: PERIODO selezionato | AD OGGI (anno intero).
+  function kpi(label, kg, l15, col, lamb, pKg, p15, pAmb) {
+    var inner = filtroOn
+      ? '<div style="display:flex;gap:10px">'
+        + kpiCol(etPer, pKg, p15, pAmb, col, true)
+        + '<div style="width:0.5px;background:var(--border)"></div>'
+        + kpiCol('ad oggi · ' + anno, kg, l15, lamb, col, false)
+        + '</div>'
+      : kpiCol('', kg, l15, lamb, col, true);
+    return '<div style="flex:1;min-width:' + (filtroOn ? 260 : 130) + 'px;background:var(--bg);border:0.5px solid var(--border);border-radius:8px;padding:10px 12px">'
+      + '<div style="font-size:10px;color:var(--text-hint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' + label + '</div>'
+      + inner + '</div>';
+  }
+  var pCloseKg = pOpenKg + pCkg - pSkg, pClose15 = pOpen15 + pC15 - pS15, pCloseAmb = pOpenAmb + pCamb - pSamb;
   var riep = '<div style="background:var(--card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:14px">'
     + '<div style="font-size:14px;font-weight:600;margin-bottom:4px">Riepilogo ' + _pfRegEsc(prod) + ' · ' + anno + '</div>'
     + '<div style="font-size:11px;color:var(--text-hint);margin-bottom:10px">registro carburanti denaturati · dato fiscale: <strong>kg</strong></div>'
     + warn
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    + kpi('Giacenza iniziale', openKg, open15, null, openAmb)
-    + kpi('Totale carico', aCkg, aC15, '#1D7A4D', aCamb)
-    + kpi('Totale scarico', aSkg, aS15, '#A32D2D', aSamb)
-    + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb)
+    + kpi('Giacenza iniziale', openKg, open15, null, openAmb, pOpenKg, pOpen15, pOpenAmb)
+    + kpi('Totale carico', aCkg, aC15, '#1D7A4D', aCamb, pCkg, pC15, pCamb)
+    + kpi('Totale scarico', aSkg, aS15, '#A32D2D', aSamb, pSkg, pS15, pSamb)
+    + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb, pCloseKg, pClose15, pCloseAmb)
     + '</div>'
     + _pfRegCoerenzaHtml({ regKg: aFinKg, regAmb: aFinAmb, caricoKg: aCkg, giacFisicaLamb: c.giacFisica, prodotto: prod, anno: anno, densita: _pfRegUltimaDensita(rows) })
     + _pfRegQueryMadreHtml(c.qmGiac, c.derivato ? (rows.length ? Number(rows[rows.length - 1].giac_litri || 0) : (apertura ? Number(apertura.giac_litri || 0) : 0)) : aFinAmb, prod, anno, c.derivato)
