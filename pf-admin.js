@@ -1,4 +1,10 @@
 // PhoenixFuel — Amministrazione
+// v20260910a — CHIUSURA FINE ANNO deposito: entrate/uscite/stimata presi da pfData.getGiacenzaAllaData
+//              (query madre: paginazione vera, stati confermato/consegnato, rettifiche col segno) invece
+//              di query proprie (tagliavano a 1000 righe → uscite 3,6M su 6,0M; giacenza inizio benzina
+//              −6000 perche' uno 0 reale veniva scartato da `||`). La convalida scrive anche una
+//              rettifica 'chiusura_anno' al 31/12 (conguaglio reale−stimata) cosi' la catena
+//              giacenze/registro chiude sul valore reale. Anni gia' convalidati: mostrano i totali salvati.
 // v20260820a — logistica granulare: sei sottosezioni che partono CHIUSE
 //              (strict), le altre sezioni conservano il comportamento di prima
 // PhoenixFuel — Admin, Permessi, Utenti, Giacenze
@@ -287,7 +293,7 @@ async function calcolaGiacenzeAnno(sede) {
   // Carica giacenze convalidate anno precedente
   const { data: giacPrev } = await sb.from('giacenze_annuali').select('*').eq('anno', annoPrev).eq('sede', sede).eq('convalidata', true);
   const prevMap = {};
-  (giacPrev || []).forEach(g => { prevMap[g.prodotto] = Number(g.giacenza_reale || g.giacenza_stimata || 0); });
+  (giacPrev || []).forEach(g => { prevMap[g.prodotto] = (g.giacenza_reale !== null && g.giacenza_reale !== undefined) ? Number(g.giacenza_reale) : Number(g.giacenza_stimata || 0); });
 
   // Carica giacenze già salvate per quest'anno
   const { data: giacCorr } = await sb.from('giacenze_annuali').select('*').eq('anno', anno).eq('sede', sede);
@@ -296,8 +302,32 @@ async function calcolaGiacenzeAnno(sede) {
 
   let prodottiDati = {};
 
-  if (sede === 'deposito_vibo') {
-    // AUDIT T3: 6 query sequenziali → Promise.all (4-5× più veloce)
+  if (sede === 'deposito_vibo' && typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+    // 10/09 — QUERY MADRE: stessi numeri di registro, giacenze e viste giornaliera/settimanale/mensile.
+    const { data: cisterneProd } = await sb.from('cisterne').select('prodotto').eq('sede', sede);
+    const prodSet = {};
+    (cisterneProd||[]).forEach(c => { if (c.prodotto) prodSet[c.prodotto] = true; });
+    Object.keys(prevMap).forEach(p => { prodSet[p] = true; });
+    Object.keys(corrMap).forEach(p => { prodSet[p] = true; });
+    const elenco = Object.keys(prodSet);
+    const risultati = await Promise.all(elenco.map(async prodotto => {
+      const corr = corrMap[prodotto];
+      if (corr && corr.convalidata) {
+        // anno gia' chiuso: i totali sono quelli fissati alla convalida
+        return { prodotto, inizio: Number(corr.giacenza_inizio || 0), entrate: Number(corr.totale_entrate || 0), uscite: Number(corr.totale_uscite || 0), rettifiche: 0, stimata: Number(corr.giacenza_stimata || 0) };
+      }
+      try {
+        const g = await pfData.getGiacenzaAllaData(sede, prodotto, a);
+        return { prodotto, inizio: Number(g.iniziale || 0), entrate: Number(g.entrate || 0), uscite: Number(g.uscite || 0), rettifiche: Number(g.rettifiche || 0), stimata: Number(g.calcolata || 0) };
+      } catch (e) {
+        console.warn('[calcolaGiacenzeAnno] pfData fallita per', prodotto, e);
+        return { prodotto, inizio: prevMap[prodotto] || 0, entrate: 0, uscite: 0, rettifiche: 0, stimata: prevMap[prodotto] || 0, errore: true };
+      }
+    }));
+    risultati.forEach(r => { prodottiDati[r.prodotto] = r; });
+
+  } else if (sede === 'deposito_vibo') {
+    // fallback (pfData assente) — vecchio calcolo
     const [entrateRes, usciteClientiRes, usciteStazioneRes, usciteAutoconsumoRes, rettRes, cisterneProdRes] = await Promise.all([
       sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','entrata_deposito').neq('stato','annullato').gte('data', da).lte('data', a),
       sb.from('ordini').select('prodotto,litri').eq('tipo_ordine','cliente').neq('stato','annullato').or('fornitore.ilike.%phoenix%,fornitore.ilike.%deposito%').gte('data', da).lte('data', a),
@@ -400,8 +430,8 @@ async function calcolaGiacenzeAnno(sede) {
   let html = '';
   prodOrd.forEach(prodotto => {
     const d = prodottiDati[prodotto];
-    const inizio = prevMap[prodotto] || 0;
-    const stimata = inizio + d.entrate - d.uscite;
+    const inizio = (d.inizio !== undefined) ? d.inizio : (prevMap[prodotto] || 0);
+    const stimata = (d.stimata !== undefined) ? d.stimata : (inizio + d.entrate - d.uscite);
     const esistente = corrMap[prodotto];
     const realeVal = esistente ? (esistente.giacenza_reale !== null ? esistente.giacenza_reale : '') : '';
     const isConv = esistente && esistente.convalidata;
@@ -414,11 +444,13 @@ async function calcolaGiacenzeAnno(sede) {
     html += '<td style="font-family:var(--font-mono)">' + fmtL(inizio) + '</td>';
     html += '<td style="font-family:var(--font-mono);color:#639922">' + fmtL(d.entrate) + '</td>';
     html += '<td style="font-family:var(--font-mono);color:#A32D2D">' + fmtL(d.uscite) + '</td>';
-    html += '<td style="font-family:var(--font-mono);font-weight:500">' + fmtL(stimata) + '</td>';
+    html += '<td style="font-family:var(--font-mono);font-weight:500">' + fmtL(stimata)
+      + ((d.rettifiche !== undefined && d.rettifiche !== 0) ? '<div style="font-size:10px;font-weight:400;color:' + (d.rettifiche > 0 ? '#639922' : '#A32D2D') + '" title="Rettifiche confermate dell\'anno, gia\' incluse nella stimata">incl. rettifiche ' + (d.rettifiche > 0 ? '+' : '') + _sep(Math.round(d.rettifiche).toLocaleString('it-IT')) + ' L</div>' : '')
+      + (d.errore ? '<div style="font-size:10px;color:#A32D2D">⚠ calcolo non riuscito</div>' : '') + '</td>';
     if (isConv) {
       html += '<td style="font-family:var(--font-mono);font-weight:600;color:#639922">' + fmtL(realeVal) + '</td>';
     } else {
-      html += '<td><input type="number" class="giac-reale-input" data-prodotto="' + esc(prodotto) + '" data-sede="' + sede + '" data-stimata="' + stimata + '" data-giac-inizio="' + inizio + '" data-entrate="' + d.entrate + '" value="' + realeVal + '" placeholder="' + Math.round(stimata) + '" style="font-family:var(--font-mono);font-size:13px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:120px;max-width:100%;text-align:right" oninput="aggiornaGiacDiff(this,' + stimata + ')" /></td>';
+      html += '<td><input type="number" class="giac-reale-input" data-prodotto="' + esc(prodotto) + '" data-sede="' + sede + '" data-stimata="' + stimata + '" data-giac-inizio="' + inizio + '" data-entrate="' + d.entrate + '" data-uscite="' + d.uscite + '" value="' + realeVal + '" placeholder="' + Math.round(stimata) + '" style="font-family:var(--font-mono);font-size:13px;font-weight:600;padding:6px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:120px;max-width:100%;text-align:right" oninput="aggiornaGiacDiff(this,' + stimata + ')" /></td>';
     }
     // Calo consentito (D.M. 55/2000) — solo per sede deposito e prodotti gasolio/benzina
     var caloHtml = '';
@@ -459,8 +491,8 @@ async function calcolaGiacenzeAnno(sede) {
   // Salva dati stimati nel DB (upsert)
   for (const prodotto of prodOrd) {
     const d = prodottiDati[prodotto];
-    const inizio = prevMap[prodotto] || 0;
-    const stimata = inizio + d.entrate - d.uscite;
+    const inizio = (d.inizio !== undefined) ? d.inizio : (prevMap[prodotto] || 0);
+    const stimata = (d.stimata !== undefined) ? d.stimata : (inizio + d.entrate - d.uscite);
     const esistente = corrMap[prodotto];
     if (esistente && esistente.convalidata) continue; // Non sovrascrivere convalide
 
@@ -573,6 +605,10 @@ async function convalidaGiacenze(sede) {
     if (sede === 'deposito_vibo') {
       try { await _pfChiusuraScriviRegistro(prodotto, anno, reale, diff); }
       catch (eReg) { console.warn('registro chiusura', prodotto, eReg && eReg.message); }
+      // 10/09 — conguaglio come RETTIFICA confermata al 31/12 (origine chiusura_anno), idempotente:
+      // cosi' la query madre chiude l'anno sul valore reale e l'anno dopo parte da li'.
+      try { await _pfChiusuraScriviRettifica(prodotto, anno, stimata, reale, diff, nomeUtente); }
+      catch (eRt) { console.warn('rettifica chiusura anno', prodotto, eRt && eRt.message); }
     }
   }
 
@@ -581,6 +617,24 @@ async function convalidaGiacenze(sede) {
 
   // Ricarica
   calcolaGiacenzeAnno(sede);
+}
+
+// Rettifica di conguaglio annuale (solo deposito). Idempotente per anno+prodotto.
+async function _pfChiusuraScriviRettifica(prodotto, anno, stimata, reale, diff, utente) {
+  var dataChiusura = anno + '-12-31';
+  await sb.from('rettifiche_inventario').delete()
+    .eq('tipo', 'deposito').eq('prodotto', prodotto).eq('origine', 'chiusura_anno').eq('data', dataChiusura);
+  if (Math.round(diff) === 0) return;
+  var cis = await sb.from('cisterne').select('id').eq('sede', 'deposito_vibo').eq('prodotto', prodotto).limit(1);
+  var cisternaId = cis.data && cis.data[0] ? cis.data[0].id : null;
+  var res = await sb.from('rettifiche_inventario').insert([{
+    tipo: 'deposito', data: dataChiusura, cisterna_id: cisternaId, prodotto: prodotto,
+    giacenza_sistema: Math.round(stimata), giacenza_rilevata: Math.round(reale), differenza: Math.round(diff),
+    causale: 'conguaglio_annuale', origine: 'chiusura_anno', confermata: true,
+    confermata_da: utente, confermata_il: new Date().toISOString(),
+    note: 'Chiusura ' + anno + ' — conguaglio inventario di fine anno'
+  }]);
+  if (res.error) throw new Error(res.error.message);
 }
 
 // Scrive nel registro la chiusura di fine anno per un prodotto (solo deposito):
