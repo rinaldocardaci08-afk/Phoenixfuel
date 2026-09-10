@@ -1,4 +1,6 @@
 // PhoenixFuel — Registro di carico e scarico (prodotti energetici)
+// v20260910a — REGISTRO PROVA: seconda fonte 'derivato' = vista v_registro_derivato (ordini della query madre
+//   + dato fiscale da movimenti_fiscali / DAS Logistica). Il registro attuale resta la fonte di default.
 // v20260626a — registro kg+l@15+l amb, cruscotto calo 3‰, REPORT PERIODO (totali + tolleranza rettifiche).
 // ─────────────────────────────────────────────────────────────────────────────
 // FONTE UNICA: vista v_registro_movimenti (tabella registro_movimenti).
@@ -10,7 +12,7 @@
 //   import (storico) o, dal 26/06, via DAS generati in PhoenixFuel.
 // ─────────────────────────────────────────────────────────────────────────────
 
-var _pfRegState = { prodotto: 'Gasolio Autotrazione', anno: 2026, mese: 0, dal: '', al: '' };
+var _pfRegState = { prodotto: 'Gasolio Autotrazione', anno: 2026, mese: 0, dal: '', al: '', fonte: 'registro' }; // fonte: 'registro' (tabella) | 'derivato' (vista dagli ordini)
 var _PF_REG_PRODOTTI = ['Gasolio Autotrazione', 'Gasolio Agricolo', 'Benzina'];
 var _PF_REG_MESI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
 var _PF_REG_MESI_FULL = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
@@ -86,12 +88,18 @@ function _pfRegHeaderHtml() {
     + '<select onchange="_pfRegSetAnno(this.value)" style="font-size:13px;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">' + opts + '</select>'
     + '<button onclick="_pfRegSetAnno(' + (_pfRegState.anno + 1) + ')" title="Anno successivo" style="border:0.5px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;width:30px;height:30px;cursor:pointer">▶</button>'
     + '</div>';
+  var isDer = (_pfRegState.fonte === 'derivato');
+  var fonteBtn = '<button onclick="_pfRegSetFonte(\'' + (isDer ? 'registro' : 'derivato') + '\')" title="Registro PROVA: derivato dagli ordini (query madre) + dato fiscale da movimenti_fiscali" style="font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;border:0.5px solid ' + (isDer ? '#185FA5' : 'var(--border)') + ';' + (isDer ? 'background:#185FA5;color:#fff;font-weight:600' : 'background:var(--bg);color:var(--text)') + '">🧪 Registro PROVA' + (isDer ? ' · attivo' : '') + '</button>';
   return '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">'
     + '<div style="display:flex;gap:6px;flex-wrap:wrap">' + subtabs + '</div>' + nav + '</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' + fonteBtn
+    + (isDer ? '<span style="font-size:11px;color:#185FA5">fonte: vista <code>v_registro_derivato</code> — stesse righe della giacenza deposito, dato fiscale da Access/DAS. Il registro attuale non viene toccato.</span>' : '')
+    + '</div>'
     + '<div id="reg-body"></div>';
 }
 
 function _pfRegResetFiltri() { _pfRegState.mese = 0; _pfRegState.dal = ''; _pfRegState.al = ''; }
+function _pfRegSetFonte(f) { _pfRegState.fonte = (f === 'derivato') ? 'derivato' : 'registro'; _pfRegResetFiltri(); _pfRegCache = null; pfRegCarica(); }
 function _pfRegSetProdotto(p) { _pfRegState.prodotto = p; _pfRegResetFiltri(); _pfRegCache = null; pfRegCarica(); }
 function _pfRegSetAnno(y) { y = Number(y); if (!y || y < 2000) return; _pfRegState.anno = y; _pfRegResetFiltri(); _pfRegCache = null; pfRegCarica(); }
 function _pfRegSetMese(m) { _pfRegState.mese = Number(m) || 0; _pfRegState.dal = ''; _pfRegState.al = ''; _pfRegDraw(); }
@@ -131,12 +139,14 @@ async function _pfRegRenderPanels() {
   try {
     var rows = [];
     var page = 0, size = 1000;
+    var derivato = (_pfRegState.fonte === 'derivato');
     while (true) {
-      var res = await sb.from('v_registro_movimenti').select('*')
-        .eq('prodotto', prod).eq('anno', anno)
-        .order('data', { ascending: true })
-        .order('seq', { ascending: true })
-        .range(page * size, page * size + size - 1);
+      var q = derivato
+        ? sb.from('v_registro_derivato').select('*').eq('prodotto', prod).eq('anno', anno)
+            .order('data', { ascending: true }).order('direzione', { ascending: true }).order('num_das', { ascending: true, nullsFirst: false })
+        : sb.from('v_registro_movimenti').select('*').eq('prodotto', prod).eq('anno', anno)
+            .order('data', { ascending: true }).order('seq', { ascending: true });
+      var res = await q.range(page * size, page * size + size - 1);
       if (res.error) throw res.error;
       var batch = res.data || [];
       rows = rows.concat(batch);
@@ -144,6 +154,7 @@ async function _pfRegRenderPanels() {
       page++;
       if (page > 50) break;
     }
+    if (derivato) rows = _pfRegDerivatoToRows(rows);
     var apertura = null, movimenti = [];
     rows.forEach(function (r) { if (r.is_apertura) apertura = r; else movimenti.push(r); });
     movimenti.forEach(function (r, i) { r._n = i + 1; });
@@ -168,12 +179,48 @@ async function _pfRegRenderPanels() {
       }
     } catch (eQm) { /* niente confronto se non leggibile */ }
 
-    _pfRegCache = { rows: movimenti, apertura: apertura, prod: prod, anno: anno, giacFisica: giacFisica, qmGiac: qmGiac };
+    _pfRegCache = { rows: movimenti, apertura: apertura, prod: prod, anno: anno, giacFisica: giacFisica, qmGiac: qmGiac, derivato: derivato };
     _pfRegDraw();
   } catch (e) {
     console.error('registro', e);
     body.innerHTML = '<div style="padding:16px;color:#A32D2D">Errore nel caricamento del registro: ' + (e && e.message ? e.message : e) + '</div>';
   }
+}
+
+// ── Registro PROVA: converte le righe di v_registro_derivato nella stessa forma
+//    di v_registro_movimenti (car_/sca_/giac_ progressive), così tabella, stampa
+//    e report restano identici. In più porta i LITRI ORDINE (giac_litri) per il
+//    confronto secco con la query madre.
+function _pfRegDerivatoToRows(src) {
+  var gKg = 0, g15 = 0, gAmb = 0, gLitri = 0, seq = 0;
+  var out = [];
+  src.forEach(function (v) {
+    var dir = v.direzione, isRett = (dir === 'R'), isAp = (dir === 'A');
+    var litri = Number(v.litri || 0), kg = Number(v.kg || 0), l15 = Number(v.lt_15 || 0), lamb = Number(v.lt_amb || 0);
+    var segno = isRett ? (litri >= 0 ? 1 : -1) : (dir === 'E' || isAp ? 1 : -1);
+    if (isRett) { litri = Math.abs(litri); kg = Math.abs(kg); l15 = Math.abs(l15); lamb = Math.abs(lamb); }
+    gKg += segno * kg; g15 += segno * l15; gAmb += segno * lamb; gLitri += segno * litri;
+    var r = {
+      prodotto: v.prodotto, anno: v.anno, seq: ++seq, data: v.data,
+      direzione: isAp ? 'E' : (isRett ? (segno > 0 ? 'E' : 'U') : dir),
+      tipo_doc: isAp ? 'APERTURA' : (isRett ? 'RETT' : 'DAS'),
+      arc: isRett ? null : (v.num_das || null),
+      progressivo: v.num_dogane || null,
+      controparte: v.controparte || null,
+      dens_amb: v.dens_amb, dens_15: v.dens_15,
+      is_apertura: isAp, origine: v.fonte_fiscale, das_id: null, ordine_id: v.ordine_id,
+      car_kg: 0, car_lt15: 0, car_ltamb: 0, car_litri: 0,
+      sca_kg: 0, sca_lt15: 0, sca_ltamb: 0, sca_litri: 0,
+      giac_kg: gKg, giac_lt15: g15, giac_ltamb: gAmb, giac_litri: gLitri,
+      _fonte: v.fonte_fiscale, _mancante: !!v.fiscale_mancante, _tipo: v.tipo_ordine
+    };
+    if (!isAp) {
+      if (segno > 0) { r.car_kg = kg; r.car_lt15 = l15; r.car_ltamb = lamb; r.car_litri = litri; }
+      else { r.sca_kg = kg; r.sca_lt15 = l15; r.sca_ltamb = lamb; r.sca_litri = litri; }
+    }
+    out.push(r);
+  });
+  return out;
 }
 
 function _pfRegDraw() {
@@ -235,7 +282,7 @@ function _pfRegDraw() {
     + kpi('Giacenza finale', aFinKg, aFin15, '#185FA5', aFinAmb)
     + '</div>'
     + _pfRegCoerenzaHtml({ regKg: aFinKg, regAmb: aFinAmb, caricoKg: aCkg, giacFisicaLamb: c.giacFisica, prodotto: prod, anno: anno, densita: _pfRegUltimaDensita(rows) })
-    + _pfRegQueryMadreHtml(c.qmGiac, aFinAmb, prod, anno)
+    + _pfRegQueryMadreHtml(c.qmGiac, c.derivato ? (rows.length ? Number(rows[rows.length - 1].giac_litri || 0) : (apertura ? Number(apertura.giac_litri || 0) : 0)) : aFinAmb, prod, anno, c.derivato)
     + '</div>';
 
   var tbl = _pfRegFiltroHtml() + _pfRegTabella(visible, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg, pS15, pSamb, prod, anno);
@@ -269,7 +316,7 @@ function _pfRegUltimaDensita(rows) {
 // Doppio calcolo: giacenza del REGISTRO vs giacenza della QUERY MADRE (getGiacenzaAllaData).
 // Read-only, per TUTTI i prodotti (a differenza del cruscotto calo, solo autotrazione).
 // Se divergono, il registro non riflette tutti i movimenti del deposito (es. agricolo giugno).
-function _pfRegQueryMadreHtml(qmGiac, regAmb, prod, anno) {
+function _pfRegQueryMadreHtml(qmGiac, regAmb, prod, anno, derivato) {
   var annoCorrente = (new Date()).getFullYear();
   if (anno !== annoCorrente) return '';
   if (qmGiac === null || qmGiac === undefined) return '';
@@ -283,7 +330,7 @@ function _pfRegQueryMadreHtml(qmGiac, regAmb, prod, anno) {
     + '<div style="font-size:11px;color:var(--text-hint);margin-bottom:8px">La query madre conta tutte le entrate/uscite del deposito per il prodotto (autoconsumo incluso). Registro e query madre devono coincidere.</div>'
     + '<div style="display:flex;gap:16px;flex-wrap:wrap">'
     + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza query madre</div><div style="font-size:17px;font-family:monospace">' + _pfRegN(qm) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
-    + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza registro</div><div style="font-size:17px;font-family:monospace">' + _pfRegN(reg) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-hint)">Giacenza registro' + (derivato ? ' (litri ordini)' : '') + '</div><div style="font-size:17px;font-family:monospace">' + _pfRegN(reg) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
     + '<div><div style="font-size:11px;color:var(--text-hint)">Scarto</div><div style="font-size:17px;font-family:monospace;color:' + col + '">' + (scarto > 0 ? '+' : '') + _pfRegN(scarto) + ' <span style="font-size:11px;color:var(--text-hint)">L</span></div></div>'
     + '</div>'
     + (ok ? '<div style="margin-top:8px;font-size:11px;color:#1D7A4D">✓ Registro e query madre coincidono: i movimenti camminano insieme.</div>'
@@ -410,7 +457,8 @@ function _pfRegTabella(rows, pOpenKg, pOpen15, pOpenAmb, pCkg, pC15, pCamb, pSkg
     var docTipo = r.tipo_doc || '—';
     var docRef = r.arc ? '<div style="font-size:10px;color:var(--text-hint)">' + _pfRegEsc(r.arc) + '</div>' : '';
     var prog = r.progressivo ? '<div style="font-size:10px;color:var(--text-hint)">' + _pfRegEsc(r.progressivo) + '</div>' : '';
-    var dens = (r.dens_15 != null) ? '<div style="font-size:10px;color:var(--text-hint)">ρ15 ' + Number(r.dens_15).toFixed(3).replace('.', ',') + '</div>' : '';
+    var dens = (r.dens_15 != null) ? '<div style="font-size:10px;color:var(--text-hint)">ρ15 ' + Number(r.dens_15).toFixed(3).replace('.', ',') + (r._fonte ? ' · ' + _pfRegEsc(r._fonte) : '') + '</div>' : '';
+    if (r._mancante) dens += '<div style="font-size:10px;color:#A32D2D">⚠ dato fiscale mancante — densità di default</div>';
     H += '<tr style="border-top:0.5px solid var(--border)">'
       + '<td style="padding:7px 8px;color:var(--text-hint)">' + r._n + '</td>'
       + '<td style="padding:7px 8px;font-family:inherit">' + _pfRegData(r.data) + '</td>'
