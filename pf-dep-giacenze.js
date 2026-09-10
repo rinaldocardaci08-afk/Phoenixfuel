@@ -1,3 +1,9 @@
+// VERSIONE 10/09/2026 c - REGOLA: la rilevata e' SOLO osservazione (muove Δ e cumulata, mai la catena);
+//   la giacenza inizio mese = teorica del mese prima, sempre. Nuova riga "± Rettifiche" = rettifiche
+//   manuali confermate del mese (rettifiche_inventario tipo deposito, ESCLUSE quelle di chiusura mese,
+//   gia' rappresentate dalle caselle), incluse nella teorica: a fine anno la teorica coincide con la
+//   giacenza deposito (query madre). Vista Anno: giacenza fine anno = teorica di dicembre.
+// VERSIONE 10/09/2026 b - fix: id celle (variabile pi sovrascritta → aggiornamento sul posto non partiva); calo calcolato A DESTRA della casella, stessa grandezza.
 // VERSIONE 10/09/2026 a - (1) input: niente rerender a ogni tasto (il cursore restava fuori dopo una cifra):
 //   si aggiornano sul posto solo le celle calcolate; (2) cali tecnici: la casella mostra SOLO il valore
 //   manuale, il calcolato DM55 sta accanto in grigio con (i) che apre il dettaglio del calcolo;
@@ -96,7 +102,7 @@ async function caricaGiacenzeMensiliDeposito() {
   // che includeva anche 'in_attesa' e 'programmato' gonfiando i totali.
   // FIX 25/05/2026: PostgREST cappa a 1000 righe. Paginazione vera in batch da 1000.
   var STATI_VALIDI = ['confermato','consegnato'];
-  var [entrateArr, uscCliArr, uscStaArr, uscAutoArr] = await Promise.all([
+  var [entrateArr, uscCliArr, uscStaArr, uscAutoArr, rettArr] = await Promise.all([
     _pfFetchAllPages(function() {
       return sb.from('ordini').select('data,prodotto,litri')
         .eq('tipo_ordine','entrata_deposito').in('stato', STATI_VALIDI)
@@ -118,8 +124,22 @@ async function caricaGiacenzeMensiliDeposito() {
       return sb.from('ordini').select('data,prodotto,litri')
         .eq('tipo_ordine','autoconsumo').in('stato', STATI_VALIDI)
         .gte('data', daISO).lte('data', aISO);
+    }),
+    // Rettifiche manuali confermate (le 'chiusura_mese' sono gia' nelle caselle del mese)
+    _pfFetchAllPages(function() {
+      return sb.from('rettifiche_inventario').select('data,prodotto,differenza,causale,origine,note')
+        .eq('tipo','deposito').eq('confermata', true)
+        .gte('data', daISO).lte('data', aISO);
     })
   ]);
+  var rettMese = {}, rettLista = {};
+  (rettArr||[]).forEach(function(r){
+    if (r.origine === 'chiusura_mese') return;
+    var m = parseInt(r.data.substring(5,7));
+    var k = r.prodotto+'_'+m;
+    rettMese[k] = (rettMese[k]||0) + Number(r.differenza||0);
+    (rettLista[k] = rettLista[k] || []).push(r);
+  });
 
   // Aggrega per mese/prodotto
   var entrateMese = {}, usciteMese = {};
@@ -156,6 +176,7 @@ async function caricaGiacenzeMensiliDeposito() {
         eccedenze:Number(salv.eccedenze_viaggio || 0), caliViaggio:Number(salv.cali_viaggio || 0),
         caliSuggeriti:caliSug, caliTecnici:(caliManuale ? Number(salv.cali_tecnici) : caliSug),
         caliManuale:caliManuale, caliManualeDb:caliManuale, coeff:coeff,
+        rettifiche:(rettMese[k]||0), rettLista:(rettLista[k]||[]),
         giacPresunta:0, giacRilevata:giacRilev,
         diffMese:null, diffCumulata:null,
         // Stato chiusura (19/04/2026) - NUOVO
@@ -180,16 +201,16 @@ function _depGmRicalcola(prod) {
   var diffCum = 0;
   _depGmDati.mesi[prod].forEach(function(d){
     d.giacInizio = Math.round(giacCorr);
-    d.giacPresunta = Math.round((giacCorr + d.entrate + (d.eccedenze||0) - (d.caliViaggio||0) - (d.caliTecnici||0) - (d.scattiVuoto||0) - d.uscite) * 100) / 100;
+    d.giacPresunta = Math.round((giacCorr + d.entrate + (d.eccedenze||0) - (d.caliViaggio||0) - (d.caliTecnici||0) - (d.scattiVuoto||0) + (d.rettifiche||0) - d.uscite) * 100) / 100;
     if (d.giacRilevata !== null && d.giacRilevata !== undefined) {
       d.diffMese = Math.round((d.giacRilevata - d.giacPresunta) * 100) / 100;
       diffCum = Math.round((diffCum + d.diffMese) * 100) / 100;
       d.diffCumulata = diffCum;
-      giacCorr = d.giacRilevata;
     } else {
       d.diffMese = null; d.diffCumulata = null;
-      giacCorr = d.giacPresunta;
     }
+    // La rilevata e' SOLO osservazione: il mese dopo parte SEMPRE dalla teorica
+    giacCorr = d.giacPresunta;
   });
 }
 
@@ -197,8 +218,32 @@ function _depGmFmtL(v) { return v !== null && v !== undefined ? _sep(Math.round(
 function _depGmDiffTxt(v) { return v === null || v === undefined ? '—' : (v > 0 ? '+' : '') + Math.round(v).toLocaleString('it-IT') + ' L'; }
 function _depGmDiffCol(v) { return v === null || v === undefined ? 'var(--text-muted)' : v === 0 ? '#639922' : Math.abs(v) < 200 ? '#BA7517' : '#A32D2D'; }
 function _depGmCumCol(v) { return v === null || v === undefined ? 'var(--text-muted)' : Math.abs(v) < 500 ? '#639922' : Math.abs(v) < 2000 ? '#BA7517' : '#A32D2D'; }
+function _depGmRettTxt(d) {
+  var n = (d.rettLista||[]).length;
+  if (!n) return '<span style="color:var(--text-muted)">—</span>';
+  return _depGmDiffTxt(d.rettifiche) + ' <span onclick="_depGmInfoRett(' + d._pi + ',' + d.mese + ')" title="Elenco rettifiche del mese" style="cursor:pointer;color:#185FA5;font-weight:700">ⓘ</span>';
+}
+function _depGmInfoRett(pi, mese) {
+  if (!_depGmDati) return;
+  var prod = _depGmDati.prodotti[pi]; var d = _depGmDati.mesi[prod][mese-1]; if (!d) return;
+  var html = '<div style="max-width:520px">'
+    + '<div style="font-size:15px;font-weight:600;margin-bottom:8px">Rettifiche · ' + esc(prod) + ' · ' + _depGmMesi[mese-1] + ' ' + _depGmDati.anno + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Rettifiche manuali confermate (sezione Rettifiche). Quelle generate dalla chiusura mese non sono elencate: sono gia\' nelle caselle eccedenze/cali/scatti.</div>'
+    + '<table style="font-size:13px;border-collapse:collapse;width:100%">'
+    + '<tr style="font-size:11px;color:var(--text-muted)"><td>Data</td><td>Causale</td><td>Note</td><td style="text-align:right">Litri</td></tr>';
+  (d.rettLista||[]).forEach(function(r){
+    var dt = r.data ? r.data.substring(8,10) + '/' + r.data.substring(5,7) : '';
+    html += '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 6px 5px 0;white-space:nowrap">' + dt + '</td>'
+      + '<td style="padding:5px 6px">' + esc(r.causale || '') + '</td>'
+      + '<td style="padding:5px 6px;color:var(--text-muted);font-size:12px">' + esc(r.note || '') + '</td>'
+      + '<td style="padding:5px 0;text-align:right;font-family:var(--font-mono);color:' + (Number(r.differenza) < 0 ? '#A32D2D' : '#1D7A4D') + '">' + _depGmDiffTxt(Number(r.differenza)) + '</td></tr>';
+  });
+  html += '<tr style="border-top:1px solid var(--text-muted)"><td colspan="3" style="padding:6px 0;font-weight:600">Totale mese</td><td style="text-align:right;font-family:var(--font-mono);font-weight:600">' + _depGmDiffTxt(d.rettifiche) + '</td></tr></table></div>';
+  if (typeof apriModal === 'function') apriModal(html);
+  else alert((d.rettLista||[]).map(function(r){ return r.data + ' ' + (r.causale||'') + ' ' + r.differenza + ' L'; }).join('\n'));
+}
 function _depGmCaliHint(d) {
-  return (d.caliManuale ? '✓ manuale · calc. ' : '≈ ') + Number(d.caliSuggeriti||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' L'
+  return (d.caliManuale ? 'calc. ' : '≈ ') + Number(d.caliSuggeriti||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' L'
     + ' <span onclick="_depGmInfoCali(' + d._pi + ',' + d.mese + ')" title="Come e\' calcolato" style="cursor:pointer;color:#185FA5;font-weight:700">ⓘ</span>';
 }
 function _depGmInfoCali(pi, mese) {
@@ -234,9 +279,9 @@ function renderGiacenzeMensiliDeposito() {
   var mesiIdx = trim===1?[0,1,2]:trim===2?[3,4,5]:trim===3?[6,7,8]:[9,10,11];
   var html = '';
 
-  _depGmDati.prodotti.forEach(function(prod, pi) {
+  _depGmDati.prodotti.forEach(function(prod, pIdx) {
     var dati   = _depGmDati.mesi[prod];
-    dati.forEach(function(d){ d._pi = pi; });
+    dati.forEach(function(d){ d._pi = pIdx; });
     var coeff  = _depGmCoeff[prod] || 0.00020;
     var pi     = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===prod;}) : null;
     var col    = pi ? pi.colore : '#D85A30';
@@ -260,6 +305,7 @@ function renderGiacenzeMensiliDeposito() {
       { key:'caliViaggio',label:'- Cali viaggio',          bg:'#FAEEDA', color:'#633806', input:'cali_viaggio', neg:true },
       { key:'caliTecnici',label:'- Cali tecnici',          bg:'#EEEDFE', color:'#3C3489', input:'cali_tecnici', neg:true, suggerito:'caliSuggeriti', manuale:'caliManuale' },
       { key:'scattiVuoto',label:'- Scatti a vuoto',        bg:'#EEEDFE', color:'#3C3489', input:'scatti_vuoto', neg:true },
+      { key:'rettifiche', label:'± Rettifiche (manuali)',  bg:'#F1EFE8', color:'#444441', auto:true, segno:true },
       { key:'giacPresunta',label:'= Giacenza teorica',     bg:'#EAF3DE', color:'#27500A', auto:true, bold:true },
     ];
 
@@ -275,6 +321,7 @@ function renderGiacenzeMensiliDeposito() {
           // Cali tecnici: nella casella SOLO il valore manuale; il calcolato sta accanto (hint)
           if (riga.suggerito && !d[riga.manuale]) savedVal = '';
           html += '<td style="padding:3px 4px;border:0.5px solid var(--border)">';
+          if (riga.suggerito) html += '<div style="display:flex;align-items:center;gap:6px;white-space:nowrap">';
           html += '<input type="number" class="dep-gm-input" ';
           html += 'data-prod="'+esc(prod)+'" data-mese="'+(i+1)+'" data-campo="'+riga.input+'" ';
           html += 'value="'+(savedVal||'')+'" placeholder="0" step="0.01" ';
@@ -288,12 +335,12 @@ function renderGiacenzeMensiliDeposito() {
           html += 'style="width:85px;font-family:var(--font-mono);font-size:12px;padding:4px 6px;border:'+borderStile+';border-radius:4px;background:'+bgStile+';color:#1a1a18;text-align:right'+(meseChiuso?';cursor:not-allowed;opacity:0.6':'')+'">';
           // Hint sotto input
           if (riga.suggerito) {
-            html += '<div id="dgm-'+pi+'-'+(i+1)+'-calihint" style="font-size:9px;color:'+(isManualeOra?'#27500A':'#8a86a8')+';margin-top:2px;white-space:nowrap">' + _depGmCaliHint(d) + '</div>';
+            html += '<span id="dgm-'+pIdx+'-'+(i+1)+'-calihint" style="font-family:var(--font-mono);font-size:12px;color:'+(isManualeOra?'#27500A':'#8a86a8')+'">' + _depGmCaliHint(d) + '</span></div>';
           }
           html += '</td>';
         } else {
-          var display = _depGmFmtL(val);
-          html += '<td id="dgm-'+pi+'-'+(i+1)+'-'+riga.key+'" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;font-weight:'+(riga.bold?'700':'400')+';color:'+riga.color+'">'+display+'</td>';
+          var display = riga.segno ? _depGmRettTxt(d) : _depGmFmtL(val);
+          html += '<td id="dgm-'+pIdx+'-'+(i+1)+'-'+riga.key+'" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;font-weight:'+(riga.bold?'700':'400')+';color:'+riga.color+'">'+display+'</td>';
         }
       });
       html += '</tr>';
@@ -320,7 +367,7 @@ function renderGiacenzeMensiliDeposito() {
     html += '<td style="padding:5px 8px;border:0.5px solid var(--border);font-size:10px;color:var(--text-muted)">Δ Differenza (rilevata − teorica)</td>';
     mesiIdx.forEach(function(i){
       var d = dati[i];
-      html += '<td id="dgm-'+pi+'-'+(i+1)+'-diff" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;color:'+_depGmDiffCol(d.diffMese)+'">'+_depGmDiffTxt(d.diffMese)+'</td>';
+      html += '<td id="dgm-'+pIdx+'-'+(i+1)+'-diff" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;color:'+_depGmDiffCol(d.diffMese)+'">'+_depGmDiffTxt(d.diffMese)+'</td>';
     });
     html += '</tr>';
 
@@ -329,7 +376,7 @@ function renderGiacenzeMensiliDeposito() {
     html += '<td style="padding:5px 8px;border:0.5px solid var(--border);font-size:10px;color:var(--text-muted)">Δ Cumulata anno</td>';
     mesiIdx.forEach(function(i){
       var d = dati[i];
-      html += '<td id="dgm-'+pi+'-'+(i+1)+'-cum" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;font-weight:600;color:'+_depGmCumCol(d.diffCumulata)+'">'+_depGmDiffTxt(d.diffCumulata)+'</td>';
+      html += '<td id="dgm-'+pIdx+'-'+(i+1)+'-cum" style="text-align:right;padding:5px 8px;border:0.5px solid var(--border);font-family:var(--font-mono);font-size:12px;font-weight:600;color:'+_depGmCumCol(d.diffCumulata)+'">'+_depGmDiffTxt(d.diffCumulata)+'</td>';
     });
     html += '</tr>';
 
@@ -453,9 +500,10 @@ function _depGmRenderTotali() {
     var dati = _depGmDati.mesi[prod];
     var pi = cacheProdotti ? cacheProdotti.find(function(p){return p.nome===prod;}) : null;
     var col = pi ? pi.colore : '#D85A30';
-    var totEnt=0, totUsc=0, totCali=0;
-    dati.forEach(function(d){ totEnt+=d.entrate; totUsc+=d.uscite; totCali+=d.caliTecnici||0; });
-    var giacFinale = (_depGmDati.giacInizioAnno[prod]||0) + totEnt - totUsc - totCali;
+    var totEnt=0, totUsc=0, totCali=0, totRett=0;
+    dati.forEach(function(d){ totEnt+=d.entrate; totUsc+=d.uscite; totCali+=d.caliTecnici||0; totRett+=d.rettifiche||0; });
+    // Fine anno = teorica di dicembre (catena completa: caselle + rettifiche manuali)
+    var giacFinale = dati.length ? dati[dati.length-1].giacPresunta : 0;
 
     html += '<div style="background:var(--bg);border:0.5px solid var(--border);border-left:5px solid '+col+';border-radius:10px;padding:14px;margin-bottom:12px">';
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
@@ -468,7 +516,8 @@ function _depGmRenderTotali() {
       {label:'Totale entrate', val:fmtL(totEnt), color:'#27500A'},
       {label:'Totale uscite', val:fmtL(totUsc), color:'#791F1F'},
       {label:'Cali tecnici', val:fmtL(totCali), color:'#633806'},
-      {label:'Giac. stimata fine anno', val:fmtL(giacFinale), color:'#3C3489'},
+      {label:'Rettifiche manuali', val:_depGmDiffTxt(totRett), color:'#444441'},
+      {label:'Giac. teorica fine anno', val:fmtL(giacFinale), color:'#3C3489'},
     ];
     kpi.forEach(function(k){
       html += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:8px;padding:10px">';
@@ -488,6 +537,7 @@ function _depGmRenderTotali() {
     var righe = [
       {key:'entrate', label:'Entrate', color:'#27500A'},
       {key:'uscite', label:'Uscite', color:'#791F1F'},
+      {key:'rettifiche', label:'Rettifiche', color:'#444441'},
       {key:'giacPresunta', label:'Giac. teorica', color:'#3C3489'},
       {key:'giacRilevata', label:'Giac. rilevata', color:'#D85A30'},
     ];
