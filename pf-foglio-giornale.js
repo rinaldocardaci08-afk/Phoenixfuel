@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260916d — il modale Entrata/Uscita NON si chiude piu' cliccando fuori (o trascinando il cursore
+//              fuori da una casella mentre si scrive): si chiude solo con × o Annulla.
 // v20260916c — casella di spunta accanto a ogni fattura fornitore (modo A): con Importo vuoto la spunta
 //              porta il saldo in "Imputa" E nell'Importo in alto (somma delle fatture spuntate); con
 //              Importo gia' scritto la spunta imputa quel che resta da assegnare; l'inserimento a mano
@@ -888,7 +890,7 @@ function _fgRenderModale() {
   var coloreT = m.tipo === 'entrata' ? '#27500A' : '#791F1F';
   var dataLbl = _fgFmtData(m.data);
 
-  var html = '<div id="fg-modale-overlay" onclick="if(event.target===this)_fgChiudiModale()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px">';
+  var html = '<div id="fg-modale-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px">';
   html += '<div style="background:white;border-radius:12px;padding:20px;width:640px;max-width:100%;max-height:calc(100vh - 32px);overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,0.3)" onclick="event.stopPropagation()">';
 
   // Header
