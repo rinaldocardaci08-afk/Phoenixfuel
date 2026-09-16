@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260916a — ✏️ e 🗑️ su OGNI riga di entrata/uscita anche nella vista normale del giorno (prima solo
+//              in "Espandi"). Modifica: si puo' cambiare anche la DATA; importo/data/metodo vengono
+//              propagati al pagamento fornitore collegato (pagamenti_fornitori.movimento_foglio_id).
+//              Elimina: toglie anche i pagamenti fornitore collegati e rimette "da pagare" fatture e
+//              ordini che il movimento aveva saldato (prima restavano pagati → doppio pagamento a Eni).
 // v20260821d — il pagamento va nel giorno in cui esce il denaro, non in quello
 //              della scadenza: data proposta a oggi e modificabile, e nelle
 //              note resta scritto "scadeva il 27, pagata 6 giorni prima"
@@ -743,10 +748,18 @@ function _fgRenderRigaMovimento(m, tipo) {
   var metodoTag = m.metodo ? ' <span style="background:rgba(0,0,0,0.05);color:var(--text-muted);font-size:9px;padding:1px 5px;border-radius:3px">' + esc(m.metodo) + '</span>' : '';
   var contoLabel = m.banca_id ? '→ banca' : (m.cassa_tipo ? '→ ' + (m.cassa_tipo === 'cassa_centrale' ? 'Cassa centrale' : 'Cassa stazione') : '');
 
+  var isAuto = !!(m.origine && m.origine.indexOf('auto-') === 0);
+  var btnHtml = '';
+  if (!isAuto && _fgPuoRegistrare() && m.id) {
+    btnHtml = '<span style="display:inline-flex;gap:3px;margin-left:8px;vertical-align:middle">'
+      + '<button onclick="fgModificaMovimento(\'' + m.id + '\')" title="Modifica movimento" style="font-size:11px;padding:1px 6px;background:white;border:0.5px solid var(--border);border-radius:4px;cursor:pointer;line-height:1.4">✏️</button>'
+      + '<button onclick="fgEliminaMovimento(\'' + m.id + '\')" title="Elimina movimento" style="font-size:11px;padding:1px 6px;background:white;border:0.5px solid #A32D2D;color:#A32D2D;border-radius:4px;cursor:pointer;line-height:1.4">🗑️</button>'
+      + '</span>';
+  }
   var html = '<div style="background:' + bg + ';border-left:3px solid ' + borderL + ';border-radius:0 6px 6px 0;padding:8px 12px;font-size:12px;margin-bottom:6px">';
   html += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">';
   html += '<div style="flex:1">' + esc(m.descrizione) + tagHtml + '</div>';
-  html += '<div style="font-family:var(--font-mono);font-weight:500;color:' + amountColor + '">' + sign + _fgFmtImporto(m.importo) + '</div>';
+  html += '<div style="font-family:var(--font-mono);font-weight:500;color:' + amountColor + ';white-space:nowrap">' + sign + _fgFmtImporto(m.importo) + btnHtml + '</div>';
   html += '</div>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">' + esc(contoLabel) + metodoTag + '</div>';
   html += '</div>';
@@ -2573,7 +2586,10 @@ async function fgModificaMovimento(movId) {
   html += '</div>';
 
   html += '<div style="background:var(--bg);padding:12px;border-radius:6px;margin-bottom:12px">';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">';
+
+  html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Data</label>';
+  html += '<input type="date" id="fg-mod-edit-data" value="' + esc(m.data || '') + '" style="width:100%;font-size:12px;padding:6px 8px;border:0.5px solid var(--border);border-radius:4px"/></div>';
 
   html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Importo €</label>';
   html += '<input type="number" step="0.01" min="0.01" id="fg-mod-edit-importo" value="' + Number(m.importo).toFixed(2) + '" style="width:100%;font-family:var(--font-mono);font-weight:500;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
@@ -2611,7 +2627,7 @@ async function fgModificaMovimento(movId) {
   html += '<textarea id="fg-mod-edit-note" rows="2" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px;resize:vertical">' + esc(m.note || '') + '</textarea></div>';
 
   if ((m.fatture_collegate_count || 0) > 0 || (m.ordini_collegati_count || 0) > 0) {
-    html += '<div style="background:#FAEEDA;border-left:3px solid #BA7517;padding:8px 12px;font-size:11px;color:#412402;margin-top:10px;border-radius:0 4px 4px 0">⚠ Questo movimento ha riconciliazioni con fatture/ordini. La modifica aggiorna solo i dati base, le riconciliazioni restano invariate.</div>';
+    html += '<div style="background:#FAEEDA;border-left:3px solid #BA7517;padding:8px 12px;font-size:11px;color:#412402;margin-top:10px;border-radius:0 4px 4px 0">⚠ Movimento collegato a fatture/ordini: data, metodo e importo vengono riportati sul pagamento fornitore collegato. Se le fatture collegate sono piu\' di una, l\'importo non si puo\' cambiare qui: elimina il movimento e registralo di nuovo.</div>';
   }
 
   html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:0.5px solid var(--border)">';
@@ -2626,6 +2642,7 @@ async function fgModificaMovimento(movId) {
 
 
 async function _fgConfermaModificaMovimento(movId) {
+  var dataNuova = (document.getElementById('fg-mod-edit-data') || {}).value || '';
   var importo = parseFloat(document.getElementById('fg-mod-edit-importo').value) || 0;
   var conto = document.getElementById('fg-mod-edit-conto').value;
   var metodo = document.getElementById('fg-mod-edit-metodo').value;
@@ -2634,12 +2651,25 @@ async function _fgConfermaModificaMovimento(movId) {
 
   if (importo <= 0) { alert('⚠ Inserisci un importo > 0'); return; }
   if (!descrizione) { alert('⚠ Inserisci la descrizione'); return; }
+  if (!dataNuova) { alert('⚠ Inserisci la data'); return; }
 
   var banca_id = null, cassa_tipo = null;
   if (conto.indexOf('banca:') === 0) banca_id = conto.substring(6);
   else if (conto.indexOf('cassa:') === 0) cassa_tipo = conto.substring(6);
 
+  // Pagamenti fornitore collegati a questo movimento (nati dalla registrazione dell'uscita)
+  var resPag = await sb.from('pagamenti_fornitori').select('id,importo,fattura_ricevuta_id').eq('movimento_foglio_id', movId);
+  var pagColl = (resPag.data || []);
+  var resOld = await sb.from('foglio_giornale_movimenti').select('importo,data').eq('id', movId).single();
+  var importoVecchio = resOld.data ? Number(resOld.data.importo) : importo;
+  var importoCambiato = Math.abs(importoVecchio - importo) > 0.005;
+  if (importoCambiato && pagColl.length > 1) {
+    alert('⚠ Questo movimento salda ' + pagColl.length + ' fatture fornitore: l\'importo non si puo\' cambiare qui.\nElimina il movimento e registralo di nuovo con gli importi giusti.');
+    return;
+  }
+
   var resU = await sb.from('foglio_giornale_movimenti').update({
+    data: dataNuova,
     importo: importo,
     descrizione: descrizione,
     banca_id: banca_id,
@@ -2649,6 +2679,20 @@ async function _fgConfermaModificaMovimento(movId) {
   }).eq('id', movId);
 
   if (resU.error) { alert('Errore aggiornamento: ' + resU.error.message); console.error(resU.error); return; }
+
+  // Propago al pagamento fornitore collegato: data, modalita' e (se una sola fattura) importo
+  if (pagColl.length > 0) {
+    var modalitaPag = (metodo === 'riba' || metodo === 'assegno') ? metodo : 'bonifico';
+    var updPag = { data_pagamento: dataNuova, modalita: modalitaPag };
+    if (importoCambiato && pagColl.length === 1) updPag.importo = importo;
+    var resPU = await sb.from('pagamenti_fornitori').update(updPag).eq('movimento_foglio_id', movId);
+    if (resPU.error) console.warn('[fg] aggiornamento pagamenti_fornitori:', resPU.error.message);
+    // data pagamento sugli ordini che questo movimento aveva marcato pagati
+    var fattIds = pagColl.map(function(p){ return p.fattura_ricevuta_id; }).filter(Boolean);
+    if (fattIds.length) {
+      await sb.from('ordini').update({ data_pagamento_fornitore: dataNuova }).in('fattura_ricevuta_id', fattIds).eq('pagato_fornitore', true);
+    }
+  }
 
   if (typeof _auditLog === 'function') {
     _auditLog('foglio_giornale', 'foglio_giornale_movimenti', 'Modifica movimento ' + movId.substring(0,8) + ' nuovo importo ' + _fgFmtImporto(importo));
@@ -2682,15 +2726,42 @@ async function fgEliminaMovimento(movId) {
 
   if (!confirm('Vuoi davvero eliminare questo movimento?\n\n' +
       (m.tipo === 'entrata' ? 'Entrata' : 'Uscita') + ' di € ' + _fgFmtImporto(m.importo) +
-      '\n"' + m.descrizione + '"\n\nL\'operazione non è reversibile. Le eventuali riconciliazioni con fatture/ordini saranno rimosse.')) return;
+      '\n"' + m.descrizione + '"\n\nL\'operazione non è reversibile. Vengono tolti anche il pagamento fornitore collegato e le riconciliazioni: le fatture/ordini tornano "da pagare".')) return;
 
-  // Elimino prima le riconciliazioni (CASCADE dovrebbe farlo da DB ma sicurezza in più)
+  // Cosa aveva saldato questo movimento (per rimettere "da pagare" dopo la cancellazione)
+  var resRic = await sb.from('foglio_giornale_riconciliazioni').select('ordine_id,fattura_ricevuta_id').eq('movimento_id', movId);
+  var ricRows = resRic.data || [];
+  var ordiniModoD = ricRows.map(function(r){ return r.ordine_id; }).filter(Boolean);
+  var fattureColl = ricRows.map(function(r){ return r.fattura_ricevuta_id; }).filter(Boolean);
+  var resPag = await sb.from('pagamenti_fornitori').select('id,fattura_ricevuta_id').eq('movimento_foglio_id', movId);
+  (resPag.data || []).forEach(function(p){ if (p.fattura_ricevuta_id && fattureColl.indexOf(p.fattura_ricevuta_id) < 0) fattureColl.push(p.fattura_ricevuta_id); });
+
+  // 1) pagamenti fornitore nati da questo movimento
+  var resPD = await sb.from('pagamenti_fornitori').delete().eq('movimento_foglio_id', movId);
+  if (resPD.error) { alert('Errore: non riesco a togliere il pagamento fornitore collegato: ' + resPD.error.message); return; }
+
+  // 2) riconciliazioni (CASCADE dovrebbe farlo da DB ma sicurezza in più)
   var resR = await sb.from('foglio_giornale_riconciliazioni').delete().eq('movimento_id', movId);
   if (resR.error) console.warn('[fgElimina] errore pulizia riconciliazioni:', resR.error);
 
-  // Elimino movimento
+  // 3) movimento
   var resD = await sb.from('foglio_giornale_movimenti').delete().eq('id', movId);
   if (resD.error) { alert('Errore eliminazione: ' + resD.error.message); console.error(resD.error); return; }
+
+  // 4) fatture che tornano con residuo > 0 → i loro ordini tornano "da pagare"
+  if (fattureColl.length) {
+    var saldi = await sb.from('v_fatture_ricevute_saldi').select('id,saldo_residuo').in('id', fattureColl);
+    var riaperte = (saldi.data || []).filter(function(f){ return Number(f.saldo_residuo) > 0.01; }).map(function(f){ return f.id; });
+    if (riaperte.length) {
+      var u1 = await sb.from('ordini').update({ pagato_fornitore: false, data_pagamento_fornitore: null }).in('fattura_ricevuta_id', riaperte);
+      if (u1.error) console.warn('[fgElimina] ordini da fatture:', u1.error.message);
+    }
+  }
+  // 5) ordini pagati direttamente (modo D) → "da pagare"
+  if (ordiniModoD.length) {
+    var u2 = await sb.from('ordini').update({ pagato_fornitore: false, data_pagamento_fornitore: null }).in('id', ordiniModoD);
+    if (u2.error) console.warn('[fgElimina] ordini modo D:', u2.error.message);
+  }
 
   if (typeof _auditLog === 'function') {
     _auditLog('foglio_giornale', 'foglio_giornale_movimenti', 'Eliminato movimento ' + movId.substring(0,8) + ' (' + m.tipo + ' ' + _fgFmtImporto(m.importo) + ' €)');
