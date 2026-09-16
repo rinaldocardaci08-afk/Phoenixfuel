@@ -1,5 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
+// v20260916c — casella di spunta accanto a ogni fattura fornitore (modo A): con Importo vuoto la spunta
+//              porta il saldo in "Imputa" E nell'Importo in alto (somma delle fatture spuntate); con
+//              Importo gia' scritto la spunta imputa quel che resta da assegnare; l'inserimento a mano
+//              in "Imputa" resta possibile come prima.
+// v20260916b — nel modale Uscita le fatture fornitore (modo A) sono in ordine di SCADENZA, dalla piu'
+//              vicina alla piu' lontana, con la colonna Scadenza (rossa se gia' passata); gli ordini
+//              del modo D dal piu' vecchio al piu' recente. Prima erano dal piu' recente al piu' vecchio.
 // v20260916a — ✏️ e 🗑️ su OGNI riga di entrata/uscita anche nella vista normale del giorno (prima solo
 //              in "Espandi"). Modifica: si puo' cambiare anche la DATA; importo/data/metodo vengono
 //              propagati al pagamento fornitore collegato (pagamenti_fornitori.movimento_foglio_id).
@@ -1134,12 +1141,13 @@ async function _fgSelezionaContraente(id, nome, tipo) {
   } else if (_fgModale.modo === 'D') {
     // Modo D: ordini SENZA fattura ricevuta (per pagamento anticipato)
     // TUTTI gli ordini al fornitore (deposito e non), non solo le entrate deposito
-    var resOd = await sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore').ilike('fornitore', nome).neq('stato', 'annullato').eq('pagato_fornitore', false).is('fattura_ricevuta_id', null).order('data', { ascending: false }).limit(200);
+    var resOd = await sb.from('ordini').select('id,data,fornitore,prodotto,litri,costo_litro,trasporto_litro,iva,giorni_pagamento,pagato_fornitore').ilike('fornitore', nome).neq('stato', 'annullato').eq('pagato_fornitore', false).is('fattura_ricevuta_id', null).order('data', { ascending: true }).limit(200);
     _fgModale.ordiniTrovati = resOd.data || [];
     elFatt.innerHTML = _fgRenderListaOrdini();
   } else {
     // Modo A (uscita): fatture ricevute non saldate del fornitore
-    var resFR = await sb.from('v_fatture_ricevute_saldi').select('*').eq('fornitore_nome', nome).gt('saldo_residuo', 0.01).order('data_fattura', { ascending: false }).limit(20);
+    var resFR = await sb.from('v_fatture_ricevute_saldi').select('*').eq('fornitore_nome', nome).gt('saldo_residuo', 0.01)
+      .order('data_scadenza', { ascending: true, nullsFirst: false }).order('data_fattura', { ascending: true }).limit(40);
     _fgModale.fattureRicevuteTrovate = resFR.data || [];
     elFatt.innerHTML = _fgRenderListaFattureRicevute();
   }
@@ -1148,6 +1156,7 @@ async function _fgSelezionaContraente(id, nome, tipo) {
 
 function _fgRisetContraente() {
   _fgModale.contraenteSelezionato = null;
+  _fgModale.importoAuto = false;
   _fgModale.fattureTrovate = [];
   _fgModale.ordiniTrovati = [];
   _fgModale.imputazioni = {};
@@ -1404,14 +1413,20 @@ function _fgRenderListaFattureRicevute() {
   if (!f.length) {
     return '<div style="font-size:11px;color:var(--text-muted);padding:8px;font-style:italic;background:var(--bg);border-radius:4px">Nessuna fattura ricevuta aperta per questo fornitore. Per pagare un ordine non ancora fatturato usa il Modo D.</div>';
   }
-  var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Fatture ricevute aperte (' + f.length + '):</div>';
+  var html = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Fatture ricevute aperte (' + f.length + ') — dalla scadenza piu\' vicina:</div>';
   html += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
-  html += '<thead><tr style="background:var(--bg)"><th style="text-align:left;padding:5px 6px">N°</th><th style="text-align:left;padding:5px 6px">Data</th><th style="text-align:right;padding:5px 6px">Totale</th><th style="text-align:right;padding:5px 6px">Saldo</th><th style="text-align:right;padding:5px 6px">Imputa €</th></tr></thead><tbody>';
+  html += '<thead><tr style="background:var(--bg)"><th style="width:26px;padding:5px 6px"></th><th style="text-align:left;padding:5px 6px">N°</th><th style="text-align:left;padding:5px 6px">Data</th><th style="text-align:left;padding:5px 6px">Scadenza</th><th style="text-align:right;padding:5px 6px">Totale</th><th style="text-align:right;padding:5px 6px">Saldo</th><th style="text-align:right;padding:5px 6px">Imputa €</th></tr></thead><tbody>';
+  var oggi = (typeof oggiISO !== 'undefined') ? oggiISO : new Date().toISOString().slice(0, 10);
   f.forEach(function(fa) {
     var imp = _fgModale.imputazioni['fr:' + fa.id] || '';
+    var scad = fa.data_scadenza || '';
+    var scaduta = scad && scad < oggi;
     html += '<tr style="border-bottom:0.5px solid var(--border)">';
+    html += '<td style="padding:5px 6px;text-align:center"><input type="checkbox" ' + (imp !== '' && Number(imp) > 0 ? 'checked' : '')
+          + ' onchange="_fgFlagFatturaRicevuta(\'' + fa.id + '\',this.checked)" title="Paga l\'intera fattura (o quel che resta da assegnare)" style="cursor:pointer"/></td>';
     html += '<td style="padding:5px 6px;font-family:var(--font-mono);font-weight:500">' + esc(String(fa.numero_fattura || '—')) + '</td>';
     html += '<td style="padding:5px 6px">' + _fgFmtData(fa.data_fattura) + '</td>';
+    html += '<td style="padding:5px 6px;font-weight:' + (scaduta ? '600' : '400') + ';color:' + (scaduta ? '#A32D2D' : (scad === oggi ? '#BA7517' : 'inherit')) + '">' + (scad ? _fgFmtData(scad) + (scaduta ? ' ⚠' : '') : '—') + '</td>';
     html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + _fgFmtImporto(fa.importo_dichiarato) + '</td>';
     html += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:#BA7517;font-weight:500">' + _fgFmtImporto(fa.saldo_residuo) + '</td>';
     html += '<td style="padding:5px 6px;text-align:right"><input type="number" step="0.01" min="0" max="' + fa.saldo_residuo + '" value="' + imp + '" placeholder="0,00" oninput="_fgImputaFatturaRicevuta(\'' + fa.id + '\',this.value)" style="width:90px;font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:0.5px solid var(--border);border-radius:3px;text-align:right"/></td>';
@@ -1425,6 +1440,50 @@ function _fgImputaFatturaRicevuta(id, val) {
   var v = parseFloat(val) || 0;
   if (v <= 0) delete _fgModale.imputazioni['fr:' + id];
   else _fgModale.imputazioni['fr:' + id] = v;
+  // digitando a mano l'Importo in alto non si tocca (resta come lo hai scritto)
+  _fgModale.importoAuto = false;
+  _fgAggiornaStatusModale();
+}
+
+// v20260916c — spunta su una fattura fornitore
+function _fgFlagFatturaRicevuta(id, checked) {
+  var chiave = 'fr:' + id;
+  var elImp = document.getElementById('fg-mod-importo');
+  var importoTop = elImp ? (parseFloat(elImp.value) || 0) : 0;
+  var fa = (_fgModale.fattureRicevuteTrovate || []).filter(function (x) { return x.id === id; })[0];
+  if (!checked) {
+    delete _fgModale.imputazioni[chiave];
+    if (_fgModale.importoAuto && elImp) elImp.value = _fgSommaImputazioni().toFixed(2);
+    _fgRidisegnaFattureRicevute();
+    return;
+  }
+  if (!fa) return;
+  var saldo = Math.round(Number(fa.saldo_residuo || 0) * 100) / 100;
+  if (importoTop <= 0 || _fgModale.importoAuto) {
+    // Importo vuoto (o costruito dalle spunte): la spunta prende tutta la fattura e alza l'Importo
+    _fgModale.imputazioni[chiave] = saldo;
+    _fgModale.importoAuto = true;
+    if (elImp) elImp.value = _fgSommaImputazioni().toFixed(2);
+  } else {
+    // Importo scritto a mano: la spunta imputa quel che resta da assegnare
+    var resta = _fgDaAssegnare();
+    if (resta <= 0.005) {
+      if (typeof toast === 'function') toast('Importo gia\' assegnato tutto: libera qualche riga o alza l\'importo');
+      _fgRidisegnaFattureRicevute();
+      return;
+    }
+    _fgModale.imputazioni[chiave] = Math.round(Math.min(saldo, resta) * 100) / 100;
+  }
+  _fgRidisegnaFattureRicevute();
+}
+function _fgSommaImputazioni() {
+  var tot = 0;
+  Object.keys(_fgModale.imputazioni).forEach(function (k) { tot += Number(_fgModale.imputazioni[k]) || 0; });
+  return Math.round(tot * 100) / 100;
+}
+function _fgRidisegnaFattureRicevute() {
+  var el = document.getElementById('fg-fatture-trovate');
+  if (el) el.innerHTML = _fgRenderListaFattureRicevute();
   _fgAggiornaStatusModale();
 }
 
