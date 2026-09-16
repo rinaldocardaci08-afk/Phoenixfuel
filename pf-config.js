@@ -1,4 +1,5 @@
 // PhoenixFuel — Config & Utilities
+// v20260916a — modale generale: niente chiusura al clic/trascinamento sullo sfondo
 // ── SUPABASE ─────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_xMFZND8_vBl5Z5eEA-2guA_kVME1Iz-';
@@ -262,8 +263,9 @@ function apriModal(html) {
 }
 function chiudiModalePermessi() { document.getElementById('modal-permessi').style.display = 'none'; }
 function chiudiModalOverlay() { document.getElementById('modal-overlay').style.display = 'none'; }
-document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) chiudiModalOverlay(); });
-document.getElementById('modal-permessi').addEventListener('click', function(e) { if (e.target === this) chiudiModalePermessi(); });
+// 16/09/2026 — i modali NON si chiudono piu' cliccando sullo sfondo: un trascinamento del cursore da
+// una casella a fuori il browser lo contava come clic sullo sfondo e buttava via tutto il lavoro
+// (anticipo fatture, rettifiche, ecc.). Si chiudono solo con × o Annulla.
 function chiudiModal() { chiudiModalePermessi(); chiudiModalOverlay(); }
 
 // ── UTILITÀ ───────────────────────────────────────────────────────
