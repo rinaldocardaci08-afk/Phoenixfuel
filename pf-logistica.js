@@ -1,4 +1,7 @@
 // PhoenixFuel — Logistica
+// v20260918b — Costi di trasporto: colonne "Costo motrice" e "Costo bilico" (€ = €/L × capacita', capacita' modificabili in
+//              intestazione, 17.000 e 36.000 di default) e colonna "Lt da trasportare" con casella in intestazione: scrivendo
+//              i litri ogni riga mostra costo totale e €/L. Aggiornamento sul posto (il cursore resta nella casella).
 // v20260918a — Costi di trasporto (Mezzi propri): matita per modificare descrizione, valore e attivo in riga
 // v20260820c — permessi per singola linguetta: chi non ce l'ha non la vede
 // v20260820b — linguetta Consumi mezzi (pf-mezzi-consumi.js)
@@ -2717,12 +2720,16 @@ function _ctRender() {
   var box = document.getElementById('costi-trasporto-wrap');
   if (!box) return;
   var h = '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">'
-    + 'Valori al litro proposti quando si compone un preventivo o un ordine.</div>';
+    + 'Valori al litro proposti quando si compone un preventivo o un ordine. Le colonne motrice/bilico valorizzano subito il costo del viaggio pieno; nella casella "Lt da trasportare" scrivi i litri e vedi costo totale per ogni tariffa.</div>';
+  var capIn = 'width:78px;padding:3px 6px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:12px;text-align:right;font-family:var(--font-mono)';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
-  h += '<tr style="color:var(--text-muted);text-align:right">'
+  h += '<tr style="color:var(--text-muted);text-align:right;vertical-align:bottom">'
     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Descrizione</th>'
-    + '<th style="padding:6px 8px;font-weight:500;width:130px">&euro;/litro</th>'
-    + '<th style="padding:6px 8px;font-weight:500;width:90px">Attivo</th>'
+    + '<th style="padding:6px 8px;font-weight:500;width:110px">&euro;/litro</th>'
+    + '<th style="padding:6px 8px;font-weight:500;width:70px">Attivo</th>'
+    + '<th style="padding:6px 8px;font-weight:600;color:var(--text);width:150px;border-left:1px solid var(--border)">Costo motrice<br><input type="number" step="500" min="0" id="ct-cap-motrice" value="' + _ctCapMotrice + '" oninput="_ctAggiornaCalcoli()" title="Capacita\' motrice in litri" style="' + capIn + '"> lt</th>'
+    + '<th style="padding:6px 8px;font-weight:600;color:var(--text);width:150px;border-left:1px solid var(--border)">Costo bilico<br><input type="number" step="500" min="0" id="ct-cap-bilico" value="' + _ctCapBilico + '" oninput="_ctAggiornaCalcoli()" title="Capacita\' bilico in litri" style="' + capIn + '"> lt</th>'
+    + '<th style="padding:6px 8px;font-weight:600;color:var(--text);width:190px;border-left:1px solid var(--border);border-right:1px solid var(--border)">Lt da trasportare<br><input type="number" step="500" min="0" id="ct-litri" value="' + (_ctLitri || '') + '" placeholder="litri" oninput="_ctAggiornaCalcoli()" style="' + capIn + ';width:96px;border-color:#185FA5"></th>'
     + '<th style="width:110px"></th></tr>';
   var inp = 'padding:6px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
   _ctVoci.forEach(function (v) {
@@ -2732,6 +2739,7 @@ function _ctRender() {
         + '<td style="text-align:left;padding:5px 8px"><input type="text" id="ct-ed-descr" value="' + esc(v.descrizione || '') + '" style="width:100%;' + inp + '"></td>'
         + '<td style="padding:5px 8px"><input type="number" step="0.000001" id="ct-ed-valore" value="' + Number(v.valore) + '" style="width:100%;text-align:right;font-family:var(--font-mono);' + inp + '"></td>'
         + '<td style="padding:5px 8px"><input type="checkbox" id="ct-ed-attivo" ' + (v.attivo === false ? '' : 'checked') + ' style="cursor:pointer"></td>'
+        + '<td style="border-left:1px solid var(--border)"></td><td style="border-left:1px solid var(--border)"></td><td style="border-left:1px solid var(--border);border-right:1px solid var(--border)"></td>'
         + '<td style="padding:5px 8px;text-align:right;white-space:nowrap">'
         + '<button class="btn-primary" onclick="ctSalvaModifica(\'' + v.id + '\')" style="padding:3px 9px;font-size:12px">Salva</button> '
         + '<button onclick="ctAnnullaModifica()" style="padding:3px 8px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button></td></tr>';
@@ -2741,6 +2749,9 @@ function _ctRender() {
       + '<td style="text-align:left;padding:7px 8px">' + esc(v.descrizione || '') + '</td>'
       + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:600">' + Number(v.valore).toFixed(6) + '</td>'
       + '<td style="padding:7px 8px">' + (v.attivo === false ? '<span style="color:var(--text-muted)">no</span>' : '<span style="color:#27500A">si</span>') + '</td>'
+      + '<td id="ct-mot-' + v.id + '" style="padding:7px 8px;font-family:var(--font-mono);font-weight:600;color:#A32D2D;border-left:1px solid var(--border)"></td>'
+      + '<td id="ct-bil-' + v.id + '" style="padding:7px 8px;font-family:var(--font-mono);font-weight:600;color:#A32D2D;border-left:1px solid var(--border)"></td>'
+      + '<td id="ct-tot-' + v.id + '" style="padding:7px 8px;font-family:var(--font-mono);font-weight:600;color:#A32D2D;border-left:1px solid var(--border);border-right:1px solid var(--border)"></td>'
       + '<td style="padding:7px 8px;text-align:right;white-space:nowrap">'
       + '<button onclick="ctModifica(\'' + v.id + '\')" title="Modifica" style="padding:3px 8px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">\u270f\ufe0f</button> '
       + '<button class="btn-danger" onclick="ctElimina(\'' + v.id + '\')" title="Elimina" style="padding:3px 8px">\ud83d\uddd1\ufe0f</button></td></tr>';
@@ -2754,6 +2765,25 @@ function _ctRender() {
   h += '<button class="btn-primary" onclick="ctAggiungi()" style="padding:9px 16px;font-size:12.5px">Aggiungi</button>';
   h += '</div>';
   box.innerHTML = h;
+  _ctAggiornaCalcoli();
+}
+
+// Capacita' e litri della simulazione (solo a video, non salvati)
+var _ctCapMotrice = 17000, _ctCapBilico = 36000, _ctLitri = 0;
+function _ctEuro(n) { return '\u20ac ' + Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function _ctAggiornaCalcoli() {
+  var g = function (id) { return document.getElementById(id); };
+  _ctCapMotrice = Number((g('ct-cap-motrice') || {}).value) || 0;
+  _ctCapBilico  = Number((g('ct-cap-bilico')  || {}).value) || 0;
+  _ctLitri      = Number((g('ct-litri')       || {}).value) || 0;
+  _ctVoci.forEach(function (v) {
+    var val = Number(v.valore) || 0, el;
+    if ((el = g('ct-mot-' + v.id))) el.textContent = _ctCapMotrice > 0 ? _ctEuro(val * _ctCapMotrice) : '';
+    if ((el = g('ct-bil-' + v.id))) el.textContent = _ctCapBilico  > 0 ? _ctEuro(val * _ctCapBilico)  : '';
+    if ((el = g('ct-tot-' + v.id))) el.innerHTML = _ctLitri > 0
+      ? _ctEuro(val * _ctLitri) + ' <span style="font-size:11px;font-weight:400;color:var(--text-muted)">/ ' + val.toFixed(3).replace('.', ',') + ' \u20ac/lt</span>'
+      : '<span style="color:var(--text-muted);font-weight:400">\u2014</span>';
+  });
 }
 
 async function ctAggiungi() {
