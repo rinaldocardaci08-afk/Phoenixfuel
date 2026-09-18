@@ -1,4 +1,5 @@
 // PhoenixFuel — Logistica
+// v20260918a — Costi di trasporto (Mezzi propri): matita per modificare descrizione, valore e attivo in riga
 // v20260820c — permessi per singola linguetta: chi non ce l'ha non la vede
 // v20260820b — linguetta Consumi mezzi (pf-mezzi-consumi.js)
 // v20260820a — linguetta Presenze autisti agganciata (il modulo vive in
@@ -2722,13 +2723,27 @@ function _ctRender() {
     + '<th style="text-align:left;padding:6px 8px;font-weight:500">Descrizione</th>'
     + '<th style="padding:6px 8px;font-weight:500;width:130px">&euro;/litro</th>'
     + '<th style="padding:6px 8px;font-weight:500;width:90px">Attivo</th>'
-    + '<th style="width:60px"></th></tr>';
+    + '<th style="width:110px"></th></tr>';
+  var inp = 'padding:6px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
   _ctVoci.forEach(function (v) {
+    if (_ctEditId === v.id) {
+      // riga in modifica: descrizione, valore e attivo modificabili sul posto
+      h += '<tr style="border-top:0.5px solid var(--border);text-align:right;background:#E6F1FB">'
+        + '<td style="text-align:left;padding:5px 8px"><input type="text" id="ct-ed-descr" value="' + esc(v.descrizione || '') + '" style="width:100%;' + inp + '"></td>'
+        + '<td style="padding:5px 8px"><input type="number" step="0.000001" id="ct-ed-valore" value="' + Number(v.valore) + '" style="width:100%;text-align:right;font-family:var(--font-mono);' + inp + '"></td>'
+        + '<td style="padding:5px 8px"><input type="checkbox" id="ct-ed-attivo" ' + (v.attivo === false ? '' : 'checked') + ' style="cursor:pointer"></td>'
+        + '<td style="padding:5px 8px;text-align:right;white-space:nowrap">'
+        + '<button class="btn-primary" onclick="ctSalvaModifica(\'' + v.id + '\')" style="padding:3px 9px;font-size:12px">Salva</button> '
+        + '<button onclick="ctAnnullaModifica()" style="padding:3px 8px;font-size:12px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button></td></tr>';
+      return;
+    }
     h += '<tr style="border-top:0.5px solid var(--border);text-align:right">'
       + '<td style="text-align:left;padding:7px 8px">' + esc(v.descrizione || '') + '</td>'
       + '<td style="padding:7px 8px;font-family:var(--font-mono);font-weight:600">' + Number(v.valore).toFixed(6) + '</td>'
       + '<td style="padding:7px 8px">' + (v.attivo === false ? '<span style="color:var(--text-muted)">no</span>' : '<span style="color:#27500A">si</span>') + '</td>'
-      + '<td style="padding:7px 8px;text-align:right"><button class="btn-danger" onclick="ctElimina(\'' + v.id + '\')" style="padding:3px 8px">x</button></td></tr>';
+      + '<td style="padding:7px 8px;text-align:right;white-space:nowrap">'
+      + '<button onclick="ctModifica(\'' + v.id + '\')" title="Modifica" style="padding:3px 8px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">\u270f\ufe0f</button> '
+      + '<button class="btn-danger" onclick="ctElimina(\'' + v.id + '\')" title="Elimina" style="padding:3px 8px">\ud83d\uddd1\ufe0f</button></td></tr>';
   });
   h += '</table>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">';
@@ -2749,6 +2764,23 @@ async function ctAggiungi() {
     var r = await sb.from('costi_trasporto').insert([{ descrizione: d.trim() || (v.toFixed(3) + ' \u20ac/L'), valore: v, attivo: true }]);
     if (r.error) throw r.error;
     toast('\u2713 Costo aggiunto');
+    caricaCostiTrasporto();
+  } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
+}
+
+var _ctEditId = null;
+function ctModifica(id) { _ctEditId = id; _ctRender(); var el = document.getElementById('ct-ed-descr'); if (el) el.focus(); }
+function ctAnnullaModifica() { _ctEditId = null; _ctRender(); }
+async function ctSalvaModifica(id) {
+  var d = ((document.getElementById('ct-ed-descr') || {}).value || '').trim();
+  var v = Number((document.getElementById('ct-ed-valore') || {}).value || 0);
+  var a = !!((document.getElementById('ct-ed-attivo') || {}).checked);
+  if (!(v > 0)) { toast('Inserisci un valore maggiore di zero'); return; }
+  try {
+    var r = await sb.from('costi_trasporto').update({ descrizione: d || (v.toFixed(3) + ' \u20ac/L'), valore: v, attivo: a }).eq('id', id);
+    if (r.error) throw r.error;
+    _ctEditId = null;
+    toast('\u2713 Costo aggiornato');
     caricaCostiTrasporto();
   } catch (e) { toast('Errore: ' + ((e && e.message) || e)); }
 }
