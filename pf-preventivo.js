@@ -1,4 +1,8 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260918c — UN SOLO PREZZO per prodotto: casella accanto a ogni fornitore (una sola spuntabile per prodotto);
+//              "Stampa preventivo" attivo solo con un prezzo scelto, e stampa solo quello. CLIENTE RETE
+//              (clienti.cliente_rete): sotto compare un secondo blocco per la Benzina con margine e fornitori
+//              suoi, cosi' il preventivo porta gasolio + benzina, un prezzo per prodotto.
 // v20260918b — prodotti in ordine fisso (Gasolio Autotrazione primo, poi Benzina, Agricolo, AdBlue); cella prodotto in grassetto e piu' grande
 // v20260918a — in alto, in evidenza: "Stai lavorando sui prezzi del: gg/mm/aaaa" (data del listino aperto)
 // v20260805g — la base la decide pfBasePerRiga, la stessa regola del listino
@@ -38,6 +42,14 @@ function _pvOrdProd(p) {
 }
 var _pvTrasporti = [];
 var _pvPrezzi = [];
+// 18/09: prezzo scelto per il prodotto principale, e blocco Benzina per il cliente rete
+_pvState.scelto = null;
+_pvState.rete = false;
+_pvState.benz = { margine: 0, scelto: null };
+function _pvBenzAttivo() {
+  return _pvState.rete && !_pvStessoProd(_pvState.prodotto, 'Benzina')
+      && _pvProdotti.some(function (p) { return _pvStessoProd(p, 'Benzina'); });
+}
 
 function _pvNum(v, d) { return Number(v || 0).toFixed(d === undefined ? 6 : d); }
 function _pvData() {
@@ -57,7 +69,7 @@ async function apriPreventivoCliente() {
     // la tabella solo se il listino non e ancora stato aperto.
     var r = await Promise.all([
       sb.from('prezzi').select('*, basi_carico(id,nome)').eq('data', data),
-      sb.from('clienti').select('id,nome').eq('attivo', true).order('nome'),
+      sb.from('clienti').select('id,nome,cliente_rete').eq('attivo', true).order('nome'),
       (typeof pfCostiTrasporto === 'function')
         ? pfCostiTrasporto()
         : sb.from('costi_trasporto').select('*').eq('attivo', true).order('valore').then(function (x) { return x.data || []; })
@@ -115,15 +127,30 @@ async function pvCambia(campo, valore) {
     _pvState.clienteId = valore;
     var c = _pvClienti.filter(function (x) { return x.id === valore; })[0];
     _pvState.clienteNome = c ? c.nome : '';
+    _pvState.rete = !!(c && c.cliente_rete);
   } else if (campo === 'base') _pvState.baseId = valore;
   else if (campo === 'prodotto') _pvState.prodotto = valore;
   else if (campo === 'trasporto') _pvState.trasporto = Number(valore || 0);
   else if (campo === 'margine') { _pvState.margine = Number(valore || 0); _pvRender(); return; }
+  else if (campo === 'margineBenz') { _pvState.benz.margine = Number(valore || 0); _pvRender(); return; }
+
+  // cambiando cliente, base o prodotto la scelta del prezzo si azzera: va rifatta sui prezzi nuovi
+  if (campo === 'cliente' || campo === 'base' || campo === 'prodotto') { _pvState.scelto = null; _pvState.benz.scelto = null; }
 
   // cliente o prodotto cambiati: si ripropone il margine dagli ordini
   if (campo === 'cliente' || campo === 'prodotto') {
     _pvState.margine = await _pvMargineMedio(_pvState.clienteId, _pvState.clienteNome, _pvState.prodotto);
   }
+  if (campo === 'cliente' && _pvBenzAttivo()) {
+    _pvState.benz.margine = await _pvMargineMedio(_pvState.clienteId, _pvState.clienteNome, 'Benzina');
+  }
+  _pvRender();
+}
+
+// Spunta di un prezzo: una sola per blocco (gasolio / benzina)
+function pvScegli(blocco, fornitore, checked) {
+  if (blocco === 'benz') _pvState.benz.scelto = checked ? fornitore : null;
+  else _pvState.scelto = checked ? fornitore : null;
   _pvRender();
 }
 
@@ -242,15 +269,17 @@ function _pvStessoProd(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 }
 
-function _pvRighe() {
+function _pvRighe(prodotto, margine) {
   var S = _pvState;
+  if (prodotto === undefined) prodotto = S.prodotto;
+  if (margine === undefined) margine = S.margine;
   return _pvPrezzi
     .filter(function (p) {
-      return _pvStessoProd(p.prodotto, S.prodotto) && _pvBase(p) === S.baseId;
+      return _pvStessoProd(p.prodotto, prodotto) && _pvBase(p) === S.baseId;
     })
     .map(function (p) {
       var costo = Number(p.costo_litro || 0);
-      var netto = costo + S.trasporto + S.margine;
+      var netto = costo + S.trasporto + margine;
       return { fornitore: p.fornitore, base: p.basi_carico.nome, costo: costo,
                netto: netto, ivato: netto * (1 + Number(p.iva || 22) / 100) };
     })
@@ -309,31 +338,7 @@ function _pvRender() {
   h += '</div></div>';
 
   var righe = _pvRighe();
-  if (!righe.length) {
-    h += '<div style="padding:18px;background:var(--bg-kpi);border-radius:10px;font-size:13px;color:var(--text-muted)">'
-      + 'Nessun fornitore ha il prezzo di <strong>' + esc(S.prodotto) + '</strong> da questo deposito nel listino di oggi.</div>';
-  } else {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
-    h += '<tr style="color:var(--text-muted);font-size:10.5px;text-transform:uppercase;letter-spacing:0.3px">'
-      + '<th style="text-align:left;padding:7px 8px;font-weight:500">Fornitore</th>'
-      + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:104px">Costo &euro;/lt</th>'
-      + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:104px">Trasporto</th>'
-      + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:96px">Margine</th>'
-      + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:170px">Prezzo imponibile &middot; ivato</th></tr>';
-    righe.forEach(function (r, i) {
-      var best = (i === 0);
-      h += '<tr style="border-top:0.5px solid var(--border)' + (best ? ';background:#EAF3DE' : '') + '">'
-        + '<td style="padding:11px 8px"><strong>' + esc(r.fornitore) + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + esc(r.base) + '</span>'
-          + (best ? ' <span style="font-size:10px;background:#639922;color:#fff;padding:1px 7px;border-radius:8px;margin-left:4px">migliore</span>' : '') + '</td>'
-        + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + _pvNum(r.costo) + '</td>'
-        + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + _pvNum(S.trasporto) + '</td>'
-        + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _pvNum(S.margine) + '</td>'
-        + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono)"><strong style="' + (best ? 'color:#27500A' : '') + '">' + _pvNum(r.netto) + '</strong>'
-          + '<div style="font-size:11px;color:var(--text-muted)">' + _pvNum(r.ivato, 5) + ' ivato</div></td></tr>';
-    });
-    h += '</table>';
-  }
-
+  h += _pvTabella(righe, 'main', S.margine, S.scelto);
   h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">'
     + 'Costo e fornitori vengono dal listino del giorno, in sola lettura. Trasporto e margine sono quelli scelti sopra: '
     + 'per cambiarli si usano i campi, non la tabella.'
@@ -357,18 +362,74 @@ function _pvRender() {
     }
   }
 
-  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
-  h += '<button onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button>';
-  if (righe.length) {
-    h += '<button onclick="pvStampa()" class="btn-primary" style="padding:9px 18px">&#128424; Stampa preventivo</button>';
+  // ── Cliente rete: secondo blocco Benzina ─────────────────────────────
+  if (_pvBenzAttivo()) {
+    var righeB = _pvRighe('Benzina', S.benz.margine);
+    h += '<div style="margin-top:18px;padding-top:14px;border-top:2px solid #185FA5">';
+    h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<span style="font-size:15px;font-weight:700">Benzina</span>'
+      + '<span style="font-size:10.5px;background:#E6F1FB;color:#0C447C;padding:2px 8px;border-radius:8px">cliente rete: secondo prodotto del preventivo</span>'
+      + '<div style="margin-left:auto;display:flex;align-items:center;gap:6px"><span style="' + lbl + ';margin:0">Margine &euro;/lt</span>'
+      + '<input type="number" step="0.000001" value="' + _pvNum(S.benz.margine) + '" onchange="pvCambia(\'margineBenz\', this.value)" style="' + sel + ';width:150px;text-align:right;font-family:var(--font-mono)"></div></div>';
+    h += _pvTabella(righeB, 'benz', S.benz.margine, S.benz.scelto);
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Stesso deposito e stesso trasporto scelti sopra; margine proposto dalle ultime consegne di benzina a questo cliente.</div>';
+    h += '</div>';
   }
+
+  var nScelti = (S.scelto ? 1 : 0) + (_pvBenzAttivo() && S.benz.scelto ? 1 : 0);
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:14px">';
+  if (!nScelti) h += '<span style="font-size:11.5px;color:#854F0B;margin-right:auto">Spunta il prezzo da comunicare al cliente (uno per prodotto) per attivare la stampa.</span>';
+  else h += '<span style="font-size:11.5px;color:#27500A;margin-right:auto">' + nScelti + ' prezz' + (nScelti === 1 ? 'o' : 'i') + ' selezionat' + (nScelti === 1 ? 'o' : 'i') + ': pronto per la stampa.</span>';
+  h += '<button onclick="chiudiModal()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer">Chiudi</button>';
+  h += '<button onclick="pvStampa()" class="btn-primary" ' + (nScelti ? '' : 'disabled') + ' style="padding:9px 18px' + (nScelti ? '' : ';opacity:.45;cursor:not-allowed') + '">&#128424; Stampa preventivo</button>';
   h += '</div></div>';
   apriModal(h);
 }
 
+// Tabella fornitori di un blocco (gasolio principale o benzina), con la casella di scelta
+function _pvTabella(righe, blocco, margine, scelto) {
+  var S = _pvState, h = '';
+  if (!righe.length) {
+    var nomeProd = blocco === 'benz' ? 'Benzina' : S.prodotto;
+    return '<div style="background:#FAEEDA;border:0.5px solid #E4C892;border-radius:8px;padding:12px 14px;font-size:12.5px;color:#854F0B">'
+      + 'Nessun fornitore ha il prezzo di <strong>' + esc(nomeProd) + '</strong> da questo deposito nel listino di oggi.</div>';
+  }
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  h += '<tr style="color:var(--text-muted)">'
+    + '<th style="width:34px;padding:7px 4px;font-weight:500" title="Scegli il prezzo da comunicare">&#10003;</th>'
+    + '<th style="text-align:left;padding:7px 8px;font-weight:500">Fornitore</th>'
+    + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:104px">Costo &euro;/lt</th>'
+    + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:104px">Trasporto</th>'
+    + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:96px">Margine</th>'
+    + '<th style="text-align:right;padding:7px 8px;font-weight:500;width:170px">Prezzo imponibile &middot; ivato</th></tr>';
+  righe.forEach(function (r, i) {
+    var best = (i === 0), sel = (scelto === r.fornitore);
+    h += '<tr style="border-top:0.5px solid var(--border)' + (sel ? ';background:#E6F1FB;outline:1.5px solid #185FA5' : (best ? ';background:#EAF3DE' : '')) + '">'
+      + '<td style="padding:11px 4px;text-align:center"><input type="checkbox" ' + (sel ? 'checked' : '') + ' onchange="pvScegli(\'' + blocco + '\',\'' + esc(r.fornitore).replace(/'/g, "\\'") + '\',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>'
+      + '<td style="padding:11px 8px"><strong>' + esc(r.fornitore) + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + esc(r.base) + '</span>'
+        + (best ? ' <span style="font-size:10px;background:#639922;color:#fff;padding:1px 7px;border-radius:8px;margin-left:4px">migliore</span>' : '')
+        + (sel ? ' <span style="font-size:10px;background:#185FA5;color:#fff;padding:1px 7px;border-radius:8px;margin-left:4px">da comunicare</span>' : '') + '</td>'
+      + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + _pvNum(r.costo) + '</td>'
+      + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + _pvNum(S.trasporto) + '</td>'
+      + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _pvNum(margine) + '</td>'
+      + '<td style="padding:11px 8px;text-align:right;font-family:var(--font-mono)"><strong style="' + (best ? 'color:#27500A' : '') + '">' + _pvNum(r.netto) + '</strong>'
+        + '<div style="font-size:11px;color:var(--text-muted)">' + _pvNum(r.ivato, 5) + ' ivato</div></td></tr>';
+  });
+  h += '</table>';
+  return h;
+}
+
 function pvStampa() {
-  var S = _pvState, righe = _pvRighe();
-  if (!righe.length) return;
+  var S = _pvState;
+  // SOLO i prezzi scelti: uno per prodotto
+  var blocchi = [];
+  var rM = _pvRighe().filter(function (r) { return r.fornitore === S.scelto; });
+  if (rM.length) blocchi.push({ prodotto: S.prodotto, riga: rM[0] });
+  if (_pvBenzAttivo()) {
+    var rB = _pvRighe('Benzina', S.benz.margine).filter(function (r) { return r.fornitore === S.benz.scelto; });
+    if (rB.length) blocchi.push({ prodotto: 'Benzina', riga: rB[0] });
+  }
+  if (!blocchi.length) { toast('Spunta prima il prezzo da comunicare'); return; }
   var w = window.open('', '_blank');
   if (!w) { toast('Il browser ha bloccato la finestra: consenti i popup e riprova'); return; }
   var oggi = new Date().toLocaleDateString('it-IT');
@@ -385,11 +446,11 @@ function pvStampa() {
   doc += '<div class="mitt">Zona Industriale &mdash; 89900 Vibo Valentia (VV) &middot; P.IVA 02744150802</div>';
   if (S.clienteNome) doc += '<div>Spett.le <strong>' + S.clienteNome + '</strong></div>';
   doc += '<div style="text-align:right">Vibo Valentia, ' + oggi + '</div>';
-  doc += '<p><strong>Preventivo &mdash; ' + S.prodotto + '</strong><br>Consegna da '
-      + (righe[0] ? righe[0].base : '') + ', prezzi validi per la giornata odierna.</p>';
-  doc += '<table><tr><th class="l">Fornitore</th><th>Prezzo imponibile &euro;/L</th><th>Prezzo ivato &euro;/L</th></tr>';
-  righe.forEach(function (r) {
-    doc += '<tr><td class="l">' + r.fornitore + '</td><td>' + _pvNum(r.netto) + '</td><td>' + _pvNum(r.ivato, 5) + '</td></tr>';
+  doc += '<p><strong>Preventivo &mdash; ' + blocchi.map(function (b) { return b.prodotto; }).join(' e ') + '</strong><br>Consegna da '
+      + blocchi[0].riga.base + ', prezzi validi per la giornata odierna.</p>';
+  doc += '<table><tr><th class="l">Prodotto</th><th>Prezzo imponibile &euro;/L</th><th>Prezzo ivato &euro;/L</th></tr>';
+  blocchi.forEach(function (b) {
+    doc += '<tr><td class="l"><strong>' + b.prodotto + '</strong></td><td>' + _pvNum(b.riga.netto) + '</td><td>' + _pvNum(b.riga.ivato, 5) + '</td></tr>';
   });
   doc += '</table>';
   doc += '<div class="note">Prezzi comprensivi di trasporto, riferiti al listino del ' + _pfIsoToIt(_pvData())
