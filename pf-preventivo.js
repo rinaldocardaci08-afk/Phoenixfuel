@@ -1,4 +1,5 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260918b — prodotti in ordine fisso (Gasolio Autotrazione primo, poi Benzina, Agricolo, AdBlue); cella prodotto in grassetto e piu' grande
 // v20260918a — in alto, in evidenza: "Stai lavorando sui prezzi del: gg/mm/aaaa" (data del listino aperto)
 // v20260805g — la base la decide pfBasePerRiga, la stessa regola del listino
 // v20260805f — le righe del deposito si prendono dal listino gia calcolato:
@@ -30,6 +31,11 @@ var _pvState = { clienteId: '', clienteNome: '', baseId: '', prodotto: '', margi
 var _pvBasi = [];
 var _pvClienti = [];
 var _pvProdotti = [];
+var _PV_ORDINE_PROD = ['gasolio autotrazione', 'benzina', 'gasolio agricolo', 'adblue'];
+function _pvOrdProd(p) {
+  var i = _PV_ORDINE_PROD.indexOf(String(p || '').trim().toLowerCase());
+  return i < 0 ? 99 : i;
+}
 var _pvTrasporti = [];
 var _pvPrezzi = [];
 
@@ -74,7 +80,8 @@ async function apriPreventivoCliente() {
       if (p.prodotto && !vistiP[p.prodotto]) { vistiP[p.prodotto] = true; _pvProdotti.push(p.prodotto); }
     });
     _pvBasi.sort(function (a, b) { return a.nome < b.nome ? -1 : 1; });
-    _pvProdotti.sort();
+    // 18/09: ordine fisso — Gasolio Autotrazione, Benzina, Gasolio Agricolo, AdBlue, poi il resto in alfabetico
+    _pvProdotti.sort(function (a, b) { return _pvOrdProd(a) - _pvOrdProd(b) || a.localeCompare(b); });
 
     if (!_pvBasi.length) {
       apriModal('<div style="padding:20px;font-size:13px;color:var(--text-muted)">Nessun prezzo inserito per il '
@@ -275,7 +282,7 @@ function _pvRender() {
         return '<option value="' + b.id + '"' + (b.id === S.baseId ? ' selected' : '') + '>' + esc(b.nome) + '</option>';
       }).join('') + '</select></div>';
   h += '<div style="flex:1.2;min-width:170px"><span style="' + lbl + '">Prodotto</span>'
-    + '<select onchange="pvCambia(\'prodotto\', this.value)" style="' + sel + '">'
+    + '<select onchange="pvCambia(\'prodotto\', this.value)" style="' + sel + ';font-weight:700;font-size:15px">'
     + _pvProdotti.map(function (p) {
         return '<option value="' + esc(p) + '"' + (p === S.prodotto ? ' selected' : '') + '>' + esc(p) + '</option>';
       }).join('') + '</select></div>';
