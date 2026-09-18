@@ -1,4 +1,5 @@
 // PhoenixFuel — Preventivo a cliente
+// v20260918a — in alto, in evidenza: "Stai lavorando sui prezzi del: gg/mm/aaaa" (data del listino aperto)
 // v20260805g — la base la decide pfBasePerRiga, la stessa regola del listino
 // v20260805f — le righe del deposito si prendono dal listino gia calcolato:
 //              non stanno nella tabella prezzi, sono ricavate dal CMP
@@ -256,8 +257,10 @@ function _pvRender() {
 
   var h = '<div style="max-width:820px">';
   h += '<div style="font-size:16px;font-weight:600">Preventivo a cliente</div>';
-  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:16px">Listino del ' + _pfIsoToIt(_pvData())
-     + ' &middot; solo i fornitori con il prezzo gia inserito</div>';
+  h += '<div style="display:flex;align-items:center;gap:10px;margin:8px 0 14px;padding:9px 14px;background:#E6F1FB;border-left:4px solid #185FA5;border-radius:0 8px 8px 0">'
+     + '<span style="font-size:12px;color:#0C447C;text-transform:uppercase;letter-spacing:0.3px">Stai lavorando sui prezzi del:</span>'
+     + '<strong style="font-size:18px;font-family:var(--font-mono);color:#0C447C">' + _pfIsoToIt(_pvData()) + '</strong>'
+     + '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">solo i fornitori con il prezzo gia inserito</span></div>';
 
   h += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
   h += '<div style="flex:1.4;min-width:200px"><span style="' + lbl + '">Cliente</span>'
