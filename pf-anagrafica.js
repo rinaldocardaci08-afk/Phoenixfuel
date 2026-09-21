@@ -1,3 +1,5 @@
+// v20260921a — Numero fattura da Consegne: numero gia' usato → ammesso solo per stesso cliente e stesso mese
+//   (fattura cumulativa); altrimenti pop-up di errore e RIFIUTO (prima chiedeva 'agganciare lo stesso?').
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
 // v20260813a — categoria fornitore oil / non_oil: i non oil non hanno basi
 // v20260630g — fix: la card marginalità usava la classe 'section' (nascosta di default);
@@ -238,14 +240,27 @@ async function pfSalvaFatturaManuale(ordineId){
   var iva = imponibile * aliquota / 100;
 
   var fx = await sb.from('fatture_emesse')
-    .select('id,cliente_id,cessionario_denominazione')
+    .select('id,cliente_id,cessionario_denominazione,data')
     .eq('cedente_piva', _PF_CEDENTE_PIVA).eq('anno', anno).eq('numero', numero).maybeSingle();
   var fatt = fx.data;
 
   if (fatt) {
-    if (fatt.cliente_id && o.cliente_id && fatt.cliente_id !== o.cliente_id) {
-      if (!confirm('⚠️ La fattura ' + numero + ' è intestata a "' + (fatt.cessionario_denominazione||'?') + '", ma questa consegna è di "' + o.cliente + '".\n\nProbabile errore di numero. Agganciare lo stesso?')) return;
-    } else if (!confirm('La fattura ' + numero + ' esiste già (' + (fatt.cessionario_denominazione||o.cliente) + ').\n\nAgganci anche questa consegna alla stessa fattura?')) {
+    // REGOLA 21/09/2026 (caso 1634/1364): un numero gia' usato si puo' riutilizzare SOLO per
+    // una consegna dello STESSO cliente e dello STESSO MESE (fattura cumulativa). Altrimenti
+    // e' un numero sbagliato: avviso e rifiuto, nessun "agganciare lo stesso?".
+    var stessoCliente = (fatt.cliente_id && o.cliente_id)
+      ? (fatt.cliente_id === o.cliente_id)
+      : (String(fatt.cessionario_denominazione || '').trim().toLowerCase() === String(o.cliente || '').trim().toLowerCase());
+    var meseFatt = String(fatt.data || '').slice(0, 7), meseCons = String(o.data || '').slice(0, 7);
+    if (!stessoCliente) {
+      alert('⛔ NUMERO FATTURA GIÀ USATO\n\nLa fattura ' + numero + ' del ' + _pfIsoToIt(fatt.data) + ' è intestata a\n"' + (fatt.cessionario_denominazione || '?') + '"\n\nmentre questa consegna è di\n"' + o.cliente + '".\n\nIl numero è sbagliato: controlla su Danea e riscrivilo. Non è stato agganciato nulla.');
+      return;
+    }
+    if (meseFatt !== meseCons) {
+      alert('⛔ NUMERO FATTURA GIÀ USATO IN UN ALTRO MESE\n\nLa fattura ' + numero + ' è del ' + _pfIsoToIt(fatt.data) + ', questa consegna è del ' + _pfIsoToIt(o.data) + '.\n\nUna stessa fattura può raccogliere solo consegne dello stesso mese: il numero è sbagliato, controlla su Danea. Non è stato agganciato nulla.');
+      return;
+    }
+    if (!confirm('La fattura ' + numero + ' del ' + _pfIsoToIt(fatt.data) + ' esiste già per ' + (fatt.cessionario_denominazione || o.cliente) + ' (stesso cliente, stesso mese).\n\nAggiungo anche questa consegna alla stessa fattura?')) {
       return;
     }
     if (!(await _pfAggiungiRigaEAggancia(fatt.id, o, prezzoUnit, imponibile, aliquota))) return;
