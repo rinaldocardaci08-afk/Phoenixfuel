@@ -1,3 +1,7 @@
+// v20260921b — il numero fattura in Consegne e' CLICCABILE: apre "Modifica numero fattura" (numero + data)
+//   per QUELLA consegna. Se la fattura vecchia aveva altre consegne, questa viene spostata su una fattura
+//   con il numero nuovo (creata o esistente) e i totali di entrambe vengono ricalcolati. Valgono le stesse
+//   regole dell'inserimento: numero gia' usato ammesso solo per stesso cliente e stesso mese.
 // v20260921a — Numero fattura da Consegne: numero gia' usato → ammesso solo per stesso cliente e stesso mese
 //   (fattura cumulativa); altrimenti pop-up di errore e RIFIUTO (prima chiedeva 'agganciare lo stesso?').
 // PhoenixFuel — Consegne, Vendite, Clienti, Fornitori, Basi, Prodotti
@@ -165,7 +169,7 @@ async function caricaConsegne() {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9">—</div>';
       } else if (_numFatt != null) {
         // FIX 17/07: già fatturato → numero SEMPRE visibile, anche senza DAS/cartellino (le fatture Danea vecchie non erano bloccate da quella regola).
-        nFattCell = '<div style="text-align:center"><span style="font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px">' + esc(String(_numFatt)) + '</span></div>';
+        nFattCell = '<div style="text-align:center"><span onclick="pfModificaNumeroFattura(\'' + r.id + '\')" title="Clicca per modificare numero e data della fattura di questa consegna" style="cursor:pointer;font-family:var(--font-mono);font-weight:600;color:#0C447C;background:#E6F1FB;padding:3px 9px;border-radius:5px;border:0.5px solid #B9D4EE">' + esc(String(_numFatt)) + ' <span style="font-size:9px">&#9998;</span></span></div>';
       } else if (!hasDas) {
         nFattCell = '<div style="text-align:center;font-size:9px;color:#B4B2A9;line-height:1.2">In attesa di<br>DAS firmato</div>';
       } else {
@@ -294,6 +298,116 @@ async function pfSalvaFatturaManuale(ordineId){
 
   toast('✓ Fattura ' + numero + ' agganciata alla consegna');
   if (typeof _auditLog === 'function') _auditLog('fattura_manuale', 'fatture_emesse', 'Numero ' + numero + ' → ordine ' + ordineId);
+  await caricaConsegne();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 21/09/2026 — MODIFICA del numero fattura di una consegna gia' agganciata.
+// Stesse regole dell'inserimento (numero gia' usato solo per stesso cliente e stesso mese).
+// Se la fattura di partenza aveva altre consegne, questa viene SPOSTATA su un'altra fattura.
+// ══════════════════════════════════════════════════════════════════
+async function pfModificaNumeroFattura(ordineId){
+  var res = await sb.from('ordini')
+    .select('id,cliente,cliente_id,prodotto,litri,costo_litro,trasporto_litro,margine,data,tipo_ordine,fattura_id,fattura_riga_id')
+    .eq('id', ordineId).single();
+  var o = res.data;
+  if (res.error || !o) { toast('Ordine non trovato'); return; }
+  if (o.tipo_ordine !== 'cliente') { toast('Solo consegne a cliente'); return; }
+  if (!o.fattura_id) { toast('Questa consegna non ha ancora una fattura'); return; }
+
+  var fv = await sb.from('fatture_emesse').select('id,numero,data,cliente_id,cessionario_denominazione').eq('id', o.fattura_id).single();
+  var vecchia = fv.data;
+  if (!vecchia) { toast('Fattura collegata non trovata'); return; }
+
+  var numero = prompt('Numero fattura per la consegna del ' + _pfIsoToIt(o.data) + ' (' + o.cliente + ')\n\nAttuale: ' + vecchia.numero + ' del ' + _pfIsoToIt(vecchia.data), String(vecchia.numero || ''));
+  if (numero === null) return;
+  numero = String(numero).trim();
+  if (!numero) { toast('Numero non valido'); return; }
+
+  var dataIn = prompt('Data della fattura ' + numero + ' (GG/MM/AAAA):', _pfIsoToIt(vecchia.data));
+  if (!dataIn) return;
+  var dataIso = _pfItToIso(dataIn);
+  if (!dataIso) { toast('Data non valida — usa GG/MM/AAAA'); return; }
+  var anno = parseInt(dataIso.slice(0, 4), 10);
+
+  if (numero === String(vecchia.numero) && dataIso === String(vecchia.data).slice(0, 10)) { toast('Nessuna modifica'); return; }
+
+  // quante consegne ha la fattura di partenza
+  var rr = await sb.from('fatture_righe').select('id').eq('fattura_id', vecchia.id);
+  var nRighe = (rr.data || []).length;
+
+  // il numero nuovo esiste gia'?
+  var fx = await sb.from('fatture_emesse')
+    .select('id,numero,data,cliente_id,cessionario_denominazione')
+    .eq('cedente_piva', _PF_CEDENTE_PIVA).eq('anno', anno).eq('numero', numero).maybeSingle();
+  var target = fx.data;
+  if (target && target.id === vecchia.id) target = null;   // e' la stessa fattura
+
+  if (target) {
+    var stessoCliente = (target.cliente_id && o.cliente_id)
+      ? (target.cliente_id === o.cliente_id)
+      : (String(target.cessionario_denominazione || '').trim().toLowerCase() === String(o.cliente || '').trim().toLowerCase());
+    if (!stessoCliente) {
+      alert('\u26D4 NUMERO FATTURA GIÀ USATO\n\nLa fattura ' + numero + ' del ' + _pfIsoToIt(target.data) + ' è intestata a\n"' + (target.cessionario_denominazione || '?') + '"\n\nmentre questa consegna è di\n"' + o.cliente + '".\n\nControlla il numero su Danea. Non è stato modificato nulla.');
+      return;
+    }
+    if (String(target.data).slice(0, 7) !== String(o.data).slice(0, 7)) {
+      alert('\u26D4 NUMERO FATTURA GIÀ USATO IN UN ALTRO MESE\n\nLa fattura ' + numero + ' è del ' + _pfIsoToIt(target.data) + ', questa consegna è del ' + _pfIsoToIt(o.data) + '.\n\nControlla il numero su Danea. Non è stato modificato nulla.');
+      return;
+    }
+    if (!confirm('Sposto questa consegna sulla fattura ' + numero + ' del ' + _pfIsoToIt(target.data) + ' (' + (target.cessionario_denominazione || o.cliente) + ')?')) return;
+  }
+
+  if (!target && nRighe <= 1) {
+    // la fattura e' solo di questa consegna: basta rinumerarla
+    if (!confirm('Cambio numero e data della fattura di questa consegna:\n' + vecchia.numero + ' del ' + _pfIsoToIt(vecchia.data) + '  \u2192  ' + numero + ' del ' + _pfIsoToIt(dataIso) + '\n\nProcedo?')) return;
+    var up = await sb.from('fatture_emesse').update({ numero: numero, data: dataIso, updated_at: new Date().toISOString() }).eq('id', vecchia.id);
+    if (up.error) { toast('Errore modifica: ' + up.error.message); return; }
+    toast('\u2713 Fattura ora ' + numero + ' del ' + _pfIsoToIt(dataIso));
+    if (typeof _auditLog === 'function') _auditLog('fattura_numero_modificato', 'fatture_emesse', vecchia.numero + ' -> ' + numero + ' (ordine ' + ordineId + ')');
+    await caricaConsegne();
+    return;
+  }
+
+  // serve una fattura di destinazione: esistente (target) o nuova
+  var destId = target ? target.id : null;
+  if (!destId) {
+    if (!confirm('La fattura ' + vecchia.numero + ' contiene ' + nRighe + ' consegne.\n\nQuesta consegna viene spostata su una NUOVA fattura ' + numero + ' del ' + _pfIsoToIt(dataIso) + ', le altre restano sulla ' + vecchia.numero + '.\n\nProcedo?')) return;
+    var cl = null;
+    if (o.cliente_id) { var rc = await sb.from('clienti').select('*').eq('id', o.cliente_id).single(); cl = rc.data; }
+    var ins = await sb.from('fatture_emesse').insert({
+      numero: numero, data: dataIso, tipo_documento: 'TD24', divisa: 'EUR',
+      cedente_piva: _PF_CEDENTE_PIVA, cedente_denominazione: _PF_CEDENTE_DENOM,
+      cessionario_piva: cl ? (cl.piva || null) : null,
+      cessionario_codfiscale: cl ? (cl.codice_fiscale || null) : null,
+      cessionario_denominazione: cl ? (cl.nome || o.cliente) : o.cliente,
+      cessionario_indirizzo: cl ? (cl.indirizzo || null) : null,
+      cessionario_cap: cl ? (cl.cap || null) : null,
+      cessionario_comune: cl ? (cl.citta || null) : null,
+      cessionario_provincia: cl ? (cl.provincia || null) : null,
+      cessionario_nazione: 'IT',
+      importo_totale: 0, imponibile_totale: 0, iva_totale: 0,
+      cliente_id: o.cliente_id || null,
+      match_status: 'matched', match_score: 5, match_details: null,
+      note: 'Numero corretto da Consegne il ' + _pfIsoToIt(new Date().toISOString())
+    }).select('id').single();
+    if (ins.error || !ins.data) { toast('Errore creazione fattura: ' + (ins.error ? ins.error.message : '')); return; }
+    destId = ins.data.id;
+  }
+
+  // sposto la riga e l'ordine sulla fattura di destinazione
+  if (o.fattura_riga_id) {
+    var ur = await sb.from('fatture_righe').update({ fattura_id: destId }).eq('id', o.fattura_riga_id);
+    if (ur.error) { toast('Errore spostamento riga: ' + ur.error.message); return; }
+  }
+  var uo = await sb.from('ordini').update({ fattura_id: destId }).eq('id', o.id);
+  if (uo.error) { toast('Errore aggancio consegna: ' + uo.error.message); return; }
+
+  await _pfRicalcolaTotaliFattura(vecchia.id);
+  await _pfRicalcolaTotaliFattura(destId);
+
+  toast('\u2713 Consegna spostata sulla fattura ' + numero);
+  if (typeof _auditLog === 'function') _auditLog('fattura_numero_modificato', 'fatture_emesse', vecchia.numero + ' -> ' + numero + ' (ordine ' + ordineId + ')');
   await caricaConsegne();
 }
 
