@@ -1,4 +1,7 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260921e — il CONFRONTO FRA ANNI e anche una pagina del programma: due
+//               tendine, KPI, doppia barra per cliente e tabella con differenza
+//               e variazione %, con il suo pulsante per la stampa in PDF
 // v20260921d — Composizione anticipi per cliente: anno in evidenza, due pulsanti
 //               PDF — "Crea PDF" dell anno mostrato (KPI, grafico ridisegnato in
 //               HTML, tabella con TUTTI i clienti) e "Confronta anni" che fa
@@ -1212,9 +1215,15 @@ function antAnalisiPdf() {
 }
 
 // Scelta dei due anni da confrontare: qualsiasi coppia fra quelli disponibili
+// 21/09: la scelta degli anni non e' piu' un modale che produce solo il PDF —
+// apre la PAGINA di confronto, da cui si stampa se serve.
 function antAnalisiConfrontoModale() {
   var anni = _antAnalisiAnniDisp || [];
   if (anni.length < 2) { toast('Serve almeno un secondo anno con dati su questa linea'); return; }
+  _antCfrA = _antCfrA || anni[0];
+  _antCfrB = _antCfrB || (anni[1] || anni[0]);
+  _antRenderConfrontoAnni();
+  return;
   var sel = function (id, def) {
     return '<select id="' + id + '" style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px;font-family:var(--font-mono);font-weight:700">'
       + anni.map(function (a) { return '<option value="' + a + '"' + (String(a) === String(def) ? ' selected' : '') + '>' + a + '</option>'; }).join('')
@@ -1236,8 +1245,7 @@ function antAnalisiConfrontoModale() {
 }
 
 function antAnalisiConfrontoPdf() {
-  var a1 = (document.getElementById('ant-cfr-a') || {}).value;
-  var a2 = (document.getElementById('ant-cfr-b') || {}).value;
+  var a1 = _antCfrA, a2 = _antCfrB;
   if (!a1 || !a2) { toast('Scegli i due anni'); return; }
   if (a1 === a2) { toast('Scegli due anni diversi'); return; }
   var A = _antCompDati(_antAnalisiIst, a1), B = _antCompDati(_antAnalisiIst, a2);
@@ -1289,8 +1297,130 @@ function antAnalisiConfrontoPdf() {
     + '</tbody></table>'
     + '<div class="foot">Phoenix Fuel S.r.l. &middot; Zona Industriale, 89900 Portosalvo (VV) &middot; P.IVA 02744150802 &mdash; dati estratti dal gestionale PhoenixFuel</div>'
     + '</body></html>';
-  chiudiModal();
   _antPdfApri(html);
+}
+
+// ─── PAGINA CONFRONTO FRA ANNI (21/09) ────────────────────────────────────
+var _antCfrA = null, _antCfrB = null, _antGrafCfr = null;
+function antCfrSet(quale, valore) {
+  if (quale === 'a') _antCfrA = valore; else _antCfrB = valore;
+  _antRenderConfrontoAnni();
+}
+function antCfrIndietro() { _antRenderAnalisiClienti(); }
+
+function _antRenderConfrontoAnni() {
+  var cont = document.getElementById('ant-content');
+  if (!cont || !_antValDati) return;
+  var anni = _antAnalisiAnniDisp || [];
+  var A = _antCompDati(_antAnalisiIst, _antCfrA) || { lista: [], totM: 0, totF: 0 };
+  var B = _antCompDati(_antAnalisiIst, _antCfrB) || { lista: [], totM: 0, totF: 0 };
+  var tenda = function (quale, val) {
+    return '<select onchange="antCfrSet(\'' + quale + '\', this.value)" style="padding:7px 12px;border:2px solid ' + (quale === 'a' ? '#0C447C' : '#6B7A8C') + ';border-radius:8px;background:var(--bg);color:var(--text);font-size:15px;font-weight:700;font-family:var(--font-mono);cursor:pointer">'
+      + anni.map(function (x) { return '<option value="' + x + '"' + (String(x) === String(val) ? ' selected' : '') + '>' + x + '</option>'; }).join('')
+      + '</select>';
+  };
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px">'
+    + '<div style="font-size:17px;font-weight:700">📊 Confronto fra anni — ' + esc(_antAnalisiIst || '') + '</div>'
+    + '<div style="display:flex;gap:6px;align-items:center">'
+    + '<button onclick="antAnalisiConfrontoPdf()" style="font-size:12px;padding:7px 13px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa PDF</button>'
+    + '<button onclick="antCfrIndietro()" style="font-size:12px;padding:6px 13px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Indietro</button>'
+    + '</div></div>'
+    + '<div style="display:flex;gap:10px;align-items:center;margin:10px 0 14px">'
+    + tenda('a', _antCfrA) + '<span style="font-size:12px;color:var(--text-muted)">contro</span>' + tenda('b', _antCfrB)
+    + '<span style="font-size:11.5px;color:var(--text-muted);margin-left:6px">montante per cliente transitato sulla linea</span></div>';
+
+  if (String(_antCfrA) === String(_antCfrB)) {
+    cont.innerHTML = h + '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12.5px">Scegli due anni diversi.</div>';
+    return;
+  }
+  if (!A.lista.length && !B.lista.length) {
+    cont.innerHTML = h + '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12.5px">Nessuna fattura su questa linea nei due anni scelti.</div>';
+    return;
+  }
+
+  var mapA = {}; A.lista.forEach(function (c) { mapA[c.nome] = c; });
+  var mapB = {}; B.lista.forEach(function (c) { mapB[c.nome] = c; });
+  var nomi = Object.keys(mapA).concat(Object.keys(mapB).filter(function (n) { return !mapA[n]; }));
+  nomi.sort(function (x, y) { return ((mapA[y] || {}).montante || 0) - ((mapA[x] || {}).montante || 0); });
+  var dTot = A.totM - B.totM;
+  var pctTot = B.totM > 0 ? (dTot / B.totM * 100) : 0;
+  var colTot = dTot >= 0 ? '#27500A' : '#A32D2D';
+
+  var kpi = function (lab, val, sub, col) {
+    return '<div style="flex:1;min-width:170px;background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
+      + '<div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div></div>';
+  };
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    + kpi('Montante ' + _antCfrA, fmtE(A.totM), A.totF + ' fatture · ' + A.lista.length + ' clienti')
+    + kpi('Montante ' + _antCfrB, fmtE(B.totM), B.totF + ' fatture · ' + B.lista.length + ' clienti', '#6B7A8C')
+    + kpi('Differenza', (dTot >= 0 ? '+' : '') + fmtE(dTot), (dTot >= 0 ? '▲ ' : '▼ ') + Math.abs(pctTot).toFixed(1) + '% sul ' + _antCfrB, colTot)
+    + '</div>';
+
+  var nGraf = Math.min(12, nomi.length);
+  h += '<div style="background:var(--bg-card);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Montante per cliente · <span style="color:#0C447C">' + _antCfrA + '</span> contro <span style="color:#6B7A8C">' + _antCfrB + '</span></div>'
+    + '<div style="position:relative;height:' + (60 + nGraf * 34) + 'px"><canvas id="ant-graf-cfr"></canvas></div></div>';
+
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px">'
+    + '<thead><tr style="background:var(--bg-card)">'
+    + ['Cliente', 'Montante ' + _antCfrA, 'Ft.', 'Montante ' + _antCfrB, 'Ft.', 'Differenza', 'Var. %'].map(function (t, k) {
+        return '<th style="padding:7px 8px;text-align:' + (k === 0 ? 'left' : 'right') + ';font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:1.5px solid var(--border)">' + t + '</th>';
+      }).join('') + '</tr></thead><tbody>';
+  nomi.forEach(function (n) {
+    var ca = mapA[n] || { n: 0, montante: 0 }, cb = mapB[n] || { n: 0, montante: 0 };
+    var d = ca.montante - cb.montante;
+    var pct = cb.montante > 0 ? (d / cb.montante * 100) : (ca.montante > 0 ? 100 : 0);
+    var col = d > 0 ? '#27500A' : (d < 0 ? '#A32D2D' : 'var(--text-muted)');
+    h += '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:6px 8px">' + esc(n) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">' + fmtE(ca.montante) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + (ca.n || '—') + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:#6B7A8C">' + fmtE(cb.montante) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + (cb.n || '—') + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + col + '">' + (d >= 0 ? '+' : '') + fmtE(d) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right;color:' + col + '">' + (d >= 0 ? '▲ ' : '▼ ') + Math.abs(pct).toFixed(0) + '%</td></tr>';
+  });
+  h += '<tr style="background:var(--bg-card);font-weight:700">'
+    + '<td style="padding:8px">TOTALE</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + fmtE(A.totM) + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + A.totF + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono);color:#6B7A8C">' + fmtE(B.totM) + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + B.totF + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono);color:' + colTot + '">' + (dTot >= 0 ? '+' : '') + fmtE(dTot) + '</td>'
+    + '<td style="padding:8px;text-align:right;color:' + colTot + '">' + (dTot >= 0 ? '▲ ' : '▼ ') + Math.abs(pctTot).toFixed(0) + '%</td></tr>'
+    + '</tbody></table></div>';
+
+  cont.innerHTML = h;
+
+  setTimeout(function () {
+    var cv = document.getElementById('ant-graf-cfr');
+    if (!cv || typeof Chart === 'undefined') return;
+    if (_antGrafCfr) { try { _antGrafCfr.destroy(); } catch (e) {} }
+    var top = nomi.slice(0, nGraf);
+    _antGrafCfr = new Chart(cv, {
+      type: 'bar',
+      data: {
+        labels: top.map(function (n) { return n.length > 24 ? n.slice(0, 24) + '…' : n; }),
+        datasets: [
+          { label: String(_antCfrA), data: top.map(function (n) { return Math.round((mapA[n] || {}).montante || 0); }), backgroundColor: '#0B2545', borderRadius: 3, maxBarThickness: 12 },
+          { label: String(_antCfrB), data: top.map(function (n) { return Math.round((mapB[n] || {}).montante || 0); }), backgroundColor: '#9BA9BC', borderRadius: 3, maxBarThickness: 12 }
+        ]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top', labels: { font: { size: 11 }, boxWidth: 12 } },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + fmtE(c.raw); } } }
+        },
+        scales: {
+          x: { grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 }, callback: function (v) { return Math.round(v / 1000) + 'k'; } } },
+          y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        }
+      }
+    });
+  }, 60);
 }
 
 // ─── ELENCO FATTURE ANTICIPATE (30/07) ────────────────────────────────────
