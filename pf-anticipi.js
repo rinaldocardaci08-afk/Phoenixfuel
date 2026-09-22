@@ -1,4 +1,8 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260921c — la fattura insoluta non e piu "in essere": badge rosso
+//               "insoluta · rientro anticipo addebitato", niente pulsante
+//               Registra rientro, fuori dal conteggio delle aperte; in foglio
+//               giornale la causale e "Rientro di anticipo da parte della banca"
 // v20260921b — tolto il pulsante Insoluta sull intero modulo: si gestisce
 //               fattura per fattura. Le funzioni restano ma non sono richiamate
 // v20260921a — INSOLUTO VERO: segnando insoluta una fattura la banca si riprende
@@ -1121,7 +1125,7 @@ function _antRenderFattureAnticipate(moduli) {
 
   // dalla scadenza banca piu vicina alla piu lontana; le gia rientrate in fondo
   righe.sort((a, b) => {
-    const ae = a.f.stato === 'estinta', be = b.f.stato === 'estinta';
+    const ae = (a.f.stato === 'estinta' || a.f.stato === 'insoluta'), be = (b.f.stato === 'estinta' || b.f.stato === 'insoluta');
     if (ae !== be) return ae ? 1 : -1;
     return String(a.f.scadenza_banca || '9999-12-31').localeCompare(String(b.f.scadenza_banca || '9999-12-31'));
   });
@@ -1130,7 +1134,7 @@ function _antRenderFattureAnticipate(moduli) {
     return '<div style="padding:26px;text-align:center;color:var(--text-muted);font-size:12.5px">Nessuna fattura con questi filtri.</div>';
   }
 
-  const aperte = righe.filter(r => r.f.stato !== 'estinta');
+  const aperte = righe.filter(r => r.f.stato !== 'estinta' && r.f.stato !== 'insoluta');
   const totAperte = aperte.reduce((s, r) => s + Number(r.f.importo_anticipato_calcolato || 0), 0);
   const scadute = aperte.filter(r => r.f.scadenza_banca && r.f.scadenza_banca < oggi);
 
@@ -1147,7 +1151,10 @@ function _antRenderFattureAnticipate(moduli) {
 
   righe.forEach(r => {
     const f = r.f;
-    const estinta = f.stato === 'estinta';
+    // 21/09: anche l'INSOLUTA e' chiusa per la banca — l'anticipo e' rientrato
+    // con l'addebito sul conto, quindi niente "in essere" e niente pulsante.
+    const insol = f.stato === 'insoluta';
+    const estinta = f.stato === 'estinta' || insol;
     const scad = f.scadenza_banca && f.scadenza_banca < oggi && !estinta;
     h += '<tr style="border-bottom:0.5px solid var(--border);' + (estinta ? 'opacity:.55' : '') + '">'
       + '<td style="padding:6px 8px;font-family:var(--font-mono);font-weight:700;color:' + (scad ? '#A32D2D' : 'var(--text)') + '">'
@@ -1158,9 +1165,11 @@ function _antRenderFattureAnticipate(moduli) {
       + '<td style="padding:6px 8px;text-align:right;font-family:var(--font-mono);font-weight:700">' + fmtE(f.importo_anticipato_calcolato) + '</td>'
       + '<td style="padding:6px 8px;font-family:var(--font-mono);color:var(--text-muted)">' + (f.scadenza_cliente ? fmtD(f.scadenza_cliente) : '—') + '</td>'
       + '<td style="padding:6px 8px">'
-        + (estinta
-            ? '<span style="background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">rientrata ' + (f.data_incasso ? fmtD(f.data_incasso) : '') + '</span>'
-            : '<span style="background:#E6F1FB;color:#0C447C;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">in essere</span>')
+        + (insol
+            ? '<span style="background:#FCEBEB;color:#791F1F;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700" title="' + esc(f.note || '') + '">insoluta · rientro anticipo addebitato</span>'
+            : estinta
+              ? '<span style="background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">rientrata ' + (f.data_incasso ? fmtD(f.data_incasso) : '') + '</span>'
+              : '<span style="background:#E6F1FB;color:#0C447C;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">in essere</span>')
       + '</td>'
       + '<td style="padding:6px 8px;text-align:right">'
         + (estinta ? '' : '<button onclick="_antRegistraIncasso(\'' + f.id + '\')" style="font-size:11px;padding:5px 11px;border:0.5px solid #378ADD;border-radius:6px;background:var(--bg-card);color:#0C447C;font-weight:600;cursor:pointer">Registra rientro</button>')
@@ -3975,7 +3984,7 @@ async function _antSalvaIncasso(fatturaAntId) {
     if (bancaIns) {
       var movIns = await sb.from('foglio_giornale_movimenti').insert([{
         data: dIns, tipo: 'uscita', importo: Math.round(impIns * 100) / 100,
-        descrizione: 'Insoluto anticipo · fattura ' + (rigaIns.numero_fattura || '') + (rigaIns.cliente_nome ? ' · ' + rigaIns.cliente_nome : ''),
+        descrizione: 'Rientro di anticipo da parte della banca (insoluto) · fattura ' + (rigaIns.numero_fattura || '') + (rigaIns.cliente_nome ? ' · ' + rigaIns.cliente_nome : ''),
         banca_id: bancaIns, cassa_tipo: null, metodo: 'sbf',
         origine: 'auto-anticipo-insoluto',
         note: 'Riaddebito dell\'anticipo: il cliente non ha pagato'
