@@ -1,4 +1,14 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260921b — tolto il pulsante Insoluta sull intero modulo: si gestisce
+//               fattura per fattura. Le funzioni restano ma non sono richiamate
+// v20260921a — INSOLUTO VERO: segnando insoluta una fattura la banca si riprende
+//               i soldi. Ora il modale chiede data dell addebito, importo
+//               addebitato, conto e (a parte) le spese insoluto; scrive l uscita
+//               in foglio giornale con origine auto-anticipo-insoluto piu una
+//               seconda riga per le spese; LIBERA IL FIDO valorizzando
+//               importo_estinto con l importo addebitato, cosi il modulo non
+//               resta ne aperto ne a utilizzo; la fattura torna da incassare e
+//               nelle note resta scritto insoluta addebitata il gg/mm
 // v20260819d — controllo: la lista presentazioni non si rilegge piu una volta
 //               per cliente; se il foglio giornale non e leggibile lo dice
 //               invece di far credere che l entrata manchi; corretto il
@@ -1390,7 +1400,12 @@ function _antRenderModuloCard(p, aff) {
     }
     if (_antPuoChiudere()) {
       html += '<button onclick="_antApriModaleRientro(\'' + p.id + '\')" title="Marca come rientrata (cliente ha pagato, banca chiude SBF)" style="background:#27500A;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">✓ Rientro</button>';
-      html += '<button onclick="_antApriModaleInsoluta(\'' + p.id + '\')" title="Marca come insoluta (cliente non ha pagato, banca preleva soldi)" style="background:#A32D2D;color:#fff;border:0;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer">❌ Insoluta</button>';
+      // 21/09/2026 — tolto il pulsante "Insoluta" sull'INTERO MODULO: l'insoluto
+      // si gestisce fattura per fattura (Registra incasso → "Cliente non ha
+      // pagato"), dove viene scritta l'uscita in banca e liberato il fido.
+      // Sul modulo dichiarava un'uscita che non scriveva mai e lasciava il fido
+      // a utilizzo. Le funzioni _antApriModaleInsoluta/_antConfermaInsoluta
+      // restano nel file, non piu' richiamate, per i moduli gia' marcati insoluti.
     }
   }
   if (_antPuoModificare()) {
@@ -3787,13 +3802,23 @@ async function _antRenderModaleIncasso(fatturaAntId) {
   html += '</select>';
   html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Preselezionata la banca del modulo.</div></div>';
 
-  // Opzione insoluta
+  // Opzione insoluta — 21/09: l'insoluto e' un addebito vero in banca
   html += '<div style="margin-top:14px;padding:10px 14px;background:#FCEBEB;border-left:4px solid #E24B4A;border-radius:6px">';
   html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">';
   html += '<input type="checkbox" id="ant-inc-insoluta" onchange="_antModIncAggiorna()"> ';
-  html += '<span><strong style="color:#791F1F">Cliente non ha pagato (insoluta)</strong> — segna la fattura come "insoluta". Il modulo resta aperto.</span>';
+  html += '<span><strong style="color:#791F1F">Cliente non ha pagato (insoluta)</strong> — la banca riaddebita l\'anticipo sul conto.</span>';
   html += '</label>';
+  html += '<div id="ant-inc-ins-campi" style="display:none;margin-top:10px">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:#791F1F;font-weight:500">Data addebito in banca *</label>';
+  html += '<input id="ant-inc-ins-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid #E24B4A;border-radius:6px;background:var(--bg);color:var(--text);font-size:12px"></div>';
+  html += '<div><label style="font-size:11px;color:#791F1F;font-weight:500">Importo addebitato (€) *</label>';
+  html += '<input id="ant-inc-ins-importo" type="number" step="0.01" min="0" oninput="_antModIncAggiorna()" value="' + defaultImporto.toFixed(2) + '" style="width:100%;padding:7px 9px;border:0.5px solid #E24B4A;border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);font-weight:600"></div>';
   html += '</div>';
+  html += '<div style="margin-top:8px"><label style="font-size:11px;color:#791F1F;font-weight:500">Spese insoluto (€) — riga separata, lasciare 0 se non addebitate</label>';
+  html += '<input id="ant-inc-ins-spese" type="number" step="0.01" min="0" value="0" style="width:100%;padding:7px 9px;border:0.5px solid #E24B4A;border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono)"></div>';
+  html += '<div style="font-size:10.5px;color:#501313;margin-top:8px;line-height:1.5">Alla conferma: uscita in foglio giornale sul conto scelto, fido liberato, modulo chiuso per questa fattura e fattura di nuovo <strong>da incassare</strong> nell\'estratto conto cliente.</div>';
+  html += '</div></div>';
 
   html += '</div><div id="ant-inc-lancetta" style="background:var(--bg);border-radius:10px;padding:12px 10px"></div></div>';
 
@@ -3819,10 +3844,18 @@ function _antModIncAggiorna() {
   if (!el) return;
   var ins = document.getElementById('ant-inc-insoluta');
   var inp = document.getElementById('ant-inc-importo');
-  var quota = (ins && ins.checked) ? 0 : (inp ? (parseFloat(inp.value) || 0) : S.residuo);
+  var insOn = !!(ins && ins.checked);
+  var campi = document.getElementById('ant-inc-ins-campi');
+  if (campi) campi.style.display = insOn ? 'block' : 'none';
+  var inpIns = document.getElementById('ant-inc-ins-importo');
+  // 21/09: anche l'insoluto libera il fido — la banca si e' ripresa i soldi
+  var quota = insOn ? (inpIns ? (parseFloat(inpIns.value) || 0) : S.residuo)
+                    : (inp ? (parseFloat(inp.value) || 0) : S.residuo);
   if (quota > S.residuo) quota = S.residuo;
   var dopo = Math.max(0, S.esposto - quota);
-  var sotto = quota > 0 ? 'da ' + fmtE(S.esposto) + ' · −' + fmtE(quota) : 'esposizione invariata';
+  var sotto = quota > 0
+    ? 'da ' + fmtE(S.esposto) + ' · −' + fmtE(quota) + (insOn ? ' (addebito insoluto)' : '')
+    : 'esposizione invariata';
   el.innerHTML = _antLancetta(S.esposto, dopo, S.massimale, S.f.cliente_nome, sotto)
     + (S.origineMass === 'regola'
         ? '<div style="border-top:0.5px solid var(--border);margin-top:9px;padding-top:8px;font-size:10.5px;color:var(--text-muted);line-height:1.5">Massimale impostato sul cliente</div>'
@@ -3912,9 +3945,19 @@ async function _antSalvaIncasso(fatturaAntId) {
     modificato_at: new Date().toISOString()
   };
   if (insoluta) {
+    // 21/09 — INSOLUTO VERO: la banca riaddebita, quindi il fido si libera
+    // (importo_estinto = importo addebitato) e in foglio giornale esce il
+    // movimento. La fattura cliente torna da incassare.
+    var dIns = (document.getElementById('ant-inc-ins-data') || {}).value || '';
+    var impIns = parseFloat((document.getElementById('ant-inc-ins-importo') || {}).value) || 0;
+    var speseIns = parseFloat((document.getElementById('ant-inc-ins-spese') || {}).value) || 0;
+    if (!dIns) { toast('Indica la data dell\'addebito in banca'); return; }
+    if (impIns <= 0) { toast('Indica l\'importo addebitato dalla banca'); return; }
     payload.stato = 'insoluta';
     payload.data_incasso = null;
-    payload.importo_estinto = 0;
+    payload.importo_estinto = impIns;
+    payload.note = 'Insoluta · addebitata in banca il ' + fmtD(dIns) + ' per ' + fmtE(impIns)
+                 + (speseIns > 0 ? ' + spese ' + fmtE(speseIns) : '');
   } else {
     var importo = Number(importoRaw);
     if (!isFinite(importo) || importo <= 0) { toast('Importo non valido'); return; }
@@ -3926,6 +3969,32 @@ async function _antSalvaIncasso(fatturaAntId) {
   if (insoluta) {
     var resU = await sb.from('anticipi_sbf_fatture').update(payload).eq('id', fatturaAntId);
     if (resU.error) { toast('❌ Errore: ' + resU.error.message); return; }
+    var elBIns = document.getElementById('ant-inc-banca');
+    var bancaIns = (elBIns && elBIns.value) ? elBIns.value : null;
+    var rigaIns = (_antModInc && _antModInc.f) || {};
+    if (bancaIns) {
+      var movIns = await sb.from('foglio_giornale_movimenti').insert([{
+        data: dIns, tipo: 'uscita', importo: Math.round(impIns * 100) / 100,
+        descrizione: 'Insoluto anticipo · fattura ' + (rigaIns.numero_fattura || '') + (rigaIns.cliente_nome ? ' · ' + rigaIns.cliente_nome : ''),
+        banca_id: bancaIns, cassa_tipo: null, metodo: 'sbf',
+        origine: 'auto-anticipo-insoluto',
+        note: 'Riaddebito dell\'anticipo: il cliente non ha pagato'
+      }]);
+      if (movIns.error) { toast('⚠ Insoluto salvato ma uscita NON registrata: ' + movIns.error.message); }
+      if (speseIns > 0) {
+        var movSp = await sb.from('foglio_giornale_movimenti').insert([{
+          data: dIns, tipo: 'uscita', importo: Math.round(speseIns * 100) / 100,
+          descrizione: 'Spese insoluto · fattura ' + (rigaIns.numero_fattura || '') + (rigaIns.cliente_nome ? ' · ' + rigaIns.cliente_nome : ''),
+          banca_id: bancaIns, cassa_tipo: null, metodo: 'sbf',
+          origine: 'auto-anticipo-insoluto',
+          note: 'Spese addebitate dalla banca per l\'insoluto'
+        }]);
+        if (movSp.error) console.warn('[ant] spese insoluto non registrate:', movSp.error.message);
+      }
+    } else {
+      toast('⚠ Nessun conto selezionato: uscita non registrata');
+    }
+    if (typeof _auditLog === 'function') _auditLog('anticipi', 'anticipi_sbf_fatture', 'INSOLUTA fattura ' + (rigaIns.numero_fattura || fatturaAntId) + ' addebito ' + fmtD(dIns) + ' ' + impIns.toFixed(2) + (speseIns > 0 ? ' + spese ' + speseIns.toFixed(2) : ''));
   } else {
     // stessa funzione usata dall'estratto conto clienti: aggiorna la riga E
     // scrive l'uscita dal conto (rientro dell'anticipo alla banca)
@@ -3940,7 +4009,7 @@ async function _antSalvaIncasso(fatturaAntId) {
   }
 
   chiudiModal();
-  toast(insoluta ? '⚠ Fattura segnata come insoluta' : '✓ Fattura estinta');
+  toast(insoluta ? '❌ Insoluto registrato: addebito in banca e fido liberato' : '✓ Fattura estinta');
   _antValDati = null;
   _antSvuotaCachePresIds();   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
