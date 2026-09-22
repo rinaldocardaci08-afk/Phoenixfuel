@@ -1,4 +1,8 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260921d — Composizione anticipi per cliente: anno in evidenza, due pulsanti
+//               PDF — "Crea PDF" dell anno mostrato (KPI, grafico ridisegnato in
+//               HTML, tabella con TUTTI i clienti) e "Confronta anni" che fa
+//               scegliere due anni qualsiasi e produce il PDF del confronto
 // v20260921c — la fattura insoluta non e piu "in essere": badge rosso
 //               "insoluta · rientro anticipo addebitato", niente pulsante
 //               Registra rientro, fuori dal conteggio delle aperte; in foglio
@@ -981,14 +985,19 @@ function _antRenderAnalisiClienti() {
   const lista = Object.values(perCliente).sort((a, b) => b.montante - a.montante);
   const primi4 = lista.slice(0, 4).reduce((s, c) => s + c.montante, 0);
 
+  _antAnalisiAnniDisp = Object.keys(anni).sort().reverse();
   let h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px">'
     + '<div style="font-size:17px;font-weight:700">👥 Composizione anticipi per cliente — ' + esc(_antAnalisiIst || '') + '</div>'
     + '<div style="display:flex;gap:6px;align-items:center">'
-      + Object.keys(anni).sort().reverse().map(a =>
-          '<button onclick="antAnalisiAnno(' + a + ')" style="font-size:12px;padding:6px 13px;border:0.5px solid ' + (Number(a) === _antAnalisiAnno ? '#0C447C' : 'var(--border)') + ';border-radius:7px;background:' + (Number(a) === _antAnalisiAnno ? '#0C447C' : 'var(--bg)') + ';color:' + (Number(a) === _antAnalisiAnno ? '#fff' : 'var(--text)') + ';cursor:pointer">' + a + '</button>').join('')
+      + _antAnalisiAnniDisp.map(a => {
+          var sel = Number(a) === _antAnalisiAnno;
+          return '<button onclick="antAnalisiAnno(' + a + ')" style="font-size:' + (sel ? '16px' : '13px') + ';font-weight:' + (sel ? '700' : '500') + ';padding:' + (sel ? '8px 20px' : '7px 14px') + ';border:' + (sel ? '2px solid #0C447C' : '0.5px solid var(--border)') + ';border-radius:8px;background:' + (sel ? '#0C447C' : 'var(--bg)') + ';color:' + (sel ? '#fff' : 'var(--text)') + ';cursor:pointer;font-family:var(--font-mono)">' + a + '</button>';
+        }).join('')
+      + '<button onclick="antAnalisiPdf()" title="Scarica il PDF di questo anno" style="font-size:12px;padding:7px 13px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer;margin-left:8px">📄 Crea PDF</button>'
+      + '<button onclick="antAnalisiConfrontoModale()" title="PDF di confronto fra due anni a scelta" style="font-size:12px;padding:7px 13px;border:0.5px solid #0C447C;border-radius:7px;background:var(--bg);color:#0C447C;font-weight:600;cursor:pointer">📊 Confronta anni</button>'
       + '<button onclick="antChiudiAnalisi()" style="font-size:12px;padding:6px 13px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer;margin-left:6px">← Indietro</button>'
     + '</div></div>'
-    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">quanto lavoro di ciascun cliente è transitato su questa linea nell\'anno scelto</div>';
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">quanto lavoro di ciascun cliente è transitato su questa linea nell\'<strong style="color:var(--text)">anno ' + _antAnalisiAnno + '</strong></div>';
 
   if (!lista.length) {
     cont.innerHTML = h + '<div style="padding:30px;text-align:center;color:var(--text-muted);font-size:12.5px">Nessuna fattura anticipata su questo istituto nel ' + _antAnalisiAnno + '.</div>';
@@ -1091,6 +1100,197 @@ function _antRenderAnalisiClienti() {
       }]
     });
   }, 60);
+}
+
+// ─── PDF COMPOSIZIONE CLIENTI (21/09) ─────────────────────────────────────
+// Due stampe: l'anno mostrato e il confronto fra due anni a scelta. Il grafico
+// NON usa Chart.js (in stampa esce sfocato o vuoto): le barre sono ridisegnate
+// in HTML, stessi colori e stessa lettura della pagina.
+var _antAnalisiAnniDisp = [];
+
+// Aggrega per cliente le fatture dell'istituto in un anno. Stessa regola della
+// pagina: anno preso da data_emissione, altrimenti dalla data di presentazione.
+function _antCompDati(istituto, anno) {
+  var D = _antValDati; if (!D) return null;
+  var nomeIst = {}; D.ist.forEach(function (i) { nomeIst[i.id] = i.nome; });
+  var affDi = {}; D.aff.forEach(function (a) { affDi[a.id] = nomeIst[a.istituto_id] || '—'; });
+  var presDi = {}; D.pres.forEach(function (p) { presDi[p.id] = p; });
+  var per = {}, totM = 0, totA = 0, totF = 0, totAperte = 0;
+  D.fatt.forEach(function (f) {
+    var p = presDi[f.presentazione_id]; if (!p) return;
+    if (affDi[p.affidamento_id] !== istituto) return;
+    var d = String(f.data_emissione || p.data_presentazione || '');
+    if (!d || Number(d.slice(0, 4)) !== Number(anno)) return;
+    var cli = String(f.cliente_nome || '—').trim();
+    var b = per[cli] || (per[cli] = { nome: cli, n: 0, montante: 0, anticipato: 0, aperte: 0 });
+    b.n++; b.montante += Number(f.totale_fattura || 0);
+    b.anticipato += Number(f.importo_anticipato_calcolato || 0);
+    if (f.stato !== 'estinta' && f.stato !== 'insoluta') { b.aperte++; totAperte++; }
+    totM += Number(f.totale_fattura || 0); totA += Number(f.importo_anticipato_calcolato || 0); totF++;
+  });
+  var lista = Object.keys(per).map(function (k) { return per[k]; }).sort(function (a, b) { return b.montante - a.montante; });
+  return { lista: lista, totM: totM, totA: totA, totF: totF, totAperte: totAperte, anno: Number(anno) };
+}
+
+function _antPdfIntestazione(titolo, sottotitolo) {
+  return '<div class="hd"><div><div class="marchio">PHOENIX FUEL S.R.L.</div>'
+    + '<div class="sotto">Vendita all\'ingrosso di carburanti e oli</div></div>'
+    + '<div class="dati">Uffici e Deposito: Zona Industriale — 89900 Portosalvo (VV)<br>'
+    + 'Tel. 0966 1906397 &middot; Fax 0966 1906395<br>info@phoenixfuel.it &middot; logistica@phoenixfuel.it<br>'
+    + 'Partita IVA 02744150802 &middot; www.phoenixfuel.it</div></div>'
+    + '<h1>' + titolo + '</h1><div class="sub">' + sottotitolo + '</div>';
+}
+
+function _antPdfStile() {
+  return '<style>@page{size:A4;margin:13mm}body{font-family:Calibri,Arial,sans-serif;font-size:10.5px;color:#222;margin:0}'
+    + '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #C8102E;padding-bottom:8px;margin-bottom:12px}'
+    + '.marchio{font-size:17px;font-weight:700;letter-spacing:.5px;color:#111}.sotto{font-size:9.5px;color:#555}'
+    + '.dati{text-align:right;font-size:9px;color:#444;line-height:1.4}'
+    + 'h1{font-size:14px;margin:0 0 2px}.sub{font-size:10px;color:#555;margin-bottom:12px}'
+    + '.anno{display:inline-block;background:#0B2545;color:#fff;font-size:13px;font-weight:700;padding:2px 12px;border-radius:5px;font-family:Consolas,monospace}'
+    + '.kpi{display:flex;gap:8px;margin-bottom:12px}.k{flex:1;border:1px solid #DDD;border-radius:6px;padding:7px 9px}'
+    + '.k .l{font-size:8.5px;color:#666;text-transform:uppercase;letter-spacing:.3px}'
+    + '.k .v{font-size:15px;font-weight:700;font-family:Consolas,monospace;color:#0B2545}.k .s{font-size:8.5px;color:#666}'
+    + '.box{border:1px solid #DDD;border-radius:6px;padding:10px 12px;margin-bottom:12px}'
+    + '.box h2{font-size:11px;margin:0 0 8px;color:#0B2545}'
+    + 'table{width:100%;border-collapse:collapse;font-size:9.5px}'
+    + 'thead{display:table-header-group}th{background:#0B2545;color:#fff;padding:6px 7px;font-size:8.5px;text-transform:uppercase;letter-spacing:.3px;text-align:right}'
+    + 'th.l{text-align:left}td{padding:5px 7px;border-bottom:1px solid #E8E8E8;text-align:right}'
+    + 'td.l{text-align:left}tr{page-break-inside:avoid}'
+    + '.foot{margin-top:14px;border-top:1px solid #DDD;padding-top:5px;font-size:8px;color:#777;text-align:center}</style>';
+}
+
+function _antPdfApri(html) {
+  var w = window.open('', '_blank');
+  if (!w) { toast('Abilita i popup per creare il PDF'); return; }
+  w.document.write(html); w.document.close(); w.focus();
+  setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+}
+
+function antAnalisiPdf() {
+  var D = _antCompDati(_antAnalisiIst, _antAnalisiAnno);
+  if (!D || !D.lista.length) { toast('Nessun dato da stampare per questo anno'); return; }
+  var mx = D.lista[0].montante || 1;
+  var barre = D.lista.map(function (c, i) {
+    var w = Math.max(0.5, c.montante / mx * 100);
+    var col = i < 4 ? '#9E2B25' : '#D08C88';
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'
+      + '<div style="width:190px;font-size:9px;text-align:right;color:#333;overflow:hidden;white-space:nowrap">' + esc(c.nome) + '</div>'
+      + '<div style="flex:1;background:#F2F2F2;border-radius:3px;height:15px"><div style="width:' + w.toFixed(1) + '%;background:' + col + ';height:15px;border-radius:3px"></div></div>'
+      + '<div style="width:155px;font-size:9px;font-family:Consolas,monospace;color:#333">' + fmtE(c.montante) + ' &middot; ' + (c.montante / D.totM * 100).toFixed(1) + '%</div></div>';
+  }).join('');
+  var righe = D.lista.map(function (c, i) {
+    return '<tr style="background:' + (i % 2 ? '#FAFAFA' : '#FFF') + ';font-weight:' + (i < 4 ? '600' : '400') + '">'
+      + '<td class="l">' + esc(c.nome) + '</td><td>' + c.n + '</td>'
+      + '<td style="font-family:Consolas,monospace">' + fmtE(c.montante) + '</td>'
+      + '<td>' + (c.montante / D.totM * 100).toFixed(1) + '%</td>'
+      + '<td style="font-family:Consolas,monospace">' + fmtE(c.anticipato) + '</td>'
+      + '<td style="color:' + (c.aperte ? '#8A4F06' : '#999') + '">' + (c.aperte || '—') + '</td></tr>';
+  }).join('');
+  var primi4 = D.lista.slice(0, 4).reduce(function (s, c) { return s + c.montante; }, 0);
+  var oggi = new Date().toLocaleDateString('it-IT');
+  var html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Composizione anticipi ' + D.anno + '</title>' + _antPdfStile() + '</head><body>'
+    + _antPdfIntestazione('Composizione anticipi per cliente &mdash; ' + esc(_antAnalisiIst || ''),
+        'Anno <span class="anno">' + D.anno + '</span> &nbsp; quanto lavoro di ciascun cliente &egrave; transitato su questa linea &middot; documento generato il ' + oggi)
+    + '<div class="kpi">'
+    + '<div class="k"><div class="l">Montante ' + D.anno + '</div><div class="v">' + fmtE(D.totM) + '</div><div class="s">' + D.totF + ' fatture</div></div>'
+    + '<div class="k"><div class="l">Clienti</div><div class="v">' + D.lista.length + '</div><div class="s">sulla linea</div></div>'
+    + '<div class="k"><div class="l">Primo cliente</div><div class="v" style="font-size:12px">' + esc(D.lista[0].nome) + '</div><div class="s">' + Math.round(D.lista[0].montante / D.totM * 100) + '% del montante</div></div>'
+    + '<div class="k"><div class="l">Primi quattro</div><div class="v">' + Math.round(primi4 / D.totM * 100) + '%</div><div class="s">' + fmtE(primi4) + '</div></div>'
+    + '</div>'
+    + '<div class="box"><h2>Quanto ha lavorato ciascun cliente sulla linea nel ' + D.anno + '</h2>' + barre
+    + '<div style="font-size:8.5px;color:#777;margin-top:6px">In rosso scuro i primi quattro clienti: sono la concentrazione che la banca guarda per prima.</div></div>'
+    + '<table><thead><tr><th class="l">Cliente</th><th>Fatture</th><th>Montante</th><th>% del totale</th><th>Anticipato</th><th>Ancora aperte</th></tr></thead><tbody>'
+    + righe
+    + '<tr style="background:#EAF0F7;font-weight:700"><td class="l">TOTALE</td><td>' + D.totF + '</td>'
+    + '<td style="font-family:Consolas,monospace">' + fmtE(D.totM) + '</td><td>100%</td>'
+    + '<td style="font-family:Consolas,monospace">' + fmtE(D.totA) + '</td><td>' + (D.totAperte || '—') + '</td></tr>'
+    + '</tbody></table>'
+    + '<div class="foot">Phoenix Fuel S.r.l. &middot; Zona Industriale, 89900 Portosalvo (VV) &middot; P.IVA 02744150802 &mdash; dati estratti dal gestionale PhoenixFuel</div>'
+    + '</body></html>';
+  _antPdfApri(html);
+}
+
+// Scelta dei due anni da confrontare: qualsiasi coppia fra quelli disponibili
+function antAnalisiConfrontoModale() {
+  var anni = _antAnalisiAnniDisp || [];
+  if (anni.length < 2) { toast('Serve almeno un secondo anno con dati su questa linea'); return; }
+  var sel = function (id, def) {
+    return '<select id="' + id + '" style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px;font-family:var(--font-mono);font-weight:700">'
+      + anni.map(function (a) { return '<option value="' + a + '"' + (String(a) === String(def) ? ' selected' : '') + '>' + a + '</option>'; }).join('')
+      + '</select>';
+  };
+  var html = '<div style="max-width:440px">'
+    + '<div style="font-size:16px;font-weight:600;margin-bottom:4px">📊 Confronto fra due anni</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px">' + esc(_antAnalisiIst || '') + ' &middot; scegli i due anni da mettere a confronto</div>'
+    + '<div style="display:flex;gap:12px;align-items:flex-end">'
+    + '<div style="flex:1"><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Anno</label>' + sel('ant-cfr-a', anni[0]) + '</div>'
+    + '<div style="padding-bottom:9px;font-size:13px;color:var(--text-muted)">contro</div>'
+    + '<div style="flex:1"><label style="font-size:11px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:4px">Anno</label>' + sel('ant-cfr-b', anni[1] || anni[0]) + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="antAnalisiConfrontoPdf()" class="btn-primary" style="font-size:12px;padding:8px 16px">📄 Crea PDF confronto</button>'
+    + '</div></div>';
+  apriModal(html);
+}
+
+function antAnalisiConfrontoPdf() {
+  var a1 = (document.getElementById('ant-cfr-a') || {}).value;
+  var a2 = (document.getElementById('ant-cfr-b') || {}).value;
+  if (!a1 || !a2) { toast('Scegli i due anni'); return; }
+  if (a1 === a2) { toast('Scegli due anni diversi'); return; }
+  var A = _antCompDati(_antAnalisiIst, a1), B = _antCompDati(_antAnalisiIst, a2);
+  if (!A || !B || (!A.lista.length && !B.lista.length)) { toast('Nessun dato da confrontare'); return; }
+  var mapA = {}; A.lista.forEach(function (c) { mapA[c.nome] = c; });
+  var mapB = {}; B.lista.forEach(function (c) { mapB[c.nome] = c; });
+  var nomi = Object.keys(mapA).concat(Object.keys(mapB).filter(function (n) { return !mapA[n]; }));
+  nomi.sort(function (x, y) { return ((mapA[y] || {}).montante || 0) - ((mapA[x] || {}).montante || 0); });
+  var mx = Math.max(A.lista[0] ? A.lista[0].montante : 0, B.lista[0] ? B.lista[0].montante : 0) || 1;
+  var barre = nomi.map(function (n) {
+    var ca = mapA[n] || { montante: 0 }, cb = mapB[n] || { montante: 0 };
+    var bar = function (v, col) { return '<div style="flex:1;background:#F2F2F2;border-radius:3px;height:11px"><div style="width:' + Math.max(0, v / mx * 100).toFixed(1) + '%;background:' + col + ';height:11px;border-radius:3px"></div></div>'; };
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+      + '<div style="width:180px;font-size:9px;text-align:right;color:#333;overflow:hidden;white-space:nowrap">' + esc(n) + '</div>'
+      + '<div style="flex:1"><div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">' + bar(ca.montante, '#0B2545') + '<div style="width:92px;font-size:8.5px;font-family:Consolas,monospace">' + fmtE(ca.montante) + '</div></div>'
+      + '<div style="display:flex;align-items:center;gap:6px">' + bar(cb.montante, '#9BA9BC') + '<div style="width:92px;font-size:8.5px;font-family:Consolas,monospace;color:#666">' + fmtE(cb.montante) + '</div></div></div></div>';
+  }).join('');
+  var righe = nomi.map(function (n, i) {
+    var ca = mapA[n] || { n: 0, montante: 0 }, cb = mapB[n] || { n: 0, montante: 0 };
+    var d = ca.montante - cb.montante;
+    var pct = cb.montante > 0 ? (d / cb.montante * 100) : (ca.montante > 0 ? 100 : 0);
+    var col = d > 0 ? '#27500A' : (d < 0 ? '#A32D2D' : '#666');
+    return '<tr style="background:' + (i % 2 ? '#FAFAFA' : '#FFF') + '">'
+      + '<td class="l">' + esc(n) + '</td>'
+      + '<td style="font-family:Consolas,monospace">' + fmtE(ca.montante) + '</td><td>' + (ca.n || '—') + '</td>'
+      + '<td style="font-family:Consolas,monospace;color:#666">' + fmtE(cb.montante) + '</td><td style="color:#666">' + (cb.n || '—') + '</td>'
+      + '<td style="font-family:Consolas,monospace;color:' + col + ';font-weight:600">' + (d >= 0 ? '+' : '') + fmtE(d) + '</td>'
+      + '<td style="color:' + col + '">' + (d >= 0 ? '▲ ' : '▼ ') + Math.abs(pct).toFixed(0) + '%</td></tr>';
+  }).join('');
+  var dTot = A.totM - B.totM;
+  var pctTot = B.totM > 0 ? (dTot / B.totM * 100) : 0;
+  var oggi = new Date().toLocaleDateString('it-IT');
+  var html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Confronto anticipi ' + a1 + ' vs ' + a2 + '</title>' + _antPdfStile() + '</head><body>'
+    + _antPdfIntestazione('Composizione anticipi per cliente &mdash; confronto &middot; ' + esc(_antAnalisiIst || ''),
+        '<span class="anno">' + a1 + '</span> &nbsp;contro&nbsp; <span class="anno" style="background:#6B7A8C">' + a2 + '</span> &nbsp; documento generato il ' + oggi)
+    + '<div class="kpi">'
+    + '<div class="k"><div class="l">Montante ' + a1 + '</div><div class="v">' + fmtE(A.totM) + '</div><div class="s">' + A.totF + ' fatture &middot; ' + A.lista.length + ' clienti</div></div>'
+    + '<div class="k"><div class="l">Montante ' + a2 + '</div><div class="v" style="color:#6B7A8C">' + fmtE(B.totM) + '</div><div class="s">' + B.totF + ' fatture &middot; ' + B.lista.length + ' clienti</div></div>'
+    + '<div class="k"><div class="l">Differenza</div><div class="v" style="color:' + (dTot >= 0 ? '#27500A' : '#A32D2D') + '">' + (dTot >= 0 ? '+' : '') + fmtE(dTot) + '</div><div class="s">' + (dTot >= 0 ? '▲ ' : '▼ ') + Math.abs(pctTot).toFixed(1) + '% sul ' + a2 + '</div></div>'
+    + '</div>'
+    + '<div class="box"><h2>Montante per cliente &mdash; ' + a1 + ' (scuro) contro ' + a2 + ' (chiaro)</h2>' + barre + '</div>'
+    + '<table><thead><tr><th class="l">Cliente</th><th>Montante ' + a1 + '</th><th>Ft.</th><th>Montante ' + a2 + '</th><th>Ft.</th><th>Differenza</th><th>Var. %</th></tr></thead><tbody>'
+    + righe
+    + '<tr style="background:#EAF0F7;font-weight:700"><td class="l">TOTALE</td>'
+    + '<td style="font-family:Consolas,monospace">' + fmtE(A.totM) + '</td><td>' + A.totF + '</td>'
+    + '<td style="font-family:Consolas,monospace">' + fmtE(B.totM) + '</td><td>' + B.totF + '</td>'
+    + '<td style="font-family:Consolas,monospace;color:' + (dTot >= 0 ? '#27500A' : '#A32D2D') + '">' + (dTot >= 0 ? '+' : '') + fmtE(dTot) + '</td>'
+    + '<td style="color:' + (dTot >= 0 ? '#27500A' : '#A32D2D') + '">' + (dTot >= 0 ? '▲ ' : '▼ ') + Math.abs(pctTot).toFixed(0) + '%</td></tr>'
+    + '</tbody></table>'
+    + '<div class="foot">Phoenix Fuel S.r.l. &middot; Zona Industriale, 89900 Portosalvo (VV) &middot; P.IVA 02744150802 &mdash; dati estratti dal gestionale PhoenixFuel</div>'
+    + '</body></html>';
+  chiudiModal();
+  _antPdfApri(html);
 }
 
 // ─── ELENCO FATTURE ANTICIPATE (30/07) ────────────────────────────────────
