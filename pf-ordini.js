@@ -1,3 +1,4 @@
+// v20260922a — dopo il salvataggio di un ordine parte il controllo FUORI FIDO del fornitore (pf-fido-alert.js)
 // PhoenixFuel — Area Cliente, Prezzi, Ordini, Fido
 // v20260813c — si usa prodotti.categoria che c era gia (benzine/altro) e in
 //              NON OIL spariscono i pulsanti delle funzioni oil
@@ -1194,6 +1195,11 @@ async function salvaOrdine() {
   var ordDataSel = document.getElementById('ordini-giorno-data');
   if (ordDataSel) ordDataSel.value = record.data;
   caricaOrdini();
+  // 22/09 — se questo ordine manda il FORNITORE fuori fido, avviso con
+  // l'importo del bonifico da fare entro le 12 di domani (pf-fido-alert.js)
+  if (typeof pfFidoAlertControlla === 'function' && record.fornitore) {
+    setTimeout(function () { pfFidoAlertControlla(record.fornitore); }, 600);
+  }
 }
 
 // ── Helper per renderizzare una riga ordine ──
