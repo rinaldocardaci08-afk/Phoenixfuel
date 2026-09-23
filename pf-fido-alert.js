@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fido-alert.js — AVVISO FUORI FIDO FORNITORE
+// v20260922b — il pulsante "Apri estratto conto" cambia davvero sezione (setSection)
+//               e poi apre la scheda del fornitore
 // v20260922a — 22/09/2026
 //
 // REGOLA (Rinaldo): il fornitore ci lascia emettere un ordine anche oltre il
@@ -199,11 +201,28 @@ async function fidoAlertHoCapito(fornitoreId, sforamento) {
   _fidoAlertChiudi();
 }
 
-// Porta all'estratto conto del fornitore, se la sezione e' disponibile.
+// Porta all'estratto conto del fornitore: prima si va nella SEZIONE Fornitori
+// (setSection, la stessa del menu, che carica la pagina e ne segna la voce),
+// poi si apre la scheda del fornitore. Senza il cambio sezione il popup si
+// chiudeva e basta, perche' ecfVaiFornitore lavora dentro una pagina gia'
+// aperta.
 async function fidoAlertApriEstratto(nome, fornitoreId, sforamento) {
   await fidoAlertHoCapito(fornitoreId, sforamento);
-  if (typeof ecfVaiFornitore === 'function') { try { ecfVaiFornitore(nome); return; } catch (e) {} }
-  if (typeof toast === 'function') toast('Apri Fornitori → Estratto conto · ' + nome);
+  try {
+    if (typeof setSection === 'function') {
+      var voce = null;
+      document.querySelectorAll('.nav-item').forEach(function (n) {
+        if (!voce && n.textContent && n.textContent.toLowerCase().indexOf('fornitori') >= 0) voce = n;
+      });
+      setSection('fornitori', voce);
+    }
+  } catch (e) { console.warn('[fido-alert] cambio sezione:', e && e.message); }
+  // la pagina Fornitori deve finire di caricarsi prima di aprire la scheda
+  setTimeout(function () {
+    if (typeof ecfVaiFornitore === 'function') { try { ecfVaiFornitore(nome); return; } catch (e) {} }
+    if (typeof ecfApriFornitore === 'function') { try { ecfApriFornitore(nome); return; } catch (e) {} }
+    if (typeof toast === 'function') toast('Apri l\'estratto conto di ' + nome);
+  }, 900);
 }
 
 // Apre la registrazione dell'uscita in foglio giornale con la data di domani.
