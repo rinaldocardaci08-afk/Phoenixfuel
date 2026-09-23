@@ -1,3 +1,7 @@
+// v20260923a — pannello Fido da Ordini: i dati del cliente si caricano sempre
+//              se non ci sono GIA' PER QUEL CLIENTE. Prima bastava aver aperto
+//              l'estratto conto di un altro cliente perche' il caricamento
+//              venisse saltato: dal secondo clic in poi l'esposizione era zero.
 // ═══════════════════════════════════════════════════════════════════════════
 // v20260801a — lettura di anticipi_sbf_presentazioni paginata (si fermava a mille)
 // PhoenixFuel — Estratto Conto
@@ -1010,18 +1014,24 @@ function _ecMarginalitaCliente(clienteId, quante) {
 async function pfFidoCliente(clienteId, nomeFallback) {
   if (!clienteId) { toast('Cliente non collegato a questo ordine'); return; }
   try {
-    // se l'estratto conto non e' mai stato aperto in questa sessione, carico
-    // il minimo indispensabile per QUESTO cliente
-    if (!(_ecStato.fatture || []).length || !(_ecStato.clienti || []).length) {
+    // 23/09 — si guarda se ci sono i dati DI QUESTO CLIENTE, non se la memoria
+    // e' vuota: bastava aver aperto l'estratto conto di un altro cliente perche'
+    // il caricamento venisse saltato e l'esposizione uscisse a zero.
+    var haFatt = (_ecStato.fatture || []).some(function (f) { return f.cliente_id === clienteId; });
+    var haOrd  = (_ecStato.ordini  || []).some(function (o) { return o.cliente_id === clienteId; });
+    var haCli  = (_ecStato.clienti || []).some(function (c) { return c.id === clienteId; });
+    if (!haFatt || !haOrd || !haCli) {
       var r = await Promise.all([
         sb.from('estratto_conto_cliente').select('*').eq('cliente_id', clienteId),
         sb.from('ordini').select('id,cliente_id,data,litri,costo_litro,trasporto_litro,margine,iva,stato,fattura_id,fattura_riga_id,pagato')
           .eq('cliente_id', clienteId).eq('tipo_ordine', 'cliente').neq('stato', 'annullato'),
         sb.from('clienti').select('id,nome,ragione_sociale,fido_massimo,giorni_pagamento,modalita_pagamento').eq('id', clienteId).single()
       ]);
-      _ecStato.fatture = (_ecStato.fatture || []).concat(r[0].data || []);
-      _ecStato.ordini  = (_ecStato.ordini  || []).concat(r[1].data || []);
-      if (r[2].data) _ecStato.clienti = (_ecStato.clienti || []).concat([r[2].data]);
+      // si sostituiscono le righe di QUESTO cliente, senza duplicarle se il
+      // pannello viene riaperto piu' volte
+      _ecStato.fatture = (_ecStato.fatture || []).filter(function (f) { return f.cliente_id !== clienteId; }).concat(r[0].data || []);
+      _ecStato.ordini  = (_ecStato.ordini  || []).filter(function (o) { return o.cliente_id !== clienteId; }).concat(r[1].data || []);
+      _ecStato.clienti = (_ecStato.clienti || []).filter(function (c) { return c.id !== clienteId; }).concat(r[2].data ? [r[2].data] : []);
     }
     var cliente = (_ecStato.clienti || []).filter(function (c) { return c.id === clienteId; })[0]
       || { nome: nomeFallback || '', fido_massimo: 0 };
