@@ -1,4 +1,10 @@
 // ═════════════════════════════════════════════════════════════════════════════
+// v20260925a — terza possibilita' nel modale Registra rientro: RIENTRO DALLA
+//               BANCA CON ADDEBITO SUL CONTO. Non e' un insoluto: il cliente
+//               paghera', ma la banca si riprende l anticipo prima (politica
+//               sua). Effetti: uscita in foglio giornale alla data dell addebito,
+//               fido liberato, modulo chiuso per quella fattura, MA la fattura
+//               resta da incassare dal cliente e nessuna nota di insoluto.
 // v20260921e — il CONFRONTO FRA ANNI e anche una pagina del programma: due
 //               tendine, KPI, doppia barra per cliente e tabella con differenza
 //               e variazione %, con il suo pulsante per la stampa in PDF
@@ -1497,6 +1503,8 @@ function _antRenderFattureAnticipate(moduli) {
       + '<td style="padding:6px 8px">'
         + (insol
             ? '<span style="background:#FCEBEB;color:#791F1F;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700" title="' + esc(f.note || '') + '">insoluta · rientro anticipo addebitato</span>'
+            : (estinta && String(f.note || '').indexOf('Rientro dalla banca') === 0)
+              ? '<span style="background:#FAEEDA;color:#854F0B;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700" title="' + esc(f.note || '') + '">rientro banca ' + (f.data_incasso ? fmtD(f.data_incasso) : '') + ' · cliente da incassare</span>'
             : estinta
               ? '<span style="background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">rientrata ' + (f.data_incasso ? fmtD(f.data_incasso) : '') + '</span>'
               : '<span style="background:#E6F1FB;color:#0C447C;padding:2px 9px;border-radius:9px;font-size:10px;font-weight:700">in essere</span>')
@@ -4159,6 +4167,24 @@ async function _antRenderModaleIncasso(fatturaAntId) {
   html += '<div style="font-size:10.5px;color:#501313;margin-top:8px;line-height:1.5">Alla conferma: uscita in foglio giornale sul conto scelto, fido liberato, modulo chiuso per questa fattura e fattura di nuovo <strong>da incassare</strong> nell\'estratto conto cliente.</div>';
   html += '</div></div>';
 
+  // 25/09 — RIENTRO DALLA BANCA: la banca si riprende l'anticipo prima che il
+  // cliente paghi (politica sua, spesso a ridosso della scadenza). Non e' un
+  // insoluto: il cliente paghera' e la fattura resta aperta nell'estratto conto.
+  html += '<div style="margin-top:10px;padding:10px 14px;background:#FAEEDA;border-left:4px solid #BA7517;border-radius:6px">';
+  html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">';
+  html += '<input type="checkbox" id="ant-inc-rientro" onchange="_antModIncAggiorna()"> ';
+  html += '<span><strong style="color:#854F0B">Fattura rientrata dalla banca con addebito sul conto</strong> — la banca si riprende l\'anticipo prima del pagamento del cliente.</span>';
+  html += '</label>';
+  html += '<div id="ant-inc-rie-campi" style="display:none;margin-top:10px">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  html += '<div><label style="font-size:11px;color:#854F0B;font-weight:500">Data addebito in banca *</label>';
+  html += '<input id="ant-inc-rie-data" type="date" value="' + oggiISO + '" style="width:100%;padding:7px 9px;border:0.5px solid #BA7517;border-radius:6px;background:var(--bg);color:var(--text);font-size:12px"></div>';
+  html += '<div><label style="font-size:11px;color:#854F0B;font-weight:500">Importo addebitato (€) *</label>';
+  html += '<input id="ant-inc-rie-importo" type="number" step="0.01" min="0" oninput="_antModIncAggiorna()" value="' + defaultImporto.toFixed(2) + '" style="width:100%;padding:7px 9px;border:0.5px solid #BA7517;border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;font-family:var(--font-mono);font-weight:600"></div>';
+  html += '</div>';
+  html += '<div style="font-size:10.5px;color:#412402;margin-top:8px;line-height:1.5">Alla conferma: uscita in foglio giornale sul conto scelto e fido liberato. La fattura <strong>resta da incassare</strong> dal cliente e NON viene segnata come insoluta: quando il cliente pagherà, l\'incasso si registra normalmente in estratto conto.</div>';
+  html += '</div></div>';
+
   html += '</div><div id="ant-inc-lancetta" style="background:var(--bg);border-radius:10px;padding:12px 10px"></div></div>';
 
   // Pulsanti
@@ -4183,17 +4209,30 @@ function _antModIncAggiorna() {
   if (!el) return;
   var ins = document.getElementById('ant-inc-insoluta');
   var inp = document.getElementById('ant-inc-importo');
+  var rie = document.getElementById('ant-inc-rientro');
   var insOn = !!(ins && ins.checked);
+  var rieOn = !!(rie && rie.checked);
+  // le due caselle si escludono: e' o un insoluto o un rientro anticipato
+  if (insOn && rieOn) {
+    if (document.activeElement === rie) { ins.checked = false; insOn = false; }
+    else { rie.checked = false; rieOn = false; }
+  }
   var campi = document.getElementById('ant-inc-ins-campi');
   if (campi) campi.style.display = insOn ? 'block' : 'none';
+  var campiR = document.getElementById('ant-inc-rie-campi');
+  if (campiR) campiR.style.display = rieOn ? 'block' : 'none';
   var inpIns = document.getElementById('ant-inc-ins-importo');
+  var inpRie = document.getElementById('ant-inc-rie-importo');
   // 21/09: anche l'insoluto libera il fido — la banca si e' ripresa i soldi
+  // 25/09: lo stesso vale per il rientro anticipato dalla banca
   var quota = insOn ? (inpIns ? (parseFloat(inpIns.value) || 0) : S.residuo)
+            : rieOn ? (inpRie ? (parseFloat(inpRie.value) || 0) : S.residuo)
                     : (inp ? (parseFloat(inp.value) || 0) : S.residuo);
   if (quota > S.residuo) quota = S.residuo;
   var dopo = Math.max(0, S.esposto - quota);
   var sotto = quota > 0
-    ? 'da ' + fmtE(S.esposto) + ' · −' + fmtE(quota) + (insOn ? ' (addebito insoluto)' : '')
+    ? 'da ' + fmtE(S.esposto) + ' · −' + fmtE(quota)
+      + (insOn ? ' (addebito insoluto)' : (rieOn ? ' (rientro dalla banca)' : ''))
     : 'esposizione invariata';
   el.innerHTML = _antLancetta(S.esposto, dopo, S.massimale, S.f.cliente_nome, sotto)
     + (S.origineMass === 'regola'
@@ -4275,6 +4314,7 @@ async function antEstinguiAnticipo(fatturaAntId, opt) {
 async function _antSalvaIncasso(fatturaAntId) {
   if (!_antPuoIncasso()) { toast('Permesso negato: chiedi all\'amministratore di abilitarti su questa funzione'); return; }
   var insoluta = document.getElementById('ant-inc-insoluta').checked;
+  var rientroBanca = !!((document.getElementById('ant-inc-rientro') || {}).checked);
   var data = document.getElementById('ant-inc-data').value;
   var importoRaw = document.getElementById('ant-inc-importo').value;
 
@@ -4297,6 +4337,18 @@ async function _antSalvaIncasso(fatturaAntId) {
     payload.importo_estinto = impIns;
     payload.note = 'Insoluta · addebitata in banca il ' + fmtD(dIns) + ' per ' + fmtE(impIns)
                  + (speseIns > 0 ? ' + spese ' + fmtE(speseIns) : '');
+  } else if (rientroBanca) {
+    // 25/09 — RIENTRO DALLA BANCA prima del pagamento del cliente: per la banca
+    // la partita e' chiusa (fido libero, conto addebitato), per il cliente NO.
+    var dRie = (document.getElementById('ant-inc-rie-data') || {}).value || '';
+    var impRie = parseFloat((document.getElementById('ant-inc-rie-importo') || {}).value) || 0;
+    if (!dRie) { toast('Indica la data dell\'addebito in banca'); return; }
+    if (impRie <= 0) { toast('Indica l\'importo addebitato dalla banca'); return; }
+    payload.stato = 'estinta';          // chiusa verso la banca
+    payload.data_incasso = dRie;
+    payload.importo_estinto = impRie;
+    payload.note = 'Rientro dalla banca con addebito sul conto il ' + fmtD(dRie) + ' per ' + fmtE(impRie)
+                 + ' · il cliente non ha ancora pagato: fattura aperta in estratto conto';
   } else {
     var importo = Number(importoRaw);
     if (!isFinite(importo) || importo <= 0) { toast('Importo non valido'); return; }
@@ -4334,6 +4386,25 @@ async function _antSalvaIncasso(fatturaAntId) {
       toast('⚠ Nessun conto selezionato: uscita non registrata');
     }
     if (typeof _auditLog === 'function') _auditLog('anticipi', 'anticipi_sbf_fatture', 'INSOLUTA fattura ' + (rigaIns.numero_fattura || fatturaAntId) + ' addebito ' + fmtD(dIns) + ' ' + impIns.toFixed(2) + (speseIns > 0 ? ' + spese ' + speseIns.toFixed(2) : ''));
+  } else if (rientroBanca) {
+    var resR = await sb.from('anticipi_sbf_fatture').update(payload).eq('id', fatturaAntId);
+    if (resR.error) { toast('❌ Errore: ' + resR.error.message); return; }
+    var elBRie = document.getElementById('ant-inc-banca');
+    var bancaRie = (elBRie && elBRie.value) ? elBRie.value : null;
+    var rigaRie = (_antModInc && _antModInc.f) || {};
+    if (bancaRie) {
+      var movRie = await sb.from('foglio_giornale_movimenti').insert([{
+        data: dRie, tipo: 'uscita', importo: Math.round(impRie * 100) / 100,
+        descrizione: 'Rientro di anticipo da parte della banca · fattura ' + (rigaRie.numero_fattura || '') + (rigaRie.cliente_nome ? ' · ' + rigaRie.cliente_nome : ''),
+        banca_id: bancaRie, cassa_tipo: null, metodo: 'sbf',
+        origine: 'auto-anticipo-rientro',
+        note: 'Addebito dell\'anticipo prima del pagamento del cliente: la fattura resta da incassare'
+      }]);
+      if (movRie.error) { toast('⚠ Rientro salvato ma uscita NON registrata: ' + movRie.error.message); }
+    } else {
+      toast('⚠ Nessun conto selezionato: uscita non registrata');
+    }
+    if (typeof _auditLog === 'function') _auditLog('anticipi', 'anticipi_sbf_fatture', 'RIENTRO BANCA fattura ' + (rigaRie.numero_fattura || fatturaAntId) + ' addebito ' + fmtD(dRie) + ' ' + impRie.toFixed(2));
   } else {
     // stessa funzione usata dall'estratto conto clienti: aggiorna la riga E
     // scrive l'uscita dal conto (rientro dell'anticipo alla banca)
@@ -4348,7 +4419,9 @@ async function _antSalvaIncasso(fatturaAntId) {
   }
 
   chiudiModal();
-  toast(insoluta ? '❌ Insoluto registrato: addebito in banca e fido liberato' : '✓ Fattura estinta');
+  toast(insoluta ? '❌ Insoluto registrato: addebito in banca e fido liberato'
+      : (rientroBanca ? '✓ Rientro dalla banca registrato: fido liberato, fattura ancora da incassare dal cliente'
+                      : '✓ Fattura estinta'));
   _antValDati = null;
   _antSvuotaCachePresIds();   // v20260801d: dopo una scrittura i dati in memoria sono vecchi
   if (typeof renderBancheAnticipi === 'function') await renderBancheAnticipi();
