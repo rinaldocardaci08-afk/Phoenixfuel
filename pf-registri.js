@@ -18,7 +18,7 @@
 //   import (storico) o, dal 26/06, via DAS generati in PhoenixFuel.
 // ─────────────────────────────────────────────────────────────────────────────
 
-var _pfRegState = { prodotto: 'Gasolio Autotrazione', anno: 2026, mese: 0, dal: '', al: '', fonte: 'registro' }; // fonte: 'registro' (tabella) | 'derivato' (vista dagli ordini)
+var _pfRegState = { prodotto: 'Gasolio Autotrazione', anno: 2026, mese: 0, dal: '', al: '', fonte: 'derivato' }; // fonte: 'registro' (tabella) | 'derivato' (vista dagli ordini)
 var _PF_REG_PRODOTTI = ['Gasolio Autotrazione', 'Gasolio Agricolo', 'Benzina'];
 var _PF_REG_MESI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
 var _PF_REG_MESI_FULL = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
@@ -95,11 +95,14 @@ function _pfRegHeaderHtml() {
     + '<button onclick="_pfRegSetAnno(' + (_pfRegState.anno + 1) + ')" title="Anno successivo" style="border:0.5px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;width:30px;height:30px;cursor:pointer">▶</button>'
     + '</div>';
   var isDer = (_pfRegState.fonte === 'derivato');
-  var fonteBtn = '<button onclick="_pfRegSetFonte(\'' + (isDer ? 'registro' : 'derivato') + '\')" title="Registro PROVA: derivato dagli ordini (query madre) + dato fiscale da movimenti_fiscali" style="font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;border:0.5px solid ' + (isDer ? '#185FA5' : 'var(--border)') + ';' + (isDer ? 'background:#185FA5;color:#fff;font-weight:600' : 'background:var(--bg);color:var(--text)') + '">🧪 Registro PROVA' + (isDer ? ' · attivo' : '') + '</button>';
+  // 29/09: il registro DERIVATO e' quello ufficiale. Resta il pulsante per
+  // rileggere la vecchia tabella registro_movimenti, solo come archivio storico.
+  var fonteBtn = '<button onclick="_pfRegSetFonte(\'' + (isDer ? 'registro' : 'derivato') + '\')" title="Passa fra il registro in uso (derivato dagli ordini) e la vecchia tabella, tenuta solo come archivio" style="font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;border:0.5px solid ' + (isDer ? 'var(--border)' : '#A32D2D') + ';' + (isDer ? 'background:var(--bg);color:var(--text-muted)' : 'background:#A32D2D;color:#fff;font-weight:600') + '">' + (isDer ? '🗄 Vedi vecchio registro (archivio)' : '⚠ Stai vedendo il VECCHIO registro · torna a quello in uso') + '</button>';
   return '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">'
     + '<div style="display:flex;gap:6px;flex-wrap:wrap">' + subtabs + '</div>' + nav + '</div>'
     + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">' + fonteBtn
-    + (isDer ? '<span style="font-size:11px;color:#185FA5">fonte: vista <code>v_registro_derivato</code> — stesse righe della giacenza deposito, dato fiscale da Access/DAS. Il registro attuale non viene toccato.</span>' : '')
+    + (isDer ? '<span style="font-size:11px;color:var(--text-muted)">registro in uso: righe dagli ordini (stessa fonte della giacenza deposito) con il dato fiscale dei DAS.</span>'
+             : '<span style="font-size:11px;color:#A32D2D;font-weight:600">Vecchia tabella registro_movimenti: contiene densità e kg errati, tenuta solo come archivio. Non usarla per i controlli.</span>')
     + '</div>'
     + '<div id="reg-body"></div>';
 }

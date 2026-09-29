@@ -1,3 +1,8 @@
+// v20260929a — ACCETTA CARICO: (1) le densita' si scrivono come stanno sul DAS,
+//   in kg/mc (813,80) oppure in kg/L (0,81380), con virgola o punto: prima
+//   "813,80" veniva letto 81380 e i kg uscivano ×10 (1.139.239 invece di 11.393);
+//   (2) il dato fiscale va in MOVIMENTI_FISCALI agganciato all'ordine_id — e'
+//   la fonte del registro derivato; registro_movimenti non viene piu' scritta.
 // v20260910a — GIORNALIERA: apertura = giacenza CALCOLATA del giorno prima (query madre), MAI la rilevata
 //   (rilevata = solo osservazione, come mensile e settimanale); teorica include le rettifiche confermate del giorno.
 // PhoenixFuel — Deposito, Rettifiche, Autoconsumo
@@ -3883,8 +3888,30 @@ function _pfAccNum(v) {
   v = v.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
   var n = Number(v); return isNaN(n) ? '' : n;
 }
+// 29/09 — densita': si accetta come sta scritta sul DAS. Il separatore puo'
+// essere la virgola o il punto, e il valore puo' essere in kg/mc (813,80) o in
+// kg/L (0,81380). Qui si legge il numero VERO (niente punto come migliaia) e si
+// riporta sempre a kg/L, che e' l'unita' usata nei calcoli e nel registro.
+function _pfAccDens(v) {
+  if (v == null) return 0;
+  var t = String(v).trim().replace(/\s/g, '');
+  if (!t) return 0;
+  if (t.indexOf(',') >= 0) t = t.replace(/\./g, '').replace(',', '.');   // 813,80 · 1.013,80
+  var n = Number(t);
+  if (!isFinite(n) || n <= 0) return 0;
+  if (n >= 600) n = n / 1000;          // kg/mc: 813,80 → 0,81380
+  else if (n >= 60) n = n / 100;       // 81,38 → 0,81380 (errore di battitura ricorrente)
+  else if (n >= 6) n = n / 10;         // 8,138 → 0,81380
+  return n;
+}
 function _pfAccFmtInt(n) { return (n == null || isNaN(Number(n))) ? '—' : Math.round(Number(n)).toLocaleString('it-IT'); }
-function _pfAccDensFmt(n) { return (n == null || n === 0 || isNaN(Number(n))) ? '' : String(n).replace('.', ','); }
+// nel campo si mostra la densita' come sta sul DAS (kg/mc, tre decimali al piu')
+function _pfAccDensFmt(n) {
+  if (n == null || n === 0 || isNaN(Number(n))) return '';
+  var v = Number(n);
+  if (v < 6) v = v * 1000;                                  // 0,81380 → 813,80
+  return v.toFixed(2).replace('.', ',');
+}
 
 async function apriAccettaCarico(ordineId) {
   var { data: ordine } = await sb.from('ordini').select('*').eq('id', ordineId).single();
@@ -3897,11 +3924,12 @@ async function apriAccettaCarico(ordineId) {
     data: ordine.data,
     costo: Number(ordine.costo_litro || 0) + Number(ordine.trasporto_litro || 0),
     litri: Number(ordine.litri) || 0,            // litri ambiente (editabile)
-    densAmb: _PF_ACC_DENS_DEF[ordine.prodotto] || 835,
-    dens15: _PF_ACC_DENS_DEF[ordine.prodotto] || 835,
+    densAmb: (_PF_ACC_DENS_DEF[ordine.prodotto] || 835) / 1000,   // kg/L
+    dens15: (_PF_ACC_DENS_DEF[ordine.prodotto] || 835) / 1000,
     densSugg: true,
     numDoc: '',
-    kg: 0, litri15: 0
+    kg: 0, litri15: 0,
+    kgManuale: false, l15Manuale: false   // 29/09: se corretti a mano valgono i valori del DAS
   };
   _pfAccCalc();
   _pfAccRender();
@@ -3909,18 +3937,34 @@ async function apriAccettaCarico(ordineId) {
 
 function _pfAccCalc() {
   var S = _pfAcc; if (!S) return;
-  if (S.densAmb > 0) S.kg = Math.round(S.litri * S.densAmb / 1000);
-  if (S.densAmb > 0 && S.dens15 > 0) S.litri15 = Math.round(S.litri * S.densAmb / S.dens15);
+  // densita' sempre in kg/L: kg = litri × densita' ambiente, lt15 = kg / densita' a 15°
+  // I valori corretti a mano (presi dal DAS) NON vengono sovrascritti dal calcolo.
+  if (!S.kgManuale && S.densAmb > 0) S.kg = Math.round(S.litri * S.densAmb);
+  if (!S.l15Manuale && S.densAmb > 0 && S.dens15 > 0) S.litri15 = Math.round(S.kg / S.dens15);
+}
+function _pfAccOnInputKg() {
+  var S = _pfAcc; if (!S) return;
+  var v = _pfAccNum(document.getElementById('acc-kg').value);
+  S.kg = Number(v) || 0; S.kgManuale = S.kg > 0;
+  if (!S.l15Manuale && S.dens15 > 0) {
+    S.litri15 = Math.round(S.kg / S.dens15);
+    var e15 = document.getElementById('acc-litri15'); if (e15) e15.value = _pfAccFmtInt(S.litri15);
+  }
+}
+function _pfAccOnInputL15() {
+  var S = _pfAcc; if (!S) return;
+  var v = _pfAccNum(document.getElementById('acc-litri15').value);
+  S.litri15 = Number(v) || 0; S.l15Manuale = S.litri15 > 0;
 }
 function _pfAccOnInput() {
   var S = _pfAcc; if (!S) return;
   S.litri = _pfAccNum(document.getElementById('acc-litri').value) || 0;
-  S.densAmb = _pfAccNum(document.getElementById('acc-densamb').value) || 0;
-  S.dens15 = _pfAccNum(document.getElementById('acc-dens15').value) || 0;
+  S.densAmb = _pfAccDens(document.getElementById('acc-densamb').value);
+  S.dens15 = _pfAccDens(document.getElementById('acc-dens15').value);
   S.numDoc = document.getElementById('acc-numdoc').value || '';
   _pfAccCalc();
-  var ek = document.getElementById('acc-kg'); if (ek) ek.textContent = _pfAccFmtInt(S.kg);
-  var e15 = document.getElementById('acc-litri15'); if (e15) e15.textContent = _pfAccFmtInt(S.litri15);
+  var ek = document.getElementById('acc-kg'); if (ek && !S.kgManuale) ek.value = _pfAccFmtInt(S.kg);
+  var e15 = document.getElementById('acc-litri15'); if (e15 && !S.l15Manuale) e15.value = _pfAccFmtInt(S.litri15);
   // densità toccata → non più suggerimento (tolgo stile tenue)
   var da = document.getElementById('acc-densamb'), d15 = document.getElementById('acc-dens15');
   if (da) { da.style.color = 'var(--text)'; da.style.fontStyle = 'normal'; }
@@ -3951,10 +3995,10 @@ function _pfAccRender() {
   h += '</div>';
 
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">';
-  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">peso kg (calcolato)</div><div id="acc-kg" style="' + calc + '">' + _pfAccFmtInt(S.kg) + '</div></div>';
-  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">litri @15 (calcolato)</div><div id="acc-litri15" style="' + calc + '">' + _pfAccFmtInt(S.litri15) + '</div></div>';
+  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">peso kg' + (S.kgManuale ? ' (dal DAS)' : ' (calcolato · modificabile)') + '</div><input id="acc-kg" type="text" inputmode="numeric" value="' + _pfAccFmtInt(S.kg) + '" oninput="_pfAccOnInputKg()" style="' + (S.kgManuale ? box : calc) + ';width:100%;box-sizing:border-box"></div>';
+  h += '<div style="flex:1;min-width:110px"><div style="' + lbl + '">litri @15' + (S.l15Manuale ? ' (dal DAS)' : ' (calcolato · modificabile)') + '</div><input id="acc-litri15" type="text" inputmode="numeric" value="' + _pfAccFmtInt(S.litri15) + '" oninput="_pfAccOnInputL15()" style="' + (S.l15Manuale ? box : calc) + ';width:100%;box-sizing:border-box"></div>';
   h += '</div>';
-  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:16px">' + (S.densSugg ? '💡 densità suggerita — inserisci quella del DAS in entrata · ' : '') + 'kg = litri × densità amb / 1000 · il deposito sale di ' + _pfAccFmtInt(S.litri) + ' L (ambiente)</div>';
+  h += '<div style="font-size:11px;color:var(--text-hint);margin-bottom:16px">' + (S.densSugg ? '💡 densità suggerita — inserisci quella del DAS in entrata · ' : '') + 'kg = litri × densità ambiente · si può scrivere 813,80 oppure 0,81380 · kg e litri@15 sono proposti dal calcolo ma si possono correggere con i valori esatti del DAS · il deposito sale di ' + _pfAccFmtInt(S.litri) + ' L (ambiente)</div>';
 
   h += '<div style="display:flex;gap:8px"><button class="btn-primary" style="flex:1;background:#1D9E75" id="acc-salva" onclick="_confermaAccettaCarico()">💧 Accetta e carica deposito</button>';
   h += '<button onclick="chiudiModalePermessi()" style="padding:9px 16px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);cursor:pointer">Annulla</button></div>';
@@ -4002,29 +4046,27 @@ async function _confermaAccettaCarico() {
       caricato_deposito: true
     }).eq('id', S.ordineId);
 
-    // 3. riga nel registro fiscale (direzione E = entrata)
+    // 3. dato fiscale dell'ENTRATA → movimenti_fiscali, agganciato all'ordine.
+    //    E' la fonte del registro derivato (v_registro_derivato): una riga per
+    //    ordine, densita' in kg/L. La vecchia registro_movimenti non si scrive
+    //    piu' (29/09): teneva righe non agganciate e con densita' ×10.
     try {
-      var _densAmbReg = S.densAmb > 100 ? S.densAmb / 1000 : S.densAmb;
-      var _dens15Reg = S.dens15 > 100 ? S.dens15 / 1000 : S.dens15;
-      await sb.from('registro_movimenti').insert([{
-        prodotto: S.prodotto,
-        seq: Math.floor(Date.now() / 60000),
-        data: S.data,
-        direzione: 'E',
-        tipo_doc: 'RDR',
-        arc: S.numDoc || null,
-        doc_data: S.data,
-        progressivo: null,
-        controparte: S.fornitore || null,
-        dens_amb: _densAmbReg,
-        dens_15: _dens15Reg,
+      var resMf = await sb.from('movimenti_fiscali').upsert({
+        ordine_id: S.ordineId,
+        num_das: S.numDoc || null,
+        dens_amb: Number(S.densAmb.toFixed(5)),
+        dens_15: Number(S.dens15.toFixed(5)),
         kg: Math.round(S.kg),
         lt_15: Math.round(S.litri15),
         lt_amb: Math.round(S.litri),
-        is_apertura: false,
-        origine: 'phoenix'
-      }]);
-    } catch (eReg) { console.warn('registro entrata non scritto:', eReg && eReg.message); }
+        fonte: 'accetta_carico',
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'ordine_id' });
+      if (resMf.error) throw resMf.error;
+    } catch (eReg) {
+      console.warn('dato fiscale entrata non scritto:', eReg && eReg.message);
+      toast('⚠ Carico fatto, ma il dato fiscale non è stato salvato: ' + (eReg && eReg.message ? eReg.message : ''));
+    }
 
     if (typeof _cmpStoricoSvuotaCache === 'function') _cmpStoricoSvuotaCache();
     _auditLog('accetta_carico', 'cisterne', S.prodotto + ' ' + _pfAccFmtInt(S.litri) + ' L da ' + S.fornitore + ' · CMP ' + res.cmpNuovo.toFixed(6));
