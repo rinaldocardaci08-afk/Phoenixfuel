@@ -1,4 +1,6 @@
 // PhoenixFuel — Logistica: Report vettori
+// v20260930b — pulsante 📄 Stampa PDF nella sezione per base: stampa ESATTAMENTE
+//   la selezione a video (filtri base/vettore/mese) con barre, tabella e totali.
 // v20260930a — nuova sezione DETTAGLIO PER BASE DI CARICO sotto il dettaglio per
 //   vettore: filtri base + vettore + anno + mese, barre dei litri per base divise
 //   per vettore e tabella a due livelli (base → vettori) con litri/viaggio e €/L,
@@ -266,6 +268,7 @@ function _vetRenderBasi() {
   h += '<select onchange="vetBaseFiltro(\'mese\', this.value)" style="' + sel + '"><option value="">Tutto l\'anno ' + d.anno + '</option>'
     + _VET_MESI.map(function (m, i) { return '<option value="' + i + '"' + (String(_vetBaseF.mese) === String(i) ? ' selected' : '') + '>' + m + '</option>'; }).join('')
     + '</select>';
+  h += '<button onclick="vetBasiPdf()" title="Stampa in PDF esattamente quello che vedi" style="font-size:12px;padding:6px 12px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa PDF</button>';
   h += '<span style="margin-left:auto;font-size:11.5px;color:var(--text-muted)">' + _vetNum(totViaggi) + ' viaggi · ' + _vetNum(totLitri) + ' litri</span>';
   h += '</div>';
 
@@ -439,5 +442,112 @@ function vetPrefattura(vettoreId, mese) {
   doc += '</body></html>';
   w.document.write(doc);
   w.document.close();
+  setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+}
+
+// ── PDF della selezione (30/09) ────────────────────────────────────────────
+// Stampa esattamente quello che si vede: stessi filtri, stesse barre, stessa
+// tabella. Nessun calcolo nuovo: si riusano le righe gia' in memoria.
+function vetBasiPdf() {
+  var d = _vetDati; if (!d) return;
+  var righe = _vetRighiFiltrate();
+  if (!righe.length) { if (typeof toast === 'function') toast('Nessun viaggio da stampare con questi filtri'); return; }
+
+  var perBase = {};
+  righe.forEach(function (r) {
+    var b = perBase[r.baseId] || (perBase[r.baseId] = { nome: r.baseNome, litri: 0, importo: 0, viaggi: {}, vett: {} });
+    b.litri += r.litri; b.importo += r.importo; b.viaggi[r.caricoId] = true;
+    var v = b.vett[r.vettoreId] || (b.vett[r.vettoreId] = { nome: r.vettoreNome, proprio: r.proprio, litri: 0, importo: 0, viaggi: {} });
+    v.litri += r.litri; v.importo += r.importo; v.viaggi[r.caricoId] = true;
+  });
+  var basi = Object.keys(perBase).map(function (k) { return perBase[k]; }).sort(function (a, b) { return b.litri - a.litri; });
+  var totLitri = basi.reduce(function (s2, b) { return s2 + b.litri; }, 0);
+  var totImp = basi.reduce(function (s2, b) { return s2 + b.importo; }, 0);
+  var totViaggi = basi.reduce(function (s2, b) { return s2 + Object.keys(b.viaggi).length; }, 0);
+
+  // etichette dei filtri attivi, per scriverle nel documento
+  var nomiBase = {}, nomiVett = {};
+  d.righeBase.forEach(function (r) { nomiBase[r.baseId] = r.baseNome; nomiVett[r.vettoreId] = r.vettoreNome; });
+  var filtri = [];
+  filtri.push('Base: ' + (_vetBaseF.base ? (nomiBase[_vetBaseF.base] || '—') : 'tutte'));
+  filtri.push('Vettore: ' + (_vetBaseF.vettore ? (nomiVett[_vetBaseF.vettore] || '—') : 'tutti'));
+  filtri.push('Periodo: ' + (_vetBaseF.mese !== '' ? _VET_MESI[Number(_vetBaseF.mese)] + ' ' + d.anno : 'anno ' + d.anno));
+
+  var mx = basi[0].litri || 1;
+  var COL = ['#185FA5', '#7E9BBD', '#B9C6D4', '#639922', '#BA7517', '#A32D2D', '#6B5FCC'];
+  var colVett = {}; Object.keys(nomiVett).forEach(function (k, i) { colVett[k] = COL[i % COL.length]; });
+
+  var barre = basi.map(function (b) {
+    var vv = Object.keys(b.vett).map(function (k) { return { k: k, v: b.vett[k] }; }).sort(function (x, y) { return y.v.litri - x.v.litri; });
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'
+      + '<div style="width:140px;font-size:9px;text-align:right">' + b.nome + '</div>'
+      + '<div style="flex:1;background:#F2F2F2;border-radius:3px;height:14px"><div style="width:' + (b.litri / mx * 100).toFixed(1) + '%;height:14px;display:flex;border-radius:3px;overflow:hidden">'
+      + vv.map(function (x) { return '<div style="width:' + (x.v.litri / b.litri * 100).toFixed(1) + '%;background:' + (colVett[x.k] || '#999') + '"></div>'; }).join('')
+      + '</div></div>'
+      + '<div style="width:95px;font-size:9px;font-family:Consolas,monospace;text-align:right">' + _vetNum(b.litri) + '</div></div>';
+  }).join('');
+  var legenda = Object.keys(nomiVett).map(function (k) {
+    return '<span style="margin-right:12px"><span style="display:inline-block;width:8px;height:8px;background:' + colVett[k] + '"></span> ' + nomiVett[k] + '</span>';
+  }).join('');
+
+  var corpo = '';
+  basi.forEach(function (b) {
+    var nv = Object.keys(b.viaggi).length;
+    corpo += '<tr style="background:#EAF0F7;font-weight:700"><td>' + b.nome + '</td>'
+      + '<td class="n">' + _vetNum(nv) + '</td><td class="n">' + _vetNum(b.litri) + '</td>'
+      + '<td class="n">' + (nv ? _vetNum(b.litri / nv) : '—') + '</td>'
+      + '<td class="n">' + (b.litri ? _vetNum(b.importo / b.litri, 4) : '—') + '</td>'
+      + '<td class="n">' + _vetEuro(b.importo) + '</td></tr>';
+    var vv = Object.keys(b.vett).map(function (k) { return b.vett[k]; }).sort(function (x, y) { return y.litri - x.litri; });
+    var costi = vv.filter(function (v) { return v.litri > 0 && v.importo > 0; }).map(function (v) { return v.importo / v.litri; });
+    var min = costi.length ? Math.min.apply(null, costi) : null, max = costi.length ? Math.max.apply(null, costi) : null;
+    vv.forEach(function (v) {
+      var nvv = Object.keys(v.viaggi).length, el = v.litri ? v.importo / v.litri : 0;
+      var col = (costi.length > 1 && v.importo > 0)
+        ? (Math.abs(el - min) < 1e-9 ? '#27500A' : (Math.abs(el - max) < 1e-9 ? '#A32D2D' : '#222')) : '#222';
+      corpo += '<tr><td style="padding-left:16px">' + v.nome + (v.proprio ? ' <span style="font-size:8px;color:#777">non fattura</span>' : '') + '</td>'
+        + '<td class="n">' + _vetNum(nvv) + '</td><td class="n">' + _vetNum(v.litri) + '</td>'
+        + '<td class="n">' + (nvv ? _vetNum(v.litri / nvv) : '—') + '</td>'
+        + '<td class="n" style="color:' + col + ';font-weight:600">' + (v.litri ? _vetNum(el, 4) : '—') + '</td>'
+        + '<td class="n">' + _vetEuro(v.importo) + '</td></tr>';
+    });
+  });
+
+  var oggi = new Date().toLocaleDateString('it-IT');
+  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Trasporti per base ' + d.anno + '</title><style>'
+    + '@page{size:A4;margin:13mm}body{font-family:Calibri,Arial,sans-serif;font-size:10.5px;color:#222;margin:0}'
+    + 'h1{font-size:15px;margin:0}.sub{font-size:10px;color:#555;margin:2px 0 10px}'
+    + '.filtri{font-size:10px;background:#F4F6F8;border:1px solid #DDD;border-radius:6px;padding:7px 10px;margin-bottom:12px}'
+    + '.kpi{display:flex;gap:8px;margin-bottom:12px}.k{flex:1;border:1px solid #DDD;border-radius:6px;padding:7px 9px}'
+    + '.k .l{font-size:8.5px;color:#666;text-transform:uppercase}.k .v{font-size:15px;font-weight:700;font-family:Consolas,monospace}'
+    + '.box{border:1px solid #DDD;border-radius:6px;padding:10px 12px;margin-bottom:12px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:9.5px}thead{display:table-header-group}'
+    + 'th{background:#0B2545;color:#fff;padding:6px 7px;font-size:8.5px;text-transform:uppercase;text-align:right}'
+    + 'th.l{text-align:left}td{padding:5px 7px;border-bottom:1px solid #E8E8E8}td.n{text-align:right;font-family:Consolas,monospace}'
+    + 'tr{page-break-inside:avoid}.foot{margin-top:14px;border-top:1px solid #DDD;padding-top:5px;font-size:8px;color:#777;text-align:center}'
+    + '</style></head><body>'
+    + '<h1>PHOENIX FUEL S.R.L. &mdash; Trasporti per base di carico</h1>'
+    + '<div class="sub">Uffici e Deposito: Zona Industriale, 89900 Portosalvo (VV) &middot; P.IVA 02744150802 &middot; documento generato il ' + oggi + '</div>'
+    + '<div class="filtri"><strong>Selezione:</strong> ' + filtri.join(' &nbsp;&middot;&nbsp; ') + '</div>'
+    + '<div class="kpi">'
+    + '<div class="k"><div class="l">Basi</div><div class="v">' + basi.length + '</div></div>'
+    + '<div class="k"><div class="l">Viaggi</div><div class="v">' + _vetNum(totViaggi) + '</div></div>'
+    + '<div class="k"><div class="l">Litri</div><div class="v">' + _vetNum(totLitri) + '</div></div>'
+    + '<div class="k"><div class="l">Costo trasporto</div><div class="v">' + _vetEuro(totImp) + '</div><div class="l">' + (totLitri ? _vetNum(totImp / totLitri, 4) + ' &euro;/L medio' : '') + '</div></div>'
+    + '</div>'
+    + '<div class="box"><div style="font-size:11px;font-weight:700;margin-bottom:8px">Litri per base, divisi per vettore</div>' + barre
+    + '<div style="font-size:8.5px;color:#555;margin-top:7px">' + legenda + '</div></div>'
+    + '<table><thead><tr><th class="l">Base &middot; vettore</th><th>Viaggi</th><th>Litri</th><th>Litri/viaggio</th><th>&euro;/litro</th><th>Costo</th></tr></thead><tbody>'
+    + corpo
+    + '<tr style="background:#EAF0F7;font-weight:700"><td>TOTALE</td><td class="n">' + _vetNum(totViaggi) + '</td><td class="n">' + _vetNum(totLitri) + '</td><td></td>'
+    + '<td class="n">' + (totLitri ? _vetNum(totImp / totLitri, 4) : '—') + '</td><td class="n">' + _vetEuro(totImp) + '</td></tr>'
+    + '</tbody></table>'
+    + '<div style="font-size:8.5px;color:#555;margin-top:8px">In verde il &euro;/litro piu\' basso della base, in rosso il piu\' alto. La base viene dall\'ordine: un viaggio con ordini di basi diverse ripartisce i litri fra le basi. I viaggi senza carico registrato non sono compresi.</div>'
+    + '<div class="foot">Phoenix Fuel S.r.l. &middot; P.IVA 02744150802 &mdash; dati estratti dal gestionale PhoenixFuel</div>'
+    + '</body></html>';
+
+  var w = window.open('', '_blank');
+  if (!w) { if (typeof toast === 'function') toast('Abilita i popup per creare il PDF'); return; }
+  w.document.write(doc); w.document.close(); w.focus();
   setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
 }
