@@ -1,4 +1,10 @@
 // PhoenixFuel — Logistica: Report vettori
+// v20260930a — nuova sezione DETTAGLIO PER BASE DI CARICO sotto il dettaglio per
+//   vettore: filtri base + vettore + anno + mese, barre dei litri per base divise
+//   per vettore e tabella a due livelli (base → vettori) con litri/viaggio e €/L,
+//   in verde il vettore piu' conveniente della base e in rosso il piu' caro.
+//   La base arriva da ordini.base_carico_id: se un carico raccoglie ordini di
+//   basi diverse, i litri vanno su ciascuna base per la loro quota.
 // v20260804a
 //
 // Serve a mandare a ogni vettore, ogni mese, la PREFATTURA che ci
@@ -33,6 +39,7 @@ async function caricaReportVettori() {
   try {
     _vetDati = await _vetCarica(_vetAnno);
     box.innerHTML = _vetHtml(_vetDati);
+    _vetRenderBasi();
     _vetDisegna();
   } catch (e) {
     box.innerHTML = '<div style="padding:20px;color:#A32D2D;font-size:13px">Non riesco a caricare i viaggi: '
@@ -44,10 +51,20 @@ function vetAnno(a) { _vetAnno = Number(a); caricaReportVettori(); }
 
 async function _vetCarica(anno) {
   var r = await sb.from('carichi')
-    .select('id,data,trasportatore_id,mezzo_targa,autista,stato,carico_ordini(ordini(litri,trasporto_litro,prodotto,cliente)),trasportatori(nome)')
+    .select('id,data,trasportatore_id,mezzo_targa,autista,stato,carico_ordini(ordini(litri,trasporto_litro,prodotto,cliente,base_carico_id)),trasportatori(nome)')
     .gte('data', anno + '-01-01').lte('data', anno + '-12-31')
     .order('data');
   if (r.error) throw r.error;
+
+  // nomi delle basi di carico (anagrafica piccola, lettura unica)
+  var basi = {};
+  try {
+    var rb = await sb.from('basi_carico').select('id,nome');
+    (rb.data || []).forEach(function (b) { basi[b.id] = b.nome; });
+  } catch (eb) { console.warn('[vettori] basi di carico non lette:', eb && eb.message); }
+
+  // righe elementari base × vettore × mese: una per ogni ordine del carico
+  var righeBase = [];
 
   var perVettore = {};
   (r.data || []).forEach(function (c) {
@@ -70,11 +87,27 @@ async function _vetCarica(anno) {
                      targa: c.mezzo_targa, autista: c.autista, stato: c.stato,
                      prodotti: [].concat.apply([], ordini.map(function (o) { return o.prodotto || ''; })),
                      clienti: ordini.map(function (o) { return o.cliente || ''; }) });
+
+    // una riga per ordine: cosi' un carico con ordini di basi diverse finisce
+    // su ciascuna base con i suoi litri, senza inventare attribuzioni
+    var caricoContato = {};
+    ordini.forEach(function (o) {
+      var bId = o.base_carico_id || '_senza';
+      righeBase.push({
+        baseId: bId,
+        baseNome: basi[bId] || (bId === '_senza' ? 'Base non indicata' : 'Base ' + String(bId).slice(0, 8)),
+        vettoreId: key, vettoreNome: nome, proprio: (key === 'proprio'),
+        mese: m, caricoId: c.id,
+        litri: Number(o.litri || 0),
+        importo: Number(o.trasporto_litro || 0) * Number(o.litri || 0),
+        primoDelCarico: !caricoContato[bId + '|' + key] && (caricoContato[bId + '|' + key] = true)
+      });
+    });
   });
 
   var elenco = Object.keys(perVettore).map(function (k) { return perVettore[k]; })
     .sort(function (a, b) { return b.litri - a.litri; });
-  return { anno: anno, vettori: elenco,
+  return { anno: anno, vettori: elenco, righeBase: righeBase,
            totViaggi: elenco.reduce(function (a, v) { return a + v.viaggi; }, 0),
            totLitri: elenco.reduce(function (a, v) { return a + v.litri; }, 0),
            totImporto: elenco.reduce(function (a, v) { return a + v.importo; }, 0) };
@@ -165,7 +198,154 @@ function _vetHtml(d) {
     + 'I viaggi vengono dai carichi registrati; l\'importo e il prezzo per litro dell\'ordine moltiplicato per i litri, '
     + 'lo stesso valore che compare in Logistica. I <strong>mezzi propri</strong> sono nel conteggio ma non emettono fattura.</div>';
   h += '</div>';
+
+  h += '<div id="vet-basi" style="margin-top:16px"></div>';
   return h;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETTAGLIO PER BASE DI CARICO (30/09)
+// Da quale base partono i viaggi e come si dividono fra i vettori: serve a
+// decidere a chi affidare i viaggi di ogni base guardando il €/litro.
+// Nessuna query nuova: si usano le righe gia' caricate per il report vettori.
+// ═══════════════════════════════════════════════════════════════════════════
+var _vetBaseF = { base: '', vettore: '', mese: '' };
+
+function vetBaseFiltro(campo, valore) { _vetBaseF[campo] = valore || ''; _vetRenderBasi(); }
+
+function _vetRighiFiltrate() {
+  var d = _vetDati; if (!d || !d.righeBase) return [];
+  return d.righeBase.filter(function (r) {
+    if (_vetBaseF.base && r.baseId !== _vetBaseF.base) return false;
+    if (_vetBaseF.vettore && r.vettoreId !== _vetBaseF.vettore) return false;
+    if (_vetBaseF.mese !== '' && String(r.mese) !== String(_vetBaseF.mese)) return false;
+    return true;
+  });
+}
+
+function _vetRenderBasi() {
+  var box = document.getElementById('vet-basi');
+  var d = _vetDati;
+  if (!box || !d) return;
+  if (!d.righeBase || !d.righeBase.length) {
+    box.innerHTML = '<div class="card" style="padding:14px;font-size:12.5px;color:var(--text-muted)">Nessun viaggio con base di carico nel ' + d.anno + '.</div>';
+    return;
+  }
+
+  // elenchi per le tendine (sempre completi, non filtrati)
+  var basiEl = {}, vettEl = {};
+  d.righeBase.forEach(function (r) { basiEl[r.baseId] = r.baseNome; vettEl[r.vettoreId] = r.vettoreNome; });
+
+  var righe = _vetRighiFiltrate();
+  var perBase = {};
+  righe.forEach(function (r) {
+    var b = perBase[r.baseId] || (perBase[r.baseId] = { id: r.baseId, nome: r.baseNome, litri: 0, importo: 0, viaggi: {}, vett: {} });
+    b.litri += r.litri; b.importo += r.importo; b.viaggi[r.caricoId] = true;
+    var v = b.vett[r.vettoreId] || (b.vett[r.vettoreId] = { id: r.vettoreId, nome: r.vettoreNome, proprio: r.proprio, litri: 0, importo: 0, viaggi: {} });
+    v.litri += r.litri; v.importo += r.importo; v.viaggi[r.caricoId] = true;
+  });
+  var basi = Object.keys(perBase).map(function (k) { return perBase[k]; }).sort(function (a, b) { return b.litri - a.litri; });
+  var totLitri = basi.reduce(function (s, b) { return s + b.litri; }, 0);
+  var totImp = basi.reduce(function (s, b) { return s + b.importo; }, 0);
+  var totViaggi = basi.reduce(function (s, b) { return s + Object.keys(b.viaggi).length; }, 0);
+
+  var sel = 'font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer';
+  var h = '<div class="card" style="padding:14px">';
+  h += '<div style="font-size:14px;font-weight:700">🏭 Dettaglio per base di carico</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Quanti viaggi partono da ogni base e come si dividono fra i vettori.</div>';
+
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">';
+  h += '<select onchange="vetBaseFiltro(\'base\', this.value)" style="' + sel + '"><option value="">Tutte le basi</option>'
+    + Object.keys(basiEl).sort(function (a, b) { return String(basiEl[a]).localeCompare(String(basiEl[b])); })
+        .map(function (k) { return '<option value="' + k + '"' + (_vetBaseF.base === k ? ' selected' : '') + '>' + esc(basiEl[k]) + '</option>'; }).join('')
+    + '</select>';
+  h += '<select onchange="vetBaseFiltro(\'vettore\', this.value)" style="' + sel + '"><option value="">Tutti i vettori</option>'
+    + Object.keys(vettEl).sort(function (a, b) { return String(vettEl[a]).localeCompare(String(vettEl[b])); })
+        .map(function (k) { return '<option value="' + k + '"' + (_vetBaseF.vettore === k ? ' selected' : '') + '>' + esc(vettEl[k]) + '</option>'; }).join('')
+    + '</select>';
+  h += '<select onchange="vetBaseFiltro(\'mese\', this.value)" style="' + sel + '"><option value="">Tutto l\'anno ' + d.anno + '</option>'
+    + _VET_MESI.map(function (m, i) { return '<option value="' + i + '"' + (String(_vetBaseF.mese) === String(i) ? ' selected' : '') + '>' + m + '</option>'; }).join('')
+    + '</select>';
+  h += '<span style="margin-left:auto;font-size:11.5px;color:var(--text-muted)">' + _vetNum(totViaggi) + ' viaggi · ' + _vetNum(totLitri) + ' litri</span>';
+  h += '</div>';
+
+  if (!basi.length) {
+    h += '<div style="padding:18px;text-align:center;font-size:12.5px;color:var(--text-muted)">Nessun viaggio con questi filtri.</div></div>';
+    box.innerHTML = h;
+    return;
+  }
+
+  // barre: litri per base divisi per vettore
+  var COL = ['#185FA5', '#7E9BBD', '#B9C6D4', '#639922', '#BA7517', '#A32D2D', '#6B5FCC'];
+  var colVett = {}; Object.keys(vettEl).forEach(function (k, i) { colVett[k] = COL[i % COL.length]; });
+  var mx = basi[0].litri || 1;
+  h += '<div style="border:0.5px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:12px">';
+  h += '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Litri per base, divisi per vettore</div>';
+  basi.forEach(function (b) {
+    var vv = Object.keys(b.vett).map(function (k) { return b.vett[k]; }).sort(function (x, y) { return y.litri - x.litri; });
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+      + '<div style="width:130px;font-size:11px;text-align:right;overflow:hidden;white-space:nowrap">' + esc(b.nome) + '</div>'
+      + '<div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:var(--bg)">'
+      + '<div style="width:' + (b.litri / mx * 100).toFixed(1) + '%;display:flex">'
+      + vv.map(function (v) { return '<div title="' + esc(v.nome) + ': ' + _vetNum(v.litri) + ' L" style="width:' + (v.litri / b.litri * 100).toFixed(1) + '%;background:' + colVett[v.id] + '"></div>'; }).join('')
+      + '</div></div>'
+      + '<div style="width:100px;font-size:11px;font-family:var(--font-mono);text-align:right">' + _vetNum(b.litri) + '</div></div>';
+  });
+  h += '<div style="display:flex;gap:14px;margin-top:9px;font-size:10.5px;color:var(--text-muted);flex-wrap:wrap">'
+    + Object.keys(vettEl).map(function (k) {
+        return '<span><span style="display:inline-block;width:9px;height:9px;background:' + colVett[k] + ';border-radius:2px"></span> ' + esc(vettEl[k]) + '</span>';
+      }).join('') + '</div></div>';
+
+  // tabella base → vettori
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Base · vettore</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Viaggi</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Litri</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Litri/viaggio</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">€/litro</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Costo</th></tr>';
+  basi.forEach(function (b) {
+    var nv = Object.keys(b.viaggi).length;
+    h += '<tr style="background:var(--bg-kpi);font-weight:700">'
+      + '<td style="padding:7px">' + esc(b.nome) + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _vetNum(nv) + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _vetNum(b.litri) + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + (nv ? _vetNum(b.litri / nv) : '—') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + (b.litri ? _vetNum(b.importo / b.litri, 4) : '—') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _vetEuro(b.importo) + '</td></tr>';
+    var vv = Object.keys(b.vett).map(function (k) { return b.vett[k]; }).sort(function (x, y) { return y.litri - x.litri; });
+    var costi = vv.filter(function (v) { return v.litri > 0 && v.importo > 0; }).map(function (v) { return v.importo / v.litri; });
+    var min = costi.length ? Math.min.apply(null, costi) : null, max = costi.length ? Math.max.apply(null, costi) : null;
+    vv.forEach(function (v) {
+      var nvv = Object.keys(v.viaggi).length;
+      var el = v.litri ? v.importo / v.litri : 0;
+      var col = (costi.length > 1 && v.importo > 0)
+        ? (Math.abs(el - min) < 1e-9 ? '#27500A' : (Math.abs(el - max) < 1e-9 ? '#A32D2D' : 'var(--text)'))
+        : 'var(--text)';
+      h += '<tr style="border-bottom:0.5px solid var(--border)">'
+        + '<td style="padding:6px 7px 6px 22px">' + esc(v.nome)
+          + (v.proprio ? ' <span style="font-size:9px;background:var(--bg);border:0.5px solid var(--border);padding:1px 6px;border-radius:7px;color:var(--text-muted)">non fattura</span>' : '') + '</td>'
+        + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _vetNum(nvv) + '</td>'
+        + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _vetNum(v.litri) + '</td>'
+        + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + (nvv ? _vetNum(v.litri / nvv) : '—') + '</td>'
+        + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono);color:' + col + ';font-weight:600">' + (v.litri ? _vetNum(el, 4) : '—') + '</td>'
+        + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _vetEuro(v.importo) + '</td></tr>';
+    });
+  });
+  h += '<tr style="background:var(--bg-kpi);font-weight:700">'
+    + '<td style="padding:8px">TOTALE</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + _vetNum(totViaggi) + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + _vetNum(totLitri) + '</td>'
+    + '<td></td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + (totLitri ? _vetNum(totImp / totLitri, 4) : '—') + '</td>'
+    + '<td style="padding:8px;text-align:right;font-family:var(--font-mono)">' + _vetEuro(totImp) + '</td></tr>';
+  h += '</table></div>';
+  h += '<div style="font-size:11px;color:var(--text-muted);margin-top:9px">In verde il €/litro più basso della base, in rosso il più alto. '
+    + 'La base viene dall\'ordine: se un viaggio raccoglie ordini di basi diverse, i litri vanno su ciascuna base per la loro quota. '
+    + 'I viaggi senza carico registrato non compaiono qui — si vedono nel blocco “viaggi da attribuire”.</div>';
+  h += '</div>';
+  box.innerHTML = h;
 }
 
 function _vetDisegna() {
