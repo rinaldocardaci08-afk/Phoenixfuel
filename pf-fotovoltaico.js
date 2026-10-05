@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261005c — CONTRATTI come schede degli IMPIANTI VENDUTI: elenco separato da
+//   quello degli impianti di proprieta' (che stanno in Investimenti), con due barre —
+//   AVANZAMENTO LAVORI per fasi (accettazione, consegna, installazione, collaudo,
+//   produzione) e INCASSI dal cliente sul totale del contratto.
 // v20261005b — COSTI E MARGINE sull'offerta: anagrafica FORNITORI FV separata e
 //   blocco dei costi (fornitura chiavi in mano, commissione agente, altro) con il
 //   riferimento al documento del fornitore — solo i dati, nessun PDF allegato.
@@ -623,9 +627,11 @@ async function fvCaricaContratti() {
   var r = await Promise.all([
     sb.from('fv_contratti').select('*').order('anno', { ascending: false }).order('numero', { ascending: false }),
     sb.from('fv_contratti_righe').select('*').order('ordine'),
-    sb.from('fv_contratti_quote').select('*').order('ordine')
+    sb.from('fv_contratti_quote').select('*').order('ordine'),
+    sb.from('foglio_giornale_movimenti').select('id,data,tipo,importo,descrizione,fv_contratto_id').not('fv_contratto_id', 'is', null)
   ]);
-  _fvCon = { contratti: r[0].data || [], righe: r[1].data || [], quote: r[2].data || [] };
+  _fvCon = { contratti: r[0].data || [], righe: r[1].data || [], quote: r[2].data || [],
+             incassi: (r[3] && r[3].data) || [] };
   _fvContrattoAperto = null;
   _fvRenderContratti();
 }
@@ -633,16 +639,17 @@ async function fvCaricaContratti() {
 function _fvRenderContratti() {
   var box = document.getElementById('fvc-content');
   if (_fvContrattoAperto) { _fvRenderContrattoScheda(); return; }
-  var h = '<div style="margin-bottom:12px"><div style="font-size:16px;font-weight:700">📝 Contratti</div>'
-    + '<div style="font-size:11.5px;color:var(--text-muted)">Nascono dall\'offerta accettata e restano modificabili voce per voce, quote di pagamento comprese.</div></div>';
+  var h = '<div style="margin-bottom:12px"><div style="font-size:16px;font-weight:700">📝 Contratti · impianti venduti</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Gli impianti venduti ai clienti, con l\'avanzamento dei lavori e gli incassi. Gli impianti di nostra proprietà stanno in Investimenti.</div></div>';
   if (!_fvCon.contratti.length) { box.innerHTML = h + _fvVuoto('Nessun contratto. Si genera da un\'offerta accettata.'); return; }
   h += '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:700px">';
   h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
     + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">N.</th>'
     + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">Data</th>'
     + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">Cliente</th>'
-    + '<th style="text-align:right;padding:8px 10px;border-bottom:1.5px solid var(--border)">Imponibile</th>'
-    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">Stato</th>'
+    + '<th style="text-align:right;padding:8px 10px;border-bottom:1.5px solid var(--border)">Totale</th>'
+    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border);width:150px">Avanzamento</th>'
+    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border);width:150px">Incassato</th>'
     + '<th style="width:90px;border-bottom:1.5px solid var(--border)"></th></tr>';
   _fvCon.contratti.forEach(function (c) {
     var st = _FV_STATI_CON[c.stato] || _FV_STATI_CON.da_firmare;
@@ -650,8 +657,9 @@ function _fvRenderContratti() {
       + '<td style="padding:9px 10px;font-family:var(--font-mono)">' + (c.numero || '—') + '/' + c.anno + '</td>'
       + '<td style="padding:9px 10px">' + _fvData(c.data) + '</td>'
       + '<td style="padding:9px 10px"><strong>' + _fvEsc(c.cliente_nome) + '</strong></td>'
-      + '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(c.imponibile) + '</td>'
-      + '<td style="padding:9px 10px"><span style="font-size:10px;background:' + st.bg + ';color:' + st.col + ';padding:2px 9px;border-radius:9px;font-weight:600">' + st.lab + '</span></td>'
+      + '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(Number(c.imponibile || 0) * (1 + Number(c.aliquota_iva || 0) / 100)) + '</td>'
+      + '<td style="padding:9px 10px">' + _fvBarraFasi(c, true) + '</td>'
+      + '<td style="padding:9px 10px">' + _fvBarraIncassi(c, true) + '</td>'
       + '<td style="padding:9px 10px;text-align:right"><button onclick="fvApriContratto(\'' + c.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">Apri →</button></td></tr>';
   });
   h += '</table></div>';
@@ -733,6 +741,13 @@ function _fvRenderContrattoScheda() {
     + '<button onclick="fvStampaContratto(\'' + c.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa contratto</button>'
     + '<button onclick="fvChiudiContratto()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Tutti i contratti</button>'
     + '</div></div>';
+
+  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Avanzamento lavori</div>';
+  h += _fvFasiEditor(c);
+  h += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px">Incassi dal cliente</div>';
+  h += _fvBarraIncassi(c, false);
+  h += '</div>';
 
   h += '<div class="card" style="padding:12px 14px;margin-bottom:12px"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
   h += '<div><label style="' + lb + '">Data</label><input type="date" value="' + (c.data || '') + '" onchange="fvContrattoCampo(\'data\', this.value)" style="' + inp + '"></div>';
@@ -1164,4 +1179,84 @@ function switchFvSubTab(btn) {
 // Punto d'ingresso della sezione (chiamato dal menu)
 function caricaFotovoltaico() {
   if (typeof caricaInvestimenti === 'function') caricaInvestimenti();
+}
+
+// ── AVANZAMENTO LAVORI E INCASSI (05/10) ───────────────────────────────────
+// Le fasi dell'opera venduta e i pagamenti ricevuti dal cliente. Le date delle
+// fasi le segna chi segue il cantiere; gli incassi arrivano dalle entrate del
+// foglio giornale collegate a questo contratto.
+var _FV_FASI = [
+  { k: 'data_accettazione',   lab: 'Accettazione offerta' },
+  { k: 'data_consegna_merce', lab: 'Consegna merce' },
+  { k: 'data_installazione',  lab: 'Installazione impianto' },
+  { k: 'data_collaudo',       lab: 'Collaudo' },
+  { k: 'data_produzione',     lab: 'Messa in produzione' }
+];
+
+function _fvFasiFatte(c) {
+  return _FV_FASI.filter(function (f) { return c[f.k]; }).length;
+}
+
+function _fvBarraFasi(c, compatta) {
+  var fatte = _fvFasiFatte(c), tot = _FV_FASI.length;
+  var pct = fatte / tot * 100;
+  var col = fatte === tot ? '#27500A' : '#185FA5';
+  var ultima = null;
+  _FV_FASI.forEach(function (f) { if (c[f.k]) ultima = f.lab; });
+  var h = '<div style="height:' + (compatta ? '10' : '16') + 'px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+    + '<div style="width:' + pct.toFixed(0) + '%;height:100%;background:' + col + '"></div></div>';
+  h += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">' + fatte + '/' + tot
+    + (ultima ? ' · ' + _fvEsc(ultima) : ' · non avviato') + '</div>';
+  return h;
+}
+
+function _fvFasiEditor(c) {
+  var h = '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+  _FV_FASI.forEach(function (f, idx) {
+    var fatta = !!c[f.k];
+    h += '<div style="flex:1;min-width:132px;border:0.5px solid ' + (fatta ? '#639922' : 'var(--border)') + ';border-radius:8px;padding:8px 10px;background:' + (fatta ? '#EAF3DE' : 'var(--bg)') + '">'
+      + '<div style="font-size:10px;color:' + (fatta ? '#27500A' : 'var(--text-muted)') + ';font-weight:600;text-transform:uppercase;letter-spacing:.3px">'
+      + (idx + 1) + '. ' + f.lab + '</div>'
+      + '<input type="date" value="' + (c[f.k] || '') + '" onchange="fvContrattoCampo(\'' + f.k + '\', this.value)" '
+      + 'style="width:100%;margin-top:4px;padding:5px 7px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:11.5px">'
+      + '</div>';
+  });
+  h += '</div>';
+  h += '<div style="margin-top:10px">' + _fvBarraFasi(c, false) + '</div>';
+  return h;
+}
+
+function _fvIncassiContratto(c) {
+  return (_fvCon.incassi || []).filter(function (m) { return m.fv_contratto_id === c.id && m.tipo === 'entrata'; });
+}
+
+function _fvBarraIncassi(c, compatta) {
+  var totale = Number(c.imponibile || 0) * (1 + Number(c.aliquota_iva || 0) / 100);
+  var inc = _fvIncassiContratto(c);
+  var ric = inc.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
+  var pct = totale > 0 ? Math.min(100, ric / totale * 100) : 0;
+  var residuo = totale - ric;
+  var col = residuo <= 0.5 ? '#27500A' : '#BA7517';
+  var h = '<div style="height:' + (compatta ? '10' : '16') + 'px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+    + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + col + '"></div></div>';
+  if (compatta) {
+    h += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">' + _fvEuro(ric) + ' · ' + pct.toFixed(0) + '%</div>';
+    return h;
+  }
+  h += '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:11.5px;margin-top:5px">'
+    + '<span style="color:var(--text-muted)">Incassato <strong style="font-family:var(--font-mono);color:var(--text)">' + _fvEuro(ric) + '</strong> su ' + _fvEuro(totale) + '</span>'
+    + '<span style="font-family:var(--font-mono);font-weight:600;color:' + (residuo > 0.5 ? '#A32D2D' : '#27500A') + '">'
+    + (residuo > 0.5 ? 'residuo ' + _fvEuro(residuo) : 'saldato') + '</span></div>';
+  if (inc.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px">';
+    inc.forEach(function (m) {
+      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 4px;white-space:nowrap">' + _fvData(m.data) + '</td>'
+        + '<td style="padding:5px 4px">' + _fvEsc(m.descrizione || '') + '</td>'
+        + '<td style="padding:5px 4px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(m.importo) + '</td></tr>';
+    });
+    h += '</table>';
+  } else {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Nessun incasso registrato. Si registrano in Finanze → Foglio giornale come entrata, richiamando questo contratto.</div>';
+  }
+  return h;
 }
