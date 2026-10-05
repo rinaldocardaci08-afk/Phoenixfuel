@@ -1,3 +1,7 @@
+// v20261001a — PDF finanziamenti: segue il FILTRO scelto (attivi / deliberati /
+//   inattivi / estinti / tutti) invece di stampare sempre i soli attivi; con gli
+//   ESTINTI la seconda pagina (interessi residui) non ha senso e non viene fatta:
+//   si stampa la sola pagina capitale con il totale degli interessi pagati.
 // ═══════════════════════════════════════════════════════════════════════════
 // v20260802c — corretto l ordine: la somma delle differenze stava PRIMA del
 //               calcolo della differenza (errore a schermo, tabella non
@@ -688,8 +692,14 @@ function _aggiornaFiltroFinanziamenti(val) {
 
 // ═══ STAMPA PDF FINANZIAMENTI (2 pagine: Capitale + Interessi) ═══════════
 async function stampaFinanziamentiPDF() {
-  const attivi = _bancheFinanziamenti.filter(f => f.stato === 'attivo');
-  if (!attivi.length) { toast('⚠ Nessun finanziamento attivo da stampare'); return; }
+  // 01/10 — si stampa la stessa selezione che si vede in pagina
+  const F = _finFiltroStato || 'attivo';
+  const ETICH = { attivo: 'Attivi', deliberato: 'Deliberati (in preparazione)', inattivo: 'Inattivi', estinto: 'Estinti', tutti: 'Tutti' };
+  const etichettaSel = ETICH[F] || F;
+  const attivi = _bancheFinanziamenti.filter(f => (F === 'tutti' ? true : f.stato === F));
+  if (!attivi.length) { toast('⚠ Nessun finanziamento da stampare con il filtro "' + etichettaSel + '"'); return; }
+  // con gli estinti non c'e' nulla da rimborsare: la pagina degli interessi residui si salta
+  const soloCapitale = (F === 'estinto');
 
   toast('⏳ Generazione PDF...');
 
@@ -803,11 +813,11 @@ async function stampaFinanziamentiPDF() {
   h += '<div class="page">';
   h += '<div class="header">';
   h += '<div class="azienda">PHOENIX FUEL S.R.L.<small>Vibo Valentia · P.IVA 03371240793</small></div>';
-  h += '<div class="titolo">Report Finanziamenti — Capitale<small>Aggiornato al ' + dataFmt + '</small></div>';
+  h += '<div class="titolo">Report Finanziamenti — ' + (soloCapitale ? 'Estinti' : 'Capitale') + '<small>' + escPdf(etichettaSel) + ' · aggiornato al ' + dataFmt + '</small></div>';
   h += '</div>';
 
   h += '<div class="kpi-grid">';
-  h += '<div class="kpi" style="background:#F1EFE8"><div class="kpi-label" style="color:#5F5E5A">Attivi</div><div class="kpi-val">' + dati.length + '</div></div>';
+  h += '<div class="kpi" style="background:#F1EFE8"><div class="kpi-label" style="color:#5F5E5A">' + escPdf(etichettaSel) + '</div><div class="kpi-val">' + dati.length + '</div></div>';
   h += '<div class="kpi" style="background:#EEEDFE"><div class="kpi-label" style="color:#26215C">Capitale orig.</div><div class="kpi-val" style="color:#26215C">' + fmtEPdf(tot.cap) + '</div></div>';
   h += '<div class="kpi" style="background:#EAF3DE"><div class="kpi-label" style="color:#27500A">Pagato</div><div class="kpi-val" style="color:#27500A">' + fmtEPdf(tot.pagCap) + '</div></div>';
   h += '<div class="kpi" style="background:#FCEBEB"><div class="kpi-label" style="color:#791F1F">Residuo</div><div class="kpi-val" style="color:#791F1F">' + fmtEPdf(tot.resCap) + '</div></div>';
@@ -857,10 +867,11 @@ async function stampaFinanziamentiPDF() {
     h += '</div></div>';
   });
 
-  h += '<div class="footer"><span>Phoenix Fuel S.r.l. · PhoenixFuel Gestionale</span><span>Pagina 1 di 2</span></div>';
+  h += '<div class="footer"><span>Phoenix Fuel S.r.l. · PhoenixFuel Gestionale</span><span>Pagina 1 di ' + (soloCapitale ? '1' : '2') + '</span></div>';
   h += '</div>';
 
-  // ─── PAGINA 2 — INTERESSI ───
+  // ─── PAGINA 2 — INTERESSI (non per gli estinti: non c'e' nulla da rimborsare) ───
+  if (!soloCapitale) {
   h += '<div class="page">';
   h += '<div class="header">';
   h += '<div class="azienda">PHOENIX FUEL S.R.L.<small>Vibo Valentia · P.IVA 03371240793</small></div>';
@@ -868,7 +879,7 @@ async function stampaFinanziamentiPDF() {
   h += '</div>';
 
   h += '<div class="kpi-grid">';
-  h += '<div class="kpi" style="background:#F1EFE8"><div class="kpi-label" style="color:#5F5E5A">Attivi</div><div class="kpi-val">' + dati.length + '</div></div>';
+  h += '<div class="kpi" style="background:#F1EFE8"><div class="kpi-label" style="color:#5F5E5A">' + escPdf(etichettaSel) + '</div><div class="kpi-val">' + dati.length + '</div></div>';
   h += '<div class="kpi" style="background:#FAEEDA"><div class="kpi-label" style="color:#633806">Tot. interessi</div><div class="kpi-val" style="color:#633806">' + fmtEPdf(tot.totInt) + '</div></div>';
   h += '<div class="kpi" style="background:#EAF3DE"><div class="kpi-label" style="color:#27500A">Pagati</div><div class="kpi-val" style="color:#27500A">' + fmtEPdf(tot.pagInt) + '</div></div>';
   h += '<div class="kpi" style="background:#FCEBEB"><div class="kpi-label" style="color:#791F1F">Residui</div><div class="kpi-val" style="color:#791F1F">' + fmtEPdf(tot.resInt) + '</div></div>';
@@ -920,6 +931,7 @@ async function stampaFinanziamentiPDF() {
 
   h += '<div class="footer"><span>Phoenix Fuel S.r.l. · PhoenixFuel Gestionale</span><span>Pagina 2 di 2</span></div>';
   h += '</div>';
+  }   // fine pagina 2 (saltata con il filtro Estinti)
 
   h += '</body></html>';
 
