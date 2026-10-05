@@ -1,3 +1,8 @@
+// v20261005a — (1) PREAMMORTAMENTO: campo "rate di solo interesse" nel modale e
+//   nel calcolo del piano — e' cio' che mancava per far quadrare i piani della
+//   banca (es. mutuo 500.000 con le prime 12 rate a quota capitale 0);
+//   (2) pulsante 📄 PDF dentro il modale Piano di ammortamento, impaginato come
+//   l'allegato della banca (PR · SCAD · Q.CAPIT · Q.INTER · TOT RATA · CAP.RES).
 // v20261001a — PDF finanziamenti: segue il FILTRO scelto (attivi / deliberati /
 //   inattivi / estinti / tutti) invece di stampare sempre i soli attivi; con gli
 //   ESTINTI la seconda pagina (interessi residui) non ha senso e non viene fatta:
@@ -1222,6 +1227,9 @@ function _badgeStato(s) {
 // Per 'misto' / 'zero_coupon' è un fallback ragionevole ma non perfetto.
 function _generaRateFrancese(params) {
   const { capitale, tasso, durata_rate, frequenza, data_prima_rata } = params;
+  // 05/10 — rate iniziali di SOLO INTERESSE (preammortamento): la banca le mette
+  // in testa al piano con quota capitale 0; l'ammortamento francese parte dopo.
+  const pre = Math.max(0, Math.min(Number(params.rate_preammortamento || 0), Number(durata_rate) - 1));
   const periodiPerAnno = { mensile: 12, trimestrale: 4, semestrale: 2, annuale: 1 }[frequenza] || 12;
   const mesiPerPeriodo = { mensile: 1, trimestrale: 3, semestrale: 6, annuale: 12 }[frequenza] || 1;
   const i = (Number(tasso || 0) / 100) / periodiPerAnno;
@@ -1230,8 +1238,9 @@ function _generaRateFrancese(params) {
 
   if (!C || !n || !data_prima_rata) return [];
 
-  // Rata costante (formula francese; se i=0 → divisione semplice)
-  const rata = i === 0 ? (C / n) : (C * i / (1 - Math.pow(1 + i, -n)));
+  // Rata costante (formula francese sulle sole rate di ammortamento; i=0 → divisione semplice)
+  const nAmm = n - pre;
+  const rata = i === 0 ? (C / nAmm) : (C * i / (1 - Math.pow(1 + i, -nAmm)));
 
   const rate = [];
   let residuo = C;
@@ -1239,7 +1248,7 @@ function _generaRateFrancese(params) {
 
   for (let j = 1; j <= n; j++) {
     const interesse = residuo * i;
-    let capitaleQ = rata - interesse;
+    let capitaleQ = (j <= pre) ? 0 : (rata - interesse);
     // Ultima rata: chiude esattamente il residuo (per evitare residui di centesimi)
     if (j === n) capitaleQ = residuo;
     residuo = Math.max(0, residuo - capitaleQ);
@@ -1282,6 +1291,7 @@ async function _simGetRate(f) {
   // Fallback: calcola al volo con formula francese
   return _generaRateFrancese({
     capitale: f.capitale, tasso: f.tasso, durata_rate: f.durata_rate,
+    rate_preammortamento: f.rate_preammortamento || 0,
     frequenza: f.frequenza, data_prima_rata: f.data_prima_rata
   });
 }
@@ -1456,6 +1466,7 @@ async function _rigeneraPianoFinanziamento(finId, payload) {
     capitale: payload.capitale,
     tasso: payload.tasso || 0,
     durata_rate: payload.durata_rate,
+    rate_preammortamento: payload.rate_preammortamento || 0,
     frequenza: payload.frequenza,
     data_prima_rata: payload.data_prima_rata
   });
@@ -1503,7 +1514,10 @@ async function apriPianoFinanziamento(id) {
 
   // Header info
   html += '<div style="margin-bottom:16px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">';
   html += '<div style="font-size:18px;font-weight:600;color:var(--text)">📋 Piano di ammortamento</div>';
+  html += '<button onclick="stampaPianoAmmortamentoPDF(\'' + f.id + '\')" style="background:#1a1a18;color:#FAC775;border:0;border-radius:6px;padding:7px 12px;font-size:12px;cursor:pointer">📄 PDF</button>';
+  html += '</div>';
   html += '<div style="font-size:13px;color:var(--text-muted);margin-top:3px">' + esc(f.descrizione) + ' · ' + esc(istNome) + (f.numero_contratto ? ' · <span style="font-family:var(--font-mono)">' + esc(f.numero_contratto) + '</span>' : '') + '</div>';
   html += '</div>';
 
@@ -1722,6 +1736,9 @@ function apriModalFinanziamento(id) {
   html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Durata (n. rate) *</label>';
   html += '<input type="number" id="mod-fin-durata" value="' + (f?.durata_rate ?? '') + '" placeholder="120" oninput="_syncDataFineDaDurata()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px"></div>';
+  html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Rate di preammortamento <span style="font-weight:400">(solo interessi)</span></label>';
+  html += '<input type="number" id="mod-fin-preamm" min="0" value="' + (f?.rate_preammortamento ?? 0) + '" placeholder="0" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Comprese nel numero totale di rate. Es. mutuo 180 rate di cui 12 di preammortamento.</div></div>';
   html += '<div><label style="font-size:11px;color:var(--text-muted);font-weight:500">Frequenza *</label>';
   html += '<select id="mod-fin-frequenza" onchange="_syncDataFineDaDurata()" onwheel="this.blur()" style="width:100%;padding:8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-top:3px">';
   ['mensile','trimestrale','semestrale','annuale'].forEach(t => {
@@ -1862,6 +1879,7 @@ async function salvaFinanziamento(id) {
     commissioni_eur: document.getElementById('mod-fin-comm-eur') ? (Number(document.getElementById('mod-fin-comm-eur').value) || null) : null,
     altri_costi_eur: document.getElementById('mod-fin-altri-eur') ? (Number(document.getElementById('mod-fin-altri-eur').value) || null) : null,
     durata_rate: durata,
+    rate_preammortamento: document.getElementById('mod-fin-preamm') ? (parseInt(document.getElementById('mod-fin-preamm').value, 10) || 0) : 0,
     frequenza: document.getElementById('mod-fin-frequenza').value,
     data_erogazione: dataErog,
     data_prima_rata: dataPrimaRata,
@@ -1890,7 +1908,7 @@ async function salvaFinanziamento(id) {
 
   // ─── Rigenerazione piano di ammortamento ──────────────────────────────
   // Trigger: nuovo finanziamento, oppure cambi a parametri di calcolo
-  const keyFields = ['capitale', 'tasso', 'durata_rate', 'frequenza', 'data_prima_rata', 'tipo_tasso'];
+  const keyFields = ['capitale', 'tasso', 'durata_rate', 'rate_preammortamento', 'frequenza', 'data_prima_rata', 'tipo_tasso'];
   let needsRegen = !id; // nuovo finanziamento → sempre genera
   if (id && oldF) {
     needsRegen = keyFields.some(k => String(oldF[k] ?? '') !== String(payload[k] ?? ''));
@@ -1898,7 +1916,7 @@ async function salvaFinanziamento(id) {
 
   if (needsRegen && finId) {
     const proceed = id
-      ? confirm('I parametri di calcolo sono cambiati.\n\nRigenero il piano di ammortamento?\n• ' + payload.durata_rate + ' rate ' + payload.frequenza + '\n• Capitale ' + payload.capitale + ' €\n• Tasso ' + (payload.tasso || 0) + '%\n\nLe rate verranno ricalcolate sui nuovi parametri.')
+      ? confirm('I parametri di calcolo sono cambiati.\n\nRigenero il piano di ammortamento?\n• ' + payload.durata_rate + ' rate ' + payload.frequenza + (payload.rate_preammortamento ? ' (di cui ' + payload.rate_preammortamento + ' di preammortamento)' : '') + '\n• Capitale ' + payload.capitale + ' €\n• Tasso ' + (payload.tasso || 0) + '%\n\nLe rate verranno ricalcolate sui nuovi parametri.')
       : true;
     if (proceed) {
       const ok = await _rigeneraPianoFinanziamento(finId, payload);
@@ -4641,4 +4659,97 @@ function stampaSituazionePDF() {
   w.document.write(html);
   w.document.close();
   // Non lancio auto-print: l'utente vede l'anteprima e clicca lui Stampa
+}
+
+// ═══ PDF DEL PIANO DI AMMORTAMENTO (05/10) ════════════════════════════════
+// Impaginato come l'allegato della banca: testata con i dati del contratto e
+// tabella PR · SCAD · Q.CAPIT · Q.INTER · TOT RATA · CAP.RES con i totali.
+async function stampaPianoAmmortamentoPDF(id) {
+  const f = _bancheFinanziamenti.find(x => x.id === id);
+  if (!f) { toast('⚠ Finanziamento non trovato'); return; }
+  if (!_bancheRate[id]) {
+    const { data } = await sb.from('banche_finanziamenti_rate')
+      .select('*').eq('finanziamento_id', id).order('numero');
+    _bancheRate[id] = data || [];
+  }
+  const rate = _bancheRate[id];
+  if (!rate.length) { toast('⚠ Nessun piano da stampare per questo finanziamento'); return; }
+
+  const istNome = (_bancheIstituti.find(i => i.id === f.istituto_id) || {}).nome || '—';
+  const oggi = new Date().toISOString().split('T')[0];
+  const eur = n => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const esc2 = v => String(v == null ? '' : v).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const dmy = ds => ds ? ds.substring(8, 10) + '/' + ds.substring(5, 7) + '/' + ds.substring(0, 4) : '—';
+
+  const totCap = rate.reduce((s2, r) => s2 + Number(r.quota_capitale || 0), 0);
+  const totInt = rate.reduce((s2, r) => s2 + Number(r.quota_interessi || 0), 0);
+  const totRata = rate.reduce((s2, r) => s2 + Number(r.rata || 0), 0);
+  const pagate = rate.filter(r => r.data_scadenza <= oggi).length;
+  const residuoOggi = (rate.find(r => r.data_scadenza > oggi) || {}).residuo_capitale;
+  const pre = Number(f.rate_preammortamento || 0);
+  const costiIniziali = Number(f.spese_istruttoria_eur || 0) + Number(f.commissioni_eur || 0) + Number(f.altri_costi_eur || 0);
+
+  const righe = rate.map(r => {
+    const pag = r.data_scadenza <= oggi;
+    return '<tr' + (pag ? ' class="pag"' : '') + '><td class="n">' + r.numero + '</td>'
+      + '<td>' + dmy(r.data_scadenza) + (pag ? ' <span class="ok">pagata</span>' : '') + '</td>'
+      + '<td class="n">' + eur(r.quota_capitale) + '</td>'
+      + '<td class="n">' + eur(r.quota_interessi) + '</td>'
+      + '<td class="n">' + eur(r.rata) + '</td>'
+      + '<td class="n">' + eur(r.residuo_capitale) + '</td></tr>';
+  }).join('');
+
+  const riga = (l, v) => '<tr><td class="l">' + l + '</td><td class="v">' + v + '</td></tr>';
+  const doc = '<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><title>Piano di ammortamento — ' + esc2(f.descrizione) + '</title><style>'
+    + '@page{size:A4 portrait;margin:12mm}body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#1a1a18;margin:0}'
+    + '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1.5px solid #1a1a18;padding-bottom:8px;margin-bottom:10px}'
+    + '.az{font-size:11px;font-weight:700}.az small{display:block;font-size:8px;color:#777;font-weight:400}'
+    + '.ti{text-align:right;font-size:14px;font-weight:600}.ti small{display:block;font-size:9px;color:#777;font-weight:400}'
+    + '.dati{display:flex;gap:10px;margin-bottom:12px}'
+    + '.dati table{flex:1;border-collapse:collapse;font-size:9.5px;border:0.5px solid #ccc}'
+    + '.dati td{padding:4px 7px;border-bottom:0.5px solid #e6e6e6}'
+    + '.dati td.l{color:#666}.dati td.v{text-align:right;font-family:monospace;font-weight:600}'
+    + 'table.piano{width:100%;border-collapse:collapse;font-size:9px;border:0.5px solid #ccc}'
+    + 'table.piano thead{display:table-header-group}'
+    + 'table.piano th{background:#F1EFE8;padding:5px 6px;font-size:8px;text-transform:uppercase;color:#5F5E5A;border-bottom:1px solid #888;text-align:right}'
+    + 'table.piano th.l{text-align:left}'
+    + 'table.piano td{padding:3.5px 6px;border-bottom:0.5px solid #ececec}'
+    + 'table.piano td.n{text-align:right;font-family:monospace}'
+    + 'tr.pag{background:#FAFAF8;color:#777}.ok{font-size:7px;color:#27500A}'
+    + 'tr.tot{background:#1a1a18;color:#fff;font-weight:700}tr.tot td{padding:6px}'
+    + 'tr{page-break-inside:avoid}.foot{margin-top:10px;font-size:7.5px;color:#777;text-align:center;border-top:0.5px solid #ddd;padding-top:5px}'
+    + '</style></head><body>'
+    + '<div class="hd"><div class="az">PHOENIX FUEL S.R.L.<small>Zona Industriale — 89900 Portosalvo (VV) · P.IVA 02744150802</small></div>'
+    + '<div class="ti">Piano di ammortamento<small>' + esc2(istNome) + ' · stampato il ' + new Date().toLocaleDateString('it-IT') + '</small></div></div>'
+    + '<div class="dati"><table>'
+    + riga('Descrizione', esc2(f.descrizione || '—'))
+    + riga('N° contratto', esc2(f.numero_contratto || '—'))
+    + riga('Capitale', '€ ' + eur(f.capitale))
+    + riga('Tasso (TAN)', (f.tasso ? Number(f.tasso).toFixed(4) + ' %' : '—'))
+    + riga('Tipo tasso', esc2(f.tipo_tasso || '—'))
+    + '</table><table>'
+    + riga('Numero rate', rate.length + (pre ? ' (di cui ' + pre + ' di preammortamento)' : ''))
+    + riga('Frequenza', esc2(f.frequenza || '—'))
+    + riga('Data erogazione', dmy(f.data_erogazione))
+    + riga('Prima rata', dmy(f.data_prima_rata))
+    + riga('Costi iniziali', costiIniziali ? '€ ' + eur(costiIniziali) : '—')
+    + '</table><table>'
+    + riga('Rate pagate', pagate + ' / ' + rate.length)
+    + riga('Capitale residuo oggi', residuoOggi != null ? '€ ' + eur(residuoOggi) : '€ 0,00')
+    + riga('Totale interessi', '€ ' + eur(totInt))
+    + riga('Totale da restituire', '€ ' + eur(totRata))
+    + riga('Stato', esc2(f.stato || '—'))
+    + '</table></div>'
+    + '<table class="piano"><thead><tr><th class="l">PR.</th><th class="l">SCAD.</th><th>Q. CAPIT.</th><th>Q. INTER.</th><th>TOT. RATA</th><th>CAP. RES.</th></tr></thead><tbody>'
+    + righe
+    + '<tr class="tot"><td colspan="2">TOTALI</td><td class="n">' + eur(totCap) + '</td><td class="n">' + eur(totInt) + '</td><td class="n">' + eur(totRata) + '</td><td class="n">0,00</td></tr>'
+    + '</tbody></table>'
+    + '<div class="foot">Phoenix Fuel S.r.l. · PhoenixFuel Gestionale — piano calcolato ad ammortamento francese'
+    + (pre ? ' con ' + pre + ' rate iniziali di soli interessi' : '') + '</div>'
+    + '</body></html>';
+
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠ Popup bloccato dal browser'); return; }
+  w.document.write(doc); w.document.close();
+  setTimeout(() => w.print(), 400);
 }
