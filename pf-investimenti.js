@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261005n — la tendina in alto mostra solo le causali di SPESA (tipo='spesa'):
+//   quelle di incasso servono sulle entrate del foglio giornale e aprivano la pagina
+//   su una causale senza impianti, facendo sembrare persi i dati.
+// v20261005m — PRODUZIONE REALE per impianto: data di allaccio alla rete (da quando
+//   siamo produttori) e, anno per anno, kWh prodotti, €/kWh riconosciuto dal GSE e
+//   contributo CER incassato, messi a confronto con il conto economico previsionale.
 // v20261005l — barra di avanzamento dei PAGAMENTI sotto le voci di costo: quanto
 //   abbiamo gia' pagato rispetto al costo totale dell'opera, col residuo da pagare.
 // v20261005i — scelta del fornitore DEFINITIVA: quando un preventivo e' scelto gli
@@ -86,7 +92,10 @@ async function caricaInvestimenti() {
   box.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">Caricamento…</div>';
   try {
     var rc = await sb.from('causali_investimento').select('*').eq('attiva', true).order('nome');
-    var causali = rc.data || [];
+    var tutte = rc.data || [];
+    // solo le causali di spesa: le 'incasso' si usano sulle entrate del foglio giornale
+    var causali = tutte.filter(function (c) { return (c.tipo || 'spesa') === 'spesa'; });
+    if (!causali.length) causali = tutte;
     if (!causali.length) {
       box.innerHTML = '<div class="card" style="padding:20px;font-size:13px">Nessuna causale di investimento impostata.</div>';
       return;
@@ -101,7 +110,8 @@ async function caricaInvestimenti() {
         .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,investimento_impianto_id,investimento_voce_id')
         .eq('causale_investimento_id', _invCausale).order('data', { ascending: false }),
       sb.from('banche_finanziamenti').select('id,descrizione,capitale,tasso,durata_rate,rate_preammortamento,data_prima_rata,numero_contratto'),
-      sb.from('investimenti_preventivi').select('*').order('data')
+      sb.from('investimenti_preventivi').select('*').order('data'),
+      sb.from('investimenti_produzione').select('*').order('anno')
     ]);
     _invDati = {
       causali: causali,
@@ -110,7 +120,8 @@ async function caricaInvestimenti() {
       voci: r[2].data || [],
       movimenti: r[3].data || [],
       finanziamenti: r[4].data || [],
-      preventivi: (r[5] && r[5].data) || []
+      preventivi: (r[5] && r[5].data) || [],
+      produzione: (r[6] && r[6].data) || []
     };
     _invImpiantoAperto = null;
     _invRender();
@@ -441,10 +452,12 @@ function _invRenderImpianto() {
     + '<div style="font-size:11.5px;color:var(--text-muted)">' + _invEsc(i.luogo || '—')
     + (i.kw ? ' · ' + Number(i.kw).toLocaleString('it-IT') + ' kW' : '')
     + (i.fornitore ? ' · ' + _invEsc(i.fornitore) : '')
-    + (i.data_inizio || i.data_fine ? ' · ' + _invData(i.data_inizio) + ' → ' + _invData(i.data_fine) : '') + '</div></div>';
+    + (i.data_inizio || i.data_fine ? ' · ' + _invData(i.data_inizio) + ' → ' + _invData(i.data_fine) : '')
+    + (i.data_allaccio ? ' · <strong style="color:#27500A">in rete dal ' + _invData(i.data_allaccio) + '</strong>' : '') + '</div></div>';
   h += '<div style="display:flex;gap:8px">';
   if (_invPuo()) {
     h += '<button onclick="invModaleVoce(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Voce di costo</button>';
+    h += '<button onclick="invModaleProduzione(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #639922;border-radius:7px;background:var(--bg);color:#3B6D11;font-weight:600;cursor:pointer">⚡ Produzione</button>';
     h += '<button onclick="invModaleImpianto(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">✏️ Modifica</button>';
   }
   h += '<button onclick="invChiudiImpianto()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Tutti gli impianti</button>';
@@ -530,6 +543,9 @@ function _invRenderImpianto() {
   h += _invGanttSingolo(i);
   h += _invBloccoCE(i, prev);
 
+  // PRODUZIONE REALE contro budget
+  h += _invBloccoProduzione(i, prev);
+
   // PAGAMENTI IMPUTATI
   h += '<div class="card" style="padding:12px 14px">';
   h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Pagamenti imputati (' + spese.length + ')</div>';
@@ -582,6 +598,8 @@ function invModaleImpianto(id) {
     + '</select></div>';
   h += '<div><label style="' + lb + '">Inizio previsto</label><input id="inv-i-dal" type="date" value="' + (i && i.data_inizio || '') + '" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Fine prevista</label><input id="inv-i-al" type="date" value="' + (i && i.data_fine || '') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Allaccio alla rete</label><input id="inv-i-allaccio" type="date" value="' + (i && i.data_allaccio || '') + '" style="' + inp + '">'
+    + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Da questa data l\'impianto produce e vende energia.</div></div>';
   h += '<div style="grid-column:1/3"><label style="' + lb + '">Note</label><input id="inv-i-note" value="' + _invEsc(i && i.note || '') + '" style="' + inp + '"></div>';
   h += '</div>';
   h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Le date servono solo al diagramma delle tempistiche: senza entrambe, l\'impianto non compare nel Gantt.</div>';
@@ -609,6 +627,7 @@ async function invSalvaImpianto(id) {
     stato: g('inv-i-stato') || 'previsto',
     data_inizio: g('inv-i-dal') || null,
     data_fine: g('inv-i-al') || null,
+    data_allaccio: g('inv-i-allaccio') || null,
     note: g('inv-i-note') || null,
     updated_at: new Date().toISOString()
   };
@@ -1171,4 +1190,131 @@ function invConfermaOrdine(impiantoId, preventivoId, aliquota) {
   if (!w) { toast('Abilita i popup per stampare'); return; }
   w.document.write(doc); w.document.close(); w.focus();
   setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
+}
+
+// ── PRODUZIONE REALE (05/10) ───────────────────────────────────────────────
+// Anno per anno: kWh prodotti, €/kWh riconosciuto dal GSE e contributo CER
+// incassato. Si confrontano con il conto economico previsionale, cosi' si vede
+// se l'impianto rende come previsto. Il primo anno parte dall'allaccio alla rete.
+function _invProdImpianto(id) {
+  return (_invDati.produzione || []).filter(function (p) { return p.impianto_id === id; })
+    .sort(function (a, b) { return a.anno - b.anno; });
+}
+
+function _invBloccoProduzione(i, costoNetto) {
+  var righe = _invProdImpianto(i.id);
+  var CE = _invCeCalcola(i, costoNetto);
+  var annoAllaccio = i.data_allaccio ? Number(String(i.data_allaccio).slice(0, 4)) : null;
+
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">⚡ Produzione reale</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">'
+    + (i.data_allaccio ? 'In rete dal ' + _invData(i.data_allaccio) + ': da qui si contano gli anni di esercizio.'
+                       : 'Manca la data di allaccio alla rete: inseriscila con ✏️ Modifica.') + '</div></div>'
+    + (_invPuo() ? '<button onclick="invModaleProduzione(\'' + i.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #639922;border-radius:6px;background:var(--bg);color:#3B6D11;font-weight:600;cursor:pointer">+ Anno</button>' : '')
+    + '</div>';
+  if (!righe.length) {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessun dato di produzione registrato.</div></div>';
+    return h;
+  }
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Anno</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">kWh prodotti</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">€/kWh GSE</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Ricavo energia</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Contributo CER</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Totale</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Su previsto</th>'
+    + '<th style="width:36px;border-bottom:1.5px solid var(--border)"></th></tr>';
+  var tK = 0, tR = 0, tC = 0;
+  righe.forEach(function (p) {
+    var ric = Number(p.kwh || 0) * Number(p.eur_kwh || 0);
+    var cer = Number(p.cer_incassato || 0);
+    tK += Number(p.kwh || 0); tR += ric; tC += cer;
+    // anno di esercizio = differenza dall'anno di allaccio
+    var nEs = annoAllaccio ? (p.anno - annoAllaccio + 1) : null;
+    var budget = (CE && nEs && CE.anni[nEs - 1]) ? CE.anni[nEs - 1] : null;
+    var scost = budget ? ((ric + cer) - (budget.ricavi + budget.cer)) : null;
+    var col = scost == null ? 'var(--text-muted)' : (scost >= 0 ? '#27500A' : '#A32D2D');
+    h += '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:7px"><strong>' + p.anno + '</strong>' + (nEs ? '<div style="font-size:10px;color:var(--text-muted)">anno ' + nEs + ' di esercizio</div>' : '') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + Math.round(p.kwh || 0).toLocaleString('it-IT') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + Number(p.eur_kwh || 0).toFixed(4).replace('.', ',') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(ric) + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);color:#27500A">' + _invEuro(cer) + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(ric + cer) + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);color:' + col + '">'
+      + (budget ? (scost >= 0 ? '+' : '') + _invEuro(scost) + '<div style="font-size:10px">previsto ' + _invEuroK(budget.ricavi + budget.cer) + '</div>' : '—') + '</td>'
+      + '<td style="padding:7px;text-align:right">' + (_invPuo() ? '<button onclick="invEliminaProduzione(\'' + p.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button>' : '') + '</td></tr>';
+  });
+  h += '<tr style="font-weight:700"><td style="padding:8px 7px">TOTALE</td>'
+    + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + Math.round(tK).toLocaleString('it-IT') + '</td><td></td>'
+    + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(tR) + '</td>'
+    + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(tC) + '</td>'
+    + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(tR + tC) + '</td><td></td><td></td></tr>';
+  h += '</table></div></div>';
+  return h;
+}
+
+function invModaleProduzione(impiantoId) {
+  var i = (_invDati.impianti || []).filter(function (x) { return x.id === impiantoId; })[0];
+  var righe = _invProdImpianto(impiantoId);
+  var annoNuovo = righe.length ? (righe[righe.length - 1].anno + 1) : (i && i.data_allaccio ? Number(String(i.data_allaccio).slice(0, 4)) : new Date().getFullYear());
+  var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
+  var lb = 'display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
+  var h = '<div style="max-width:500px"><div style="font-size:16px;font-weight:600;margin-bottom:2px">⚡ Produzione dell\'anno</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">' + _invEsc(i ? i.nome : '')
+    + (i && i.data_allaccio ? ' · in rete dal ' + _invData(i.data_allaccio) : ' · manca la data di allaccio') + '</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div><label style="' + lb + '">Anno *</label><input id="invpr-anno" type="number" value="' + annoNuovo + '" style="' + inp + ';font-family:var(--font-mono)"></div>';
+  h += '<div><label style="' + lb + '">kWh prodotti *</label><input id="invpr-kwh" type="number" step="1" oninput="_invProdCalc()" style="' + inp + ';font-family:var(--font-mono);text-align:right"></div>';
+  h += '<div><label style="' + lb + '">€/kWh riconosciuto (GSE)</label><input id="invpr-eur" type="number" step="0.0001" oninput="_invProdCalc()" style="' + inp + ';font-family:var(--font-mono);text-align:right"></div>';
+  h += '<div><label style="' + lb + '">Contributo CER incassato €</label><input id="invpr-cer" type="number" step="0.01" oninput="_invProdCalc()" style="' + inp + ';font-family:var(--font-mono);text-align:right"></div>';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Note</label><input id="invpr-note" style="' + inp + '"></div>';
+  h += '</div>';
+  h += '<div id="invpr-calc" style="font-size:12px;color:var(--text-muted);margin-top:10px"></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="invSalvaProduzione(\'' + impiantoId + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
+  apriModal(h);
+}
+
+function _invProdCalc() {
+  var g = function (x) { var e = document.getElementById(x); return e ? parseFloat(e.value) || 0 : 0; };
+  var box = document.getElementById('invpr-calc');
+  if (!box) return;
+  var ric = g('invpr-kwh') * g('invpr-eur');
+  var tot = ric + g('invpr-cer');
+  box.innerHTML = ric > 0 || g('invpr-cer') > 0
+    ? 'Ricavo energia <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(ric) + '</strong>'
+      + ' + CER <strong style="font-family:var(--font-mono);color:#27500A">' + _invEuro(g('invpr-cer')) + '</strong>'
+      + ' = <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(tot) + '</strong>'
+    : '';
+}
+
+async function invSalvaProduzione(impiantoId) {
+  var g = function (x) { var e = document.getElementById(x); return e ? e.value : ''; };
+  var anno = parseInt(g('invpr-anno'), 10);
+  var kwh = parseFloat(g('invpr-kwh')) || 0;
+  if (!anno) { toast('Indica l\'anno'); return; }
+  if (kwh <= 0) { toast('Indica i kWh prodotti'); return; }
+  var r = await sb.from('investimenti_produzione').upsert({
+    impianto_id: impiantoId, anno: anno, kwh: kwh,
+    eur_kwh: parseFloat(g('invpr-eur')) || 0,
+    cer_incassato: parseFloat(g('invpr-cer')) || 0,
+    note: g('invpr-note') || null
+  }, { onConflict: 'impianto_id,anno' });
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  chiudiModal();
+  toast('✓ Produzione ' + anno + ' salvata');
+  caricaInvestimenti();
+}
+
+async function invEliminaProduzione(id) {
+  if (!confirm('Elimino i dati di produzione di questo anno?')) return;
+  var r = await sb.from('investimenti_produzione').delete().eq('id', id);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  caricaInvestimenti();
 }
