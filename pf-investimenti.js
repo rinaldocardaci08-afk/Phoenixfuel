@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261005h — popup del finanziamento rifatto (versione B: fascia blu con capitale,
+//   sezioni Condizioni / Preammortamento / Rata / Avanzamento) e aliquota IVA della
+//   conferma d'ordine chiesta ogni volta, proposta al 10%.
+// v20261005g — CONFERMA D'ORDINE AL FORNITORE per impianto: dal preventivo scelto
+//   si genera il documento da mandare al fornitore (dati delle parti, oggetto,
+//   descrizione, imponibile/IVA/totale, quote di pagamento, firme).
 // v20261005f — blocco PREVENTIVI RICEVUTI nella scheda impianto: i preventivi dei
 //   fornitori sullo stesso impianto, con quello scelto in evidenza, cosi' resta
 //   scritto il confronto (es. Mungo Bus: Ormus 91.000 scelto, NovaPower 85.000).
@@ -715,33 +721,60 @@ async function invPopupFinanziamento(finId) {
   var pagate = rate.filter(function (r) { return r.data_scadenza <= oggi; });
   var prossima = rate.filter(function (r) { return r.data_scadenza > oggi; })[0];
   var pre = Number(f.rate_preammortamento || 0);
-  var finePre = pre > 0 && rate[pre - 1] ? rate[pre - 1].data_scadenza : null;
-  var rataDopo = pre > 0 && rate[pre] ? rate[pre].rata : (rate[0] ? rate[0].rata : null);
+  var finePre = (pre > 0 && rate[pre - 1]) ? rate[pre - 1].data_scadenza : null;
+  var rataDopo = (pre > 0 && rate[pre]) ? rate[pre].rata : (rate[0] ? rate[0].rata : null);
+  var rataOggi = prossima ? prossima.rata : (rate[0] ? rate[0].rata : null);
   var residuo = prossima ? prossima.residuo_capitale : (rate.length ? 0 : f.capitale);
+  var tot = rate.length || Number(f.durata_rate || 0);
+  var pct = tot > 0 ? (pagate.length / tot * 100) : 0;
+  var inPre = pre > 0 && pagate.length < pre;
 
-  var riga = function (l, v, grande) {
-    return '<tr><td style="padding:6px 2px;color:var(--text-muted)">' + l + '</td>'
-      + '<td style="padding:6px 2px;text-align:right;font-family:var(--font-mono)' + (grande ? ';font-weight:700;font-size:15px' : '') + '">' + v + '</td></tr>';
+  var sez = function (titolo, dentro) {
+    return '<div style="display:flex;border-bottom:0.5px solid var(--border);padding:11px 0">'
+      + '<div style="width:150px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px;padding-top:3px">' + titolo + '</div>'
+      + '<div style="flex:1;display:flex;gap:22px;flex-wrap:wrap;align-items:center">' + dentro + '</div></div>';
   };
-  var h = '<div style="max-width:430px">';
-  h += '<div style="font-size:16px;font-weight:600;margin-bottom:2px">' + _invEsc(f.descrizione || 'Finanziamento') + '</div>';
-  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">'
-    + _invEsc(f.numero_contratto || '') + ' · caratteristiche del finanziamento</div>';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
-  h += riga('Capitale', _invEuro(f.capitale), true);
-  h += riga('TAN', (f.tasso != null ? Number(f.tasso).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 4 }) + ' %' : '—'));
-  h += riga('Rate pagate', pagate.length + ' / ' + (rate.length || f.durata_rate || '—'));
+  var voce = function (lab, val, grande) {
+    return '<div><div style="font-size:10px;color:var(--text-muted)">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-weight:600' + (grande ? ';font-size:15px' : '') + '">' + val + '</div></div>';
+  };
+
+  var h = '<div style="max-width:540px;margin:-24px -24px 0;border-radius:8px;overflow:hidden">';
+  h += '<div style="background:#185FA5;color:#fff;padding:14px 18px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">'
+    + '<div><div style="font-size:15px;font-weight:600">' + _invEsc(f.descrizione || 'Finanziamento') + '</div>'
+    + '<div style="font-size:11px;opacity:.85">' + _invEsc(f.numero_contratto || '') + '</div></div>'
+    + '<div style="text-align:right"><div style="font-size:10px;opacity:.8;text-transform:uppercase">Capitale</div>'
+    + '<div style="font-size:21px;font-weight:600;font-family:var(--font-mono)">' + _invEuro(f.capitale) + '</div></div>'
+    + '</div></div>';
+  h += '<div style="padding:0 18px;background:var(--bg-card,var(--bg))">';
+  h += sez('Condizioni',
+      voce('TAN', (f.tasso != null ? Number(f.tasso).toLocaleString('it-IT', { minimumFractionDigits: 3, maximumFractionDigits: 4 }) + ' %' : '—'))
+    + voce('Tipo', _invEsc(f.tipo_tasso || 'fisso'))
+    + voce('Durata', (tot ? tot + ' mesi' : '—'))
+    + voce('Erogato', _invData(f.data_erogazione)));
   if (pre > 0) {
-    h += riga('In preammortamento fino a', finePre ? _invData(finePre) : '—');
-    h += riga('Rata attuale', rate[0] ? _invEuro(pagate.length < pre ? rate[0].rata : (prossima ? prossima.rata : 0)) : '—');
-    h += riga('Rata dopo il preamm.', rataDopo != null ? _invEuro(rataDopo) : '—');
-  } else {
-    h += riga('Rata', prossima ? _invEuro(prossima.rata) : (rate[0] ? _invEuro(rate[0].rata) : '—'));
+    h += sez('Preammortamento',
+        voce('Fino al', finePre ? _invData(finePre) : '—')
+      + voce('Rate di soli interessi', String(pre))
+      + (inPre ? '<span style="font-size:10px;background:#FAEEDA;color:#854F0B;padding:3px 9px;border-radius:9px;font-weight:600">in corso</span>'
+               : '<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:3px 9px;border-radius:9px;font-weight:600">concluso</span>'));
   }
-  h += riga('Capitale residuo', _invEuro(residuo), true);
-  h += '</table>';
-  h += '<div style="display:flex;justify-content:flex-end;margin-top:14px">'
-    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 16px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Chiudi</button></div></div>';
+  h += sez('Rata',
+      voce('Oggi', rataOggi != null ? _invEuro(rataOggi) : '—', true)
+    + (pre > 0 ? voce('Dopo il preamm.', rataDopo != null ? _invEuro(rataDopo) : '—', true) : '')
+    + voce('Prossima scadenza', prossima ? _invData(prossima.data_scadenza) : '—'));
+  h += '<div style="display:flex;padding:11px 0 14px">'
+    + '<div style="width:150px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px;padding-top:3px">Avanzamento</div>'
+    + '<div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:4px">'
+    + '<span>' + pagate.length + ' rat' + (pagate.length === 1 ? 'a pagata' : 'e pagate') + ' su ' + (tot || '—') + '</span>'
+    + '<span style="font-family:var(--font-mono)">residuo ' + _invEuro(residuo) + '</span></div>'
+    + '<div style="height:10px;border-radius:5px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+    + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:#185FA5"></div></div></div></div>';
+  h += '</div>';
+  h += '<div style="display:flex;justify-content:flex-end;padding:12px 18px;background:var(--bg-card,var(--bg))">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 16px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Chiudi</button></div>';
+  h += '</div>';
   apriModal(h);
 }
 
@@ -932,6 +965,7 @@ function _invBloccoPreventivi(i) {
       + (piuBasso && prev.length > 1 ? '<div style="font-size:9.5px;color:#27500A">il più basso</div>' : '') + '</td>'
       + '<td style="padding:7px">' + (p.scelto
           ? '<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-weight:700">scelto</span>'
+            + ' <button onclick="invConfermaOrdine(\'' + i.id + '\',\'' + p.id + '\')" title="Genera la conferma d\'ordine da mandare al fornitore" style="font-size:10.5px;padding:3px 8px;border:0.5px solid #A32D2D;border-radius:6px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer;margin-left:4px">📄 Conferma d\'ordine</button>'
           : (_invPuo() ? '<button onclick="invScegliPreventivo(\'' + p.id + '\',\'' + i.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">scegli</button>' : '')) + '</td>'
       + '<td style="padding:7px;text-align:right">' + (_invPuo() ? '<button onclick="invEliminaPreventivo(\'' + p.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button>' : '') + '</td></tr>';
   });
@@ -990,4 +1024,114 @@ async function invEliminaPreventivo(id) {
   var r = await sb.from('investimenti_preventivi').delete().eq('id', id);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
   caricaInvestimenti();
+}
+
+// ── CONFERMA D'ORDINE AL FORNITORE (05/10) ─────────────────────────────────
+// Documento da mandare al fornitore una volta scelto il preventivo: parti,
+// oggetto, voci, imponibile/IVA/totale, quote di pagamento e firme.
+var _INV_AZIENDA = {
+  nome: 'PHOENIX FUEL S.R.L.',
+  indirizzo: 'Zona Industriale Portosalvo snc',
+  citta: '89900 Vibo Valentia (VV)',
+  piva: '02744150802', email: 'info@phoenixfuel.it',
+  pec: 'phoenixfuel@legalmail.it', tel: '0966 1906397'
+};
+
+function invConfermaOrdine(impiantoId, preventivoId, aliquota) {
+  var i = (_invDati.impianti || []).filter(function (x) { return x.id === impiantoId; })[0];
+  var p = (_invDati.preventivi || []).filter(function (x) { return x.id === preventivoId; })[0];
+  if (!i || !p) { toast('Dati non trovati'); return; }
+  // l'aliquota si conferma ogni volta: sugli impianti e' il 10%, ma non sempre
+  if (aliquota == null) {
+    var hA = '<div style="max-width:380px"><div style="font-size:16px;font-weight:600;margin-bottom:4px">Conferma d\'ordine</div>'
+      + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">' + _invEsc(p.fornitore) + ' · ' + _invEsc(i.nome) + '</div>'
+      + '<label style="display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px">Aliquota IVA %</label>'
+      + '<input id="inv-ord-iva" type="number" step="0.1" value="10" style="width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px;font-family:var(--font-mono);text-align:right">'
+      + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Sugli impianti fotovoltaici è il 10%: controlla il preventivo del fornitore prima di generare.</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+      + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+      + '<button onclick="chiudiModal();invConfermaOrdine(\'' + impiantoId + '\',\'' + preventivoId + '\', parseFloat(document.getElementById(\'inv-ord-iva\') ? document.getElementById(\'inv-ord-iva\').value : 10) || 10)" class="btn-primary" style="font-size:12px;padding:8px 16px">📄 Genera</button></div></div>';
+    apriModal(hA);
+    return;
+  }
+  var ALIQ = Number(aliquota) || 10;
+  var voci = (_invDati.voci || []).filter(function (v) {
+    return v.impianto_id === i.id && (v.fornitore || '').toLowerCase().indexOf(String(p.fornitore).toLowerCase().slice(0, 6)) >= 0;
+  });
+  var imponibile = voci.length
+    ? voci.reduce(function (s2, v) { return s2 + Number(v.importo_previsto || 0); }, 0)
+    : Number(p.importo || 0);
+  var iva = imponibile * ALIQ / 100;
+  var tot = imponibile + iva;
+
+  var corpo = (voci.length ? voci : [{ descrizione: 'Fornitura e installazione impianto fotovoltaico'
+      + (i.kw ? ' da ' + Number(i.kw).toLocaleString('it-IT') + ' kW' : ''), importo_previsto: imponibile }])
+    .map(function (v) {
+      return '<tr><td class="l">' + _invEsc(v.descrizione) + '</td><td>1</td><td>' + ALIQ + '%</td>'
+        + '<td>' + _invEuro(v.importo_previsto) + '</td><td>' + _invEuro(Number(v.importo_previsto) * (1 + ALIQ / 100)) + '</td></tr>';
+    }).join('');
+
+  var quote = [
+    { perc: 30, evento: 'Alla firma della conferma d\'ordine' },
+    { perc: 50, evento: 'All\'avviso di consegna dei materiali' },
+    { perc: 20, evento: 'Al collaudo dell\'impianto' }
+  ];
+  var qh = quote.map(function (q) {
+    return '<tr><td class="l" style="width:60px">' + q.perc + '%</td><td class="l">' + q.evento + '</td>'
+      + '<td>' + _invEuro(tot * q.perc / 100) + '</td></tr>';
+  }).join('');
+
+  var A = _INV_AZIENDA;
+  var oggi = new Date().toLocaleDateString('it-IT');
+  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Conferma d\'ordine ' + _invEsc(i.nome) + '</title><style>'
+    + '@page{size:A4;margin:14mm}body{font-family:Calibri,Arial,sans-serif;font-size:10.5px;color:#222;margin:0}'
+    + '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #C8102E;padding-bottom:8px;margin-bottom:14px}'
+    + '.az{font-size:15px;font-weight:700}.az small{display:block;font-size:9px;color:#666;font-weight:400;line-height:1.4}'
+    + '.ti{text-align:right;font-size:13px;font-weight:600}.ti small{display:block;font-size:9.5px;color:#666;font-weight:400}'
+    + '.parti{display:flex;gap:30px;margin-bottom:14px}.parti>div{flex:1;font-size:10px;line-height:1.5}'
+    + '.parti .et{font-size:9px;color:#777;text-transform:uppercase;letter-spacing:.3px}.parti strong{font-size:11.5px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:10px}'
+    + 'th{background:#F1EFE8;padding:6px 7px;font-size:8.5px;text-transform:uppercase;letter-spacing:.3px;color:#5F5E5A;text-align:right;border-bottom:1px solid #999}'
+    + 'th.l{text-align:left}td{padding:6px 7px;border-bottom:0.5px solid #e8e8e8;text-align:right}td.l{text-align:left}'
+    + '.tot{margin-top:10px;margin-left:auto;width:46%}.tot td{border:0;padding:3px 7px}'
+    + '.tot .gr{font-size:13px;font-weight:700;border-top:1px solid #333}'
+    + '.box{border:1px solid #ddd;border-radius:5px;padding:9px 11px;margin-top:12px;font-size:9.5px;line-height:1.5}'
+    + '.firme{display:flex;justify-content:space-between;gap:40px;margin-top:32px;font-size:10px}'
+    + '.firme>div{flex:1}.firme .riga{border-bottom:1px solid #333;height:40px;margin-top:8px}'
+    + '.foot{margin-top:16px;border-top:0.5px solid #ddd;padding-top:5px;font-size:8px;color:#777;text-align:center}'
+    + '</style></head><body>'
+    + '<div class="hd"><div class="az">' + A.nome + '<small>' + A.indirizzo + ' · ' + A.citta
+    + '<br>P.IVA ' + A.piva + ' · ' + A.email + ' · ' + A.pec + '</small></div>'
+    + '<div class="ti">Conferma d\'ordine<small>' + oggi + '</small></div></div>'
+    + '<div class="parti">'
+    + '<div><div class="et">Committente</div><strong>' + A.nome + '</strong><br>' + A.indirizzo + '<br>' + A.citta
+    + '<br>P.IVA ' + A.piva + '<br>' + A.tel + '</div>'
+    + '<div><div class="et">Spettabile fornitore</div><strong>' + _invEsc(p.fornitore) + '</strong>'
+    + (p.numero || p.data ? '<br>Vs. preventivo ' + (p.numero ? 'n. ' + _invEsc(p.numero) : '') + (p.data ? ' del ' + _invData(p.data) : '') : '')
+    + '</div></div>'
+    + '<div style="font-size:11px;margin-bottom:10px"><strong>Oggetto:</strong> impianto fotovoltaico <strong>' + _invEsc(i.nome) + '</strong>'
+    + (i.luogo ? ' — ' + _invEsc(i.luogo) : '') + (i.kw ? ' · ' + Number(i.kw).toLocaleString('it-IT') + ' kW' : '')
+    + '<br>Con la presente confermiamo l\'ordine alle condizioni del Vs. preventivo sopra richiamato.</div>'
+    + '<table><tr><th class="l">Descrizione</th><th>Quantità</th><th>IVA</th><th>Imponibile</th><th>Totale</th></tr>' + corpo + '</table>'
+    + '<table class="tot"><tr><td class="l">Imponibile</td><td>' + _invEuro(imponibile) + '</td></tr>'
+    + '<tr><td class="l">IVA ' + ALIQ + '%</td><td>' + _invEuro(iva) + '</td></tr>'
+    + '<tr class="gr"><td class="l">Totale</td><td>' + _invEuro(tot) + '</td></tr></table>'
+    + '<div style="clear:both"></div>'
+    + '<div style="font-weight:700;font-size:11px;margin:14px 0 5px">Termini di pagamento</div>'
+    + '<table><tr><th class="l">Quota</th><th class="l">Scadenza</th><th>Importo (IVA incl.)</th></tr>' + qh + '</table>'
+    + '<div class="box">I pagamenti saranno effettuati a mezzo bonifico bancario a vista fattura. '
+    + 'Eventuali varianti ai materiali indicati nel preventivo dovranno essere concordate per iscritto. '
+    + 'I termini di consegna e installazione decorrono dalla data della presente conferma.'
+    + (i.data_fine ? ' Fine lavori prevista entro il ' + _invData(i.data_fine) + '.' : '') + '</div>'
+    + '<div class="firme"><div><div style="font-size:9px;color:#777">Il Committente</div><strong>' + A.nome + '</strong>'
+    + '<div class="riga"></div><div style="font-size:9px;color:#777">Luogo e data</div></div>'
+    + '<div><div style="font-size:9px;color:#777">Il Fornitore — per accettazione</div><strong>' + _invEsc(p.fornitore) + '</strong>'
+    + '<div class="riga"></div><div style="font-size:9px;color:#777">Luogo e data</div></div></div>'
+    + '<div class="foot">' + A.nome + ' · ' + A.indirizzo + ', ' + A.citta + ' · P.IVA ' + A.piva + ' · ' + A.email + '</div>'
+    + '</body></html>';
+
+  var w = window.open('', '_blank');
+  if (!w) { toast('Abilita i popup per stampare'); return; }
+  w.document.write(doc); w.document.close(); w.focus();
+  setTimeout(function () { try { w.print(); } catch (e) {} }, 350);
 }
