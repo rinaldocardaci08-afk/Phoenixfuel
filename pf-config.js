@@ -1,4 +1,6 @@
 // PhoenixFuel — Config & Utilities
+// v20261005b — nuova sezione di menu ☀️ Fotovoltaico (ramo a sé: clienti, offerte,
+//   contratti e impianti suoi, separati dai carburanti)
 // v20260916a — modale generale: niente chiusura al clic/trascinamento sullo sfondo
 // ── SUPABASE ─────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://jpugeakgpitbxdswbucj.supabase.co';
@@ -116,6 +118,8 @@ async function costruisciMenu(ruolo, utenteId) {
       const map = { clienti:{icon:'👤',label:'Clienti'}, fornitori:{icon:'🏭',label:'Fornitori'}, basi:{icon:'📍',label:'Basi di carico'}, prodotti:{icon:'📦',label:'Prodotti'} };
       voci.push({ id, ...map[id] });
     });
+    voci.push({ section:'Fotovoltaico' });
+    voci.push({ id:'fotovoltaico', icon:'☀️', label:'Fotovoltaico' });
     voci.push({ section:'Logistica' });
     voci.push({ id:'logistica', icon:'🚛', label:'Logistica' });
     voci.push({ section:'Stazione' });
@@ -144,6 +148,7 @@ async function costruisciMenu(ruolo, utenteId) {
       { id:'fornitori', icon:'🏭', label:'Fornitori' },
       { id:'basi', icon:'📍', label:'Basi di carico' },
       { id:'prodotti', icon:'📦', label:'Prodotti' },
+      { id:'fotovoltaico', icon:'☀️', label:'Fotovoltaico', section:'Fotovoltaico' },
       { id:'logistica', icon:'🚛', label:'Logistica', section:'Logistica' },
       { id:'stazione', icon:'⛽', label:'Stazione Oppido', section:'Stazione' },
       { id:'autoconsumo', icon:'🛢', label:'Autoconsumo', section:'Autoconsumo' },
@@ -176,14 +181,14 @@ async function costruisciMenu(ruolo, utenteId) {
 async function logout() { await sb.auth.signOut(); window.location.href = 'login.html'; }
 
 // ── NAVIGAZIONE ───────────────────────────────────────────────────
-const TITLES = { home:'Bacheca', dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi', benchmark:'Benchmark mercato', finanze:'Finanze', fatture:'Fatture', banche:'Banche & Mutui' };
+const TITLES = { home:'Bacheca', dashboard:'Dashboard', ordini:'Ordini', prezzi:'Prezzi giornalieri', deposito:'Deposito', consegne:'Consegne', vendite:'Vendite', clienti:'Clienti', fornitori:'Fornitori', basi:'Basi di carico', prodotti:'Prodotti', stazione:'Stazione Oppido', autoconsumo:'Autoconsumo', utenti:'Utenti', cliente:'I miei prezzi', logistica:'Logistica', bacheca:'Bacheca avvisi', benchmark:'Benchmark mercato', finanze:'Finanze', fatture:'Fatture', banche:'Banche & Mutui' , fotovoltaico:'Fotovoltaico' };
 function setSection(id, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('s-' + id).classList.add('active');
   if (el) el.classList.add('active');
   document.getElementById('page-title').textContent = TITLES[id] || id;
-  const loaders = { home:caricaHome, dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca, benchmark:caricaBenchmark, finanze:caricaFinanze, fatture:initFatture, banche:caricaBanche };
+  const loaders = { home:caricaHome, dashboard:caricaDashboard, prezzi:caricaPrezzi, ordini:caricaOrdini, deposito:caricaDeposito, consegne:caricaConsegne, vendite:caricaVendite, clienti:caricaClienti, fornitori:caricaFornitori, basi:caricaBasi, prodotti:caricaProdotti, stazione:caricaStazione, autoconsumo:caricaAutoconsumo, utenti:caricaUtentiCompleto, cliente:caricaAreaCliente, logistica:caricaLogistica, bacheca:caricaBacheca, benchmark:caricaBenchmark, finanze:caricaFinanze, fatture:initFatture, banche:caricaBanche, fotovoltaico:(typeof caricaFotovoltaico === 'function' ? caricaFotovoltaico : null) };
   if (loaders[id]) loaders[id]();
   // Chiudi sidebar su mobile
   if (window.innerWidth <= 768) {
