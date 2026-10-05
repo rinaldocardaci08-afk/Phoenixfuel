@@ -1,4 +1,7 @@
+// v20261005a — sezione Fotovoltaico fra i permessi assegnabili agli utenti
 // PhoenixFuel — Amministrazione
+// v20260911a — CHIUSURA FINE ANNO anche per la STAZIONE su query madre (le letture pompe superano le 1000
+//              righe/anno: senza paginazione le uscite venivano tagliate; ora paginate e coerenti con le giacenze).
 // v20260910a — CHIUSURA FINE ANNO deposito: entrate/uscite/stimata presi da pfData.getGiacenzaAllaData
 //              (query madre: paginazione vera, stati confermato/consegnato, rettifiche col segno) invece
 //              di query proprie (tagliavano a 1000 righe → uscite 3,6M su 6,0M; giacenza inizio benzina
@@ -79,6 +82,7 @@ const SEZIONI_SISTEMA = [
     {id:'stazione.allegati',label:'Allegati'},
     {id:'stazione.report',label:'Report'}
   ]},
+  {id:'fotovoltaico',label:'Fotovoltaico',icon:'☀️'},
   {id:'autoconsumo',label:'Autoconsumo',icon:'🛢'},
   {id:'home',label:'Bacheca Home',icon:'🏠'},
   {id:'bacheca',label:'Bacheca avvisi',icon:'🔔'},
@@ -302,11 +306,16 @@ async function calcolaGiacenzeAnno(sede) {
 
   let prodottiDati = {};
 
-  if (sede === 'deposito_vibo' && typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
+  if ((sede === 'deposito_vibo' || sede === 'stazione_oppido') && typeof pfData !== 'undefined' && pfData.getGiacenzaAllaData) {
     // 10/09 — QUERY MADRE: stessi numeri di registro, giacenze e viste giornaliera/settimanale/mensile.
+    // 11/09 — anche stazione: entrate ricevute + uscite da letture pompe (paginate) + rettifiche col segno.
     const { data: cisterneProd } = await sb.from('cisterne').select('prodotto').eq('sede', sede);
     const prodSet = {};
     (cisterneProd||[]).forEach(c => { if (c.prodotto) prodSet[c.prodotto] = true; });
+    if (sede === 'stazione_oppido') {
+      const { data: pompeProd } = await sb.from('stazione_pompe').select('prodotto').eq('attiva', true);
+      (pompeProd||[]).forEach(p => { if (p.prodotto) prodSet[p.prodotto] = true; });
+    }
     Object.keys(prevMap).forEach(p => { prodSet[p] = true; });
     Object.keys(corrMap).forEach(p => { prodSet[p] = true; });
     const elenco = Object.keys(prodSet);
@@ -605,9 +614,11 @@ async function convalidaGiacenze(sede) {
     if (sede === 'deposito_vibo') {
       try { await _pfChiusuraScriviRegistro(prodotto, anno, reale, diff); }
       catch (eReg) { console.warn('registro chiusura', prodotto, eReg && eReg.message); }
+    }
+    if (sede === 'deposito_vibo' || sede === 'stazione_oppido') {
       // 10/09 — conguaglio come RETTIFICA confermata al 31/12 (origine chiusura_anno), idempotente:
       // cosi' la query madre chiude l'anno sul valore reale e l'anno dopo parte da li'.
-      try { await _pfChiusuraScriviRettifica(prodotto, anno, stimata, reale, diff, nomeUtente); }
+      try { await _pfChiusuraScriviRettifica(sede, prodotto, anno, stimata, reale, diff, nomeUtente); }
       catch (eRt) { console.warn('rettifica chiusura anno', prodotto, eRt && eRt.message); }
     }
   }
@@ -620,15 +631,16 @@ async function convalidaGiacenze(sede) {
 }
 
 // Rettifica di conguaglio annuale (solo deposito). Idempotente per anno+prodotto.
-async function _pfChiusuraScriviRettifica(prodotto, anno, stimata, reale, diff, utente) {
+async function _pfChiusuraScriviRettifica(sede, prodotto, anno, stimata, reale, diff, utente) {
+  var tipo = (sede === 'stazione_oppido') ? 'stazione' : 'deposito';
   var dataChiusura = anno + '-12-31';
   await sb.from('rettifiche_inventario').delete()
-    .eq('tipo', 'deposito').eq('prodotto', prodotto).eq('origine', 'chiusura_anno').eq('data', dataChiusura);
+    .eq('tipo', tipo).eq('prodotto', prodotto).eq('origine', 'chiusura_anno').eq('data', dataChiusura);
   if (Math.round(diff) === 0) return;
-  var cis = await sb.from('cisterne').select('id').eq('sede', 'deposito_vibo').eq('prodotto', prodotto).limit(1);
+  var cis = await sb.from('cisterne').select('id').eq('sede', sede).eq('prodotto', prodotto).limit(1);
   var cisternaId = cis.data && cis.data[0] ? cis.data[0].id : null;
   var res = await sb.from('rettifiche_inventario').insert([{
-    tipo: 'deposito', data: dataChiusura, cisterna_id: cisternaId, prodotto: prodotto,
+    tipo: tipo, data: dataChiusura, cisterna_id: cisternaId, prodotto: prodotto,
     giacenza_sistema: Math.round(stimata), giacenza_rilevata: Math.round(reale), differenza: Math.round(diff),
     causale: 'conguaglio_annuale', origine: 'chiusura_anno', confermata: true,
     confermata_da: utente, confermata_il: new Date().toISOString(),
