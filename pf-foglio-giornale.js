@@ -1,4 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20261005b — USCITE SU INVESTIMENTI: nel modale Uscita si sceglie solo la CAUSALE
+//   (il ramo) e l'aliquota IVA; il programma scorpora e salva l'imponibile. L'impianto
+//   a cui imputare la spesa si assegna DOPO, dalla pagina Investimenti: finche' non lo
+//   si fa, la spesa resta nel totale del ramo come spesa generale non imputata.
+
 // PhoenixFuel — Foglio Giornale Aziendale (movimenti monetari)
 // v20260916d — il modale Entrata/Uscita NON si chiude piu' cliccando fuori (o trascinando il cursore
 //              fuori da una casella mentre si scrive): si chiude solo con × o Annulla.
@@ -856,7 +861,8 @@ async function _fgApriModale(iso, tipo, preset) {
     fattureTrovate: [],
     ordiniTrovati: [],
     imputazioni: {},
-    anticipiPerFattura: {}
+    anticipiPerFattura: {},
+    invCausale: '', invImpianto: '', invVoce: '', invIva: 22
   };
   // v20260821b — arrivando da una scadenza il fornitore e le fatture sono
   // gia' scelti: si portano dentro PRIMA del disegno, altrimenti il render
@@ -870,6 +876,20 @@ async function _fgApriModale(iso, tipo, preset) {
     var banchRes = await sb.from('banche_istituti').select('id,nome').order('nome');
     _fgListaBanche = banchRes.data || [];
   }
+  // Causali investimento + impianti + voci (solo per le uscite, lettura unica)
+  if (tipo === 'uscita' && !_fgInvCausali) {
+    try {
+      var rc = await sb.from('causali_investimento').select('id,nome').eq('attiva', true).order('nome');
+      _fgInvCausali = rc.data || [];
+      var ri = await sb.from('investimenti_impianti').select('id,nome,causale_id,stato').order('nome');
+      _fgInvImpianti = ri.data || [];
+      var rv = await sb.from('investimenti_voci').select('id,impianto_id,descrizione,categoria').order('ordine');
+      _fgInvVoci = rv.data || [];
+    } catch (e) {
+      _fgInvCausali = []; _fgInvImpianti = []; _fgInvVoci = [];
+      console.warn('[fg] investimenti non disponibili:', e && e.message);
+    }
+  }
 
   _fgRenderModale();
 }
@@ -880,6 +900,57 @@ function _fgChiudiModale() {
   if (ov) ov.remove();
 }
 
+
+var _fgInvCausali = null, _fgInvImpianti = null, _fgInvVoci = null;
+
+// 05/10 — blocco "Spesa su investimento" del modale Uscita: scegliendo la
+// causale si imputa la spesa a un impianto; l'IVA viene scorporata e in
+// movimento resta l'imponibile, che e' il valore della pagina Investimenti.
+function _fgInvBlocco() {
+  var m = _fgModale;
+  if (m.tipo !== 'uscita' || !_fgInvCausali || !_fgInvCausali.length) return '';
+  var selSt = 'width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px';
+  var h = '<div style="background:#FFF7E0;border-left:4px solid #BA7517;border-radius:0 6px 6px 0;padding:10px 12px;margin-bottom:14px">';
+  h += '<div style="display:grid;grid-template-columns:2fr 0.7fr;gap:10px">';
+  h += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">Spesa su investimento</label>';
+  h += '<select id="fg-mod-inv-causale" onchange="_fgInvCambia()" style="' + selSt + '"><option value="">— no, spesa normale —</option>'
+     + _fgInvCausali.map(function (c) { return '<option value="' + esc(c.id) + '"' + (m.invCausale === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>'; }).join('')
+     + '</select></div>';
+  h += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">IVA %</label>';
+  h += '<input type="number" step="0.1" min="0" id="fg-mod-inv-iva" value="' + (m.invIva != null ? m.invIva : 22) + '" oninput="_fgInvCambia()"' + (m.invCausale ? '' : ' disabled') + ' style="' + selSt + ';font-family:var(--font-mono);text-align:right' + (m.invCausale ? '' : ';opacity:.5') + '"></div>';
+  h += '</div>';
+  h += '<div id="fg-inv-calc" style="font-size:11px;color:#412402;margin-top:8px"></div>';
+  h += '</div>';
+  return h;
+}
+
+function _fgInvCambia() {
+  var m = _fgModale;
+  var g = function (id) { var e = document.getElementById(id); return e ? e.value : ''; };
+  var nuovaCausale = g('fg-mod-inv-causale');
+  var cambiata = (nuovaCausale !== m.invCausale);
+  m.invCausale = nuovaCausale;
+  m.invIva = parseFloat(g('fg-mod-inv-iva'));
+  if (isNaN(m.invIva)) m.invIva = 22;
+  if (cambiata) { _fgRenderModale(); return; }
+  _fgInvAggiornaCalcolo();
+}
+
+function _fgInvAggiornaCalcolo() {
+  var box = document.getElementById('fg-inv-calc');
+  if (!box) return;
+  var m = _fgModale;
+  var el = document.getElementById('fg-mod-importo');
+  var tot = el ? (parseFloat(el.value) || 0) : 0;
+  if (!m.invCausale || tot <= 0) { box.innerHTML = ''; return; }
+  var iva = Number(m.invIva) || 0;
+  var imponibile = tot / (1 + iva / 100);
+  var impIva = tot - imponibile;
+  box.innerHTML = 'Imponibile <strong style="font-family:var(--font-mono)">' + _fgFmtImporto(imponibile) + '</strong>'
+    + ' · IVA ' + iva + '% <span style="font-family:var(--font-mono)">' + _fgFmtImporto(impIva) + '</span>'
+    + ' — nella pagina Investimenti conta l\'imponibile; l\'IVA è partita di giro.'
+    + ' <span style="color:#854F0B">L\'impianto si assegna dopo, dalla pagina Investimenti.</span>';
+}
 
 function _fgRenderModale() {
   // Rimuovi precedente
@@ -906,7 +977,7 @@ function _fgRenderModale() {
   html += '<div style="background:var(--bg);padding:12px;border-radius:6px;margin-bottom:14px">';
   html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
   html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Importo €</label>';
-  html += '<input type="number" step="0.01" min="0.01" id="fg-mod-importo" oninput="_fgAggiornaStatusModale()" placeholder="0,00" style="width:100%;font-family:var(--font-mono);font-weight:500;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
+  html += '<input type="number" step="0.01" min="0.01" id="fg-mod-importo" oninput="_fgAggiornaStatusModale(); _fgInvAggiornaCalcolo();" placeholder="0,00" style="width:100%;font-family:var(--font-mono);font-weight:500;font-size:13px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
 
   html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">' + (m.tipo === 'entrata' ? 'Conto destinazione' : 'Conto sorgente') + '</label>';
   html += '<select id="fg-mod-conto" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px">';
@@ -925,6 +996,9 @@ function _fgRenderModale() {
   html += '<option value="bonifico">Bonifico</option><option value="riba">RIBA</option><option value="contanti">Contanti</option><option value="assegno">Assegno</option><option value="pos">POS</option><option value="altro">Altro</option>';
   html += '</select></div>';
   html += '</div></div>';
+
+  // Sezione investimenti (solo uscite)
+  html += _fgInvBlocco();
 
   // Sezione 2: Modi
   var labelSottoTitolo = m.tipo === 'entrata' ? 'A copertura di...' : 'A pagamento di...';
@@ -1750,6 +1824,15 @@ async function _fgConfermaMovimento() {
   }
 
   // INSERT movimento
+  // 05/10 — spesa su investimento: imponibile scorporato, impianto obbligatorio
+  var invCausale = m.invCausale || null, invImpianto = null, invVoce = null;   // impianto e voce si assegnano dalla pagina Investimenti
+  var invIva = null, invImponibile = null;
+  if (invCausale) {
+    invIva = Number(m.invIva);
+    if (!isFinite(invIva) || invIva < 0) invIva = 22;
+    invImponibile = Math.round((importo / (1 + invIva / 100)) * 100) / 100;
+  }
+
   var insMov = await sb.from('foglio_giornale_movimenti').insert([{
     data: m.data,
     tipo: m.tipo,
@@ -1759,7 +1842,12 @@ async function _fgConfermaMovimento() {
     cassa_tipo: cassa_tipo,
     metodo: metodo,
     origine: 'manuale',
-    note: note
+    note: note,
+    causale_investimento_id: invCausale,
+    investimento_impianto_id: invImpianto,
+    investimento_voce_id: invVoce,
+    aliquota_iva: invIva,
+    imponibile: invImponibile
   }]).select('id').single();
 
   if (insMov.error) {
