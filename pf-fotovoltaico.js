@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261005b — COSTI E MARGINE sull'offerta: anagrafica FORNITORI FV separata e
+//   blocco dei costi (fornitura chiavi in mano, commissione agente, altro) con il
+//   riferimento al documento del fornitore — solo i dati, nessun PDF allegato.
+//   Tutto a IMPONIBILE: l'IVA e' partita di giro. In testa ricavo, costi, margine.
 // v20261005a — 05/10/2026
 //
 // Qui vivono CLIENTI FV, CATALOGO, OFFERTE e CONTRATTI del ramo fotovoltaico.
@@ -13,7 +17,7 @@
 // modificabile, comprese le quote di pagamento.
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _fvCli = null, _fvCat = null, _fvOff = null, _fvCon = null, _fvSchemi = null;
+var _fvCli = null, _fvCat = null, _fvOff = null, _fvCon = null, _fvSchemi = null, _fvForn = null;
 var _fvOffertaAperta = null, _fvContrattoAperto = null;
 
 var _FV_TIPI = [
@@ -231,9 +235,12 @@ async function fvCaricaOfferte() {
     sb.from('fv_offerte_righe').select('*').order('ordine'),
     sb.from('fv_clienti').select('*').order('ragione_sociale'),
     sb.from('fv_catalogo').select('*').eq('attivo', true).order('tipo').order('nome'),
-    sb.from('fv_schemi_pagamento').select('*').eq('attivo', true).order('nome')
+    sb.from('fv_schemi_pagamento').select('*').eq('attivo', true).order('nome'),
+    sb.from('fv_offerte_costi').select('*').order('ordine'),
+    sb.from('fv_fornitori').select('*').eq('attivo', true).order('ragione_sociale')
   ]);
-  _fvOff = { offerte: r[0].data || [], righe: r[1].data || [] };
+  _fvOff = { offerte: r[0].data || [], righe: r[1].data || [], costi: (r[5] && r[5].data) || [] };
+  _fvForn = (r[6] && r[6].data) || [];
   _fvCli = r[2].data || [];
   _fvCat = r[3].data || [];
   _fvSchemi = r[4].data || [];
@@ -371,7 +378,141 @@ function _fvRenderOffertaScheda() {
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:15px">' + _fvEuro(imponibile + iva) + '</div></div>'
     + '</div></div>';
 
+  h += _fvBloccoCosti(o, imponibile);
   box.innerHTML = h;
+}
+
+// ── COSTI E MARGINE DELL'OFFERTA ───────────────────────────────────────────
+// Quanto ci costa l'impianto (fornitura chiavi in mano del fornitore,
+// commissione dell'agente, altro) e quanto resta a noi. Sempre a imponibile.
+function _fvCostiOfferta(offertaId) {
+  return (_fvOff.costi || []).filter(function (c) { return c.offerta_id === offertaId; });
+}
+
+function _fvBloccoCosti(o, ricavo) {
+  var costi = _fvCostiOfferta(o.id);
+  var totCosti = costi.reduce(function (s, c) { return s + Number(c.imponibile || 0); }, 0);
+  var margine = Number(ricavo || 0) - totCosti;
+  var pct = ricavo > 0 ? (margine / ricavo * 100) : 0;
+  var TIPI = { fornitura: 'Fornitura', commissione: 'Commissione agente', trasporto: 'Trasporto', pratiche: 'Pratiche', altro: 'Altro' };
+
+  var kpi = function (lab, val, col) {
+    return '<div style="flex:1;min-width:140px;border:0.5px solid var(--border);border-radius:9px;padding:10px 12px">'
+      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div></div>';
+  };
+
+  var h = '<div class="card" style="padding:12px 14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+    + '<div><div style="font-size:13px;font-weight:700">I nostri costi e il margine</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">Importi al netto dell\'IVA: quello che il fornitore ci fattura, le commissioni e quanto resta a noi.</div></div>'
+    + (_fvPuo() ? '<button onclick="fvModaleCosto(\'' + o.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Costo</button>' : '')
+    + '</div>';
+  h += '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:10px">'
+    + kpi('Ricavo (imponibile)', _fvEuro(ricavo))
+    + kpi('Costi', _fvEuro(totCosti), '#A32D2D')
+    + kpi('Margine', _fvEuro(margine), margine >= 0 ? '#27500A' : '#A32D2D')
+    + kpi('Margine %', (ricavo > 0 ? pct.toFixed(1) + ' %' : '—'), margine >= 0 ? '#27500A' : '#A32D2D')
+    + '</div>';
+  if (!costi.length) {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessun costo inserito: aggiungi la fornitura del fornitore e le commissioni.</div></div>';
+    return h;
+  }
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Voce</th>'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Documento</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Imponibile</th>'
+    + '<th style="width:36px;border-bottom:1.5px solid var(--border)"></th></tr>';
+  costi.forEach(function (c) {
+    var f = (_fvForn || []).filter(function (x) { return x.id === c.fornitore_id; })[0];
+    h += '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:7px"><strong>' + _fvEsc(c.descrizione) + '</strong>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + _fvEsc(TIPI[c.tipo] || c.tipo) + (f ? ' · ' + _fvEsc(f.ragione_sociale) : '') + '</div></td>'
+      + '<td style="padding:7px;font-size:11.5px;color:var(--text-muted)">'
+      + (c.doc_numero ? _fvEsc((c.doc_tipo || 'doc') + ' n. ' + c.doc_numero) + (c.doc_data ? ' del ' + _fvData(c.doc_data) : '') : '—')
+      + (c.doc_totale ? '<div>totale documento ' + _fvEuro(c.doc_totale) + '</div>' : '') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(c.imponibile) + '</td>'
+      + '<td style="padding:7px;text-align:right">' + (_fvPuo() ? '<button onclick="fvEliminaCosto(\'' + c.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button>' : '') + '</td></tr>';
+  });
+  h += '<tr style="font-weight:700"><td colspan="2" style="padding:8px 7px">TOTALE COSTI</td>'
+    + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _fvEuro(totCosti) + '</td><td></td></tr>';
+  h += '</table></div>';
+  return h;
+}
+
+function fvModaleCosto(offertaId) {
+  var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
+  var lb = 'display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
+  var h = '<div style="max-width:560px"><div style="font-size:16px;font-weight:600;margin-bottom:4px">Costo dell\'impianto</div>';
+  h += '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Scrivi l\'imponibile. Se hai il totale con IVA, usa il pulsante per scorporarla.</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div><label style="' + lb + '">Tipo</label><select id="fvco-tipo" style="' + inp + '">'
+    + '<option value="fornitura">Fornitura chiavi in mano</option><option value="commissione">Commissione agente</option>'
+    + '<option value="trasporto">Trasporto</option><option value="pratiche">Pratiche</option><option value="altro">Altro</option></select></div>';
+  h += '<div><label style="' + lb + '">Fornitore</label><select id="fvco-forn" style="' + inp + '"><option value="">— nessuno —</option>'
+    + (_fvForn || []).map(function (f) { return '<option value="' + f.id + '">' + _fvEsc(f.ragione_sociale) + '</option>'; }).join('')
+    + '</select></div>';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Descrizione *</label><input id="fvco-descr" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Imponibile €</label><input id="fvco-imp" type="number" step="0.01" style="' + inp + ';font-family:var(--font-mono)"></div>';
+  h += '<div><label style="' + lb + '">Oppure totale con IVA</label><div style="display:flex;gap:6px">'
+    + '<input id="fvco-tot" type="number" step="0.01" style="' + inp + ';font-family:var(--font-mono)">'
+    + '<input id="fvco-iva" type="number" step="0.1" value="10" title="aliquota %" style="' + inp + ';width:62px;text-align:right">'
+    + '<button onclick="fvScorporaCosto()" title="Scorpora l\'IVA" style="padding:0 10px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:700;cursor:pointer">→</button></div></div>';
+  h += '<div><label style="' + lb + '">Documento</label><select id="fvco-dtipo" style="' + inp + '">'
+    + '<option value="">— nessuno —</option><option value="fattura">Fattura</option><option value="preventivo">Preventivo</option><option value="ordine">Ordine</option></select></div>';
+  h += '<div><label style="' + lb + '">Numero</label><input id="fvco-dnum" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Data documento</label><input id="fvco-ddata" type="date" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Totale documento €</label><input id="fvco-dtot" type="number" step="0.01" style="' + inp + ';font-family:var(--font-mono)"></div>';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Note</label><input id="fvco-note" style="' + inp + '"></div>';
+  h += '</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="fvSalvaCosto(\'' + offertaId + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
+  apriModal(h);
+}
+
+// Totale con IVA → imponibile (es. 70.000 al 10% = 63.636,36)
+function fvScorporaCosto() {
+  var tot = parseFloat((document.getElementById('fvco-tot') || {}).value) || 0;
+  var iva = parseFloat((document.getElementById('fvco-iva') || {}).value);
+  if (!isFinite(iva)) iva = 10;
+  if (tot <= 0) { toast('Scrivi il totale con IVA'); return; }
+  var imp = Math.round((tot / (1 + iva / 100)) * 100) / 100;
+  var e = document.getElementById('fvco-imp'); if (e) e.value = imp;
+  var d = document.getElementById('fvco-dtot'); if (d && !d.value) d.value = tot;
+}
+
+async function fvSalvaCosto(offertaId) {
+  var g = function (x) { var e = document.getElementById(x); return e ? e.value : ''; };
+  var d = (g('fvco-descr') || '').trim();
+  var imp = parseFloat(g('fvco-imp')) || 0;
+  if (!d) { toast('La descrizione è obbligatoria'); return; }
+  if (imp <= 0) { toast('Indica l\'imponibile (o scorpora il totale con IVA)'); return; }
+  var n = _fvCostiOfferta(offertaId).length;
+  var r = await sb.from('fv_offerte_costi').insert([{
+    offerta_id: offertaId, tipo: g('fvco-tipo') || 'altro',
+    fornitore_id: g('fvco-forn') || null, descrizione: d, imponibile: imp,
+    aliquota_iva: parseFloat(g('fvco-iva')) || null,
+    doc_tipo: g('fvco-dtipo') || null, doc_numero: g('fvco-dnum') || null,
+    doc_data: g('fvco-ddata') || null, doc_totale: parseFloat(g('fvco-dtot')) || null,
+    note: g('fvco-note') || null, ordine: n + 1
+  }]);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  chiudiModal();
+  await _fvRicaricaCosti();
+  _fvRenderOffertaScheda();
+}
+
+async function fvEliminaCosto(id) {
+  var r = await sb.from('fv_offerte_costi').delete().eq('id', id);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  await _fvRicaricaCosti();
+  _fvRenderOffertaScheda();
+}
+
+async function _fvRicaricaCosti() {
+  var r = await sb.from('fv_offerte_costi').select('*').order('ordine');
+  _fvOff.costi = r.data || [];
 }
 
 async function fvOffertaCampo(campo, valore) {
@@ -920,6 +1061,85 @@ function fvStampaOfferta(id) {
   _fvApriStampa('<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Preventivo ' + (o.numero || '') + '-' + o.anno + '</title>' + _fvStile() + '</head><body>' + pagine + '</body></html>');
 }
 
+// ═══ FORNITORI FV ══════════════════════════════════════════════════════════
+async function fvCaricaFornitori() {
+  var box = document.getElementById('fvforn-content');
+  if (!box) return;
+  box.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">Caricamento…</div>';
+  var r = await sb.from('fv_fornitori').select('*').order('ragione_sociale');
+  if (r.error) { box.innerHTML = _fvVuoto('Errore: ' + _fvEsc(r.error.message)); return; }
+  _fvForn = r.data || [];
+  _fvRenderFornitori();
+}
+
+function _fvRenderFornitori() {
+  var box = document.getElementById('fvforn-content');
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">'
+    + '<div><div style="font-size:16px;font-weight:700">🏭 Fornitori fotovoltaico</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Chi ci fornisce gli impianti chiavi in mano. Separati dai fornitori carburanti.</div></div>'
+    + (_fvPuo() ? '<button onclick="fvModaleFornitore()" class="btn-primary" style="font-size:12px;padding:7px 13px">+ Nuovo fornitore</button>' : '')
+    + '</div>';
+  if (!(_fvForn || []).length) { box.innerHTML = h + _fvVuoto('Nessun fornitore.'); return; }
+  h += '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">Ragione sociale</th>'
+    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">P.IVA</th>'
+    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">Sede</th>'
+    + '<th style="text-align:left;padding:8px 10px;border-bottom:1.5px solid var(--border)">Contatti</th>'
+    + '<th style="width:70px;border-bottom:1.5px solid var(--border)"></th></tr>';
+  _fvForn.forEach(function (f) {
+    h += '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:9px 10px"><strong>' + _fvEsc(f.ragione_sociale) + '</strong></td>'
+      + '<td style="padding:9px 10px;font-family:var(--font-mono)">' + _fvEsc(f.piva || '—') + '</td>'
+      + '<td style="padding:9px 10px">' + _fvEsc([f.indirizzo, f.comune, f.provincia ? '(' + f.provincia + ')' : ''].filter(Boolean).join(', ') || '—') + '</td>'
+      + '<td style="padding:9px 10px;font-size:11.5px;color:var(--text-muted)">' + _fvEsc([f.referente, f.telefono, f.email].filter(Boolean).join(' · ') || '—') + '</td>'
+      + '<td style="padding:9px 10px;text-align:right">' + (_fvPuo() ? '<button onclick="fvModaleFornitore(\'' + f.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">✏️</button>' : '') + '</td></tr>';
+  });
+  h += '</table></div>';
+  box.innerHTML = h;
+}
+
+function fvModaleFornitore(id) {
+  var f = id ? (_fvForn || []).filter(function (x) { return x.id === id; })[0] : null;
+  var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
+  var lb = 'display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
+  var v = function (k) { return _fvEsc(f && f[k] || ''); };
+  var h = '<div style="max-width:560px"><div style="font-size:16px;font-weight:600;margin-bottom:12px">' + (f ? 'Modifica fornitore' : 'Nuovo fornitore fotovoltaico') + '</div>';
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">';
+  h += '<div style="grid-column:1/4"><label style="' + lb + '">Ragione sociale *</label><input id="fvf-rs" value="' + v('ragione_sociale') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">P.IVA</label><input id="fvf-piva" value="' + v('piva') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Codice fiscale</label><input id="fvf-cf" value="' + v('codice_fiscale') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Telefono</label><input id="fvf-tel" value="' + v('telefono') + '" style="' + inp + '"></div>';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Indirizzo</label><input id="fvf-ind" value="' + v('indirizzo') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">CAP</label><input id="fvf-cap" value="' + v('cap') + '" style="' + inp + '"></div>';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Comune</label><input id="fvf-com" value="' + v('comune') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Provincia</label><input id="fvf-prov" maxlength="2" value="' + v('provincia') + '" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Referente</label><input id="fvf-ref" value="' + v('referente') + '" style="' + inp + '"></div>';
+  h += '<div style="grid-column:2/4"><label style="' + lb + '">Email</label><input id="fvf-mail" value="' + v('email') + '" style="' + inp + '"></div>';
+  h += '<div style="grid-column:1/4"><label style="' + lb + '">PEC</label><input id="fvf-pec" value="' + v('pec') + '" style="' + inp + '"></div>';
+  h += '<div style="grid-column:1/4"><label style="' + lb + '">IBAN</label><input id="fvf-iban" value="' + v('iban') + '" style="' + inp + ';font-family:var(--font-mono)"></div>';
+  h += '</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="fvSalvaFornitore(' + (f ? '\'' + f.id + '\'' : 'null') + ')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
+  apriModal(h);
+}
+
+async function fvSalvaFornitore(id) {
+  var g = function (x) { var e = document.getElementById(x); return e ? e.value.trim() : ''; };
+  if (!g('fvf-rs')) { toast('La ragione sociale è obbligatoria'); return; }
+  var p = {
+    ragione_sociale: g('fvf-rs'), piva: g('fvf-piva') || null, codice_fiscale: g('fvf-cf') || null,
+    indirizzo: g('fvf-ind') || null, cap: g('fvf-cap') || null, comune: g('fvf-com') || null,
+    provincia: (g('fvf-prov') || '').toUpperCase() || null, referente: g('fvf-ref') || null,
+    telefono: g('fvf-tel') || null, email: g('fvf-mail') || null, pec: g('fvf-pec') || null,
+    iban: g('fvf-iban') || null
+  };
+  var r = id ? await sb.from('fv_fornitori').update(p).eq('id', id) : await sb.from('fv_fornitori').insert([p]);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  chiudiModal();
+  fvCaricaFornitori();
+}
+
 // ═══ LINGUETTE DELLA SEZIONE ═══════════════════════════════════════════════
 function switchFvSubTab(btn) {
   var tab = btn.getAttribute('data-tab');
@@ -938,6 +1158,7 @@ function switchFvSubTab(btn) {
   if (tab === 'fv-tab-contratti') fvCaricaContratti();
   if (tab === 'fv-tab-clienti') fvCaricaClienti();
   if (tab === 'fv-tab-catalogo') fvCaricaCatalogo();
+  if (tab === 'fv-tab-fornitori') fvCaricaFornitori();
 }
 
 // Punto d'ingresso della sezione (chiamato dal menu)
