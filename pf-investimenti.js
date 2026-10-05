@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261005i — scelta del fornitore DEFINITIVA: quando un preventivo e' scelto gli
+//   altri non si possono piu' selezionare (niente pulsante "scegli"); restano a
+//   memoria del confronto. Per cambiare davvero si elimina il preventivo scelto.
 // v20261005h — popup del finanziamento rifatto (versione B: fascia blu con capitale,
 //   sezioni Condizioni / Preammortamento / Rata / Avanzamento) e aliquota IVA della
 //   conferma d'ordine chiesta ogni volta, proposta al 10%.
@@ -947,6 +950,7 @@ function _invBloccoPreventivi(i) {
     + '</div>';
   if (!prev.length) { h += '<div style="font-size:12px;color:var(--text-muted)">Nessun preventivo registrato.</div></div>'; return h; }
   var min = Math.min.apply(null, prev.map(function (p) { return Number(p.importo || 0); }));
+  var giaScelto = prev.some(function (p) { return p.scelto; });
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
   h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
     + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Fornitore</th>'
@@ -966,13 +970,19 @@ function _invBloccoPreventivi(i) {
       + '<td style="padding:7px">' + (p.scelto
           ? '<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-weight:700">scelto</span>'
             + ' <button onclick="invConfermaOrdine(\'' + i.id + '\',\'' + p.id + '\')" title="Genera la conferma d\'ordine da mandare al fornitore" style="font-size:10.5px;padding:3px 8px;border:0.5px solid #A32D2D;border-radius:6px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer;margin-left:4px">📄 Conferma d\'ordine</button>'
-          : (_invPuo() ? '<button onclick="invScegliPreventivo(\'' + p.id + '\',\'' + i.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">scegli</button>' : '')) + '</td>'
+          : (giaScelto
+              ? '<span style="font-size:10.5px;color:var(--text-muted)">non scelto</span>'
+              : (_invPuo() ? '<button onclick="invScegliPreventivo(\'' + p.id + '\',\'' + i.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">scegli</button>' : ''))) + '</td>'
       + '<td style="padding:7px;text-align:right">' + (_invPuo() ? '<button onclick="invEliminaPreventivo(\'' + p.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button>' : '') + '</td></tr>';
   });
   h += '</table>';
   var scelto = prev.filter(function (p) { return p.scelto; })[0];
   if (scelto && prev.length > 1 && Math.abs(Number(scelto.importo) - min) > 0.01) {
     h += '<div style="font-size:11px;color:#854F0B;margin-top:8px">Il preventivo scelto costa ' + _invEuro(Number(scelto.importo) - min) + ' in più del più basso.</div>';
+  }
+  if (scelto) {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Fornitore già scelto: la fornitura è definitiva. '
+      + 'Per cambiarla va eliminato il preventivo scelto.</div>';
   }
   h += '</div>';
   return h;
@@ -987,7 +997,12 @@ function invModalePreventivo(impiantoId) {
   h += '<div><label style="' + lb + '">Numero</label><input id="invp-num" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Data</label><input id="invp-data" type="date" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Imponibile €</label><input id="invp-imp" type="number" step="0.01" style="' + inp + ';font-family:var(--font-mono)"></div>';
-  h += '<div><label style="' + lb + '">Scelto</label><select id="invp-scelto" style="' + inp + '"><option value="">No</option><option value="1">Sì</option></select></div>';
+  var giaScelto = (_invDati.preventivi || []).some(function (x) { return x.impianto_id === impiantoId && x.scelto; });
+  h += '<div><label style="' + lb + '">Scelto</label>'
+    + (giaScelto
+        ? '<div style="' + inp + ';color:var(--text-muted)">no — fornitore già scelto</div><input type="hidden" id="invp-scelto" value="">'
+        : '<select id="invp-scelto" style="' + inp + '"><option value="">No</option><option value="1">Sì</option></select>')
+    + '</div>';
   h += '<div style="grid-column:1/3"><label style="' + lb + '">Note (cosa comprende, perché scelto o scartato)</label><input id="invp-note" style="' + inp + '"></div>';
   h += '</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
     + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
