@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261005d — lo switch delle linguette e il punto d'ingresso della sezione sono
+//   passati a pf-fotovoltaico.js: qui resta solo la pagina Investimenti.
+// v20261005c — nel Gantt: linea di oggi e percentuale di spesa sul totale previsto degli impianti a diagramma
+// v20261005b — la sezione vive ora sotto ☀️ Fotovoltaico (camera stagna), non in Finanze;
+//   aggiunto switchFvSubTab per le linguette del ramo.
 // v20261005a — 05/10/2026
 //
 // COME FUNZIONA (regole fissate con Rinaldo):
@@ -290,8 +295,20 @@ function _invGantt(impianti) {
   while (cur <= max) { mesi.push(new Date(cur)); cur.setMonth(cur.getMonth() + 1); }
   var MM = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 
+  // linea di oggi, se cade dentro il periodo mostrato
+  var oggiD = new Date(); oggiD.setHours(12, 0, 0, 0);
+  var oggiPct = (oggiD >= min && oggiD <= max) ? ((oggiD - min) / span * 100) : null;
+  // percentuale di spesa sul totale considerato (somma dei previsti degli impianti in diagramma)
+  var prevTot = conDate.reduce(function (a, i) { return a + Number(i.spesa_prevista || 0); }, 0);
+  var spesoTot = conDate.reduce(function (a, i) { return a + _invSpesoImpianto(i.id); }, 0);
+  var pctTot = prevTot > 0 ? (spesoTot / prevTot * 100) : 0;
+
   var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Tempistiche</div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+    + '<div style="font-size:13px;font-weight:700">Tempistiche</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">speso <strong style="font-family:var(--font-mono);color:var(--text)">'
+      + _invEuro(spesoTot) + '</strong> su <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(prevTot)
+      + '</strong> previsti · <strong style="color:' + (pctTot > 100 ? '#A32D2D' : 'var(--text)') + '">' + pctTot.toFixed(1) + '%</strong></div></div>';
   h += '<div style="display:flex;gap:8px;margin-bottom:4px"><div style="width:150px"></div><div style="flex:1;display:flex;font-size:9.5px;color:var(--text-muted)">'
     + mesi.map(function (d) { return '<div style="flex:1;text-align:center;border-left:0.5px solid var(--border)">' + MM[d.getMonth()] + (d.getMonth() === 0 ? ' ' + String(d.getFullYear()).slice(2) : '') + '</div>'; }).join('')
     + '</div></div>';
@@ -305,10 +322,14 @@ function _invGantt(impianti) {
       + '<div style="width:150px;font-size:11px;text-align:right;overflow:hidden;white-space:nowrap">' + _invEsc(i.nome) + '</div>'
       + '<div style="flex:1;position:relative;height:20px;background:var(--bg);border-radius:4px">'
       + '<div title="' + _invData(i.data_inizio) + ' → ' + _invData(i.data_fine) + ' · speso ' + pct.toFixed(0) + '%" style="position:absolute;left:' + left.toFixed(1) + '%;width:' + w.toFixed(1) + '%;top:0;height:20px;background:' + st.bg + ';border:0.5px solid ' + st.col + ';border-radius:4px;overflow:hidden">'
-      + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + st.col + ';opacity:.35"></div></div></div>'
+      + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + st.col + ';opacity:.35"></div></div>'
+      + (oggiPct !== null ? '<div title="oggi" style="position:absolute;left:' + oggiPct.toFixed(2) + '%;top:-2px;width:2px;height:24px;background:#A32D2D"></div>' : '')
+      + '</div>'
       + '<div style="width:70px;font-size:10.5px;color:var(--text-muted);text-align:right">' + pct.toFixed(0) + '% speso</div></div>';
   });
-  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">La parte piena di ogni barra è la quota di spesa già sostenuta sul previsto. Gli impianti senza date non compaiono.</div>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">La parte piena di ogni barra è la quota di spesa già sostenuta sul previsto'
+    + (oggiPct !== null ? ' · la <span style="color:#A32D2D;font-weight:600">linea rossa</span> è oggi' : '')
+    + '. Gli impianti senza date non compaiono.</div>';
   h += '</div>';
   return h;
 }
