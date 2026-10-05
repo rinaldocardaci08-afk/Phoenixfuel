@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261005f — blocco PREVENTIVI RICEVUTI nella scheda impianto: i preventivi dei
+//   fornitori sullo stesso impianto, con quello scelto in evidenza, cosi' resta
+//   scritto il confronto (es. Mungo Bus: Ormus 91.000 scelto, NovaPower 85.000).
 // v20261005e — (1) cliccando la riga di una risorsa-mutuo si apre un popup con le
 //   CARATTERISTICHE del finanziamento (senza piano di rientro); (2) nella scheda di
 //   ogni impianto: Gantt del singolo e CONTO ECONOMICO PREVISIONALE a 10 anni + 25
@@ -86,7 +89,8 @@ async function caricaInvestimenti() {
       sb.from('foglio_giornale_movimenti')
         .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,investimento_impianto_id,investimento_voce_id')
         .eq('causale_investimento_id', _invCausale).order('data', { ascending: false }),
-      sb.from('banche_finanziamenti').select('id,descrizione,capitale,tasso,durata_rate,rate_preammortamento,data_prima_rata,numero_contratto')
+      sb.from('banche_finanziamenti').select('id,descrizione,capitale,tasso,durata_rate,rate_preammortamento,data_prima_rata,numero_contratto'),
+      sb.from('investimenti_preventivi').select('*').order('data')
     ]);
     _invDati = {
       causali: causali,
@@ -94,7 +98,8 @@ async function caricaInvestimenti() {
       impianti: r[1].data || [],
       voci: r[2].data || [],
       movimenti: r[3].data || [],
-      finanziamenti: r[4].data || []
+      finanziamenti: r[4].data || [],
+      preventivi: (r[5] && r[5].data) || []
     };
     _invImpiantoAperto = null;
     _invRender();
@@ -486,6 +491,9 @@ function _invRenderImpianto() {
     }
   }
   h += '</div>';
+
+  // PREVENTIVI RICEVUTI dai fornitori per questo impianto
+  h += _invBloccoPreventivi(i);
 
   // GANTT del singolo impianto + CONTO ECONOMICO PREVISIONALE
   h += _invGanttSingolo(i);
@@ -891,4 +899,95 @@ function _invBloccoCE(i, costoNetto) {
 function _invGanttSingolo(i) {
   if (!i.data_inizio || !i.data_fine) return '';
   return _invGantt([i]);
+}
+
+// ── PREVENTIVI RICEVUTI (05/10) ────────────────────────────────────────────
+// I preventivi dei fornitori sullo stesso impianto: serve a tenere memoria del
+// confronto e della scelta fatta, anche quando non si prende il piu' economico.
+function _invBloccoPreventivi(i) {
+  var prev = (_invDati.preventivi || []).filter(function (p) { return p.impianto_id === i.id; });
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">Preventivi ricevuti</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">Le offerte dei fornitori per questo impianto e quella scelta.</div></div>'
+    + (_invPuo() ? '<button onclick="invModalePreventivo(\'' + i.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Preventivo</button>' : '')
+    + '</div>';
+  if (!prev.length) { h += '<div style="font-size:12px;color:var(--text-muted)">Nessun preventivo registrato.</div></div>'; return h; }
+  var min = Math.min.apply(null, prev.map(function (p) { return Number(p.importo || 0); }));
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Fornitore</th>'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Documento</th>'
+    + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Imponibile</th>'
+    + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Esito</th>'
+    + '<th style="width:36px;border-bottom:1.5px solid var(--border)"></th></tr>';
+  prev.forEach(function (p) {
+    var piuBasso = Math.abs(Number(p.importo || 0) - min) < 0.01;
+    h += '<tr style="border-bottom:0.5px solid var(--border)' + (p.scelto ? ';background:#EAF3DE' : '') + '">'
+      + '<td style="padding:7px"><strong>' + _invEsc(p.fornitore) + '</strong>'
+      + (p.note ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEsc(p.note) + '</div>' : '') + '</td>'
+      + '<td style="padding:7px;font-size:11.5px;color:var(--text-muted)">'
+      + (p.numero ? 'n. ' + _invEsc(p.numero) : '—') + (p.data ? ' del ' + _invData(p.data) : '') + '</td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(p.importo)
+      + (piuBasso && prev.length > 1 ? '<div style="font-size:9.5px;color:#27500A">il più basso</div>' : '') + '</td>'
+      + '<td style="padding:7px">' + (p.scelto
+          ? '<span style="font-size:10px;background:#EAF3DE;color:#27500A;padding:2px 9px;border-radius:9px;font-weight:700">scelto</span>'
+          : (_invPuo() ? '<button onclick="invScegliPreventivo(\'' + p.id + '\',\'' + i.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">scegli</button>' : '')) + '</td>'
+      + '<td style="padding:7px;text-align:right">' + (_invPuo() ? '<button onclick="invEliminaPreventivo(\'' + p.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button>' : '') + '</td></tr>';
+  });
+  h += '</table>';
+  var scelto = prev.filter(function (p) { return p.scelto; })[0];
+  if (scelto && prev.length > 1 && Math.abs(Number(scelto.importo) - min) > 0.01) {
+    h += '<div style="font-size:11px;color:#854F0B;margin-top:8px">Il preventivo scelto costa ' + _invEuro(Number(scelto.importo) - min) + ' in più del più basso.</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function invModalePreventivo(impiantoId) {
+  var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
+  var lb = 'display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
+  var h = '<div style="max-width:480px"><div style="font-size:16px;font-weight:600;margin-bottom:12px">Preventivo ricevuto</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Fornitore *</label><input id="invp-forn" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Numero</label><input id="invp-num" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Data</label><input id="invp-data" type="date" style="' + inp + '"></div>';
+  h += '<div><label style="' + lb + '">Imponibile €</label><input id="invp-imp" type="number" step="0.01" style="' + inp + ';font-family:var(--font-mono)"></div>';
+  h += '<div><label style="' + lb + '">Scelto</label><select id="invp-scelto" style="' + inp + '"><option value="">No</option><option value="1">Sì</option></select></div>';
+  h += '<div style="grid-column:1/3"><label style="' + lb + '">Note (cosa comprende, perché scelto o scartato)</label><input id="invp-note" style="' + inp + '"></div>';
+  h += '</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="invSalvaPreventivo(\'' + impiantoId + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
+  apriModal(h);
+}
+
+async function invSalvaPreventivo(impiantoId) {
+  var g = function (x) { var e = document.getElementById(x); return e ? e.value : ''; };
+  var f = (g('invp-forn') || '').trim();
+  var imp = parseFloat(g('invp-imp')) || 0;
+  if (!f) { toast('Il fornitore è obbligatorio'); return; }
+  if (imp <= 0) { toast('Indica l\'imponibile del preventivo'); return; }
+  var scelto = !!g('invp-scelto');
+  if (scelto) await sb.from('investimenti_preventivi').update({ scelto: false }).eq('impianto_id', impiantoId);
+  var r = await sb.from('investimenti_preventivi').insert([{
+    impianto_id: impiantoId, fornitore: f, numero: g('invp-num') || null,
+    data: g('invp-data') || null, importo: imp, scelto: scelto, note: g('invp-note') || null
+  }]);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  chiudiModal();
+  caricaInvestimenti();
+}
+
+async function invScegliPreventivo(id, impiantoId) {
+  await sb.from('investimenti_preventivi').update({ scelto: false }).eq('impianto_id', impiantoId);
+  var r = await sb.from('investimenti_preventivi').update({ scelto: true }).eq('id', id);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  caricaInvestimenti();
+}
+
+async function invEliminaPreventivo(id) {
+  if (!confirm('Elimino questo preventivo?')) return;
+  var r = await sb.from('investimenti_preventivi').delete().eq('id', id);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  caricaInvestimenti();
 }
