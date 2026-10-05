@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261005l — barra di avanzamento dei PAGAMENTI sotto le voci di costo: quanto
+//   abbiamo gia' pagato rispetto al costo totale dell'opera, col residuo da pagare.
 // v20261005i — scelta del fornitore DEFINITIVA: quando un preventivo e' scelto gli
 //   altri non si possono piu' selezionare (niente pulsante "scegli"); restano a
 //   memoria del confronto. Per cambiare davvero si elimina il preventivo scelto.
@@ -498,6 +500,26 @@ function _invRenderImpianto() {
     if (Math.abs(totVoci - prev) > 0.5) {
       h += '<div style="font-size:11px;color:#854F0B;margin-top:8px">La somma delle voci (' + _invEuro(totVoci) + ') è diversa dalla spesa prevista dell\'impianto (' + _invEuro(prev) + ').</div>';
     }
+  }
+  // barra dei pagamenti sul costo totale dell'opera
+  var base = (voci.length ? voci.reduce(function (s2, v) { return s2 + Number(v.importo_previsto || 0); }, 0) : prev);
+  if (base > 0) {
+    var pctP = Math.min(100, speso / base * 100);
+    var daPagare = base - speso;
+    h += '<div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;font-size:11.5px;margin-bottom:5px">'
+      + '<span style="font-weight:600">Pagamenti sul costo dell\'opera</span>'
+      + '<span style="color:var(--text-muted)">pagato <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(speso) + '</strong>'
+      + ' su <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(base) + '</strong></span></div>';
+    h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;display:flex">'
+      + '<div style="width:' + pctP.toFixed(1) + '%;background:' + (pctP >= 100 ? '#27500A' : '#185FA5') + ';display:flex;align-items:center;padding-left:8px;color:#fff;font-size:10px;font-family:var(--font-mono);white-space:nowrap">'
+      + pctP.toFixed(1) + '%</div></div>';
+    h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px">'
+      + (daPagare > 0.5 ? 'Ancora da pagare <strong style="font-family:var(--font-mono);color:#A32D2D">' + _invEuro(daPagare) + '</strong>'
+                        : (daPagare < -0.5 ? 'Pagato <strong style="color:#A32D2D">' + _invEuro(-daPagare) + '</strong> oltre il previsto'
+                                           : 'Opera interamente pagata'))
+      + ' · i pagamenti sono quelli imputati a questo impianto dal foglio giornale.</div>';
+    h += '</div>';
   }
   h += '</div>';
 
