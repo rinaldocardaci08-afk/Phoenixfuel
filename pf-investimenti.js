@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261006a — nella schermata centrale, sotto le spese degli impianti, due riquadri
+//   nuovi: SPESE DI COMMESSA da imputare a un CONTRATTO (impianti venduti) e INCASSI
+//   da collegare al contratto. Cosi' tutto si imputa da dove si apre la pagina.
+// v20261005o — Investimenti mostra solo le causali di AMBITO 'investimenti' (impianti
+//   di nostra proprieta'). Le spese del ramo VENDITE (acquisto impianti per rivendita,
+//   provvigioni) si imputano al CONTRATTO, nella sezione Contratti.
 // v20261005n — la tendina in alto mostra solo le causali di SPESA (tipo='spesa'):
 //   quelle di incasso servono sulle entrate del foglio giornale e aprivano la pagina
 //   su una causale senza impianti, facendo sembrare persi i dati.
@@ -94,7 +100,10 @@ async function caricaInvestimenti() {
     var rc = await sb.from('causali_investimento').select('*').eq('attiva', true).order('nome');
     var tutte = rc.data || [];
     // solo le causali di spesa: le 'incasso' si usano sulle entrate del foglio giornale
-    var causali = tutte.filter(function (c) { return (c.tipo || 'spesa') === 'spesa'; });
+    var causali = tutte.filter(function (c) {
+      return (c.tipo || 'spesa') === 'spesa' && (c.ambito || 'investimenti') === 'investimenti';
+    });
+    if (!causali.length) causali = tutte.filter(function (c) { return (c.tipo || 'spesa') === 'spesa'; });
     if (!causali.length) causali = tutte;
     if (!causali.length) {
       box.innerHTML = '<div class="card" style="padding:20px;font-size:13px">Nessuna causale di investimento impostata.</div>';
@@ -111,7 +120,11 @@ async function caricaInvestimenti() {
         .eq('causale_investimento_id', _invCausale).order('data', { ascending: false }),
       sb.from('banche_finanziamenti').select('id,descrizione,capitale,tasso,durata_rate,rate_preammortamento,data_prima_rata,numero_contratto'),
       sb.from('investimenti_preventivi').select('*').order('data'),
-      sb.from('investimenti_produzione').select('*').order('anno')
+      sb.from('investimenti_produzione').select('*').order('anno'),
+      sb.from('fv_contratti').select('id,numero,anno,cliente_nome,sito_installazione,stato').order('anno', { ascending: false }).order('numero', { ascending: false }),
+      sb.from('foglio_giornale_movimenti')
+        .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,causale_investimento_id,fv_contratto_id')
+        .not('causale_investimento_id', 'is', null).is('fv_contratto_id', null)
     ]);
     _invDati = {
       causali: causali,
@@ -121,7 +134,12 @@ async function caricaInvestimenti() {
       movimenti: r[3].data || [],
       finanziamenti: r[4].data || [],
       preventivi: (r[5] && r[5].data) || [],
-      produzione: (r[6] && r[6].data) || []
+      produzione: (r[6] && r[6].data) || [],
+      contratti: (r[7] && r[7].data) || [],
+      movVendite: (((r[8] && r[8].data) || []).filter(function (m) {
+        var c = (tutte || []).filter(function (x) { return x.id === m.causale_investimento_id; })[0];
+        return c && (c.ambito || 'investimenti') === 'vendite';
+      }))
     };
     _invImpiantoAperto = null;
     _invRender();
@@ -308,6 +326,9 @@ function _invRender() {
       + '<button onclick="invMostraGenerali()" style="font-size:11px;padding:3px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;margin-left:6px">vedi</button></div>';
   }
   h += '</div>';
+
+  // ── Spese di commessa e incassi del ramo vendite: si imputano a un CONTRATTO ──
+  h += _invBloccoVendite();
 
   box.innerHTML = h;
 }
@@ -1316,5 +1337,74 @@ async function invEliminaProduzione(id) {
   if (!confirm('Elimino i dati di produzione di questo anno?')) return;
   var r = await sb.from('investimenti_produzione').delete().eq('id', id);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
+  caricaInvestimenti();
+}
+
+// ── DA IMPUTARE AI CONTRATTI (06/10) ───────────────────────────────────────
+// Gli impianti venduti non stanno fra gli investimenti: le loro spese e i loro
+// incassi si imputano al contratto. Qui si fa dalla stessa schermata, senza
+// doverli cercare dentro la scheda della commessa.
+function _invBloccoVendite() {
+  var D = _invDati;
+  var mov = (D.movVendite || []);
+  var spese = mov.filter(function (m) { return m.tipo === 'uscita'; });
+  var incassi = mov.filter(function (m) { return m.tipo === 'entrata'; });
+  if (!spese.length && !incassi.length) return '';
+  var contratti = (D.contratti || []);
+
+  var tendina = function (m, verbo) {
+    if (!contratti.length) {
+      return '<span style="font-size:11px;color:#A32D2D">nessun contratto: crealo da Offerte</span>';
+    }
+    return '<select onchange="invImputaContratto(\'' + m.id + '\', this.value)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text)">'
+      + '<option value="">— ' + verbo + ' a contratto… —</option>'
+      + contratti.map(function (c) {
+          return '<option value="' + c.id + '">' + (c.numero || '—') + '/' + c.anno + ' · ' + _invEsc(c.cliente_nome)
+            + (c.sito_installazione ? ' · ' + _invEsc(String(c.sito_installazione).slice(0, 28)) : '') + '</option>';
+        }).join('')
+      + '</select>';
+  };
+  var riga = function (m, verbo, colore) {
+    return '<tr style="border-bottom:0.5px solid var(--border)">'
+      + '<td style="padding:7px;white-space:nowrap">' + _invData(m.data) + '</td>'
+      + '<td style="padding:7px">' + _invEsc(m.descrizione || '')
+      + '<div style="font-size:10.5px;color:var(--text-muted)">totale ' + _invEuro(m.importo)
+      + (m.aliquota_iva != null ? ' · IVA ' + m.aliquota_iva + '%' : '') + '</div></td>'
+      + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600'
+      + (colore ? ';color:' + colore : '') + '">' + _invEuro(m.tipo === 'entrata' ? m.importo : _invImponibile(m)) + '</td>'
+      + '<td style="padding:7px;text-align:right;white-space:nowrap">' + tendina(m, verbo) + '</td></tr>';
+  };
+
+  var h = '';
+  if (spese.length) {
+    var tot = spese.reduce(function (s2, m) { return s2 + _invImponibile(m); }, 0);
+    h += '<div class="card" style="padding:12px 14px;margin-top:12px;border-left:4px solid #BA7517">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      + '<div style="font-size:13px;font-weight:700">Spese di commessa da imputare</div>'
+      + '<div style="font-size:11.5px;color:var(--text-muted)">' + spese.length + ' moviment' + (spese.length === 1 ? 'o' : 'i') + ' · ' + _invEuro(tot) + ' di imponibile</div></div>';
+    h += '<div style="font-size:11px;color:var(--text-muted);margin:4px 0 10px">Impianti venduti ai clienti: si imputano al contratto, non a un impianto nostro.</div>';
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px">'
+      + spese.map(function (m) { return riga(m, 'imputa'); }).join('') + '</table></div></div>';
+  }
+  if (incassi.length) {
+    var totI = incassi.reduce(function (s2, m) { return s2 + Number(m.importo || 0); }, 0);
+    h += '<div class="card" style="padding:12px 14px;margin-top:12px;border-left:4px solid #639922">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      + '<div style="font-size:13px;font-weight:700">Incassi da collegare</div>'
+      + '<div style="font-size:11.5px;color:var(--text-muted)">' + incassi.length + ' moviment' + (incassi.length === 1 ? 'o' : 'i') + ' · ' + _invEuro(totI) + '</div></div>';
+    h += '<div style="font-size:11px;color:var(--text-muted);margin:4px 0 10px">Pagamenti ricevuti dai clienti: si collegano al contratto e riempiono la sua barra incassi.</div>';
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px">'
+      + incassi.map(function (m) { return riga(m, 'collega', '#27500A'); }).join('') + '</table></div></div>';
+  }
+  return h;
+}
+
+async function invImputaContratto(movId, contrattoId) {
+  if (!contrattoId) return;
+  if (!_invPuo()) { toast('Permesso negato'); return; }
+  var r = await sb.from('foglio_giornale_movimenti').update({ fv_contratto_id: contrattoId }).eq('id', movId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  if (typeof _auditLog === 'function') _auditLog('fotovoltaico', 'foglio_giornale_movimenti', 'movimento ' + movId + ' imputato al contratto ' + contrattoId);
+  toast('✓ Movimento collegato al contratto');
   caricaInvestimenti();
 }

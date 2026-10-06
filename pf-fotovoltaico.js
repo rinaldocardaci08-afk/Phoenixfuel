@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261005d — COSTI DELLA COMMESSA nella scheda del contratto: le uscite registrate
+//   in foglio giornale con una causale del ramo VENDITE (acquisto impianti per
+//   rivendita, provvigioni) si imputano qui al contratto, e il margine reale si
+//   aggiorna. Prima finivano in Investimenti, dove l'impianto venduto non esiste.
 // v20261005c — CONTRATTI come schede degli IMPIANTI VENDUTI: elenco separato da
 //   quello degli impianti di proprieta' (che stanno in Investimenti), con due barre —
 //   AVANZAMENTO LAVORI per fasi (accettazione, consegna, installazione, collaudo,
@@ -628,10 +632,23 @@ async function fvCaricaContratti() {
     sb.from('fv_contratti').select('*').order('anno', { ascending: false }).order('numero', { ascending: false }),
     sb.from('fv_contratti_righe').select('*').order('ordine'),
     sb.from('fv_contratti_quote').select('*').order('ordine'),
-    sb.from('foglio_giornale_movimenti').select('id,data,tipo,importo,descrizione,fv_contratto_id').not('fv_contratto_id', 'is', null)
+    sb.from('foglio_giornale_movimenti')
+      .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,fv_contratto_id,causale_investimento_id')
+      .not('causale_investimento_id', 'is', null),
+    sb.from('causali_investimento').select('id,nome,tipo,ambito')
   ]);
+  var movs = (r[3] && r[3].data) || [];
+  var cau = {};
+  ((r[4] && r[4].data) || []).forEach(function (c) { cau[c.id] = c; });
+  // solo i movimenti del ramo VENDITE: incassi dai clienti e costi di commessa
+  var delRamo = movs.filter(function (m) {
+    var c = cau[m.causale_investimento_id];
+    return c && (c.ambito || 'investimenti') === 'vendite';
+  });
   _fvCon = { contratti: r[0].data || [], righe: r[1].data || [], quote: r[2].data || [],
-             incassi: (r[3] && r[3].data) || [] };
+             incassi: delRamo.filter(function (m) { return m.tipo === 'entrata'; }),
+             costi: delRamo.filter(function (m) { return m.tipo === 'uscita'; }),
+             causali: cau };
   _fvContrattoAperto = null;
   _fvRenderContratti();
 }
@@ -788,6 +805,9 @@ function _fvRenderContrattoScheda() {
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">IVA ' + c.aliquota_iva + '%</div><div style="font-family:var(--font-mono)">' + _fvEuro(iva) + '</div></div>'
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:15px">' + _fvEuro(imponibile + iva) + '</div></div></div>';
   h += '</div>';
+
+  // costi della commessa
+  h += _fvBloccoCostiCommessa(c, imponibile);
 
   // quote di pagamento
   var totIvato = imponibile + iva;
@@ -1247,6 +1267,19 @@ function _fvBarraIncassi(c, compatta) {
     + '<span style="color:var(--text-muted)">Incassato <strong style="font-family:var(--font-mono);color:var(--text)">' + _fvEuro(ric) + '</strong> su ' + _fvEuro(totale) + '</span>'
     + '<span style="font-family:var(--font-mono);font-weight:600;color:' + (residuo > 0.5 ? '#A32D2D' : '#27500A') + '">'
     + (residuo > 0.5 ? 'residuo ' + _fvEuro(residuo) : 'saldato') + '</span></div>';
+  // incassi del ramo ancora liberi: si collegano a questo contratto
+  var liberi = (_fvCon.incassi || []).filter(function (m) { return !m.fv_contratto_id; });
+  if (!compatta && liberi.length) {
+    h += '<div style="margin-top:10px;padding:8px 10px;background:#FFF7E0;border-left:3px solid #BA7517;border-radius:0 6px 6px 0">';
+    h += '<div style="font-size:11px;font-weight:600;color:#854F0B;margin-bottom:5px">Incassi del ramo da collegare (' + liberi.length + ')</div>';
+    liberi.forEach(function (m) {
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11.5px;padding:3px 0">'
+        + '<span>' + _fvData(m.data) + ' · ' + _fvEsc(m.descrizione || '') + '</span>'
+        + '<span style="display:flex;gap:8px;align-items:center"><strong style="font-family:var(--font-mono)">' + _fvEuro(m.importo) + '</strong>'
+        + '<button onclick="fvImputaIncasso(\'' + m.id + '\',\'' + c.id + '\')" style="font-size:10.5px;padding:3px 9px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">collega</button></span></div>';
+    });
+    h += '</div>';
+  }
   if (inc.length) {
     h += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px">';
     inc.forEach(function (m) {
@@ -1259,4 +1292,90 @@ function _fvBarraIncassi(c, compatta) {
     h += '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Nessun incasso registrato. Si registrano in Finanze → Foglio giornale come entrata, richiamando questo contratto.</div>';
   }
   return h;
+}
+
+// ── COSTI DELLA COMMESSA (06/10) ───────────────────────────────────────────
+// Le uscite del ramo vendite: quelle gia' imputate a questo contratto e quelle
+// ancora libere, che si assegnano da qui. Tutto a imponibile.
+function _fvImponibileMov(m) {
+  if (m.imponibile != null) return Number(m.imponibile);
+  var iva = Number(m.aliquota_iva || 0);
+  return Number(m.importo || 0) / (1 + iva / 100);
+}
+
+function _fvBloccoCostiCommessa(c, ricavo) {
+  var tutte = (_fvCon.costi || []);
+  var mie = tutte.filter(function (m) { return m.fv_contratto_id === c.id; });
+  var libere = tutte.filter(function (m) { return !m.fv_contratto_id; });
+  var tot = mie.reduce(function (s, m) { return s + _fvImponibileMov(m); }, 0);
+  var margine = Number(ricavo || 0) - tot;
+  var pct = ricavo > 0 ? (margine / ricavo * 100) : 0;
+
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">Costi della commessa</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">Le uscite registrate in foglio giornale con le causali del ramo vendite, al netto dell\'IVA.</div></div>'
+    + '<div style="text-align:right"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Margine reale</div>'
+    + '<div style="font-family:var(--font-mono);font-size:17px;font-weight:700;color:' + (margine >= 0 ? '#27500A' : '#A32D2D') + '">'
+    + _fvEuro(margine) + (ricavo > 0 ? ' <span style="font-size:11px">· ' + pct.toFixed(1) + '%</span>' : '') + '</div></div></div>';
+
+  if (mie.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    mie.forEach(function (m) {
+      var cau = (_fvCon.causali || {})[m.causale_investimento_id];
+      h += '<tr style="border-bottom:0.5px solid var(--border)">'
+        + '<td style="padding:6px 4px;white-space:nowrap">' + _fvData(m.data) + '</td>'
+        + '<td style="padding:6px 4px">' + _fvEsc(m.descrizione || '')
+        + '<div style="font-size:10.5px;color:var(--text-muted)">' + _fvEsc(cau ? cau.nome : '') + ' · totale ' + _fvEuro(m.importo) + '</div></td>'
+        + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(_fvImponibileMov(m)) + '</td>'
+        + '<td style="padding:6px 4px;text-align:right"><button onclick="fvTogliCosto(\'' + m.id + '\')" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">togli</button></td></tr>';
+    });
+    h += '<tr style="font-weight:700"><td colspan="2" style="padding:8px 4px">TOTALE COSTI</td>'
+      + '<td style="padding:8px 4px;text-align:right;font-family:var(--font-mono)">' + _fvEuro(tot) + '</td><td></td></tr>';
+    h += '</table>';
+  } else {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessun costo imputato a questa commessa.</div>';
+  }
+
+  if (libere.length) {
+    h += '<div style="margin-top:12px;padding-top:10px;border-top:0.5px solid var(--border)">';
+    h += '<div style="font-size:11.5px;font-weight:600;margin-bottom:6px">Da imputare (' + libere.length + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    libere.forEach(function (m) {
+      var cau = (_fvCon.causali || {})[m.causale_investimento_id];
+      h += '<tr style="border-bottom:0.5px solid var(--border)">'
+        + '<td style="padding:6px 4px;white-space:nowrap">' + _fvData(m.data) + '</td>'
+        + '<td style="padding:6px 4px">' + _fvEsc(m.descrizione || '')
+        + '<div style="font-size:10.5px;color:var(--text-muted)">' + _fvEsc(cau ? cau.nome : '') + ' · totale ' + _fvEuro(m.importo) + '</div></td>'
+        + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(_fvImponibileMov(m)) + '</td>'
+        + '<td style="padding:6px 4px;text-align:right"><button onclick="fvImputaCosto(\'' + m.id + '\',\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">imputa qui</button></td></tr>';
+    });
+    h += '</table></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+async function fvImputaCosto(movId, contrattoId) {
+  var r = await sb.from('foglio_giornale_movimenti').update({ fv_contratto_id: contrattoId }).eq('id', movId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  toast('✓ Costo imputato alla commessa');
+  await fvCaricaContratti();
+  fvApriContratto(contrattoId);
+}
+
+async function fvTogliCosto(movId) {
+  var id = _fvContrattoAperto;
+  var r = await sb.from('foglio_giornale_movimenti').update({ fv_contratto_id: null }).eq('id', movId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  await fvCaricaContratti();
+  fvApriContratto(id);
+}
+
+// anche gli incassi si collegano da qui
+async function fvImputaIncasso(movId, contrattoId) {
+  var r = await sb.from('foglio_giornale_movimenti').update({ fv_contratto_id: contrattoId }).eq('id', movId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  await fvCaricaContratti();
+  fvApriContratto(contrattoId);
 }
