@@ -1,5 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261006c — il MARGINE si calcola sui costi della commessa (fornitura del
+//   fornitore + provvigioni, dai costi dell'offerta), non su quanto e' stato pagato
+//   finora: i pagamenti muovono solo la cassa. Le barre mostrano pagato/da pagare sul
+//   costo totale e incassato/residuo sul venduto.
+// v20261006b — scheda del contratto divisa in due linguette: COMPOSIZIONE (sola
+//   lettura, si sblocca con ✏️ Modifica che avvisa se il contratto e' gia' firmato) e
+//   CONTABILITÀ (stato di avanzamento, costo e pagamenti, vendita e incassi, numeri
+//   del margine ed elenco entrate/uscite).
 // v20261005d — COSTI DELLA COMMESSA nella scheda del contratto: le uscite registrate
 //   in foglio giornale con una causale del ramo VENDITE (acquisto impianti per
 //   rivendita, provvigioni) si imputano qui al contratto, e il margine reale si
@@ -635,7 +643,8 @@ async function fvCaricaContratti() {
     sb.from('foglio_giornale_movimenti')
       .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,fv_contratto_id,causale_investimento_id')
       .not('causale_investimento_id', 'is', null),
-    sb.from('causali_investimento').select('id,nome,tipo,ambito')
+    sb.from('causali_investimento').select('id,nome,tipo,ambito'),
+    sb.from('fv_offerte_costi').select('*').order('ordine')
   ]);
   var movs = (r[3] && r[3].data) || [];
   var cau = {};
@@ -648,7 +657,8 @@ async function fvCaricaContratti() {
   _fvCon = { contratti: r[0].data || [], righe: r[1].data || [], quote: r[2].data || [],
              incassi: delRamo.filter(function (m) { return m.tipo === 'entrata'; }),
              costi: delRamo.filter(function (m) { return m.tipo === 'uscita'; }),
-             causali: cau };
+             causali: cau,
+             costiPrevisti: (r[5] && r[5].data) || [] };
   _fvContrattoAperto = null;
   _fvRenderContratti();
 }
@@ -735,6 +745,28 @@ async function fvGeneraContratto(offertaId) {
   fvApriContratto(contrattoId);
 }
 
+var _fvConTab = 'composizione';   // 'composizione' | 'contabilita'
+var _fvConEdit = false;           // modifica sbloccata solo dopo conferma
+
+function fvContrattoTab(t) { _fvConTab = t; _fvRenderContrattoScheda(); }
+
+function fvSbloccaModifica(id) {
+  if (_fvConEdit) { _fvConEdit = false; _fvRenderContrattoScheda(); return; }
+  var c = (_fvCon.contratti || []).filter(function (x) { return x.id === id; })[0];
+  var firmato = c && c.stato === 'firmato';
+  var h = '<div style="max-width:420px">'
+    + '<div style="font-size:16px;font-weight:600;margin-bottom:8px">Modificare il contratto?</div>'
+    + '<div style="font-size:12.5px;color:var(--text-secondary);line-height:1.6">'
+    + (firmato
+        ? 'Questo contratto risulta <strong>firmato</strong>. Modificando importi, voci o quote di pagamento il documento non corrisponderà più a quello sottoscritto dal cliente: andrà ristampato e fatto firmare di nuovo.'
+        : 'Si sbloccano i campi del contratto: dati, voci e quote di pagamento diventano modificabili.')
+    + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="chiudiModal();_fvConEdit=true;_fvRenderContrattoScheda()" class="btn-primary" style="font-size:12px;padding:8px 16px">Sì, modifica</button></div></div>';
+  apriModal(h);
+}
+
 function _fvRenderContrattoScheda() {
   var box = document.getElementById('fvc-content');
   var c = (_fvCon.contratti || []).filter(function (x) { return x.id === _fvContrattoAperto; })[0];
@@ -745,77 +777,93 @@ function _fvRenderContrattoScheda() {
     ? righe.reduce(function (s, r) { return s + Number(r.quantita || 0) * Number(r.prezzo_unitario || 0); }, 0)
     : Number(c.imponibile || 0);
   var iva = imponibile * Number(c.aliquota_iva || 0) / 100;
+  var totIvato = imponibile + iva;
+  var ed = _fvConEdit;
   var inp = 'width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
+  var ro = 'padding:7px 2px;font-size:12.5px';
   var lb = 'display:block;font-size:10.5px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
   var st = _FV_STATI_CON[c.stato] || _FV_STATI_CON.da_firmare;
 
-  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px">';
+  // testata
+  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">';
   h += '<div><div style="font-size:16px;font-weight:700">Contratto n. ' + (c.numero || '—') + '/' + c.anno
     + ' <span style="font-size:11px;background:' + st.bg + ';color:' + st.col + ';padding:2px 9px;border-radius:9px;vertical-align:middle">' + st.lab + '</span></div>'
     + '<div style="font-size:11.5px;color:var(--text-muted)">' + _fvEsc(c.cliente_nome) + ' · ' + _fvData(c.data)
     + (c.riferimento_offerta ? ' · ' + _fvEsc(c.riferimento_offerta) : '') + '</div></div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + (_fvConTab === 'composizione'
+        ? '<button onclick="fvSbloccaModifica(\'' + c.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid ' + (ed ? '#639922' : 'var(--border)') + ';border-radius:7px;background:' + (ed ? '#EAF3DE' : 'var(--bg)') + ';color:' + (ed ? '#27500A' : 'var(--text)') + ';font-weight:600;cursor:pointer">'
+          + (ed ? '🔓 Modifica attiva · blocca' : '✏️ Modifica') + '</button>'
+        : '')
     + '<button onclick="fvStampaContratto(\'' + c.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa contratto</button>'
     + '<button onclick="fvChiudiContratto()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Tutti i contratti</button>'
     + '</div></div>';
 
-  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Avanzamento lavori</div>';
-  h += _fvFasiEditor(c);
-  h += '<div style="font-size:13px;font-weight:700;margin:16px 0 8px">Incassi dal cliente</div>';
-  h += _fvBarraIncassi(c, false);
-  h += '</div>';
+  // linguette
+  var tab = function (k, lab) {
+    var att = (_fvConTab === k);
+    return '<button onclick="fvContrattoTab(\'' + k + '\')" style="font-size:12px;padding:7px 14px;border-radius:7px;cursor:pointer;border:0.5px solid ' + (att ? '#185FA5' : 'var(--border)') + ';'
+      + (att ? 'background:#185FA5;color:#fff;font-weight:600' : 'background:var(--bg);color:var(--text)') + '">' + lab + '</button>';
+  };
+  h += '<div style="display:flex;gap:6px;margin-bottom:12px">' + tab('composizione', '📄 Composizione contratto') + tab('contabilita', '📊 Contabilità') + '</div>';
 
+  if (_fvConTab === 'contabilita') {
+    h += _fvContabilitaContratto(c, imponibile, iva);
+    box.innerHTML = h;
+    return;
+  }
+
+  // ── COMPOSIZIONE DEL CONTRATTO ──────────────────────────────────────────
+  var campo = function (lab, valore, html) {
+    return '<div><label style="' + lb + '">' + lab + '</label>' + (ed ? html : '<div style="' + ro + '">' + (valore || '—') + '</div>') + '</div>';
+  };
   h += '<div class="card" style="padding:12px 14px;margin-bottom:12px"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">';
-  h += '<div><label style="' + lb + '">Data</label><input type="date" value="' + (c.data || '') + '" onchange="fvContrattoCampo(\'data\', this.value)" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">Stato</label><select onchange="fvContrattoCampo(\'stato\', this.value)" style="' + inp + '">'
-    + Object.keys(_FV_STATI_CON).map(function (k) { return '<option value="' + k + '"' + (c.stato === k ? ' selected' : '') + '>' + _FV_STATI_CON[k].lab + '</option>'; }).join('')
-    + '</select></div>';
-  h += '<div><label style="' + lb + '">Data firma</label><input type="date" value="' + (c.data_firma || '') + '" onchange="fvContrattoCampo(\'data_firma\', this.value)" style="' + inp + '"></div>';
-  h += '<div style="grid-column:1/4"><label style="' + lb + '">Sito di installazione</label><input value="' + _fvEsc(c.sito_installazione || '') + '" onchange="fvContrattoCampo(\'sito_installazione\', this.value)" style="' + inp + '"></div>';
-  h += '<div style="grid-column:1/4"><label style="' + lb + '">Descrizione tecnica (va nel documento)</label><textarea rows="4" onchange="fvContrattoCampo(\'descrizione_tecnica\', this.value)" style="' + inp + ';resize:vertical">' + _fvEsc(c.descrizione_tecnica || '') + '</textarea></div>';
-  h += '<div><label style="' + lb + '">IVA %</label><input type="number" step="0.1" value="' + c.aliquota_iva + '" onchange="fvContrattoCampo(\'aliquota_iva\', this.value)" style="' + inp + '"></div>';
-  h += '<div style="grid-column:2/4"><label style="' + lb + '">Modalità di pagamento</label><input value="' + _fvEsc(c.modalita_pagamento || '') + '" onchange="fvContrattoCampo(\'modalita_pagamento\', this.value)" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">Banca</label><input value="' + _fvEsc(c.banca_appoggio || '') + '" onchange="fvContrattoCampo(\'banca_appoggio\', this.value)" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">IBAN</label><input value="' + _fvEsc(c.iban || '') + '" onchange="fvContrattoCampo(\'iban\', this.value)" style="' + inp + ';font-family:var(--font-mono)"></div>';
-  h += '<div><label style="' + lb + '">Intestatario</label><input value="' + _fvEsc(c.intestatario || '') + '" onchange="fvContrattoCampo(\'intestatario\', this.value)" style="' + inp + '"></div>';
-  h += '<div style="grid-column:1/4"><label style="' + lb + '">Condizioni finali (va nel documento)</label><textarea rows="3" onchange="fvContrattoCampo(\'condizioni\', this.value)" style="' + inp + ';resize:vertical">' + _fvEsc(c.condizioni || '') + '</textarea></div>';
+  h += campo('Data', _fvData(c.data), '<input type="date" value="' + (c.data || '') + '" onchange="fvContrattoCampo(\'data\', this.value)" style="' + inp + '">');
+  h += campo('Stato', st.lab, '<select onchange="fvContrattoCampo(\'stato\', this.value)" style="' + inp + '">'
+    + Object.keys(_FV_STATI_CON).map(function (k) { return '<option value="' + k + '"' + (c.stato === k ? ' selected' : '') + '>' + _FV_STATI_CON[k].lab + '</option>'; }).join('') + '</select>');
+  h += campo('Data firma', _fvData(c.data_firma), '<input type="date" value="' + (c.data_firma || '') + '" onchange="fvContrattoCampo(\'data_firma\', this.value)" style="' + inp + '">');
+  h += '<div style="grid-column:1/4">' + campo('Sito di installazione', _fvEsc(c.sito_installazione || ''), '<input value="' + _fvEsc(c.sito_installazione || '') + '" onchange="fvContrattoCampo(\'sito_installazione\', this.value)" style="' + inp + '">') + '</div>';
+  h += '<div style="grid-column:1/4">' + campo('Descrizione tecnica', _fvEsc(c.descrizione_tecnica || ''), '<textarea rows="4" onchange="fvContrattoCampo(\'descrizione_tecnica\', this.value)" style="' + inp + ';resize:vertical">' + _fvEsc(c.descrizione_tecnica || '') + '</textarea>') + '</div>';
+  h += campo('IVA %', c.aliquota_iva + '%', '<input type="number" step="0.1" value="' + c.aliquota_iva + '" onchange="fvContrattoCampo(\'aliquota_iva\', this.value)" style="' + inp + '">');
+  h += '<div style="grid-column:2/4">' + campo('Modalità di pagamento', _fvEsc(c.modalita_pagamento || ''), '<input value="' + _fvEsc(c.modalita_pagamento || '') + '" onchange="fvContrattoCampo(\'modalita_pagamento\', this.value)" style="' + inp + '">') + '</div>';
+  h += campo('Banca', _fvEsc(c.banca_appoggio || ''), '<input value="' + _fvEsc(c.banca_appoggio || '') + '" onchange="fvContrattoCampo(\'banca_appoggio\', this.value)" style="' + inp + '">');
+  h += campo('IBAN', _fvEsc(c.iban || ''), '<input value="' + _fvEsc(c.iban || '') + '" onchange="fvContrattoCampo(\'iban\', this.value)" style="' + inp + ';font-family:var(--font-mono)">');
+  h += campo('Intestatario', _fvEsc(c.intestatario || ''), '<input value="' + _fvEsc(c.intestatario || '') + '" onchange="fvContrattoCampo(\'intestatario\', this.value)" style="' + inp + '">');
+  h += '<div style="grid-column:1/4">' + campo('Condizioni finali', _fvEsc(c.condizioni || ''), '<textarea rows="3" onchange="fvContrattoCampo(\'condizioni\', this.value)" style="' + inp + ';resize:vertical">' + _fvEsc(c.condizioni || '') + '</textarea>') + '</div>';
   h += '</div></div>';
 
-  // righe
+  // voci
   h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
     + '<div style="font-size:13px;font-weight:700">Voci del contratto</div>'
-    + '<button onclick="fvAggiungiRigaContratto(\'' + c.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Voce</button></div>';
-  if (!righe.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nessuna voce: nel documento comparirà la sola descrizione tecnica con l\'imponibile indicato.</div>';
+    + (ed ? '<button onclick="fvAggiungiRigaContratto(\'' + c.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Voce</button>' : '') + '</div>';
+  if (!righe.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nel documento compare la sola descrizione tecnica con l\'imponibile indicato.</div>';
   else {
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     righe.forEach(function (r) {
+      var tot = Number(r.quantita || 0) * Number(r.prezzo_unitario || 0);
       h += '<tr style="border-bottom:0.5px solid var(--border)">'
-        + '<td style="padding:5px 6px"><input value="' + _fvEsc(r.descrizione) + '" onchange="fvRigaContrattoCampo(\'' + r.id + '\',\'descrizione\',this.value)" style="' + inp + '"></td>'
-        + '<td style="padding:5px 6px;width:80px"><input type="number" step="0.01" value="' + r.quantita + '" onchange="fvRigaContrattoCampo(\'' + r.id + '\',\'quantita\',this.value)" style="' + inp + ';text-align:right;font-family:var(--font-mono)"></td>'
-        + '<td style="padding:5px 6px;width:120px"><input type="number" step="0.01" value="' + r.prezzo_unitario + '" onchange="fvRigaContrattoCampo(\'' + r.id + '\',\'prezzo_unitario\',this.value)" style="' + inp + ';text-align:right;font-family:var(--font-mono)"></td>'
-        + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;width:120px">' + _fvEuro(Number(r.quantita || 0) * Number(r.prezzo_unitario || 0)) + '</td>'
-        + '<td style="padding:5px 6px;text-align:right;width:36px"><button onclick="fvEliminaRigaContratto(\'' + r.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button></td></tr>';
+        + '<td style="padding:5px 6px">' + (ed ? '<input value="' + _fvEsc(r.descrizione) + '" onchange="fvRigaContrattoCampo(\'' + r.id + '\',\'descrizione\',this.value)" style="' + inp + '">' : _fvEsc(r.descrizione)) + '</td>'
+        + '<td style="padding:5px 6px;width:80px;text-align:right;font-family:var(--font-mono)">' + (ed ? '<input type="number" step="0.01" value="' + r.quantita + '" onchange="fvRigaContrattoCampo(\'' + r.id + '\',\'quantita\',this.value)" style="' + inp + ';text-align:right">' : Number(r.quantita).toLocaleString('it-IT')) + '</td>'
+        + '<td style="padding:5px 6px;width:120px;text-align:right;font-family:var(--font-mono)">' + (ed ? '<input type="number" step="0.01" value="' + r.prezzo_unitario + '" onchange="fvRigaContrattoCampo(\'' + r.id + '\',\'prezzo_unitario\',this.value)" style="' + inp + ';text-align:right">' : _fvEuro(r.prezzo_unitario)) + '</td>'
+        + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);font-weight:600;width:120px">' + _fvEuro(tot) + '</td>'
+        + (ed ? '<td style="padding:5px 6px;text-align:right;width:36px"><button onclick="fvEliminaRigaContratto(\'' + r.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button></td>' : '<td style="width:36px"></td>')
+        + '</tr>';
     });
     h += '</table>';
   }
   h += '<div style="display:flex;justify-content:flex-end;gap:24px;margin-top:12px;font-size:13px">'
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Imponibile</div><div style="font-family:var(--font-mono);font-weight:600">' + _fvEuro(imponibile) + '</div></div>'
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">IVA ' + c.aliquota_iva + '%</div><div style="font-family:var(--font-mono)">' + _fvEuro(iva) + '</div></div>'
-    + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:15px">' + _fvEuro(imponibile + iva) + '</div></div></div>';
+    + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:15px">' + _fvEuro(totIvato) + '</div></div></div>';
   h += '</div>';
 
-  // costi della commessa
-  h += _fvBloccoCostiCommessa(c, imponibile);
-
   // quote di pagamento
-  var totIvato = imponibile + iva;
   var sommaPerc = quote.reduce(function (s, q) { return s + Number(q.percentuale || 0); }, 0);
   h += '<div class="card" style="padding:12px 14px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
     + '<div style="font-size:13px;font-weight:700">Quote di pagamento</div>'
-    + '<button onclick="fvAggiungiQuota(\'' + c.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Quota</button></div>';
+    + (ed ? '<button onclick="fvAggiungiQuota(\'' + c.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Quota</button>' : '') + '</div>';
   if (!quote.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nessuna quota impostata.</div>';
   else {
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
@@ -824,11 +872,12 @@ function _fvRenderContrattoScheda() {
       + '<th style="text-align:left;padding:5px 6px;width:140px">Incassata il</th><th style="width:36px"></th></tr>';
     quote.forEach(function (q) {
       h += '<tr style="border-bottom:0.5px solid var(--border)">'
-        + '<td style="padding:5px 6px"><input type="number" step="0.01" value="' + q.percentuale + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'percentuale\',this.value,' + totIvato + ')" style="' + inp + ';text-align:right;font-family:var(--font-mono)"></td>'
-        + '<td style="padding:5px 6px"><input value="' + _fvEsc(q.evento) + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'evento\',this.value)" style="' + inp + '"></td>'
-        + '<td style="padding:5px 6px"><input type="number" step="0.01" value="' + q.importo_ivato + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'importo_ivato\',this.value)" style="' + inp + ';text-align:right;font-family:var(--font-mono)"></td>'
-        + '<td style="padding:5px 6px"><input type="date" value="' + (q.data_incasso || '') + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'data_incasso\',this.value)" style="' + inp + '"></td>'
-        + '<td style="padding:5px 6px;text-align:right"><button onclick="fvEliminaQuota(\'' + q.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button></td></tr>';
+        + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + (ed ? '<input type="number" step="0.01" value="' + q.percentuale + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'percentuale\',this.value,' + totIvato + ')" style="' + inp + ';text-align:right">' : Number(q.percentuale).toLocaleString('it-IT') + '%') + '</td>'
+        + '<td style="padding:5px 6px">' + (ed ? '<input value="' + _fvEsc(q.evento) + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'evento\',this.value)" style="' + inp + '">' : _fvEsc(q.evento)) + '</td>'
+        + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);font-weight:600">' + (ed ? '<input type="number" step="0.01" value="' + q.importo_ivato + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'importo_ivato\',this.value)" style="' + inp + ';text-align:right">' : _fvEuro(q.importo_ivato)) + '</td>'
+        + '<td style="padding:5px 6px">' + (ed ? '<input type="date" value="' + (q.data_incasso || '') + '" onchange="fvQuotaCampo(\'' + q.id + '\',\'data_incasso\',this.value)" style="' + inp + '">' : (q.data_incasso ? _fvData(q.data_incasso) : '—')) + '</td>'
+        + (ed ? '<td style="padding:5px 6px;text-align:right"><button onclick="fvEliminaQuota(\'' + q.id + '\')" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">×</button></td>' : '<td></td>')
+        + '</tr>';
     });
     h += '</table>';
     if (Math.abs(sommaPerc - 100) > 0.01) {
@@ -836,7 +885,110 @@ function _fvRenderContrattoScheda() {
     }
   }
   h += '</div>';
+  if (!ed) {
+    h += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Contratto in sola lettura: per cambiare qualcosa usa <strong>✏️ Modifica</strong> in alto.</div>';
+  }
   box.innerHTML = h;
+}
+
+// ── CONTABILITÀ DEL CONTRATTO (06/10) ──────────────────────────────────────
+// Tre blocchi — avanzamento lavori, costo e pagamenti ai fornitori, vendita e
+// incassi dal cliente — e sotto i numeri del margine, con entrate e uscite.
+function _fvContabilitaContratto(c, imponibile, iva) {
+  var totIvato = imponibile + iva;
+  // COSTO DELLA COMMESSA: quello pattuito con i fornitori (fornitura + provvigioni),
+  // preso dai costi dell'offerta. Non dipende da quanto e' stato pagato finora.
+  var prev = (_fvCon.costiPrevisti || []).filter(function (x) { return x.offerta_id === c.offerta_id; });
+  var costoImpon = prev.reduce(function (s, x) { return s + Number(x.imponibile || 0); }, 0);
+  var costoIvato = prev.reduce(function (s, x) {
+    return s + Number(x.imponibile || 0) * (1 + Number(x.aliquota_iva != null ? x.aliquota_iva : 0) / 100);
+  }, 0);
+  var costi = (_fvCon.costi || []).filter(function (m) { return m.fv_contratto_id === c.id; });
+  var incassi = _fvIncassiContratto(c);
+  var pagatoIvato = costi.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
+  var pagatoImpon = costi.reduce(function (s, m) { return s + _fvImponibileMov(m); }, 0);
+  var totInc = incassi.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
+  // se non ci sono costi pattuiti si ripiega su quanto pagato, per non mostrare zero
+  if (costoImpon <= 0) { costoImpon = pagatoImpon; costoIvato = pagatoIvato; }
+  var margine = imponibile - costoImpon;
+  var pct = imponibile > 0 ? (margine / imponibile * 100) : 0;
+  var cassa = totInc - pagatoIvato;
+
+  var barra = function (titolo, fatto, totale, colore, etFatto, etResto) {
+    var p = totale > 0 ? Math.min(100, fatto / totale * 100) : 0;
+    return '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:7px">'
+      + '<div style="font-size:13px;font-weight:700">' + titolo + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:14px;font-weight:700">' + _fvEuro(totale) + '</div></div>'
+      + '<div style="height:18px;border-radius:9px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+      + '<div style="width:' + p.toFixed(1) + '%;height:100%;background:' + colore + '"></div></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-top:5px">'
+      + '<span style="font-family:var(--font-mono);color:' + colore + ';font-weight:600">' + _fvEuro(fatto) + '<span style="color:var(--text-muted);font-weight:400"> · ' + etFatto + '</span></span>'
+      + '<span style="font-family:var(--font-mono);color:var(--text-muted)">' + _fvEuro(totale - fatto) + ' · ' + etResto + '</span></div></div>';
+  };
+
+  var h = '';
+  // 1) stato di avanzamento
+  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Stato di avanzamento</div>'
+    + _fvFasiEditor(c) + '</div>';
+  // 2) costo impianto e pagamenti: la barra si riempie fino al costo pattuito
+  h += barra('Costo impianto e pagamenti', pagatoIvato, costoIvato, '#A32D2D', 'pagato ai fornitori', 'da pagare');
+  if (prev.length) {
+    h += '<div style="font-size:10.5px;color:var(--text-muted);margin:-6px 0 12px 2px">Costo pattuito: '
+      + prev.map(function (x) {
+          return _fvEsc(x.descrizione) + ' ' + _fvEuro(x.imponibile)
+            + (x.aliquota_iva ? ' + IVA ' + x.aliquota_iva + '%' : '');
+        }).join(' · ') + '</div>';
+  }
+  // 3) vendita e incassi
+  h += barra('Vendita impianto e incassi', totInc, totIvato, '#639922', 'incassato', 'residuo');
+
+  // numeri del margine
+  var cella = function (lab, val, col, sub) {
+    return '<div style="flex:1;min-width:150px;border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
+      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + (sub || '&nbsp;') + '</div></div>';
+  };
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + cella('Ricavo (imponibile)', _fvEuro(imponibile), null, 'totale con IVA ' + _fvEuro(totIvato))
+    + cella('Costo della commessa', _fvEuro(costoImpon), '#A32D2D', 'con IVA ' + _fvEuro(costoIvato))
+    + cella('Margine', _fvEuro(margine), margine >= 0 ? '#27500A' : '#A32D2D', pct.toFixed(1) + '% sul ricavo')
+    + cella('Cassa ad oggi', _fvEuro(cassa), cassa >= 0 ? '#27500A' : '#A32D2D', 'incassato ' + _fvEuro(totInc) + ' − pagato ' + _fvEuro(pagatoIvato))
+    + '</div>';
+
+  // entrate e uscite affiancate
+  h += '<div class="card" style="padding:12px 14px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+  h += '<div><div style="font-size:12.5px;font-weight:700;color:#27500A;margin-bottom:6px">Entrate</div>';
+  if (!incassi.length) h += '<div style="font-size:11.5px;color:var(--text-muted)">Nessun incasso registrato.</div>';
+  else {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11.5px">';
+    incassi.forEach(function (m) {
+      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 3px;white-space:nowrap">' + _fvData(m.data) + '</td>'
+        + '<td style="padding:5px 3px">' + _fvEsc(m.descrizione || '') + '</td>'
+        + '<td style="padding:5px 3px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + _fvEuro(m.importo) + '</td></tr>';
+    });
+    h += '<tr style="font-weight:700"><td colspan="2" style="padding:6px 3px">Totale incassato</td><td style="padding:6px 3px;text-align:right;font-family:var(--font-mono)">' + _fvEuro(totInc) + '</td></tr>'
+      + '<tr><td colspan="2" style="padding:4px 3px;color:var(--text-muted)">Residuo dal cliente</td><td style="padding:4px 3px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + _fvEuro(totIvato - totInc) + '</td></tr></table>';
+  }
+  h += '</div>';
+  h += '<div style="border-left:0.5px solid var(--border);padding-left:16px"><div style="font-size:12.5px;font-weight:700;color:#A32D2D;margin-bottom:6px">Uscite</div>';
+  if (!costi.length) h += '<div style="font-size:11.5px;color:var(--text-muted)">Nessun costo imputato.</div>';
+  else {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11.5px">';
+    costi.forEach(function (m) {
+      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 3px;white-space:nowrap">' + _fvData(m.data) + '</td>'
+        + '<td style="padding:5px 3px">' + _fvEsc(m.descrizione || '')
+        + '<div style="font-size:10px;color:var(--text-muted)">imponibile ' + _fvEuro(_fvImponibileMov(m)) + '</div></td>'
+        + '<td style="padding:5px 3px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#A32D2D">' + _fvEuro(m.importo)
+        + '<div><button onclick="fvTogliCosto(\'' + m.id + '\')" style="font-size:10px;padding:2px 7px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text-muted);cursor:pointer;margin-top:3px">togli</button></div></td></tr>';
+    });
+    h += '<tr style="font-weight:700"><td colspan="2" style="padding:6px 3px">Totale pagato</td><td style="padding:6px 3px;text-align:right;font-family:var(--font-mono)">' + _fvEuro(pagatoIvato) + '</td></tr>'
+      + '<tr><td colspan="2" style="padding:4px 3px;color:var(--text-muted)">Ancora da pagare</td><td style="padding:4px 3px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + _fvEuro(costoIvato - pagatoIvato) + '</td></tr></table>';
+  }
+  h += '</div></div></div>';
+  return h;
 }
 
 async function fvContrattoCampo(campo, valore) {
