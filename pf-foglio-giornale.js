@@ -1,4 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20261005d — causali divise per verso: in USCITA solo quelle di SPESA (pagamenti
+//   investimenti, acquisto impianti per rivendita), in ENTRATA solo quelle di INCASSO
+//   (vendita impianti, contributi). Prima comparivano tutte, anche quelle sbagliate.
 // v20261005c — SPESA DI UN RAMO INVESTIMENTI: scelta la causale, il blocco
 //   "A pagamento di…" sparisce e il movimento si salva con la sola causale, l'IVA e
 //   l'imponibile. Niente fatture o fornitori dei carburanti: l'imputazione all'impianto
@@ -881,7 +884,7 @@ async function _fgApriModale(iso, tipo, preset) {
     _fgListaBanche = banchRes.data || [];
   }
   // Causali investimento + impianti + voci (solo per le uscite, lettura unica)
-  if (tipo === 'uscita' && !_fgInvCausali) {
+  if (!_fgInvCausali) {
     try {
       var rc = await sb.from('causali_investimento').select('id,nome').eq('attiva', true).order('nome');
       _fgInvCausali = rc.data || [];
@@ -912,13 +915,19 @@ var _fgInvCausali = null, _fgInvImpianti = null, _fgInvVoci = null;
 // movimento resta l'imponibile, che e' il valore della pagina Investimenti.
 function _fgInvBlocco() {
   var m = _fgModale;
-  if (m.tipo !== 'uscita' || !_fgInvCausali || !_fgInvCausali.length) return '';
+  if (!_fgInvCausali || !_fgInvCausali.length) return '';
+  // in uscita si pagano i fornitori (spesa), in entrata si incassa dai clienti
+  var verso = (m.tipo === 'entrata') ? 'incasso' : 'spesa';
+  var causali = _fgInvCausali.filter(function (c) { return (c.tipo || 'spesa') === verso; });
+  if (!causali.length) return '';
   var selSt = 'width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px';
   var h = '<div style="background:#FFF7E0;border-left:4px solid #BA7517;border-radius:0 6px 6px 0;padding:10px 12px;margin-bottom:14px">';
   h += '<div style="display:grid;grid-template-columns:2fr 0.7fr;gap:10px">';
-  h += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">Spesa su investimento</label>';
-  h += '<select id="fg-mod-inv-causale" onchange="_fgInvCambia()" style="' + selSt + '"><option value="">— no, spesa normale —</option>'
-     + _fgInvCausali.map(function (c) { return '<option value="' + esc(c.id) + '"' + (m.invCausale === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>'; }).join('')
+  h += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">'
+     + (verso === 'incasso' ? 'Incasso del ramo fotovoltaico' : 'Spesa su investimento') + '</label>';
+  h += '<select id="fg-mod-inv-causale" onchange="_fgInvCambia()" style="' + selSt + '"><option value="">— no, '
+     + (verso === 'incasso' ? 'entrata normale' : 'spesa normale') + ' —</option>'
+     + causali.map(function (c) { return '<option value="' + esc(c.id) + '"' + (m.invCausale === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>'; }).join('')
      + '</select></div>';
   h += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">IVA %</label>';
   h += '<input type="number" step="0.1" min="0" id="fg-mod-inv-iva" value="' + (m.invIva != null ? m.invIva : 22) + '" oninput="_fgInvCambia()"' + (m.invCausale ? '' : ' disabled') + ' style="' + selSt + ';font-family:var(--font-mono);text-align:right' + (m.invCausale ? '' : ';opacity:.5') + '"></div>';
@@ -956,8 +965,10 @@ function _fgInvAggiornaCalcolo() {
   var impIva = tot - imponibile;
   box.innerHTML = 'Imponibile <strong style="font-family:var(--font-mono)">' + _fgFmtImporto(imponibile) + '</strong>'
     + ' · IVA ' + iva + '% <span style="font-family:var(--font-mono)">' + _fgFmtImporto(impIva) + '</span>'
-    + ' — nella pagina Investimenti conta l\'imponibile; l\'IVA è partita di giro.'
-    + ' <span style="color:#854F0B">L\'impianto si assegna dopo, dalla pagina Investimenti.</span>';
+    + ' — conta l\'imponibile; l\'IVA è partita di giro.'
+    + (m.tipo === 'entrata'
+        ? ' <span style="color:#854F0B">Il contratto a cui si riferisce si collega dalla sezione Fotovoltaico.</span>'
+        : ' <span style="color:#854F0B">L\'impianto si assegna dopo, dalla pagina Investimenti.</span>');
 }
 
 function _fgRenderModale() {
@@ -1049,8 +1060,8 @@ function _fgRenderModale() {
   // avviso al posto della sezione modi quando la spesa e' di un ramo investimenti
   html += '<div id="fg-inv-nota" style="' + (invOn ? '' : 'display:none;')
     + 'background:#FFF7E0;border-left:4px solid #BA7517;border-radius:0 6px 6px 0;padding:11px 13px;font-size:12px;color:#412402;line-height:1.5">'
-    + 'Spesa del ramo investimenti: si registra con la sola causale e l\'IVA. '
-    + 'Niente fatture o fornitori dei carburanti — l\'impianto a cui imputarla si sceglie poi nella sezione Fotovoltaico.</div>';
+    + 'Movimento del ramo fotovoltaico: si registra con la sola causale e l\'IVA. '
+    + 'Niente fatture o anagrafiche dei carburanti — l\'impianto o il contratto si collegano poi dalla sezione Fotovoltaico.</div>';
 
   html += _fgRenderModaleCoda();
   document.body.insertAdjacentHTML('beforeend', html);
