@@ -1,4 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20261005c — SPESA DI UN RAMO INVESTIMENTI: scelta la causale, il blocco
+//   "A pagamento di…" sparisce e il movimento si salva con la sola causale, l'IVA e
+//   l'imponibile. Niente fatture o fornitori dei carburanti: l'imputazione all'impianto
+//   si fa nella sezione Fotovoltaico. Togliendo la causale torna tutto come prima.
 // v20261005b — USCITE SU INVESTIMENTI: nel modale Uscita si sceglie solo la CAUSALE
 //   (il ramo) e l'aliquota IVA; il programma scorpora e salva l'imponibile. L'impianto
 //   a cui imputare la spesa si assegna DOPO, dalla pagina Investimenti: finche' non lo
@@ -926,12 +930,16 @@ function _fgInvBlocco() {
 
 function _fgInvCambia() {
   var m = _fgModale;
+  var wrap = document.getElementById('fg-modi-wrap');
+  var nota = document.getElementById('fg-inv-nota');
   var g = function (id) { var e = document.getElementById(id); return e ? e.value : ''; };
   var nuovaCausale = g('fg-mod-inv-causale');
   var cambiata = (nuovaCausale !== m.invCausale);
   m.invCausale = nuovaCausale;
   m.invIva = parseFloat(g('fg-mod-inv-iva'));
   if (isNaN(m.invIva)) m.invIva = 22;
+  if (wrap) wrap.style.display = m.invCausale ? 'none' : '';
+  if (nota) nota.style.display = m.invCausale ? '' : 'none';
   if (cambiata) { _fgRenderModale(); return; }
   _fgInvAggiornaCalcolo();
 }
@@ -1000,7 +1008,9 @@ function _fgRenderModale() {
   // Sezione investimenti (solo uscite)
   html += _fgInvBlocco();
 
-  // Sezione 2: Modi
+  // Sezione 2: Modi — nascosta quando la spesa e' di un ramo investimenti
+  var invOn = !!m.invCausale;
+  html += '<div id="fg-modi-wrap"' + (invOn ? ' style="display:none"' : '') + '>';
   var labelSottoTitolo = m.tipo === 'entrata' ? 'A copertura di...' : 'A pagamento di...';
   html += '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:8px;font-weight:500">' + labelSottoTitolo + '</div>';
 
@@ -1034,6 +1044,13 @@ function _fgRenderModale() {
   html += '<div id="fg-modo-content">';
   html += _fgRenderModoContent();
   html += '</div>';
+  html += '</div>';   // chiude fg-modi-wrap
+
+  // avviso al posto della sezione modi quando la spesa e' di un ramo investimenti
+  html += '<div id="fg-inv-nota" style="' + (invOn ? '' : 'display:none;')
+    + 'background:#FFF7E0;border-left:4px solid #BA7517;border-radius:0 6px 6px 0;padding:11px 13px;font-size:12px;color:#412402;line-height:1.5">'
+    + 'Spesa del ramo investimenti: si registra con la sola causale e l\'IVA. '
+    + 'Niente fatture o fornitori dei carburanti — l\'impianto a cui imputarla si sceglie poi nella sezione Fotovoltaico.</div>';
 
   html += _fgRenderModaleCoda();
   document.body.insertAdjacentHTML('beforeend', html);
@@ -1781,7 +1798,15 @@ async function _fgConfermaMovimento() {
   var descrizione = '';
   var imputazioni = [];
 
-  if (m.modo === 'B') {
+  if (m.invCausale) {
+    // Spesa di un ramo investimenti: nessuna riconciliazione, basta la descrizione.
+    descrizione = (document.getElementById('fg-descr-b') ? (document.getElementById('fg-descr-b').value || '').trim() : '');
+    if (!descrizione) {
+      var nomeCau = (_fgInvCausali || []).filter(function (c) { return c.id === m.invCausale; })[0];
+      descrizione = nomeCau ? nomeCau.nome : 'Spesa investimenti';
+    }
+    m.imputazioni = {};
+  } else if (m.modo === 'B') {
     descrizione = (document.getElementById('fg-descr-b').value || '').trim();
     if (!descrizione) { alert('⚠ Inserisci la descrizione'); return; }
   } else {
