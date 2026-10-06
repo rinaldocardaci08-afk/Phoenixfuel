@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261006d — CONTABILITÀ del contratto: il margine si legge in tre celle separate.
+//   MARGINE LORDO = ricavo − costi diretti (fornitura, trasporto, pratiche, altro),
+//   PROVVIGIONI = costi di tipo 'commissione', MARGINE NETTO = lordo − provvigioni.
+//   Tutto a imponibile. Se l'offerta non ha costi pattuiti, si usano i pagamenti e le
+//   provvigioni si riconoscono dalla causale "Provvigioni…" del movimento.
 // v20261006c — il MARGINE si calcola sui costi della commessa (fornitura del
 //   fornitore + provvigioni, dai costi dell'offerta), non su quanto e' stato pagato
 //   finora: i pagamenti muovono solo la cassa. Le barre mostrano pagato/da pagare sul
@@ -909,8 +914,23 @@ function _fvContabilitaContratto(c, imponibile, iva) {
   var pagatoImpon = costi.reduce(function (s, m) { return s + _fvImponibileMov(m); }, 0);
   var totInc = incassi.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
   // se non ci sono costi pattuiti si ripiega su quanto pagato, per non mostrare zero
-  if (costoImpon <= 0) { costoImpon = pagatoImpon; costoIvato = pagatoIvato; }
-  var margine = imponibile - costoImpon;
+  // PROVVIGIONI separate dal costo diretto: margine lordo = ricavo − costi diretti
+  // (fornitura, trasporto, pratiche, altro); margine netto = lordo − provvigioni.
+  var provv = prev.filter(function (x) { return x.tipo === 'commissione'; })
+                  .reduce(function (s, x) { return s + Number(x.imponibile || 0); }, 0);
+  if (costoImpon <= 0) {
+    costoImpon = pagatoImpon; costoIvato = pagatoIvato;
+    // senza costi pattuiti le provvigioni si riconoscono dalla causale del movimento
+    provv = costi.filter(function (m) {
+      var cau = (_fvCon.causali || {})[m.causale_investimento_id];
+      return cau && /provvigion/i.test(cau.nome || '');
+    }).reduce(function (s, m) { return s + _fvImponibileMov(m); }, 0);
+  }
+  var costoDiretto = costoImpon - provv;
+  var margLordo = imponibile - costoDiretto;
+  var margine = margLordo - provv;           // margine netto
+  var pctL = imponibile > 0 ? (margLordo / imponibile * 100) : 0;
+  var pctP = imponibile > 0 ? (provv / imponibile * 100) : 0;
   var pct = imponibile > 0 ? (margine / imponibile * 100) : 0;
   var cassa = totInc - pagatoIvato;
 
@@ -953,8 +973,10 @@ function _fvContabilitaContratto(c, imponibile, iva) {
   };
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + cella('Ricavo (imponibile)', _fvEuro(imponibile), null, 'totale con IVA ' + _fvEuro(totIvato))
-    + cella('Costo della commessa', _fvEuro(costoImpon), '#A32D2D', 'con IVA ' + _fvEuro(costoIvato))
-    + cella('Margine', _fvEuro(margine), margine >= 0 ? '#27500A' : '#A32D2D', pct.toFixed(1) + '% sul ricavo')
+    + cella('Costo impianto', _fvEuro(costoDiretto), '#A32D2D', 'fornitura e costi diretti')
+    + cella('Margine lordo', _fvEuro(margLordo), margLordo >= 0 ? '#27500A' : '#A32D2D', pctL.toFixed(1) + '% sul ricavo')
+    + cella('Provvigioni', _fvEuro(provv), '#A32D2D', pctP.toFixed(1) + '% sul ricavo')
+    + cella('Margine netto', _fvEuro(margine), margine >= 0 ? '#27500A' : '#A32D2D', pct.toFixed(1) + '% sul ricavo')
     + cella('Cassa ad oggi', _fvEuro(cassa), cassa >= 0 ? '#27500A' : '#A32D2D', 'incassato ' + _fvEuro(totInc) + ' − pagato ' + _fvEuro(pagatoIvato))
     + '</div>';
 
