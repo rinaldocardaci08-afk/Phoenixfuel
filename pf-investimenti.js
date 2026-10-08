@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261008c — PREZZO DELL'ENERGIA (PUN) modificabile per impianto a FASCE DI 5 ANNI
+//   (anni 1-5, 6-10, 11-15, 16-20, 21-25): 5 valori nel riquadro "Ipotesi" del conto
+//   economico completo, salvati in investimenti_impianti.pun_fasce (numeric[5]). Una fascia
+//   lasciata vuota usa il prezzo di base (0,116 anni 1-4, 0,100 5-10, 0,090 11-16, 0,080
+//   17-25). Produzione stimata e PUN si salvano insieme con un solo pulsante.
 // v20261008b — (1) PRODUZIONE STIMATA per impianto (kWh/anno, es. da PVGIS): si scrive
 //   nella scheda impianto (✏️ Modifica) o direttamente nel conto economico completo, e
 //   sostituisce kW × kWh/kW come produzione del 1° anno (poi il degrado). Colonna nuova
@@ -872,7 +877,16 @@ var _INV_PREZZI = [
   { da: 1, a: 4, p: 0.116 }, { da: 5, a: 10, p: 0.100 },
   { da: 11, a: 16, p: 0.090 }, { da: 17, a: 25, p: 0.080 }
 ];
-function _invPrezzoAnno(n) {
+// prezzo dell'anno n: la fascia di 5 anni inserita sull'impianto, se c'e'
+function _invPunFascia(i, n) {
+  var f = i && i.pun_fasce;
+  if (!f || !f.length) return null;
+  var v = f[Math.min(4, Math.floor((n - 1) / 5))];
+  return (v != null && Number(v) > 0) ? Number(v) : null;
+}
+function _invPrezzoAnno(n, i) {
+  var pf = _invPunFascia(i, n);
+  if (pf != null) return pf;
   for (var i = 0; i < _INV_PREZZI.length; i++) {
     if (n >= _INV_PREZZI[i].da && n <= _INV_PREZZI[i].a) return _INV_PREZZI[i].p;
   }
@@ -913,7 +927,7 @@ function _invCeCalcola(i, costoNetto) {
   var anni = [];
   for (var n = 1; n <= 25; n++) {
     var mwh = base * Math.pow(1 - P.degrado / 100, n - 1) / 1000;
-    var prezzo = _invPrezzoAnno(n);
+    var prezzo = _invPrezzoAnno(n, i);
     var ricavi = mwh * 1000 * prezzo;
     var costi = P.costi_op + (n >= P.acc_dal ? P.acc_importo : 0);
     var ebitda = ricavi - costi;
@@ -977,6 +991,16 @@ function _invTestoProd(i, P) {
   if (P.stima) return kwT + 'produzione stimata <strong>' + Math.round(P.stima).toLocaleString('it-IT') + ' kWh/anno</strong>'
     + (i.kw ? ' (' + P.kwh_per_kw.toLocaleString('it-IT') + ' kWh/kW)' : '');
   return kwT + P.kwh_per_kw.toLocaleString('it-IT') + ' kWh/kW (nessuna stima inserita: valore di base)';
+}
+
+// prezzi usati, raggruppati per periodi con lo stesso valore
+function _invTestoPrezzi(i) {
+  var out = [], da = 1, cur = _invPrezzoAnno(1, i);
+  for (var n = 2; n <= 26; n++) {
+    var p = n <= 25 ? _invPrezzoAnno(n, i) : null;
+    if (p !== cur) { out.push(cur.toFixed(3).replace('.', ',') + ' €/kWh anni ' + da + '-' + (n - 1)); da = n; cur = p; }
+  }
+  return out.join(', ') + (_invPunFascia(i, 1) != null || (i.pun_fasce && i.pun_fasce.some(function (x) { return x != null; })) ? ' (PUN inserito sull\'impianto)' : ' (prezzi di base)');
 }
 
 function _invAddAnni(iso, n) {
@@ -1102,19 +1126,35 @@ async function invApriCE(impId) {
   _invMostraOverlayCE(_invHtmlCE(i, R));
 }
 
-async function invSalvaStima(impId) {
+function _invNum(v) {
+  v = String(v == null ? '' : v).trim().replace(/\s/g, '');
+  if (v === '') return null;
+  if (v.indexOf(',') >= 0) v = v.replace(/\./g, '').replace(',', '.');
+  var n = parseFloat(v);
+  return isFinite(n) ? n : NaN;
+}
+
+// Salva le ipotesi del conto economico: produzione stimata e PUN a fasce di 5 anni
+async function invSalvaIpotesi(impId) {
   if (!_invPuo()) { toast('Permesso negato'); return; }
-  var el = document.getElementById('inv-ce-stima');
-  var v = el && el.value !== '' ? parseFloat(el.value) : null;
-  if (v != null && !(v > 0)) { toast('Produzione non valida'); return; }
-  var r = await sb.from('investimenti_impianti').update({ produzione_stimata_kwh: v, updated_at: new Date().toISOString() }).eq('id', impId);
+  var v = _invNum((document.getElementById('inv-ce-stima') || {}).value);
+  if (v !== null && !(v > 0)) { toast('Produzione non valida'); return; }
+  var pun = [], almeno = false;
+  for (var k = 0; k < 5; k++) {
+    var x = _invNum((document.getElementById('inv-ce-pun' + k) || {}).value);
+    if (x !== null && !(x > 0 && x < 2)) { toast('Prezzo anni ' + (k * 5 + 1) + '-' + (k * 5 + 5) + ' non valido (in €/kWh, es. 0,10)'); return; }
+    pun.push(x); if (x !== null) almeno = true;
+  }
+  var upd = { produzione_stimata_kwh: v, pun_fasce: almeno ? pun : null, updated_at: new Date().toISOString() };
+  var r = await sb.from('investimenti_impianti').update(upd).eq('id', impId);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
   var i = (_invDati.impianti || []).filter(function (x) { return x.id === impId; })[0];
-  if (i) i.produzione_stimata_kwh = v;
-  toast('✓ Produzione stimata salvata');
+  if (i) { i.produzione_stimata_kwh = upd.produzione_stimata_kwh; i.pun_fasce = upd.pun_fasce; }
+  toast('✓ Ipotesi salvate');
   await invApriCE(impId);
   if (_invImpiantoAperto === impId) _invRenderImpianto();
 }
+var invSalvaStima = invSalvaIpotesi;
 
 function invChiudiCE() {
   var o = document.getElementById('inv-ce-overlay');
@@ -1149,14 +1189,27 @@ function _invHtmlCE(i, R) {
     + '<div style="font-size:11.5px;color:var(--text-muted)">Anno 1 dal <strong>' + _invData(R.inizio) + '</strong> (' + R.origine + ')</div></div>'
     + '<button onclick="invChiudiCE()" style="font-size:13px;padding:7px 14px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">✕ Chiudi</button></div>';
 
-  // ── produzione stimata modificabile qui
+  // ── ipotesi modificabili qui: produzione stimata e PUN a fasce di 5 anni
   if (_invPuo()) {
-    h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:0.5px solid #639922;border-radius:10px;padding:9px 13px;margin-bottom:10px;font-size:12px">'
-      + '<span style="font-weight:600;color:#3B6D11">⚡ Produzione stimata 1° anno</span>'
-      + '<input id="inv-ce-stima" type="number" step="1" value="' + (i.produzione_stimata_kwh ? Math.round(i.produzione_stimata_kwh) : '') + '" placeholder="' + Math.round(P.base_kwh) + '" style="width:130px;padding:6px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)">'
-      + '<span style="color:var(--text-muted)">kWh/anno</span>'
-      + '<button onclick="invSalvaStima(\'' + i.id + '\')" class="btn-primary" style="font-size:12px;padding:6px 13px">Salva e ricalcola</button>'
-      + '<span style="font-size:10.5px;color:var(--text-muted)">es. "Produzione annuale FV" del PVGIS · vuoto = ' + _INV_CE_DEF.kwh_per_kw + ' kWh/kW × kW</span></div>';
+    var inpS = 'padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)';
+    var lbS = 'display:block;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px';
+    h += '<div style="border:0.5px solid #639922;border-radius:10px;padding:10px 13px;margin-bottom:10px;font-size:12px">'
+      + '<div style="font-weight:600;color:#3B6D11;margin-bottom:8px">Ipotesi del conto economico</div>'
+      + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
+      + '<div><label style="' + lbS + '">⚡ Produzione 1° anno kWh</label>'
+      + '<input id="inv-ce-stima" inputmode="decimal" value="' + (i.produzione_stimata_kwh ? Math.round(i.produzione_stimata_kwh) : '') + '" placeholder="' + Math.round(P.base_kwh) + '" style="' + inpS + ';width:120px"></div>';
+    for (var k = 0; k < 5; k++) {
+      var da = k * 5 + 1, al = k * 5 + 5;
+      var salv = (i.pun_fasce && i.pun_fasce[k] != null && Number(i.pun_fasce[k]) > 0) ? Number(i.pun_fasce[k]) : null;
+      var base = [];
+      for (var y = da; y <= al; y++) { var pb = _invPrezzoAnno(y, null); if (base.indexOf(pb) < 0) base.push(pb); }
+      h += '<div><label style="' + lbS + '">PUN anni ' + da + '-' + al + '</label>'
+        + '<input id="inv-ce-pun' + k + '" inputmode="decimal" value="' + (salv != null ? String(salv).replace('.', ',') : '') + '"'
+        + ' placeholder="' + base.map(function (b2) { return b2.toFixed(3).replace('.', ','); }).join('→') + '" style="' + inpS + ';width:118px"></div>';
+    }
+    h += '<button onclick="invSalvaIpotesi(\'' + i.id + '\')" class="btn-primary" style="font-size:12px;padding:7px 14px">Salva e ricalcola</button></div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Produzione: es. "Produzione annuale FV" del PVGIS; vuoto = ' + _INV_CE_DEF.kwh_per_kw + ' kWh/kW × kW. '
+      + 'PUN in €/kWh (es. 0,10); una fascia vuota usa il prezzo di base scritto in grigio.</div></div>';
   }
 
   // ── finanziamento dell'impianto
@@ -1254,7 +1307,7 @@ function _invHtmlCE(i, R) {
     + 'Rate vere del mutuo dalla tabella banche, attribuite all\'impianto in proporzione alla sua spesa prevista sulle risorse della causale; sommate per anno di esercizio. '
     + 'La cassa cumulata parte dai mezzi propri messi nell\'impianto (' + _invEuro(Q.propri) + ')' + (cant ? ' e dalle rate del cantiere' : '') + '. '
     + 'DSCR = EBITDA / rata: verde da 1,25x, giallo fra 1 e 1,25x, rosso sotto 1. '
-    + 'Prezzo dell\'energia: 0,116 €/kWh anni 1-4, 0,100 anni 5-10, 0,090 anni 11-16, 0,080 anni 17-25. '
+    + 'Prezzo dell\'energia: ' + _invTestoPrezzi(i) + '. '
     + 'Flusso di cassa = risultato dell\'anno + ammortamento − capitale restituito (cioè EBITDA + CER − rata intera). '
     + 'Ammortamento su ' + P.anni_amm + ' anni. Imposte escluse.</div>';
   return h;
