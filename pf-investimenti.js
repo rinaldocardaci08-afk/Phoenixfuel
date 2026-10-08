@@ -1,5 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261008e — (1) SPESE DA IMPUTARE: sotto ogni movimento la NOTA PER L'IMPUTAZIONE
+//   scritta in foglio giornale (colonna foglio_giornale_movimenti.nota_imputazione); se
+//   nella nota o nella descrizione c'e' il nome di un impianto, l'impianto e' gia' proposto.
+//   Sulla riga si sceglie anche la VOCE DI COSTO e si conferma con "✓ Imputa".
+//   (2) TEMPISTICHE rifatte: per ogni impianto una LINEA dei lavori sul calendario (pieno
+//   fino a oggi, pallino di fine e di allaccio) e SOTTO una BARRA SEPARATA dei pagamenti
+//   sul costo previsto; a destra tempo trascorso, giorni mancanti, pagato e resto.
 // v20261008d — STAMPA / PDF del conto economico completo: pulsante nel modale, apre il
 //   documento A4 orizzontale su fondo bianco (intestazione, ipotesi, finanziamento, indici,
 //   tabella anni Cantiere+1-13 in prima pagina e 14-25 + totale in seconda) e lancia la
@@ -139,7 +146,7 @@ async function caricaInvestimenti() {
       sb.from('investimenti_impianti').select('*').eq('causale_id', _invCausale).order('nome'),
       sb.from('investimenti_voci').select('*').order('ordine'),
       sb.from('foglio_giornale_movimenti')
-        .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,investimento_impianto_id,investimento_voce_id')
+        .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id')
         .eq('causale_investimento_id', _invCausale).order('data', { ascending: false }),
       sb.from('banche_finanziamenti').select('id,descrizione,capitale,tasso,durata_rate,rate_preammortamento,data_prima_rata,numero_contratto'),
       sb.from('investimenti_preventivi').select('*').order('data'),
@@ -329,17 +336,26 @@ function _invRender() {
   } else {
     h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px">';
     C.daImputare.forEach(function (m) {
+      var sug = _invSuggerisciImpianto((m.nota_imputazione || '') + ' ' + (m.descrizione || ''));
+      var vociSug = sug ? (D.voci || []).filter(function (v) { return v.impianto_id === sug.id; }) : [];
       h += '<tr style="border-bottom:0.5px solid var(--border)">'
-        + '<td style="padding:7px;white-space:nowrap">' + _invData(m.data) + '</td>'
-        + '<td style="padding:7px">' + _invEsc(m.descrizione || '')
-        + '<div style="font-size:10.5px;color:var(--text-muted)">totale ' + _invEuro(m.importo) + ' · IVA ' + (m.aliquota_iva != null ? m.aliquota_iva + '%' : 'n.d.') + '</div></td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(_invImponibile(m)) + '</td>'
-        + '<td style="padding:7px;text-align:right;white-space:nowrap">'
-        + '<select onchange="invImputa(\'' + m.id + '\', this.value)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text)">'
+        + '<td style="padding:7px;white-space:nowrap;vertical-align:top">' + _invData(m.data) + '</td>'
+        + '<td style="padding:7px;vertical-align:top">' + _invEsc(m.descrizione || '')
+        + '<div style="font-size:10.5px;color:var(--text-muted)">totale ' + _invEuro(m.importo) + ' · IVA ' + (m.aliquota_iva != null ? m.aliquota_iva + '%' : 'n.d.') + '</div>'
+        + (m.nota_imputazione ? '<div style="display:inline-block;margin-top:4px;background:#FFF8E1;border:0.5px solid #E8C873;color:#6b4e00;border-radius:6px;padding:3px 8px;font-size:11.5px">📝 ' + _invEsc(m.nota_imputazione) + '</div>' : '')
+        + '</td>'
+        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600;vertical-align:top">' + _invEuro(_invImponibile(m)) + '</td>'
+        + '<td style="padding:7px;text-align:right;white-space:nowrap;vertical-align:top">'
+        + '<select id="inv-imp-' + m.id + '" onchange="invRigaCambiaImpianto(\'' + m.id + '\')" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);max-width:170px">'
         + '<option value="">— imputa a… —</option>'
-        + D.impianti.map(function (i) { return '<option value="' + i.id + '">' + _invEsc(i.nome) + '</option>'; }).join('')
+        + D.impianti.map(function (i) { return '<option value="' + i.id + '"' + (sug && sug.id === i.id ? ' selected' : '') + '>' + _invEsc(i.nome) + '</option>'; }).join('')
         + '</select> '
+        + '<select id="inv-voce-' + m.id + '"' + (vociSug.length ? '' : ' disabled') + ' style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);max-width:160px">'
+        + _invOpzioniVoci(vociSug) + '</select> '
+        + '<button onclick="invImputaRiga(\'' + m.id + '\')" class="btn-primary" style="font-size:11.5px;padding:5px 10px">✓ Imputa</button> '
         + '<button onclick="invSegnaGenerale(\'' + m.id + '\')" title="Resta un costo comune del ramo" style="font-size:11.5px;padding:5px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">spesa generale</button>'
+        + (sug ? '<div style="font-size:10.5px;color:#27500A;margin-top:3px">✓ proposto "' + _invEsc(sug.nome) + '": il nome è nella nota</div>'
+               : (m.nota_imputazione ? '<div style="font-size:10.5px;color:#854F0B;margin-top:3px">nessun impianto riconosciuto nella nota: scegli tu</div>' : ''))
         + '</td></tr>';
     });
     h += '</table></div>';
@@ -360,53 +376,99 @@ function _invRender() {
 function _invGantt(impianti) {
   var conDate = (impianti || []).filter(function (i) { return i.data_inizio && i.data_fine; });
   if (!conDate.length) return '';   // niente date, niente diagramma
+  var D12 = function (iso) { return new Date(String(iso).slice(0, 10) + 'T12:00:00'); };
+  var oggiD = new Date(); oggiD.setHours(12, 0, 0, 0);
   var min = null, max = null;
   conDate.forEach(function (i) {
-    var a = new Date(i.data_inizio + 'T12:00:00'), b = new Date(i.data_fine + 'T12:00:00');
+    var a = D12(i.data_inizio), b = D12(i.data_fine), c = i.data_allaccio ? D12(i.data_allaccio) : null;
     if (!min || a < min) min = a;
     if (!max || b > max) max = b;
+    if (c && c > max) max = c;
   });
+  if (oggiD < min) min = new Date(oggiD);
+  if (oggiD > max) max = new Date(oggiD);
+  min = new Date(min.getFullYear(), min.getMonth(), 1, 12);
+  max = new Date(max.getFullYear(), max.getMonth() + 1, 0, 12);
   var span = Math.max(1, (max - min));
+  var pos = function (d) { return ((d - min) / span * 100); };
   var mesi = [];
   var cur = new Date(min.getFullYear(), min.getMonth(), 1);
   while (cur <= max) { mesi.push(new Date(cur)); cur.setMonth(cur.getMonth() + 1); }
   var MM = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+  var gg = function (ms) { return Math.round(ms / 86400000); };
+  var oggiPct = pos(oggiD);
 
-  // linea di oggi, se cade dentro il periodo mostrato
-  var oggiD = new Date(); oggiD.setHours(12, 0, 0, 0);
-  var oggiPct = (oggiD >= min && oggiD <= max) ? ((oggiD - min) / span * 100) : null;
-  // percentuale di spesa sul totale considerato (somma dei previsti degli impianti in diagramma)
   var prevTot = conDate.reduce(function (a, i) { return a + Number(i.spesa_prevista || 0); }, 0);
   var spesoTot = conDate.reduce(function (a, i) { return a + _invSpesoImpianto(i.id); }, 0);
   var pctTot = prevTot > 0 ? (spesoTot / prevTot * 100) : 0;
+  var BLU = '#185FA5', ROSSO = '#A32D2D', VERDE = '#27500A';
+  var dlS = 'position:absolute;top:24px;font-size:9.5px;color:var(--text-muted);white-space:nowrap';
+  // etichetta sotto la linea: ai bordi si allinea verso l'interno per non uscire
+  var lab = function (p, testo, col) {
+    var tr = p < 8 ? 'translateX(0)' : (p > 92 ? 'translateX(-100%)' : 'translateX(-50%)');
+    return '<div style="' + dlS + ';left:' + p.toFixed(2) + '%;transform:' + tr + (col ? ';color:' + col : '') + '">' + testo + '</div>';
+  };
+  var dot = function (p, pieno, col) {
+    return '<div style="position:absolute;top:6px;left:' + p.toFixed(2) + '%;width:11px;height:11px;margin-left:-7px;border-radius:50%;border:2px solid ' + col + ';background:' + (pieno ? col : 'var(--bg-card,#fff)') + '"></div>';
+  };
 
   var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
     + '<div style="font-size:13px;font-weight:700">Tempistiche</div>'
-    + '<div style="font-size:11.5px;color:var(--text-muted)">speso <strong style="font-family:var(--font-mono);color:var(--text)">'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">pagato <strong style="font-family:var(--font-mono);color:var(--text)">'
       + _invEuro(spesoTot) + '</strong> su <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(prevTot)
-      + '</strong> previsti · <strong style="color:' + (pctTot > 100 ? '#A32D2D' : 'var(--text)') + '">' + pctTot.toFixed(1) + '%</strong></div></div>';
-  h += '<div style="display:flex;gap:8px;margin-bottom:4px"><div style="width:150px"></div><div style="flex:1;display:flex;font-size:9.5px;color:var(--text-muted)">'
-    + mesi.map(function (d) { return '<div style="flex:1;text-align:center;border-left:0.5px solid var(--border)">' + MM[d.getMonth()] + (d.getMonth() === 0 ? ' ' + String(d.getFullYear()).slice(2) : '') + '</div>'; }).join('')
-    + '</div></div>';
-  conDate.forEach(function (i) {
-    var a = new Date(i.data_inizio + 'T12:00:00'), b = new Date(i.data_fine + 'T12:00:00');
-    var left = (a - min) / span * 100, w = Math.max(1.5, (b - a) / span * 100);
-    var sp = _invSpesoImpianto(i.id), prev = Number(i.spesa_prevista || 0);
-    var pct = prev > 0 ? Math.min(100, sp / prev * 100) : 0;
+      + '</strong> previsti · <strong style="color:' + (pctTot > 100 ? ROSSO : 'var(--text)') + '">' + pctTot.toFixed(1) + '%</strong></div></div>';
+  h += '<div style="overflow-x:auto"><div style="min-width:720px">';
+  h += '<div style="display:grid;grid-template-columns:160px 1fr 190px;gap:12px;font-size:9.5px;color:var(--text-muted)"><div></div><div style="display:flex">'
+    + mesi.map(function (d) { return '<div style="flex:1;text-align:center;border-left:0.5px solid var(--border)">' + MM[d.getMonth()] + (d.getMonth() === 0 || mesi.length < 2 ? ' ' + String(d.getFullYear()).slice(2) : '') + '</div>'; }).join('')
+    + '</div><div></div></div>';
+
+  conDate.forEach(function (i, idx) {
+    var a = D12(i.data_inizio), b = D12(i.data_fine), c = i.data_allaccio ? D12(i.data_allaccio) : null;
+    var pa = pos(a), pb = pos(b);
+    var fattoFino = Math.min(Math.max(oggiD, a), b);
+    var pf = pos(fattoFino);
     var st = _INV_STATI[i.stato] || _INV_STATI.previsto;
-    h += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'
-      + '<div style="width:150px;font-size:11px;text-align:right;overflow:hidden;white-space:nowrap">' + _invEsc(i.nome) + '</div>'
-      + '<div style="flex:1;position:relative;height:20px;background:var(--bg);border-radius:4px">'
-      + '<div title="' + _invData(i.data_inizio) + ' → ' + _invData(i.data_fine) + ' · speso ' + pct.toFixed(0) + '%" style="position:absolute;left:' + left.toFixed(1) + '%;width:' + w.toFixed(1) + '%;top:0;height:20px;background:' + st.bg + ';border:0.5px solid ' + st.col + ';border-radius:4px;overflow:hidden">'
-      + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + st.col + ';opacity:.35"></div></div>'
-      + (oggiPct !== null ? '<div title="oggi" style="position:absolute;left:' + oggiPct.toFixed(2) + '%;top:-2px;width:2px;height:24px;background:#A32D2D"></div>' : '')
-      + '</div>'
-      + '<div style="width:70px;font-size:10.5px;color:var(--text-muted);text-align:right">' + pct.toFixed(0) + '% speso</div></div>';
+    var finito = i.stato === 'collaudato' || i.stato === 'in_esercizio';
+    var durata = Math.max(1, b - a);
+    var pctT = Math.max(0, Math.min(100, (oggiD - a) / durata * 100));
+    var lavori;
+    if (finito) lavori = '<strong>Lavori</strong> · conclusi<div style="color:var(--text-muted)">' + st.lab.toLowerCase() + '</div>';
+    else if (oggiD < a) lavori = '<strong>Lavori</strong> · non iniziati<div style="color:var(--text-muted)">partono fra ' + gg(a - oggiD) + ' giorni</div>';
+    else if (oggiD > b) lavori = '<strong>Lavori</strong> · <span style="color:' + ROSSO + '">fine superata</span><div style="color:' + ROSSO + '">da ' + gg(oggiD - b) + ' giorni</div>';
+    else lavori = '<strong>Lavori</strong> · ' + pctT.toFixed(0) + '% del tempo<div style="color:var(--text-muted)">mancano ' + gg(b - oggiD) + ' giorni</div>';
+
+    var sp = _invSpesoImpianto(i.id), prev = Number(i.spesa_prevista || 0);
+    var pctP = prev > 0 ? sp / prev * 100 : 0;
+    var res = prev - sp;
+
+    h += '<div style="display:grid;grid-template-columns:160px 1fr 190px;gap:12px;align-items:center;padding:10px 0' + (idx < conDate.length - 1 ? ';border-bottom:0.5px solid var(--border)' : '') + '">';
+    h += '<div><div style="font-weight:600;font-size:12.5px">' + _invEsc(i.nome) + '</div><div style="font-size:10.5px;color:var(--text-muted)">' + st.lab + (i.fornitore ? ' · ' + _invEsc(i.fornitore) : '') + '</div></div>';
+    // linea dei lavori sul calendario
+    h += '<div><div style="position:relative;height:22px">'
+      + '<div style="position:absolute;top:10px;left:' + pa.toFixed(2) + '%;width:' + Math.max(0.5, pb - pa).toFixed(2) + '%;height:3px;background:var(--border);border-radius:2px"></div>'
+      + (pf > pa ? '<div style="position:absolute;top:9px;left:' + pa.toFixed(2) + '%;width:' + (pf - pa).toFixed(2) + '%;height:5px;background:' + BLU + ';border-radius:3px"></div>' : '')
+      + (c ? '<div style="position:absolute;top:11px;left:' + pb.toFixed(2) + '%;width:' + Math.max(0, pos(c) - pb).toFixed(2) + '%;border-top:1.5px dashed ' + VERDE + '"></div>' : '')
+      + dot(pa, oggiD >= a, BLU) + dot(pb, finito || oggiD >= b, BLU)
+      + (c ? dot(pos(c), oggiD >= c, VERDE) : '')
+      + '<div title="oggi" style="position:absolute;top:0;left:' + oggiPct.toFixed(2) + '%;width:2px;height:22px;background:' + ROSSO + '"></div>'
+      + lab(pa, 'inizio ' + _invData(i.data_inizio).slice(0, 5))
+      + lab(pb, 'fine ' + _invData(i.data_fine).slice(0, 5))
+      + (c ? lab(pos(c), 'allaccio', VERDE) : '')
+      + '</div><div style="height:18px"></div>';
+    // barra separata dei pagamenti
+    h += '<div style="font-size:10.5px;color:var(--text-muted)">💶 Pagamenti sul costo previsto</div>'
+      + '<div style="height:14px;border-radius:7px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;margin-top:4px">'
+      + '<div style="width:' + Math.min(100, pctP).toFixed(1) + '%;height:100%;background:' + (pctP > 100 ? '#854F0B' : ROSSO) + '"></div></div></div>';
+    // riassunto
+    h += '<div style="font-size:11px">' + lavori
+      + '<div style="margin-top:9px"><strong>Pagato</strong> <span style="font-family:var(--font-mono)">' + _invEuroK(sp) + '</span> · ' + pctP.toFixed(1) + '%</div>'
+      + '<div style="color:' + (res < 0 ? ROSSO : 'var(--text-muted)') + '">' + (prev > 0 ? (res >= 0 ? 'resta da pagare ' : 'oltre il previsto di ') + '<span style="font-family:var(--font-mono)">' + _invEuroK(Math.abs(res)) + '</span>' : 'spesa prevista non indicata') + '</div></div>';
+    h += '</div>';
   });
-  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">La parte piena di ogni barra è la quota di spesa già sostenuta sul previsto'
-    + (oggiPct !== null ? ' · la <span style="color:#A32D2D;font-weight:600">linea rossa</span> è oggi' : '')
-    + '. Gli impianti senza date non compaiono.</div>';
+  h += '</div></div>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Linea <span style="color:' + BLU + ';font-weight:600">blu</span> = tempo dei lavori sul calendario (pieno fino a oggi) · pallino <span style="color:' + VERDE + ';font-weight:600">verde</span> = allaccio · '
+    + 'barra <span style="color:' + ROSSO + ';font-weight:600">rossa</span> = pagato sul costo previsto (pagamenti imputati, imponibile) · linea rossa verticale = oggi. Gli impianti senza date non compaiono.</div>';
   h += '</div>';
   return h;
 }
@@ -418,6 +480,41 @@ async function invImputa(movId, impiantoId) {
   var r = await sb.from('foglio_giornale_movimenti').update({ investimento_impianto_id: impiantoId }).eq('id', movId);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
   if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'imputata spesa ' + movId + ' a impianto ' + impiantoId);
+  toast('✓ Spesa imputata');
+  caricaInvestimenti();
+}
+
+// impianto il cui nome compare nel testo (parole di almeno 4 lettere); solo se uno vince
+function _invSuggerisciImpianto(testo) {
+  var t = ' ' + String(testo || '').toLowerCase().replace(/[^a-z0-9àèéìòù]+/g, ' ') + ' ';
+  if (!t.trim()) return null;
+  var best = null, bestN = 0, pari = false;
+  (_invDati.impianti || []).forEach(function (i) {
+    var parole = String(i.nome || '').toLowerCase().replace(/[^a-z0-9àèéìòù]+/g, ' ').split(' ').filter(function (w) { return w.length >= 4; });
+    var n = parole.filter(function (w) { return t.indexOf(' ' + w + ' ') >= 0; }).length;
+    if (n > bestN) { best = i; bestN = n; pari = false; } else if (n && n === bestN) pari = true;
+  });
+  return (best && !pari) ? best : null;
+}
+function _invOpzioniVoci(voci) {
+  return '<option value="">— voce —</option>' + (voci || []).map(function (v) { return '<option value="' + v.id + '">' + _invEsc(v.descrizione) + '</option>'; }).join('');
+}
+function invRigaCambiaImpianto(movId) {
+  var imp = (document.getElementById('inv-imp-' + movId) || {}).value;
+  var sv = document.getElementById('inv-voce-' + movId);
+  if (!sv) return;
+  var voci = imp ? (_invDati.voci || []).filter(function (v) { return v.impianto_id === imp; }) : [];
+  sv.innerHTML = _invOpzioniVoci(voci);
+  sv.disabled = !voci.length;
+}
+async function invImputaRiga(movId) {
+  if (!_invPuo()) { toast('Permesso negato'); return; }
+  var imp = (document.getElementById('inv-imp-' + movId) || {}).value;
+  var voce = (document.getElementById('inv-voce-' + movId) || {}).value || null;
+  if (!imp) { toast('Scegli l\'impianto'); return; }
+  var r = await sb.from('foglio_giornale_movimenti').update({ investimento_impianto_id: imp, investimento_voce_id: voce }).eq('id', movId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'imputata spesa ' + movId + ' a impianto ' + imp + (voce ? ' voce ' + voce : ''));
   toast('✓ Spesa imputata');
   caricaInvestimenti();
 }
