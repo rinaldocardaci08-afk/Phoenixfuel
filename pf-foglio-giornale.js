@@ -1,4 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20261009a — VOCE DI SPESA a testo libero nel blocco del ramo fotovoltaico: scelta la
+//   causale compare la casella "📝 Voce di spesa / nota per l'imputazione" (es. "Ormus Plant –
+//   rata alla firma 30%"). Si salva in nota_imputazione e diventa anche la descrizione del
+//   movimento; in Fotovoltaico → Investimenti guida l'imputazione ed e' la voce nell'elenco
+//   spese dell'impianto. Prima la descrizione era sempre il nome della causale.
 // v20261005d — causali divise per verso: in USCITA solo quelle di SPESA (pagamenti
 //   investimenti, acquisto impianti per rivendita), in ENTRATA solo quelle di INCASSO
 //   (vendita impianti, contributi). Prima comparivano tutte, anche quelle sbagliate.
@@ -869,7 +874,7 @@ async function _fgApriModale(iso, tipo, preset) {
     ordiniTrovati: [],
     imputazioni: {},
     anticipiPerFattura: {},
-    invCausale: '', invImpianto: '', invVoce: '', invIva: 22
+    invCausale: '', invImpianto: '', invVoce: '', invIva: 22, invNota: ''
   };
   // v20260821b — arrivando da una scadenza il fornitore e le fatture sono
   // gia' scelti: si portano dentro PRIMA del disegno, altrimenti il render
@@ -932,6 +937,12 @@ function _fgInvBlocco() {
   h += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">IVA %</label>';
   h += '<input type="number" step="0.1" min="0" id="fg-mod-inv-iva" value="' + (m.invIva != null ? m.invIva : 22) + '" oninput="_fgInvCambia()"' + (m.invCausale ? '' : ' disabled') + ' style="' + selSt + ';font-family:var(--font-mono);text-align:right' + (m.invCausale ? '' : ';opacity:.5') + '"></div>';
   h += '</div>';
+  if (m.invCausale) {
+    h += '<div style="margin-top:10px"><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">📝 Voce di spesa / nota per l\'imputazione</label>'
+      + '<input id="fg-mod-inv-nota" value="' + esc(m.invNota || '') + '" oninput="_fgModale.invNota=this.value" maxlength="200"'
+      + ' placeholder="' + (verso === 'incasso' ? 'es. DS Energy – 2ª quota al montaggio' : 'es. Ormus Plant – rata alla firma 30% – Mungo Bus') + '" style="' + selSt + '">'
+      + '<div style="font-size:10.5px;color:#854F0B;margin-top:3px">Scrivi fornitore – cosa – impianto: in Investimenti propone l\'impianto e diventa la voce nell\'elenco spese.</div></div>';
+  }
   h += '<div id="fg-inv-calc" style="font-size:11px;color:#412402;margin-top:8px"></div>';
   h += '</div>';
   return h;
@@ -1811,7 +1822,10 @@ async function _fgConfermaMovimento() {
 
   if (m.invCausale) {
     // Spesa di un ramo investimenti: nessuna riconciliazione, basta la descrizione.
-    descrizione = (document.getElementById('fg-descr-b') ? (document.getElementById('fg-descr-b').value || '').trim() : '');
+    var elNotaInv = document.getElementById('fg-mod-inv-nota');
+    if (elNotaInv) m.invNota = elNotaInv.value;
+    descrizione = String(m.invNota || '').trim()
+      || (document.getElementById('fg-descr-b') ? (document.getElementById('fg-descr-b').value || '').trim() : '');
     if (!descrizione) {
       var nomeCau = (_fgInvCausali || []).filter(function (c) { return c.id === m.invCausale; })[0];
       descrizione = nomeCau ? nomeCau.nome : 'Spesa investimenti';
@@ -1883,7 +1897,8 @@ async function _fgConfermaMovimento() {
     investimento_impianto_id: invImpianto,
     investimento_voce_id: invVoce,
     aliquota_iva: invIva,
-    imponibile: invImponibile
+    imponibile: invImponibile,
+    nota_imputazione: (invCausale && String(m.invNota || '').trim()) ? String(m.invNota).trim() : null
   }]).select('id').single();
 
   if (insMov.error) {

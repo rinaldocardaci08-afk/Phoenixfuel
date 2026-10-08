@@ -1,5 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261009a — VIA LE VOCI DI COSTO FISSE. L'impianto ha un solo budget (spesa prevista)
+//   e un ELENCO SPESE: ogni pagamento imputato porta come voce il suo testo libero
+//   (foglio_giornale_movimenti.nota_imputazione, scritto in foglio giornale e correggibile
+//   qui con ✏️). Le spese si raggruppano per la parte di testo prima del trattino
+//   ("Ormus Plant – rata alla firma" e "Ormus Plant – saldo" → gruppo "Ormus Plant") con
+//   subtotale. In "Spese da imputare" la voce e' una casella di testo gia' riempita con la
+//   nota. La tabella investimenti_voci resta in database ma non si usa piu'; la conferma
+//   d'ordine prende l'importo dal preventivo scelto.
+// v20261008f — VOCI DI COSTO nella scheda impianto: riga "Pagamenti senza voce" (imputati
+//   all'impianto ma non a una voce: prima finivano solo nel totale e le righe non tornavano)
+//   e sotto il totale quanto e' uscito davvero CON IVA, da confrontare con l'estratto conto.
 // v20261008e — (1) SPESE DA IMPUTARE: sotto ogni movimento la NOTA PER L'IMPUTAZIONE
 //   scritta in foglio giornale (colonna foglio_giornale_movimenti.nota_imputazione); se
 //   nella nota o nella descrizione c'e' il nome di un impianto, l'impianto e' gia' proposto.
@@ -144,7 +155,7 @@ async function caricaInvestimenti() {
     var r = await Promise.all([
       sb.from('investimenti_risorse').select('*').eq('causale_id', _invCausale),
       sb.from('investimenti_impianti').select('*').eq('causale_id', _invCausale).order('nome'),
-      sb.from('investimenti_voci').select('*').order('ordine'),
+      Promise.resolve({ data: [] }),   // voci di costo fisse non piu' usate (09/10)
       sb.from('foglio_giornale_movimenti')
         .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id')
         .eq('causale_investimento_id', _invCausale).order('data', { ascending: false }),
@@ -337,7 +348,7 @@ function _invRender() {
     h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px">';
     C.daImputare.forEach(function (m) {
       var sug = _invSuggerisciImpianto((m.nota_imputazione || '') + ' ' + (m.descrizione || ''));
-      var vociSug = sug ? (D.voci || []).filter(function (v) { return v.impianto_id === sug.id; }) : [];
+      var testoVoce = m.nota_imputazione || (_invTestoGenerico(m.descrizione) ? '' : (m.descrizione || ''));
       h += '<tr style="border-bottom:0.5px solid var(--border)">'
         + '<td style="padding:7px;white-space:nowrap;vertical-align:top">' + _invData(m.data) + '</td>'
         + '<td style="padding:7px;vertical-align:top">' + _invEsc(m.descrizione || '')
@@ -346,12 +357,11 @@ function _invRender() {
         + '</td>'
         + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600;vertical-align:top">' + _invEuro(_invImponibile(m)) + '</td>'
         + '<td style="padding:7px;text-align:right;white-space:nowrap;vertical-align:top">'
-        + '<select id="inv-imp-' + m.id + '" onchange="invRigaCambiaImpianto(\'' + m.id + '\')" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);max-width:170px">'
+        + '<select id="inv-imp-' + m.id + '" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);max-width:170px">'
         + '<option value="">— imputa a… —</option>'
         + D.impianti.map(function (i) { return '<option value="' + i.id + '"' + (sug && sug.id === i.id ? ' selected' : '') + '>' + _invEsc(i.nome) + '</option>'; }).join('')
         + '</select> '
-        + '<select id="inv-voce-' + m.id + '"' + (vociSug.length ? '' : ' disabled') + ' style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);max-width:160px">'
-        + _invOpzioniVoci(vociSug) + '</select> '
+        + '<input id="inv-voce-' + m.id + '" value="' + _invEsc(testoVoce) + '" placeholder="voce di spesa (es. Ormus Plant – saldo)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:220px"> '
         + '<button onclick="invImputaRiga(\'' + m.id + '\')" class="btn-primary" style="font-size:11.5px;padding:5px 10px">✓ Imputa</button> '
         + '<button onclick="invSegnaGenerale(\'' + m.id + '\')" title="Resta un costo comune del ramo" style="font-size:11.5px;padding:5px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">spesa generale</button>'
         + (sug ? '<div style="font-size:10.5px;color:#27500A;margin-top:3px">✓ proposto "' + _invEsc(sug.nome) + '": il nome è nella nota</div>'
@@ -496,27 +506,52 @@ function _invSuggerisciImpianto(testo) {
   });
   return (best && !pari) ? best : null;
 }
-function _invOpzioniVoci(voci) {
-  return '<option value="">— voce —</option>' + (voci || []).map(function (v) { return '<option value="' + v.id + '">' + _invEsc(v.descrizione) + '</option>'; }).join('');
+// descrizione automatica del foglio giornale (nome della causale): non e' una voce
+function _invTestoGenerico(t) {
+  t = String(t || '').trim().toLowerCase();
+  if (!t) return true;
+  return (_invDati.causali || []).some(function (c) { return String(c.nome || '').trim().toLowerCase() === t; })
+    || t === 'spesa investimenti' || t.indexOf('pagamenti investimenti') === 0;
 }
-function invRigaCambiaImpianto(movId) {
-  var imp = (document.getElementById('inv-imp-' + movId) || {}).value;
-  var sv = document.getElementById('inv-voce-' + movId);
-  if (!sv) return;
-  var voci = imp ? (_invDati.voci || []).filter(function (v) { return v.impianto_id === imp; }) : [];
-  sv.innerHTML = _invOpzioniVoci(voci);
-  sv.disabled = !voci.length;
+// voce mostrata nell'elenco spese
+function _invVoceMov(m) {
+  if (m.nota_imputazione && String(m.nota_imputazione).trim()) return String(m.nota_imputazione).trim();
+  return _invTestoGenerico(m.descrizione) ? '' : String(m.descrizione || '').trim();
 }
 async function invImputaRiga(movId) {
   if (!_invPuo()) { toast('Permesso negato'); return; }
   var imp = (document.getElementById('inv-imp-' + movId) || {}).value;
-  var voce = (document.getElementById('inv-voce-' + movId) || {}).value || null;
+  var voce = ((document.getElementById('inv-voce-' + movId) || {}).value || '').trim();
   if (!imp) { toast('Scegli l\'impianto'); return; }
-  var r = await sb.from('foglio_giornale_movimenti').update({ investimento_impianto_id: imp, investimento_voce_id: voce }).eq('id', movId);
+  var r = await sb.from('foglio_giornale_movimenti').update({ investimento_impianto_id: imp, nota_imputazione: voce || null }).eq('id', movId);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
-  if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'imputata spesa ' + movId + ' a impianto ' + imp + (voce ? ' voce ' + voce : ''));
+  if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'imputata spesa ' + movId + ' a impianto ' + imp + (voce ? ' — ' + voce : ''));
   toast('✓ Spesa imputata');
   caricaInvestimenti();
+}
+// correggere il testo della voce di una spesa gia' imputata
+function invModaleVoceSpesa(movId) {
+  var m = (_invDati.movimenti || []).filter(function (x) { return x.id === movId; })[0];
+  if (!m) return;
+  var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
+  var h = '<div style="max-width:480px"><div style="font-size:16px;font-weight:600;margin-bottom:4px">Voce della spesa</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">' + _invData(m.data) + ' · ' + _invEuro(m.importo) + ' con IVA · ' + _invEsc(m.descrizione || '') + '</div>'
+    + '<input id="inv-vs-testo" value="' + _invEsc(_invVoceMov(m)) + '" style="' + inp + '" placeholder="es. Ormus Plant – rata alla firma 30%">'
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Le spese si raggruppano per la parte prima del trattino: scrivi "Fornitore – cosa".</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="invSalvaVoceSpesa(\'' + m.id + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
+  apriModal(h);
+}
+async function invSalvaVoceSpesa(movId) {
+  if (!_invPuo()) { toast('Permesso negato'); return; }
+  var t = ((document.getElementById('inv-vs-testo') || {}).value || '').trim();
+  var r = await sb.from('foglio_giornale_movimenti').update({ nota_imputazione: t || null }).eq('id', movId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  var m = (_invDati.movimenti || []).filter(function (x) { return x.id === movId; })[0];
+  if (m) m.nota_imputazione = t || null;
+  chiudiModal();
+  _invRenderImpianto();
 }
 
 async function invSegnaGenerale(movId) {
@@ -597,7 +632,6 @@ function _invRenderImpianto() {
     + (i.data_allaccio ? ' · <strong style="color:#27500A">in rete dal ' + _invData(i.data_allaccio) + '</strong>' : '') + '</div></div>';
   h += '<div style="display:flex;gap:8px">';
   if (_invPuo()) {
-    h += '<button onclick="invModaleVoce(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Voce di costo</button>';
     h += '<button onclick="invModaleProduzione(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #639922;border-radius:7px;background:var(--bg);color:#3B6D11;font-weight:600;cursor:pointer">⚡ Produzione</button>';
     h += '<button onclick="invModaleImpianto(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">✏️ Modifica</button>';
   }
@@ -620,62 +654,8 @@ function _invRenderImpianto() {
   }
   h += '</div>';
 
-  // VOCI DI COSTO
-  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Voci di costo</div>';
-  if (!voci.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nessuna voce: la spesa prevista è quella indicata sull\'impianto.</div>';
-  else {
-    var totVoci = 0;
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-    h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
-      + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Voce</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Previsto</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Speso</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Residuo</th>'
-      + '<th style="width:36px"></th></tr>';
-    voci.forEach(function (v) {
-      var sv = spese.filter(function (m) { return m.investimento_voce_id === v.id; })
-                    .reduce(function (s, m) { return s + _invImponibile(m); }, 0);
-      var pv = Number(v.importo_previsto || 0); totVoci += pv;
-      h += '<tr style="border-bottom:0.5px solid var(--border)">'
-        + '<td style="padding:7px"><strong>' + _invEsc(v.descrizione) + '</strong>'
-        + '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEsc((_INV_CATEGORIE.filter(function (c) { return c[0] === v.categoria; })[0] || ['', v.categoria])[1])
-        + (v.fornitore ? ' · ' + _invEsc(v.fornitore) : '') + '</div></td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(pv) + '</td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + _invEuro(sv) + '</td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);color:' + ((pv - sv) < 0 ? '#A32D2D' : '#27500A') + '">' + _invEuro(pv - sv) + '</td>'
-        + '<td style="padding:7px;text-align:right">' + (_invPuo() ? '<button onclick="invEliminaVoce(\'' + v.id + '\')" style="border:0;background:transparent;cursor:pointer;color:#A32D2D">×</button>' : '') + '</td></tr>';
-    });
-    h += '<tr style="font-weight:700"><td style="padding:8px 7px">TOTALE VOCI</td>'
-      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(totVoci) + '</td>'
-      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(speso) + '</td>'
-      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(totVoci - speso) + '</td><td></td></tr>';
-    h += '</table>';
-    if (Math.abs(totVoci - prev) > 0.5) {
-      h += '<div style="font-size:11px;color:#854F0B;margin-top:8px">La somma delle voci (' + _invEuro(totVoci) + ') è diversa dalla spesa prevista dell\'impianto (' + _invEuro(prev) + ').</div>';
-    }
-  }
-  // barra dei pagamenti sul costo totale dell'opera
-  var base = (voci.length ? voci.reduce(function (s2, v) { return s2 + Number(v.importo_previsto || 0); }, 0) : prev);
-  if (base > 0) {
-    var pctP = Math.min(100, speso / base * 100);
-    var daPagare = base - speso;
-    h += '<div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;font-size:11.5px;margin-bottom:5px">'
-      + '<span style="font-weight:600">Pagamenti sul costo dell\'opera</span>'
-      + '<span style="color:var(--text-muted)">pagato <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(speso) + '</strong>'
-      + ' su <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(base) + '</strong></span></div>';
-    h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;display:flex">'
-      + '<div style="width:' + pctP.toFixed(1) + '%;background:' + (pctP >= 100 ? '#27500A' : '#185FA5') + ';display:flex;align-items:center;padding-left:8px;color:#fff;font-size:10px;font-family:var(--font-mono);white-space:nowrap">'
-      + pctP.toFixed(1) + '%</div></div>';
-    h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px">'
-      + (daPagare > 0.5 ? 'Ancora da pagare <strong style="font-family:var(--font-mono);color:#A32D2D">' + _invEuro(daPagare) + '</strong>'
-                        : (daPagare < -0.5 ? 'Pagato <strong style="color:#A32D2D">' + _invEuro(-daPagare) + '</strong> oltre il previsto'
-                                           : 'Opera interamente pagata'))
-      + ' · i pagamenti sono quelli imputati a questo impianto dal foglio giornale.</div>';
-    h += '</div>';
-  }
-  h += '</div>';
+  // ELENCO SPESE: i pagamenti imputati, con la loro voce a testo libero
+  h += _invBloccoElencoSpese(i, spese, speso, prev);
 
   // PREVENTIVI RICEVUTI dai fornitori per questo impianto
   h += _invBloccoPreventivi(i);
@@ -687,35 +667,82 @@ function _invRenderImpianto() {
   // PRODUZIONE REALE contro budget
   h += _invBloccoProduzione(i, prev);
 
-  // PAGAMENTI IMPUTATI
-  h += '<div class="card" style="padding:12px 14px">';
-  h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Pagamenti imputati (' + spese.length + ')</div>';
-  if (!spese.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nessun pagamento imputato a questo impianto.</div>';
-  else {
-    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">';
-    spese.forEach(function (m) {
-      h += '<tr style="border-bottom:0.5px solid var(--border)">'
-        + '<td style="padding:7px;white-space:nowrap">' + _invData(m.data) + '</td>'
-        + '<td style="padding:7px">' + _invEsc(m.descrizione || '')
-        + '<div style="font-size:10.5px;color:var(--text-muted)">totale ' + _invEuro(m.importo) + ' · IVA ' + (m.aliquota_iva != null ? m.aliquota_iva + '%' : 'n.d.') + '</div></td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(_invImponibile(m)) + '</td>'
-        + '<td style="padding:7px;text-align:right;white-space:nowrap">'
-        + (voci.length
-            ? '<select onchange="invImputaVoce(\'' + m.id + '\', this.value)" style="font-size:11px;padding:4px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
-              + '<option value="">— voce —</option>'
-              + voci.map(function (v) { return '<option value="' + v.id + '"' + (m.investimento_voce_id === v.id ? ' selected' : '') + '>' + _invEsc(v.descrizione) + '</option>'; }).join('')
-              + '</select> '
-            : '')
-        + '<button onclick="invTogliImputazione(\'' + m.id + '\')" title="Togli dall\'impianto" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">togli</button>'
-        + '</td></tr>';
+  box.innerHTML = h;
+}
+
+// ── ELENCO SPESE DELL'IMPIANTO (09/10) ──────────────────────────────────────
+// Gruppo = testo della voce prima del trattino (– — -). Subtotale solo se il gruppo
+// ha almeno due spese, cosi' l'elenco non si appesantisce.
+function _invGruppoVoce(t) {
+  var g = String(t || '').split(/\s+[–—-]\s+/)[0].trim();
+  return g || '';
+}
+function _invBloccoElencoSpese(i, spese, speso, prev) {
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+    + '<div style="font-size:13px;font-weight:700">Elenco spese (' + spese.length + ')</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">budget <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(prev) + '</strong> (spesa prevista)</div></div>';
+  if (!spese.length) {
+    h += '<div style="font-size:12px;color:var(--text-muted)">Nessuna spesa imputata: le spese si imputano dalla schermata degli impianti, in "Spese da imputare".</div>';
+  } else {
+    // gruppi in ordine di prima data
+    var gruppi = [], idx = {};
+    spese.slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); }).forEach(function (m) {
+      var v = _invVoceMov(m), g = _invGruppoVoce(v).toLowerCase() || ('·' + m.id);
+      if (idx[g] == null) { idx[g] = gruppi.length; gruppi.push({ nome: _invGruppoVoce(v), righe: [] }); }
+      gruppi[idx[g]].righe.push(m);
     });
-    h += '<tr style="font-weight:700"><td colspan="2" style="padding:8px 7px">TOTALE</td>'
+    var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border)';
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">';
+    h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+      + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">Voce</th>'
+      + '<th style="text-align:right;' + th + '">Con IVA</th><th style="text-align:right;' + th + '">IVA</th>'
+      + '<th style="text-align:right;' + th + '">Imponibile</th><th style="' + th + ';width:90px"></th></tr>';
+    var totIvato = 0;
+    gruppi.forEach(function (g) {
+      var subI = 0, subN = 0;
+      g.righe.forEach(function (m) {
+        var v = _invVoceMov(m), imp = _invImponibile(m);
+        subI += Number(m.importo || 0); subN += imp; totIvato += Number(m.importo || 0);
+        h += '<tr style="border-bottom:0.5px solid var(--border)">'
+          + '<td style="padding:7px;white-space:nowrap">' + _invData(m.data) + '</td>'
+          + '<td style="padding:7px">' + (v ? _invEsc(v) : '<span style="color:#854F0B">senza voce</span>')
+          + (m.descrizione && !_invTestoGenerico(m.descrizione) && m.descrizione !== v ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEsc(m.descrizione) + '</div>' : '') + '</td>'
+          + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(m.importo) + '</td>'
+          + '<td style="padding:7px;text-align:right;color:var(--text-muted)">' + (m.aliquota_iva != null ? m.aliquota_iva + '%' : 'n.d.') + '</td>'
+          + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(imp) + '</td>'
+          + '<td style="padding:7px;text-align:right;white-space:nowrap">'
+          + (_invPuo() ? '<button onclick="invModaleVoceSpesa(\'' + m.id + '\')" title="Correggi la voce" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">✏️</button> '
+              + '<button onclick="invTogliImputazione(\'' + m.id + '\')" title="Togli dall\'impianto" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">togli</button>' : '')
+          + '</td></tr>';
+      });
+      if (g.righe.length > 1) {
+        h += '<tr style="background:var(--bg-kpi,var(--bg));font-weight:600;color:#185FA5">'
+          + '<td></td><td style="padding:6px 7px">Totale ' + _invEsc(g.nome) + ' (' + g.righe.length + ')</td>'
+          + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(subI) + '</td><td></td>'
+          + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(subN) + '</td><td></td></tr>';
+      }
+    });
+    h += '<tr style="font-weight:700"><td colspan="2" style="padding:8px 7px">TOTALE PAGATO</td>'
+      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(totIvato) + '</td><td></td>'
       + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(speso) + '</td><td></td></tr>';
     h += '</table></div>';
   }
+  // pagato sul budget
+  if (prev > 0) {
+    var pctP = Math.min(100, speso / prev * 100), res = prev - speso;
+    h += '<div style="margin-top:12px;padding-top:10px;border-top:0.5px solid var(--border)">'
+      + '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:11.5px;margin-bottom:5px">'
+      + '<span style="font-weight:600">💶 Pagato sul budget</span>'
+      + '<span style="color:var(--text-muted)">' + _invEuro(speso) + ' su ' + _invEuro(prev) + ' · ' + (speso / prev * 100).toFixed(1) + '%</span></div>'
+      + '<div style="height:14px;border-radius:7px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
+      + '<div style="width:' + pctP.toFixed(1) + '%;height:100%;background:' + (res < 0 ? '#854F0B' : '#A32D2D') + '"></div></div>'
+      + '<div style="font-size:10.5px;margin-top:4px;color:' + (res < 0 ? '#A32D2D' : 'var(--text-muted)') + '">'
+      + (res >= 0 ? 'Resta da pagare <strong style="font-family:var(--font-mono)">' + _invEuro(res) + '</strong>' : 'Oltre il budget di <strong style="font-family:var(--font-mono)">' + _invEuro(-res) + '</strong>')
+      + ' · importi al netto dell\'IVA, partita di giro.</div></div>';
+  }
   h += '</div>';
-
-  box.innerHTML = h;
+  return h;
 }
 
 // ── MODALI ─────────────────────────────────────────────────────────────────
@@ -786,7 +813,7 @@ async function invSalvaImpianto(id) {
 async function invEliminaImpianto(id) {
   var sp = _invSpesoImpianto(id);
   if (sp > 0) { toast('Ci sono pagamenti imputati: toglili prima di eliminare l\'impianto'); return; }
-  if (!confirm('Elimino questo impianto e le sue voci di costo?')) return;
+  if (!confirm('Elimino questo impianto?')) return;
   var r = await sb.from('investimenti_impianti').delete().eq('id', id);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
   chiudiModal();
