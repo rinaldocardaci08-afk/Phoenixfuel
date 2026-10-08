@@ -1,5 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261008b — (1) PRODUZIONE STIMATA per impianto (kWh/anno, es. da PVGIS): si scrive
+//   nella scheda impianto (✏️ Modifica) o direttamente nel conto economico completo, e
+//   sostituisce kW × kWh/kW come produzione del 1° anno (poi il degrado). Colonna nuova
+//   investimenti_impianti.produzione_stimata_kwh. (2) Costi operativi di base 1.500 €/anno
+//   fissi (contratto manutenzione 600 + 900 guasti/assicurazioni), senza accantonamento
+//   dal 6° anno; i parchi tengono i loro valori nelle note. (3) Nella CASSA si parte dal
+//   RISULTATO DELL'ANNO, si aggiunge l'ammortamento e si toglie il capitale restituito:
+//   la rata intera sta solo nella copertura della rata, cosi' non sembra contata due volte.
+// v20261008a — CONTO ECONOMICO COMPLETO in modale grande (pulsante nella scheda
+//   impianto): CE a 25 anni con INTERESSI del mutuo, CASSA (EBITDA + CER − rata) con
+//   cumulata, COPERTURA DELLA RATA (DSCR solo energia e con CER) e INDICI (DSCR minimo,
+//   rientro investimento e mezzi propri, TIR, VAN al TAN, costo del kWh). La rata e' una
+//   QUOTA delle rate vere dei mutui collegati alle risorse, in proporzione alla spesa
+//   prevista sul totale risorse. Ante imposte, prezzo dell'energia del piano attuale.
 // v20261006a — nella schermata centrale, sotto le spese degli impianti, due riquadri
 //   nuovi: SPESE DI COMMESSA da imputare a un CONTRATTO (impianti venduti) e INCASSI
 //   da collegare al contratto. Cosi' tutto si imputa da dove si apre la pagina.
@@ -621,6 +635,8 @@ function invModaleImpianto(id) {
   h += '<div><label style="' + lb + '">Fine prevista</label><input id="inv-i-al" type="date" value="' + (i && i.data_fine || '') + '" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Allaccio alla rete</label><input id="inv-i-allaccio" type="date" value="' + (i && i.data_allaccio || '') + '" style="' + inp + '">'
     + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Da questa data l\'impianto produce e vende energia.</div></div>';
+  h += '<div><label style="' + lb + '">Produzione stimata kWh/anno</label><input id="inv-i-stima" type="number" step="1" value="' + (i && i.produzione_stimata_kwh != null ? i.produzione_stimata_kwh : '') + '" style="' + inp + '">'
+    + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">Es. dal PVGIS. Vuoto = ' + _INV_CE_DEF.kwh_per_kw + ' kWh/kW × kW.</div></div>';
   h += '<div style="grid-column:1/3"><label style="' + lb + '">Note</label><input id="inv-i-note" value="' + _invEsc(i && i.note || '') + '" style="' + inp + '"></div>';
   h += '</div>';
   h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Le date servono solo al diagramma delle tempistiche: senza entrambe, l\'impianto non compare nel Gantt.</div>';
@@ -649,6 +665,7 @@ async function invSalvaImpianto(id) {
     data_inizio: g('inv-i-dal') || null,
     data_fine: g('inv-i-al') || null,
     data_allaccio: g('inv-i-allaccio') || null,
+    produzione_stimata_kwh: parseFloat(g('inv-i-stima')) || null,
     note: g('inv-i-note') || null,
     updated_at: new Date().toISOString()
   };
@@ -848,7 +865,7 @@ async function invPopupFinanziamento(finId) {
 // dell'energia a fasce, costi operativi, accantonamento manutenzione dal 6° anno,
 // ammortamento su 25 anni e contributo CER. Si possono cambiare per impianto.
 var _INV_CE_DEF = {
-  kwh_per_kw: 1350, degrado: 0.2, costi_op: 2500, acc_dal: 6, acc_importo: 600,
+  kwh_per_kw: 1350, degrado: 0.2, costi_op: 1500, acc_dal: 6, acc_importo: 0,
   anni_amm: 25, cer_eur: 0.0365, cer_quota: 60, cer_anni: 20
 };
 var _INV_PREZZI = [
@@ -885,11 +902,17 @@ function _invCeParam(i) {
 function _invCeCalcola(i, costoNetto) {
   var P = _invCeParam(i);
   var kw = Number(i.kw || 0);
-  if (!kw) return null;
+  var stima = Number(i.produzione_stimata_kwh || 0);
+  if (!kw && !stima) return null;
+  // produzione del 1° anno: la stima inserita (PVGIS) se c'e', altrimenti kW × kWh/kW
+  var base = stima > 0 ? stima : kw * P.kwh_per_kw;
+  P.stima = stima > 0 ? stima : null;
+  P.base_kwh = base;
+  if (stima > 0 && kw) P.kwh_per_kw = Math.round(stima / kw);
   var amm = Number(costoNetto || 0) / P.anni_amm;
   var anni = [];
   for (var n = 1; n <= 25; n++) {
-    var mwh = kw * P.kwh_per_kw * Math.pow(1 - P.degrado / 100, n - 1) / 1000;
+    var mwh = base * Math.pow(1 - P.degrado / 100, n - 1) / 1000;
     var prezzo = _invPrezzoAnno(n);
     var ricavi = mwh * 1000 * prezzo;
     var costi = P.costi_op + (n >= P.acc_dal ? P.acc_importo : 0);
@@ -906,90 +929,334 @@ function _invBloccoCE(i, costoNetto) {
   if (!CE) {
     return '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
       + '<div style="font-size:13px;font-weight:700;margin-bottom:6px">Conto economico previsionale</div>'
-      + '<div style="font-size:12px;color:var(--text-muted)">Per calcolarlo servono i <strong>kW installati</strong>: inseriscili con ✏️ Modifica.</div></div>';
+      + '<div style="font-size:12px;color:var(--text-muted)">Per calcolarlo servono i <strong>kW installati</strong> o la <strong>produzione stimata</strong>: inseriscili con ✏️ Modifica.</div></div>';
   }
   var P = CE.P, a = CE.anni;
-  var somma = function (da, a2, campo) {
-    return a.slice(da - 1, a2).reduce(function (s, x) { return s + x[campo]; }, 0);
-  };
-  var tot25 = { ricavi: somma(1, 25, 'ricavi'), ebitda: somma(1, 25, 'ebitda'),
-                utile: somma(1, 25, 'utile'), cer: somma(1, 25, 'cer'), utile2: somma(1, 25, 'utile2') };
-
-  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:4px">'
-    + '<div style="font-size:13px;font-weight:700">Conto economico previsionale</div>'
-    + '<div style="font-size:11px;color:var(--text-muted)">' + Number(i.kw).toLocaleString('it-IT') + ' kW · '
-    + P.kwh_per_kw + ' kWh/kW · degrado ' + String(P.degrado).replace('.', ',') + '%/anno · costi ' + _invEuroK(P.costi_op) + '/anno'
-    + ' · CER ' + String(P.cer_eur).replace('.', ',') + ' €/kWh sul ' + P.cer_quota + '%</div></div>';
-
+  var tot25 = a.reduce(function (s, x) { return s + x.utile2; }, 0);
   var kpi = function (lab, val, col) {
     return '<div style="flex:1;min-width:140px;border:0.5px solid var(--border);border-radius:9px;padding:9px 11px">'
       + '<div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
       + '<div style="font-family:var(--font-mono);font-size:17px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div></div>';
   };
-  h += '<div style="display:flex;gap:9px;flex-wrap:wrap;margin:10px 0">'
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">Conto economico previsionale</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">' + _invTestoProd(i, P)
+    + ' · degrado ' + String(P.degrado).replace('.', ',') + '%/anno · costi ' + _invEuroK(P.costi_op) + '/anno'
+    + ' · CER ' + String(P.cer_eur).replace('.', ',') + ' €/kWh sul ' + P.cer_quota + '%</div></div>'
+    + '<button onclick="invApriCE(\'' + i.id + '\')" class="btn-primary" style="font-size:12px;padding:7px 14px">📊 Conto economico completo</button></div>';
+  h += '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:10px">'
     + kpi('EBITDA 1° anno', _invEuroK(a[0].ebitda))
-    + kpi('Utile 1° anno', _invEuroK(a[0].utile), a[0].utile >= 0 ? '#27500A' : '#A32D2D')
+    + kpi('Utile 1° anno (prima del mutuo)', _invEuroK(a[0].utile), a[0].utile >= 0 ? '#27500A' : '#A32D2D')
     + kpi('Utile con CER 1° anno', _invEuroK(a[0].utile2), '#27500A')
-    + kpi('Utile 25 anni con CER', _invEuroK(tot25.utile2), '#27500A')
+    + kpi('Utile 25 anni con CER', _invEuroK(tot25), '#27500A')
+    + '</div>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Interessi, rata del mutuo, cassa, copertura della rata e indici nel conto economico completo.</div>';
+  h += '</div>';
+  return h;
+}
+
+// ── CONTO ECONOMICO COMPLETO IN MODALE GRANDE (08/10) ──────────────────────
+// Regole fissate con Rinaldo l'08/10/2026:
+//  · RATA: per gli impianti su tetto si prende una QUOTA delle rate vere dei mutui
+//    collegati alle risorse della causale, in proporzione alla spesa prevista
+//    dell'impianto sul totale delle risorse (Mungo Bus 101.700 / 600.000 = 16,95%).
+//    Le rate sono quelle di banche_finanziamenti_rate (preammortamento compreso).
+//  · Il secondo mutuo Intesa da 100.000 NON entra nel fotovoltaico.
+//  · Prezzo dell'energia: piano attuale (1.350 kWh/kW, 0,116 per 4 anni poi a scendere).
+//  · Niente imposte: tutto ante imposte, come nel dossier per la banca.
+//  · DSCR sul solo ricavo dell'energia (EBITDA / rata); con la CER in colonna a parte.
+//  · L'anno 1 parte dall'allaccio alla rete; se manca, dalla fine prevista dei lavori;
+//    se manca anche quella, da oggi. Le rate pagate prima stanno nella colonna "Cantiere".
+//  · I parchi con finanziamento proprio (BCC) sono ancora da definire: per ora prendono
+//    la quota della causale come gli altri.
+
+// testo della produzione usata: stima inserita oppure kW × kWh/kW
+function _invTestoProd(i, P) {
+  var kwT = i.kw ? Number(i.kw).toLocaleString('it-IT') + ' kW · ' : '';
+  if (P.stima) return kwT + 'produzione stimata <strong>' + Math.round(P.stima).toLocaleString('it-IT') + ' kWh/anno</strong>'
+    + (i.kw ? ' (' + P.kwh_per_kw.toLocaleString('it-IT') + ' kWh/kW)' : '');
+  return kwT + P.kwh_per_kw.toLocaleString('it-IT') + ' kWh/kW (nessuna stima inserita: valore di base)';
+}
+
+function _invAddAnni(iso, n) {
+  var y = Number(iso.slice(0, 4)) + n, md = iso.slice(5, 10);
+  if (md === '02-29') md = '02-28';
+  return y + '-' + md;
+}
+
+// Quota dei mutui della causale attribuita all'impianto
+function _invQuotaDebito(i) {
+  var D = _invDati;
+  var risTot = (D.risorse || []).reduce(function (s, r) { return s + Number(r.importo || 0); }, 0);
+  var spesa = Number(i.spesa_prevista || 0);
+  var q = (risTot > 0 && spesa > 0) ? spesa / risTot : 0;
+  var mutui = [];
+  (D.risorse || []).forEach(function (r) {
+    if (!r.finanziamento_id) return;
+    var f = (D.finanziamenti || []).filter(function (x) { return x.id === r.finanziamento_id; })[0];
+    if (!f || !Number(f.capitale)) return;
+    // parte del mutuo destinata alla causale (di solito tutto) × quota dell'impianto
+    var quotaRata = q * Math.min(1, Number(r.importo || 0) / Number(f.capitale));
+    mutui.push({ fin: f, risorsa: r, quotaRata: quotaRata, debito: q * Number(r.importo || 0) });
+  });
+  var debito = mutui.reduce(function (s, m) { return s + m.debito; }, 0);
+  return { q: q, risTot: risTot, mutui: mutui, debito: debito, propri: Math.max(0, spesa - debito) };
+}
+
+function _invTir(flussi) {
+  var van = function (r) { return flussi.reduce(function (s, f, t) { return s + f / Math.pow(1 + r, t); }, 0); };
+  var lo = -0.99, hi = 1;
+  if (van(lo) * van(hi) > 0) return null;
+  for (var k = 0; k < 200; k++) {
+    var mid = (lo + hi) / 2;
+    if (van(lo) * van(mid) <= 0) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// Calcolo completo: CE con interessi, cassa, DSCR, indici
+function _invCeCompleto(i, rateFin) {
+  var spesa = Number(i.spesa_prevista || 0);
+  var CE = _invCeCalcola(i, spesa);
+  if (!CE) return null;
+  var Q = _invQuotaDebito(i);
+  var oggi = new Date().toISOString().slice(0, 10);
+  var inizio = i.data_allaccio || i.data_fine || oggi;
+  var origine = i.data_allaccio ? 'allaccio alla rete' : (i.data_fine ? 'fine prevista dei lavori' : 'oggi (mancano allaccio e fine lavori)');
+  var limiti = [];
+  for (var n = 0; n <= 25; n++) limiti.push(_invAddAnni(inizio, n));
+
+  // rate dell'impianto per anno (0 = cantiere, prima dell'anno 1)
+  var fin = [];
+  for (var k = 0; k <= 25; k++) fin.push({ rata: 0, interessi: 0, capitale: 0 });
+  Q.mutui.forEach(function (m) {
+    (rateFin[m.fin.id] || []).forEach(function (r) {
+      var d = String(r.data_scadenza).slice(0, 10), idx = 0;
+      if (d >= limiti[0]) {
+        idx = -1;
+        for (var n2 = 1; n2 <= 25; n2++) if (d >= limiti[n2 - 1] && d < limiti[n2]) { idx = n2; break; }
+        if (idx < 0) return;
+      }
+      fin[idx].rata += Number(r.rata || 0) * m.quotaRata;
+      fin[idx].interessi += Number(r.quota_interessi || 0) * m.quotaRata;
+      fin[idx].capitale += Number(r.quota_capitale || 0) * m.quotaRata;
+    });
+  });
+
+  var cum = -Q.propri - fin[0].rata;
+  var cumProg = -spesa, rientroProg = null, rientroPropri = null;
+  var anni = CE.anni.map(function (x) {
+    var f = fin[x.n];
+    var utileFin = x.ebitda - x.amm - f.interessi;
+    var flusso = x.ebitda + x.cer - f.rata;
+    var cumPrima = cum; cum += flusso;
+    if (rientroPropri == null && cumPrima < 0 && cum >= 0 && flusso > 0) rientroPropri = x.n - 1 + (-cumPrima / flusso);
+    var progPrima = cumProg; cumProg += x.ebitda + x.cer;
+    if (rientroProg == null && progPrima < 0 && cumProg >= 0) rientroProg = x.n - 1 + (-progPrima / (x.ebitda + x.cer));
+    return Object.assign({}, x, {
+      anno: Number(limiti[x.n - 1].slice(0, 4)),
+      interessi: f.interessi, rata: f.rata, capitale: f.capitale,
+      utileFin: utileFin, utileFin2: utileFin + x.cer,
+      flusso: flusso, cumulata: cum,
+      dscr: f.rata > 0.5 ? x.ebitda / f.rata : null,
+      dscr2: f.rata > 0.5 ? (x.ebitda + x.cer) / f.rata : null
+    });
+  });
+  if (rientroPropri == null && Q.propri + fin[0].rata <= 0) rientroPropri = 0;
+
+  var conRata = anni.filter(function (x) { return x.dscr != null; });
+  var minD = conRata.length ? conRata.reduce(function (m, x) { return x.dscr < m.dscr ? x : m; }) : null;
+  var minD2 = conRata.length ? conRata.reduce(function (m, x) { return x.dscr2 < m.dscr2 ? x : m; }) : null;
+  var tir = spesa > 0 ? _invTir([-spesa].concat(anni.map(function (x) { return x.ebitda + x.cer; }))) : null;
+  var tan = Q.mutui.length ? Number(Q.mutui[0].fin.tasso || 0) / 100 : null;
+  var van = (tan != null && spesa > 0)
+    ? anni.reduce(function (s, x) { return s + (x.ebitda + x.cer) / Math.pow(1 + tan, x.n); }, -spesa) : null;
+  var kwh = anni.reduce(function (s, x) { return s + x.mwh * 1000; }, 0);
+  var costiTot = anni.reduce(function (s, x) { return s + x.costi; }, 0);
+  var intTot = anni.reduce(function (s, x) { return s + x.interessi; }, 0) + fin[0].interessi;
+  return {
+    CE: CE, Q: Q, anni: anni, cantiere: fin[0], inizio: inizio, origine: origine, spesa: spesa,
+    minD: minD, minD2: minD2, tir: tir, tan: tan, van: van,
+    costoKwh: kwh > 0 ? (spesa + costiTot + intTot) / kwh : null,
+    rientroProg: rientroProg, rientroPropri: rientroPropri,
+    intTot: intTot, rataTot: anni.reduce(function (s, x) { return s + x.rata; }, 0) + fin[0].rata,
+    utile25: anni.reduce(function (s, x) { return s + x.utileFin2; }, 0)
+  };
+}
+
+async function invApriCE(impId) {
+  var i = (_invDati.impianti || []).filter(function (x) { return x.id === impId; })[0];
+  if (!i) return;
+  var Q = _invQuotaDebito(i);
+  var ids = Q.mutui.map(function (m) { return m.fin.id; });
+  var rateFin = {};
+  if (ids.length) {
+    var rr = await sb.from('banche_finanziamenti_rate').select('finanziamento_id,numero,data_scadenza,rata,quota_capitale,quota_interessi,residuo_capitale')
+      .in('finanziamento_id', ids).order('numero').limit(5000);
+    if (rr.error) { toast('Errore rate: ' + rr.error.message); return; }
+    (rr.data || []).forEach(function (r) { (rateFin[r.finanziamento_id] = rateFin[r.finanziamento_id] || []).push(r); });
+  }
+  var R = _invCeCompleto(i, rateFin);
+  if (!R) { toast('Servono i kW installati'); return; }
+  _invMostraOverlayCE(_invHtmlCE(i, R));
+}
+
+async function invSalvaStima(impId) {
+  if (!_invPuo()) { toast('Permesso negato'); return; }
+  var el = document.getElementById('inv-ce-stima');
+  var v = el && el.value !== '' ? parseFloat(el.value) : null;
+  if (v != null && !(v > 0)) { toast('Produzione non valida'); return; }
+  var r = await sb.from('investimenti_impianti').update({ produzione_stimata_kwh: v, updated_at: new Date().toISOString() }).eq('id', impId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  var i = (_invDati.impianti || []).filter(function (x) { return x.id === impId; })[0];
+  if (i) i.produzione_stimata_kwh = v;
+  toast('✓ Produzione stimata salvata');
+  await invApriCE(impId);
+  if (_invImpiantoAperto === impId) _invRenderImpianto();
+}
+
+function invChiudiCE() {
+  var o = document.getElementById('inv-ce-overlay');
+  if (o) o.remove();
+  document.removeEventListener('keydown', _invCeEsc);
+}
+function _invCeEsc(e) { if (e.key === 'Escape') invChiudiCE(); }
+function _invMostraOverlayCE(html) {
+  invChiudiCE();
+  var o = document.createElement('div');
+  o.id = 'inv-ce-overlay';
+  o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1050;display:flex;align-items:flex-start;justify-content:center;padding:18px 10px;overflow-y:auto';
+  o.onclick = function (e) { if (e.target === o) invChiudiCE(); };
+  o.innerHTML = '<div style="background:var(--bg-card,var(--bg));color:var(--text);border-radius:12px;width:min(1280px,100%);padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.25)">' + html + '</div>';
+  document.body.appendChild(o);
+  document.addEventListener('keydown', _invCeEsc);
+}
+
+function _invHtmlCE(i, R) {
+  var a = R.anni, Q = R.Q, P = R.CE.P;
+  var e0 = function (v) { return Math.round(v).toLocaleString('it-IT'); };
+  var neg = function (v) { return Math.abs(v) < 0.5 ? '—' : '−' + e0(v); };
+  var dec = function (v, d) { return v == null ? '—' : v.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d }); };
+  var anniTxt = function (v) { return v == null ? 'oltre 25 anni' : dec(v, 1) + ' anni'; };
+  var ROSSO = '#A32D2D', VERDE = '#27500A';
+  var colD = function (v) { return v == null ? 'var(--text-muted)' : (v >= 1.25 ? VERDE : (v >= 1 ? '#854F0B' : ROSSO)); };
+
+  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+    + '<div><div style="font-size:18px;font-weight:700">Conto economico — ' + _invEsc(i.nome) + '</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">' + _invTestoProd(i, P) + ' · degrado ' + String(P.degrado).replace('.', ',') + '%/anno · costi ' + _invEuroK(P.costi_op) + '/anno'
+    + (P.acc_importo ? ' (+' + _invEuroK(P.acc_importo) + ' dal ' + P.acc_dal + '° anno)' : '') + ' · CER ' + String(P.cer_eur).replace('.', ',') + ' €/kWh sul ' + P.cer_quota + '% per ' + P.cer_anni + ' anni · ante imposte</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Anno 1 dal <strong>' + _invData(R.inizio) + '</strong> (' + R.origine + ')</div></div>'
+    + '<button onclick="invChiudiCE()" style="font-size:13px;padding:7px 14px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">✕ Chiudi</button></div>';
+
+  // ── produzione stimata modificabile qui
+  if (_invPuo()) {
+    h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:0.5px solid #639922;border-radius:10px;padding:9px 13px;margin-bottom:10px;font-size:12px">'
+      + '<span style="font-weight:600;color:#3B6D11">⚡ Produzione stimata 1° anno</span>'
+      + '<input id="inv-ce-stima" type="number" step="1" value="' + (i.produzione_stimata_kwh ? Math.round(i.produzione_stimata_kwh) : '') + '" placeholder="' + Math.round(P.base_kwh) + '" style="width:130px;padding:6px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono)">'
+      + '<span style="color:var(--text-muted)">kWh/anno</span>'
+      + '<button onclick="invSalvaStima(\'' + i.id + '\')" class="btn-primary" style="font-size:12px;padding:6px 13px">Salva e ricalcola</button>'
+      + '<span style="font-size:10.5px;color:var(--text-muted)">es. "Produzione annuale FV" del PVGIS · vuoto = ' + _INV_CE_DEF.kwh_per_kw + ' kWh/kW × kW</span></div>';
+  }
+
+  // ── finanziamento dell'impianto
+  h += '<div style="border:0.5px solid var(--border);border-radius:10px;padding:10px 13px;margin-bottom:12px;font-size:12px">';
+  if (!R.spesa) {
+    h += '<span style="color:' + ROSSO + '">Spesa prevista a zero: senza investimento non ci sono ammortamento, quota di mutuo e indici.</span>';
+  } else {
+    h += '<strong>Investimento ' + _invEuro(R.spesa) + '</strong> = ' + dec(Q.q * 100, 2) + '% delle risorse della causale (' + _invEuroK(Q.risTot) + ')'
+      + ' → <strong>mutuo ' + _invEuro(Q.debito) + '</strong> · <strong>mezzi propri ' + _invEuro(Q.propri) + '</strong>';
+    Q.mutui.forEach(function (m) {
+      h += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">' + _invEsc(m.fin.descrizione || m.fin.numero_contratto) + ' ' + _invEsc(m.fin.numero_contratto || '')
+        + ' · TAN ' + m.fin.tasso + '% · all\'impianto il ' + dec(m.quotaRata * 100, 2) + '% di ogni rata</div>';
+    });
+    if (!Q.mutui.length) h += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">Nessun mutuo collegato alle risorse della causale: niente rata.</div>';
+    if (R.cantiere.rata > 0.5) {
+      h += '<div style="font-size:11px;color:#854F0B;margin-top:3px">Prima dell\'anno 1 (cantiere) si pagano ' + _invEuro(R.cantiere.rata)
+        + ' di rate, di cui interessi ' + _invEuro(R.cantiere.interessi) + '.</div>';
+    }
+  }
+  h += '</div>';
+
+  // ── indici
+  var kpi = function (lab, val, sub, col) {
+    return '<div style="flex:1;min-width:150px;border:0.5px solid var(--border);border-radius:10px;padding:10px 12px">'
+      + '<div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + (sub || '&nbsp;') + '</div></div>';
+  };
+  h += '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px">'
+    + kpi('DSCR minimo', R.minD ? dec(R.minD.dscr, 2) + 'x' : '—', R.minD ? 'anno ' + R.minD.n + ' · solo energia' : 'nessuna rata', colD(R.minD && R.minD.dscr))
+    + kpi('DSCR minimo con CER', R.minD2 ? dec(R.minD2.dscr2, 2) + 'x' : '—', R.minD2 ? 'anno ' + R.minD2.n : '&nbsp;', colD(R.minD2 && R.minD2.dscr2))
+    + kpi('Rientro investimento', anniTxt(R.rientroProg), 'EBITDA + CER sul costo')
+    + kpi('Rientro mezzi propri', anniTxt(R.rientroPropri), 'cassa dopo le rate')
+    + kpi('TIR progetto', R.tir != null ? dec(R.tir * 100, 1) + '%' : '—', '25 anni, con CER')
+    + kpi('VAN', R.van != null ? _invEuroK(R.van) : '—', R.tan != null ? 'scontato al TAN ' + dec(R.tan * 100, 3) + '%' : 'manca il tasso', R.van != null ? (R.van >= 0 ? VERDE : ROSSO) : null)
+    + kpi('Costo del kWh', R.costoKwh != null ? dec(R.costoKwh, 4) + ' €' : '—', 'investimento + costi + interessi / kWh')
+    + kpi('Utile 25 anni con CER', _invEuroK(R.utile25), 'dopo ammortamento e interessi', R.utile25 >= 0 ? VERDE : ROSSO)
     + '</div>';
 
-  // primi 10 anni
-  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:760px">';
-  h += '<tr style="color:var(--text-muted);font-size:9.5px;text-transform:uppercase"><th style="text-align:left;padding:5px 6px;border-bottom:1.5px solid var(--border)">€</th>'
-    + a.slice(0, 10).map(function (x) { return '<th style="text-align:right;padding:5px 6px;border-bottom:1.5px solid var(--border)">Anno ' + x.n + '</th>'; }).join('')
-    + '<th style="text-align:right;padding:5px 6px;border-bottom:1.5px solid var(--border)">Tot. 10</th></tr>';
-  var rigaCE = function (lab, campo, fmt, grassetto, col) {
-    var r = '<tr' + (grassetto ? ' style="font-weight:700;background:var(--bg-kpi,var(--bg))"' : ' style="border-bottom:0.5px solid var(--border)"') + '>'
-      + '<td style="padding:5px 6px' + (col ? ';color:' + col : '') + '">' + lab + '</td>';
-    a.slice(0, 10).forEach(function (x) {
-      r += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)' + (col ? ';color:' + col : '') + '">' + fmt(x[campo]) + '</td>';
+  // ── tabella anno per anno (25 anni, scorre in orizzontale)
+  var th = 'padding:5px 7px;border-bottom:1.5px solid var(--border);text-align:right;white-space:nowrap';
+  var td = 'padding:5px 7px;text-align:right;font-family:var(--font-mono);white-space:nowrap';
+  var tdL = 'padding:5px 9px;text-align:left;white-space:nowrap;position:sticky;left:0;background:var(--bg-card,var(--bg));z-index:1';
+  var cant = R.cantiere.rata > 0.5;
+  var t = '<div style="overflow-x:auto;border:0.5px solid var(--border);border-radius:10px">'
+    + '<table style="border-collapse:collapse;font-size:11px;min-width:100%">';
+  t += '<tr style="color:var(--text-muted);font-size:9.5px;text-transform:uppercase"><th style="' + th + ';' + tdL + '">€</th>'
+    + (cant ? '<th style="' + th + '">Cantiere</th>' : '')
+    + a.map(function (x) { return '<th style="' + th + '">Anno ' + x.n + '<div style="font-weight:400">' + x.anno + '</div></th>'; }).join('')
+    + '<th style="' + th + '">Tot. 25</th></tr>';
+  var sez = function (tit) {
+    return '<tr><td colspan="' + (a.length + 2 + (cant ? 1 : 0)) + '" style="padding:9px 9px 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#185FA5">'
+      + '<span style="position:sticky;left:9px">' + tit + '</span></td></tr>';
+  };
+  // riga: fn(x) -> valore, fmt, opzioni { tot, col, b, cantVal }
+  var riga = function (lab, fn, fmt, o) {
+    o = o || {};
+    var st = o.b ? 'font-weight:700;background:var(--bg-kpi,var(--bg))' : 'border-bottom:0.5px solid var(--border)';
+    var r = '<tr style="' + st + '"><td style="' + tdL + (o.b ? ';font-weight:700;background:var(--bg-kpi,var(--bg-card,var(--bg)))' : '') + (o.col ? ';color:' + o.col : '') + '">' + lab + '</td>';
+    if (cant) r += '<td style="' + td + (o.col ? ';color:' + o.col : '') + '">' + (o.cantVal != null ? fmt(o.cantVal) : '') + '</td>';
+    var tot = 0;
+    a.forEach(function (x) {
+      var v = fn(x); tot += (v || 0);
+      var c = o.colFn ? o.colFn(v) : o.col;
+      r += '<td style="' + td + (c ? ';color:' + c : '') + '">' + fmt(v) + '</td>';
     });
-    r += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);font-weight:700">' + fmt(somma(1, 10, campo)) + '</td></tr>';
+    r += '<td style="' + td + ';font-weight:700">' + (o.tot === false ? '' : fmt(tot + (o.cantVal || 0))) + '</td></tr>';
     return r;
   };
-  var e0 = function (v) { return Math.round(v).toLocaleString('it-IT'); };
-  h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 6px">Energia (MWh)</td>'
-    + a.slice(0, 10).map(function (x) { return '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + Math.round(x.mwh).toLocaleString('it-IT') + '</td>'; }).join('')
-    + '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);font-weight:700">' + Math.round(somma(1, 10, 'mwh')).toLocaleString('it-IT') + '</td></tr>';
-  h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 6px;color:var(--text-muted)">Prezzo €/kWh</td>'
-    + a.slice(0, 10).map(function (x) { return '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + x.prezzo.toFixed(3).replace('.', ',') + '</td>'; }).join('')
-    + '<td></td></tr>';
-  h += rigaCE('Ricavi energia', 'ricavi', e0);
-  h += rigaCE('Costi operativi', 'costi', function (v) { return '−' + e0(v); }, false, '#A32D2D');
-  h += rigaCE('EBITDA', 'ebitda', e0, true);
-  h += rigaCE('Ammortamento', 'amm', function (v) { return '−' + e0(v); }, false, '#A32D2D');
-  h += rigaCE('Utile ante imposte', 'utile', e0, true);
-  h += rigaCE('Contributo CER', 'cer', e0, false, '#27500A');
-  h += rigaCE('Utile con CER', 'utile2', e0, true);
-  h += '</table></div>';
+  t += sez('Conto economico');
+  t += riga('Energia (MWh)', function (x) { return x.mwh; }, function (v) { return dec(v, 1); });
+  t += riga('Prezzo €/kWh', function (x) { return x.prezzo; }, function (v) { return dec(v, 3); }, { tot: false, col: 'var(--text-muted)' });
+  t += riga('Ricavi energia', function (x) { return x.ricavi; }, e0);
+  t += riga('Manutenzione e costi', function (x) { return x.costi; }, neg, { col: ROSSO });
+  t += riga('EBITDA', function (x) { return x.ebitda; }, e0, { b: true });
+  t += riga('Ammortamento', function (x) { return x.amm; }, neg, { col: ROSSO });
+  t += riga('Interessi mutuo', function (x) { return x.interessi; }, neg, { col: ROSSO, cantVal: cant ? R.cantiere.interessi : null });
+  t += riga('Utile ante imposte', function (x) { return x.utileFin; }, e0, { b: true, colFn: function (v) { return v < 0 ? ROSSO : null; } });
+  t += riga('Contributo CER', function (x) { return x.cer; }, e0, { col: VERDE });
+  t += riga('Utile con CER', function (x) { return x.utileFin2; }, e0, { b: true, colFn: function (v) { return v < 0 ? ROSSO : null; } });
+  t += sez('Cassa');
+  t += riga('Risultato dell\'anno', function (x) { return x.utileFin2; }, e0, { b: true, colFn: function (v) { return v < 0 ? ROSSO : null; }, cantVal: cant ? -R.cantiere.interessi : null });
+  t += riga('+ Ammortamento (non è un\'uscita)', function (x) { return x.amm; }, e0, { col: VERDE });
+  t += riga('− Capitale restituito alla banca', function (x) { return x.capitale; }, neg, { col: ROSSO, cantVal: cant ? R.cantiere.capitale : null });
+  t += riga('Flusso di cassa', function (x) { return x.flusso; }, e0, { b: true, colFn: function (v) { return v < 0 ? ROSSO : null; }, cantVal: cant ? -R.cantiere.rata : null });
+  t += riga('Cassa cumulata', function (x) { return x.cumulata; }, e0, { tot: false, colFn: function (v) { return v < 0 ? ROSSO : VERDE; } });
+  t += sez('Copertura della rata');
+  t += riga('Rata alla banca (capitale + interessi)', function (x) { return x.rata; }, neg, { col: 'var(--text-muted)', cantVal: cant ? R.cantiere.rata : null });
+  t += riga('DSCR solo energia', function (x) { return x.dscr; }, function (v) { return v == null ? '—' : dec(v, 2) + 'x'; }, { tot: false, colFn: colD });
+  t += riga('DSCR con CER', function (x) { return x.dscr2; }, function (v) { return v == null ? '—' : dec(v, 2) + 'x'; }, { tot: false, colFn: colD });
+  t += '</table></div>';
+  h += t;
 
-  // sintesi 25 anni per blocchi
-  var blocchi = [[1, 5], [6, 10], [11, 15], [16, 20], [21, 25]];
-  h += '<div style="font-size:12px;font-weight:700;margin:14px 0 6px">Proiezione a 25 anni</div>';
-  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:560px">';
-  h += '<tr style="color:var(--text-muted);font-size:9.5px;text-transform:uppercase"><th style="text-align:left;padding:5px 6px;border-bottom:1.5px solid var(--border)">€</th>'
-    + blocchi.map(function (b) { return '<th style="text-align:right;padding:5px 6px;border-bottom:1.5px solid var(--border)">Anni ' + b[0] + '-' + b[1] + '</th>'; }).join('')
-    + '<th style="text-align:right;padding:5px 6px;border-bottom:1.5px solid var(--border)">Tot. 25</th></tr>';
-  var rigaB = function (lab, campo, grassetto, col) {
-    var r = '<tr' + (grassetto ? ' style="font-weight:700;background:var(--bg-kpi,var(--bg))"' : ' style="border-bottom:0.5px solid var(--border)"') + '>'
-      + '<td style="padding:5px 6px' + (col ? ';color:' + col : '') + '">' + lab + '</td>';
-    blocchi.forEach(function (b) {
-      r += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)' + (col ? ';color:' + col : '') + '">' + e0(somma(b[0], b[1], campo)) + '</td>';
-    });
-    r += '<td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);font-weight:700">' + e0(somma(1, 25, campo)) + '</td></tr>';
-    return r;
-  };
-  h += rigaB('Ricavi energia', 'ricavi');
-  h += rigaB('EBITDA', 'ebitda', true);
-  h += rigaB('Utile ante imposte', 'utile', true);
-  h += rigaB('Contributo CER', 'cer', false, '#27500A');
-  h += rigaB('Utile con CER', 'utile2', true);
-  h += '</table></div>';
-  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Ammortamento su ' + P.anni_amm + ' anni del costo '
-    + (costoNetto ? _invEuro(costoNetto) : '—') + ' (spesa prevista dell\'impianto). Prezzo dell\'energia: 0,116 €/kWh anni 1-4, '
-    + '0,100 anni 5-10, 0,090 anni 11-16, 0,080 anni 17-25. Imposte e rate del mutuo non comprese: il mutuo si vede nelle risorse.</div>';
-  h += '</div>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:10px;line-height:1.5">'
+    + 'Rate vere del mutuo dalla tabella banche, attribuite all\'impianto in proporzione alla sua spesa prevista sulle risorse della causale; sommate per anno di esercizio. '
+    + 'La cassa cumulata parte dai mezzi propri messi nell\'impianto (' + _invEuro(Q.propri) + ')' + (cant ? ' e dalle rate del cantiere' : '') + '. '
+    + 'DSCR = EBITDA / rata: verde da 1,25x, giallo fra 1 e 1,25x, rosso sotto 1. '
+    + 'Prezzo dell\'energia: 0,116 €/kWh anni 1-4, 0,100 anni 5-10, 0,090 anni 11-16, 0,080 anni 17-25. '
+    + 'Flusso di cassa = risultato dell\'anno + ammortamento − capitale restituito (cioè EBITDA + CER − rata intera). '
+    + 'Ammortamento su ' + P.anni_amm + ' anni. Imposte escluse.</div>';
   return h;
 }
 
