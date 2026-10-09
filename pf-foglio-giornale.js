@@ -1,4 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// v20261009b — ✏️ MODIFICA di un movimento del ramo fotovoltaico: compare anche l'IVA %
+//   e al salvataggio l'IMPONIBILE si ricalcola dal nuovo importo. Prima cambiando l'importo
+//   l'imponibile restava quello vecchio e la pagina Investimenti mostrava il valore sbagliato.
 // v20261009a — VOCE DI SPESA a testo libero nel blocco del ramo fotovoltaico: scelta la
 //   causale compare la casella "📝 Voce di spesa / nota per l'imputazione" (es. "Ormus Plant –
 //   rata alla firma 30%"). Si salva in nota_imputazione e diventa anche la descrizione del
@@ -2820,6 +2823,15 @@ async function fgModificaMovimento(movId) {
 
   html += '</div></div>';
 
+  // 09/10 — movimento del ramo fotovoltaico: l'IVA serve a ricalcolare l'imponibile
+  if (m.causale_investimento_id) {
+    html += '<div style="background:#FFF7E0;border-left:4px solid #BA7517;border-radius:0 6px 6px 0;padding:9px 12px;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">';
+    html += '<div><label style="display:block;font-size:11px;color:#854F0B;margin-bottom:4px;font-weight:600">IVA %</label>';
+    html += '<input type="number" step="0.1" min="0" id="fg-mod-edit-iva" value="' + (m.aliquota_iva != null ? Number(m.aliquota_iva) : 10) + '" style="width:90px;font-family:var(--font-mono);font-size:13px;padding:6px 8px;border:0.5px solid var(--border);border-radius:4px;text-align:right"/></div>';
+    html += '<div style="font-size:11px;color:#412402;flex:1;min-width:200px">Movimento del ramo fotovoltaico: salvando, l\'imponibile si ricalcola dall\'importo e dall\'IVA. In Investimenti conta l\'imponibile.</div>';
+    html += '</div>';
+  }
+
   html += '<div><label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500">Descrizione *</label>';
   html += '<input type="text" id="fg-mod-edit-descrizione" value="' + esc(m.descrizione || '') + '" style="width:100%;font-size:12px;padding:6px 10px;border:0.5px solid var(--border);border-radius:4px"/></div>';
 
@@ -2868,7 +2880,7 @@ async function _fgConfermaModificaMovimento(movId) {
     return;
   }
 
-  var resU = await sb.from('foglio_giornale_movimenti').update({
+  var updMov = {
     data: dataNuova,
     importo: importo,
     descrizione: descrizione,
@@ -2876,7 +2888,16 @@ async function _fgConfermaModificaMovimento(movId) {
     cassa_tipo: cassa_tipo,
     metodo: metodo,
     note: note
-  }).eq('id', movId);
+  };
+  // 09/10 — ramo fotovoltaico: imponibile ricalcolato dal nuovo importo
+  var elIva = document.getElementById('fg-mod-edit-iva');
+  if (elIva) {
+    var ivaN = parseFloat(elIva.value);
+    if (!isFinite(ivaN) || ivaN < 0) { alert('⚠ Aliquota IVA non valida'); return; }
+    updMov.aliquota_iva = ivaN;
+    updMov.imponibile = Math.round((importo / (1 + ivaN / 100)) * 100) / 100;
+  }
+  var resU = await sb.from('foglio_giornale_movimenti').update(updMov).eq('id', movId);
 
   if (resU.error) { alert('Errore aggiornamento: ' + resU.error.message); console.error(resU.error); return; }
 

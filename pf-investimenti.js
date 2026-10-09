@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261009b — ✏️ della SPESA: oltre alla voce si correggono DATA, IMPORTO CON IVA e
+//   ALIQUOTA; l'imponibile si ricalcola e si salva sulla STESSA riga del foglio giornale
+//   (nessuna copia: il foglio giornale lo vede gia' cambiato). Conto e metodo restano
+//   modificabili solo dal foglio giornale. Ovunque si vede anche il totale CON IVA, che
+//   e' quanto esce dalla banca; nel conto economico entra solo l'imponibile.
 // v20261009a — VIA LE VOCI DI COSTO FISSE. L'impianto ha un solo budget (spesa prevista)
 //   e un ELENCO SPESE: ogni pagamento imputato porta come voce il suo testo libero
 //   (foglio_giornale_movimenti.nota_imputazione, scritto in foglio giornale e correggibile
@@ -262,7 +267,7 @@ function _invRender() {
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + kpi('Risorse disponibili', _invEuroK(C.disponibili), C.incassi ? 'di cui incassi ' + _invEuroK(C.incassi) : D.risorse.length + ' voci')
     + kpi('Prenotato dagli impianti', _invEuroK(C.prenotato), D.impianti.length + ' impianti')
-    + kpi('Speso (imponibile)', _invEuroK(C.spesoTotale), 'imputato ' + _invEuroK(C.spesoImputato) + ' · generale ' + _invEuroK(C.spesoGenerale + C.daImputareTot), '#A32D2D')
+    + kpi('Speso (imponibile)', _invEuroK(C.spesoTotale), 'con IVA ' + _invEuroK(D.movimenti.filter(function (m) { return m.tipo === 'uscita'; }).reduce(function (s6, m) { return s6 + Number(m.importo || 0); }, 0)) + ' · imputato ' + _invEuroK(C.spesoImputato), '#A32D2D')
     + kpi('Ancora libere', _invEuroK(libere), libere < 0 ? 'prenotato oltre le risorse' : 'risorse − prenotato', libere < 0 ? '#A32D2D' : '#27500A')
     + '</div>';
 
@@ -534,24 +539,57 @@ function invModaleVoceSpesa(movId) {
   var m = (_invDati.movimenti || []).filter(function (x) { return x.id === movId; })[0];
   if (!m) return;
   var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
-  var h = '<div style="max-width:480px"><div style="font-size:16px;font-weight:600;margin-bottom:4px">Voce della spesa</div>'
-    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">' + _invData(m.data) + ' · ' + _invEuro(m.importo) + ' con IVA · ' + _invEsc(m.descrizione || '') + '</div>'
-    + '<input id="inv-vs-testo" value="' + _invEsc(_invVoceMov(m)) + '" style="' + inp + '" placeholder="es. Ormus Plant – rata alla firma 30%">'
-    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Le spese si raggruppano per la parte prima del trattino: scrivi "Fornitore – cosa".</div>'
+  var lb = 'display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
+  var aliq = m.aliquota_iva != null ? Number(m.aliquota_iva) : 10;
+  var h = '<div style="max-width:520px"><div style="font-size:16px;font-weight:600;margin-bottom:4px">✏️ Spesa del ' + _invData(m.data) + '</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Le modifiche si salvano sul movimento del foglio giornale: non ci sono copie da allineare. Conto e metodo di pagamento si cambiano dal foglio giornale.</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 0.6fr;gap:10px">'
+    + '<div style="grid-column:1/4"><label style="' + lb + '">Voce</label><input id="inv-vs-testo" value="' + _invEsc(_invVoceMov(m)) + '" style="' + inp + '" placeholder="es. Ormus Plant – rata alla firma 30%"></div>'
+    + '<div><label style="' + lb + '">Data</label><input id="inv-vs-data" type="date" value="' + _invEsc(String(m.data || '').slice(0, 10)) + '" style="' + inp + '"></div>'
+    + '<div><label style="' + lb + '">Importo con IVA €</label><input id="inv-vs-importo" type="number" step="0.01" min="0.01" value="' + Number(m.importo || 0).toFixed(2) + '" oninput="invVsCalcola()" style="' + inp + ';font-family:var(--font-mono)"></div>'
+    + '<div><label style="' + lb + '">IVA %</label><input id="inv-vs-iva" type="number" step="0.1" min="0" value="' + aliq + '" oninput="invVsCalcola()" style="' + inp + ';font-family:var(--font-mono);text-align:right"></div>'
+    + '</div>'
+    + '<div id="inv-vs-calc" style="font-size:12px;margin-top:8px;color:var(--text-muted)"></div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Le spese si raggruppano per la parte di voce prima del trattino: scrivi "Fornitore – cosa".</div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
     + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
     + '<button onclick="invSalvaVoceSpesa(\'' + m.id + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
   apriModal(h);
+  invVsCalcola();
+}
+function invVsCalcola() {
+  var box = document.getElementById('inv-vs-calc');
+  if (!box) return;
+  var tot = parseFloat((document.getElementById('inv-vs-importo') || {}).value) || 0;
+  var iva = parseFloat((document.getElementById('inv-vs-iva') || {}).value);
+  if (!isFinite(iva) || iva < 0) iva = 0;
+  var imp = Math.round(tot / (1 + iva / 100) * 100) / 100;
+  box.innerHTML = 'Imponibile <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(imp) + '</strong>'
+    + ' · IVA ' + iva + '% <span style="font-family:var(--font-mono)">' + _invEuro(tot - imp) + '</span>'
+    + ' — nel conto economico entra solo l\'imponibile.';
 }
 async function invSalvaVoceSpesa(movId) {
   if (!_invPuo()) { toast('Permesso negato'); return; }
-  var t = ((document.getElementById('inv-vs-testo') || {}).value || '').trim();
-  var r = await sb.from('foglio_giornale_movimenti').update({ nota_imputazione: t || null }).eq('id', movId);
+  var g = function (id) { var e = document.getElementById(id); return e ? e.value : ''; };
+  var t = (g('inv-vs-testo') || '').trim();
+  var data = g('inv-vs-data');
+  var tot = parseFloat(g('inv-vs-importo')) || 0;
+  var iva = parseFloat(g('inv-vs-iva'));
+  if (!data) { toast('Indica la data'); return; }
+  if (tot <= 0) { toast('Indica un importo maggiore di zero'); return; }
+  if (!isFinite(iva) || iva < 0) { toast('Aliquota IVA non valida'); return; }
+  var upd = {
+    nota_imputazione: t || null, data: data, importo: Math.round(tot * 100) / 100,
+    aliquota_iva: iva, imponibile: Math.round(tot / (1 + iva / 100) * 100) / 100
+  };
+  var r = await sb.from('foglio_giornale_movimenti').update(upd).eq('id', movId);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
+  if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'modificata spesa ' + movId + ' — ' + _invEuro(upd.importo) + ' IVA ' + iva + '%');
   var m = (_invDati.movimenti || []).filter(function (x) { return x.id === movId; })[0];
-  if (m) m.nota_imputazione = t || null;
+  if (m) { Object.keys(upd).forEach(function (k) { m[k] = upd[k]; }); }
   chiudiModal();
-  _invRenderImpianto();
+  toast('✓ Spesa aggiornata, anche nel foglio giornale');
+  if (_invImpiantoAperto) _invRenderImpianto(); else _invRender();
 }
 
 async function invSegnaGenerale(movId) {
@@ -645,7 +683,8 @@ function _invRenderImpianto() {
   };
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + kpi('Spesa prevista', _invEuro(prev))
-    + kpi('Speso', _invEuro(speso), '#A32D2D')
+    + kpi('Speso (imponibile)', _invEuro(speso), '#A32D2D')
+    + kpi('Uscito con IVA', _invEuro(spese.reduce(function (s5, m) { return s5 + Number(m.importo || 0); }, 0)), 'var(--text-muted)')
     + kpi('Residuo', _invEuro(res), res < 0 ? '#A32D2D' : '#27500A');
   if (i.destinazione === 'vendita') {
     var ric = Number(i.ricavo_previsto || 0);
@@ -709,7 +748,7 @@ function _invBloccoElencoSpese(i, spese, speso, prev) {
           + '<td style="padding:7px">' + (v ? _invEsc(v) : '<span style="color:#854F0B">senza voce</span>')
           + (m.descrizione && !_invTestoGenerico(m.descrizione) && m.descrizione !== v ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEsc(m.descrizione) + '</div>' : '') + '</td>'
           + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(m.importo) + '</td>'
-          + '<td style="padding:7px;text-align:right;color:var(--text-muted)">' + (m.aliquota_iva != null ? m.aliquota_iva + '%' : 'n.d.') + '</td>'
+          + '<td style="padding:7px;text-align:right;color:var(--text-muted);font-family:var(--font-mono)">' + _invEuro(Number(m.importo || 0) - imp) + '<div style="font-size:10px">' + (m.aliquota_iva != null ? m.aliquota_iva + '%' : 'n.d.') + '</div></td>'
           + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(imp) + '</td>'
           + '<td style="padding:7px;text-align:right;white-space:nowrap">'
           + (_invPuo() ? '<button onclick="invModaleVoceSpesa(\'' + m.id + '\')" title="Correggi la voce" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">✏️</button> '
@@ -719,12 +758,14 @@ function _invBloccoElencoSpese(i, spese, speso, prev) {
       if (g.righe.length > 1) {
         h += '<tr style="background:var(--bg-kpi,var(--bg));font-weight:600;color:#185FA5">'
           + '<td></td><td style="padding:6px 7px">Totale ' + _invEsc(g.nome) + ' (' + g.righe.length + ')</td>'
-          + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(subI) + '</td><td></td>'
+          + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(subI) + '</td>'
+          + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + _invEuro(subI - subN) + '</td>'
           + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(subN) + '</td><td></td></tr>';
       }
     });
     h += '<tr style="font-weight:700"><td colspan="2" style="padding:8px 7px">TOTALE PAGATO</td>'
-      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(totIvato) + '</td><td></td>'
+      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(totIvato) + '</td>'
+      + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono);color:var(--text-muted)">' + _invEuro(totIvato - speso) + '</td>'
       + '<td style="padding:8px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(speso) + '</td><td></td></tr>';
     h += '</table></div>';
   }
