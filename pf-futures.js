@@ -1,4 +1,12 @@
 // PhoenixFuel — Futures ICE Gasoil + EUR/USD
+// v20261009a — PREVISTO CONTRO REALE: sezione nuova in Mercato gasolio. Legge le
+//              previsioni salvate ogni sera dalla funzione mercato-chiusura (tabella
+//              previsioni_listino) e le confronta col prezzo vero arrivato dal fornitore
+//              per lo STESSO giorno di ritiro (in `prezzi` la data e' il giorno del ritiro).
+//              Due linee per fornitore (reale continua, previsto tratteggiata), settimana
+//              per settimana, con direzione azzeccata, errore medio e tabella giorno per
+//              giorno. Pulsante per ricostruire a ritroso le previsioni degli ultimi 45
+//              giorni con la regola nuova (segnate come "ricostruite").
 // v20260819a — BENCHMARK MERCATO rifatto sui listini VERI: la linea non e'
 //              piu' petrolio + accisa + uno scarto medio ricavato all'indietro
 //              dai carichi (numero costruito, confronto senza significato),
@@ -950,9 +958,11 @@ async function renderMercato() {
     // v20260802b: la scomposizione dell'accisa NON dipende dal mercato —
     // prodotto puro = costo meno accisa. Prima si usciva di qui e la sezione
     // non compariva affatto.
+    h += '<div id="mkt-pvr"></div>';
     h += _mktSezioneAccise(carichi, serie, carichiTutti);
     el.innerHTML = h;
     _mktDisegnaGraficoAccise();
+    mktPvrCarica();
     return;
   }
 
@@ -990,9 +1000,11 @@ async function renderMercato() {
   if (!benchGiorno.length) {
     h += '<div class="card"><div style="font-size:13px;color:var(--text-muted);line-height:1.7">'
       + 'I listini letti sono tutti a costo zero o del solo Deposito: niente da confrontare.</div></div>';
+    h += '<div id="mkt-pvr"></div>';
     h += _mktSezioneAccise(carichi, serie, carichiTutti);
     el.innerHTML = h;
     _mktDisegnaGraficoAccise();
+    mktPvrCarica();
     return;
   }
 
@@ -1104,6 +1116,7 @@ async function renderMercato() {
       + '<div style="font-size:11px;color:var(--text-muted)">l\'IVA la recuperi: non entra mai nei confronti</div></div>'
     + '</div>';
   h += _mktSezionePrevisione(serie);
+  h += '<div id="mkt-pvr"></div>';
 
   // ═══ Composizione del prezzo · accise ═══
   h += _mktSezioneAccise(carichi, serie, carichiTutti);
@@ -1171,6 +1184,189 @@ async function renderMercato() {
   }
 
   _mktDisegnaGraficoAccise();
+  mktPvrCarica();
+}
+
+// ═══ PREVISTO CONTRO REALE (09/10) ═══════════════════════════════════════
+// Asse = giorno del RITIRO. Reale = prezzo con quella data in `prezzi` (arrivato la
+// mattina del giorno feriale prima). Previsto = quanto aveva detto l'avviso delle
+// 17:30 della sera prima che quel prezzo arrivasse (previsioni_listino).
+var _pvrForn = 'Eni';
+var _pvrLun = null;           // lunedi' della settimana mostrata (YYYY-MM-DD)
+var _pvrDati = null;
+var _pvrChart = null;
+
+function _pvrIso(d) { return d.toISOString().split('T')[0]; }
+function _pvrPiu(s, g) { var d = new Date(s + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + g); return _pvrIso(d); }
+function _pvrLunedi(s) { var d = new Date(s + 'T12:00:00Z'); var g = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - g); return _pvrIso(d); }
+function _pvrEt(s) { var GG = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab']; var d = new Date(s + 'T12:00:00Z'); return GG[d.getUTCDay()] + ' ' + s.slice(8, 10) + '/' + s.slice(5, 7); }
+
+async function mktPvrCarica() {
+  var box = document.getElementById('mkt-pvr');
+  if (!box) return;
+  if (!_pvrLun) _pvrLun = _pvrLunedi(_pvrIso(new Date()));
+  var dal = _pvrPiu(_pvrLun, -10), al = _pvrPiu(_pvrLun, 6);
+  try {
+    var r = await Promise.all([
+      sb.from('previsioni_listino').select('*').gte('data_ritiro', _pvrLun).lte('data_ritiro', al).order('data_ritiro'),
+      sb.from('prezzi').select('data,fornitore,costo_litro,basi_carico(nome)')
+        .ilike('prodotto', '%gasolio%auto%').gte('data', dal).lte('data', al).order('data')
+    ]);
+    if (r[0].error) throw r[0].error;
+    var reali = {};
+    (r[1].data || []).forEach(function (x) {
+      var b = x.basi_carico && x.basi_carico.nome ? x.basi_carico.nome : '';
+      if (!/vibo/i.test(b) || !(Number(x.costo_litro) > 0)) return;
+      var k = String(x.fornitore || '').trim() + '|' + x.data;
+      reali[k] = Number(x.costo_litro);
+    });
+    _pvrDati = { prev: r[0].data || [], reali: reali };
+    _pvrDisegna();
+  } catch (e) {
+    var msg = (e && e.message) || String(e);
+    box.innerHTML = '<div class="card" style="margin-bottom:14px"><div style="font-size:13px;font-weight:700;margin-bottom:6px">📈 Previsto contro reale</div>'
+      + '<div style="font-size:12px;color:#A32D2D">' + esc(msg)
+      + (/previsioni_listino/.test(msg) ? ' — manca la tabella: lancia la SQL di creazione.' : '') + '</div></div>';
+  }
+}
+function mktPvrForn(f) { _pvrForn = f; _pvrDisegna(); }
+function mktPvrSett(passo) { _pvrLun = _pvrPiu(_pvrLun || _pvrLunedi(_pvrIso(new Date())), 7 * passo); mktPvrCarica(); }
+
+function _pvrDisegna() {
+  var box = document.getElementById('mkt-pvr');
+  if (!box || !_pvrDati) return;
+  var D = _pvrDati;
+  var fornitori = [];
+  D.prev.forEach(function (p) { if (fornitori.indexOf(p.fornitore) < 0) fornitori.push(p.fornitore); });
+  fornitori.sort(function (a, b) { return /eni/i.test(a) ? -1 : (/eni/i.test(b) ? 1 : a.localeCompare(b)); });
+  if (fornitori.length && fornitori.indexOf(_pvrForn) < 0) _pvrForn = fornitori[0];
+
+  var giorni = [];
+  for (var i = 0; i < 6; i++) giorni.push(_pvrPiu(_pvrLun, i));          // lun-sab
+  var righe = giorni.map(function (g) {
+    var p = D.prev.filter(function (x) { return x.data_ritiro === g && x.fornitore === _pvrForn; })[0] || null;
+    var reale = D.reali[_pvrForn + '|' + g];
+    var base = p ? Number(p.prezzo_base) : null;
+    var varPrev = p ? Number(p.variazione_prevista) : null;
+    var varReale = (p && reale != null) ? reale - base : null;
+    var esito = null;
+    if (varPrev != null && varReale != null) {
+      esito = (Math.abs(varPrev) < 0.002 && Math.abs(varReale) < 0.005) || (Math.sign(varPrev) === Math.sign(varReale));
+    }
+    return { g: g, p: p, reale: reale != null ? reale : null, previsto: p ? Number(p.prezzo_previsto) : null,
+             base: base, varPrev: varPrev, varReale: varReale, esito: esito };
+  });
+  var conf = righe.filter(function (x) { return x.esito !== null; });
+  var giusti = conf.filter(function (x) { return x.esito; }).length;
+  var errMedio = conf.length ? conf.reduce(function (s, x) { return s + Math.abs(x.varReale - x.varPrev); }, 0) / conf.length : null;
+  var prossima = righe.filter(function (x) { return x.p && x.reale === null; })[0];
+  var ricostruite = D.prev.some(function (x) { return x.ricostruita && x.fornitore === _pvrForn; });
+  var mill = function (v) { return v == null ? '—' : ((v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 1000))); };
+
+  var h = '<div class="card" style="margin-bottom:14px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+    + '<div><div style="font-size:14px;font-weight:700">📈 Previsto contro reale</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Per giorno di ritiro, base Vibo, gasolio auto: quello che l\'avviso delle 17:30 aveva previsto e il prezzo poi arrivato dal fornitore.</div></div>'
+    + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+    + '<button onclick="mktPvrSett(-1)" style="font-size:12px;padding:5px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">‹</button>'
+    + '<span style="font-size:12px;font-weight:600">' + _pvrEt(giorni[0]) + ' – ' + _pvrEt(giorni[5]) + '</span>'
+    + '<button onclick="mktPvrSett(1)" style="font-size:12px;padding:5px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">›</button>'
+    + '</div></div>';
+  if (fornitori.length) {
+    h += '<div style="display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap">' + fornitori.map(function (f) {
+      var on = f === _pvrForn;
+      return '<button onclick="mktPvrForn(\'' + esc(f).replace(/'/g, '') + '\')" style="font-size:12px;padding:5px 13px;border-radius:6px;cursor:pointer;border:0.5px solid '
+        + (on ? '#185FA5;background:#185FA5;color:#fff' : 'var(--border);background:var(--bg);color:var(--text)') + '">' + esc(f) + '</button>';
+    }).join('') + '</div>';
+  }
+  if (!D.prev.length) {
+    h += '<div style="font-size:12.5px;color:var(--text-muted);line-height:1.7">Nessuna previsione salvata per questa settimana. '
+      + 'Da oggi le salva ogni sera l\'avviso delle 17:30; per vedere le settimane passate puoi ricostruirle con la regola attuale.</div>';
+  } else {
+    var kpi = function (lab, val, sub, col) {
+      return '<div style="flex:1;min-width:160px;border:0.5px solid var(--border);border-radius:9px;padding:9px 12px">'
+        + '<div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+        + '<div style="font-family:var(--font-mono);font-size:18px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+        + '<div style="font-size:10.5px;color:var(--text-muted)">' + (sub || '&nbsp;') + '</div></div>';
+    };
+    h += '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:10px">'
+      + kpi('Direzione azzeccata', conf.length ? giusti + ' su ' + conf.length : '—', 'giorni con prezzo arrivato', conf.length ? (giusti / conf.length >= 0.6 ? '#27500A' : '#A32D2D') : null)
+      + kpi('Errore medio', errMedio != null ? Math.round(errMedio * 1000) + ' mill.' : '—', '|variazione prevista − reale|')
+      + kpi('Prossimo atteso', prossima ? mill(prossima.varPrev) + ' mill.' : '—', prossima ? _pvrEt(prossima.g) + ' · ≈ ' + Number(prossima.previsto).toFixed(4) : 'nessuno in attesa',
+            prossima ? (prossima.varPrev > 0 ? '#A32D2D' : '#27500A') : null)
+      + '</div>';
+    h += '<div style="position:relative;height:260px"><canvas id="mkt-pvr-chart"></canvas></div>';
+    var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border);text-align:right;font-size:10px;color:var(--text-muted);text-transform:uppercase';
+    var td = 'padding:6px 7px;text-align:right;font-family:var(--font-mono);border-bottom:0.5px solid var(--border)';
+    h += '<div style="overflow-x:auto;margin-top:10px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">'
+      + '<tr><th style="' + th + ';text-align:left">Ritiro</th><th style="' + th + '">Prezzo prima</th><th style="' + th + '">Previsto</th>'
+      + '<th style="' + th + '">Reale</th><th style="' + th + '">Scarto</th><th style="' + th + ';text-align:left">Esito</th></tr>';
+    righe.forEach(function (x) {
+      if (!x.p && x.reale === null) return;
+      h += '<tr><td style="' + td + ';text-align:left;font-family:inherit">' + _pvrEt(x.g)
+        + (x.p && x.p.ricostruita ? ' <span title="ricalcolata a ritroso con la regola attuale, non e\' l\'avviso di quel giorno" style="font-size:9.5px;color:#854F0B">ricostr.</span>' : '') + '</td>'
+        + '<td style="' + td + ';color:var(--text-muted)">' + (x.base != null ? x.base.toFixed(4) : '—') + '</td>'
+        + '<td style="' + td + '">' + (x.previsto != null ? x.previsto.toFixed(4) + ' <span style="color:var(--text-muted)">(' + mill(x.varPrev) + ')</span>' : '—') + '</td>'
+        + '<td style="' + td + ';font-weight:600">' + (x.reale != null ? x.reale.toFixed(4) + (x.varReale != null ? ' <span style="color:var(--text-muted);font-weight:400">(' + mill(x.varReale) + ')</span>' : '') : '<span style="color:var(--text-muted);font-weight:400">in attesa</span>') + '</td>'
+        + '<td style="' + td + '">' + (x.esito !== null ? mill(x.varReale - x.varPrev) : '') + '</td>'
+        + '<td style="' + td + ';text-align:left;font-family:inherit;color:' + (x.esito === null ? 'var(--text-muted)' : (x.esito ? '#27500A' : '#A32D2D')) + '">'
+        + (x.esito === null ? (x.p ? 'si vedra all\'arrivo del prezzo' : 'nessuna previsione') : (x.esito ? '✓ direzione giusta' : '✗ direzione sbagliata')) + '</td></tr>';
+    });
+    h += '</table></div>';
+    h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px;line-height:1.5">Valori in €/L, variazioni in millesimi sul prezzo gia comunicato quando e stata fatta la previsione. '
+      + 'La previsione viene dal Brent e dal cambio delle 17:30: i fornitori seguono il gasolio di Londra, che a volte va diverso.'
+      + (ricostruite ? ' Le righe "ricostr." sono calcolate a ritroso con la regola attuale: non sono gli avvisi di quei giorni.' : '') + '</div>';
+  }
+  h += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<button id="mkt-pvr-btn" onclick="mktPvrRicostruisci()" style="font-size:11.5px;padding:5px 12px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">↺ Ricostruisci ultimi 45 giorni</button>'
+    + '<span id="mkt-pvr-esito" style="font-size:11px;color:var(--text-muted)"></span></div>';
+  h += '</div>';
+  box.innerHTML = h;
+
+  if (!D.prev.length || typeof Chart === 'undefined') return;
+  var cv = document.getElementById('mkt-pvr-chart');
+  if (!cv) return;
+  if (_pvrChart) { try { _pvrChart.destroy(); } catch (e) {} }
+  _pvrChart = new Chart(cv, {
+    type: 'line',
+    data: {
+      labels: giorni.map(_pvrEt),
+      datasets: [
+        { label: 'Reale (prezzi giornalieri)', data: righe.map(function (x) { return x.reale; }),
+          borderColor: '#185FA5', backgroundColor: '#185FA5', borderWidth: 2.5, pointRadius: 5, spanGaps: false, tension: 0 },
+        { label: 'Previsto dall\'avviso', data: righe.map(function (x) { return x.previsto; }),
+          borderColor: '#BA7517', backgroundColor: '#fff', borderWidth: 2, borderDash: [6, 5], pointRadius: 5,
+          pointBorderColor: '#BA7517', spanGaps: false, tension: 0 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top', labels: { font: { size: 11 } } },
+                 tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + (c.raw == null ? '—' : Number(c.raw).toFixed(4)); } } } },
+      scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                y: { grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { font: { size: 10 }, callback: function (v) { return Number(v).toFixed(3); } } } }
+    }
+  });
+}
+
+async function mktPvrRicostruisci() {
+  if (!confirm('Ricalcolo a ritroso cosa avrebbe previsto la regola attuale negli ultimi 45 giorni? Le previsioni vere delle 17:30 non vengono toccate.')) return;
+  var btn = document.getElementById('mkt-pvr-btn'), out = document.getElementById('mkt-pvr-esito');
+  if (btn) { btn.disabled = true; btn.textContent = 'Ricalcolo…'; }
+  try {
+    var res = await sb.functions.invoke('mercato-chiusura', { body: { ricostruisci: 45 } });
+    if (res.error) throw res.error;
+    var d = res.data || {};
+    if (!d.ok) throw new Error(d.errore || 'risposta non valida');
+    if (out) { out.style.color = '#3B6D11'; out.textContent = '✓ ' + d.ricostruite + ' previsioni ricostruite'; }
+    await mktPvrCarica();
+  } catch (e) {
+    var msg = (e && e.message) || String(e);
+    if (out) { out.style.color = '#A32D2D'; out.textContent = '✕ ' + msg; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↺ Ricostruisci ultimi 45 giorni'; }
+  }
 }
 
 // Recupero storico: la stessa funzione, chiamata con un numero di giorni.
