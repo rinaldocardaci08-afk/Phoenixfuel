@@ -1,4 +1,11 @@
 // PhoenixFuel — Finanze: Andamento
+// v20261013a — PERIODO LIBERO "Dal / Al" nel conto economico e nel confronto anni.
+//              Ricavi, acquisti e trasporti si sommano GIORNO PER GIORNO dai
+//              movimenti; i costi da budget si ripartiscono per giorni sul
+//              trimestre in cui cadono; le rimanenze si calcolano alle due date.
+//              Nel confronto l'anno precedente e lo STESSO periodo un anno prima:
+//              dall'archivio mensile, con i mesi presi a meta ripartiti per giorni
+//              (etichetta "stima"); dal bilancio, ripartito per giorni sull'anno.
 // v20260804k — la rimanenza di apertura viene dal BILANCIO depositato,
 //              non ricalcolata dalle giacenze
 // v20260804j — voce 59 altri ricavi e proventi, e valorizzazione giacenze
@@ -330,7 +337,49 @@ function _ceTrimestriDi(q) {
   return [q];
 }
 
+// ═══ v20261013a · PERIODO LIBERO ═══════════════════════════════════
+var _cePerDal = null, _cePerAl = null;      // date del periodo libero (q = 'per')
+function _ceGiorniTra(dal, al) {            // giorni compresi, estremi inclusi
+  return Math.round((new Date(al + 'T12:00:00') - new Date(dal + 'T12:00:00')) / 86400000) + 1;
+}
+function _ceGiornoDopo(iso) {
+  var d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0];
+}
+function _ceAnnoPrima(iso) {                // stessa data un anno prima (29/02 -> 28/02)
+  var y = Number(iso.slice(0, 4)) - 1, md = iso.slice(5);
+  if (md === '02-29') md = '02-28';
+  return y + '-' + md;
+}
+function _ceGiorniNelMese(anno, m) { return new Date(anno, m + 1, 0).getDate(); }   // m 0..11
+function _ceTrimDiData(iso) { return Math.floor((Number(iso.slice(5, 7)) - 1) / 3) + 1; }
+function _ceGiorniTrim(anno, t) {
+  var a = ['01-01', '04-01', '07-01', '10-01'][t - 1], b = ['03-31', '06-30', '09-30', '12-31'][t - 1];
+  return _ceGiorniTra(anno + '-' + a, anno + '-' + b);
+}
+function _cePeriodoBarra(fn) {
+  // due date e un pulsante: stesso aspetto dei filtri data del programma
+  var dal = _cePerDal || '', al = _cePerAl || '';
+  return '<span style="display:inline-flex;gap:5px;align-items:center;margin-left:6px;padding:3px 8px;border:0.5px solid var(--border);border-radius:8px">'
+    + '<span style="font-size:11px;color:var(--text-muted)">Dal</span>'
+    + '<input type="date" id="ce-per-dal" value="' + dal + '" style="padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px">'
+    + '<span style="font-size:11px;color:var(--text-muted)">al</span>'
+    + '<input type="date" id="ce-per-al" value="' + al + '" style="padding:5px 7px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px">'
+    + '<button onclick="' + fn + '()" style="font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:600;background:' + '#0B2545' + ';color:#fff;border:0">Applica</button></span>';
+}
+function _ceLeggiPeriodo() {
+  var dal = (document.getElementById('ce-per-dal') || {}).value;
+  var al = (document.getElementById('ce-per-al') || {}).value;
+  if (!dal || !al) { if (typeof toast === 'function') toast('Indica le due date del periodo'); return false; }
+  if (al < dal) { if (typeof toast === 'function') toast('La data finale viene prima di quella iniziale'); return false; }
+  if (_ceGiorniTra(dal, al) > 731) { if (typeof toast === 'function') toast('Periodo troppo lungo: massimo due anni'); return false; }
+  _cePerDal = dal; _cePerAl = al;
+  return true;
+}
+function cePeriodoApplica() { if (_ceLeggiPeriodo()) { _ceQ = 'per'; _ceRender(); } }
+function cfrPeriodoApplica() { if (_ceLeggiPeriodo()) { _cfrQ = 'per'; _cfrRender(); } }
+
 function _ceEtichetta(q, anno) {
+  if (q === 'per') return 'Periodo dal ' + _andIt(_cePerDal) + ' al ' + _andIt(_cePerAl);
   if (q === 'anno') return 'Esercizio ' + anno;
   if (q === 'h1') return 'Primo semestre ' + anno;
   if (q === 'h2') return 'Secondo semestre ' + anno;
@@ -520,33 +569,96 @@ async function _ceCaricaAnno(anno) {
     });
     mesi.push(x);
   }
-  _ceCache[anno] = { mesi: mesi };
+
+  // v20261013a — gli stessi numeri GIORNO PER GIORNO, per il periodo libero
+  var giorni = {};
+  var gNuovo = function (d) {
+    return giorni[d] || (giorni[d] = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
+      acquisti: 0, trasporti: 0, trasportiPropri: 0, litriPropri: 0, litriAcq: 0, nOrdiniAcq: 0 });
+  };
+  allIng.forEach(function (o) {
+    var d = String(o.data).slice(0, 10); if (d.slice(0, 4) !== String(anno)) return;
+    var g = gNuovo(d), l = Number(o.litri || 0);
+    g.ingLitri += l; g.ingFatt += _noIva(o) * l; g.ingMarg += Number(o.margine || 0) * l;
+  });
+  allOrd.forEach(function (o) {
+    var d = String(o.data).slice(0, 10); if (d.slice(0, 4) !== String(anno)) return;
+    var g = gNuovo(d), l = Number(o.litri || 0);
+    if (String(o.fornitore || '').toLowerCase().indexOf('phoenix') >= 0) {
+      g.trasportiPropri += Number(o.trasporto_litro || 0) * l; g.litriPropri += l; return;
+    }
+    g.acquisti += Number(o.costo_litro || 0) * l;
+    if (!_ceTrasportoNelPrezzo(o.fornitore)) g.trasporti += Number(o.trasporto_litro || 0) * l;
+    g.litriAcq += l; g.nOrdiniAcq++;
+  });
+  Object.keys(dettPerGiorno).forEach(function (d) {
+    if (d.slice(0, 4) !== String(anno)) return;
+    var g = gNuovo(d);
+    g.dettLitri += dettPerGiorno[d].litri; g.dettInc += dettPerGiorno[d].incasso; g.dettCosto += dettPerGiorno[d].costo;
+  });
+
+  _ceCache[anno] = { mesi: mesi, giorni: giorni };
   return _ceCache[anno];
 }
 
 async function _ceCalcola(q, anno) {
-  var per = (q === 'anno') ? { dal: anno + '-01-01', al: anno + '-12-31' } : _ceTrimestre(q, anno);
+  if (q === 'per') { anno = Number(String(_cePerDal).slice(0, 4)); }
+  var per = (q === 'per') ? { dal: _cePerDal, al: _cePerAl }
+    : (q === 'anno') ? { dal: anno + '-01-01', al: anno + '-12-31' } : _ceTrimestre(q, anno);
   var primaDelDal = _ceGiornoPrima(per.dal);
 
-  var cache = await _ceCaricaAnno(anno);
-  await _ceGiacenzeAnno(anno);
-  var fin = _ceFinestra(q);
-  var da = fin.da, quanti = fin.quanti;
   var acc = { ingLitri: 0, ingFatt: 0, ingMarg: 0, dettLitri: 0, dettInc: 0, dettCosto: 0,
               acquisti: 0, trasporti: 0, trasportiPropri: 0, litriPropri: 0,
               litriAcq: 0, nOrdiniAcq: 0 };
-  for (var i = da; i < da + quanti; i++) {
-    var m = cache.mesi[i];
-    Object.keys(acc).forEach(function (k) { acc[k] += m[k]; });
-  }
-
   var bud = {};
-  var righeBud = await _ceBudget(anno);
-  var trim = _ceTrimestriDi(q);
-  righeBud.forEach(function (b) {
-    bud[b.voce] = (q === 'anno') ? Number(b.annuo || 0)
-      : trim.reduce(function (a, t) { return a + Number(b['q' + t] || 0); }, 0);
-  });
+  var righeBud;
+  var cache;
+
+  if (q === 'per') {
+    // v20261013a — periodo libero: movimenti giorno per giorno, budget per giorni
+    var anni = [];
+    for (var y = Number(per.dal.slice(0, 4)); y <= Number(per.al.slice(0, 4)); y++) anni.push(y);
+    var caches = await Promise.all(anni.map(function (y) { return _ceCaricaAnno(y); }));
+    var buds = await Promise.all(anni.map(function (y) { return _ceBudget(y); }));
+    cache = caches[0];
+    righeBud = [].concat.apply([], buds);
+    anni.forEach(function (y, k) {
+      var gg = caches[k].giorni || {};
+      Object.keys(gg).forEach(function (d) {
+        if (d < per.dal || d > per.al) return;
+        Object.keys(acc).forEach(function (kk) { acc[kk] += gg[d][kk]; });
+      });
+      // budget: ogni giorno del periodo vale trimestre / giorni del trimestre
+      var da1 = per.dal > y + '-01-01' ? per.dal : y + '-01-01';
+      var al1 = per.al < y + '-12-31' ? per.al : y + '-12-31';
+      for (var t = 1; t <= 4; t++) {
+        var ta = y + '-' + ['01-01', '04-01', '07-01', '10-01'][t - 1], tb = y + '-' + ['03-31', '06-30', '09-30', '12-31'][t - 1];
+        var a2 = da1 > ta ? da1 : ta, b2 = al1 < tb ? al1 : tb;
+        if (a2 > b2) continue;
+        var frac = _ceGiorniTra(a2, b2) / _ceGiorniTrim(y, t);
+        buds[k].forEach(function (b) {
+          var qv = Number(b['q' + t] || 0);
+          if (!qv && Number(b.annuo || 0)) qv = Number(b.annuo) / 4;
+          bud[b.voce] = (bud[b.voce] || 0) + qv * frac;
+        });
+      }
+    });
+  } else {
+    cache = await _ceCaricaAnno(anno);
+    await _ceGiacenzeAnno(anno);
+    var fin = _ceFinestra(q);
+    var da = fin.da, quanti = fin.quanti;
+    for (var i = da; i < da + quanti; i++) {
+      var m = cache.mesi[i];
+      Object.keys(acc).forEach(function (k) { acc[k] += m[k]; });
+    }
+    righeBud = await _ceBudget(anno);
+    var trim = _ceTrimestriDi(q);
+    righeBud.forEach(function (b) {
+      bud[b.voce] = (q === 'anno') ? Number(b.annuo || 0)
+        : trim.reduce(function (a, t) { return a + Number(b['q' + t] || 0); }, 0);
+    });
+  }
 
   // le due date insieme, non in fila
   var due = await Promise.all([_ceGiacenze(primaDelDal), _ceGiacenze(per.al)]);
@@ -629,7 +741,7 @@ async function _ceRender() {
   }
 }
 
-function ceVai(q) { _ceQ = q; _ceRender(); }
+function ceVai(q) { _ceQ = q; _cePerDal = null; _cePerAl = null; _ceRender(); }
 function ceAnnoCambia(a) { _ceAnno = Number(a); _ceRender(); }
 
 function _ceRiga(label, valore, opt) {
@@ -701,6 +813,8 @@ function _ceBarra(d) {
       + (on ? 'background:' + C_CE.navy + ';color:#fff;border:0.5px solid ' + C_CE.navy : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">' + x[1] + '</button>';
   });
   h += '<input type="number" value="' + d.anno + '" onchange="ceAnnoCambia(this.value)" style="width:82px;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono);margin-left:6px">';
+  if (!_cePerDal) { _cePerDal = d.periodo.dal; _cePerAl = d.periodo.al; }
+  h += _cePeriodoBarra('cePeriodoApplica');
   h += '<span style="display:flex;gap:3px;background:var(--bg-kpi);border-radius:8px;padding:3px;margin-left:8px">';
   [['A', 'A \u2014 Istituzionale'], ['B', 'B \u2014 Operativo']].forEach(function (x) {
     var on = _ceStile === x[0];
@@ -1247,6 +1361,27 @@ var _cfrBilanci = null;
 var _cfrStorico = null;
 
 // Somma i mesi dell'archivio che cadono nel periodo scelto.
+// v20261013a — stesso periodo un anno prima, dai mesi d'archivio: i mesi presi
+// solo in parte valgono per la quota di giorni (e il dato diventa "stima")
+function _cfrPeriodoLibero(righe, dal, al) {
+  var a = { litri: 0, fatturato: 0, margine: 0, mesi: 0, parziale: false };
+  (righe || []).forEach(function (r) {
+    var y = Number(r.anno), m = Number(r.mese) - 1;
+    var ini = y + '-' + String(m + 1).padStart(2, '0') + '-01';
+    var nG = _ceGiorniNelMese(y, m);
+    var fine = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(nG).padStart(2, '0');
+    var a2 = dal > ini ? dal : ini, b2 = al < fine ? al : fine;
+    if (a2 > b2) return;
+    var frac = _ceGiorniTra(a2, b2) / nG;
+    if (frac < 0.9999) a.parziale = true;
+    a.litri += frac * (Number(r.ing_litri || 0) + Number(r.dett_litri || 0));
+    a.fatturato += frac * (Number(r.ing_fatturato || 0) + Number(r.dett_incasso || 0));
+    a.margine += frac * (Number(r.ing_margine || 0) + Number(r.dett_margine || 0));
+    a.mesi++;
+  });
+  return a.mesi ? a : null;
+}
+
 function _cfrPeriodo(righe, q) {
   var fin = _ceFinestra(q);
   var a = { litri: 0, fatturato: 0, margine: 0, mesi: 0 };
@@ -1261,7 +1396,7 @@ function _cfrPeriodo(righe, q) {
   return a.mesi ? a : null;
 }
 
-function cfrVai(q) { _cfrQ = q; _cfrRender(); }
+function cfrVai(q) { _cfrQ = q; _cePerDal = null; _cePerAl = null; _cfrRender(); }
 
 async function _cfrRender() {
   var box = document.getElementById('and-vista');
@@ -1269,7 +1404,7 @@ async function _cfrRender() {
   if (_cfrQ === null) _cfrQ = Math.floor(new Date().getMonth() / 3) + 1;
   box.innerHTML = '<div class="loading" style="padding:24px">Confronto in corso...</div>';
   try {
-    var anno = _ceAnno;
+    var anno = (_cfrQ === 'per') ? Number(String(_cePerDal).slice(0, 4)) : _ceAnno;
     var d = await _ceCalcola(_cfrQ, anno);
     if (!_cfrBilanci) {
       var rb = await sb.from('bilanci_annuali').select('*');
@@ -1282,6 +1417,15 @@ async function _cfrRender() {
     // Il suo margine e al netto di TUTTI i trasporti, propri compresi;
     // per confrontare sulla stessa base, al 2026 si toglie anche il
     // trasporto proprio. Cosi nessuno dei due numeri e stimato.
+    if (_cfrQ === 'per') {
+      var pDal = _ceAnnoPrima(_cePerDal), pAl = _ceAnnoPrima(_cePerAl);
+      var anniP = [];
+      for (var yy = Number(pDal.slice(0, 4)); yy <= Number(pAl.slice(0, 4)); yy++) anniP.push(yy);
+      var rsP = await sb.from('vendite_storiche').select('*').in('anno', anniP);
+      var stoP = _cfrPeriodoLibero(rsP.data || [], pDal, pAl);
+      box.innerHTML = _cfrHtml(d, _cfrBilanci[anno - 1], anno, stoP, { dal: pDal, al: pAl });
+      return;
+    }
     if (!_cfrStorico) {
       var rs = await sb.from('vendite_storiche').select('*').eq('anno', anno - 1);
       _cfrStorico = rs.data || [];
@@ -1294,12 +1438,16 @@ async function _cfrRender() {
 }
 
 function _cfrQuota(q) {
+  if (q === 'per') {   // periodo libero: quota di giorni sull'anno
+    var gAnno = _ceGiorniTra(_cePerDal.slice(0, 4) + '-01-01', _cePerDal.slice(0, 4) + '-12-31');
+    return gAnno / _ceGiorniTra(_cePerDal, _cePerAl);
+  }
   if (q === 'anno') return 1;
   if (q === 'h1' || q === 'h2') return 2;
   return 4;
 }
 
-function _cfrHtml(d, bil, anno, sto) {
+function _cfrHtml(d, bil, anno, sto, perPrec) {
   var div = _cfrQuota(_cfrQ);
   var p = function (v) { return (Number(v || 0)) / div; };
   var ebitdaBil = null;
@@ -1310,9 +1458,10 @@ function _cfrHtml(d, bil, anno, sto) {
 
   // margine al netto di TUTTI i trasporti, la stessa base dell'archivio
   var margNetto = d.margineLordo - d.trasportiPropri;
+  var stoVero = !!sto && !sto.parziale;   // mesi presi a meta: ripartiti, quindi "stima"
   var righe = bil ? [
     { cod: CE_CODICI.ricavi, l: 'VALORE DELLA PRODUZIONE', a: d.ricavi,
-      b: sto ? sto.fatturato : p(bil.fatturato), vero: !!sto, buono: 1, banda: 'ricavi' },
+      b: sto ? sto.fatturato : p(bil.fatturato), vero: stoVero, buono: 1, banda: 'ricavi' },
     { cod: CE_CODICI.ricaviIngrosso, l: 'Ricavi ingrosso', a: d.ricaviIngrosso, b: null, sotto: true },
     { cod: CE_CODICI.ricaviDettaglio, l: 'Ricavi stazione Oppido', a: d.ricaviDettaglio, b: null, sotto: true },
     { cod: CE_CODICI.costiProd, l: 'COSTI DELLA PRODUZIONE', a: d.costoVenduto + d.trasporti, b: p(bil.costo_merci), buono: -1, banda: 'costi' },
@@ -1321,9 +1470,9 @@ function _cfrHtml(d, bil, anno, sto) {
     { cod: 'R1', l: 'MARGINE LORDO', a: d.margineLordo,
       b: p(bil.fatturato) - p(bil.costo_merci), buono: 1, banda: 'margine' },
     { cod: '', l: 'Margine al netto anche del trasporto proprio', a: margNetto,
-      b: sto ? sto.margine : null, vero: !!sto, buono: 1, sotto: true },
+      b: sto ? sto.margine : null, vero: stoVero, buono: 1, sotto: true },
     { cod: '', l: 'Litri venduti', a: d.litriIngrosso + d.litriDettaglio,
-      b: sto ? sto.litri : null, vero: !!sto, buono: 1, sotto: true, litri: true },
+      b: sto ? sto.litri : null, vero: stoVero, buono: 1, sotto: true, litri: true },
     { cod: CE_CODICI.personale, l: 'Per il personale', a: d.budget.personale || 0, b: p(bil.personale), buono: -1 },
     { cod: CE_CODICI.servizi, l: 'Per servizi', a: d.servizi, b: p(bil.servizi), buono: -1 },
     { cod: CE_CODICI.godimento, l: 'Per godimento beni di terzi', a: d.budget.godimento_beni || 0, b: p(bil.godimento_beni), buono: -1 },
@@ -1340,7 +1489,10 @@ function _cfrHtml(d, bil, anno, sto) {
     h += '<button onclick="cfrVai(' + (typeof x[0] === 'number' ? x[0] : '\'' + x[0] + '\'') + ')" style="font-size:12px;padding:8px 15px;border-radius:7px;cursor:pointer;font-weight:600;'
       + (on ? 'background:#0B2545;color:#fff;border:0.5px solid #0B2545' : 'background:var(--bg);color:var(--text);border:0.5px solid var(--border)') + '">' + x[1] + '</button>';
   });
-  h += '<span style="margin-left:auto;font-size:11.5px;color:var(--text-muted)">' + _andIt(d.periodo.dal) + ' \u2014 ' + _andIt(d.periodo.al) + '</span>';
+  if (!_cePerDal) { _cePerDal = d.periodo.dal; _cePerAl = d.periodo.al; }
+  h += _cePeriodoBarra('cfrPeriodoApplica');
+  h += '<span style="margin-left:auto;font-size:11.5px;color:var(--text-muted)">' + _andIt(d.periodo.dal) + ' \u2014 ' + _andIt(d.periodo.al)
+    + (perPrec ? ' contro ' + _andIt(perPrec.dal) + ' \u2014 ' + _andIt(perPrec.al) : '') + '</span>';
   h += '</div>';
 
   if (!bil) {
@@ -1355,7 +1507,8 @@ function _cfrHtml(d, bil, anno, sto) {
   h += '<div style="background:' + C_CE.navy + ';color:#fff;padding:13px 16px">'
      + '<div style="font-size:15px;font-weight:700;letter-spacing:0.5px">PHOENIX FUEL S.R.L. \u2014 confronto ' + _ceEtichetta(_cfrQ, anno).toLowerCase() + '</div>'
      + '<div style="font-size:11.5px;opacity:0.85;margin-top:2px">' + anno + ' dai movimenti \u00b7 ' + (anno - 1)
-     + ' dal bilancio depositato' + (div > 1 ? ', ripartito in ' + div + ' (stima)' : '') + '</div></div>';
+     + (_cfrQ === 'per' ? ' stesso periodo: archivio vendite (mesi a meta ripartiti per giorni) e bilancio ripartito per giorni (stima)'
+        : ' dal bilancio depositato' + (div > 1 ? ', ripartito in ' + div + ' (stima)' : '')) + '</div></div>';
 
   h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;color:#222;table-layout:fixed">';
   h += '<tr style="background:#f7f7f5;color:#666;font-size:10.5px">'
@@ -1392,7 +1545,7 @@ function _cfrHtml(d, bil, anno, sto) {
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + cTx + '">'
        + (r.b === null ? '<span style="opacity:0.4">\u2014</span>'
           : (r.litri ? _andNum(r.b, 0) : _andNum(r.b, 2))
-            + (r.vero ? '' : (div > 1 ? ' <span style="font-size:9.5px;opacity:0.6">stima</span>' : ''))) + '</td>';
+            + (r.vero ? '' : ((div > 1.0001 || _cfrQ === 'per') ? ' <span style="font-size:9.5px;opacity:0.6">stima</span>' : ''))) + '</td>';
     h += '<td style="padding:' + (ban ? '10px' : '7px') + ' 10px;text-align:right;font-family:var(--font-mono);color:' + (fin ? (col === '#27500A' ? '#7BE0B0' : (col === '#A32D2D' ? '#FF9B9B' : '#FFFFFF')) : col) + (ban ? ';font-weight:700' : '') + '">'
        + (delta === null ? '' : frec + ' ' + (delta >= 0 ? '+' : '') + _andNum(delta, 2)
           + (pct !== null ? '<div style="font-size:11px;font-weight:400">' + (pct >= 0 ? '+' : '') + _andNum(pct, 2) + '%</div>' : '')) + '</td>';
@@ -1403,7 +1556,10 @@ function _cfrHtml(d, bil, anno, sto) {
      + 'Sui <strong>ricavi</strong> il verde e crescita. Sui <strong>costi</strong> il verde e risparmio: rosso quando aumentano.'
      + (sto ? '<br>Ricavi, margine e litri del ' + (anno - 1) + ' vengono dall\'archivio vendite, mese per mese: sono dati veri, non ripartiti. '
          + 'Il <strong>margine al netto anche del trasporto proprio</strong> e la riga da confrontare, perche l\'archivio lo tiene gia dentro.'
-         : '')     + (div > 1 ? '<br>Le voci senza dato d\'archivio vengono dal bilancio annuale diviso ' + div + ': ripartizione uniforme, serve a leggere la direzione.' : '')
+         : '')
+     + (sto && sto.parziale ? '<br>Il periodo prende solo una parte di alcuni mesi: per quei mesi l\'archivio e ripartito in proporzione ai giorni, quindi il dato e una <strong>stima</strong>.' : '')
+     + (_cfrQ === 'per' ? '<br>Le voci senza dato d\'archivio vengono dal bilancio annuale ripartito per giorni sul periodo: serve a leggere la direzione.'
+        : (div > 1 ? '<br>Le voci senza dato d\'archivio vengono dal bilancio annuale diviso ' + div + ': ripartizione uniforme, serve a leggere la direzione.' : ''))
      + '</div></div>';
   return h;
 }
