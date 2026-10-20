@@ -1,3 +1,9 @@
+// v20261020a
+// VERSIONE 20/10/2026 a - Portale: prezzo vecchio/nuovo riconosciuto dal prezzo del
+//   giorno prima (il portale numera le fasce per prezzo crescente, non per orario:
+//   quando il prezzo SCENDE la fascia 1 e' il prezzo NUOVO). Il salvataggio del
+//   cambio prezzo non ricarica piu la pagina: i contatori proposti e non ancora
+//   salvati restano nei campi.
 // VERSIONE 26/05/2026 d - Aggiunto tab Prezzi mese
 // ═══════════════════════════════════════════════════════════════════
 // PhoenixFuel — Tab unificata Letture & Marginalità stazione
@@ -683,20 +689,42 @@ async function _uniCaricaDalPortale() {
       nCont++;
     });
 
-    // ── proposta prezzo (fascia 1 = prezzo in vigore quel giorno)
+    // ── proposta prezzo
+    // v20261020a — il portale numera le fasce per PREZZO CRESCENTE, non per
+    // orario (verificato sui dati: 02/10 e 25/09, prezzo sceso, la fascia 1 era
+    // il prezzo NUOVO). Il prezzo VECCHIO e' quello con cui ha chiuso il giorno
+    // prima in Phoenix (cambio prezzo del giorno prima se c'era, altrimenti il
+    // prezzo pompa). La fascia con quel prezzo e' il vecchio, l'altra il nuovo.
     var nPrez = 0;
     var fasce2 = {};
-    prez.forEach(function (r) {
-      if (Number(r.fascia) === 1) {
-        var inpP = document.querySelector('.uni-prezzo-input[data-prodotto="' + r.prodotto + '"]');
-        if (inpP) {
-          inpP.value = Number(r.prezzo_litro_iva).toFixed(3);
-          inpP.style.borderColor = '#639922';
-          if (typeof _uniSyncProdotto === 'function') _uniSyncProdotto(inpP, 'prezzo');
-          nPrez++;
-        }
-      } else {
-        fasce2[r.prodotto] = { prezzo: Number(r.prezzo_litro_iva), litri: Number(r.litri) };
+    var dubbi = [];
+    var perProd = {};
+    prez.forEach(function (r) { (perProd[r.prodotto] = perProd[r.prodotto] || []).push(r); });
+    Object.keys(perProd).forEach(function (prod) {
+      var lista = perProd[prod].slice().sort(function (a, b) { return Number(a.fascia) - Number(b.fascia); });
+      var iVecchio = 0;
+      if (lista.length > 1) {
+        var chiuso = _uniPrezzoChiusuraPrima(data, prod);
+        var trovato = -1;
+        lista.forEach(function (r, i) {
+          if (trovato < 0 && chiuso > 0 && Math.abs(Number(r.prezzo_litro_iva) - chiuso) < 0.0005) trovato = i;
+        });
+        if (trovato >= 0) iVecchio = trovato;
+        else dubbi.push(prod + ': nessuna fascia ha il prezzo del giorno prima (' + (chiuso > 0 ? chiuso.toFixed(3) : 'non trovato') + '), controlla quale e il prezzo vecchio');
+        if (lista.length > 2) dubbi.push(prod + ': il portale riporta ' + lista.length + ' prezzi nella giornata, controlla i litri');
+      }
+      var vecchio = lista[iVecchio];
+      var inpP = document.querySelector('.uni-prezzo-input[data-prodotto="' + prod + '"]');
+      if (inpP) {
+        inpP.value = Number(vecchio.prezzo_litro_iva).toFixed(3);
+        inpP.style.borderColor = '#639922';
+        if (typeof _uniSyncProdotto === 'function') _uniSyncProdotto(inpP, 'prezzo');
+        nPrez++;
+      }
+      var altri = lista.filter(function (r, i) { return i !== iVecchio; });
+      if (altri.length) {
+        var nuovo = altri[altri.length - 1];
+        fasce2[prod] = { prezzo: Number(nuovo.prezzo_litro_iva), litri: Number(nuovo.litri) };
       }
     });
 
@@ -718,6 +746,10 @@ async function _uniCaricaDalPortale() {
         testo += 'Apri <strong>⚡ Cambio prezzo</strong>: litri e prezzo sono gia pronti, il <strong>COSTO di questi litri lo devi confermare tu</strong> — dal portale non arriva.'
           + '</div>';
       }
+      if (dubbi.length) {
+        testo += '<div style="margin-top:8px;padding:8px 10px;background:#FCEBEB;border-left:3px solid #E24B4A;border-radius:0 6px 6px 0;color:#791F1F">'
+          + '<strong>Da controllare</strong><br>' + dubbi.join('<br>') + '</div>';
+      }
       avviso.innerHTML = testo;
       avviso.style.display = 'block';
     }
@@ -727,6 +759,27 @@ async function _uniCaricaDalPortale() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '📥 Carica dati dal portale'; }
   }
+}
+
+// v20261020a — prezzo con cui ha chiuso l'ultimo giorno prima di `data`:
+// il nuovo prezzo del cambio prezzo, se quel giorno c'e stato, altrimenti
+// il prezzo pompa. 0 se non c'e niente.
+function _uniPrezzoChiusuraPrima(data, prodotto) {
+  var m = _uniData;
+  if (!m) return 0;
+  var suff = '_' + prodotto;
+  var giorni = {};
+  Object.keys(m.prezziMap || {}).forEach(function (k) {
+    if (k.slice(-suff.length) === suff && k.slice(0, 10) < data && k.length === 10 + suff.length) giorni[k.slice(0, 10)] = true;
+  });
+  Object.keys(m.cambioPrezzoMap || {}).forEach(function (k) {
+    if (k.slice(-suff.length) === suff && k.slice(0, 10) < data && k.length === 10 + suff.length) giorni[k.slice(0, 10)] = true;
+  });
+  var ultimo = Object.keys(giorni).sort().pop();
+  if (!ultimo) return 0;
+  var cp = (m.cambioPrezzoMap || {})[ultimo + suff];
+  if (cp && Number(cp.prezzo_iva_nuovo) > 0 && Number(cp.litri_al_nuovo_prezzo) > 0) return Number(cp.prezzo_iva_nuovo);
+  return Number((m.prezziMap || {})[ultimo + suff] || 0);
 }
 
 function _uniRenderModaleCambioPrezzo(data) {
@@ -1046,9 +1099,66 @@ async function _uniSalvaModaleCambioPrezzo() {
     return;
   }
   toast('✓ Cambio prezzo salvato');
+
+  // v20261020a — NIENTE ricarica dal database: i contatori proposti dal portale
+  // (o scritti a mano) e non ancora salvati andrebbero persi. Aggiorno in
+  // memoria il cambio prezzo e il CMP, ridisegno il giorno e rimetto nei campi
+  // quello che c'era scritto.
+  cppDocs.forEach(function (inpL) {
+    var prod = inpL.dataset.prodotto;
+    var inpP = document.querySelector('#uni-modale-cp .uni-cpp-prezzo[data-prodotto="' + prod + '"]');
+    var inpC = document.querySelector('#uni-modale-cp .uni-cpp-costo[data-prodotto="' + prod + '"]');
+    var litri = parseFloat(inpL.value) || 0;
+    var prezzo = inpP ? (parseFloat(inpP.value) || 0) : 0;
+    var costo = inpC ? (parseFloat(inpC.value) || 0) : 0;
+    if (litri > 0 && prezzo > 0) {
+      _uniData.cambioPrezzoMap[data + '_' + prod] = { prezzo_iva_nuovo: prezzo, costo_netto_nuovo: costo, litri_al_nuovo_prezzo: litri };
+    } else {
+      delete _uniData.cambioPrezzoMap[data + '_' + prod];
+    }
+  });
+  if (cmpCheckCp && cmpCheckCp.aggiornareCmp) {
+    cmpCheckCp.aggiornareCmp.forEach(function (a) { _uniData.cmpCorrente[a.prodotto] = Number(a.nuovo); });
+  }
   _uniChiudiModaleCambioPrezzo();
-  // Ricarica dati così il riquadro informativo sulle pompe e l'ereditarietà funzionano
-  caricaUnificata();
+  _uniRidisegnaTenendoCampi();
+}
+
+// v20261020a — ridisegna il giorno corrente lasciando nei campi i valori
+// scritti e non ancora salvati (contatori, prezzi, costi) e l'avviso del portale.
+function _uniRidisegnaTenendoCampi() {
+  if (!_uniData) return;
+  var letture = {}, prezzi = {}, costi = {};
+  document.querySelectorAll('.uni-lettura-input').forEach(function (i) { if (i.value !== '') letture[i.dataset.pompa] = i.value; });
+  document.querySelectorAll('.uni-prezzo-input').forEach(function (i) { if (i.value !== '') prezzi[i.dataset.prodotto] = i.value; });
+  document.querySelectorAll('.uni-costo-input').forEach(function (i) { if (i.value !== '') costi[i.dataset.prodotto] = i.value; });
+  var avv = document.getElementById('uni-portale-avviso');
+  var avvHtml = (avv && avv.style.display !== 'none') ? avv.innerHTML : '';
+  var eraSporco = !!_uniData.dirty;
+
+  _uniVistaHome = false;
+  _uniRenderGiorno(_uniData.indice);
+
+  document.querySelectorAll('.uni-lettura-input').forEach(function (i) {
+    if (letture[i.dataset.pompa] != null) i.value = letture[i.dataset.pompa];
+  });
+  var giaP = {}, giaC = {};
+  document.querySelectorAll('.uni-prezzo-input').forEach(function (i) {
+    var v = prezzi[i.dataset.prodotto];
+    if (v == null) return;
+    i.value = v;
+    if (!giaP[i.dataset.prodotto]) { giaP[i.dataset.prodotto] = true; _uniSyncProdotto(i, 'prezzo'); }
+  });
+  document.querySelectorAll('.uni-costo-input').forEach(function (i) {
+    var v = costi[i.dataset.prodotto];
+    if (v == null) return;
+    i.value = v;
+    if (!giaC[i.dataset.prodotto]) { giaC[i.dataset.prodotto] = true; _uniSyncProdotto(i, 'costo'); }
+  });
+  var avv2 = document.getElementById('uni-portale-avviso');
+  if (avv2 && avvHtml) { avv2.innerHTML = avvHtml; avv2.style.display = 'block'; }
+  _uniData.dirty = eraSporco;
+  try { _uniCalcolaLive(); } catch (e) { console.error('[_uniRidisegnaTenendoCampi] calcolo:', e); }
 }
 
 // ── RENDER PRINCIPALE ──
