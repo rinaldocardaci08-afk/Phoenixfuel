@@ -1,4 +1,5 @@
 // PhoenixFuel — Stazione: Core, Dashboard, Ricezione ordini
+// v20261020c — Prezzo applicato: intestazione centrata e margine attuale.
 // v20261020b — Ordini in arrivo: colonna "Prezzo applicato" (prezzo pompa in vigore,
 //   netto e ivato, compreso l'ultimo cambio prezzo) e margine al litro accanto ai due
 //   prezzi proposti.
@@ -144,7 +145,7 @@ async function caricaOrdiniDaCaricare() {
   try {
     var _oggiA = new Date().toISOString().split('T')[0];
     var _pzA = await sb.from('stazione_prezzi').select('prodotto,prezzo_litro,data').lte('data', _oggiA).order('data',{ascending:false}).limit(60);
-    var _cpA = await sb.from('stazione_cambio_prezzo').select('prodotto,prezzo_iva_nuovo,litri_al_nuovo_prezzo,data').lte('data', _oggiA).order('data',{ascending:false}).limit(20);
+    var _cpA = await sb.from('stazione_cambio_prezzo').select('prodotto,prezzo_iva_nuovo,costo_netto_nuovo,litri_al_nuovo_prezzo,data').lte('data', _oggiA).order('data',{ascending:false}).limit(20);
     (_pzA.data||[]).forEach(function(p){
       if (_appl[p.prodotto] == null && Number(p.prezzo_litro) > 0) _appl[p.prodotto] = { data: p.data, iva: Number(p.prezzo_litro) };
     });
@@ -157,13 +158,27 @@ async function caricaOrdiniDaCaricare() {
       var c = _cpUlt[prod], a = _appl[prod];
       if (!a || c.data >= a.data) _appl[prod] = { data: c.data, iva: Number(c.prezzo_iva_nuovo) };
     });
+    // v20261020c — costo in uso oggi (l'ultimo fino a oggi, come in Letture &
+    // marginalita'; se c'e un cambio prezzo piu recente con costo, vale quello)
+    var _coA = await sb.from('stazione_costi').select('prodotto,costo_litro,data').lte('data', _oggiA).order('data',{ascending:false}).limit(60);
+    var _costoOggi = {};
+    (_coA.data||[]).forEach(function(c){
+      if (_costoOggi[c.prodotto] == null && Number(c.costo_litro) > 0) _costoOggi[c.prodotto] = { data: c.data, costo: Number(c.costo_litro) };
+    });
+    Object.keys(_cpUlt).forEach(function(prod){
+      var c = _cpUlt[prod], k = _costoOggi[prod];
+      if (Number(c.costo_netto_nuovo) > 0 && (!k || c.data >= k.data)) _costoOggi[prod] = { data: c.data, costo: Number(c.costo_netto_nuovo) };
+    });
+    Object.keys(_appl).forEach(function(prod){
+      if (_costoOggi[prod]) _appl[prod].margine = _appl[prod].iva / 1.22 - _costoOggi[prod].costo;
+    });
   } catch(e){}
   var _f3 = function(v){ return v.toFixed(3).replace('.', ','); };
   var _f4 = function(v){ return v.toFixed(4).replace('.', ','); };
 
   let html = '<div class="card" style="border-left:4px solid #6B5FCC">';
   html += '<div class="card-title" style="color:#6B5FCC">📦 Ordini in arrivo — da ricevere in cisterna (' + ordini.length + ')</div>';
-  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Stato</th><th>Costo sbarcato</th><th style="border-left:1.5px solid #1a1a18;border-right:1.5px solid #1a1a18">Prezzo applicato</th><th>Prezzo (ultimo marg.)</th><th>Prezzo (marg. cercata)</th><th></th></tr></thead><tbody>';
+  html += '<div style="overflow-x:auto"><table><thead><tr><th>Data</th><th>Prodotto</th><th>Litri</th><th>Fornitore</th><th>Stato</th><th>Costo sbarcato</th><th style="text-align:center;border-left:1.5px solid #1a1a18;border-right:1.5px solid #1a1a18">Prezzo applicato</th><th>Prezzo (ultimo marg.)</th><th>Prezzo (marg. cercata)</th><th></th></tr></thead><tbody>';
   ordini.forEach(function(r) {
     const dataFmt = new Date(r.data).toLocaleDateString('it-IT');
     const _pi = cacheProdotti.find(function(p) { return p.nome === r.prodotto; });
@@ -181,7 +196,8 @@ async function caricaOrdiniDaCaricare() {
     var _mMo = (_mo != null && _cs > 0) ? ' <span style="font-size:11px;font-weight:600;color:var(--text-muted);font-family:var(--font-sans)">marg. ' + _f4(_mo) + '</span>' : '';
     var _ap = _appl[r.prodotto];
     var _apStr = _ap
-      ? '€ ' + _f3(_ap.iva / 1.22) + '<div style="font-size:11px;font-weight:600;color:#BA7517">ivato € ' + _f3(_ap.iva) + '</div>'
+      ? '€ ' + _f3(_ap.iva / 1.22) + ' <span style="font-size:11px;font-weight:600;color:var(--text-muted);font-family:var(--font-sans)">' + (_ap.margine != null ? 'marg. ' + _f4(_ap.margine) : 'marg. —') + '</span>'
+        + '<div style="font-size:11px;font-weight:600;color:#BA7517">ivato € ' + _f3(_ap.iva) + '</div>'
       : '<span style="color:var(--text-muted)">—</span>';
     html += '<tr>' +
       '<td>' + dataFmt + '</td>' +
@@ -190,7 +206,7 @@ async function caricaOrdiniDaCaricare() {
       '<td>' + esc(r.fornitore) + '</td>' +
       '<td>' + badgeStato(r.stato) + '</td>' +
       '<td style="font-family:var(--font-mono);color:#A32D2D;font-weight:600">' + _csStr + '</td>' +
-      '<td style="font-family:var(--font-mono);font-weight:700;color:var(--text);background:var(--bg);border-left:1.5px solid #1a1a18;border-right:1.5px solid #1a1a18;white-space:nowrap">' + _apStr + '</td>' +
+      '<td style="text-align:center;font-family:var(--font-mono);font-weight:700;color:var(--text);background:var(--bg);border-left:1.5px solid #1a1a18;border-right:1.5px solid #1a1a18;white-space:nowrap">' + _apStr + '</td>' +
       '<td style="font-family:var(--font-mono);color:#185FA5;font-weight:600;white-space:nowrap">' + _pumStr + _mUmm + _pumIva + '</td>' +
       '<td style="font-family:var(--font-mono);color:#0C447C;font-weight:600;white-space:nowrap">' + _ptStr + _mMo + _ptIva + '</td>' +
       '<td><button class="btn-primary" style="font-size:11px;padding:4px 12px;background:#639922" onclick="riceviOrdineStazione(\'' + r.id + '\',' + r.litri + ',\'' + esc(r.prodotto) + '\')">📦 Ricevi</button></td>' +
