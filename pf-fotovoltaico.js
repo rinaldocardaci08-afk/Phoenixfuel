@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261022b — vetrina Polistena con le COLTURE sotto le serre (fragole, mirtilli, more,
+//   idroponica verticale con vasche dei pesci) e la sesta tappa della visita: cambia solo la
+//   versione della vetrina, cosi' il programma carica il file nuovo e non quello in memoria.
 // v20261022a — linguetta 🏗️ IMPIANTI IN SVILUPPO: elenco degli impianti con la vetrina
 //   3D per i clienti (primo: Polistena, serre fotovoltaiche 974,4 kWp). La vetrina e' un
 //   file HTML a se' (fv-vetrina-polistena.html) aperto a tutto schermo dentro il programma;
@@ -1566,8 +1569,8 @@ async function fvImputaIncasso(movId, contrattoId) {
 // provare); la copia per il cliente e' in sola lettura e porta la data della proposta.
 var _FV_VETRINE = [
   { id: 'polistena', nome: 'Polistena', luogo: 'Polistena (RC) · c/da Primogenito',
-    tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno',
-    file: 'fv-vetrina-polistena.html', ver: '20261022a', stato: 'In sviluppo' }
+    tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno', colture: 'Fragole, mirtilli, more e idroponica verticale',
+    file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' }
 ];
 
 function fvCaricaSviluppo() {
@@ -1581,6 +1584,7 @@ function fvCaricaSviluppo() {
       + '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#FAEEDA;color:#633806">' + esc(v.stato) + '</span></div>'
       + '<div style="font-size:12px;color:var(--text-muted)">' + esc(v.luogo) + '</div>'
       + '<div style="font-size:13px">' + esc(v.tipo) + ' · <b>' + esc(v.kwp) + '</b> · ' + esc(v.energia) + '</div>'
+      + (v.colture ? '<div style="font-size:12px;color:#2e7d32">🌱 ' + esc(v.colture) + '</div>' : '')
       + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'
       + '<button class="btn-primary" style="font-size:12px;padding:7px 12px" onclick="fvApriVetrina(\'' + v.id + '\')">🌐 Apri la vetrina</button>'
       + '<button class="btn-primary" style="font-size:12px;padding:7px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="fvScaricaVetrina(\'' + v.id + '\')">⬇️ Scarica pagina cliente</button>'

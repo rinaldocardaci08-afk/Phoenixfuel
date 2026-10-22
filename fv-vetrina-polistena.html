@@ -43,6 +43,9 @@ h2{font-family:var(--font-display);font-weight:600;font-size:24px;margin:0}
 .side input[type=range]{width:100%;accent-color:var(--accent)}
 .sval{display:flex;justify-content:space-between;font-family:var(--font-data);font-size:12px;color:var(--muted)}.sval b{color:var(--fg);font-size:13px}
 #play{width:100%}
+.agri{--agri:#2e7d32;--agri-bg:#e8f3e6;border-top:1px solid var(--line);padding-top:12px}.agri .lbl{color:var(--agri)}
+.agri .btn{background:var(--agri-bg);border-color:#9cc59a;color:#1b4d1e}.agri .btn[aria-pressed="true"]{background:var(--agri);border-color:var(--agri);color:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .agri .btn:not([aria-pressed="true"]){background:#1c2a1d;color:#cfe8cc;border-color:#355a36}}
 .lay>.stage{min-width:0;aspect-ratio:auto;min-height:540px;height:auto}
 .mini{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:4px}.mini b{font-family:var(--font-display);font-weight:600;font-size:28px;line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}.mini svg{width:100%;height:70px;display:block}.mini small{font-family:var(--font-data);font-size:11px;color:var(--muted);line-height:1.35}
 .toolbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px 26px;padding:14px 16px;background:var(--surface);border:1px solid var(--line)}
@@ -157,6 +160,11 @@ tr.key td{font-weight:600;background:color-mix(in srgb,var(--accent) 8%,transpar
         <button class="btn" data-view="cab" aria-pressed="false">Cabina</button>
         <button class="btn more" data-view="sec" aria-pressed="false">Sezione</button>
         <button class="btn" data-view="in" aria-pressed="false">Dentro la serra</button>
+      </div></div>
+    <div class="group agri"><span class="lbl">Vista agricoltura</span>
+      <div class="col">
+        <button class="btn tg" id="tCrops" aria-pressed="false">Colture</button>
+        <button class="btn tg" id="tRoof" aria-pressed="true">Coperture</button>
       </div></div>
   </aside>
   <div class="stage" id="stage">
@@ -403,6 +411,44 @@ farm=new THREE.Group();scene.add(farm);farm.userData.info={t:'Serre fotovoltaich
   var fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));fg.setIndex(idx);fg.computeVertexNormals();filmMesh=new THREE.Mesh(fg,filmMat);farm.add(filmMesh);
   stats.mods=mods.length;stats.shadedFrac=shaded/tot;})();
 
+/* colture sotto le serre (mockup) */
+var crops=new THREE.Group();crops.visible=false;scene.add(crops);var CROPS=[];
+(function(){
+  /* ordine di riempimento: [fila, inizio, lunghezza] dei segmenti */
+  var segs={};SEG.forEach(function(g,i){segs[g[0]+'_'+g[1]]=g;});
+  var plan=[['idro',[[9,67.5],[8,65],[7,45]],184],['fragole',[[7,45],[6,32.5],[5,22.5],[4,115],[3,125]],368],['mirtilli',[[3,125],[4,12.5],[3,0]],184],['more',[[3,0],[2,0],[1,0],[0,0]],184]];
+  var used={};function take(key,need){var g=segs[key],u=used[key]||0,avail=g[2]-u,t=Math.min(avail,need);used[key]=u+t;return {r:g[0],x0:g[1]+u-CX,x1:g[1]+u+t-CX,len:t};}
+  plan.forEach(function(p){var need=p[2];p[1].forEach(function(k){if(need<=0.01)return;var key=k[0]+'_'+k[1];if((used[key]||0)>=segs[key][2]-0.01)return;var c=take(key,need);need-=c.len;if(c.len>0.5)CROPS.push({k:p[0],r:c.r,x0:c.x0,x1:c.x1});});});
+  var Q=new THREE.Quaternion(),M=new THREE.Matrix4();
+  function inst(geo,mat,list,info){var m=new THREE.InstancedMesh(geo,mat,list.length);m.userData.info=info;list.forEach(function(e,i){M.compose(e[0],e[1]||Q,e[2]);m.setMatrixAt(i,M);});m.castShadow=false;m.receiveShadow=true;crops.add(m);return m;}
+  var CINFO={fragole:{t:'Fragole',p:'Canaline sospese a circa 1 m da terra, otto file per campata: si raccoglie in piedi e i frutti non toccano il suolo.',d:[['Quota','40% delle serre'],['Superficie','circa 3.530 m²'],['Dove','file centrali']]},
+    mirtilli:{t:'Mirtilli',p:'Cespugli in vaso con substrato acido, alti circa 1,5 m, quattro file per campata.',d:[['Quota','20% delle serre'],['Superficie','circa 1.770 m²']]},
+    more:{t:'More',p:'Piante su filo, alte circa 1,6 m, quattro file per campata.',d:[['Quota','20% delle serre'],['Superficie','circa 1.770 m²'],['Dove','file a nord']]},
+    idro:{t:'Idroponica verticale con pesci',p:'Torri verticali alte 2 m con insalate e piante a foglia: più piante per metro quadro. Le torri più fitte stanno sotto la falda nord con il film, dove arriva più luce. L\u2019acqua delle vasche dei pesci, filtrata, sale nelle torri, nutre le piante e torna alle vasche.',d:[['Quota','20% delle serre'],['Superficie','circa 1.770 m²'],['Vasche','6, all\u2019inizio della fila 8']]}};
+  var floorC={fragole:0xf0a0a0,mirtilli:0x9db3f0,more:0xc8a0e0,idro:0x86d9be};
+  var gut=[],dots={fragole:[],mirtilli:[],more:[]},bush=[],hedge=[],nft=[],lett=[],tanks=[];
+  CROPS.forEach(function(c){var zn=c.r*W-CZ,L=c.x1-c.x0;
+    var f=new THREE.Mesh(new THREE.PlaneGeometry(L-0.3,W-0.4),new THREE.MeshLambertMaterial({color:floorC[c.k]}));f.rotation.x=-Math.PI/2;f.position.set((c.x0+c.x1)/2,0.06,zn+W/2);f.receiveShadow=true;f.userData.info=CINFO[c.k];crops.add(f);
+    if(c.k==='fragole'){for(var i=0;i<8;i++){var z=zn+0.9+i*1.11;gut.push([V((c.x0+c.x1)/2,0.95,z),null,V(L-1,0.28,0.32)]);for(var x=c.x0+0.6;x<c.x1-0.5;x+=0.7)dots.fragole.push([V(x,1.12,z+(Math.random()-.5)*0.2),null,V(.045,.045,.045)]);}}
+    if(c.k==='mirtilli'){for(var i2=0;i2<4;i2++){var z2=zn+1.3+i2*2.35;for(var x2=c.x0+0.8;x2<c.x1-0.6;x2+=1.1){var sc=0.55+Math.random()*0.15;bush.push([V(x2,0.75,z2),null,V(sc,0.75,sc)]);for(var d=0;d<3;d++)dots.mirtilli.push([V(x2+(Math.random()-.5)*0.8,0.5+Math.random()*0.9,z2+(Math.random()-.5)*0.8),null,V(.06,.06,.06)]);}}}
+    if(c.k==='more'){for(var i3=0;i3<4;i3++){var z3=zn+1.3+i3*2.35;hedge.push([V((c.x0+c.x1)/2,0.95,z3),null,V(L-1.2,1.55,0.35)]);for(var x3=c.x0+0.7;x3<c.x1-0.6;x3+=0.55)dots.more.push([V(x3,0.5+Math.random()*1.2,z3+(Math.random()<.5?-.3:.3)),null,V(.07,.07,.07)]);}}
+    if(c.k==='idro'){var tx=c.x0+3.5,tankEnd=(c.r===8)?c.x0+14:c.x0;
+      if(c.r===8){for(var t=0;t<3;t++)tanks.push([tx+t*3.6,zn+W/2-2.2]);for(var t2=0;t2<3;t2++)tanks.push([tx+t2*3.6,zn+W/2+2.2]);}
+      var xs0=Math.max(c.x0,tankEnd)+0.7;[0.9,1.9,2.9,3.9,6.2,8.2].forEach(function(dz){var z4=zn+dz;for(var x4=xs0;x4<c.x1-0.5;x4+=0.8){nft.push([V(x4,1.05,z4),null,V(0.11,2.0,0.11)]);
+        for(var lv=0;lv<5;lv++){var yy=0.35+lv*0.33,an=lv*1.1;lett.push([V(x4+Math.cos(an)*0.17,yy,z4+Math.sin(an)*0.17),null,V(.13,.09,.13)]);lett.push([V(x4-Math.cos(an)*0.17,yy+0.15,z4-Math.sin(an)*0.17),null,V(.13,.09,.13)]);}}});}});
+  inst(new THREE.BoxGeometry(1,1,1),new THREE.MeshLambertMaterial({color:0x3d7a35}),gut,CINFO.fragole);
+  inst(new THREE.SphereGeometry(1,6,4),new THREE.MeshBasicMaterial({color:0xd8262b}),dots.fragole,CINFO.fragole);
+  inst(new THREE.IcosahedronGeometry(1,0),new THREE.MeshLambertMaterial({color:0x3e6b48}),bush,CINFO.mirtilli);
+  inst(new THREE.SphereGeometry(1,6,4),new THREE.MeshBasicMaterial({color:0x3a4fb0}),dots.mirtilli,CINFO.mirtilli);
+  inst(new THREE.BoxGeometry(1,1,1),new THREE.MeshLambertMaterial({color:0x467f3d}),hedge,CINFO.more);
+  inst(new THREE.SphereGeometry(1,6,4),new THREE.MeshBasicMaterial({color:0x3b1638}),dots.more,CINFO.more);
+  inst(new THREE.CylinderGeometry(1,1,1,8),new THREE.MeshLambertMaterial({color:0xf2f2ee}),nft,CINFO.idro);
+  inst(new THREE.SphereGeometry(1,7,5),new THREE.MeshLambertMaterial({color:0x8fd14f}),lett,CINFO.idro);
+  tanks.forEach(function(p){var g=new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.5,1.2,28),new THREE.MeshLambertMaterial({color:0x2a6f97}));g.position.set(p[0],0.6,p[1]);g.userData.info=CINFO.idro;crops.add(g);
+    var w=new THREE.Mesh(new THREE.CircleGeometry(1.4,28),new THREE.MeshLambertMaterial({color:0x5fb3d9}));w.rotation.x=-Math.PI/2;w.position.set(p[0],1.21,p[1]);crops.add(w);});
+  var tubeM=new THREE.MeshLambertMaterial({color:0x9aa3a8});CROPS.filter(function(c){return c.k==='idro';}).forEach(function(c){strip([c.x0+1,c.r*W-CZ+0.4],[c.x1-1,c.r*W-CZ+0.4],0.15,0.15,0.3,tubeM,crops);});
+  stats.crops=CROPS.map(function(c){return c.k+' fila '+c.r+' '+(c.x1-c.x0).toFixed(1)+' m';});
+})();
 /* cabina di utenza e inverter, angolo nord-est */
 cab=new THREE.Group();cab.position.set(CAB[0],0,CAB[1]);cab.rotation.y=-Math.atan2(44.7,14.7)+Math.PI/2;scene.add(cab);cab.userData.info={t:'Cabina di utenza MT/BT',p:'Raccoglie l\u2019energia delle serre e la consegna alla rete in media tensione. Accanto, i 4 inverter.',d:[['Inverter','4 × 250 kW'],['Trasformatore','MT/BT'],['Coordinate','38°25\'17,19" N · 16°04\'06,98" E']]};
 (function(){function box(w,h,d,col,x,y,z){var m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:col,roughness:.7,metalness:.05}));m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;cab.add(m);return m;}
@@ -423,10 +469,14 @@ function arcY(t){return P.gronda+(P.colmo-P.gronda)*t+0.55*Math.sin(Math.PI*t);}
 /* ===================== ETICHETTE ===================== */
 var labels=[];
 function addLabel(text,pos,o){o=o||{};var el=document.createElement('div');el.className='tag'+(o.cls?' '+o.cls:'');if(o.color)el.style.setProperty('--dot',o.color);el.textContent=text;labelsEl.appendChild(el);
-  var l={el:el,pos:pos,callout:!(o.cls&&o.cls.indexOf('mute')>=0),color:o.color||'',grp:o.grp||'',far:o.far||0,phase:o.phase||''};labels.push(l);return l;}
-var showLabels=true,showConstr=true,phaseToday=false;
+  var l={el:el,pos:pos,callout:!(o.cls&&o.cls.indexOf('mute')>=0),color:o.color||'',grp:o.grp||'',far:o.far||0,phase:o.phase||'',roof:o.roof||0};labels.push(l);return l;}
+var cropsOn=false,roofOn=true,showLabels=true,showConstr=true,phaseToday=false;
 if(renderer){
-  addLabel('Serre con impianto\n1.344 moduli · 974,4 kWp',V(-20,4.6,-10),{cls:'dot',color:'#c62828',phase:'p'});
+  addLabel('Fragole · 40%',V(10,1.5,14.4),{cls:'dot',color:'#e05a5a',grp:'crop'});
+  addLabel('Mirtilli · 20%',V(-45,1.5,-4.8),{cls:'dot',color:'#5b78d6',grp:'crop'});
+  addLabel('More · 20%',V(-64,1.5,-33.6),{cls:'dot',color:'#9a5fc0',grp:'crop'});
+  addLabel('Idroponica verticale e pesci · 20%',V(0,1.5,33.6),{cls:'dot',color:'#2fa37f',grp:'crop'});
+  addLabel('Serre con impianto\n1.344 moduli · 974,4 kWp',V(-20,4.6,-10),{cls:'dot',color:'#c62828',phase:'p',roof:1});
   addLabel('Cabina di utenza MT/BT\n4 inverter da 250 kW',V(CAB[0],3.4,CAB[1]),{cls:'dot',color:'#2b2f2c',phase:'p'});
   addLabel('La nostra stazione di servizio\ncarburanti e autolavaggio',V(STATION[0]-6,5.6,STATION[1]-2),{cls:'dot',color:'#c62828'});
   addLabel('Fascia di rispetto\nSGC SS 682',V(-64,0.5,21),{cls:'dot',color:'#a89873',grp:'c'});
@@ -557,8 +607,10 @@ if(renderer){
   byId('views').addEventListener('click',function(e){var b=e.target.closest('button[data-view]');if(!b)return;press(this,b);var wasSec=curView==='sec';if(wasSec){camera.near=0.5;camera.far=2500;camera.updateProjectionMatrix();}goTo(b.dataset.view,wasSec);});
   toggle('tLabels',function(on){showLabels=on;});
   toggle('tConstr',function(on){showConstr=on;constr.visible=on;});
+  toggle('tCrops',function(on){cropsOn=on;crops.visible=on&&!phaseToday;});
+  toggle('tRoof',function(on){roofOn=on;farm.visible=on&&!phaseToday;});
   toggle('tTrees',function(on){trees.visible=on;if(on)occlude(true);});
-  toggle('tPhase',function(on){phaseToday=on;farm.visible=!on;cab.visible=!on;cablePath.visible=!on;olives.visible=on;dirtMat.color.set(on?0x9c9a6e:0xb9a47e);byId('tPhase').textContent=on?'Torna al progetto':'Oggi, senza impianto';setSun(hour);if(curView==='in'||curView==='sec'||curView==='cab'){press(byId('views'),byId('views').querySelector('[data-view=persp]'));camera.near=0.5;camera.far=2500;goTo('persp',true);}});
+  toggle('tPhase',function(on){phaseToday=on;farm.visible=!on&&roofOn;crops.visible=!on&&cropsOn;cab.visible=!on;cablePath.visible=!on;olives.visible=on;dirtMat.color.set(on?0x9c9a6e:0xb9a47e);byId('tPhase').textContent=on?'Torna al progetto':'Oggi, senza impianto';setSun(hour);if(curView==='in'||curView==='sec'||curView==='cab'){press(byId('views'),byId('views').querySelector('[data-view=persp]'));camera.near=0.5;camera.far=2500;goTo('persp',true);}});
   controls.addEventListener('change',function(){dirty=true;});
 }
 var ray=new THREE.Raycaster(),pdown=null,card=byId('card');
@@ -574,7 +626,7 @@ function resize(){if(!renderer)return;var w=stage.clientWidth,h=stage.clientHeig
 new ResizeObserver(resize).observe(stage);
 function updateLabels(){var calls=[],dist=camera.position.distanceTo(controls.target);
   labels.forEach(function(l){var v=l.pos.clone().project(camera),vis=showLabels&&curView!=='sec'&&v.z<1&&Math.abs(v.x)<1.05&&Math.abs(v.y)<1.05;
-    if(vis&&l.grp==='c'&&!showConstr)vis=false;if(vis&&l.phase==='p'&&phaseToday)vis=false;if(vis&&l.far&&dist<200)vis=false;if(vis&&l.callout&&MOBILE.matches&&l.grp==='c')vis=false;
+    if(vis&&l.grp==='c'&&!showConstr)vis=false;if(vis&&l.roof&&!roofOn)vis=false;if(vis&&l.grp==='crop'&&!(cropsOn&&!phaseToday))vis=false;if(vis&&l.phase==='p'&&phaseToday)vis=false;if(vis&&l.far&&dist<200)vis=false;if(vis&&l.callout&&MOBILE.matches&&l.grp==='c')vis=false;
     if(!vis){l.el.style.display='none';return;}l.el.style.display='block';var x=(v.x*.5+.5)*size.w,y=(-v.y*.5+.5)*size.h;
     if(l.callout){l.ax=x;l.ay=y;calls.push(l);}else l.el.style.transform='translate('+x.toFixed(1)+'px,'+y.toFixed(1)+'px) translate(-50%,-50%)';});
   calls.sort(function(a,b){return a.ay-b.ay;});var top=8;calls.forEach(function(l){var h=l.el.offsetHeight;l.by=Math.max(l.ay-h/2,top);top=l.by+h+6;});
@@ -590,16 +642,18 @@ function loop(now){requestAnimationFrame(loop);
 (function(){var st=document.documentElement.getAttribute('data-stamp');if(st)byId('stampP').textContent='Proposta di progetto del '+st+(CLIENT?' · documento in sola lettura':'');})();
 /* ===================== VISITA GUIDATA ===================== */
 var TOUR=[
- {t:'Il sito',p:'Polistena, contrada Primogenito, lungo la SGC SS 682. A ovest c\u2019è la nostra stazione di servizio. In rosso il confine del terreno; tratteggiati i vincoli: fascia di rispetto stradale, metanodotto e distanza minima dai confini. Le serre stanno tutte dentro.',
-  go:function(){setT('tConstr',true);setT('tLabels',true);setT('tPhase',false);view('top');}},
- {t:'Le serre',p:'Ventitré serre multitunnel su dieci file, 8.832 m² coperti. Sulla falda sud due moduli in verticale, 1.344 in tutto per 974,4 kWp; la falda nord ad arco ha il film plastico. Sotto si continua a coltivare.',
-  go:function(){setT('tConstr',false);setT('tPhase',false);view('in');}},
- {t:'Il sole e le ombre',p:'Metà dicembre, ore 10: il sole è basso e ogni fila fa ombra alla parte bassa dei moduli della fila a nord. Il modello calcola quest\u2019ombra ora per ora, mese per mese, e la toglie dalla produzione.',
-  go:function(){setT('tConstr',false);setT('tPhase',false);setMonth(11);setHour(10);view('shade');}},
+ {t:'Il sito',map:1,p:'Polistena, contrada Primogenito, lungo la SGC SS 682. A ovest c\u2019è la nostra stazione di servizio. In rosso il confine del terreno; tratteggiati i vincoli: fascia di rispetto stradale, metanodotto e distanza minima dai confini. Le serre stanno tutte dentro.',
+  go:function(){setT('tCrops',false);setT('tRoof',true);setT('tConstr',true);setT('tLabels',true);setT('tPhase',false);view('top');}},
+ {t:'Le serre',map:1,p:'Ventitré serre multitunnel su dieci file, 8.832 m² coperti. Sulla falda sud due moduli in verticale, 1.344 in tutto per 974,4 kWp; la falda nord ad arco ha il film plastico. Sotto si continua a coltivare.',
+  go:function(){setT('tCrops',false);setT('tRoof',true);setT('tConstr',false);setT('tPhase',false);view('in');}},
+ {t:'Il sole e le ombre',map:1,p:'Metà dicembre, ore 10: il sole è basso e ogni fila fa ombra alla parte bassa dei moduli della fila a nord. Il modello calcola quest\u2019ombra ora per ora, mese per mese, e la toglie dalla produzione.',
+  go:function(){setT('tCrops',false);setT('tRoof',true);setT('tConstr',false);setT('tPhase',false);setMonth(11);setHour(10);view('shade');}},
  {t:'La produzione',p:'1.214 MWh all\u2019anno secondo PVGIS, il servizio della Commissione Europea, per questo sito e questa inclinazione. Luglio è il mese migliore con 151 MWh, dicembre il più basso con 57. Il grafico del giorno medio si sposta col mese.',
   go:function(){setMonth(6);setHour(12);view('persp');setTimeout(function(){window.scrollTo(0,byId('yield').getBoundingClientRect().top+window.scrollY-tourEl.offsetHeight-12);},60);}},
  {t:'I ricavi',p:'Vendita dell\u2019energia più il contributo della comunità energetica, meno i costi operativi. Il business plan mostra i 25 anni di vita dell\u2019impianto; chiudendolo si torna qui.',
-  go:function(){openBP();}}];
+  go:function(){openBP();}},
+ {t:'Cosa cresce sotto',map:1,p:'Sotto i pannelli si coltiva. Tolte le coperture si vede la mappa: fragole al centro (40%), mirtilli (20%) e more (20%) a nord e a ovest, idroponica verticale a sud (20%), con torri alte 2 m e le vasche dei pesci all\u2019inizio della fila 8: l\u2019acqua dei pesci nutre le piante a foglia.',
+  go:function(){setT('tConstr',false);setT('tPhase',false);setT('tCrops',true);setT('tRoof',false);view('top');}}];
 var tIdx=-1,tourEl=byId('tour');
 function setT(id,on){var b=byId(id);if((b.getAttribute('aria-pressed')==='true')!==on)b.click();}
 function view(n){if(!renderer)return;var b=byId('views').querySelector('[data-view="'+n+'"]');if(b){if(curView!==n)b.click();}else{if(curView==='sec'){camera.near=0.5;camera.far=2500;}Array.prototype.forEach.call(byId('views').children,function(x){x.setAttribute('aria-pressed','false');});goTo(n,curView==='sec');}}
@@ -609,13 +663,13 @@ var tsteps=byId('tsteps');TOUR.forEach(function(s,k){var b=document.createElemen
 function tourGo(k){tIdx=k;tourEl.classList.remove('off');var s=TOUR[k];byId('tourT').textContent=(k+1)+' di '+TOUR.length+' · '+s.t;byId('tourP').textContent=s.p;
   Array.prototype.forEach.call(tsteps.children,function(b,j){b.setAttribute('aria-pressed',j===k?'true':'false');});
   byId('tourPrev').disabled=k===0;byId('tourNext').textContent=k===TOUR.length-1?'Esplora da solo':'Avanti';
-  if(k<3)window.scrollTo(0,tourEl.getBoundingClientRect().top+window.scrollY-4);s.go();}
-function tourEnd(){tIdx=-1;tourEl.classList.add('off');setT('tConstr',true);setT('tLabels',true);setT('tPhase',false);view('persp');}
+  if(s.map)window.scrollTo(0,document.querySelector('.lay').getBoundingClientRect().top+window.scrollY-tourEl.offsetHeight-8);s.go();}
+function tourEnd(){tIdx=-1;tourEl.classList.add('off');setT('tCrops',false);setT('tRoof',true);setT('tConstr',true);setT('tLabels',true);setT('tPhase',false);view('persp');}
 byId('tourStart').addEventListener('click',function(){tourGo(0);});
 byId('tourExit').addEventListener('click',tourEnd);
 byId('tourPrev').addEventListener('click',function(){if(tIdx>0)tourGo(tIdx-1);});
 byId('tourNext').addEventListener('click',function(){if(tIdx<TOUR.length-1)tourGo(tIdx+1);else tourEnd();});
 buildCurve();calcYield();resize();setSun(hour);if(renderer)goTo('persp',true);requestAnimationFrame(loop);
-window.__fv={proj:function(x,y,z){var v=V(x,y,z).project(camera);return[(v.x*.5+.5)*size.w,(-v.y*.5+.5)*size.h];},goTo:goTo,setSun:setSun,setMonth:function(m){monthEl.value=m;monthEl.dispatchEvent(new Event('input'));},stats:stats};
+window.__fv={cam:function(p,t,f){camera.near=0.3;camera.far=2500;camera.position.set(p[0],p[1],p[2]);controls.target.set(t[0],t[1],t[2]);camera.fov=f||45;camera.updateProjectionMatrix();controls.update();occlude(true);dirty=true;},proj:function(x,y,z){var v=V(x,y,z).project(camera);return[(v.x*.5+.5)*size.w,(-v.y*.5+.5)*size.h];},goTo:goTo,setSun:setSun,setMonth:function(m){monthEl.value=m;monthEl.dispatchEvent(new Event('input'));},stats:stats};
 })();
 </script></body></html>
