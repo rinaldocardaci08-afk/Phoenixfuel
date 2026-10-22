@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261022a — linguetta 🏗️ IMPIANTI IN SVILUPPO: elenco degli impianti con la vetrina
+//   3D per i clienti (primo: Polistena, serre fotovoltaiche 974,4 kWp). La vetrina e' un
+//   file HTML a se' (fv-vetrina-polistena.html) aperto a tutto schermo dentro il programma;
+//   "Scarica pagina cliente" ne produce una copia in SOLA LETTURA con la data della proposta.
+//   Nessuna tabella nuova: l'elenco e' in _FV_VETRINE finche' non arriva "crea da programma".
 // v20261006d — CONTABILITÀ del contratto: il margine si legge in tre celle separate.
 //   MARGINE LORDO = ricavo − costi diretti (fornitura, trasporto, pratiche, altro),
 //   PROVVIGIONI = costi di tipo 'commissione', MARGINE NETTO = lordo − provvigioni.
@@ -1368,6 +1373,7 @@ function switchFvSubTab(btn) {
   if (tab === 'fv-tab-clienti') fvCaricaClienti();
   if (tab === 'fv-tab-catalogo') fvCaricaCatalogo();
   if (tab === 'fv-tab-fornitori') fvCaricaFornitori();
+  if (tab === 'fv-tab-sviluppo') fvCaricaSviluppo();
 }
 
 // Punto d'ingresso della sezione (chiamato dal menu)
@@ -1552,4 +1558,92 @@ async function fvImputaIncasso(movId, contrattoId) {
   if (r.error) { toast('Errore: ' + r.error.message); return; }
   await fvCaricaContratti();
   fvApriContratto(contrattoId);
+}
+
+// ═══ IMPIANTI IN SVILUPPO — vetrine 3D per i clienti (22/10) ══════════════
+// Ogni vetrina e' un file HTML autonomo nella cartella del programma. Dentro il
+// programma si apre in modalita' interna (i dati di produzione e ricavi si possono
+// provare); la copia per il cliente e' in sola lettura e porta la data della proposta.
+var _FV_VETRINE = [
+  { id: 'polistena', nome: 'Polistena', luogo: 'Polistena (RC) · c/da Primogenito',
+    tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno',
+    file: 'fv-vetrina-polistena.html', ver: '20261022a', stato: 'In sviluppo' }
+];
+
+function fvCaricaSviluppo() {
+  var box = document.getElementById('fvsv-content');
+  if (!box) return;
+  var h = '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Vetrine 3D degli impianti in sviluppo, da mostrare ai clienti. Si aprono a tutto schermo; la pagina da mandare al cliente si scarica in sola lettura.</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';
+  _FV_VETRINE.forEach(function (v) {
+    h += '<div style="background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-left:4px solid #c62828;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><div style="font-size:17px;font-weight:600">' + esc(v.nome) + '</div>'
+      + '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#FAEEDA;color:#633806">' + esc(v.stato) + '</span></div>'
+      + '<div style="font-size:12px;color:var(--text-muted)">' + esc(v.luogo) + '</div>'
+      + '<div style="font-size:13px">' + esc(v.tipo) + ' · <b>' + esc(v.kwp) + '</b> · ' + esc(v.energia) + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'
+      + '<button class="btn-primary" style="font-size:12px;padding:7px 12px" onclick="fvApriVetrina(\'' + v.id + '\')">🌐 Apri la vetrina</button>'
+      + '<button class="btn-primary" style="font-size:12px;padding:7px 12px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)" onclick="fvScaricaVetrina(\'' + v.id + '\')">⬇️ Scarica pagina cliente</button>'
+      + '</div></div>';
+  });
+  h += '</div>';
+  box.innerHTML = h;
+}
+
+function _fvVetrina(id) {
+  for (var i = 0; i < _FV_VETRINE.length; i++) if (_FV_VETRINE[i].id === id) return _FV_VETRINE[i];
+  return null;
+}
+
+function fvApriVetrina(id) {
+  var v = _fvVetrina(id);
+  if (!v) return;
+  var old = document.getElementById('fv-vetrina-ov');
+  if (old) old.remove();
+  var ov = document.createElement('div');
+  ov.id = 'fv-vetrina-ov';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#111;display:flex;flex-direction:column';
+  ov.innerHTML = '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px 12px;background:#1a1d1b;color:#fff;flex-wrap:wrap">'
+    + '<div style="font-size:14px;font-weight:600">🏗️ ' + esc(v.nome) + ' · vetrina 3D</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + '<button class="btn-primary" style="font-size:12px;padding:6px 12px;background:#2c3430;border:0.5px solid #4a544e" onclick="fvScaricaVetrina(\'' + v.id + '\')">⬇️ Scarica pagina cliente</button>'
+    + '<button class="btn-primary" style="font-size:12px;padding:6px 12px;background:#c62828" onclick="fvChiudiVetrina()">✕ Chiudi</button>'
+    + '</div></div>'
+    + '<iframe src="' + v.file + '?v=' + v.ver + '" title="Vetrina ' + esc(v.nome) + '" style="flex:1;width:100%;border:0;background:#eef0ec" allow="fullscreen"></iframe>';
+  document.body.appendChild(ov);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', _fvVetrinaEsc);
+}
+
+function _fvVetrinaEsc(e) { if (e.key === 'Escape') fvChiudiVetrina(); }
+
+function fvChiudiVetrina() {
+  var ov = document.getElementById('fv-vetrina-ov');
+  if (ov) ov.remove();
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', _fvVetrinaEsc);
+}
+
+// Copia per il cliente: stessa pagina, ma in sola lettura e con la data della proposta.
+async function fvScaricaVetrina(id) {
+  var v = _fvVetrina(id);
+  if (!v) return;
+  try {
+    var r = await fetch(v.file + '?v=' + v.ver, { cache: 'no-store' });
+    if (!r.ok) throw new Error('file non trovato (' + r.status + ')');
+    var html = await r.text();
+    var d = new Date(), gg = String(d.getDate()).padStart(2, '0'), mm = String(d.getMonth() + 1).padStart(2, '0'), aa = d.getFullYear();
+    var tag = 'data-mode="interno" data-stamp=""';
+    if (html.indexOf(tag) < 0) throw new Error('la pagina non ha il segnaposto della modalita\' cliente');
+    html = html.replace(tag, 'data-mode="cliente" data-stamp="' + gg + '/' + mm + '/' + aa + '"');
+    var blob = new Blob([html], { type: 'text/html' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'PhoenixFuelSolar_' + v.nome.replace(/\s+/g, '_') + '_' + gg + '-' + mm + '-' + aa + '.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    toast('Pagina cliente scaricata');
+  } catch (e) {
+    toast('Errore: ' + e.message);
+  }
 }
