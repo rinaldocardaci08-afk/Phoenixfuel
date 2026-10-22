@@ -12,7 +12,7 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:16px;line-height:1.5;padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 body.modal-open{overflow:hidden}
-.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.wrap{max-width:1360px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
 .top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between}
 .brand{display:inline-block;background:#fff;padding:8px 12px;border:1px solid var(--line)}
 .brand img{display:block;height:60px;width:auto}
@@ -36,6 +36,15 @@ h2{font-family:var(--font-display);font-weight:600;font-size:24px;margin:0}
 .card{position:absolute;left:10px;top:10px;max-width:min(300px,calc(100% - 20px));background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);padding:10px 12px 12px;font-size:14px;line-height:1.4;box-shadow:0 4px 16px rgba(0,0,0,.18)}
 .card[hidden]{display:none}.card h3{font-family:var(--font-display);font-weight:600;font-size:20px;margin:0 28px 4px 0}.card p{margin:0;color:var(--muted)}.card dl{margin:6px 0 0}.card .row{padding:4px 0;font-size:13px}.card .x{position:absolute;right:4px;top:4px;min-height:28px;padding:2px 8px}
 .nogl{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:var(--muted)}
+.lay{display:grid;grid-template-columns:150px minmax(0,1fr) 190px;gap:10px;align-items:stretch}
+.side{background:var(--surface);border:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.col{display:flex;flex-direction:column;gap:5px}.col .btn{text-align:left;width:100%}
+.btn.tg{display:flex;justify-content:space-between;align-items:center;gap:6px;text-align:left}.btn.tg::after{content:'off';font-size:11px;opacity:.75}.btn.tg[aria-pressed="true"]::after{content:'on'}
+.side input[type=range]{width:100%;accent-color:var(--accent)}
+.sval{display:flex;justify-content:space-between;font-family:var(--font-data);font-size:12px;color:var(--muted)}.sval b{color:var(--fg);font-size:13px}
+#play{width:100%}
+.lay>.stage{min-width:0;aspect-ratio:auto;min-height:540px;height:auto}
+.mini{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:4px}.mini b{font-family:var(--font-display);font-weight:600;font-size:28px;line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}.mini svg{width:100%;height:70px;display:block}.mini small{font-family:var(--font-data);font-size:11px;color:var(--muted);line-height:1.35}
 .toolbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px 26px;padding:14px 16px;background:var(--surface);border:1px solid var(--line)}
 .group{display:flex;flex-direction:column;gap:7px;min-width:0}
 .lbl{font-family:var(--font-data);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
@@ -71,7 +80,7 @@ svg text{font-family:var(--font-data);font-size:11px;fill:var(--muted)}
 .notes{font-size:14px;color:var(--muted);max-width:82ch;margin:0}
 .contact{border-top:2px solid var(--fg);padding-top:14px;display:flex;flex-wrap:wrap;gap:6px 32px;justify-content:space-between;align-items:flex-end}
 .contact p{margin:0}.contact .name{font-family:var(--font-display);font-weight:600;font-size:22px;line-height:1.1}.contact .role{color:var(--muted);font-size:14px}
-.tour{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--accent);padding:12px 16px;display:flex;flex-direction:column;gap:8px;position:sticky;bottom:0;z-index:5;box-shadow:0 -6px 18px rgba(0,0,0,.08)}
+.tour{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--accent);padding:12px 16px;display:flex;flex-direction:column;gap:8px;position:sticky;top:0;z-index:5;box-shadow:0 6px 18px rgba(0,0,0,.1)}
 .tour .thead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
 .tour h3{font-family:var(--font-display);font-weight:600;font-size:22px;margin:0}
 .tour p{margin:0;max-width:75ch}
@@ -97,6 +106,8 @@ thead th{font-family:var(--font-data);font-size:11px;letter-spacing:.06em;text-t
 td{font-family:var(--font-data);font-variant-numeric:tabular-nums}
 tr.key td{font-weight:600;background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .assume{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 24px;font-size:14px;color:var(--muted);margin:0;padding-left:18px}
+@media (max-width:900px){.lay{grid-template-columns:130px minmax(0,1fr) 165px}.side{padding:10px}.col .btn,.btn.tg{font-size:13px;padding:6px 8px}}
+@media (max-width:640px){.lay>.stage{aspect-ratio:4/5;min-height:380px}.lay{grid-template-columns:1fr}.stage{order:-1}#sideR{order:0}#sideL{order:1}.col{flex-direction:row;flex-wrap:wrap}.col .btn{width:auto}.btn.tg{width:auto}}
 @media (max-width:700px){
   .kpis,.bpk{grid-template-columns:repeat(2,minmax(0,1fr))}
   .stage{aspect-ratio:4/5;min-height:380px}
@@ -128,13 +139,6 @@ tr.key td{font-weight:600;background:color-mix(in srgb,var(--accent) 8%,transpar
     <div class="kpi"><b>≈ 300 t</b><span>CO₂ evitata all'anno</span><small>fattore medio rete italiana ≈ 0,25 kg/kWh</small></div>
   </div>
 
-  <div class="stage" id="stage">
-    <canvas id="gl" aria-label="Modello tridimensionale dell'impianto su serre con il terreno e i vincoli"></canvas>
-    <div id="labels"></div>
-    <div class="hint">Trascini per ruotare · tocchi un oggetto per le informazioni</div>
-    <div class="card" id="card" hidden><button class="btn x" id="cardX" aria-label="Chiudi">×</button><h3 id="cardT"></h3><p id="cardP"></p><dl id="cardD"></dl></div>
-  </div>
-
   <section class="tour off" id="tour" aria-live="polite">
     <p class="offonly"><b>Visita guidata</b> · cinque tappe, dal terreno ai ricavi. Si può uscire quando si vuole.</p>
     <button class="btn big offonly" id="tourStart">Inizia la visita</button>
@@ -143,9 +147,10 @@ tr.key td{font-weight:600;background:color-mix(in srgb,var(--accent) 8%,transpar
     <div class="tnav on"><button class="btn" id="tourPrev">Indietro</button><button class="btn big" id="tourNext">Avanti</button></div>
   </section>
 
-  <div class="toolbar">
+  <div class="lay">
+  <aside class="side" id="sideL">
     <div class="group"><span class="lbl">Punto di vista</span>
-      <div class="seg" id="views">
+      <div class="col" id="views">
         <button class="btn" data-view="persp" aria-pressed="true">Prospettiva</button>
         <button class="btn" data-view="top" aria-pressed="false">Dall'alto</button>
         <button class="btn" data-view="sun" aria-pressed="false">Il sole</button>
@@ -153,19 +158,31 @@ tr.key td{font-weight:600;background:color-mix(in srgb,var(--accent) 8%,transpar
         <button class="btn more" data-view="sec" aria-pressed="false">Sezione</button>
         <button class="btn" data-view="in" aria-pressed="false">Dentro la serra</button>
       </div></div>
+  </aside>
+  <div class="stage" id="stage">
+    <canvas id="gl" aria-label="Modello tridimensionale dell'impianto su serre con il terreno e i vincoli"></canvas>
+    <div id="labels"></div>
+    <div class="hint">Trascini per ruotare · tocchi un oggetto per le informazioni</div>
+    <div class="card" id="card" hidden><button class="btn x" id="cardX" aria-label="Chiudi">×</button><h3 id="cardT"></h3><p id="cardP"></p><dl id="cardD"></dl></div>
+  </div>
+
+  <aside class="side" id="sideR">
     <div class="group"><span class="lbl">Mostra</span>
-      <div class="seg">
-        <button class="btn" id="tPhase" aria-pressed="false">Oggi, senza impianto</button>
-        <button class="btn" id="tConstr" aria-pressed="true">Fasce e vincoli</button>
-        <button class="btn" id="tLabels" aria-pressed="true">Etichette</button>
-        <button class="btn more" id="tTrees" aria-pressed="true">Alberi</button>
+      <div class="col">
+        <button class="btn tg" id="tPhase" aria-pressed="false">Oggi, senza impianto</button>
+        <button class="btn tg" id="tConstr" aria-pressed="true">Fasce e vincoli</button>
+        <button class="btn tg" id="tLabels" aria-pressed="true">Etichette</button>
+        <button class="btn tg more" id="tTrees" aria-pressed="true">Alberi</button>
       </div></div>
+    <div class="group"><span class="lbl">Mese</span><input type="range" id="month" min="0" max="11" step="1" value="5" aria-label="Mese"><div class="sval"><span>Gen</span><b id="monthV">Giugno</b><span>Dic</span></div></div>
+    <div class="group"><span class="lbl">Ora</span><input type="range" id="hour" min="5" max="20" step="0.25" value="11" aria-label="Ora solare"><div class="sval"><span>5:00</span><b id="clock">11:00</b><span>20:00</span></div></div>
+    <button class="btn big" id="play" aria-pressed="false">▶ Avvia la giornata</button>
+    <div class="mini"><span class="lbl">Produzione adesso</span><b id="miniKW">-</b><svg id="mini" viewBox="0 0 160 70" preserveAspectRatio="none" role="img" aria-label="Curva della giornata media"></svg><small id="miniDay"></small></div>
+  </aside>
   </div>
 
   <section class="panel" id="day">
     <div class="dayhead"><h2>Il sole, mese per mese</h2><p class="readout" id="readout"></p></div>
-    <div class="ctl"><span class="lbl">Mese</span><input type="range" id="month" min="0" max="11" step="1" value="5" aria-label="Mese"><span class="val" id="monthV">Giugno</span></div>
-    <div class="ctl"><button class="btn" id="play" aria-pressed="false">Avvia</button><input type="range" id="hour" min="5" max="20" step="0.25" value="11" aria-label="Ora solare"><span class="val" id="clock">11:00</span></div>
     <div class="chartbox" id="chartbox"><svg id="chart" role="img" aria-label="Potenza dell'impianto nella giornata media del mese"></svg></div>
     <p class="notes" id="sunnote"></p>
   </section>
@@ -446,6 +463,10 @@ function drawChart(){if(!curve)return;var g=chartGeom();function X(h){return g.m
   s+='<path d="'+path+'L'+X(X1).toFixed(1)+' '+Y(0)+'L'+X(X0).toFixed(1)+' '+Y(0)+'Z" style="fill:var(--accent)" fill-opacity="0.14"/><path d="'+path+'" fill="none" style="stroke:var(--accent)" stroke-width="2.5"/>';
   var p=powerAt(hour),xm=X(hour);s+='<line x1="'+xm+'" x2="'+xm+'" y1="'+g.mt+'" y2="'+Y(0)+'" style="stroke:var(--fg)" stroke-dasharray="2 3"/><circle cx="'+xm+'" cy="'+Y(p.t)+'" r="5" style="fill:var(--fg)"/>';
   s+='<text x="'+g.ml+'" y="12">kW · giornata media di '+MESI[month].toLowerCase()+'</text>';
+  var mw=160,mh=70,mx=function(h){return (h-X0)/(X1-X0)*mw;},my=function(v){return mh-2-(v/YMAX)*(mh-6);};
+  var mp=curve.pts.map(function(q,i){return(i?'L':'M')+mx(q.h).toFixed(1)+' '+my(q.t).toFixed(1);}).join(''),pp=powerAt(hour);
+  byId('mini').innerHTML='<path d="'+mp+'L'+mw+' '+my(0)+'L0 '+my(0)+'Z" style="fill:var(--accent)" fill-opacity="0.15"/><path d="'+mp+'" fill="none" style="stroke:var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/><line x1="'+mx(hour)+'" x2="'+mx(hour)+'" y1="0" y2="'+mh+'" style="stroke:var(--fg)" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>';
+  byId('miniKW').textContent=it0(pp.t)+' kW';byId('miniDay').textContent=MESI[month]+' · '+(curve.eDay/1000).toFixed(1).replace('.',',')+' MWh nel giorno medio · '+it0(PVGIS[month]/1000)+' MWh nel mese';
   chartEl.setAttribute('viewBox','0 0 '+g.W+' '+g.H);chartEl.setAttribute('height',g.H);chartEl.innerHTML=s;}
 function setSun(h){hour=h;var s=sunAt(h,month),up=s.el>0.02;
   if(renderer){sun.visible=up;sun.position.set(s.dir.x*300,s.dir.y*300,s.dir.z*300);sunSprite.visible=up;
@@ -462,7 +483,7 @@ var dragging=false;chartEl.addEventListener('pointerdown',function(ev){dragging=
 chartEl.addEventListener('pointermove',function(ev){if(dragging)hourFromPointer(ev);});chartEl.addEventListener('pointerup',function(){dragging=false;});chartEl.addEventListener('pointercancel',function(){dragging=false;});
 new ResizeObserver(drawChart).observe(chartBox);
 var playing=false,lastT=0,playBtn=byId('play');
-playBtn.addEventListener('click',function(){playing=!playing;playBtn.setAttribute('aria-pressed',playing?'true':'false');playBtn.textContent=playing?'Ferma':'Avvia';lastT=performance.now();});
+playBtn.addEventListener('click',function(){playing=!playing;playBtn.setAttribute('aria-pressed',playing?'true':'false');playBtn.textContent=playing?'■ Ferma':'▶ Avvia la giornata';lastT=performance.now();});
 
 /* ===================== PRODUZIONE E RICAVI ===================== */
 function num(v){var n=parseFloat(String(v).replace(/\./g,'').replace(',','.'));return isFinite(n)?n:0;}
@@ -576,7 +597,7 @@ var TOUR=[
  {t:'Il sole e le ombre',p:'Metà dicembre, ore 10: il sole è basso e ogni fila fa ombra alla parte bassa dei moduli della fila a nord. Il modello calcola quest\u2019ombra ora per ora, mese per mese, e la toglie dalla produzione.',
   go:function(){setT('tConstr',false);setT('tPhase',false);setMonth(11);setHour(10);view('shade');}},
  {t:'La produzione',p:'1.214 MWh all\u2019anno secondo PVGIS, il servizio della Commissione Europea, per questo sito e questa inclinazione. Luglio è il mese migliore con 151 MWh, dicembre il più basso con 57. Il grafico del giorno medio si sposta col mese.',
-  go:function(){setMonth(6);setHour(12);view('persp');setTimeout(function(){window.scrollTo(0,byId('yield').getBoundingClientRect().top+window.scrollY-12);},60);}},
+  go:function(){setMonth(6);setHour(12);view('persp');setTimeout(function(){window.scrollTo(0,byId('yield').getBoundingClientRect().top+window.scrollY-tourEl.offsetHeight-12);},60);}},
  {t:'I ricavi',p:'Vendita dell\u2019energia più il contributo della comunità energetica, meno i costi operativi. Il business plan mostra i 25 anni di vita dell\u2019impianto; chiudendolo si torna qui.',
   go:function(){openBP();}}];
 var tIdx=-1,tourEl=byId('tour');
@@ -588,7 +609,7 @@ var tsteps=byId('tsteps');TOUR.forEach(function(s,k){var b=document.createElemen
 function tourGo(k){tIdx=k;tourEl.classList.remove('off');var s=TOUR[k];byId('tourT').textContent=(k+1)+' di '+TOUR.length+' · '+s.t;byId('tourP').textContent=s.p;
   Array.prototype.forEach.call(tsteps.children,function(b,j){b.setAttribute('aria-pressed',j===k?'true':'false');});
   byId('tourPrev').disabled=k===0;byId('tourNext').textContent=k===TOUR.length-1?'Esplora da solo':'Avanti';
-  if(k<3)window.scrollTo(0,stage.getBoundingClientRect().top+window.scrollY-8);s.go();}
+  if(k<3)window.scrollTo(0,tourEl.getBoundingClientRect().top+window.scrollY-4);s.go();}
 function tourEnd(){tIdx=-1;tourEl.classList.add('off');setT('tConstr',true);setT('tLabels',true);setT('tPhase',false);view('persp');}
 byId('tourStart').addEventListener('click',function(){tourGo(0);});
 byId('tourExit').addEventListener('click',tourEnd);
