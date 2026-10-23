@@ -1,5 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261023c — (1) IMPIANTI VENDUTI: si leggono TUTTI gli impianti con destinazione
+//   'vendita', di qualsiasi causale (Palmi spariva perche' la pagina vendite leggeva solo la
+//   causale selezionata). (2) FORNITORE OBBLIGATORIO sulla spesa: menu con i Fornitori FV
+//   (fv_fornitori) piu' "Generico"; la voce si salva come "Fornitore – cosa" cosi' l'elenco
+//   raggruppa e fa il subtotale per fornitore senza saltarne. (3) MASTRINO: il saldo e' il
+//   RESIDUO DA PAGARE in negativo. Riga contratto = −totale con IVA; ogni pagamento lo
+//   riduce (es. −78.000 → pagamento 20.000 → −58.000). Fatture e rate previste restano come
+//   riferimento, senza saldo.
 // v20261023b — PAGINA RIFATTA A LINGUETTE (layout B scelto da Rinaldo il 23/10).
 //   · Due modi: 'nostri' (Fotovoltaico → ☀️ Investimenti, box #inv-content) e 'vendita'
 //     (Fotovoltaico → 🤝 Vendita a clienti → Impianti venduti, box #inv-vend-content).
@@ -185,11 +193,17 @@ async function caricaInvestimenti(modo) {
 
     var r = await Promise.all([
       sb.from('investimenti_risorse').select('*').eq('causale_id', _invCausale),
-      sb.from('investimenti_impianti').select('*').eq('causale_id', _invCausale).order('nome'),
-      Promise.resolve({ data: [] }),   // voci di costo fisse non piu' usate (09/10)
-      sb.from('foglio_giornale_movimenti')
-        .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id')
-        .eq('causale_investimento_id', _invCausale).order('data', { ascending: false }),
+      (_invModo === 'vendita'
+        ? sb.from('investimenti_impianti').select('*').eq('destinazione', 'vendita').order('nome')
+        : sb.from('investimenti_impianti').select('*').eq('causale_id', _invCausale).order('nome')),
+      sb.from('fv_fornitori').select('id,ragione_sociale').order('ragione_sociale'),
+      (_invModo === 'vendita'
+        ? sb.from('foglio_giornale_movimenti')
+            .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id')
+            .not('investimento_impianto_id', 'is', null).order('data', { ascending: false })
+        : sb.from('foglio_giornale_movimenti')
+            .select('id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id')
+            .eq('causale_investimento_id', _invCausale).order('data', { ascending: false })),
       sb.from('banche_finanziamenti').select('id,descrizione,capitale,tasso,durata_rate,rate_preammortamento,data_prima_rata,numero_contratto'),
       sb.from('investimenti_preventivi').select('*').order('data'),
       sb.from('investimenti_produzione').select('*').order('anno'),
@@ -202,7 +216,8 @@ async function caricaInvestimenti(modo) {
       causali: causali,
       risorse: r[0].data || [],
       impianti: r[1].data || [],
-      voci: r[2].data || [],
+      voci: [],
+      fornitori: ((r[2] && r[2].data) || []).map(function (f) { return f.ragione_sociale; }).filter(Boolean),
       movimenti: r[3].data || [],
       finanziamenti: r[4].data || [],
       preventivi: (r[5] && r[5].data) || [],
@@ -435,6 +450,9 @@ function _invPannelloSpese(D, C) {
     C.daImputare.forEach(function (m) {
       var sug = _invSuggerisciImpianto((m.nota_imputazione || '') + ' ' + (m.descrizione || ''));
       var testoVoce = m.nota_imputazione || (_invTestoGenerico(m.descrizione) ? '' : (m.descrizione || ''));
+      var sv = _invSplitVoce(testoVoce);
+      var fornSug = _invFornDaTesto(sv.forn) || _invFornDaTesto(testoVoce.split(' ').slice(0, 2).join(' '));
+      if (fornSug && sv.forn) testoVoce = sv.cosa;
       h += '<tr style="border-bottom:0.5px solid var(--border)">'
         + '<td style="padding:7px;white-space:nowrap;vertical-align:top">' + _invData(m.data) + '</td>'
         + '<td style="padding:7px;vertical-align:top">' + _invEsc(m.descrizione || '')
@@ -447,7 +465,8 @@ function _invPannelloSpese(D, C) {
         + '<option value="">— imputa a… —</option>'
         + D.impianti.map(function (i) { return '<option value="' + i.id + '"' + (sug && sug.id === i.id ? ' selected' : '') + '>' + _invEsc(i.nome) + (_invIsVend(i) ? ' (vendita)' : '') + '</option>'; }).join('')
         + '</select> '
-        + '<input id="inv-voce-' + m.id + '" value="' + _invEsc(testoVoce) + '" placeholder="voce di spesa (es. Ormus Plant – saldo)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:220px"> '
+        + _invSelForn('inv-forn-' + m.id, fornSug) + ' '
+        + '<input id="inv-voce-' + m.id + '" value="' + _invEsc(testoVoce) + '" placeholder="cosa (es. rata alla firma 30%)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:190px"> '
         + '<button onclick="invImputaRiga(\'' + m.id + '\')" class="btn-primary" style="font-size:11.5px;padding:5px 10px">✓ Imputa</button> '
         + '<button onclick="invSegnaGenerale(\'' + m.id + '\')" title="Resta un costo comune del ramo" style="font-size:11.5px;padding:5px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">spesa generale</button>'
         + (sug ? '<div style="font-size:10.5px;color:#27500A;margin-top:3px">✓ proposto "' + _invEsc(sug.nome) + '": il nome è nella nota</div>'
@@ -618,11 +637,46 @@ function _invVoceMov(m) {
   if (m.nota_imputazione && String(m.nota_imputazione).trim()) return String(m.nota_imputazione).trim();
   return _invTestoGenerico(m.descrizione) ? '' : String(m.descrizione || '').trim();
 }
+// ── FORNITORE DELLA SPESA (23/10) ──────────────────────────────────────────
+// La voce si salva come "Fornitore – cosa": il gruppo (e il subtotale) e' il fornitore.
+function _invSplitVoce(t) {
+  t = String(t || '');
+  var m = t.match(/^(.*?)\s+[–—-]\s+(.*)$/);
+  return m ? { forn: m[1].trim(), cosa: m[2].trim() } : { forn: '', cosa: t.trim() };
+}
+// fornitore della lista che corrisponde al testo (uguale, o stesso nome senza forma societaria)
+function _invFornDaTesto(t) {
+  var lista = (_invDati && _invDati.fornitori) || [];
+  var k = _invChiaveForn(t);
+  if (!k) return '';
+  if (k === 'generico') return 'Generico';
+  for (var i = 0; i < lista.length; i++) {
+    var kf = _invChiaveForn(lista[i]);
+    if (kf === k || kf.indexOf(k) === 0 || k.indexOf(kf) === 0) return lista[i];
+  }
+  return '';
+}
+function _invSelForn(id, scelto) {
+  var lista = (_invDati && _invDati.fornitori) || [];
+  var h = '<select id="' + id + '" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #A32D2D;border-radius:6px;background:var(--bg);color:var(--text);max-width:190px">'
+    + '<option value="">— fornitore —</option>';
+  lista.forEach(function (f) { h += '<option value="' + _invEsc(f) + '"' + (f === scelto ? ' selected' : '') + '>' + _invEsc(f) + '</option>'; });
+  h += '<option value="Generico"' + (scelto === 'Generico' ? ' selected' : '') + '>Generico (non in elenco)</option></select>';
+  return h;
+}
+function _invComponiVoce(forn, cosa) {
+  forn = String(forn || '').trim(); cosa = String(cosa || '').trim();
+  if (!forn) return cosa;
+  return cosa ? forn + ' – ' + cosa : forn;
+}
+
 async function invImputaRiga(movId) {
   if (!_invPuo()) { toast('Permesso negato'); return; }
   var imp = (document.getElementById('inv-imp-' + movId) || {}).value;
-  var voce = ((document.getElementById('inv-voce-' + movId) || {}).value || '').trim();
+  var forn = (document.getElementById('inv-forn-' + movId) || {}).value || '';
+  var voce = _invComponiVoce(forn, (document.getElementById('inv-voce-' + movId) || {}).value);
   if (!imp) { toast('Scegli l\'impianto'); return; }
+  if (!forn) { toast('Scegli il fornitore (o Generico se non è in elenco)'); return; }
   var r = await sb.from('foglio_giornale_movimenti').update({ investimento_impianto_id: imp, nota_imputazione: voce || null }).eq('id', movId);
   if (r.error) { toast('Errore: ' + r.error.message); return; }
   if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'imputata spesa ' + movId + ' a impianto ' + imp + (voce ? ' — ' + voce : ''));
@@ -639,13 +693,18 @@ function invModaleVoceSpesa(movId) {
   var h = '<div style="max-width:520px"><div style="font-size:16px;font-weight:600;margin-bottom:4px">✏️ Spesa del ' + _invData(m.data) + '</div>'
     + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">Le modifiche si salvano sul movimento del foglio giornale: non ci sono copie da allineare. Conto e metodo di pagamento si cambiano dal foglio giornale.</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 0.6fr;gap:10px">'
-    + '<div style="grid-column:1/4"><label style="' + lb + '">Voce</label><input id="inv-vs-testo" value="' + _invEsc(_invVoceMov(m)) + '" style="' + inp + '" placeholder="es. Ormus Plant – rata alla firma 30%"></div>'
+    + (function () {
+        var sv = _invSplitVoce(_invVoceMov(m)), f = _invFornDaTesto(sv.forn);
+        var cosa = f ? sv.cosa : _invVoceMov(m);
+        return '<div style="grid-column:1/4"><label style="' + lb + '">Fornitore *</label>' + _invSelForn('inv-vs-forn', f).replace('font-size:11.5px;padding:5px 8px', 'width:100%;max-width:none;font-size:13px;padding:8px 10px') + '</div>'
+          + '<div style="grid-column:1/4"><label style="' + lb + '">Cosa</label><input id="inv-vs-testo" value="' + _invEsc(cosa) + '" style="' + inp + '" placeholder="es. rata alla firma 30%"></div>';
+      })()
     + '<div><label style="' + lb + '">Data</label><input id="inv-vs-data" type="date" value="' + _invEsc(String(m.data || '').slice(0, 10)) + '" style="' + inp + '"></div>'
     + '<div><label style="' + lb + '">Importo con IVA €</label><input id="inv-vs-importo" type="number" step="0.01" min="0.01" value="' + Number(m.importo || 0).toFixed(2) + '" oninput="invVsCalcola()" style="' + inp + ';font-family:var(--font-mono)"></div>'
     + '<div><label style="' + lb + '">IVA %</label><input id="inv-vs-iva" type="number" step="0.1" min="0" value="' + aliq + '" oninput="invVsCalcola()" style="' + inp + ';font-family:var(--font-mono);text-align:right"></div>'
     + '</div>'
     + '<div id="inv-vs-calc" style="font-size:12px;margin-top:8px;color:var(--text-muted)"></div>'
-    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Le spese si raggruppano per la parte di voce prima del trattino: scrivi "Fornitore – cosa".</div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Le spese si raggruppano e si sommano per fornitore. Se il fornitore non è in elenco scegli Generico, oppure aggiungilo in 🏭 Fornitori FV.</div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
     + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
     + '<button onclick="invSalvaVoceSpesa(\'' + m.id + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
@@ -666,7 +725,9 @@ function invVsCalcola() {
 async function invSalvaVoceSpesa(movId) {
   if (!_invPuo()) { toast('Permesso negato'); return; }
   var g = function (id) { var e = document.getElementById(id); return e ? e.value : ''; };
-  var t = (g('inv-vs-testo') || '').trim();
+  var fornVs = g('inv-vs-forn');
+  if (!fornVs) { toast('Scegli il fornitore (o Generico se non è in elenco)'); return; }
+  var t = _invComponiVoce(fornVs, g('inv-vs-testo'));
   var data = g('inv-vs-data');
   var tot = parseFloat(g('inv-vs-importo')) || 0;
   var iva = parseFloat(g('inv-vs-iva'));
@@ -851,7 +912,7 @@ function _invBloccoElencoSpese(i, spese, speso, prev) {
               + '<button onclick="invTogliImputazione(\'' + m.id + '\')" title="Togli dall\'impianto" style="font-size:11px;padding:4px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">togli</button>' : '')
           + '</td></tr>';
       });
-      if (g.righe.length > 1) {
+      if (true) {   // v20261023c — subtotale per OGNI fornitore, anche con una sola spesa
         h += '<tr style="background:var(--bg-kpi,var(--bg));font-weight:600;color:#185FA5">'
           + '<td></td><td style="padding:6px 7px">Totale ' + _invEsc(g.nome) + ' (' + g.righe.length + ')</td>'
           + '<td style="padding:6px 7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(subI) + '</td>'
@@ -961,7 +1022,7 @@ function _invBloccoMastrino(i, spese, budget) {
   h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
     + '<div><div style="font-size:13px;font-weight:700">📒 Mastrino fornitore — ' + _invEsc(pr.fornitore) + '</div>'
     + '<div style="font-size:11px;color:var(--text-muted)">Contratto = preventivo scelto' + (pr.numero ? ' n. ' + _invEsc(pr.numero) : '') + (pr.data ? ' del ' + _invData(pr.data) : '')
-    + ' · ' + _invEuro(tot) + ' + IVA ' + aliq + '% · fatture in avere, pagamenti in dare</div></div>'
+    + ' · ' + _invEuro(tot) + ' + IVA ' + aliq + '% · contratto in avere, pagamenti in dare</div></div>'
     + (_invPuo() ? '<button onclick="invModaleRate(\'' + pr.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">✏️ Rate, IVA e fatture</button>' : '')
     + '</div>';
 
@@ -975,7 +1036,7 @@ function _invBloccoMastrino(i, spese, budget) {
     + kpi('Contratto', _invEuro(tot), 'imponibile · ' + _invEuro(totIvato) + ' con IVA')
     + kpi('Fatturato (avere)', _invEuro(fattImp), (tot > 0 ? (fattImp / tot * 100).toFixed(0) : 0) + '% · imponibile', '#A32D2D')
     + kpi('Pagato (dare)', _invEuro(pagato), 'con IVA · ' + pag.length + ' pagament' + (pag.length === 1 ? 'o' : 'i'), '#185FA5')
-    + kpi('Ancora da pagare', _invEuro(daPagare), 'sul contratto con IVA', daPagare < -0.5 ? '#A32D2D' : '')
+    + kpi('Saldo da pagare', _invEuro(-daPagare), 'contratto con IVA − pagato', daPagare > 0.5 ? '#A32D2D' : '#27500A')
     + '</div>';
 
   // barra fatturato / pagato sul contratto
@@ -992,44 +1053,47 @@ function _invBloccoMastrino(i, spese, budget) {
   var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border)';
   var td = 'padding:7px;border-bottom:0.5px solid var(--border)';
   var num = ';text-align:right;font-family:var(--font-mono)';
+  var rif = function (t) { return '<div style="font-size:10.5px;color:var(--text-muted)">' + t + '</div>'; };
+  // v20261023c — saldo = RESIDUO DA PAGARE, in negativo: parte da −contratto e
+  // ogni pagamento lo riduce. Fatture e rate previste sono solo riferimento.
   h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:620px">';
   h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
     + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">Descrizione</th>'
-    + '<th style="text-align:right;' + th + '">Dare<br>pagamenti</th><th style="text-align:right;' + th + '">Avere<br>fatture</th>'
-    + '<th style="text-align:right;' + th + '">Saldo<br>a debito</th></tr>';
-  var saldo = 0;
+    + '<th style="text-align:right;' + th + '">Dare<br>pagamenti</th><th style="text-align:right;' + th + '">Avere<br>contratto</th>'
+    + '<th style="text-align:right;' + th + '">Saldo<br>da pagare</th></tr>';
+  var residuo = -totIvato;
+  h += '<tr style="background:var(--bg)"><td style="' + td + ';white-space:nowrap">' + (pr.data ? _invData(pr.data) : '—') + '</td>'
+    + '<td style="' + td + '"><strong>Contratto ' + _invEsc(pr.fornitore) + '</strong>' + rif(_invEuro(tot) + ' + IVA ' + aliq + '% ' + _invEuro(totIvato - tot)) + '</td>'
+    + '<td style="' + td + num + '"></td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _invEuro(totIvato) + '</td>'
+    + '<td style="' + td + num + ';font-weight:700;color:#A32D2D">' + _invEuro(residuo) + '</td></tr>';
   righe.forEach(function (x) {
     if (x.tipo === 'f') {
-      var av = x.imp + x.iva; saldo += av;
-      h += '<tr><td style="' + td + ';white-space:nowrap">' + (x.data ? _invData(x.data) : '—') + '</td>'
-        + '<td style="' + td + '">Fattura ' + (x.r.fattura_num ? 'n. ' + _invEsc(x.r.fattura_num) + ' · ' : '') + Number(x.r.perc) + '% ' + _invEsc(x.r.evento || '')
-        + '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEuro(x.imp) + ' + IVA ' + _invEuro(x.iva) + '</div></td>'
-        + '<td style="' + td + num + '"></td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _invEuro(av) + '</td>'
-        + '<td style="' + td + num + '">' + _invEuro(saldo) + '</td></tr>';
+      h += '<tr style="color:var(--text-muted)"><td style="' + td + ';white-space:nowrap">' + (x.data ? _invData(x.data) : '—') + '</td>'
+        + '<td style="' + td + '">🧾 Fattura ' + (x.r.fattura_num ? 'n. ' + _invEsc(x.r.fattura_num) + ' · ' : '') + Number(x.r.perc) + '% ' + _invEsc(x.r.evento || '')
+        + rif(_invEuro(x.imp) + ' + IVA ' + _invEuro(x.iva) + ' = ' + _invEuro(x.imp + x.iva) + ' · rata del contratto, già compresa sopra') + '</td>'
+        + '<td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td></tr>';
     } else {
-      var m = x.m, da = Number(m.importo || 0); saldo -= da;
+      var m = x.m, da = Number(m.importo || 0); residuo += da;
       h += '<tr><td style="' + td + ';white-space:nowrap">' + _invData(m.data) + '</td>'
         + '<td style="' + td + '">' + _invEsc(_invVoceMov(m) || m.descrizione || 'Pagamento')
         + ' <span style="font-size:9.5px;background:#EAF3DE;color:#27500A;padding:1px 7px;border-radius:9px;font-weight:700">foglio giornale</span></td>'
         + '<td style="' + td + num + ';color:#185FA5;font-weight:700">' + _invEuro(da) + '</td><td style="' + td + num + '"></td>'
-        + '<td style="' + td + num + (saldo < -0.005 ? ';color:#27500A' : '') + '">' + _invEuro(saldo) + '</td></tr>';
+        + '<td style="' + td + num + ';font-weight:700;color:' + (residuo < -0.005 ? '#A32D2D' : '#27500A') + '">' + _invEuro(residuo) + '</td></tr>';
     }
   });
-  var saldoEff = saldo;
   previste.forEach(function (x) {
-    var av = x.imp + x.iva; saldo += av;
-    h += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + '">previsto</td>'
+    h += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + '">prevista</td>'
       + '<td style="' + td + '">◌ ' + Number(x.r.perc) + '% ' + _invEsc(x.r.evento || '')
       + ' <span style="font-style:normal;font-size:9.5px;background:#EEEDE6;color:#6B6A64;padding:1px 7px;border-radius:9px;font-weight:700">da fatturare</span>'
-      + '<div style="font-size:10.5px">' + _invEuro(x.imp) + ' + IVA ' + _invEuro(x.iva) + '</div></td>'
-      + '<td style="' + td + num + '"></td><td style="' + td + num + '">' + _invEuro(av) + '</td>'
-      + '<td style="' + td + num + '">' + _invEuro(saldo) + '</td></tr>';
+      + rif(_invEuro(x.imp) + ' + IVA ' + _invEuro(x.iva) + ' = ' + _invEuro(x.imp + x.iva)) + '</td>'
+      + '<td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td></tr>';
   });
-  h += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px"></td><td style="padding:8px 7px">Totali (fatti · con le rate previste)</td>'
+  h += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px"></td><td style="padding:8px 7px">Totali</td>'
     + '<td style="padding:8px 7px' + num + ';color:#185FA5">' + _invEuro(pagato) + '</td>'
-    + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + _invEuro(fattImp + fattIva) + (previste.length ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEuro(totIvato * percTot / 100) + '</div>' : '') + '</td>'
-    + '<td style="padding:8px 7px' + num + '">' + _invEuro(saldoEff) + (previste.length ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEuro(saldo) + '</div>' : '') + '</td></tr>';
+    + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + _invEuro(totIvato) + '</td>'
+    + '<td style="padding:8px 7px' + num + ';color:' + (residuo < -0.005 ? '#A32D2D' : '#27500A') + '">' + _invEuro(residuo) + '</td></tr>';
   h += '</table></div>';
+  var saldoEff = (fattImp + fattIva) - pagato;   // fatturato non ancora pagato (per gli avvisi)
 
   // avvisi
   var avv = [];
