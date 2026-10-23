@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261023c — IMPIANTI VENDUTI = i CONTRATTI firmati (e da firmare), una cella per
+//   contratto: cliente, sito, totale, avanzamento lavori e incassi. Il clic apre la scheda
+//   del contratto (Composizione · Contabilita') nella sotto-linguetta Contratti. Prima la
+//   linguetta leggeva gli impianti di Investimenti con destinazione 'vendita', che sono
+//   zero: Palmi e' il contratto 1/2026 DS ENERGY S.R.L.
 // v20261023b — LINGUETTE RIORDINATE: Impianti in sviluppo · Fornitori · Catalogo ·
 //   Investimenti (solo impianti nostri) · VENDITA A CLIENTI, che contiene le sotto-linguette
 //   Impianti venduti (gli impianti con destinazione 'vendita', disegnati da pf-investimenti.js
@@ -1383,6 +1388,13 @@ function switchFvSubTab(btn) {
 // v20261023b — sotto-linguette di VENDITA A CLIENTI
 var _fvVTab = 'fv-vtab-impianti';
 function fvVenditaTab(vtab) {
+  _fvMostraVTab(vtab);
+  if (_fvVTab === 'fv-vtab-impianti') fvCaricaImpiantiVenduti();
+  if (_fvVTab === 'fv-vtab-offerte') fvCaricaOfferte();
+  if (_fvVTab === 'fv-vtab-contratti') fvCaricaContratti();
+  if (_fvVTab === 'fv-vtab-clienti') fvCaricaClienti();
+}
+function _fvMostraVTab(vtab) {
   _fvVTab = vtab || 'fv-vtab-impianti';
   document.querySelectorAll('.fv-vtab').forEach(function (b) {
     var on = b.getAttribute('data-vtab') === _fvVTab;
@@ -1393,10 +1405,59 @@ function fvVenditaTab(vtab) {
     b.style.marginBottom = on ? '-1px' : '0';
   });
   document.querySelectorAll('.fv-vpanel').forEach(function (p) { p.style.display = (p.id === _fvVTab) ? '' : 'none'; });
-  if (_fvVTab === 'fv-vtab-impianti' && typeof caricaInvestimenti === 'function') caricaInvestimenti('vendita');
-  if (_fvVTab === 'fv-vtab-offerte') fvCaricaOfferte();
-  if (_fvVTab === 'fv-vtab-contratti') fvCaricaContratti();
-  if (_fvVTab === 'fv-vtab-clienti') fvCaricaClienti();
+}
+
+// ── IMPIANTI VENDUTI: celle dei contratti (23/10) ─────────────────────────
+async function fvCaricaImpiantiVenduti() {
+  var box = document.getElementById('inv-vend-content');
+  if (!box) return;
+  box.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">Caricamento…</div>';
+  // stessi dati della linguetta Contratti (fasi, incassi): li carico senza disegnare l'elenco
+  var fc = document.getElementById('fvc-content');
+  try { await fvCaricaContratti(); } catch (e) { box.innerHTML = _fvVuoto('Errore: ' + _fvEsc(e && e.message)); return; }
+  if (fc) fc.innerHTML = '';   // la linguetta Contratti si ridisegna quando la apri
+  var lista = ((_fvCon && _fvCon.contratti) || []).filter(function (c) { return c.stato !== 'annullato'; });
+  var tot = 0, inc = 0;
+  lista.forEach(function (c) {
+    tot += Number(c.imponibile || 0) * (1 + Number(c.aliquota_iva || 0) / 100);
+    inc += _fvIncassiContratto(c).reduce(function (s2, m) { return s2 + Number(m.importo || 0); }, 0);
+  });
+  var kpi = function (lab, val, col) {
+    return '<div style="flex:1;min-width:150px;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
+      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div></div>';
+  };
+  var h = '<div style="margin-bottom:10px"><div style="font-size:15px;font-weight:700">Impianti venduti</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Un impianto per ogni contratto con il cliente. Non usano le risorse degli investimenti. Clic sulla cella per aprire il contratto.</div></div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + kpi('Impianti', String(lista.length))
+    + kpi('Venduto (IVA inclusa)', _fvEuro(tot))
+    + kpi('Incassato', _fvEuro(inc), '#27500A')
+    + kpi('Da incassare', _fvEuro(tot - inc), tot - inc > 0.5 ? '#A32D2D' : '#27500A')
+    + '</div>';
+  if (!lista.length) { box.innerHTML = h + _fvVuoto('Nessun contratto. Si genera da un\'offerta accettata, in 📄 Offerte.'); return; }
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';
+  lista.forEach(function (c) {
+    var st = _FV_STATI_CON[c.stato] || _FV_STATI_CON.da_firmare;
+    var totC = Number(c.imponibile || 0) * (1 + Number(c.aliquota_iva || 0) / 100);
+    h += '<div onclick="fvApriVenduto(\'' + c.id + '\')" style="cursor:pointer;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-left:4px solid #E0A458;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:7px">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><div style="font-size:16px;font-weight:600">' + _fvEsc(c.cliente_nome || '—') + '</div>'
+      + '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' + st.bg + ';color:' + st.col + ';white-space:nowrap">' + st.lab + '</span></div>'
+      + '<div style="font-size:12px;color:var(--text-muted)">Contratto ' + (c.numero || '—') + '/' + c.anno + (c.data ? ' del ' + _fvData(c.data) : '') + '</div>'
+      + (c.sito_installazione ? '<div style="font-size:12px">📍 ' + _fvEsc(c.sito_installazione) + '</div>' : '')
+      + '<div style="display:flex;justify-content:space-between;font-size:12px"><span>Totale contratto</span><b style="font-family:var(--font-mono)">' + _fvEuro(totC) + '</b></div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px">Lavori</div>' + _fvBarraFasi(c, true)
+      + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px">Incassi</div>' + _fvBarraIncassi(c, true)
+      + '</div>';
+  });
+  h += '</div>';
+  box.innerHTML = h;
+}
+// dalla cella: apre la sotto-linguetta Contratti direttamente sulla scheda
+async function fvApriVenduto(id) {
+  _fvMostraVTab('fv-vtab-contratti');
+  await fvCaricaContratti();
+  fvApriContratto(id);
 }
 // apre Vendita a clienti su una sotto-linguetta (usato dopo aver creato un contratto)
 function fvApriVendita(vtab) {

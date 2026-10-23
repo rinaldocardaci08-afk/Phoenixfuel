@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261023d — SUBTOTALE PER FORNITORE: il gruppo si riconosce dal nome del fornitore senza
+//   forma societaria e senza maiuscole ("Ormus Plant" e "ORMUS PLANT S.R.L." sono lo stesso
+//   gruppo) e prende il nome come scritto in Fornitori FV. Il trattino separa fornitore e
+//   cosa anche senza spazio dopo ("Ormus Plant -Impianto").
 // v20261023c — (1) IMPIANTI VENDUTI: si leggono TUTTI gli impianti con destinazione
 //   'vendita', di qualsiasi causale (Palmi spariva perche' la pagina vendite leggeva solo la
 //   causale selezionata). (2) FORNITORE OBBLIGATORIO sulla spesa: menu con i Fornitori FV
@@ -641,7 +645,8 @@ function _invVoceMov(m) {
 // La voce si salva come "Fornitore – cosa": il gruppo (e il subtotale) e' il fornitore.
 function _invSplitVoce(t) {
   t = String(t || '');
-  var m = t.match(/^(.*?)\s+[–—-]\s+(.*)$/);
+  // trattino lungo con o senza spazi; trattino corto con almeno uno spazio accanto
+  var m = t.match(/^(.*?)\s*[–—]\s*(.*)$/) || t.match(/^(.*?)\s+-\s*(.*)$/) || t.match(/^(.*?)\s*-\s+(.*)$/);
   return m ? { forn: m[1].trim(), cosa: m[2].trim() } : { forn: '', cosa: t.trim() };
 }
 // fornitore della lista che corrisponde al testo (uguale, o stesso nome senza forma societaria)
@@ -870,8 +875,15 @@ function invVaiTabImp(k) { _invTabImp = k; _invRenderImpianto(); }
 // Gruppo = testo della voce prima del trattino (– — -). Subtotale solo se il gruppo
 // ha almeno due spese, cosi' l'elenco non si appesantisce.
 function _invGruppoVoce(t) {
-  var g = String(t || '').split(/\s+[–—-]\s+/)[0].trim();
-  return g || '';
+  var sp = _invSplitVoce(t);
+  var g = sp.forn || sp.cosa;   // senza trattino il gruppo e' tutta la voce
+  if (!g) return '';
+  return _invFornDaTesto(g) || g;   // nome come in Fornitori FV, se c'e'
+}
+// chiave del gruppo: stesso fornitore anche se scritto in modo diverso
+function _invChiaveGruppo(t) {
+  var g = _invGruppoVoce(t);
+  return g ? (_invChiaveForn(g) || g.toLowerCase()) : '';
 }
 function _invBloccoElencoSpese(i, spese, speso, prev) {
   var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
@@ -884,7 +896,7 @@ function _invBloccoElencoSpese(i, spese, speso, prev) {
     // gruppi in ordine di prima data
     var gruppi = [], idx = {};
     spese.slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); }).forEach(function (m) {
-      var v = _invVoceMov(m), g = _invGruppoVoce(v).toLowerCase() || ('·' + m.id);
+      var v = _invVoceMov(m), g = _invChiaveGruppo(v) || ('·' + m.id);
       if (idx[g] == null) { idx[g] = gruppi.length; gruppi.push({ nome: _invGruppoVoce(v), righe: [] }); }
       gruppi[idx[g]].righe.push(m);
     });
@@ -1113,7 +1125,7 @@ function _invBloccoMastrino(i, spese, budget) {
   var gruppi = [], idx = {};
   spese.forEach(function (m) {
     var g = _invGruppoVoce(_invVoceMov(m)) || 'Senza voce';
-    var k = _invMovDelForn(m, chiave) ? '§forn' : g.toLowerCase();
+    var k = _invMovDelForn(m, chiave) ? '§forn' : (_invChiaveGruppo(_invVoceMov(m)) || g.toLowerCase());
     if (idx[k] == null) { idx[k] = gruppi.length; gruppi.push({ nome: k === '§forn' ? pr.fornitore : g, forn: k === '§forn', pag: 0 }); }
     gruppi[idx[k]].pag += _invImponibile(m);
   });
