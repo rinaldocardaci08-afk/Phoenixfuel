@@ -1,5 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261023a — MASTRINO FORNITORE nella scheda impianto. Il contratto e' il PREVENTIVO
+//   SCELTO (fornitore + imponibile); sul preventivo si salvano anche aliquota IVA e rate
+//   (default 30% firma / 50% merce pronta / 20% collaudo) con numero e data della fattura
+//   quando arriva (colonne nuove investimenti_preventivi.aliquota_iva e .rate jsonb).
+//   AVERE = rate fatturate (righe piene) e rate ancora previste (in grigio);
+//   DARE = pagamenti gia' imputati all'impianto la cui voce contiene il nome del fornitore
+//   (nessuna doppia registrazione). Saldo progressivo a debito. Sotto, RESOCONTO
+//   preventivo contro fatturato e pagato per gruppo di spesa, sul budget dell'impianto.
 // v20261009b — ✏️ della SPESA: oltre alla voce si correggono DATA, IMPORTO CON IVA e
 //   ALIQUOTA; l'imponibile si ricalcola e si salva sulla STESSA riga del foglio giornale
 //   (nessuna copia: il foglio giornale lo vede gia' cambiato). Conto e metodo restano
@@ -696,6 +704,9 @@ function _invRenderImpianto() {
   // ELENCO SPESE: i pagamenti imputati, con la loro voce a testo libero
   h += _invBloccoElencoSpese(i, spese, speso, prev);
 
+  // MASTRINO del fornitore scelto + resoconto preventivo/speso (23/10)
+  h += _invBloccoMastrino(i, spese, prev);
+
   // PREVENTIVI RICEVUTI dai fornitori per questo impianto
   h += _invBloccoPreventivi(i);
 
@@ -784,6 +795,270 @@ function _invBloccoElencoSpese(i, spese, speso, prev) {
   }
   h += '</div>';
   return h;
+}
+
+// ── MASTRINO FORNITORE (23/10) ─────────────────────────────────────────────
+// Convenzione del conto fornitore: le FATTURE vanno in AVERE (fanno nascere il
+// debito), i PAGAMENTI in DARE (lo chiudono). Saldo positivo = ancora da pagare.
+var _INV_RATE_DEF = [
+  { perc: 30, evento: 'Alla firma del contratto' },
+  { perc: 50, evento: 'All\'avviso di merce pronta' },
+  { perc: 20, evento: 'Al collaudo e dichiarazione di conformità' }
+];
+function _invRatePrev(p) {
+  var r = p && p.rate;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { r = null; } }
+  if (!Array.isArray(r) || !r.length) r = _INV_RATE_DEF.map(function (x) { return { perc: x.perc, evento: x.evento }; });
+  return r;
+}
+function _invAliqPrev(p) {
+  var a = p && p.aliquota_iva != null ? Number(p.aliquota_iva) : 10;
+  return isFinite(a) ? a : 10;
+}
+// nome del fornitore senza forma societaria, per riconoscere i pagamenti dalla voce
+function _invChiaveForn(f) {
+  var t = String(f || '').toLowerCase().replace(/[.,]/g, ' ')
+    .replace(/\b(s\s*a\s*s|s\s*r\s*l\s*s?|s\s*p\s*a|s\s*n\s*c|sas|srl|srls|spa|snc|di)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return t;
+}
+function _invMovDelForn(m, chiave) {
+  if (!chiave) return false;
+  var t = (_invVoceMov(m) + ' ' + (m.descrizione || '')).toLowerCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ');
+  if (t.indexOf(chiave) >= 0) return true;
+  var primo = chiave.split(' ')[0];
+  return primo.length >= 4 && t.indexOf(primo) >= 0;
+}
+
+function _invBloccoMastrino(i, spese, budget) {
+  var pr = (_invDati.preventivi || []).filter(function (p) { return p.impianto_id === i.id && p.scelto; })[0];
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  if (!pr) {
+    h += '<div style="font-size:13px;font-weight:700;margin-bottom:4px">📒 Mastrino fornitore</div>'
+      + '<div style="font-size:12px;color:var(--text-muted)">Si attiva quando in "Preventivi ricevuti" c\'è un preventivo <strong>scelto</strong>: il suo imponibile è il contratto.</div></div>';
+    return h;
+  }
+  var tot = Number(pr.importo || 0), aliq = _invAliqPrev(pr), rate = _invRatePrev(pr);
+  var chiave = _invChiaveForn(pr.fornitore);
+  var pag = spese.filter(function (m) { return _invMovDelForn(m, chiave); })
+    .slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); });
+
+  // righe vere (fatture e pagamenti) in ordine di data, poi le rate previste
+  var righe = [];
+  var fattImp = 0, fattIva = 0, percTot = 0;
+  rate.forEach(function (r, k) {
+    var imp = tot * Number(r.perc || 0) / 100, iva = imp * aliq / 100;
+    percTot += Number(r.perc || 0);
+    if (r.fattura_data || r.fattura_num) {
+      fattImp += imp; fattIva += iva;
+      righe.push({ data: r.fattura_data || '', tipo: 'f', k: k, r: r, imp: imp, iva: iva });
+    }
+  });
+  var pagato = 0, pagImp = 0;
+  pag.forEach(function (m) {
+    pagato += Number(m.importo || 0); pagImp += _invImponibile(m);
+    righe.push({ data: m.data, tipo: 'p', m: m });
+  });
+  righe.sort(function (a, b) {
+    var c = String(a.data || '9999').localeCompare(String(b.data || '9999'));
+    return c !== 0 ? c : (a.tipo === 'f' ? -1 : 1);   // a parita' di data prima la fattura
+  });
+  var previste = [];
+  rate.forEach(function (r, k) {
+    if (r.fattura_data || r.fattura_num) return;
+    var imp = tot * Number(r.perc || 0) / 100;
+    previste.push({ k: k, r: r, imp: imp, iva: imp * aliq / 100 });
+  });
+
+  var totIvato = tot * (1 + aliq / 100);
+  var daPagare = totIvato - pagato;
+
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
+    + '<div><div style="font-size:13px;font-weight:700">📒 Mastrino fornitore — ' + _invEsc(pr.fornitore) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">Contratto = preventivo scelto' + (pr.numero ? ' n. ' + _invEsc(pr.numero) : '') + (pr.data ? ' del ' + _invData(pr.data) : '')
+    + ' · ' + _invEuro(tot) + ' + IVA ' + aliq + '% · fatture in avere, pagamenti in dare</div></div>'
+    + (_invPuo() ? '<button onclick="invModaleRate(\'' + pr.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">✏️ Rate, IVA e fatture</button>' : '')
+    + '</div>';
+
+  var kpi = function (lab, val, sub, col) {
+    return '<div style="flex:1;min-width:150px;background:var(--bg);border-radius:8px;padding:9px 11px">'
+      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div></div>';
+  };
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+    + kpi('Contratto', _invEuro(tot), 'imponibile · ' + _invEuro(totIvato) + ' con IVA')
+    + kpi('Fatturato (avere)', _invEuro(fattImp), (tot > 0 ? (fattImp / tot * 100).toFixed(0) : 0) + '% · imponibile', '#A32D2D')
+    + kpi('Pagato (dare)', _invEuro(pagato), 'con IVA · ' + pag.length + ' pagament' + (pag.length === 1 ? 'o' : 'i'), '#185FA5')
+    + kpi('Ancora da pagare', _invEuro(daPagare), 'sul contratto con IVA', daPagare < -0.5 ? '#A32D2D' : '')
+    + '</div>';
+
+  // barra fatturato / pagato sul contratto
+  if (tot > 0) {
+    var pF = Math.min(100, fattImp / tot * 100), pP = Math.min(100, pagImp / tot * 100);
+    h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);position:relative;overflow:hidden">'
+      + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + pF.toFixed(1) + '%;background:#E8B4B4"></div>'
+      + '<div style="position:absolute;left:0;top:50%;bottom:0;width:' + pP.toFixed(1) + '%;background:#185FA5"></div></div>'
+      + '<div style="display:flex;gap:14px;font-size:10.5px;color:var(--text-muted);margin:4px 0 10px">'
+      + '<span><span style="display:inline-block;width:9px;height:9px;background:#E8B4B4;border-radius:2px"></span> fatturato ' + pF.toFixed(0) + '%</span>'
+      + '<span><span style="display:inline-block;width:9px;height:9px;background:#185FA5;border-radius:2px"></span> pagato ' + pP.toFixed(0) + '% (imponibile)</span></div>';
+  }
+
+  var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border)';
+  var td = 'padding:7px;border-bottom:0.5px solid var(--border)';
+  var num = ';text-align:right;font-family:var(--font-mono)';
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:620px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">Descrizione</th>'
+    + '<th style="text-align:right;' + th + '">Dare<br>pagamenti</th><th style="text-align:right;' + th + '">Avere<br>fatture</th>'
+    + '<th style="text-align:right;' + th + '">Saldo<br>a debito</th></tr>';
+  var saldo = 0;
+  righe.forEach(function (x) {
+    if (x.tipo === 'f') {
+      var av = x.imp + x.iva; saldo += av;
+      h += '<tr><td style="' + td + ';white-space:nowrap">' + (x.data ? _invData(x.data) : '—') + '</td>'
+        + '<td style="' + td + '">Fattura ' + (x.r.fattura_num ? 'n. ' + _invEsc(x.r.fattura_num) + ' · ' : '') + Number(x.r.perc) + '% ' + _invEsc(x.r.evento || '')
+        + '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEuro(x.imp) + ' + IVA ' + _invEuro(x.iva) + '</div></td>'
+        + '<td style="' + td + num + '"></td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _invEuro(av) + '</td>'
+        + '<td style="' + td + num + '">' + _invEuro(saldo) + '</td></tr>';
+    } else {
+      var m = x.m, da = Number(m.importo || 0); saldo -= da;
+      h += '<tr><td style="' + td + ';white-space:nowrap">' + _invData(m.data) + '</td>'
+        + '<td style="' + td + '">' + _invEsc(_invVoceMov(m) || m.descrizione || 'Pagamento')
+        + ' <span style="font-size:9.5px;background:#EAF3DE;color:#27500A;padding:1px 7px;border-radius:9px;font-weight:700">foglio giornale</span></td>'
+        + '<td style="' + td + num + ';color:#185FA5;font-weight:700">' + _invEuro(da) + '</td><td style="' + td + num + '"></td>'
+        + '<td style="' + td + num + (saldo < -0.005 ? ';color:#27500A' : '') + '">' + _invEuro(saldo) + '</td></tr>';
+    }
+  });
+  var saldoEff = saldo;
+  previste.forEach(function (x) {
+    var av = x.imp + x.iva; saldo += av;
+    h += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + '">previsto</td>'
+      + '<td style="' + td + '">◌ ' + Number(x.r.perc) + '% ' + _invEsc(x.r.evento || '')
+      + ' <span style="font-style:normal;font-size:9.5px;background:#EEEDE6;color:#6B6A64;padding:1px 7px;border-radius:9px;font-weight:700">da fatturare</span>'
+      + '<div style="font-size:10.5px">' + _invEuro(x.imp) + ' + IVA ' + _invEuro(x.iva) + '</div></td>'
+      + '<td style="' + td + num + '"></td><td style="' + td + num + '">' + _invEuro(av) + '</td>'
+      + '<td style="' + td + num + '">' + _invEuro(saldo) + '</td></tr>';
+  });
+  h += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px"></td><td style="padding:8px 7px">Totali (fatti · con le rate previste)</td>'
+    + '<td style="padding:8px 7px' + num + ';color:#185FA5">' + _invEuro(pagato) + '</td>'
+    + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + _invEuro(fattImp + fattIva) + (previste.length ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEuro(totIvato * percTot / 100) + '</div>' : '') + '</td>'
+    + '<td style="padding:8px 7px' + num + '">' + _invEuro(saldoEff) + (previste.length ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEuro(saldo) + '</div>' : '') + '</td></tr>';
+  h += '</table></div>';
+
+  // avvisi
+  var avv = [];
+  if (Math.abs(percTot - 100) > 0.01) avv.push('Le rate sommano al ' + percTot.toLocaleString('it-IT') + '%, non al 100%.');
+  if (Math.abs(saldoEff) > 0.5 && fattImp > 0) {
+    avv.push(saldoEff < 0
+      ? 'Pagato ' + _invEuro(-saldoEff) + ' più del fatturato: spese di bonifico, bollo, IVA diversa o fattura non ancora segnata?'
+      : 'Fatturato non ancora pagato: ' + _invEuro(saldoEff) + '.');
+  }
+  if (!fattImp && pagato > 0) avv.push('Ci sono pagamenti ma nessuna fattura segnata: inserisci numero e data della fattura con "✏️ Rate, IVA e fatture".');
+  if (avv.length) {
+    h += '<div style="margin-top:10px;background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 6px 6px 0;padding:8px 10px;font-size:11.5px;color:#633806">⚠ ' + avv.join('<br>⚠ ') + '</div>';
+  }
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">I pagamenti sono quelli già imputati all\'impianto la cui voce contiene “' + _invEsc(pr.fornitore) + '”: non si registrano una seconda volta.</div>';
+
+  // RESOCONTO: preventivo contro fatturato e pagato, per gruppo di spesa
+  var gruppi = [], idx = {};
+  spese.forEach(function (m) {
+    var g = _invGruppoVoce(_invVoceMov(m)) || 'Senza voce';
+    var k = _invMovDelForn(m, chiave) ? '§forn' : g.toLowerCase();
+    if (idx[k] == null) { idx[k] = gruppi.length; gruppi.push({ nome: k === '§forn' ? pr.fornitore : g, forn: k === '§forn', pag: 0 }); }
+    gruppi[idx[k]].pag += _invImponibile(m);
+  });
+  if (idx['§forn'] == null) gruppi.unshift({ nome: pr.fornitore, forn: true, pag: 0 });
+  else { var gf = gruppi.splice(idx['§forn'], 1)[0]; gruppi.unshift(gf); }
+  var tPrev = 0, tFatt = 0, tPag = 0;
+  h += '<div style="font-size:12.5px;font-weight:700;margin:16px 0 4px">Resoconto cantiere: preventivo contro speso</div>';
+  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:560px">';
+  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;' + th + '">Voce / fornitore</th><th style="text-align:right;' + th + '">Preventivo</th>'
+    + '<th style="text-align:right;' + th + '">Fatturato</th><th style="text-align:right;' + th + '">Pagato</th><th style="text-align:right;' + th + '">Residuo</th></tr>';
+  gruppi.forEach(function (g) {
+    var pv = g.forn ? tot : null, ft = g.forn ? fattImp : null;
+    tPrev += pv || 0; tFatt += ft || 0; tPag += g.pag;
+    h += '<tr><td style="' + td + '">' + _invEsc(g.nome) + (g.forn ? ' <span style="font-size:9.5px;color:#185FA5;font-weight:700">contratto</span>' : '') + '</td>'
+      + '<td style="' + td + num + '">' + (pv != null ? _invEuro(pv) : '<span style="color:var(--text-muted)">—</span>') + '</td>'
+      + '<td style="' + td + num + '">' + (ft != null ? _invEuro(ft) : '<span style="color:var(--text-muted)">—</span>') + '</td>'
+      + '<td style="' + td + num + '">' + _invEuro(g.pag) + '</td>'
+      + '<td style="' + td + num + '">' + (pv != null ? _invEuro(pv - g.pag) : '<span style="color:var(--text-muted)">—</span>') + '</td></tr>';
+  });
+  var altro = budget - tPrev;
+  h += '<tr style="color:var(--text-muted)"><td style="' + td + '">Resto del budget (connessione, diritto di superficie, altro)</td>'
+    + '<td style="' + td + num + '">' + _invEuro(altro) + '</td><td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td></tr>';
+  h += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px">Totale impianto (budget)</td>'
+    + '<td style="padding:8px 7px' + num + '">' + _invEuro(budget) + '</td>'
+    + '<td style="padding:8px 7px' + num + '">' + _invEuro(tFatt) + '</td>'
+    + '<td style="padding:8px 7px' + num + '">' + _invEuro(tPag) + '</td>'
+    + '<td style="padding:8px 7px' + num + (budget - tPag < 0 ? ';color:#A32D2D' : '') + '">' + _invEuro(budget - tPag) + '</td></tr>';
+  h += '</table></div>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Importi senza IVA, come nel conto economico.'
+    + (altro < -0.5 ? ' <strong style="color:#A32D2D">Il contratto supera il budget dell\'impianto di ' + _invEuro(-altro) + '.</strong>' : '') + '</div>';
+  h += '</div>';
+  return h;
+}
+
+function invModaleRate(prevId) {
+  var pr = (_invDati.preventivi || []).filter(function (p) { return p.id === prevId; })[0];
+  if (!pr) { toast('Preventivo non trovato'); return; }
+  var rate = _invRatePrev(pr), aliq = _invAliqPrev(pr);
+  var inp = 'width:100%;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
+  var h = '<div style="max-width:640px"><div style="font-size:16px;font-weight:600;margin-bottom:2px">Rate, IVA e fatture</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px">' + _invEsc(pr.fornitore) + ' · contratto ' + _invEuro(pr.importo) + ' imponibile</div>';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><label style="font-size:12px;color:var(--text-muted)">Aliquota IVA %</label>'
+    + '<input id="invr-iva" type="number" step="0.1" value="' + aliq + '" style="' + inp + ';width:90px;font-family:var(--font-mono);text-align:right"></div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px" id="invr-tab">'
+    + '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:4px;width:70px">%</th><th style="text-align:left;padding:4px">Quando</th>'
+    + '<th style="text-align:left;padding:4px;width:110px">N. fattura</th><th style="text-align:left;padding:4px;width:140px">Data fattura</th><th style="width:28px"></th></tr>';
+  rate.forEach(function (r, k) { h += _invRigaRata(r, k, inp); });
+  h += '</table>';
+  h += '<button onclick="invAggiungiRata()" style="margin-top:8px;font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">+ Rata</button>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Quando arriva la fattura di una rata scrivi numero e data: la rata passa da prevista a fatturata nel mastrino.</div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="invSalvaRate(\'' + prevId + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
+  apriModal(h);
+}
+function _invRigaRata(r, k, inp) {
+  return '<tr class="invr-riga"><td style="padding:4px"><input class="invr-perc" type="number" step="0.01" value="' + (r.perc != null ? r.perc : '') + '" style="' + inp + ';font-family:var(--font-mono);text-align:right"></td>'
+    + '<td style="padding:4px"><input class="invr-ev" value="' + _invEsc(r.evento || '') + '" style="' + inp + '"></td>'
+    + '<td style="padding:4px"><input class="invr-num" value="' + _invEsc(r.fattura_num || '') + '" style="' + inp + ';font-family:var(--font-mono)"></td>'
+    + '<td style="padding:4px"><input class="invr-data" type="date" value="' + _invEsc(r.fattura_data || '') + '" style="' + inp + '"></td>'
+    + '<td style="padding:4px;text-align:center"><button onclick="this.closest(\'tr\').remove()" title="Togli la rata" style="border:0;background:transparent;color:#A32D2D;cursor:pointer;font-size:15px">×</button></td></tr>';
+}
+function invAggiungiRata() {
+  var tab = document.getElementById('invr-tab');
+  if (!tab) return;
+  var inp = 'width:100%;padding:7px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
+  tab.insertAdjacentHTML('beforeend', _invRigaRata({ perc: '', evento: '' }, 0, inp));
+}
+async function invSalvaRate(prevId) {
+  var aliq = parseFloat((document.getElementById('invr-iva') || {}).value);
+  if (!isFinite(aliq) || aliq < 0) { toast('Aliquota IVA non valida'); return; }
+  var rate = [];
+  var errore = '';
+  document.querySelectorAll('#invr-tab .invr-riga').forEach(function (tr) {
+    var perc = parseFloat(tr.querySelector('.invr-perc').value);
+    var ev = (tr.querySelector('.invr-ev').value || '').trim();
+    var num = (tr.querySelector('.invr-num').value || '').trim();
+    var dt = tr.querySelector('.invr-data').value || '';
+    if (!isFinite(perc) && !ev && !num && !dt) return;   // riga vuota
+    if (!isFinite(perc) || perc <= 0) { errore = 'Ogni rata deve avere una percentuale'; return; }
+    rate.push({ perc: perc, evento: ev, fattura_num: num || null, fattura_data: dt || null });
+  });
+  if (errore) { toast(errore); return; }
+  if (!rate.length) { toast('Inserisci almeno una rata'); return; }
+  var somma = rate.reduce(function (s, r) { return s + r.perc; }, 0);
+  if (Math.abs(somma - 100) > 0.01 && !confirm('Le rate sommano al ' + somma + '%, non al 100%. Salvo lo stesso?')) return;
+  var r = await sb.from('investimenti_preventivi').update({ aliquota_iva: aliq, rate: rate }).eq('id', prevId);
+  if (r.error) { toast('Errore: ' + r.error.message + (/column/i.test(r.error.message) ? ' — lancia prima l\'SQL delle colonne nuove' : '')); return; }
+  var pr = (_invDati.preventivi || []).filter(function (p) { return p.id === prevId; })[0];
+  if (pr) { pr.aliquota_iva = aliq; pr.rate = rate; }
+  chiudiModal();
+  toast('✓ Rate salvate');
+  if (_invImpiantoAperto) _invRenderImpianto();
 }
 
 // ── MODALI ─────────────────────────────────────────────────────────────────
