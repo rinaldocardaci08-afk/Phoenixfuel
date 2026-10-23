@@ -2684,22 +2684,30 @@
       <!-- LOGISTICA -->
       <!-- FOTOVOLTAICO -->
       <div class="section" id="s-fotovoltaico">
+        <!-- v20261023b — Impianti in sviluppo · Fornitori · Catalogo · Investimenti (nostri) · Vendita a clienti -->
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px" id="fv-subtabs">
-          <button class="btn-primary fv-subtab active" data-tab="fv-tab-investimenti" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px">☀️ Investimenti</button>
-          <button class="btn-primary fv-subtab" data-tab="fv-tab-offerte" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📄 Offerte</button>
-          <button class="btn-primary fv-subtab" data-tab="fv-tab-contratti" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📝 Contratti</button>
-          <button class="btn-primary fv-subtab" data-tab="fv-tab-clienti" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">👤 Clienti FV</button>
-          <button class="btn-primary fv-subtab" data-tab="fv-tab-catalogo" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Catalogo</button>
-          <button class="btn-primary fv-subtab" data-tab="fv-tab-fornitori" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏭 Fornitori FV</button>
           <button class="btn-primary fv-subtab" data-tab="fv-tab-sviluppo" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏗️ Impianti in sviluppo</button>
+          <button class="btn-primary fv-subtab" data-tab="fv-tab-fornitori" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🏭 Fornitori FV</button>
+          <button class="btn-primary fv-subtab" data-tab="fv-tab-catalogo" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">📦 Catalogo</button>
+          <button class="btn-primary fv-subtab active" data-tab="fv-tab-investimenti" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px">☀️ Investimenti</button>
+          <button class="btn-primary fv-subtab" data-tab="fv-tab-vendita" onclick="switchFvSubTab(this)" style="font-size:12px;padding:8px 14px;background:var(--bg);color:var(--text);border:0.5px solid var(--border)">🤝 Vendita a clienti</button>
         </div>
-        <div class="fv-subpanel" id="fv-tab-investimenti"><div id="inv-content"></div></div>
-        <div class="fv-subpanel" id="fv-tab-offerte" style="display:none"><div id="fvo-content"></div></div>
-        <div class="fv-subpanel" id="fv-tab-contratti" style="display:none"><div id="fvc-content"></div></div>
-        <div class="fv-subpanel" id="fv-tab-clienti" style="display:none"><div id="fvcli-content"></div></div>
-        <div class="fv-subpanel" id="fv-tab-catalogo" style="display:none"><div id="fvcat-content"></div></div>
-        <div class="fv-subpanel" id="fv-tab-fornitori" style="display:none"><div id="fvforn-content"></div></div>
         <div class="fv-subpanel" id="fv-tab-sviluppo" style="display:none"><div id="fvsv-content"></div></div>
+        <div class="fv-subpanel" id="fv-tab-fornitori" style="display:none"><div id="fvforn-content"></div></div>
+        <div class="fv-subpanel" id="fv-tab-catalogo" style="display:none"><div id="fvcat-content"></div></div>
+        <div class="fv-subpanel" id="fv-tab-investimenti"><div id="inv-content"></div></div>
+        <div class="fv-subpanel" id="fv-tab-vendita" style="display:none">
+          <div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:0.5px solid var(--border);margin-bottom:12px" id="fv-vtabs">
+            <button class="fv-vtab" data-vtab="fv-vtab-impianti" onclick="fvVenditaTab(this.getAttribute('data-vtab'))" style="font-size:12px;padding:6px 12px;border-radius:8px 8px 0 0;background:var(--bg-card,#fff);color:#26215C;border:0.5px solid var(--border);border-bottom-color:var(--bg-card,#fff);margin-bottom:-1px;cursor:pointer;font-weight:600">☀️ Impianti venduti</button>
+            <button class="fv-vtab" data-vtab="fv-vtab-offerte" onclick="fvVenditaTab(this.getAttribute('data-vtab'))" style="font-size:12px;padding:6px 12px;border-radius:8px 8px 0 0;background:transparent;color:var(--text-muted);border:0.5px solid transparent;cursor:pointer;font-weight:600">📄 Offerte</button>
+            <button class="fv-vtab" data-vtab="fv-vtab-contratti" onclick="fvVenditaTab(this.getAttribute('data-vtab'))" style="font-size:12px;padding:6px 12px;border-radius:8px 8px 0 0;background:transparent;color:var(--text-muted);border:0.5px solid transparent;cursor:pointer;font-weight:600">📝 Contratti</button>
+            <button class="fv-vtab" data-vtab="fv-vtab-clienti" onclick="fvVenditaTab(this.getAttribute('data-vtab'))" style="font-size:12px;padding:6px 12px;border-radius:8px 8px 0 0;background:transparent;color:var(--text-muted);border:0.5px solid transparent;cursor:pointer;font-weight:600">👤 Clienti</button>
+          </div>
+          <div class="fv-vpanel" id="fv-vtab-impianti"><div id="inv-vend-content"></div></div>
+          <div class="fv-vpanel" id="fv-vtab-offerte" style="display:none"><div id="fvo-content"></div></div>
+          <div class="fv-vpanel" id="fv-vtab-contratti" style="display:none"><div id="fvc-content"></div></div>
+          <div class="fv-vpanel" id="fv-vtab-clienti" style="display:none"><div id="fvcli-content"></div></div>
+        </div>
       </div>
 
       <div class="section" id="s-logistica">
@@ -3229,8 +3237,8 @@
 <script src="pf-test.js?v=20260417b"></script>
 <script src="pf-push.js?v=1775149951158"></script>
 <script src="pf-finanze.js?v=20260801a"></script>
-<script src="pf-investimenti.js?v=20261023a"></script>
-<script src="pf-fotovoltaico.js?v=20261022b"></script>
+<script src="pf-investimenti.js?v=20261023b"></script>
+<script src="pf-fotovoltaico.js?v=20261023b"></script>
 <script src="pf-bilanci.js?v=20260802b"></script>
 <script src="pf-andamento.js?v=20261013a"></script>
 <script src="pf-scostamenti.js?v=20260803a"></script>

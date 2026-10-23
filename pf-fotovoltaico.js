@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261023b — LINGUETTE RIORDINATE: Impianti in sviluppo · Fornitori · Catalogo ·
+//   Investimenti (solo impianti nostri) · VENDITA A CLIENTI, che contiene le sotto-linguette
+//   Impianti venduti (gli impianti con destinazione 'vendita', disegnati da pf-investimenti.js
+//   in #inv-vend-content) · Offerte · Contratti · Clienti. fvVenditaTab() le gestisce.
 // v20261022b — vetrina Polistena con le COLTURE sotto le serre (fragole, mirtilli, more,
 //   idroponica verticale con vasche dei pesci) e la sesta tappa della visita: cambia solo la
 //   versione della vetrina, cosi' il programma carica il file nuovo e non quello in memoria.
@@ -752,8 +756,7 @@ async function fvGeneraContratto(offertaId) {
     }));
   }
   toast('✓ Contratto n. ' + num + '/' + anno + ' creato');
-  var btn = document.querySelector('[data-tab="fv-tab-contratti"]');
-  if (btn) switchFvSubTab(btn);
+  fvApriVendita('fv-vtab-contratti');
   await fvCaricaContratti();
   fvApriContratto(contrattoId);
 }
@@ -1370,18 +1373,41 @@ function switchFvSubTab(btn) {
   document.querySelectorAll('.fv-subpanel').forEach(function (p) {
     p.style.display = (p.id === tab) ? '' : 'none';
   });
-  if (tab === 'fv-tab-investimenti' && typeof caricaInvestimenti === 'function') caricaInvestimenti();
-  if (tab === 'fv-tab-offerte') fvCaricaOfferte();
-  if (tab === 'fv-tab-contratti') fvCaricaContratti();
-  if (tab === 'fv-tab-clienti') fvCaricaClienti();
+  if (tab === 'fv-tab-investimenti' && typeof caricaInvestimenti === 'function') caricaInvestimenti('nostri');
+  if (tab === 'fv-tab-vendita') fvVenditaTab(_fvVTab);
   if (tab === 'fv-tab-catalogo') fvCaricaCatalogo();
   if (tab === 'fv-tab-fornitori') fvCaricaFornitori();
   if (tab === 'fv-tab-sviluppo') fvCaricaSviluppo();
 }
 
+// v20261023b — sotto-linguette di VENDITA A CLIENTI
+var _fvVTab = 'fv-vtab-impianti';
+function fvVenditaTab(vtab) {
+  _fvVTab = vtab || 'fv-vtab-impianti';
+  document.querySelectorAll('.fv-vtab').forEach(function (b) {
+    var on = b.getAttribute('data-vtab') === _fvVTab;
+    b.style.background = on ? 'var(--bg-card,#fff)' : 'transparent';
+    b.style.color = on ? '#26215C' : 'var(--text-muted)';
+    b.style.border = on ? '0.5px solid var(--border)' : '0.5px solid transparent';
+    b.style.borderBottomColor = on ? 'var(--bg-card,#fff)' : 'transparent';
+    b.style.marginBottom = on ? '-1px' : '0';
+  });
+  document.querySelectorAll('.fv-vpanel').forEach(function (p) { p.style.display = (p.id === _fvVTab) ? '' : 'none'; });
+  if (_fvVTab === 'fv-vtab-impianti' && typeof caricaInvestimenti === 'function') caricaInvestimenti('vendita');
+  if (_fvVTab === 'fv-vtab-offerte') fvCaricaOfferte();
+  if (_fvVTab === 'fv-vtab-contratti') fvCaricaContratti();
+  if (_fvVTab === 'fv-vtab-clienti') fvCaricaClienti();
+}
+// apre Vendita a clienti su una sotto-linguetta (usato dopo aver creato un contratto)
+function fvApriVendita(vtab) {
+  _fvVTab = vtab || _fvVTab;
+  var btn = document.querySelector('[data-tab="fv-tab-vendita"]');
+  if (btn) switchFvSubTab(btn); else fvVenditaTab(_fvVTab);
+}
+
 // Punto d'ingresso della sezione (chiamato dal menu)
 function caricaFotovoltaico() {
-  if (typeof caricaInvestimenti === 'function') caricaInvestimenti();
+  if (typeof caricaInvestimenti === 'function') caricaInvestimenti('nostri');
 }
 
 // ── AVANZAMENTO LAVORI E INCASSI (05/10) ───────────────────────────────────

@@ -1,5 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-investimenti.js — INVESTIMENTI (Finanze)
+// v20261023b — PAGINA RIFATTA A LINGUETTE (layout B scelto da Rinaldo il 23/10).
+//   · Due modi: 'nostri' (Fotovoltaico → ☀️ Investimenti, box #inv-content) e 'vendita'
+//     (Fotovoltaico → 🤝 Vendita a clienti → Impianti venduti, box #inv-vend-content).
+//   · Investimenti: 4 numeri in testa e linguette IMPIANTI (celle) · RISORSE · SPESE
+//     (con il numero di quelle da imputare) · TEMPISTICHE (diagramma lavori/pagamenti).
+//   · Gli impianti 'vendita' (Palmi) NON stanno piu' qui e NON pesano su prenotato, speso
+//     e risorse libere: i soldi delle banche sono per gli investimenti.
+//   · Scheda di ogni impianto a linguette: Riepilogo · Spese · Mastrino · Preventivi ·
+//     Conto economico · Produzione (le ultime due solo per gli impianti nostri).
 // v20261023a — MASTRINO FORNITORE nella scheda impianto. Il contratto e' il PREVENTIVO
 //   SCELTO (fornitore + imponibile); sul preventivo si salvano anche aliquota IVA e rate
 //   (default 30% firma / 50% merce pronta / 20% collaudo) con numero e data della fattura
@@ -111,6 +120,14 @@
 var _invCausale = null;        // causale selezionata
 var _invDati = null;           // { causali, risorse, impianti, voci, movimenti }
 var _invImpiantoAperto = null; // scheda del singolo impianto
+var _invModo = 'nostri';       // v20261023b — 'nostri' (Investimenti) o 'vendita' (Impianti venduti)
+var _invTab = 'impianti';      // linguetta della pagina: impianti | risorse | spese | tempi
+var _invTabImp = 'riepilogo';  // linguetta della scheda impianto
+function _invBox() { return document.getElementById(_invModo === 'vendita' ? 'inv-vend-content' : 'inv-content'); }
+function _invIsVend(i) { return i && i.destinazione === 'vendita'; }
+function _invImpiantiModo() {
+  return ((_invDati && _invDati.impianti) || []).filter(function (i) { return _invModo === 'vendita' ? _invIsVend(i) : !_invIsVend(i); });
+}
 
 var _INV_STATI = {
   previsto:     { lab: 'Previsto',     col: '#5F5E5A', bg: '#F1EFE8' },
@@ -146,8 +163,9 @@ function _invPuo() {
 }
 
 // ── CARICAMENTO ────────────────────────────────────────────────────────────
-async function caricaInvestimenti() {
-  var box = document.getElementById('inv-content');
+async function caricaInvestimenti(modo) {
+  if (modo === 'nostri' || modo === 'vendita') { if (modo !== _invModo) { _invTab = 'impianti'; } _invModo = modo; }
+  var box = _invBox();
   if (!box) return;
   box.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-muted)">Caricamento…</div>';
   try {
@@ -216,10 +234,15 @@ function _invConti() {
   var usc = D.movimenti.filter(function (m) { return m.tipo === 'uscita'; });
   var ent = D.movimenti.filter(function (m) { return m.tipo === 'entrata'; });
   var speseImp = {}, spesoImputato = 0, spesoGenerale = 0, daImputare = [];
+  // v20261023b — gli impianti costruiti per la vendita hanno le loro spese ma non
+  // consumano le risorse degli investimenti (mutui e mezzi propri)
+  var vend = {};
+  (D.impianti || []).forEach(function (i) { if (_invIsVend(i)) vend[i.id] = true; });
+  var spesoVendita = 0;
   usc.forEach(function (m) {
     var imp = _invImponibile(m);
     if (m.investimento_impianto_id) {
-      spesoImputato += imp;
+      if (vend[m.investimento_impianto_id]) spesoVendita += imp; else spesoImputato += imp;
       (speseImp[m.investimento_impianto_id] = speseImp[m.investimento_impianto_id] || []).push(m);
     } else if (String(m.note || '').indexOf('[spesa generale]') >= 0) {
       spesoGenerale += imp;
@@ -229,14 +252,14 @@ function _invConti() {
   });
   var incassi = ent.reduce(function (s, m) { return s + _invImponibile(m); }, 0);
   var risorse = D.risorse.reduce(function (s, r) { return s + Number(r.importo || 0); }, 0);
-  var prenotato = D.impianti.reduce(function (s, i) { return s + Number(i.spesa_prevista || 0); }, 0);
+  var prenotato = D.impianti.reduce(function (s, i) { return s + (_invIsVend(i) ? 0 : Number(i.spesa_prevista || 0)); }, 0);
   var daImputareTot = daImputare.reduce(function (s, m) { return s + _invImponibile(m); }, 0);
   return {
     risorse: risorse, incassi: incassi, disponibili: risorse + incassi,
     prenotato: prenotato, spesoImputato: spesoImputato, spesoGenerale: spesoGenerale,
     daImputare: daImputare, daImputareTot: daImputareTot,
     spesoTotale: spesoImputato + spesoGenerale + daImputareTot,
-    speseImp: speseImp
+    speseImp: speseImp, spesoVendita: spesoVendita
   };
 }
 function _invSpesoImpianto(impId) {
@@ -246,49 +269,115 @@ function _invSpesoImpianto(impId) {
 
 // ── PAGINA GENERALE ────────────────────────────────────────────────────────
 function _invRender() {
-  var box = document.getElementById('inv-content');
+  var box = _invBox();
   if (!box || !_invDati) return;
   if (_invImpiantoAperto) { _invRenderImpianto(); return; }
+  if (_invModo === 'vendita') { _invRenderVendita(box); return; }
   var D = _invDati, C = _invConti();
   var libere = C.disponibili - C.prenotato;
+  var nostri = _invImpiantiModo();
 
   var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px">';
   h += '<div><div style="font-size:17px;font-weight:700">☀️ Investimenti</div>'
-    + '<div style="font-size:11.5px;color:var(--text-muted)">Le spese arrivano dal foglio giornale con la causale scelta; qui si imputano ai singoli impianti.</div></div>';
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Solo gli impianti nostri. Le spese arrivano dal foglio giornale con la causale scelta.</div></div>';
   h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
   h += '<select onchange="invCambiaCausale(this.value)" style="font-size:12.5px;padding:7px 11px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-weight:600">'
     + D.causali.map(function (c) { return '<option value="' + c.id + '"' + (c.id === _invCausale ? ' selected' : '') + '>' + _invEsc(c.nome) + '</option>'; }).join('')
     + '</select>';
-  if (_invPuo()) {
-    h += '<button onclick="invModaleRisorsa()" style="font-size:12px;padding:7px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Risorsa</button>';
-    h += '<button onclick="invModaleImpianto()" class="btn-primary" style="font-size:12px;padding:7px 13px">+ Impianto</button>';
-  }
   h += '</div></div>';
 
-  // KPI
-  var kpi = function (lab, val, sub, col) {
-    return '<div style="flex:1;min-width:150px;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
-      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
-      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
-      + '<div style="font-size:10.5px;color:var(--text-muted)">' + (sub || '&nbsp;') + '</div></div>';
-  };
-  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-    + kpi('Risorse disponibili', _invEuroK(C.disponibili), C.incassi ? 'di cui incassi ' + _invEuroK(C.incassi) : D.risorse.length + ' voci')
-    + kpi('Prenotato dagli impianti', _invEuroK(C.prenotato), D.impianti.length + ' impianti')
-    + kpi('Speso (imponibile)', _invEuroK(C.spesoTotale), 'con IVA ' + _invEuroK(D.movimenti.filter(function (m) { return m.tipo === 'uscita'; }).reduce(function (s6, m) { return s6 + Number(m.importo || 0); }, 0)) + ' · imputato ' + _invEuroK(C.spesoImputato), '#A32D2D')
-    + kpi('Ancora libere', _invEuroK(libere), libere < 0 ? 'prenotato oltre le risorse' : 'risorse − prenotato', libere < 0 ? '#A32D2D' : '#27500A')
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">'
+    + _invKpi('Risorse disponibili', _invEuroK(C.disponibili), C.incassi ? 'di cui incassi ' + _invEuroK(C.incassi) : D.risorse.length + ' voci')
+    + _invKpi('Prenotato dagli impianti', _invEuroK(C.prenotato), nostri.length + ' impianti nostri')
+    + _invKpi('Speso (imponibile)', _invEuroK(C.spesoTotale), 'imputato ' + _invEuroK(C.spesoImputato) + (C.daImputareTot ? ' · da imputare ' + _invEuroK(C.daImputareTot) : ''), '#A32D2D')
+    + _invKpi('Ancora libere', _invEuroK(libere), libere < 0 ? 'prenotato oltre le risorse' : 'risorse − prenotato', libere < 0 ? '#A32D2D' : '#27500A')
     + '</div>';
 
-  // barra avanzamento
-  var pct = C.disponibili > 0 ? Math.min(100, C.spesoTotale / C.disponibili * 100) : 0;
-  h += '<div style="height:18px;border-radius:9px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;display:flex">'
-    + '<div style="width:' + pct.toFixed(1) + '%;background:#185FA5;display:flex;align-items:center;padding-left:9px;color:#fff;font-size:10px;font-family:var(--font-mono);white-space:nowrap">'
-    + pct.toFixed(1) + '% · ' + _invEuroK(C.spesoTotale) + '</div></div>';
-  h += '<div style="font-size:10.5px;color:var(--text-muted);margin:4px 0 14px">Speso sul totale delle risorse disponibili, al netto dell\'IVA.</div>';
+  var tabs = [
+    { k: 'impianti', lab: '☀️ Impianti' },
+    { k: 'risorse', lab: '🏦 Risorse' },
+    { k: 'spese', lab: '🧾 Spese', n: C.daImputare.length },
+    { k: 'tempi', lab: '📅 Tempistiche' }
+  ];
+  h += _invBarraTab(tabs, _invTab, 'invVaiTab');
 
-  // RISORSE
-  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Da dove vengono le risorse</div>';
+  if (_invTab === 'risorse') h += _invPannelloRisorse(D, C);
+  else if (_invTab === 'spese') h += _invPannelloSpese(D, C);
+  else if (_invTab === 'tempi') h += (_invGantt(nostri) || '<div class="card" style="padding:14px;font-size:12px;color:var(--text-muted)">Il diagramma compare quando almeno un impianto ha data di inizio e di fine (✏️ Modifica nella scheda).</div>');
+  else h += _invCelle(nostri, '+ Nuovo impianto', 'proprio');
+
+  box.innerHTML = h;
+}
+
+function invVaiTab(k) { _invTab = k; _invRender(); }
+
+function _invKpi(lab, val, sub, col) {
+  return '<div style="flex:1;min-width:150px;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
+    + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+    + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted)">' + (sub || '&nbsp;') + '</div></div>';
+}
+
+// barra di linguette: tabs = [{k, lab, n}], fn = nome della funzione da chiamare col k
+function _invBarraTab(tabs, attiva, fn) {
+  var h = '<div style="display:flex;gap:4px;border-bottom:1.5px solid var(--border);margin:12px 0 12px;flex-wrap:wrap">';
+  tabs.forEach(function (t) {
+    var on = t.k === attiva;
+    h += '<button onclick="' + fn + '(\'' + t.k + '\')" style="padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;border-radius:8px 8px 0 0;'
+      + (on ? 'background:var(--bg-card,#fff);color:#26215C;border:1.5px solid var(--border);border-bottom:1.5px solid var(--bg-card,#fff);margin-bottom:-1.5px'
+            : 'background:transparent;color:var(--text-muted);border:1.5px solid transparent') + '">'
+      + t.lab + (t.n ? ' <span style="background:#A32D2D;color:#fff;border-radius:9px;padding:0 6px;font-size:10px">' + t.n + '</span>' : '') + '</button>';
+  });
+  return h + '</div>';
+}
+
+// IMPIANTI IN CELLE
+function _invCelle(lista, testoNuovo, dest) {
+  var h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px">';
+  lista.forEach(function (i) {
+    var sp = _invSpesoImpianto(i.id), prev = Number(i.spesa_prevista || 0);
+    var st = _INV_STATI[i.stato] || _INV_STATI.previsto;
+    var pct = prev > 0 ? Math.min(100, sp / prev * 100) : 0;
+    var col = _invIsVend(i) ? '#E0A458' : (i.stato === 'in_esercizio' ? '#639922' : (i.stato === 'previsto' ? '#888780' : '#378ADD'));
+    var pr = (_invDati.preventivi || []).filter(function (p) { return p.impianto_id === i.id && p.scelto; })[0];
+    h += '<div onclick="invApriImpianto(\'' + i.id + '\')" style="cursor:pointer;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-left:4px solid ' + col + ';border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><div style="font-size:17px;font-weight:600">' + _invEsc(i.nome) + '</div>'
+      + '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:' + st.bg + ';color:' + st.col + ';white-space:nowrap">' + st.lab + '</span></div>'
+      + '<div style="font-size:12px;color:var(--text-muted)">' + _invEsc(i.luogo || '—') + (i.kw ? ' · ' + Number(i.kw).toLocaleString('it-IT') + ' kW' : '')
+      + ((pr && pr.fornitore) || i.fornitore ? ' · ' + _invEsc((pr && pr.fornitore) || i.fornitore) : '') + '</div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px"><span>' + (_invIsVend(i) ? 'Costo previsto' : 'Budget') + '</span><b style="font-family:var(--font-mono)">' + _invEuro(prev) + '</b></div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:12px"><span>Pagato</span><b style="font-family:var(--font-mono);color:#A32D2D">' + _invEuro(sp) + '</b></div>'
+      + '<div style="height:8px;border-radius:4px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden"><div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + (sp > prev && prev > 0 ? '#854F0B' : '#A32D2D') + '"></div></div>';
+    if (_invIsVend(i)) {
+      var ric = Number(i.ricavo_previsto || 0);
+      h += '<div style="display:flex;justify-content:space-between;font-size:12px"><span>Ricavo previsto</span><b style="font-family:var(--font-mono);color:#27500A">' + (ric ? _invEuro(ric) : '—') + '</b></div>'
+        + '<div style="display:flex;justify-content:space-between;font-size:12px;border-top:0.5px solid var(--border);padding-top:5px"><span>Margine atteso</span><b style="font-family:var(--font-mono);color:' + (ric - prev >= 0 ? '#27500A' : '#A32D2D') + '">' + (ric ? _invEuro(ric - prev) : '—') + '</b></div>';
+    } else {
+      h += '<div style="font-size:11px;color:var(--text-muted);border-top:0.5px solid var(--border);padding-top:5px">' + pct.toFixed(0) + '% del budget'
+        + (i.data_allaccio ? ' · in rete dal ' + _invData(i.data_allaccio) : (i.data_fine ? ' · fine lavori ' + _invData(i.data_fine) : '')) + '</div>';
+    }
+    h += '</div>';
+  });
+  if (_invPuo()) {
+    h += '<div onclick="invNuovoImpianto(\'' + dest + '\')" style="cursor:pointer;border:1.5px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;min-height:150px;color:var(--text-muted);font-weight:700;font-size:13px">' + testoNuovo + '</div>';
+  }
+  h += '</div>';
+  if (!lista.length && !_invPuo()) h += '<div style="font-size:12px;color:var(--text-muted)">Nessun impianto.</div>';
+  return h;
+}
+
+function invNuovoImpianto(dest) {
+  invModaleImpianto();
+  setTimeout(function () { var s = document.getElementById('inv-i-dest'); if (s) s.value = dest || 'proprio'; }, 30);
+}
+
+// RISORSE
+function _invPannelloRisorse(D, C) {
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+    + '<div style="font-size:13px;font-weight:700">Da dove vengono le risorse</div>'
+    + (_invPuo() ? '<button onclick="invModaleRisorsa()" style="font-size:12px;padding:6px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Risorsa</button>' : '')
+    + '</div>';
   if (!D.risorse.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nessuna risorsa inserita.</div>';
   else {
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
@@ -296,61 +385,45 @@ function _invRender() {
       var fin = (D.finanziamenti || []).filter(function (f) { return f.id === r.finanziamento_id; })[0];
       h += '<tr style="border-bottom:0.5px solid var(--border)' + (fin ? ';cursor:pointer' : '') + '"'
         + (fin ? ' onclick="invPopupFinanziamento(\'' + fin.id + '\')" title="Vedi le caratteristiche del finanziamento"' : '') + '>'
-        + '<td style="padding:6px 4px"><strong>' + _invEsc(r.descrizione) + '</strong>'
+        + '<td style="padding:7px 4px"><strong>' + _invEsc(r.descrizione) + '</strong>'
         + '<span style="font-size:10px;color:var(--text-muted);margin-left:6px">' + _invEsc(r.tipo) + '</span>'
         + (fin ? '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEsc(fin.numero_contratto || '') + ' · TAN ' + fin.tasso + '% · ' + fin.durata_rate + ' rate'
             + (fin.rate_preammortamento ? ' (di cui ' + fin.rate_preammortamento + ' di preammortamento)' : '') + '</div>' : '')
         + '</td>'
-        + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(r.importo) + '</td>'
-        + '<td style="padding:6px 4px;text-align:right;width:40px">' + (_invPuo() ? '<button onclick="event.stopPropagation();invEliminaRisorsa(\'' + r.id + '\')" title="Togli" style="border:0;background:transparent;cursor:pointer;color:#A32D2D">×</button>' : '') + '</td></tr>';
+        + '<td style="padding:7px 4px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _invEuro(r.importo) + '</td>'
+        + '<td style="padding:7px 4px;text-align:right;width:40px">' + (_invPuo() ? '<button onclick="event.stopPropagation();invEliminaRisorsa(\'' + r.id + '\')" title="Togli" style="border:0;background:transparent;cursor:pointer;color:#A32D2D">×</button>' : '') + '</td></tr>';
     });
     if (C.incassi > 0) {
-      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:6px 4px"><strong>Incassi del ramo</strong>'
-        + '<div style="font-size:10.5px;color:var(--text-muted)">entrate registrate con questa causale (vendite impianti e altro)</div></td>'
-        + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">+ ' + _invEuro(C.incassi) + '</td><td></td></tr>';
+      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:7px 4px"><strong>Incassi del ramo</strong>'
+        + '<div style="font-size:10.5px;color:var(--text-muted)">entrate registrate con questa causale</div></td>'
+        + '<td style="padding:7px 4px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">+ ' + _invEuro(C.incassi) + '</td><td></td></tr>';
     }
     h += '<tr style="font-weight:700"><td style="padding:8px 4px">TOTALE DISPONIBILE</td>'
       + '<td style="padding:8px 4px;text-align:right;font-family:var(--font-mono)">' + _invEuro(C.disponibili) + '</td><td></td></tr>';
     h += '</table>';
   }
+  // come si usano
+  var pct = C.disponibili > 0 ? Math.min(100, C.spesoTotale / C.disponibili * 100) : 0;
+  var pctP = C.disponibili > 0 ? Math.min(100, C.prenotato / C.disponibili * 100) : 0;
+  h += '<div style="margin-top:14px;padding-top:10px;border-top:0.5px solid var(--border)">'
+    + '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:5px"><span style="font-weight:600">Come si usano</span>'
+    + '<span style="color:var(--text-muted)">speso ' + pct.toFixed(1) + '% · prenotato ' + pctP.toFixed(1) + '%</span></div>'
+    + '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;position:relative">'
+    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + pctP.toFixed(1) + '%;background:#CFE1F3"></div>'
+    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + pct.toFixed(1) + '%;background:#185FA5"></div></div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px">Blu pieno = speso · azzurro = prenotato dagli impianti nostri · al netto dell\'IVA. Gli impianti per la vendita non usano queste risorse.</div></div>';
   h += '</div>';
+  return h;
+}
 
-  // IMPIANTI
-  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Gli impianti</div>';
-  if (!D.impianti.length) h += '<div style="font-size:12px;color:var(--text-muted)">Nessun impianto inserito.</div>';
-  else {
-    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px">';
-    h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
-      + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Impianto</th>'
-      + '<th style="text-align:left;padding:6px 7px;border-bottom:1.5px solid var(--border)">Stato</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">kW</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Previsto</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Speso</th>'
-      + '<th style="text-align:right;padding:6px 7px;border-bottom:1.5px solid var(--border)">Residuo</th>'
-      + '<th style="padding:6px 7px;border-bottom:1.5px solid var(--border);width:110px"></th></tr>';
-    D.impianti.forEach(function (i) {
-      var sp = _invSpesoImpianto(i.id), prev = Number(i.spesa_prevista || 0), res = prev - sp;
-      var st = _INV_STATI[i.stato] || _INV_STATI.previsto;
-      h += '<tr style="border-bottom:0.5px solid var(--border)">'
-        + '<td style="padding:7px"><strong>' + _invEsc(i.nome) + '</strong>'
-        + (i.destinazione === 'vendita' ? ' <span style="font-size:9.5px;background:#FAEEDA;color:#854F0B;padding:1px 7px;border-radius:8px">in vendita</span>' : '')
-        + '<div style="font-size:10.5px;color:var(--text-muted)">' + _invEsc(i.luogo || '') + (i.fornitore ? ' · ' + _invEsc(i.fornitore) : '') + '</div></td>'
-        + '<td style="padding:7px"><span style="font-size:10px;background:' + st.bg + ';color:' + st.col + ';padding:2px 8px;border-radius:8px;font-weight:600">' + st.lab + '</span></td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + (i.kw ? Number(i.kw).toLocaleString('it-IT') : '—') + '</td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono)">' + _invEuro(prev) + '</td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);color:#A32D2D">' + _invEuro(sp) + '</td>'
-        + '<td style="padding:7px;text-align:right;font-family:var(--font-mono);color:' + (res < 0 ? '#A32D2D' : '#27500A') + ';font-weight:600">' + _invEuro(res) + '</td>'
-        + '<td style="padding:7px;text-align:right"><button onclick="invApriImpianto(\'' + i.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Apri →</button></td></tr>';
-    });
-    h += '</table></div>';
-  }
-  h += '</div>';
-
-  // GANTT — solo se c'e' almeno un impianto con entrambe le date
-  h += _invGantt(D.impianti);
-
-  // SPESE DA IMPUTARE
+// SPESE
+function _invPannelloSpese(D, C) {
+  var h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + _invKpi('Imputate agli impianti', _invEuro(C.spesoImputato), 'impianti nostri')
+    + _invKpi('Spese generali', _invEuro(C.spesoGenerale), 'costi comuni del ramo')
+    + _invKpi('Da imputare', _invEuro(C.daImputareTot), C.daImputare.length + ' movimenti', C.daImputare.length ? '#A32D2D' : '#27500A')
+    + (C.spesoVendita ? _invKpi('Impianti in vendita', _invEuro(C.spesoVendita), 'fuori dalle risorse') : '')
+    + '</div>';
   h += '<div class="card" style="padding:12px 14px">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
     + '<div style="font-size:13px;font-weight:700">Spese da imputare</div>'
@@ -372,7 +445,7 @@ function _invRender() {
         + '<td style="padding:7px;text-align:right;white-space:nowrap;vertical-align:top">'
         + '<select id="inv-imp-' + m.id + '" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);max-width:170px">'
         + '<option value="">— imputa a… —</option>'
-        + D.impianti.map(function (i) { return '<option value="' + i.id + '"' + (sug && sug.id === i.id ? ' selected' : '') + '>' + _invEsc(i.nome) + '</option>'; }).join('')
+        + D.impianti.map(function (i) { return '<option value="' + i.id + '"' + (sug && sug.id === i.id ? ' selected' : '') + '>' + _invEsc(i.nome) + (_invIsVend(i) ? ' (vendita)' : '') + '</option>'; }).join('')
         + '</select> '
         + '<input id="inv-voce-' + m.id + '" value="' + _invEsc(testoVoce) + '" placeholder="voce di spesa (es. Ormus Plant – saldo)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:220px"> '
         + '<button onclick="invImputaRiga(\'' + m.id + '\')" class="btn-primary" style="font-size:11.5px;padding:5px 10px">✓ Imputa</button> '
@@ -388,10 +461,24 @@ function _invRender() {
       + '<button onclick="invMostraGenerali()" style="font-size:11px;padding:3px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;margin-left:6px">vedi</button></div>';
   }
   h += '</div>';
+  return h;
+}
 
-  // ── Spese di commessa e incassi del ramo vendite: si imputano a un CONTRATTO ──
-  h += _invBloccoVendite();
-
+// VENDITA A CLIENTI → IMPIANTI VENDUTI
+function _invRenderVendita(box) {
+  var lista = _invImpiantiModo();
+  var costo = 0, speso = 0, ricavo = 0;
+  lista.forEach(function (i) { costo += Number(i.spesa_prevista || 0); speso += _invSpesoImpianto(i.id); ricavo += Number(i.ricavo_previsto || 0); });
+  var h = '<div style="margin-bottom:10px"><div style="font-size:15px;font-weight:700">Impianti venduti</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted)">Impianti costruiti per un cliente: non usano le risorse degli investimenti. Le spese si imputano da ☀️ Investimenti → Spese.</div></div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + _invKpi('Costo previsto', _invEuroK(costo), lista.length + ' impiant' + (lista.length === 1 ? 'o' : 'i'))
+    + _invKpi('Pagato (imponibile)', _invEuroK(speso), '', '#A32D2D')
+    + _invKpi('Ricavo previsto', _invEuroK(ricavo), '', '#27500A')
+    + _invKpi('Margine atteso', _invEuroK(ricavo - costo), '', ricavo - costo >= 0 ? '#27500A' : '#A32D2D')
+    + '</div>';
+  h += _invCelle(lista, '+ Impianto venduto', 'vendita');
+  h += '<div style="margin-top:14px">' + _invBloccoVendite() + '</div>';
   box.innerHTML = h;
 }
 
@@ -652,11 +739,11 @@ async function invImputaVoce(movId, voceId) {
 }
 
 // ── SCHEDA DEL SINGOLO IMPIANTO ────────────────────────────────────────────
-function invApriImpianto(id) { _invImpiantoAperto = id; _invRenderImpianto(); }
+function invApriImpianto(id) { _invImpiantoAperto = id; _invTabImp = 'riepilogo'; _invRenderImpianto(); }
 function invChiudiImpianto() { _invImpiantoAperto = null; _invRender(); }
 
 function _invRenderImpianto() {
-  var box = document.getElementById('inv-content');
+  var box = _invBox();
   var D = _invDati;
   var i = (D.impianti || []).filter(function (x) { return x.id === _invImpiantoAperto; })[0];
   if (!box || !i) { _invImpiantoAperto = null; _invRender(); return; }
@@ -664,13 +751,13 @@ function _invRenderImpianto() {
   var spese = (C.speseImp[i.id] || []);
   var speso = spese.reduce(function (s, m) { return s + _invImponibile(m); }, 0);
   var prev = Number(i.spesa_prevista || 0), res = prev - speso;
-  var voci = (D.voci || []).filter(function (v) { return v.impianto_id === i.id; });
   var st = _INV_STATI[i.stato] || _INV_STATI.previsto;
+  var vend = _invIsVend(i);
 
   var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px">';
   h += '<div><div style="font-size:17px;font-weight:700">' + _invEsc(i.nome)
     + ' <span style="font-size:11px;background:' + st.bg + ';color:' + st.col + ';padding:2px 9px;border-radius:9px;vertical-align:middle">' + st.lab + '</span>'
-    + (i.destinazione === 'vendita' ? ' <span style="font-size:11px;background:#FAEEDA;color:#854F0B;padding:2px 9px;border-radius:9px">in vendita</span>' : '') + '</div>'
+    + (vend ? ' <span style="font-size:11px;background:#FAEEDA;color:#854F0B;padding:2px 9px;border-radius:9px">per la vendita</span>' : '') + '</div>'
     + '<div style="font-size:11.5px;color:var(--text-muted)">' + _invEsc(i.luogo || '—')
     + (i.kw ? ' · ' + Number(i.kw).toLocaleString('it-IT') + ' kW' : '')
     + (i.fornitore ? ' · ' + _invEsc(i.fornitore) : '')
@@ -678,47 +765,45 @@ function _invRenderImpianto() {
     + (i.data_allaccio ? ' · <strong style="color:#27500A">in rete dal ' + _invData(i.data_allaccio) + '</strong>' : '') + '</div></div>';
   h += '<div style="display:flex;gap:8px">';
   if (_invPuo()) {
-    h += '<button onclick="invModaleProduzione(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #639922;border-radius:7px;background:var(--bg);color:#3B6D11;font-weight:600;cursor:pointer">⚡ Produzione</button>';
+    if (!vend) h += '<button onclick="invModaleProduzione(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #639922;border-radius:7px;background:var(--bg);color:#3B6D11;font-weight:600;cursor:pointer">⚡ Produzione</button>';
     h += '<button onclick="invModaleImpianto(\'' + i.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">✏️ Modifica</button>';
   }
-  h += '<button onclick="invChiudiImpianto()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Tutti gli impianti</button>';
+  h += '<button onclick="invChiudiImpianto()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← ' + (vend ? 'Impianti venduti' : 'Tutti gli impianti') + '</button>';
   h += '</div></div>';
 
-  var kpi = function (lab, val, col) {
-    return '<div style="flex:1;min-width:140px;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
-      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
-      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div></div>';
-  };
-  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-    + kpi('Spesa prevista', _invEuro(prev))
-    + kpi('Speso (imponibile)', _invEuro(speso), '#A32D2D')
-    + kpi('Uscito con IVA', _invEuro(spese.reduce(function (s5, m) { return s5 + Number(m.importo || 0); }, 0)), 'var(--text-muted)')
-    + kpi('Residuo', _invEuro(res), res < 0 ? '#A32D2D' : '#27500A');
-  if (i.destinazione === 'vendita') {
-    var ric = Number(i.ricavo_previsto || 0);
-    h += kpi('Ricavo previsto', ric ? _invEuro(ric) : '—')
-      + kpi('Margine atteso', ric ? _invEuro(ric - prev) : '—', (ric - prev) >= 0 ? '#27500A' : '#A32D2D');
+  var tabs = [
+    { k: 'riepilogo', lab: 'Riepilogo' },
+    { k: 'spese', lab: '🧾 Spese (' + spese.length + ')' },
+    { k: 'mastrino', lab: '📒 Mastrino fornitore' },
+    { k: 'preventivi', lab: 'Preventivi' }
+  ];
+  if (!vend) { tabs.push({ k: 'ce', lab: 'Conto economico' }); tabs.push({ k: 'produzione', lab: '⚡ Produzione' }); }
+  if (!tabs.some(function (t) { return t.k === _invTabImp; })) _invTabImp = 'riepilogo';
+  h += _invBarraTab(tabs, _invTabImp, 'invVaiTabImp');
+
+  if (_invTabImp === 'spese') h += _invBloccoElencoSpese(i, spese, speso, prev);
+  else if (_invTabImp === 'mastrino') h += _invBloccoMastrino(i, spese, prev);
+  else if (_invTabImp === 'preventivi') h += _invBloccoPreventivi(i);
+  else if (_invTabImp === 'ce') h += _invBloccoCE(i, prev);
+  else if (_invTabImp === 'produzione') h += _invBloccoProduzione(i, prev);
+  else {
+    h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      + _invKpi(vend ? 'Costo previsto' : 'Spesa prevista', _invEuro(prev))
+      + _invKpi('Speso (imponibile)', _invEuro(speso), '', '#A32D2D')
+      + _invKpi('Uscito con IVA', _invEuro(spese.reduce(function (s5, m) { return s5 + Number(m.importo || 0); }, 0)), '', 'var(--text-muted)')
+      + _invKpi('Residuo', _invEuro(res), '', res < 0 ? '#A32D2D' : '#27500A');
+    if (vend) {
+      var ric = Number(i.ricavo_previsto || 0);
+      h += _invKpi('Ricavo previsto', ric ? _invEuro(ric) : '—')
+        + _invKpi('Margine atteso', ric ? _invEuro(ric - prev) : '—', '', (ric - prev) >= 0 ? '#27500A' : '#A32D2D');
+    }
+    h += '</div>';
+    h += _invGanttSingolo(i);
   }
-  h += '</div>';
-
-  // ELENCO SPESE: i pagamenti imputati, con la loro voce a testo libero
-  h += _invBloccoElencoSpese(i, spese, speso, prev);
-
-  // MASTRINO del fornitore scelto + resoconto preventivo/speso (23/10)
-  h += _invBloccoMastrino(i, spese, prev);
-
-  // PREVENTIVI RICEVUTI dai fornitori per questo impianto
-  h += _invBloccoPreventivi(i);
-
-  // GANTT del singolo impianto + CONTO ECONOMICO PREVISIONALE
-  h += _invGanttSingolo(i);
-  h += _invBloccoCE(i, prev);
-
-  // PRODUZIONE REALE contro budget
-  h += _invBloccoProduzione(i, prev);
 
   box.innerHTML = h;
 }
+function invVaiTabImp(k) { _invTabImp = k; _invRenderImpianto(); }
 
 // ── ELENCO SPESE DELL'IMPIANTO (09/10) ──────────────────────────────────────
 // Gruppo = testo della voce prima del trattino (– — -). Subtotale solo se il gruppo
