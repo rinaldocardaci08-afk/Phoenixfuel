@@ -1,5 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261026b — vetrina Borgia: costo netto 584.200 € (1.000.000 − contributo GSE 415.800 €,
+//   atto di concessione 26/06/2026, CUP F33D26035000004).
 // v20261026a — IMPIANTI IN SVILUPPO: seconda vetrina 3D, BORGIA (CZ) — serre Mari Serre a
 //   doppia falda con i moduli su entrambe le falde, est e ovest, 990 kWp (1.584 × 625 Wp),
 //   stima 1.423 MWh/anno, sotto non si coltiva. File fv-vetrina-borgia.html.
@@ -1663,7 +1665,7 @@ var _FV_VETRINE = [
     file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' },
   { id: 'borgia', nome: 'Borgia', luogo: 'Borgia (CZ)',
     tipo: 'Serre fotovoltaiche est-ovest', kwp: '990 kWp', energia: '≈ 1.423 MWh/anno',
-    file: 'fv-vetrina-borgia.html', ver: '20261026a', stato: 'In sviluppo' }
+    file: 'fv-vetrina-borgia.html', ver: '20261026b', stato: 'In sviluppo' }
 ];
 
 function fvCaricaSviluppo() {
