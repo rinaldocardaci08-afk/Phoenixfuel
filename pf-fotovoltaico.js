@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261026a — IMPIANTI IN SVILUPPO: seconda vetrina 3D, BORGIA (CZ) — serre Mari Serre a
+//   doppia falda con i moduli su entrambe le falde, est e ovest, 990 kWp (1.584 × 625 Wp),
+//   stima 1.423 MWh/anno, sotto non si coltiva. File fv-vetrina-borgia.html.
 // v20261023c — IMPIANTI VENDUTI = i CONTRATTI firmati (e da firmare), una cella per
 //   contratto: cliente, sito, totale, avanzamento lavori e incassi. Il clic apre la scheda
 //   del contratto (Composizione · Contabilita') nella sotto-linguetta Contratti. Prima la
@@ -1657,7 +1660,10 @@ async function fvImputaIncasso(movId, contrattoId) {
 var _FV_VETRINE = [
   { id: 'polistena', nome: 'Polistena', luogo: 'Polistena (RC) · c/da Primogenito',
     tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno', colture: 'Fragole, mirtilli, more e idroponica verticale',
-    file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' }
+    file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' },
+  { id: 'borgia', nome: 'Borgia', luogo: 'Borgia (CZ)',
+    tipo: 'Serre fotovoltaiche est-ovest', kwp: '990 kWp', energia: '≈ 1.423 MWh/anno',
+    file: 'fv-vetrina-borgia.html', ver: '20261026a', stato: 'In sviluppo' }
 ];
 
 function fvCaricaSviluppo() {
