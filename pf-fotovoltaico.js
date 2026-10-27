@@ -1,5 +1,12 @@
+// v20261027b — vetrina Borgia: i 136 moduli riservati a Catarisano in giallo chiaro, con legenda nella scena.
+// v20261027a — vetrina Borgia con i DATI DEFINITIVI: 1.800 moduli Jinko Solar 550 Wp = 990 kWp,
+//   3 inverter SolarEdge 330 kW; 20 serre da 88 + 40 moduli sulla serra Catarisano (9,60 × 50 m),
+//   dove il proprietario ha 136 moduli da 620 Wp (84,32 kWp) + 14,88 kW con accumulo sulla casa = 99,20 kW.
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fotovoltaico.js — RAMO FOTOVOLTAICO (camera stagna)
+// v20261026c — vetrina Borgia rifatta sul LAYOUT FINALE quotato (86,40 × 75,02 m): corpo ovest
+//   3 campate × 75 m, corpo est 6 campate × 50 m, 1.848 moduli da 620 Wp = 1.145,8 kWp (990 kW in
+//   rete), piu' la serra del proprietario del terreno (88 moduli, 54,6 kWp).
 // v20261026b — vetrina Borgia: costo netto 584.200 € (1.000.000 − contributo GSE 415.800 €,
 //   atto di concessione 26/06/2026, CUP F33D26035000004).
 // v20261026a — IMPIANTI IN SVILUPPO: seconda vetrina 3D, BORGIA (CZ) — serre Mari Serre a
@@ -1664,8 +1671,8 @@ var _FV_VETRINE = [
     tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno', colture: 'Fragole, mirtilli, more e idroponica verticale',
     file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' },
   { id: 'borgia', nome: 'Borgia', luogo: 'Borgia (CZ)',
-    tipo: 'Serre fotovoltaiche est-ovest', kwp: '990 kWp', energia: '≈ 1.423 MWh/anno',
-    file: 'fv-vetrina-borgia.html', ver: '20261026b', stato: 'In sviluppo' }
+    tipo: 'Serre fotovoltaiche est-ovest', kwp: '990 kWp · 1.800 moduli Jinko 550 Wp', energia: '≈ 1.423 MWh/anno',
+    file: 'fv-vetrina-borgia.html', ver: '20261027b', stato: 'In sviluppo' }
 ];
 
 function fvCaricaSviluppo() {
