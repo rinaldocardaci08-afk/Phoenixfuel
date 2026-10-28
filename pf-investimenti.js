@@ -1,3 +1,6 @@
+// v20261028b — MASTRINO A LINGUETTE, unico per impianti nostri e venduti (_pfMastrino, usato anche da
+//   pf-fotovoltaico.js): in alto riquadri e due barre (fatturato e pagato sul pattuito), sotto le linguette
+//   Fatture · Pagamenti · Saldo dare/avere, e qui anche Resoconto cantiere.
 // v20261028a — FATTURE DEL FORNITORE nel mastrino: si registrano a mano sul contratto
 //   (＋ Fattura fornitore: numero, data, imponibile, IVA, rata facoltativa, nota) e ogni
 //   pagamento del foglio giornale si collega a una fattura (colonna "Fattura pagata" del
@@ -1085,197 +1088,262 @@ function _invSelFattTutte(id) {
   return h + '</select>';
 }
 
+// ── MASTRINO A LINGUETTE, UNICO PER IMPIANTI NOSTRI E VENDUTI (28/10) ──────
+// Usato da pf-investimenti.js (mastrino fornitore dell'impianto) e da
+// pf-fotovoltaico.js (mastrino fornitori e fatture/incassi cliente del contratto).
+// In alto, sempre: riquadri e due barre (fatturato e pagato/incassato sul pattuito).
+// Sotto, linguette: Fatture · Pagamenti/Incassi · Saldo dare/avere (+ eventuali extra).
+// o = { chiave, verso:'forn'|'cli', titolo, sotto, btns, pattImp, aliq,
+//       fatture:[{id,num,data,imponibile,aliq,totale,nota,rata,legacy}],
+//       rateGrigie:[{lab,totale}], rataLab:function(f)->testo,
+//       movs:[{id,data,importo,descr,fattId}], selFatt:function(m)->html|'' ,
+//       azioniFatt:function(f)->html, daCollegare:[movs], daCollegareSel:function(m)->html,
+//       extraMov:html, avvisi:[testi], extraTabs:[{k,lab,html}], nota:testo }
+var _pfMastTabSt = {};
+function pfMastTab(btn, chiave, k) {
+  _pfMastTabSt[chiave] = k;
+  var box = btn.closest('.pf-mast');
+  if (!box) return;
+  box.querySelectorAll('.pf-mast-tab').forEach(function (b) {
+    var on = b.getAttribute('data-k') === k;
+    b.style.background = on ? 'var(--card, #fff)' : 'transparent';
+    b.style.color = on ? '#185FA5' : 'var(--text-muted)';
+    b.style.border = on ? '1.5px solid var(--border)' : '1.5px solid transparent';
+    b.style.borderBottom = on ? '1.5px solid var(--card, #fff)' : '1.5px solid transparent';
+  });
+  box.querySelectorAll('.pf-mast-pane').forEach(function (p) { p.style.display = p.getAttribute('data-k') === k ? '' : 'none'; });
+}
+function _pfMastrino(o) {
+  var E = _invEsc, EU = _invEuro, D = _invData;
+  var forn = o.verso === 'forn';
+  var colMov = forn ? '#185FA5' : '#27500A';
+  var pattIva = Math.round(o.pattImp * (1 + o.aliq / 100) * 100) / 100;
+  var ff = o.fatture || [], movs = (o.movs || []).slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); });
+  var idx = {}; ff.forEach(function (f) { idx[f.id] = f; f.mov = []; f.pagato = 0; });
+  var movTot = 0, senza = [];
+  movs.forEach(function (m) {
+    movTot += Number(m.importo || 0);
+    var f = m.fattId && idx[m.fattId];
+    if (f) { f.mov.push(m); f.pagato += Number(m.importo || 0); } else senza.push(m);
+  });
+  var etich = {};
+  ff.forEach(function (f) {
+    var cum = 0;
+    f.mov.forEach(function (m) { cum += Number(m.importo || 0); etich[m.id] = cum >= f.totale - 0.5 ? 'saldo' : 'acconto'; });
+    f.residuo = f.totale - f.pagato;
+  });
+  var fattTot = ff.reduce(function (s, f) { return s + f.totale; }, 0);
+  var fattAperte = ff.reduce(function (s, f) { return s + Math.max(0, f.residuo); }, 0);
+  var saldo = movTot - pattIva;
+  var pill = function (t, bg, col) { return '<span style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:9px;white-space:nowrap;background:' + bg + ';color:' + col + '">' + t + '</span>'; };
+  var td = 'padding:7px;border-bottom:0.5px solid var(--border);vertical-align:top';
+  var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border)';
+  var num = ';text-align:right;font-family:var(--font-mono)';
+  var rif = function (t) { return '<div style="font-size:10.5px;color:var(--text-muted)">' + t + '</div>'; };
+  var L = forn
+    ? { patt: 'Pattuito', mov: 'Pagato', aperte: 'Fatture da pagare', tabF: '🧾 Fatture ricevute', tabM: '💸 Pagamenti effettuati', movS: 'pagament', fattW: 'ricevuta', ok: 'pagata', no: 'da pagare' }
+    : { patt: 'Contratto', mov: 'Incassato', aperte: 'Fatture da incassare', tabF: '🧾 Fatture emesse', tabM: '💶 Incassi ricevuti', movS: 'incass', fattW: 'emessa', ok: 'incassata', no: 'da incassare' };
+  var plur = function (n, rad, s, p) { return n + ' ' + rad + (n === 1 ? s : p); };
+
+  var h = '<div class="card pf-mast" style="padding:12px 14px;margin-bottom:12px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">' + o.titolo + '</div><div style="font-size:11px;color:var(--text-muted)">' + (o.sotto || '') + '</div></div>'
+    + (o.btns ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + o.btns + '</div>' : '') + '</div>';
+  var k = function (lab, val, sub, col) {
+    return '<div style="flex:1;min-width:130px;background:var(--bg);border-radius:8px;padding:8px 10px">'
+      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div></div>';
+  };
+  var pc = function (x) { return pattIva > 0 ? Math.round(x / pattIva * 100) : 0; };
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    + k(L.patt, EU(pattIva), EU(o.pattImp) + ' + IVA ' + o.aliq + '%')
+    + k('Fatturato', EU(fattTot), plur(ff.length, 'fattur', 'a', 'e') + ' · ' + pc(fattTot) + '%', '#A32D2D')
+    + k(L.mov, EU(movTot), plur(movs.length, L.movS, 'o', 'i') + ' · ' + pc(movTot) + '%', colMov)
+    + k(L.aperte, EU(fattAperte), 'fatture non ancora saldate', fattAperte > 0.5 ? '#A32D2D' : '#27500A')
+    + k('Saldo', EU(saldo), L.patt.toLowerCase() + ' − ' + L.mov.toLowerCase(), saldo < -0.5 ? '#A32D2D' : '#27500A')
+    + '</div>';
+  var barra = function (lab, val, col, resto) {
+    var p = pattIva > 0 ? Math.min(100, val / pattIva * 100) : 0;
+    return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:4px"><span>' + lab + '</span>'
+      + '<span><b style="font-family:var(--font-mono);color:var(--text)">' + EU(val) + '</b> · ' + p.toFixed(0) + '% · ' + resto + ' ' + EU(Math.max(0, pattIva - val)) + '</span></div>'
+      + '<div style="height:12px;border-radius:6px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;margin-top:2px"><div style="width:' + p.toFixed(1) + '%;height:100%;background:' + col + '"></div></div>';
+  };
+  h += barra('Fatturato su ' + L.patt.toLowerCase(), fattTot, '#E8B4B4', 'da fatturare')
+    + barra(L.mov + ' su ' + L.patt.toLowerCase(), movTot, colMov, forn ? 'da pagare' : 'da incassare');
+
+  // linguette
+  var tabs = [{ k: 'fatt', lab: L.tabF + ' (' + ff.length + ')' }, { k: 'mov', lab: L.tabM + ' (' + movs.length + ')' }, { k: 'saldo', lab: '⚖️ Saldo dare / avere' }]
+    .concat((o.extraTabs || []).map(function (t) { return { k: t.k, lab: t.lab }; }));
+  var att = _pfMastTabSt[o.chiave];
+  if (!tabs.some(function (t) { return t.k === att; })) att = 'fatt';
+  h += '<div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1.5px solid var(--border);margin:14px 0 10px">';
+  tabs.forEach(function (t) {
+    var on = t.k === att;
+    h += '<button class="pf-mast-tab" data-k="' + t.k + '" onclick="pfMastTab(this,\'' + E(o.chiave) + '\',\'' + t.k + '\')" style="font-size:12.5px;font-weight:600;padding:8px 13px;border-radius:8px 8px 0 0;cursor:pointer;margin-bottom:-1.5px;'
+      + (on ? 'background:var(--card, #fff);color:#185FA5;border:1.5px solid var(--border);border-bottom:1.5px solid var(--card, #fff)' : 'background:transparent;color:var(--text-muted);border:1.5px solid transparent') + '">' + t.lab + '</button>';
+  });
+  h += '</div>';
+  var pane = function (key, html) { return '<div class="pf-mast-pane" data-k="' + key + '"' + (key === att ? '' : ' style="display:none"') + '>' + html + '</div>'; };
+
+  // 1) fatture
+  var t = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">'
+    + '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;' + th + '">Fattura</th>' + (o.rataLab ? '<th style="text-align:left;' + th + '">Rata</th>' : '')
+    + '<th style="text-align:right;' + th + '">Totale</th><th style="text-align:right;' + th + '">' + L.mov + '</th>'
+    + '<th style="text-align:right;' + th + '">Residuo</th><th style="text-align:left;' + th + '">Stato</th><th style="' + th + '"></th></tr>';
+  var ncol = o.rataLab ? 7 : 6;
+  if (!ff.length) t += '<tr><td colspan="' + ncol + '" style="' + td + ';color:var(--text-muted);font-size:11.5px">Nessuna fattura ' + L.fattW + '.</td></tr>';
+  ff.forEach(function (f) {
+    var stato = f.pagato <= 0.005 ? pill(L.no, '#FCEBEB', '#791F1F') : (f.residuo <= 0.5 ? pill(L.ok, '#EAF3DE', '#27500A') : pill('acconto', '#FAEEDA', '#854F0B'));
+    var dett = f.mov.map(function (m) { return etich[m.id] + ' ' + D(m.data) + ' <b style="font-family:var(--font-mono);color:' + colMov + '">' + EU(m.importo) + '</b>'; }).join(' · ');
+    if (f.residuo > 0.5 && f.pagato > 0) dett += ' · manca <b style="font-family:var(--font-mono);color:#A32D2D">' + EU(f.residuo) + '</b>';
+    if (f.residuo < -0.5) dett += ' · <b style="color:#854F0B">' + EU(-f.residuo) + ' in più</b>';
+    t += '<tr><td style="' + td + ';white-space:nowrap"><strong>n. ' + E(f.num || '?') + '</strong>' + (f.data ? ' del ' + D(f.data) : '')
+      + rif(EU(f.imponibile) + ' + IVA ' + f.aliq + '%' + (f.nota ? ' · ' + E(f.nota) : ''))
+      + (f.legacy ? rif('<span style="color:#854F0B">scritta sulla rata: ✏️ per completarla</span>') : '') + '</td>'
+      + (o.rataLab ? '<td style="' + td + '">' + (o.rataLab(f) || '<span style="color:var(--text-muted)">—</span>') + '</td>' : '')
+      + '<td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(f.totale) + '</td>'
+      + '<td style="' + td + num + ';color:' + colMov + ';font-weight:700">' + (f.pagato ? EU(f.pagato) : '') + '</td>'
+      + '<td style="' + td + num + ';font-weight:700;color:' + (f.residuo > 0.5 ? '#A32D2D' : '#27500A') + '">' + EU(Math.max(0, f.residuo)) + '</td>'
+      + '<td style="' + td + '">' + stato + (dett ? '<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;line-height:1.5">' + dett + '</div>' : '') + '</td>'
+      + '<td style="' + td + ';white-space:nowrap;text-align:right">' + (o.azioniFatt ? o.azioniFatt(f) : '') + '</td></tr>';
+  });
+  (o.rateGrigie || []).forEach(function (r) {
+    t += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + '">—</td>' + (o.rataLab ? '<td style="' + td + '">◌ ' + r.lab + '</td>' : '')
+      + '<td style="' + td + num + '">' + EU(r.totale) + '</td><td style="' + td + '"></td><td style="' + td + '"></td>'
+      + '<td style="' + td + '">' + pill('da fatturare', '#EEEDE6', '#6B6A64') + '</td><td style="' + td + '"></td></tr>';
+  });
+  if (ff.length) {
+    t += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px">Totale fatture</td>' + (o.rataLab ? '<td></td>' : '')
+      + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + EU(fattTot) + '</td>'
+      + '<td style="padding:8px 7px' + num + ';color:' + colMov + '">' + EU(movTot - senza.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0)) + '</td>'
+      + '<td style="padding:8px 7px' + num + ';color:' + (fattAperte > 0.5 ? '#A32D2D' : '#27500A') + '">' + EU(fattAperte) + '</td><td></td><td></td></tr>';
+  }
+  t += '</table></div>';
+  h += pane('fatt', t);
+
+  // 2) pagamenti / incassi
+  t = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">'
+    + '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">' + (forn ? 'Pagamento' : 'Incasso') + ' (foglio giornale)</th>'
+    + '<th style="text-align:left;' + th + '">Fattura</th><th style="text-align:right;' + th + '">Importo</th></tr>';
+  if (!movs.length) t += '<tr><td colspan="4" style="' + td + ';color:var(--text-muted);font-size:11.5px">Nessun ' + (forn ? 'pagamento' : 'incasso') + '.</td></tr>';
+  movs.forEach(function (m) {
+    var f = m.fattId && idx[m.fattId];
+    var tag = f ? pill(etich[m.id] + ' fatt. ' + E(f.num || '?'), etich[m.id] === 'saldo' ? '#EAF3DE' : '#FAEEDA', etich[m.id] === 'saldo' ? '#27500A' : '#854F0B') : pill('senza fattura', '#E6F1FB', '#0C447C');
+    var sel = o.selFatt ? o.selFatt(m) : '';
+    t += '<tr><td style="' + td + ';white-space:nowrap">' + D(m.data) + '</td><td style="' + td + '">' + E(m.descr || '') + ' ' + tag + '</td>'
+      + '<td style="' + td + '">' + (sel || (f ? E('n. ' + (f.num || '?')) : '—')) + '</td>'
+      + '<td style="' + td + num + ';color:' + colMov + ';font-weight:700">' + EU(m.importo) + '</td></tr>';
+  });
+  if (movs.length) t += '<tr style="font-weight:700;background:var(--bg)"><td></td><td style="padding:8px 7px">Totale ' + L.mov.toLowerCase() + '</td><td></td><td style="padding:8px 7px' + num + ';color:' + colMov + '">' + EU(movTot) + '</td></tr>';
+  t += '</table></div>';
+  if ((o.daCollegare || []).length) {
+    t += '<div style="margin-top:12px;padding:9px 11px;background:#FFF7E0;border-left:3px solid #BA7517;border-radius:0 6px 6px 0">'
+      + '<div style="font-size:12px;font-weight:700;margin-bottom:4px">Da collegare a una fattura (' + o.daCollegare.length + ')</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    o.daCollegare.forEach(function (m) {
+      t += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 4px;white-space:nowrap">' + D(m.data) + '</td><td style="padding:5px 4px">' + E(m.descr || '') + '</td>'
+        + '<td style="padding:5px 4px;text-align:right;font-family:var(--font-mono);font-weight:600;color:' + colMov + '">' + EU(m.importo) + '</td>'
+        + '<td style="padding:5px 4px;text-align:right">' + (o.daCollegareSel ? o.daCollegareSel(m) : '') + '</td></tr>';
+    });
+    t += '</table></div>';
+  }
+  t += o.extraMov || '';
+  h += pane('mov', t);
+
+  // 3) saldo dare / avere
+  var righe = [];
+  ff.forEach(function (f) { righe.push({ data: f.data || '', tipo: 'f', f: f }); });
+  movs.forEach(function (m) { righe.push({ data: m.data, tipo: 'm', m: m }); });
+  righe.sort(function (a, b) { var c = String(a.data || '9999').localeCompare(String(b.data || '9999')); return c !== 0 ? c : (a.tipo === 'f' ? -1 : 1); });
+  var run = -pattIva;
+  t = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">'
+    + '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
+    + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">Descrizione</th>'
+    + '<th style="text-align:right;' + th + '">Dare<br>' + (forn ? 'pagamenti' : 'incassi') + '</th><th style="text-align:right;' + th + '">Avere<br>' + L.patt.toLowerCase() + '</th>'
+    + '<th style="text-align:right;' + th + '">Saldo</th></tr>'
+    + '<tr style="background:var(--bg)"><td style="' + td + '">' + (o.dataPatto ? D(o.dataPatto) : '—') + '</td><td style="' + td + '"><strong>' + (forn ? 'Contratto / costo pattuito' : 'Totale contratto') + '</strong>' + rif(EU(o.pattImp) + ' + IVA ' + o.aliq + '%') + '</td>'
+    + '<td style="' + td + '"></td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(pattIva) + '</td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(run) + '</td></tr>';
+  righe.forEach(function (x) {
+    if (x.tipo === 'f') {
+      t += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + ';white-space:nowrap">' + (x.f.data ? D(x.f.data) : '—') + '</td><td style="' + td + '">🧾 Fattura n. ' + E(x.f.num || '?') + ' · ' + EU(x.f.totale) + '</td><td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td></tr>';
+    } else {
+      run += Number(x.m.importo || 0);
+      t += '<tr><td style="' + td + ';white-space:nowrap">' + D(x.m.data) + '</td><td style="' + td + '">' + E(x.m.descr || '') + '</td>'
+        + '<td style="' + td + num + ';color:' + colMov + ';font-weight:700">' + EU(x.m.importo) + '</td><td style="' + td + '"></td>'
+        + '<td style="' + td + num + ';font-weight:700;color:' + (run < -0.5 ? '#A32D2D' : '#27500A') + '">' + EU(run) + '</td></tr>';
+    }
+  });
+  t += '<tr style="font-weight:700;background:var(--bg)"><td></td><td style="padding:8px 7px">Totali</td><td style="padding:8px 7px' + num + ';color:' + colMov + '">' + EU(movTot) + '</td>'
+    + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + EU(pattIva) + '</td><td style="padding:8px 7px' + num + ';color:' + (run < -0.5 ? '#A32D2D' : '#27500A') + '">' + EU(run) + '</td></tr></table></div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Avere = ' + (forn ? 'contratto firmato' : 'contratto col cliente') + ', dare = ' + (forn ? 'pagamenti' : 'incassi') + ', saldo progressivo. Le fatture in grigio sono solo riferimento.</div>';
+  h += pane('saldo', t);
+  (o.extraTabs || []).forEach(function (x) { h += pane(x.k, x.html); });
+
+  // avvisi
+  var avv = (o.avvisi || []).slice();
+  if (senza.length) avv.push(plur(senza.length, L.movS, 'o', 'i') + ' per ' + EU(senza.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0)) + ' senza fattura collegata: collegali nella linguetta ' + L.tabM.slice(3) + '.');
+  ff.forEach(function (f) { if (f.residuo < -0.5) avv.push('Fattura n. ' + (f.num || '?') + ': ' + L.mov.toLowerCase() + ' ' + EU(-f.residuo) + ' più del totale (spese di bonifico, bollo, IVA diversa o collegamento sbagliato?).'); });
+  if (fattTot > pattIva + 0.5) avv.push('Le fatture superano ' + (forn ? 'il pattuito' : 'il contratto') + ' di ' + EU(fattTot - pattIva) + '.');
+  if (avv.length) h += '<div style="margin-top:10px;background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 6px 6px 0;padding:8px 10px;font-size:11.5px;color:#633806">⚠ ' + avv.join('<br>⚠ ') + '</div>';
+  if (o.nota) h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">' + o.nota + '</div>';
+  h += '</div>';
+  return h;
+}
+
 function _invBloccoMastrino(i, spese, budget) {
   var pr = _invPrevScelto(i.id);
-  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
   if (!pr) {
-    h += '<div style="font-size:13px;font-weight:700;margin-bottom:4px">📒 Mastrino fornitore</div>'
+    return '<div class="card" style="padding:12px 14px;margin-bottom:12px"><div style="font-size:13px;font-weight:700;margin-bottom:4px">📒 Mastrino fornitore</div>'
       + '<div style="font-size:12px;color:var(--text-muted)">Si attiva quando in "Preventivi ricevuti" c\'è un preventivo <strong>scelto</strong>: il suo imponibile è il contratto.</div></div>';
-    return h;
   }
   var tot = Number(pr.importo || 0), aliq = _invAliqPrev(pr), rate = _invRatePrev(pr);
   var chiave = _invChiaveForn(pr.fornitore);
   var FF = _invFattureContratto(pr);
-  var idsF = {}; FF.forEach(function (f) { idsF[f.id] = f; f.pagato = 0; f.pag = []; });
-  // pagamenti del contratto: quelli collegati a una sua fattura e quelli con il nome del fornitore nella voce
-  var pag = spese.filter(function (m) { return (m.investimento_fattura && idsF[m.investimento_fattura]) || _invMovDelForn(m, chiave); })
-    .slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); });
-  var pagato = 0, pagImp = 0, senzaFatt = [];
-  pag.forEach(function (m) {
-    pagato += Number(m.importo || 0); pagImp += _invImponibile(m);
-    var f = m.investimento_fattura && idsF[m.investimento_fattura];
-    if (f) { f.pagato += Number(m.importo || 0); f.pag.push(m); } else senzaFatt.push(m);
-  });
-  // etichetta di ogni pagamento: "saldo" quello che chiude la fattura, "acconto" gli altri
-  var etich = {};
-  FF.forEach(function (f) {
-    var cum = 0;
-    f.pag.forEach(function (m) {
-      cum += Number(m.importo || 0);
-      etich[m.id] = (cum >= f.totale - 0.5) ? 'saldo' : 'acconto';
-    });
-    f.residuo = f.totale - f.pagato;
-  });
-  var fattImp = FF.reduce(function (s, f) { return s + f.imponibile; }, 0);
-  var fattTot = FF.reduce(function (s, f) { return s + f.totale; }, 0);
-  var fattDaPagare = FF.reduce(function (s, f) { return s + Math.max(0, f.residuo); }, 0);
-  var totIvato = tot * (1 + aliq / 100);
-  var daPagare = totIvato - pagato;
-  var daFatturare = totIvato - fattTot;
-  var rateFatt = {}; FF.forEach(function (f) { if (f.rata != null) rateFatt[f.rata] = f; });
+  var idsF = {}; FF.forEach(function (f) { idsF[f.id] = f; });
+  // pagamenti del contratto: collegati a una sua fattura o con il nome del fornitore nella voce
+  var pag = spese.filter(function (m) { return (m.investimento_fattura && idsF[m.investimento_fattura]) || _invMovDelForn(m, chiave); });
+  var rateFatt = {}; FF.forEach(function (f) { if (f.rata != null) rateFatt[f.rata] = 1; });
   var percTot = rate.reduce(function (s, r) { return s + Number(r.perc || 0); }, 0);
-
-  var btn = function (onclick, txt, col) {
-    col = col || '#185FA5';
-    return '<button onclick="' + onclick + '" style="font-size:11.5px;padding:5px 11px;border:0.5px solid ' + col + ';border-radius:6px;background:var(--bg);color:' + col + ';font-weight:600;cursor:pointer">' + txt + '</button>';
+  var bt = function (onclick, txt) {
+    return '<button onclick="' + onclick + '" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">' + txt + '</button>';
   };
-  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">'
-    + '<div><div style="font-size:13px;font-weight:700">📒 Mastrino fornitore — ' + _invEsc(pr.fornitore) + '</div>'
-    + '<div style="font-size:11px;color:var(--text-muted)">Contratto = preventivo scelto' + (pr.numero ? ' n. ' + _invEsc(pr.numero) : '') + (pr.data ? ' del ' + _invData(pr.data) : '')
-    + ' · ' + _invEuro(tot) + ' + IVA ' + aliq + '% · contratto in avere, pagamenti in dare</div></div>'
-    + (_invPuo() ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + btn('invModaleFattura(\'' + pr.id + '\')', '＋ Fattura fornitore') + btn('invModaleRate(\'' + pr.id + '\')', '✏️ Rate e IVA') + '</div>' : '')
-    + '</div>';
-
-  var kpi = function (lab, val, sub, col) {
-    return '<div style="flex:1;min-width:140px;background:var(--bg);border-radius:8px;padding:9px 11px">'
-      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">' + lab + '</div>'
-      + '<div style="font-family:var(--font-mono);font-size:16px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
-      + '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div></div>';
-  };
-  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
-    + kpi('Contratto', _invEuro(totIvato), _invEuro(tot) + ' + IVA')
-    + kpi('Fatturato', _invEuro(fattTot), FF.length + ' fattur' + (FF.length === 1 ? 'a' : 'e') + ' · ' + (tot > 0 ? (fattImp / tot * 100).toFixed(0) : 0) + '% del contratto', '#A32D2D')
-    + kpi('Pagato', _invEuro(pagato), pag.length + ' pagament' + (pag.length === 1 ? 'o' : 'i') + ' dal foglio giornale', '#185FA5')
-    + kpi('Fatture da pagare', _invEuro(fattDaPagare), 'fatture arrivate e non ancora saldate', fattDaPagare > 0.5 ? '#A32D2D' : '#27500A')
-    + kpi('Saldo contratto', _invEuro(-daPagare), 'contratto con IVA − pagato', daPagare > 0.5 ? '#A32D2D' : '#27500A')
-    + '</div>';
-
-  if (tot > 0) {
-    var pF = Math.min(100, fattImp / tot * 100), pP = Math.min(100, pagImp / tot * 100);
-    h += '<div style="height:16px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);position:relative;overflow:hidden">'
-      + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + pF.toFixed(1) + '%;background:#E8B4B4"></div>'
-      + '<div style="position:absolute;left:0;top:50%;bottom:0;width:' + pP.toFixed(1) + '%;background:#185FA5"></div></div>'
-      + '<div style="display:flex;gap:14px;font-size:10.5px;color:var(--text-muted);margin:4px 0 12px">'
-      + '<span><span style="display:inline-block;width:9px;height:9px;background:#E8B4B4;border-radius:2px"></span> fatturato ' + pF.toFixed(0) + '%</span>'
-      + '<span><span style="display:inline-block;width:9px;height:9px;background:#185FA5;border-radius:2px"></span> pagato ' + pP.toFixed(0) + '% (imponibile)</span>'
-      + (daFatturare > 0.5 ? '<span>ancora da fatturare ' + _invEuro(daFatturare) + ' con IVA</span>' : '') + '</div>';
-  }
-
-  var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border)';
-  var td = 'padding:7px;border-bottom:0.5px solid var(--border);vertical-align:top';
-  var num = ';text-align:right;font-family:var(--font-mono)';
-  var rif = function (t) { return '<div style="font-size:10.5px;color:var(--text-muted)">' + t + '</div>'; };
-  var pill = function (t, bg, col) { return '<span style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:9px;white-space:nowrap;background:' + bg + ';color:' + col + '">' + t + '</span>'; };
-
-  // ── FATTURE DEL FORNITORE ──
-  h += '<div style="font-size:12.5px;font-weight:700;margin:4px 0 2px">🧾 Fatture del fornitore</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Ogni fattura si chiude con i pagamenti collegati: acconto e saldo, oppure un solo pagamento a saldo.</div>';
-  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px">';
-  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
-    + '<th style="text-align:left;' + th + '">Fattura</th><th style="text-align:left;' + th + '">Rata</th>'
-    + '<th style="text-align:right;' + th + '">Totale<br>con IVA</th><th style="text-align:right;' + th + '">Pagato</th>'
-    + '<th style="text-align:right;' + th + '">Residuo</th><th style="text-align:left;' + th + '">Stato</th><th style="' + th + '"></th></tr>';
-  if (!FF.length) {
-    h += '<tr><td colspan="7" style="' + td + ';color:var(--text-muted);font-size:11.5px">Nessuna fattura registrata. Quando arriva una fattura del fornitore usa “＋ Fattura fornitore”.</td></tr>';
-  }
-  FF.forEach(function (f) {
-    var r = f.rata != null ? rate[f.rata] : null;
-    var stato = f.pagato <= 0.005 ? pill('da pagare', '#FCEBEB', '#791F1F')
-      : (f.residuo <= 0.5 ? pill('pagata', '#EAF3DE', '#27500A') : pill('acconto', '#FAEEDA', '#854F0B'));
-    var dett = f.pag.map(function (m) { return (etich[m.id] || 'acconto') + ' ' + _invData(m.data) + ' <b style="font-family:var(--font-mono);color:#185FA5">' + _invEuro(m.importo) + '</b>'; }).join(' · ');
-    if (f.residuo > 0.5 && f.pagato > 0) dett += ' · manca <b style="font-family:var(--font-mono);color:#A32D2D">' + _invEuro(f.residuo) + '</b>';
-    if (f.residuo < -0.5) dett += ' · pagato <b style="font-family:var(--font-mono);color:#854F0B">' + _invEuro(-f.residuo) + '</b> in più';
-    h += '<tr><td style="' + td + ';white-space:nowrap"><strong>' + _invEsc(_invEtichettaFatt(f)) + '</strong>'
-      + rif(_invEuro(f.imponibile) + ' + IVA ' + f.aliq + '% ' + _invEuro(f.totale - f.imponibile))
-      + (f.legacy ? rif('<span style="color:#854F0B">scritta sulla rata: ✏️ per completarla</span>') : '')
-      + (f.nota ? rif(_invEsc(f.nota)) : '') + '</td>'
-      + '<td style="' + td + '">' + (r ? Number(r.perc) + '% ' + _invEsc(r.evento || '') : '<span style="color:var(--text-muted)">—</span>') + '</td>'
-      + '<td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _invEuro(f.totale) + '</td>'
-      + '<td style="' + td + num + ';color:#185FA5;font-weight:700">' + (f.pagato ? _invEuro(f.pagato) : '') + '</td>'
-      + '<td style="' + td + num + ';font-weight:700;color:' + (f.residuo > 0.5 ? '#A32D2D' : '#27500A') + '">' + _invEuro(Math.max(0, f.residuo)) + '</td>'
-      + '<td style="' + td + '">' + stato + (dett ? '<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;line-height:1.5">' + dett + '</div>' : '') + '</td>'
-      + '<td style="' + td + ';white-space:nowrap;text-align:right">' + (_invPuo()
-          ? '<button onclick="invModaleFattura(\'' + pr.id + '\',\'' + _invEsc(f.id) + '\')" title="Modifica la fattura" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">✏️</button> '
-          + '<button onclick="invEliminaFattura(\'' + pr.id + '\',\'' + _invEsc(f.id) + '\')" title="Elimina la fattura" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">🗑️</button>' : '')
-      + '</td></tr>';
-  });
-  rate.forEach(function (r, k) {
-    if (rateFatt[k]) return;
-    var imp = tot * Number(r.perc || 0) / 100;
-    h += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + '">—</td><td style="' + td + '">◌ ' + Number(r.perc) + '% ' + _invEsc(r.evento || '') + '</td>'
-      + '<td style="' + td + num + '">' + _invEuro(imp * (1 + aliq / 100)) + '</td><td style="' + td + '"></td><td style="' + td + '"></td>'
-      + '<td style="' + td + '">' + pill('da fatturare', '#EEEDE6', '#6B6A64') + '</td><td style="' + td + '"></td></tr>';
-  });
-  if (FF.length) {
-    h += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px">Totale fatture</td><td></td>'
-      + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + _invEuro(fattTot) + '</td>'
-      + '<td style="padding:8px 7px' + num + ';color:#185FA5">' + _invEuro(pagato - senzaFatt.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0)) + '</td>'
-      + '<td style="padding:8px 7px' + num + ';color:' + (fattDaPagare > 0.5 ? '#A32D2D' : '#27500A') + '">' + _invEuro(fattDaPagare) + '</td><td></td><td></td></tr>';
-  }
-  h += '</table></div>';
-
-  // ── MOVIMENTI: saldo dal contratto ──
-  h += '<div style="font-size:12.5px;font-weight:700;margin:16px 0 4px">Movimenti</div>';
-  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px">';
-  h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
-    + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">Descrizione</th>'
-    + '<th style="text-align:left;' + th + '">Fattura pagata</th>'
-    + '<th style="text-align:right;' + th + '">Dare<br>pagamenti</th><th style="text-align:right;' + th + '">Avere<br>contratto</th>'
-    + '<th style="text-align:right;' + th + '">Saldo<br>da pagare</th></tr>';
-  var residuo = -totIvato;
-  h += '<tr style="background:var(--bg)"><td style="' + td + ';white-space:nowrap">' + (pr.data ? _invData(pr.data) : '—') + '</td>'
-    + '<td style="' + td + '"><strong>Contratto ' + _invEsc(pr.fornitore) + '</strong>' + rif(_invEuro(tot) + ' + IVA ' + aliq + '% ' + _invEuro(totIvato - tot)) + '</td><td style="' + td + '"></td>'
-    + '<td style="' + td + num + '"></td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _invEuro(totIvato) + '</td>'
-    + '<td style="' + td + num + ';font-weight:700;color:#A32D2D">' + _invEuro(residuo) + '</td></tr>';
-  var righe = [];
-  FF.forEach(function (f) { righe.push({ data: f.data || '', tipo: 'f', f: f }); });
-  pag.forEach(function (m) { righe.push({ data: m.data, tipo: 'p', m: m }); });
-  righe.sort(function (a, b) {
-    var c = String(a.data || '9999').localeCompare(String(b.data || '9999'));
-    return c !== 0 ? c : (a.tipo === 'f' ? -1 : 1);
-  });
-  righe.forEach(function (x) {
-    if (x.tipo === 'f') {
-      var f = x.f;
-      h += '<tr style="color:var(--text-muted)"><td style="' + td + ';white-space:nowrap">' + (f.data ? _invData(f.data) : '—') + '</td>'
-        + '<td style="' + td + '">🧾 Fattura ' + _invEsc('n. ' + (f.num || '?')) + rif(_invEuro(f.totale) + ' con IVA · già compresa nel contratto') + '</td>'
-        + '<td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td></tr>';
-    } else {
-      var m = x.m, da = Number(m.importo || 0); residuo += da;
-      var ff = m.investimento_fattura && idsF[m.investimento_fattura];
-      var tag = ff ? pill((etich[m.id] || 'acconto') + ' fatt. ' + (ff.num || '?'), etich[m.id] === 'saldo' ? '#EAF3DE' : '#FAEEDA', etich[m.id] === 'saldo' ? '#27500A' : '#854F0B')
-        : pill('senza fattura', '#E6F1FB', '#0C447C');
-      h += '<tr><td style="' + td + ';white-space:nowrap">' + _invData(m.data) + '</td>'
-        + '<td style="' + td + '">' + _invEsc(_invVoceMov(m) || m.descrizione || 'Pagamento') + ' ' + tag + '</td>'
-        + '<td style="' + td + '">' + (_invPuo() && !_invDati.noColFatt ? _invSelFatt('inv-mf-' + m.id, i.id, m.investimento_fattura || '', 'invCollegaFattura(\'' + m.id + '\',this.value)') : (ff ? _invEsc(_invEtichettaFatt(ff)) : '—')) + '</td>'
-        + '<td style="' + td + num + ';color:#185FA5;font-weight:700">' + _invEuro(da) + '</td><td style="' + td + num + '"></td>'
-        + '<td style="' + td + num + ';font-weight:700;color:' + (residuo < -0.005 ? '#A32D2D' : '#27500A') + '">' + _invEuro(residuo) + '</td></tr>';
-    }
-  });
-  h += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px"></td><td style="padding:8px 7px">Totali</td><td></td>'
-    + '<td style="padding:8px 7px' + num + ';color:#185FA5">' + _invEuro(pagato) + '</td>'
-    + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + _invEuro(totIvato) + '</td>'
-    + '<td style="padding:8px 7px' + num + ';color:' + (residuo < -0.005 ? '#A32D2D' : '#27500A') + '">' + _invEuro(residuo) + '</td></tr>';
-  h += '</table></div>';
-
-  // avvisi
+  var puo = _invPuo(), conCol = puo && !_invDati.noColFatt;
   var avv = [];
   if (_invDati.noColFatt) avv.push('Per collegare i pagamenti alle fatture va lanciato l\'SQL della colonna investimento_fattura.');
   if (Math.abs(percTot - 100) > 0.01) avv.push('Le rate sommano al ' + percTot.toLocaleString('it-IT') + '%, non al 100%.');
-  if (senzaFatt.length) {
-    var sf = senzaFatt.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
-    avv.push(senzaFatt.length + ' pagament' + (senzaFatt.length === 1 ? 'o' : 'i') + ' per ' + _invEuro(sf) + ' senza fattura collegata: acconti in attesa di fattura, oppure scegli la fattura nella colonna “Fattura pagata”.');
-  }
-  FF.forEach(function (f) {
-    if (f.residuo < -0.5) avv.push('Fattura ' + _invEtichettaFatt(f) + ': pagato ' + _invEuro(-f.residuo) + ' più del totale. Spese di bonifico, bollo, IVA diversa o pagamento collegato alla fattura sbagliata?');
-  });
-  if (fattTot > totIvato + 0.5) avv.push('Le fatture superano il contratto di ' + _invEuro(fattTot - totIvato) + '.');
-  if (avv.length) {
-    h += '<div style="margin-top:10px;background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 6px 6px 0;padding:8px 10px;font-size:11.5px;color:#633806">⚠ ' + avv.join('<br>⚠ ') + '</div>';
-  }
-  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">I pagamenti sono quelli già imputati all\'impianto: quelli collegati a una fattura di questo contratto e quelli la cui voce contiene “' + _invEsc(pr.fornitore) + '”. Non si registrano una seconda volta.</div>';
 
-  // RESOCONTO: preventivo contro fatturato e pagato, per gruppo di spesa
+  var h = _pfMastrino({
+    chiave: 'inv-' + i.id, verso: 'forn', dataPatto: pr.data,
+    titolo: '📒 Mastrino fornitore — ' + _invEsc(pr.fornitore),
+    sotto: 'Contratto = preventivo scelto' + (pr.numero ? ' n. ' + _invEsc(pr.numero) : '') + (pr.data ? ' del ' + _invData(pr.data) : '') + ' · ' + _invEuro(tot) + ' + IVA ' + aliq + '%',
+    btns: puo ? bt('invModaleFattura(\'' + pr.id + '\')', '＋ Fattura fornitore') + bt('invModaleRate(\'' + pr.id + '\')', '✏️ Rate e IVA') : '',
+    pattImp: tot, aliq: aliq,
+    fatture: FF.map(function (f) { return { id: f.id, num: f.num, data: f.data, imponibile: f.imponibile, aliq: f.aliq, totale: f.totale, nota: f.nota, rata: f.rata, legacy: f.legacy }; }),
+    rataLab: function (f) { var r = f.rata != null ? rate[f.rata] : null; return r ? Number(r.perc) + '% ' + _invEsc(r.evento || '') : ''; },
+    rateGrigie: rate.map(function (r, k) { return rateFatt[k] ? null : { lab: Number(r.perc) + '% ' + _invEsc(r.evento || ''), totale: tot * Number(r.perc || 0) / 100 * (1 + aliq / 100) }; }).filter(Boolean),
+    azioniFatt: puo ? function (f) {
+      return '<button onclick="invModaleFattura(\'' + pr.id + '\',\'' + _invEsc(f.id) + '\')" title="Modifica la fattura" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">✏️</button> '
+        + '<button onclick="invEliminaFattura(\'' + pr.id + '\',\'' + _invEsc(f.id) + '\')" title="Elimina la fattura" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">🗑️</button>';
+    } : null,
+    movs: pag.map(function (m) { return { id: m.id, data: m.data, importo: Number(m.importo || 0), descr: _invVoceMov(m) || m.descrizione || 'Pagamento', fattId: m.investimento_fattura || '' }; }),
+    selFatt: conCol ? function (m) { return _invSelFatt('inv-mf-' + m.id, i.id, m.fattId || '', 'invCollegaFattura(\'' + m.id + '\',this.value)'); } : null,
+    avvisi: avv,
+    extraTabs: [{ k: 'resoconto', lab: '📊 Resoconto cantiere', html: _invResocontoCantiere(pr, spese, budget, idsF, chiave, FF) }],
+    nota: 'I pagamenti sono quelli già imputati all\'impianto: collegati a una fattura di questo contratto, oppure con “' + _invEsc(pr.fornitore) + '” nella voce. Non si registrano una seconda volta.'
+  });
+  return h;
+}
+
+// RESOCONTO: preventivo contro fatturato e pagato, per gruppo di spesa (imponibili)
+function _invResocontoCantiere(pr, spese, budget, idsF, chiave, FF) {
+  var tot = Number(pr.importo || 0);
+  var fattImp = FF.reduce(function (s, f) { return s + f.imponibile; }, 0);
+  var th = 'padding:6px 7px;border-bottom:1.5px solid var(--border)';
+  var td = 'padding:7px;border-bottom:0.5px solid var(--border)';
+  var num = ';text-align:right;font-family:var(--font-mono)';
   var gruppi = [], idx = {};
   spese.forEach(function (m) {
     var g = _invGruppoVoce(_invVoceMov(m)) || 'Senza voce';
@@ -1287,8 +1355,7 @@ function _invBloccoMastrino(i, spese, budget) {
   if (idx['§forn'] == null) gruppi.unshift({ nome: pr.fornitore, forn: true, pag: 0 });
   else { var gf = gruppi.splice(idx['§forn'], 1)[0]; gruppi.unshift(gf); }
   var tPrev = 0, tFatt = 0, tPag = 0;
-  h += '<div style="font-size:12.5px;font-weight:700;margin:16px 0 4px">Resoconto cantiere: preventivo contro speso</div>';
-  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:560px">';
+  var h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:560px">';
   h += '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
     + '<th style="text-align:left;' + th + '">Voce / fornitore</th><th style="text-align:right;' + th + '">Preventivo</th>'
     + '<th style="text-align:right;' + th + '">Fatturato</th><th style="text-align:right;' + th + '">Pagato</th><th style="text-align:right;' + th + '">Residuo</th></tr>';
@@ -1312,7 +1379,6 @@ function _invBloccoMastrino(i, spese, budget) {
   h += '</table></div>';
   h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Importi senza IVA, come nel conto economico. Il fatturato è quello delle fatture registrate.'
     + (altro < -0.5 ? ' <strong style="color:#A32D2D">Il contratto supera il budget dell\'impianto di ' + _invEuro(-altro) + '.</strong>' : '') + '</div>';
-  h += '</div>';
   return h;
 }
 

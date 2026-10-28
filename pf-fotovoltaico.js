@@ -1,3 +1,6 @@
+// v20261028d — mastrino fornitori e fatture/incassi cliente del contratto venduto con il MASTRINO UNICO a
+//   linguette di pf-investimenti.js (stesse barre e stesso ordine degli impianti nostri); i fornitori/agenti
+//   del contratto si scelgono dalla fila in alto invece di stare uno sotto l'altro.
 // v20261028c — vetrina Borgia come lo schizzo del 28/10: corpo Phoenix unico 9 campate x 50 m (18 serre) e a
 //   nord-ovest il blocco Catarisano di 2 serre affiancate (160 moduli del proprietario in verde + 12 nostri).
 // v20261028b — vetrina Borgia sul contratto Green Power: 1.596 moduli Jinko 620 Wp (989,52 kWp), 8 inverter
@@ -1167,113 +1170,23 @@ function _fvSelFattMov(movId, scelta, gruppi, vuoto) {
   return h + '</select>';
 }
 
-// un conto (fornitore o cliente): fatture, movimenti collegati, saldo dal pattuito
-// o = { titolo, sotto, pattImp, aliq, fatture, movs, verso:'forn'|'cli', kind, ownerId, gruppi, extraBtn }
-function _fvConto(o) {
-  var forn = o.verso === 'forn';
-  var colMov = forn ? '#185FA5' : '#27500A';
-  var pattIva = Math.round(o.pattImp * (1 + o.aliq / 100) * 100) / 100;
-  var idx = {}; o.fatture.forEach(function (f) { idx[f.id] = f; f.mov = []; f.pagato = 0; });
-  var movTot = 0;
-  o.movs.forEach(function (m) {
-    movTot += Number(m.importo || 0);
-    var f = m.investimento_fattura && idx[m.investimento_fattura];
-    if (f) { f.mov.push(m); f.pagato += Number(m.importo || 0); }
-  });
-  var etich = {};
-  o.fatture.forEach(function (f) {
-    var cum = 0;
-    f.mov.sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); }).forEach(function (m) {
-      cum += Number(m.importo || 0); etich[m.id] = cum >= f.totale - 0.5 ? 'saldo' : 'acconto';
-    });
-    f.residuo = f.totale - f.pagato;
-  });
-  var fattTot = o.fatture.reduce(function (s, f) { return s + f.totale; }, 0);
-  var fattAperte = o.fatture.reduce(function (s, f) { return s + Math.max(0, f.residuo); }, 0);
-  var saldo = movTot - pattIva;
-  var pill = function (t, bg, col) { return '<span style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:9px;white-space:nowrap;background:' + bg + ';color:' + col + '">' + t + '</span>'; };
-  var td = 'padding:6px 7px;border-bottom:0.5px solid var(--border);vertical-align:top';
-  var th = 'padding:5px 7px;border-bottom:1.5px solid var(--border)';
-  var num = ';text-align:right;font-family:var(--font-mono)';
-  var bt = function (onclick, txt) {
-    return '<button onclick="' + onclick + '" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">' + txt + '</button>';
-  };
-
-  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
-    + '<div><div style="font-size:13px;font-weight:700">' + o.titolo + '</div><div style="font-size:11px;color:var(--text-muted)">' + o.sotto + '</div></div>'
-    + (_fvPuo() ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' + (o.extraBtn || '') + bt('fvModaleFattFv(\'' + o.kind + '\',\'' + o.ownerId + '\')', forn ? '＋ Fattura ricevuta' : '＋ Fattura emessa') + '</div>' : '')
-    + '</div>';
-  var k = function (lab, val, sub, col) {
-    return '<div style="flex:1;min-width:130px;background:var(--bg);border-radius:8px;padding:8px 10px">'
-      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.3px">' + lab + '</div>'
-      + '<div style="font-family:var(--font-mono);font-size:15px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
-      + '<div style="font-size:10.5px;color:var(--text-muted)">' + sub + '</div></div>';
-  };
-  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
-    + k(forn ? 'Pattuito' : 'Contratto', _fvEuro(pattIva), _fvEuro(o.pattImp) + ' + IVA ' + o.aliq + '%')
-    + k('Fatturato', _fvEuro(fattTot), o.fatture.length + ' fattur' + (o.fatture.length === 1 ? 'a' : 'e'), '#A32D2D')
-    + k(forn ? 'Pagato' : 'Incassato', _fvEuro(movTot), o.movs.length + ' moviment' + (o.movs.length === 1 ? 'o' : 'i'), colMov)
-    + k(forn ? 'Fatture da pagare' : 'Fatture da incassare', _fvEuro(fattAperte), 'fatture non ancora saldate', fattAperte > 0.5 ? '#A32D2D' : '#27500A')
-    + k('Saldo', _fvEuro(saldo), (forn ? 'pattuito − pagato' : 'contratto − incassato'), saldo < -0.5 ? '#A32D2D' : '#27500A')
-    + '</div>';
-
-  // fatture
-  h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">'
-    + '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
-    + '<th style="text-align:left;' + th + '">Fattura ' + (forn ? 'ricevuta' : 'emessa') + '</th><th style="text-align:right;' + th + '">Totale</th>'
-    + '<th style="text-align:right;' + th + '">' + (forn ? 'Pagato' : 'Incassato') + '</th><th style="text-align:right;' + th + '">Residuo</th>'
-    + '<th style="text-align:left;' + th + '">Stato</th><th style="' + th + '"></th></tr>';
-  if (!o.fatture.length) h += '<tr><td colspan="6" style="' + td + ';color:var(--text-muted);font-size:11.5px">Nessuna fattura ' + (forn ? 'ricevuta' : 'emessa') + '.</td></tr>';
-  o.fatture.forEach(function (f) {
-    var stato = f.pagato <= 0.005 ? pill(forn ? 'da pagare' : 'da incassare', '#FCEBEB', '#791F1F')
-      : (f.residuo <= 0.5 ? pill(forn ? 'pagata' : 'incassata', '#EAF3DE', '#27500A') : pill('acconto', '#FAEEDA', '#854F0B'));
-    var dett = f.mov.map(function (m) { return (etich[m.id] || 'acconto') + ' ' + _fvData(m.data) + ' <b style="font-family:var(--font-mono);color:' + colMov + '">' + _fvEuro(m.importo) + '</b>'; }).join(' · ');
-    if (f.residuo > 0.5 && f.pagato > 0) dett += ' · manca <b style="font-family:var(--font-mono);color:#A32D2D">' + _fvEuro(f.residuo) + '</b>';
-    if (f.residuo < -0.5) dett += ' · <b style="color:#854F0B">' + _fvEuro(-f.residuo) + ' in più</b>';
-    h += '<tr><td style="' + td + ';white-space:nowrap"><strong>' + _fvEsc(_fvEtFatt(f)) + '</strong>'
-      + '<div style="font-size:10.5px;color:var(--text-muted)">' + _fvEuro(f.imponibile) + ' + IVA ' + f.aliq + '%' + (f.nota ? ' · ' + _fvEsc(f.nota) : '') + '</div></td>'
-      + '<td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _fvEuro(f.totale) + '</td>'
-      + '<td style="' + td + num + ';color:' + colMov + ';font-weight:700">' + (f.pagato ? _fvEuro(f.pagato) : '') + '</td>'
-      + '<td style="' + td + num + ';font-weight:700;color:' + (f.residuo > 0.5 ? '#A32D2D' : '#27500A') + '">' + _fvEuro(Math.max(0, f.residuo)) + '</td>'
-      + '<td style="' + td + '">' + stato + (dett ? '<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;line-height:1.5">' + dett + '</div>' : '') + '</td>'
-      + '<td style="' + td + ';white-space:nowrap;text-align:right">' + (_fvPuo()
-        ? '<button onclick="fvModaleFattFv(\'' + o.kind + '\',\'' + o.ownerId + '\',\'' + _fvEsc(f.id) + '\')" title="Modifica" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">✏️</button> '
-        + '<button onclick="fvEliminaFattFv(\'' + o.kind + '\',\'' + o.ownerId + '\',\'' + _fvEsc(f.id) + '\')" title="Elimina" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">🗑️</button>' : '')
-      + '</td></tr>';
-  });
-  h += '</table></div>';
-
-  // movimenti con saldo
-  h += '<div style="overflow-x:auto;margin-top:10px"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">'
-    + '<tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">'
-    + '<th style="text-align:left;' + th + '">Data</th><th style="text-align:left;' + th + '">' + (forn ? 'Pagamento' : 'Incasso') + '</th>'
-    + '<th style="text-align:left;' + th + '">Fattura</th><th style="text-align:right;' + th + '">Importo</th><th style="text-align:right;' + th + '">Saldo</th></tr>';
-  var run = -pattIva;
-  h += '<tr style="background:var(--bg)"><td style="' + td + '">—</td><td style="' + td + '"><strong>' + (forn ? 'Costo pattuito' : 'Totale contratto') + '</strong></td><td style="' + td + '"></td>'
-    + '<td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _fvEuro(pattIva) + '</td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + _fvEuro(run) + '</td></tr>';
-  o.movs.slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); }).forEach(function (m) {
-    run += Number(m.importo || 0);
-    var f = m.investimento_fattura && idx[m.investimento_fattura];
-    var tag = f ? pill((etich[m.id] || 'acconto') + ' fatt. ' + (f.num || '?'), etich[m.id] === 'saldo' ? '#EAF3DE' : '#FAEEDA', etich[m.id] === 'saldo' ? '#27500A' : '#854F0B')
-      : pill('senza fattura', '#E6F1FB', '#0C447C');
-    h += '<tr><td style="' + td + ';white-space:nowrap">' + _fvData(m.data) + '</td>'
-      + '<td style="' + td + '">' + _fvEsc(m.descrizione || '') + ' ' + tag + '</td>'
-      + '<td style="' + td + '">' + (_fvPuo() && !_fvCon.noColFatt ? _fvSelFattMov(m.id, m.investimento_fattura || '', o.gruppi, '— senza fattura —') : '') + '</td>'
-      + '<td style="' + td + num + ';color:' + colMov + ';font-weight:700">' + _fvEuro(m.importo) + '</td>'
-      + '<td style="' + td + num + ';font-weight:700;color:' + (run < -0.5 ? '#A32D2D' : '#27500A') + '">' + _fvEuro(run) + '</td></tr>';
-  });
-  if (!o.movs.length) h += '<tr><td colspan="5" style="' + td + ';color:var(--text-muted);font-size:11.5px">Nessun ' + (forn ? 'pagamento' : 'incasso') + ' collegato a queste fatture.</td></tr>';
-  h += '</table></div>';
-  var avv = [];
-  o.fatture.forEach(function (f) { if (f.residuo < -0.5) avv.push('Fattura ' + _fvEtFatt(f) + ': ' + (forn ? 'pagato' : 'incassato') + ' ' + _fvEuro(-f.residuo) + ' più del totale.'); });
-  if (fattTot > pattIva + 0.5) avv.push('Le fatture superano ' + (forn ? 'il costo pattuito' : 'il contratto') + ' di ' + _fvEuro(fattTot - pattIva) + '.');
-  if (avv.length) h += '<div style="margin-top:8px;background:#FFF1DC;border-left:3px solid #E0A458;border-radius:0 6px 6px 0;padding:7px 10px;font-size:11.5px;color:#633806">⚠ ' + avv.join('<br>⚠ ') + '</div>';
-  h += '</div>';
-  return h;
+// conto con il mastrino unico a linguette (_pfMastrino, in pf-investimenti.js)
+function _fvMastrinoPf(o) {
+  if (typeof _pfMastrino !== 'function') return '<div class="card" style="padding:14px;color:#A32D2D">Manca pf-investimenti.js aggiornato: serve per disegnare il mastrino.</div>';
+  return _pfMastrino(o);
 }
+function _fvAzioniFatt(kind, ownerId) {
+  if (!_fvPuo()) return null;
+  return function (f) {
+    return '<button onclick="fvModaleFattFv(\'' + kind + '\',\'' + ownerId + '\',\'' + _fvEsc(f.id) + '\')" title="Modifica" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">✏️</button> '
+      + '<button onclick="fvEliminaFattFv(\'' + kind + '\',\'' + ownerId + '\',\'' + _fvEsc(f.id) + '\')" title="Elimina" style="border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;padding:3px 7px">🗑️</button>';
+  };
+}
+function _fvMovPf(m) { return { id: m.id, data: m.data, importo: Number(m.importo || 0), descr: m.descrizione || '', fattId: m.investimento_fattura || '' }; }
 
-// linguetta 📒 MASTRINO FORNITORI
+// linguetta 📒 MASTRINO FORNITORI: si sceglie il fornitore/agente dalla fila in alto
+var _fvMastForn = {};
+function fvMastScegliForn(contrattoId, costoId) { _fvMastForn[contrattoId] = costoId; _fvRenderContrattoScheda(); }
 function _fvMastrinoFornitori(c) {
   var costi = _fvCostiDelContratto(c);
   var h = '';
@@ -1283,38 +1196,43 @@ function _fvMastrinoFornitori(c) {
   }
   var gruppi = costi.map(function (x) { return { nome: (_fvNomeForn(x.fornitore_id) || x.descrizione), fatture: _fvFattDi(x) }; });
   var pag = (_fvCon.costi || []).filter(function (m) { return m.fv_contratto_id === c.id; });
-  var usati = {};
+  var tutteId = {};
+  gruppi.forEach(function (g) { g.fatture.forEach(function (f) { tutteId[f.id] = 1; }); });
+  var liberi = pag.filter(function (m) { return !(m.investimento_fattura && tutteId[m.investimento_fattura]); });
+  var sel = _fvMastForn[c.id];
+  if (!costi.some(function (x) { return x.id === sel; })) sel = costi[0].id;
+  // fila dei fornitori / agenti
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">';
   costi.forEach(function (x) {
-    var ff = _fvFattDi(x), ids = {};
-    ff.forEach(function (f) { ids[f.id] = 1; });
-    var movs = pag.filter(function (m) { return m.investimento_fattura && ids[m.investimento_fattura]; });
-    movs.forEach(function (m) { usati[m.id] = 1; });
-    var nome = _fvNomeForn(x.fornitore_id);
-    var agente = x.tipo === 'commissione';
-    h += _fvConto({
-      titolo: (agente ? '🤝 ' : '🏭 ') + _fvEsc(nome || (agente ? 'Agente non indicato' : 'Fornitore non indicato')),
-      sotto: _fvEsc(_FV_TIPI_COSTO[x.tipo] || x.tipo) + ' · ' + _fvEsc(x.descrizione || ''),
-      pattImp: Number(x.imponibile || 0), aliq: Number(x.aliquota_iva != null ? x.aliquota_iva : 0),
-      fatture: ff, movs: movs, verso: 'forn', kind: 'costo', ownerId: x.id, gruppi: gruppi,
-      extraBtn: _fvPuo() ? '<button onclick="fvModaleCosto(\'' + c.offerta_id + '\',\'' + x.id + '\',true)" style="font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">✏️ ' + (nome ? 'Costo' : (agente ? 'Scegli l\'agente' : 'Scegli il fornitore')) + '</button>' : ''
-    });
+    var on = x.id === sel, ag = x.tipo === 'commissione', nome = _fvNomeForn(x.fornitore_id) || (ag ? 'Agente non indicato' : 'Fornitore non indicato');
+    h += '<button onclick="fvMastScegliForn(\'' + c.id + '\',\'' + x.id + '\')" style="padding:7px 12px;border-radius:18px;cursor:pointer;font-size:12px;border:0.5px solid ' + (on ? '#185FA5' : 'var(--border)') + ';'
+      + (on ? 'background:#185FA5;color:#fff;font-weight:700' : 'background:var(--bg);color:var(--text)') + '">' + (ag ? '🤝 ' : '🏭 ') + _fvEsc(nome)
+      + ' <span style="opacity:.8;font-weight:400">· ' + _fvEsc(_FV_TIPI_COSTO[x.tipo] || x.tipo) + '</span></button>';
   });
-  // pagamenti del contratto non ancora legati a una fattura
-  var liberi = pag.filter(function (m) { return !usati[m.id]; });
-  if (liberi.length) {
-    h += '<div class="card" style="padding:12px 14px;margin-bottom:12px;border-left:3px solid #BA7517">'
-      + '<div style="font-size:12.5px;font-weight:700;margin-bottom:2px">Pagamenti da collegare a una fattura (' + liberi.length + ')</div>'
-      + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Uscite già imputate a questo contratto: scegli la fattura del fornitore o dell\'agente che pagano. Finché non le colleghi restano acconti.</div>'
-      + '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-    liberi.forEach(function (m) {
-      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:6px 4px;white-space:nowrap">' + _fvData(m.data) + '</td>'
-        + '<td style="padding:6px 4px">' + _fvEsc(m.descrizione || '') + '</td>'
-        + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#185FA5">' + _fvEuro(m.importo) + '</td>'
-        + '<td style="padding:6px 4px;text-align:right">' + (_fvPuo() && !_fvCon.noColFatt ? _fvSelFattMov(m.id, '', gruppi, '— scegli la fattura —') : '') + '</td></tr>';
-    });
-    h += '</table></div>';
-  }
-  h += '<div style="font-size:10.5px;color:var(--text-muted)">I pagamenti sono le uscite del foglio giornale con causale del ramo vendite, imputate a questo contratto in Contabilità. Non si registrano una seconda volta.</div>';
+  h += '</div>';
+  var x = costi.filter(function (y) { return y.id === sel; })[0];
+  var ff = _fvFattDi(x), ids = {};
+  ff.forEach(function (f) { ids[f.id] = 1; });
+  var nome = _fvNomeForn(x.fornitore_id), agente = x.tipo === 'commissione';
+  var bt = function (onclick, txt, col) {
+    col = col || '#185FA5';
+    return '<button onclick="' + onclick + '" style="font-size:11.5px;padding:5px 11px;border:0.5px solid ' + col + ';border-radius:6px;background:var(--bg);color:' + col + ';font-weight:600;cursor:pointer">' + txt + '</button>';
+  };
+  var puo = _fvPuo(), conCol = puo && !_fvCon.noColFatt;
+  var selMov = function (m) { return _fvSelFattMov(m.id, m.fattId || '', gruppi, '— senza fattura —'); };
+  h += _fvMastrinoPf({
+    chiave: 'fvf-' + x.id, verso: 'forn', dataPatto: c.data,
+    titolo: (agente ? '🤝 ' : '🏭 ') + _fvEsc(nome || (agente ? 'Agente non indicato' : 'Fornitore non indicato')),
+    sotto: _fvEsc(_FV_TIPI_COSTO[x.tipo] || x.tipo) + ' · ' + _fvEsc(x.descrizione || ''),
+    btns: puo ? bt('fvModaleFattFv(\'costo\',\'' + x.id + '\')', '＋ Fattura ricevuta')
+      + bt('fvModaleCosto(\'' + c.offerta_id + '\',\'' + x.id + '\',true)', '✏️ ' + (nome ? 'Costo' : (agente ? 'Scegli l\'agente' : 'Scegli il fornitore')), 'var(--text-muted)') : '',
+    pattImp: Number(x.imponibile || 0), aliq: Number(x.aliquota_iva != null ? x.aliquota_iva : 0),
+    fatture: ff, azioniFatt: _fvAzioniFatt('costo', x.id),
+    movs: pag.filter(function (m) { return m.investimento_fattura && ids[m.investimento_fattura]; }).map(_fvMovPf),
+    selFatt: conCol ? selMov : null,
+    daCollegare: liberi.map(_fvMovPf), daCollegareSel: conCol ? function (m) { return _fvSelFattMov(m.id, '', gruppi, '— scegli la fattura —'); } : null,
+    nota: 'I pagamenti sono le uscite del foglio giornale con causale del ramo vendite, imputate a questo contratto in Contabilità. Quelli non ancora legati a una fattura sono nella linguetta Pagamenti effettuati, in “Da collegare”.'
+  });
   return h;
 }
 
@@ -1322,28 +1240,34 @@ function _fvMastrinoFornitori(c) {
 function _fvFattureCliente(c, imponibile) {
   var ff = _fvFattDi(c);
   var gruppi = [{ nome: '', fatture: ff }];
-  var inc = _fvIncassiContratto(c);
+  var puo = _fvPuo(), conCol = puo && !_fvCon.noColFatt;
   var h = '';
   if (_fvCon.noColFatt) h += '<div style="margin-bottom:10px;background:#FFF1DC;border-left:3px solid #E0A458;padding:8px 10px;font-size:11.5px;color:#633806">⚠ Per collegare gli incassi alle fatture va lanciato l\'SQL della colonna investimento_fattura.</div>';
-  h += _fvConto({
-    titolo: '💶 ' + _fvEsc(c.cliente_nome || 'Cliente'),
-    sotto: 'Fatture che emettiamo noi al cliente e incassi ricevuti. Gli incassi si legano alla fattura, non alla rata.',
-    pattImp: Number(imponibile || 0), aliq: Number(c.aliquota_iva || 0),
-    fatture: ff, movs: inc, verso: 'cli', kind: 'contratto', ownerId: c.id, gruppi: gruppi
-  });
+  var extra = '';
   var liberi = (_fvCon.incassi || []).filter(function (m) { return !m.fv_contratto_id; });
-  if (liberi.length && _fvPuo()) {
-    h += '<div class="card" style="padding:12px 14px;border-left:3px solid #BA7517">'
-      + '<div style="font-size:12.5px;font-weight:700;margin-bottom:6px">Incassi del ramo fotovoltaico non ancora collegati a un contratto (' + liberi.length + ')</div>'
+  if (liberi.length && puo) {
+    extra += '<div style="margin-top:12px;padding:9px 11px;background:#FFF7E0;border-left:3px solid #BA7517;border-radius:0 6px 6px 0">'
+      + '<div style="font-size:12px;font-weight:700;margin-bottom:4px">Incassi del ramo fotovoltaico non ancora collegati a un contratto (' + liberi.length + ')</div>'
       + '<table style="width:100%;border-collapse:collapse;font-size:12px">';
     liberi.forEach(function (m) {
-      h += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:6px 4px;white-space:nowrap">' + _fvData(m.data) + '</td>'
-        + '<td style="padding:6px 4px">' + _fvEsc(m.descrizione || '') + '</td>'
-        + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + _fvEuro(m.importo) + '</td>'
-        + '<td style="padding:6px 4px;text-align:right"><button onclick="fvImputaIncasso(\'' + m.id + '\',\'' + c.id + '\')" style="font-size:10.5px;padding:3px 9px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">collega a questo contratto</button></td></tr>';
+      extra += '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:5px 4px;white-space:nowrap">' + _fvData(m.data) + '</td>'
+        + '<td style="padding:5px 4px">' + _fvEsc(m.descrizione || '') + '</td>'
+        + '<td style="padding:5px 4px;text-align:right;font-family:var(--font-mono);font-weight:600;color:#27500A">' + _fvEuro(m.importo) + '</td>'
+        + '<td style="padding:5px 4px;text-align:right"><button onclick="fvImputaIncasso(\'' + m.id + '\',\'' + c.id + '\')" style="font-size:10.5px;padding:3px 9px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">collega a questo contratto</button></td></tr>';
     });
-    h += '</table></div>';
+    extra += '</table></div>';
   }
+  h += _fvMastrinoPf({
+    chiave: 'fvc-' + c.id, verso: 'cli', dataPatto: c.data,
+    titolo: '💶 ' + _fvEsc(c.cliente_nome || 'Cliente'),
+    sotto: 'Fatture che emettiamo noi al cliente e incassi ricevuti. Gli incassi si legano alla fattura, non alla rata.',
+    btns: puo ? '<button onclick="fvModaleFattFv(\'contratto\',\'' + c.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">＋ Fattura emessa</button>' : '',
+    pattImp: Number(imponibile || 0), aliq: Number(c.aliquota_iva || 0),
+    fatture: ff, azioniFatt: _fvAzioniFatt('contratto', c.id),
+    movs: _fvIncassiContratto(c).map(_fvMovPf),
+    selFatt: conCol ? function (m) { return _fvSelFattMov(m.id, m.fattId || '', gruppi, '— senza fattura —'); } : null,
+    extraMov: extra
+  });
   return h;
 }
 
