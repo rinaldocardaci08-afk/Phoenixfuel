@@ -1,3 +1,4 @@
+// v20261028c — RATE: nessuna rata predefinita (prima 30/50/20 se non salvate); si possono anche togliere tutte.
 // v20261028b — MASTRINO A LINGUETTE, unico per impianti nostri e venduti (_pfMastrino, usato anche da
 //   pf-fotovoltaico.js): in alto riquadri e due barre (fatturato e pagato sul pattuito), sotto le linguette
 //   Fatture · Pagamenti · Saldo dare/avere, e qui anche Resoconto cantiere.
@@ -991,16 +992,12 @@ function _invBloccoElencoSpese(i, spese, speso, prev) {
 // ── MASTRINO FORNITORE (23/10) ─────────────────────────────────────────────
 // Convenzione del conto fornitore: le FATTURE vanno in AVERE (fanno nascere il
 // debito), i PAGAMENTI in DARE (lo chiudono). Saldo positivo = ancora da pagare.
-var _INV_RATE_DEF = [
-  { perc: 30, evento: 'Alla firma del contratto' },
-  { perc: 50, evento: 'All\'avviso di merce pronta' },
-  { perc: 20, evento: 'Al collaudo e dichiarazione di conformità' }
-];
+// v20261028c — nessuna rata predefinita: le rate esistono solo se le inserisce l'utente
+// (da contratto o preventivo). Prima, senza rate salvate, si proponeva 30/50/20.
 function _invRatePrev(p) {
   var r = p && p.rate;
   if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { r = null; } }
-  if (!Array.isArray(r) || !r.length) r = _INV_RATE_DEF.map(function (x) { return { perc: x.perc, evento: x.evento }; });
-  return r;
+  return Array.isArray(r) ? r : [];
 }
 function _invAliqPrev(p) {
   var a = p && p.aliquota_iva != null ? Number(p.aliquota_iva) : 10;
@@ -1313,7 +1310,7 @@ function _invBloccoMastrino(i, spese, budget) {
   var puo = _invPuo(), conCol = puo && !_invDati.noColFatt;
   var avv = [];
   if (_invDati.noColFatt) avv.push('Per collegare i pagamenti alle fatture va lanciato l\'SQL della colonna investimento_fattura.');
-  if (Math.abs(percTot - 100) > 0.01) avv.push('Le rate sommano al ' + percTot.toLocaleString('it-IT') + '%, non al 100%.');
+  if (rate.length && Math.abs(percTot - 100) > 0.01) avv.push('Le rate sommano al ' + percTot.toLocaleString('it-IT') + '%, non al 100%.');
 
   var h = _pfMastrino({
     chiave: 'inv-' + i.id, verso: 'forn', dataPatto: pr.data,
@@ -1528,7 +1525,7 @@ function invModaleRate(prevId) {
   rate.forEach(function (r, k) { h += _invRigaRata(r, k, inp); });
   h += '</table>';
   h += '<button onclick="invAggiungiRata()" style="margin-top:8px;font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">+ Rata</button>';
-  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Le rate sono la previsione del contratto. Le fatture vere si registrano con “＋ Fattura fornitore” nel mastrino.</div>';
+  h += '<div style="font-size:10.5px;color:var(--text-muted);margin-top:8px">Inserisci le rate solo se sono scritte nel contratto o nel preventivo; senza rate il mastrino lavora sulle sole fatture. Per toglierle tutte, cancella le righe e salva. Le fatture vere si registrano con “＋ Fattura fornitore”.</div>';
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
     + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
     + '<button onclick="invSalvaRate(\'' + prevId + '\')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
@@ -1561,9 +1558,8 @@ async function invSalvaRate(prevId) {
     rate.push({ perc: perc, evento: ev, fattura_num: num || null, fattura_data: dt || null });
   });
   if (errore) { toast(errore); return; }
-  if (!rate.length) { toast('Inserisci almeno una rata'); return; }
   var somma = rate.reduce(function (s, r) { return s + r.perc; }, 0);
-  if (Math.abs(somma - 100) > 0.01 && !confirm('Le rate sommano al ' + somma + '%, non al 100%. Salvo lo stesso?')) return;
+  if (rate.length && Math.abs(somma - 100) > 0.01 && !confirm('Le rate sommano al ' + somma + '%, non al 100%. Salvo lo stesso?')) return;
   var r = await sb.from('investimenti_preventivi').update({ aliquota_iva: aliq, rate: rate }).eq('id', prevId);
   if (r.error) { toast('Errore: ' + r.error.message + (/column/i.test(r.error.message) ? ' — lancia prima l\'SQL delle colonne nuove' : '')); return; }
   var pr = (_invDati.preventivi || []).filter(function (p) { return p.id === prevId; })[0];
