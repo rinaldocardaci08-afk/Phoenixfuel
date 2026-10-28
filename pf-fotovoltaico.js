@@ -1,3 +1,8 @@
+// v20261028c — vetrina Borgia come lo schizzo del 28/10: corpo Phoenix unico 9 campate x 50 m (18 serre) e a
+//   nord-ovest il blocco Catarisano di 2 serre affiancate (160 moduli del proprietario in verde + 12 nostri).
+// v20261028b — vetrina Borgia sul contratto Green Power: 1.596 moduli Jinko 620 Wp (989,52 kWp), 8 inverter
+//   Sigenergy 125 kW, 20 serre (tolte le 2 a nord-est), impianto Catarisano 160 moduli 99,20 kWp + accumulo
+//   20 kWh in verde sulle 2 serre a nord del corpo est, costo netto 623.700 € (1.039.500 − GSE 415.800).
 // v20261028a — CONTRATTO VENDUTO: due linguette nuove nella scheda.
 //   📒 MASTRINO FORNITORI: un conto per ogni costo pattuito dell'offerta (fornitura, commissione
 //   agente…) con le fatture ricevute scritte a mano e i pagamenti collegati alla fattura.
@@ -2095,8 +2100,8 @@ var _FV_VETRINE = [
     tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno', colture: 'Fragole, mirtilli, more e idroponica verticale',
     file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' },
   { id: 'borgia', nome: 'Borgia', luogo: 'Borgia (CZ)',
-    tipo: 'Serre fotovoltaiche est-ovest', kwp: '990 kWp · 1.800 moduli Jinko 550 Wp', energia: '≈ 1.423 MWh/anno',
-    file: 'fv-vetrina-borgia.html', ver: '20261027b', stato: 'In sviluppo' }
+    tipo: 'Serre fotovoltaiche est-ovest', kwp: '989,52 kWp · 1.596 moduli Jinko 620 Wp', energia: '≈ 1.423 MWh/anno',
+    file: 'fv-vetrina-borgia.html', ver: '20261028c', stato: 'In sviluppo' }
 ];
 
 function fvCaricaSviluppo() {
