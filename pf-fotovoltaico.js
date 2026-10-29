@@ -1,3 +1,6 @@
+// v20261029e — PVGIS: "📄 Carica PDF PVGIS" nella scheda offerta legge il PDF (pdf.js in lib/), salva i dati in
+//   fv_offerte.pvgis e il PDF nello spazio file fv-documenti; la produzione annua segue la potenza kWp.
+//   Nel preventivo stampato: pagina "Produzione di energia elettrica" con grafico mensile e giornaliero.
 // v20261029d — OFFERTE: ✏️ e 🗑️ nella lista, 🗑️ Elimina nella scheda (bloccato se c'e' gia' il contratto).
 // v20261029c — PREVENTIVO STANDARD (formato DS Energy 10/09/2026, impaginazione automatica) e TESTI DEL PREVENTIVO
 //   con versioni (tabella fv_testi): chi siamo, Condizioni Generali, note sui materiali, clausole del contratto.
@@ -451,11 +454,15 @@ function _fvRenderOffertaScheda() {
     + '</select></div>';
   h += '</div>';
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px">';
-  h += '<div><label style="' + lb + '">Produzione kWh/anno</label><input type="number" step="1" value="' + (o.produzione_kwh_anno != null ? o.produzione_kwh_anno : '') + '" onchange="fvOffertaCampo(\'produzione_kwh_anno\', this.value)" style="' + inp + '"></div>';
+  h += _fvPvgisDi(o) ? '<div><label style="' + lb + '">Produzione kWh/anno · da PVGIS</label><div style="' + inp + ';background:#EAF1F9;font-family:var(--font-mono)">' + (o.produzione_kwh_anno != null ? _fvNumDoc(o.produzione_kwh_anno) : 'scrivi la potenza kWp') + '</div></div>' : '';
+  if (!_fvPvgisDi(o)) h += '<div><label style="' + lb + '">Produzione kWh/anno</label><input type="number" step="1" value="' + (o.produzione_kwh_anno != null ? o.produzione_kwh_anno : '') + '" onchange="fvOffertaCampo(\'produzione_kwh_anno\', this.value)" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Rendimento totale €</label><input type="number" step="0.01" value="' + (o.rendimento_totale != null ? o.rendimento_totale : '') + '" onchange="fvOffertaCampo(\'rendimento_totale\', this.value)" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Break-even (anni)</label><input type="number" step="0.1" value="' + (o.break_even_anni != null ? o.break_even_anni : '') + '" onchange="fvOffertaCampo(\'break_even_anni\', this.value)" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">TIR %</label><input type="number" step="0.01" value="' + (o.tir != null ? o.tir : '') + '" onchange="fvOffertaCampo(\'tir\', this.value)" style="' + inp + '"></div>';
   h += '</div></div>';
+
+  // produzione da PVGIS
+  h += _fvBloccoPVGIS(o);
 
   // righe
   h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
@@ -689,6 +696,9 @@ async function fvOffertaCampo(campo, valore) {
           sito_installazione: c.sito_installazione || o.sito_installazione };
   } else if (['potenza_kwp', 'aliquota_iva', 'produzione_kwh_anno', 'rendimento_totale', 'break_even_anni', 'tir'].indexOf(campo) >= 0) {
     p[campo] = valore === '' ? null : parseFloat(valore);
+    // con il PVGIS la produzione annua segue la potenza
+    var pvC = _fvPvgisDi(o);
+    if (campo === 'potenza_kwp' && pvC) p.produzione_kwh_anno = p.potenza_kwp ? Math.round(pvC.resa * p.potenza_kwp) : null;
   } else {
     p[campo] = valore || null;
   }
@@ -1503,6 +1513,277 @@ async function _fvRicaricaContratto(contrattoId) {
   _fvRenderContrattoScheda();
 }
 
+// ═══ PRODUZIONE · LETTURA DEL PDF PVGIS (29/10) ═════════════════════════════
+// Il PDF di PVGIS ("Rendimento FV connesso in rete", italiano o inglese) si legge nel
+// browser con pdf.js (lib/pdf.min.js, Mozilla, gratuito): si ricavano coordinate,
+// inclinazione, orientamento, perdite, database, potenza della simulazione, produzione
+// annua e i 12 valori mensili. Tutto si riporta a 1 kWp (resa), cosi' la produzione
+// dell'offerta = resa x kWp dell'impianto. Il PDF originale si salva nello spazio file
+// Supabase "fv-documenti"; i valori in fv_offerte.pvgis (jsonb).
+var _fvPdfLibP = null;
+function _fvPdfLib() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (_fvPdfLibP) return _fvPdfLibP;
+  _fvPdfLibP = new Promise(function (ok, ko) {
+    var s = document.createElement('script');
+    s.src = 'lib/pdf.min.js?v=3.11.174';
+    s.onload = function () {
+      if (!window.pdfjsLib) { ko(new Error('lettore PDF non caricato')); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js?v=3.11.174';
+      ok(window.pdfjsLib);
+    };
+    s.onerror = function () { _fvPdfLibP = null; ko(new Error('manca lib/pdf.min.js')); };
+    document.head.appendChild(s);
+  });
+  return _fvPdfLibP;
+}
+// testo del PDF come elenco di pezzi, nell'ordine in cui sono scritti
+async function _fvPdfPezzi(file) {
+  var lib = await _fvPdfLib();
+  var buf = await file.arrayBuffer();
+  var doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+  var out = [];
+  for (var i = 1; i <= Math.min(doc.numPages, 4); i++) {
+    var tc = await (await doc.getPage(i)).getTextContent();
+    tc.items.forEach(function (it) { var t = String(it.str || '').trim(); if (t) out.push(t); });
+  }
+  return out;
+}
+var _FV_MESI_PV = [
+  ['gennaio', 'january'], ['febbraio', 'february'], ['marzo', 'march'], ['aprile', 'april'], ['maggio', 'may'], ['giugno', 'june'],
+  ['luglio', 'july'], ['agosto', 'august'], ['settembre', 'september'], ['ottobre', 'october'], ['novembre', 'november'], ['dicembre', 'december']
+];
+function _fvNumPV(t) { var m = String(t || '').replace(',', '.').match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : null; }
+function _fvLeggiPVGIS(pz) {
+  var low = pz.map(function (x) { return x.toLowerCase(); });
+  var dopo = function (etichette) {   // valore = pezzo dopo l'etichetta (o il resto dello stesso pezzo)
+    for (var i = 0; i < low.length; i++) {
+      for (var k = 0; k < etichette.length; k++) {
+        var e = etichette[k];
+        if (low[i].indexOf(e) === 0) {
+          var resto = pz[i].slice(e.length).replace(/^[:\s]+/, '');
+          return resto ? resto : (pz[i + 1] || '');
+        }
+      }
+    }
+    return '';
+  };
+  if (!low.some(function (x) { return x.indexOf('pvgis') >= 0; })) throw new Error('non sembra un PDF di PVGIS');
+  var latlon = dopo(['latitudine/longitudine', 'latitude/longitude']);
+  var ll = latlon.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  var kwpSim = _fvNumPV(dopo(['fv installato', 'pv installed', 'installed peak pv power', 'potenza di picco fv installata'])) || 1;
+  var annua = _fvNumPV(dopo(['produzione annuale fv', 'yearly pv energy production']));
+  var mesi = [];
+  _FV_MESI_PV.forEach(function (nomi, m) {
+    for (var i = 0; i < low.length; i++) {
+      if (nomi.indexOf(low[i]) >= 0) { var v = _fvNumPV(pz[i + 1]); if (v != null) { mesi[m] = v; return; } }
+    }
+  });
+  var mancano = [];
+  if (!annua) mancano.push('produzione annuale');
+  if (mesi.filter(function (x) { return x != null; }).length !== 12) mancano.push('valori mensili');
+  if (mancano.length) throw new Error('nel PDF non trovo: ' + mancano.join(', '));
+  var r1 = function (x) { return Math.round(x * 100) / 100; };
+  return {
+    lat: ll ? parseFloat(ll[1]) : null, lon: ll ? parseFloat(ll[2]) : null,
+    inclinazione: _fvNumPV(dopo(['angolo inclinazione', 'slope angle'])),
+    orientamento: _fvNumPV(dopo(['angolo orientamento', 'azimuth angle'])),
+    perdite: _fvNumPV(dopo(['perdite di sistema', 'system loss'])),
+    database: dopo(['database solare', 'solar radiation database']) || null,
+    tecnologia: dopo(['tecnologia fv', 'pv technology']) || null,
+    kwp_simulazione: kwpSim,
+    irraggiamento: _fvNumPV(dopo(['irraggiamento annuale', 'yearly in-plane irradiation'])),
+    resa: r1(annua / kwpSim),                                  // kWh per kWp all'anno
+    mensili: mesi.map(function (v) { return r1(v / kwpSim); })  // kWh per kWp, gen..dic
+  };
+}
+
+function _fvPvgisDi(o) {
+  var p = o && o.pvgis;
+  if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = null; } }
+  return p && p.resa ? p : null;
+}
+var _fvPvgisLetto = null;   // lettura in attesa di conferma: { offertaId, dati, file }
+function fvPvgisScegli(offertaId) {
+  var i = document.createElement('input');
+  i.type = 'file'; i.accept = 'application/pdf,.pdf';
+  i.onchange = function () { if (i.files && i.files[0]) fvPvgisLeggi(offertaId, i.files[0]); };
+  i.click();
+}
+async function fvPvgisLeggi(offertaId, file) {
+  toast('Lettura del PDF…');
+  var dati;
+  try { dati = _fvLeggiPVGIS(await _fvPdfPezzi(file)); }
+  catch (e) { alert('PDF PVGIS non letto: ' + e.message + '.\nControlla che sia il PDF scaricato da PVGIS ("Rendimento FV connesso in rete").'); return; }
+  _fvPvgisLetto = { offertaId: offertaId, dati: dati, file: file };
+  var o = (_fvOff.offerte || []).filter(function (x) { return x.id === offertaId; })[0] || {};
+  var kwp = Number(o.potenza_kwp || 0);
+  var riga = function (l, v) { return '<tr><td style="padding:5px 6px;color:var(--text-muted)">' + l + '</td><td style="padding:5px 6px;text-align:right;font-family:var(--font-mono)">' + v + '</td></tr>'; };
+  var h = '<div style="max-width:560px"><div style="font-size:16px;font-weight:600;margin-bottom:2px">📄 Dati letti dal PDF PVGIS</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">' + _fvEsc(file.name) + ' · controlla e conferma</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    + riga('Coordinate', dati.lat != null ? dati.lat + ', ' + dati.lon : '—')
+    + riga('Inclinazione / orientamento', (dati.inclinazione != null ? dati.inclinazione + '°' : '—') + ' / ' + (dati.orientamento != null ? dati.orientamento + '°' : '—'))
+    + riga('Perdite di sistema', dati.perdite != null ? dati.perdite + ' %' : '—')
+    + riga('Database / tecnologia', _fvEsc((dati.database || '—') + ' · ' + (dati.tecnologia || '—')))
+    + riga('Potenza della simulazione', dati.kwp_simulazione + ' kWp')
+    + riga('<b>Resa</b>', '<b>' + _fvNumDoc(dati.resa, 1) + ' kWh/kWp all\'anno</b>')
+    + riga('Produzione con ' + (kwp ? _fvNumDoc(kwp, 2) + ' kWp' : 'la potenza dell\'offerta'), kwp ? '<b>' + _fvNumDoc(dati.resa * kwp) + ' kWh/anno</b>' : 'scrivi prima la potenza kWp')
+    + '</table>' + _fvPvgisBarre(dati.mensili, 70)
+    + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">I valori mensili sono per 1 kWp e si moltiplicano per la potenza dell\'impianto. Il PDF resta salvato nell\'offerta.</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
+    + '<button onclick="fvPvgisConferma()" class="btn-primary" style="font-size:12px;padding:8px 16px">Conferma e salva</button></div></div>';
+  apriModal(h);
+}
+function _fvPvgisBarre(mensili, alt) {
+  var max = Math.max.apply(null, mensili) || 1, L = 'GFMAMGLASOND';
+  return '<div style="display:grid;grid-template-columns:repeat(12,1fr);gap:3px;align-items:end;height:' + (alt + 16) + 'px;margin-top:10px">'
+    + mensili.map(function (v, i) {
+        return '<div style="text-align:center;font-size:9.5px;color:var(--text-muted)"><div title="' + _fvNumDoc(v, 1) + ' kWh/kWp" style="height:' + Math.max(2, Math.round(v / max * alt)) + 'px;background:#F5A623;border-radius:3px 3px 0 0;margin:0 auto 2px;width:75%"></div>' + L[i] + '</div>';
+      }).join('') + '</div>';
+}
+async function fvPvgisConferma() {
+  var x = _fvPvgisLetto;
+  if (!x) return;
+  if (!_fvPuo()) { toast('Permesso negato'); return; }
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === x.offertaId; })[0];
+  if (!o) return;
+  var dati = Object.assign({}, x.dati, { file_nome: x.file.name, letto_il: new Date().toISOString().slice(0, 10) });
+  var path = 'offerte/' + o.id + '/pvgis.pdf';
+  var up = await sb.storage.from('fv-documenti').upload(path, x.file, { upsert: true, contentType: 'application/pdf' });
+  if (up.error) toast('PDF non salvato (' + up.error.message + '): i dati si salvano lo stesso');
+  else dati.file_path = path;
+  var p = { pvgis: dati };
+  if (Number(o.potenza_kwp) > 0) p.produzione_kwh_anno = Math.round(dati.resa * Number(o.potenza_kwp));
+  var r = await sb.from('fv_offerte').update(p).eq('id', o.id);
+  if (r.error) { toast('Errore: ' + r.error.message + (/pvgis/.test(r.error.message) ? ' — lancia prima l\'SQL della colonna pvgis' : '')); return; }
+  Object.keys(p).forEach(function (k) { o[k] = p[k]; });
+  if (typeof _auditLog === 'function') _auditLog('fotovoltaico', 'fv_offerte', 'PVGIS letto per offerta ' + o.numero + '/' + o.anno + ': ' + dati.resa + ' kWh/kWp');
+  _fvPvgisLetto = null;
+  chiudiModal();
+  toast('✓ Dati PVGIS salvati');
+  _fvRenderOffertaScheda();
+}
+async function fvPvgisApri(offertaId) {
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === offertaId; })[0];
+  var pv = _fvPvgisDi(o);
+  if (!pv || !pv.file_path) { toast('PDF non salvato'); return; }
+  var w = window.open('', '_blank');
+  var r = await sb.storage.from('fv-documenti').createSignedUrl(pv.file_path, 600);
+  if (r.error) { if (w) w.close(); toast('Errore: ' + r.error.message); return; }
+  if (w) w.location = r.data.signedUrl; else window.open(r.data.signedUrl, '_blank');
+}
+async function fvPvgisTogli(offertaId) {
+  if (!_fvPuo()) { toast('Permesso negato'); return; }
+  if (!confirm('Togliere i dati PVGIS da questa offerta? La produzione annua resta quella attuale e si può scrivere a mano.')) return;
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === offertaId; })[0];
+  var pv = _fvPvgisDi(o);
+  var r = await sb.from('fv_offerte').update({ pvgis: null }).eq('id', offertaId);
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  if (pv && pv.file_path) await sb.storage.from('fv-documenti').remove([pv.file_path]);
+  o.pvgis = null;
+  _fvRenderOffertaScheda();
+}
+// riquadro nella scheda offerta
+function _fvBloccoPVGIS(o) {
+  var pv = _fvPvgisDi(o), kwp = Number(o.potenza_kwp || 0);
+  var bt = function (onclick, txt, col) {
+    return '<button onclick="' + onclick + '" style="font-size:11.5px;padding:5px 11px;border:0.5px solid ' + (col || '#185FA5') + ';border-radius:6px;background:var(--bg);color:' + (col || '#185FA5') + ';font-weight:600;cursor:pointer">' + txt + '</button>';
+  };
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    + '<div><div style="font-size:13px;font-weight:700">☀️ Produzione · PVGIS</div><div style="font-size:11px;color:var(--text-muted)">'
+    + (pv ? 'Letto da ' + _fvEsc(pv.file_nome || 'PDF') + (pv.letto_il ? ' il ' + _fvData(pv.letto_il) : '') : 'Carica il PDF di PVGIS del sito: coordinate, resa e produzione mese per mese si compilano da sole.') + '</div></div>'
+    + (_fvPuo() ? '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+        + (pv && pv.file_path ? bt('fvPvgisApri(\'' + o.id + '\')', '📄 Apri PDF', 'var(--text-muted)') : '')
+        + bt('fvPvgisScegli(\'' + o.id + '\')', pv ? '↻ Carica un altro PDF' : '📄 Carica PDF PVGIS')
+        + (pv ? bt('fvPvgisTogli(\'' + o.id + '\')', '🗑️', '#A32D2D') : '') + '</div>' : '')
+    + '</div>';
+  if (pv) {
+    var k = function (l, v) { return '<div style="flex:1;min-width:120px;background:var(--bg);border-radius:8px;padding:7px 10px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">' + l + '</div><div style="font-family:var(--font-mono);font-size:13.5px;font-weight:700">' + v + '</div></div>'; };
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + k('Coordinate', pv.lat != null ? pv.lat + ', ' + pv.lon : '—')
+      + k('Inclin. / orient.', (pv.inclinazione != null ? pv.inclinazione + '°' : '—') + ' / ' + (pv.orientamento != null ? pv.orientamento + '°' : '—'))
+      + k('Perdite', pv.perdite != null ? pv.perdite + ' %' : '—')
+      + k('Resa', _fvNumDoc(pv.resa) + ' kWh/kWp')
+      + k('Produzione annua', kwp ? _fvNumDoc(pv.resa * kwp) + ' kWh' : 'manca la potenza kWp')
+      + '</div>' + _fvPvgisBarre(pv.mensili, 60);
+  }
+  return h + '</div>';
+}
+
+// grafici della pagina "Produzione di energia elettrica" (SVG, nel preventivo stampato)
+var _FV_GG_MESE = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+function _fvScalaAsse(max) {
+  var passi = [1, 2, 2.5, 3, 5, 10], e = Math.pow(10, Math.floor(Math.log10(max / 5 || 1)));
+  for (var i = 0; i < passi.length; i++) if (passi[i] * e * 6 >= max) return passi[i] * e;
+  return 10 * e;
+}
+function _fvSvgBarre(valori, etichette, unita, divisore, opz) {
+  opz = opz || {};
+  var W = 640, H = opz.h || 170, ml = 52, mb = 22, mt = 8, mr = 8;
+  var vs = valori.map(function (v) { return v / divisore; });
+  var max = Math.max.apply(null, vs) || 1, passo = _fvScalaAsse(max), top = Math.ceil(max / passo) * passo;
+  var iw = W - ml - mr, ih = H - mt - mb, n = vs.length, bw = iw / n;
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Arial,sans-serif">';
+  for (var g = 0; g <= top + 1e-9; g += passo) {
+    var y = mt + ih - g / top * ih;
+    s += '<line x1="' + ml + '" x2="' + (W - mr) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="#e3e3e3" stroke-width="0.8"/>'
+      + '<text x="' + (ml - 6) + '" y="' + (y + 3).toFixed(1) + '" font-size="8.5" fill="#666" text-anchor="end">' + _fvNumDoc(g, g % 1 ? 1 : 0) + ' ' + unita + '</text>';
+  }
+  vs.forEach(function (v, i) {
+    var h2 = v / top * ih, x = ml + i * bw + bw * (opz.gap == null ? 0.18 : opz.gap);
+    s += '<rect x="' + x.toFixed(2) + '" y="' + (mt + ih - h2).toFixed(2) + '" width="' + Math.max(0.6, bw * (1 - 2 * (opz.gap == null ? 0.18 : opz.gap))).toFixed(2) + '" height="' + h2.toFixed(2) + '" fill="#FFA500"/>';
+  });
+  (etichette || []).forEach(function (e, i) {
+    if (!e) return;
+    s += '<text x="' + (ml + i * bw + bw / 2).toFixed(1) + '" y="' + (H - 7) + '" font-size="8.5" fill="#666" text-anchor="middle">' + e + '</text>';
+  });
+  return s + '<line x1="' + ml + '" x2="' + (W - mr) + '" y1="' + (mt + ih) + '" y2="' + (mt + ih) + '" stroke="#999" stroke-width="0.8"/></svg>';
+}
+// produzione giornaliera stimata dalle medie mensili: andamento morbido tra i mesi,
+// ritoccato perche' ogni mese torni esattamente al suo totale
+function _fvGiorniDaMesi(mensili) {
+  var med = mensili.map(function (v, m) { return v / _FV_GG_MESE[m]; });
+  var centri = [], acc = 0;
+  _FV_GG_MESE.forEach(function (g) { centri.push(acc + g / 2); acc += g; });
+  var giorni = [];
+  for (var d = 0; d < 365; d++) {
+    var x = d + 0.5, i = 0;
+    while (i < 11 && x > centri[i + 1]) i++;
+    var a, b, xa, xb;
+    if (x < centri[0]) { a = med[11]; b = med[0]; xa = centri[11] - 365; xb = centri[0]; }
+    else if (x > centri[11]) { a = med[11]; b = med[0]; xa = centri[11]; xb = centri[0] + 365; }
+    else { a = med[i]; b = med[i + 1]; xa = centri[i]; xb = centri[i + 1]; }
+    giorni.push(a + (b - a) * (x - xa) / (xb - xa));
+  }
+  var p = 0;
+  _FV_GG_MESE.forEach(function (g, m) {
+    var tot = 0; for (var k = 0; k < g; k++) tot += giorni[p + k];
+    var f = tot > 0 ? mensili[m] / tot : 0;
+    for (var k2 = 0; k2 < g; k2++) giorni[p + k2] *= f;
+    p += g;
+  });
+  return giorni;
+}
+function _fvPaginaProduzione(pv, kwp) {
+  var mesiKwh = pv.mensili.map(function (v) { return v * kwp; });
+  var mwh = Math.max.apply(null, mesiKwh) >= 10000;
+  var nomi = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+  var gg = _fvGiorniDaMesi(mesiKwh), et = [];
+  for (var d = 0; d < 365; d++) et.push(d % 12 === 0 ? String(d) : '');
+  var tot = mesiKwh.reduce(function (s, v) { return s + v; }, 0);
+  return ['<h1>Produzione di energia elettrica</h1>',
+    '<h4>Su base mensile</h4><p class="pic">Produzione di energia elettrica su base mensile per un anno: ' + _fvNumDoc(tot) + ' kWh in totale.</p>',
+    '<div class="graf">' + _fvSvgBarre(mesiKwh, nomi, mwh ? 'MWh' : 'kWh', mwh ? 1000 : 1, { h: 175 }) + '</div>',
+    '<h4>Su base giornaliera</h4><p class="pic">Produzione di elettricità su base giornaliera per un anno (stima ricavata dalle medie mensili).</p>',
+    '<div class="graf">' + _fvSvgBarre(gg, et, 'kWh', 1, { h: 175, gap: 0.12 }) + '</div>',
+    '<p class="pic" style="margin-top:8px">Fonte: PVGIS (Commissione europea)' + (pv.database ? ', database ' + _fvEsc(pv.database) : '')
+      + (pv.inclinazione != null ? ' · inclinazione ' + pv.inclinazione + '°' : '') + (pv.orientamento != null ? ', orientamento ' + pv.orientamento + '°' : '')
+      + (pv.perdite != null ? ' · perdite di sistema ' + pv.perdite + ' %' : '') + ' · resa ' + _fvNumDoc(pv.resa) + ' kWh/kWp.</p>'];
+}
+
 // ═══ TESTI DEL PREVENTIVO, CON VERSIONI (29/10) ══════════════════════════════
 // Tabella fv_testi (chiave, versione, testo). Ogni salvataggio crea una versione
 // nuova; l'offerta (e il contratto) alla prima stampa si segna le versioni usate in
@@ -1922,6 +2203,10 @@ async function fvStampaOfferta(id) {
   }
   sez.push({ blocchi: b });
 
+  // 3b) produzione da PVGIS
+  var pvS = _fvPvgisDi(o);
+  if (pvS && kwp) sez.push({ blocchi: _fvPaginaProduzione(pvS, kwp) });
+
   // 4) analisi finanziaria (per ora con i valori scritti nell'offerta)
   if (o.rendimento_totale || o.break_even_anni || o.tir) {
     var anno0 = Number(String(o.data || '').slice(0, 4)) || o.anno;
@@ -1980,6 +2265,7 @@ async function fvStampaOfferta(id) {
     + 'table.pt tr:nth-child(even) td{background:#F1F2F3}table.pt td small{display:block;font-size:8.5px;color:#666}.r{text-align:right!important}'
     + 'table.tt{width:100%;border-collapse:collapse}table.tt td{padding:8px 10px;border-bottom:0.5px solid #ddd;font-size:11px}table.tt td:last-child{text-align:right}table.tt tr.g td{font-size:14px;font-weight:700}'
     + '.parti{display:flex;gap:10mm;margin-bottom:6mm}.parti div{flex:1;font-size:12.5px;line-height:1.45;font-family:Arial,sans-serif}.parti span{display:block;font-size:9px;color:#555;margin-bottom:3px}.parti b{display:block;font-size:15px}.parti small{display:block;font-size:9px;color:#555;margin-top:4px}'
+    + '.graf{background:#F6F6F7;padding:8px 6px;border-radius:2px}'
     + '.firma{margin-top:12mm;font-size:12px}.firma div{width:95mm;border-top:0.5px solid #333;margin-bottom:3mm}'
     + '.cv-top{position:absolute;left:18mm;right:18mm;top:13mm;display:flex;justify-content:space-between}.cv-logo{height:24mm}.cv-az{text-align:right;font-size:10.5px;line-height:1.5}'
     + '.cv-foto{position:absolute;left:18mm;right:18mm;top:68mm;width:174mm;height:115mm;object-fit:cover}'
