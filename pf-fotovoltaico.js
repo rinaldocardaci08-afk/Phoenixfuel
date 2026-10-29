@@ -1,3 +1,4 @@
+// v20261029k — bottone "🧊 Vetrina 3D" anche nella cella dell'impianto in Vendita a clienti → Impianti venduti.
 // v20261029j — VETRINA 3D DS ENERGY (fv-vetrina-ds.html): bottone "🧊 Vetrina 3D" nella scheda contratto e offerta
 //   del cliente DS; le vetrine con cliente non compaiono tra gli impianti in sviluppo.
 // v20261029i — IMMAGINI DEL PROGETTO nell'offerta (render, sopralluogo, vetrina 3D) in fv-documenti, con
@@ -3202,6 +3203,7 @@ async function fvCaricaImpiantiVenduti() {
       + '<div style="display:flex;justify-content:space-between;font-size:12px"><span>Totale contratto</span><b style="font-family:var(--font-mono)">' + _fvEuro(totC) + '</b></div>'
       + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px">Lavori</div>' + _fvBarraFasi(c, true)
       + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:2px">Incassi</div>' + _fvBarraIncassi(c, true)
+      + (_fvVetrinaCliente(c.cliente_nome) ? '<div style="margin-top:4px">' + _fvBtnVetrinaCliente(c.cliente_nome) + '</div>' : '')
       + '</div>';
   });
   h += '</div>';
@@ -3427,7 +3429,7 @@ function _fvVetrinaCliente(nome) {
 }
 function _fvBtnVetrinaCliente(nome) {
   var v = _fvVetrinaCliente(nome);
-  return v ? '<button onclick="fvApriVetrina(\'' + v.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">🧊 Vetrina 3D</button>' : '';
+  return v ? '<button onclick="event.stopPropagation();fvApriVetrina(\'' + v.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">🧊 Vetrina 3D</button>' : '';
 }
 
 function fvCaricaSviluppo() {
