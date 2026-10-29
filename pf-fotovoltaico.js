@@ -1,3 +1,7 @@
+// v20261029a — VETRINE senza siti esterni: three.js r128 e OrbitControls stanno nella cartella lib del progetto
+//   (stessa versione, grafica identica). "Scarica pagina cliente" mette le due librerie DENTRO il file: la copia
+//   per il cliente e' un file unico che si apre anche senza internet (cambiano solo i caratteri, che offline
+//   ripiegano su quelli di sistema).
 // v20261028d — mastrino fornitori e fatture/incassi cliente del contratto venduto con il MASTRINO UNICO a
 //   linguette di pf-investimenti.js (stesse barre e stesso ordine degli impianti nostri); i fornitori/agenti
 //   del contratto si scelgono dalla fila in alto invece di stare uno sotto l'altro.
@@ -2022,10 +2026,10 @@ async function fvImputaIncasso(movId, contrattoId) {
 var _FV_VETRINE = [
   { id: 'polistena', nome: 'Polistena', luogo: 'Polistena (RC) · c/da Primogenito',
     tipo: 'Serre fotovoltaiche', kwp: '974,4 kWp', energia: '≈ 1.214 MWh/anno', colture: 'Fragole, mirtilli, more e idroponica verticale',
-    file: 'fv-vetrina-polistena.html', ver: '20261022b', stato: 'In sviluppo' },
+    file: 'fv-vetrina-polistena.html', ver: '20261029a', stato: 'In sviluppo' },
   { id: 'borgia', nome: 'Borgia', luogo: 'Borgia (CZ)',
     tipo: 'Serre fotovoltaiche est-ovest', kwp: '989,52 kWp · 1.596 moduli Jinko 620 Wp', energia: '≈ 1.423 MWh/anno',
-    file: 'fv-vetrina-borgia.html', ver: '20261028c', stato: 'In sviluppo' }
+    file: 'fv-vetrina-borgia.html', ver: '20261029a', stato: 'In sviluppo' }
 ];
 
 function fvCaricaSviluppo() {
@@ -2095,6 +2099,16 @@ async function fvScaricaVetrina(id) {
     var tag = 'data-mode="interno" data-stamp=""';
     if (html.indexOf(tag) < 0) throw new Error('la pagina non ha il segnaposto della modalita\' cliente');
     html = html.replace(tag, 'data-mode="cliente" data-stamp="' + gg + '/' + mm + '/' + aa + '"');
+    // v20261029a — three.js dentro la copia: la pagina cliente e' un file unico che si apre anche senza internet
+    var libs = ['lib/three.min.js', 'lib/OrbitControls.js'];
+    for (var li = 0; li < libs.length; li++) {
+      var stag = '<script src="' + libs[li] + '"></script>';
+      if (html.indexOf(stag) < 0) continue;
+      var rl = await fetch(libs[li] + '?v=r128', { cache: 'no-store' });
+      if (!rl.ok) throw new Error('libreria ' + libs[li] + ' non trovata (' + rl.status + ')');
+      var codice = (await rl.text()).replace(/<\/script/gi, '<\\/script');
+      html = html.split(stag).join('<script>' + codice + '</script>');
+    }
     var blob = new Blob([html], { type: 'text/html' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
