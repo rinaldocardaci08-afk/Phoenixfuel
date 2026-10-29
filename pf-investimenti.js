@@ -1,3 +1,5 @@
+// v20261029a — RIEPILOGO IMPIANTO: potenza, produzione stimata, resa e la barra animata CO₂ → alberi e case
+//   illuminate (_pfCO2Html, usata anche da pf-fotovoltaico.js per gli impianti venduti).
 // v20261028c — RATE: nessuna rata predefinita (prima 30/50/20 se non salvate); si possono anche togliere tutte.
 // v20261028b — MASTRINO A LINGUETTE, unico per impianti nostri e venduti (_pfMastrino, usato anche da
 //   pf-fotovoltaico.js): in alto riquadri e due barre (fatturato e pagato sul pattuito), sotto le linguette
@@ -898,12 +900,141 @@ function _invRenderImpianto() {
         + _invKpi('Margine atteso', ric ? _invEuro(ric - prev) : '—', '', (ric - prev) >= 0 ? '#27500A' : '#A32D2D');
     }
     h += '</div>';
+    // dati dell'impianto e beneficio ambientale (29/10)
+    var kwhS = Number(i.produzione_stimata_kwh || 0), kwI = Number(i.kw || 0);
+    h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      + _invKpi('Potenza', kwI ? kwI.toLocaleString('it-IT', { maximumFractionDigits: 2 }) + ' kW' : '—')
+      + _invKpi('Produzione stimata', kwhS ? kwhS.toLocaleString('it-IT') + ' kWh/anno' : '—')
+      + _invKpi('Resa', kwhS && kwI ? Math.round(kwhS / kwI).toLocaleString('it-IT') + ' kWh/kW' : '—')
+      + '</div>';
+    if (kwhS > 0) h += _pfCO2Html(kwhS, 'Produzione stimata di ' + _invEsc(i.nome));
+    else h += '<div class="card" style="padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text-muted)">🌍 Scrivi la <strong>produzione stimata kWh/anno</strong> in ✏️ Modifica: qui compare cosa cambia per l\'ambiente (CO₂ evitata, alberi, famiglie).</div>';
     h += _invGanttSingolo(i);
   }
 
   box.innerHTML = h;
 }
 function invVaiTabImp(k) { _invTabImp = k; _invRenderImpianto(); }
+
+// ═══ BARRA CO₂ → ALBERI E LUCE (29/10) ═══════════════════════════════════════
+// Usata nel Riepilogo degli impianti nostri (qui) e venduti (pf-fotovoltaico.js).
+// Nuvole di CO₂ che il sole, passando da destra a sinistra in 12 secondi, sostituisce con
+// alberi e casette che si accendono; sotto, i contatori salgono fino ai valori dell'impianto.
+// Stime: 0,25 kg CO₂ per kWh (rete italiana), 22 kg CO₂ l'anno per albero adulto,
+// 2.700 kWh l'anno per famiglia.
+var _PF_CO2 = { kgKwh: 0.25, kgAlbero: 22, kwhFamiglia: 2700, durata: 12, pausa: 4 }, _pfCo2N = 0;
+function _pfCO2Valori(kwh) {
+  kwh = Number(kwh || 0);
+  return { co2: kwh * _PF_CO2.kgKwh / 1000, alberi: kwh * _PF_CO2.kgKwh / _PF_CO2.kgAlbero, famiglie: kwh / _PF_CO2.kwhFamiglia };
+}
+function _pfCO2Html(kwh, sotto) {
+  var id = 'pfco2-' + (++_pfCo2N), v = _pfCO2Valori(kwh);
+  var cella = function (cls, col, lab) {
+    return '<div style="background:var(--bg-card,var(--bg));padding:10px 14px;display:flex;align-items:baseline;gap:10px;min-width:0">'
+      + '<b data-n="' + cls + '" style="font-family:var(--font-mono);font-size:24px;font-weight:700;line-height:1;color:' + col + ';min-width:4.2ch">0</b>'
+      + '<span style="font-size:12px;color:var(--text-muted);line-height:1.25">' + lab + '</span></div>';
+  };
+  var h = '<div class="card" style="padding:0;margin-bottom:12px;overflow:hidden">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 14px 8px">'
+    + '<div style="font-size:13px;font-weight:700">🌍 Cosa cambia per l\'ambiente</div>'
+    + '<button onclick="_pfCO2Rivedi(\'' + id + '\')" style="font-size:11.5px;padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">↻ Rivedi</button></div>'
+    + '<svg id="' + id + '" viewBox="0 0 1200 190" style="display:block;width:100%;height:auto" role="img" aria-label="La CO2 sostituita da alberi e case illuminate"></svg>'
+    + '<div id="' + id + '-n" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--border);border-top:0.5px solid var(--border)">'
+    + cella('co2', '#5b6066', 'tonnellate di CO₂<br>evitate ogni anno')
+    + cella('alberi', '#2e7d32', 'alberi che servirebbero<br>per assorbirle')
+    + cella('famiglie', '#C98A00', 'famiglie con la luce<br>prodotta dall\'impianto') + '</div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted);padding:6px 14px 9px">'
+    + (sotto ? sotto + ' · ' : '') + 'stime: ' + Number(kwh).toLocaleString('it-IT', { maximumFractionDigits: 0 }) + ' kWh/anno × 0,25 kg CO₂/kWh; un albero adulto ≈ 22 kg CO₂/anno; una famiglia ≈ 2.700 kWh/anno.</div></div>';
+  setTimeout(function () { _pfCO2Avvia(id, v); }, 0);
+  return h;
+}
+var _pfCo2Stato = {};
+function _pfCO2Rivedi(id) { if (_pfCo2Stato[id]) _pfCo2Stato[id].t0 = performance.now(); }
+function _pfCO2Avvia(id, val) {
+  var sv = document.getElementById(id);
+  if (!sv) return;
+  var W = 1200, H = 190, TERRA = 150, N = 20, NS = 'http://www.w3.org/2000/svg';
+  var el = function (t, a, p) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; };
+  var u = function (s) { return id + '-' + s; };
+  el('defs', {}, sv).innerHTML =
+    '<linearGradient id="' + u('cielo') + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bfe0f5"/><stop offset="1" stop-color="#eef7fb"/></linearGradient>'
+    + '<linearGradient id="' + u('smog') + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7d8288"/><stop offset="1" stop-color="#b9bcbf"/></linearGradient>'
+    + '<linearGradient id="' + u('raggio') + '" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff6c8" stop-opacity="0"/><stop offset=".55" stop-color="#fff2a8" stop-opacity=".9"/><stop offset="1" stop-color="#fff6c8" stop-opacity="0"/></linearGradient>'
+    + '<radialGradient id="' + u('luce') + '"><stop offset="0" stop-color="#ffe066" stop-opacity=".9"/><stop offset="1" stop-color="#ffe066" stop-opacity="0"/></radialGradient>'
+    + '<clipPath id="' + u('clip') + '"><rect id="' + u('clipR') + '" x="1200" y="0" width="1200" height="190"/></clipPath>';
+  el('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#' + u('smog') + ')' }, sv);
+  el('rect', { x: 0, y: TERRA, width: W, height: H - TERRA, fill: '#8e9184' }, sv);
+  var pulito = el('g', { 'clip-path': 'url(#' + u('clip') + ')' }, sv);
+  el('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#' + u('cielo') + ')' }, pulito);
+  el('rect', { x: 0, y: TERRA, width: W, height: H - TERRA, fill: '#7fb24e' }, pulito);
+  el('rect', { x: 0, y: TERRA, width: W, height: 4, fill: '#6a9a3e' }, pulito);
+  var albero = function (g, s) {
+    var t = el('g', { transform: 'scale(' + s + ')' }, g);
+    el('path', { d: 'M-5 0 L-4 -30 L-14 -44 L-11 -46 L-3 -36 L-2 -52 L2 -52 L3 -38 L12 -48 L15 -45 L4 -30 L5 0 Z', fill: '#7a4a2a' }, t);
+    [['#2f7d32', 0, -62, 22], ['#3f9a3c', -16, -55, 15], ['#3f9a3c', 16, -55, 15], ['#4fb047', -8, -70, 14], ['#4fb047', 9, -71, 13], ['#6cc35a', -3, -78, 9], ['#2f7d32', 0, -46, 13]]
+      .forEach(function (c) { el('circle', { cx: c[1], cy: c[2], r: c[3], fill: c[0] }, t); });
+    [[-10, -72], [6, -80], [13, -62]].forEach(function (c) { el('circle', { cx: c[0], cy: c[1], r: 3, fill: '#8fd67a' }, t); });
+    return {};
+  };
+  var casa = function (g) {
+    var alone = el('circle', { cx: 0, cy: -20, r: 34, fill: 'url(#' + u('luce') + ')', opacity: 0 }, g);
+    el('rect', { x: -20, y: -34, width: 40, height: 34, fill: '#e6e6e6' }, g);
+    el('rect', { x: 8, y: -62, width: 7, height: 18, fill: '#a87a50' }, g);
+    el('path', { d: 'M-26 -32 L0 -56 L26 -32 Z', fill: '#33339a' }, g);
+    el('rect', { x: -9, y: -27, width: 18, height: 16, fill: '#cfcfcf' }, g);
+    var vetro = el('rect', { x: -7, y: -25, width: 14, height: 12, fill: '#1f6fb8' }, g);
+    el('path', { d: 'M0 -25 V-13 M-7 -19 H7', stroke: '#cfcfcf', 'stroke-width': 1.6 }, g);
+    return { vetro: vetro, alone: alone };
+  };
+  var nuvola = function (g) {
+    [[-18, 4, 15], [0, -4, 20], [18, 3, 15], [-6, 10, 14], [9, 11, 13]].forEach(function (c) { el('circle', { cx: c[0], cy: c[1], r: c[2], fill: '#4b4f55' }, g); });
+    el('circle', { cx: -4, cy: -10, r: 7, fill: '#5d6268' }, g);
+    var tx = el('text', { x: 0, y: 8, 'text-anchor': 'middle', 'font-family': 'Arial,sans-serif', 'font-size': 14, 'font-weight': '700', fill: '#c9ccd0' }, g);
+    tx.textContent = 'CO₂';
+  };
+  var slot = [], passo = W / N;
+  for (var i = 0; i < N; i++) {
+    var x = passo * (i + 0.5), tipo = (i % 3 === 1) ? 'casa' : 'albero';
+    var gi = el('g', { transform: 'translate(' + x + ',' + TERRA + ') scale(0.001)' }, sv);
+    var it = tipo === 'casa' ? casa(gi) : albero(gi, 0.85 + ((i * 37) % 5) * 0.06);
+    var gc = el('g', {}, sv); nuvola(gc);
+    slot.push({ x: x, tipo: tipo, it: it, gi: gi, gc: gc, cy: 62 + ((i * 53) % 4) * 9 });
+  }
+  var raggio = el('rect', { x: 0, y: 0, width: 140, height: H, fill: 'url(#' + u('raggio') + ')' }, sv);
+  var sole = el('g', {}, sv);
+  el('circle', { r: 16, fill: '#ffd23a' }, sole);
+  for (var k = 0; k < 8; k++) { var a = k * Math.PI / 4; el('line', { x1: Math.cos(a) * 21, y1: Math.sin(a) * 21, x2: Math.cos(a) * 28, y2: Math.sin(a) * 28, stroke: '#ffd23a', 'stroke-width': 3, 'stroke-linecap': 'round' }, sole); }
+  var clipR = document.getElementById(u('clipR'));
+  var nBox = document.getElementById(id + '-n');
+  var nEl = { co2: nBox.querySelector('[data-n=co2]'), alberi: nBox.querySelector('[data-n=alberi]'), famiglie: nBox.querySelector('[data-n=famiglie]') };
+  var eb = function (t) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+  var cl = function (v) { return Math.max(0, Math.min(1, v)); };
+  var mix = function (t) { var a = [31, 111, 184], b = [255, 216, 77]; return 'rgb(' + a.map(function (v, j) { return Math.round(v + (b[j] - v) * t); }).join(',') + ')'; };
+  var fmt = function (n) { return Math.round(n).toLocaleString('it-IT'); };
+  var D = _PF_CO2.durata, st = _pfCo2Stato[id] = { t0: performance.now() };
+  (function frame(now) {
+    if (!sv.isConnected) { delete _pfCo2Stato[id]; return; }   // scheda chiusa: l'animazione si ferma
+    var t = (now - st.t0) / 1000;
+    if (t > D + _PF_CO2.pausa) { st.t0 = now; t = 0; }
+    var p = cl(t / D), sx = W + 70 - (W + 140) * p;
+    clipR.setAttribute('x', Math.max(0, sx));
+    raggio.setAttribute('x', sx - 20);
+    sole.setAttribute('transform', 'translate(' + sx + ',' + (34 - Math.sin(p * Math.PI) * 10) + ')');
+    slot.forEach(function (s) {
+      var lt = sx < s.x ? (s.x - sx) / (W / D) : -1;
+      var tc = cl(lt / 0.9), ti = cl((lt - 0.25) / 0.7);
+      s.gc.setAttribute('transform', 'translate(' + (s.x - tc * 30) + ',' + (s.cy - tc * 26) + ') scale(' + (1 - tc * 0.5) + ')');
+      s.gc.setAttribute('opacity', 1 - tc);
+      s.gi.setAttribute('transform', 'translate(' + s.x + ',' + TERRA + ') scale(' + Math.max(0.001, lt < 0 ? 0 : eb(ti)) + ')');
+      if (s.tipo === 'casa') { var tl = cl((lt - 0.8) / 0.5); s.it.vetro.setAttribute('fill', mix(tl)); s.it.alone.setAttribute('opacity', tl * 0.9); }
+    });
+    var q = cl((t - 0.4) / (D - 0.4));
+    nEl.co2.textContent = val.co2 * q < 10 && val.co2 >= 1 ? (val.co2 * q).toLocaleString('it-IT', { maximumFractionDigits: 1 }) : fmt(val.co2 * q);
+    nEl.alberi.textContent = fmt(val.alberi * q);
+    nEl.famiglie.textContent = fmt(val.famiglie * q);
+    requestAnimationFrame(frame);
+  })(performance.now());
+}
 
 // ── ELENCO SPESE DELL'IMPIANTO (09/10) ──────────────────────────────────────
 // Gruppo = testo della voce prima del trattino (– — -). Subtotale solo se il gruppo

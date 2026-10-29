@@ -1,3 +1,5 @@
+// v20261029l — RIEPILOGO come prima linguetta della scheda contratto (impianti venduti): totale, incassi,
+//   potenza e produzione dall'offerta, lavori e la barra CO₂ animata (_pfCO2Html di pf-investimenti.js).
 // v20261029k — bottone "🧊 Vetrina 3D" anche nella cella dell'impianto in Vendita a clienti → Impianti venduti.
 // v20261029j — VETRINA 3D DS ENERGY (fv-vetrina-ds.html): bottone "🧊 Vetrina 3D" nella scheda contratto e offerta
 //   del cliente DS; le vetrine con cliente non compaiono tra gli impianti in sviluppo.
@@ -1267,7 +1269,8 @@ async function fvCaricaContratti() {
     _qMov(_colsMov + ',investimento_fattura'),
     sb.from('causali_investimento').select('id,nome,tipo,ambito'),
     sb.from('fv_offerte_costi').select('*').order('ordine'),
-    sb.from('fv_fornitori').select('*').order('ragione_sociale')
+    sb.from('fv_fornitori').select('*').order('ragione_sociale'),
+    sb.from('fv_offerte').select('id,potenza_kwp,produzione_kwh_anno')
   ]);
   // colonna investimento_fattura non ancora creata: ricarico i movimenti senza
   var noColFatt = false;
@@ -1285,7 +1288,8 @@ async function fvCaricaContratti() {
              incassi: delRamo.filter(function (m) { return m.tipo === 'entrata'; }),
              costi: delRamo.filter(function (m) { return m.tipo === 'uscita'; }),
              causali: cau,
-             costiPrevisti: (r[5] && r[5].data) || [] };
+             costiPrevisti: (r[5] && r[5].data) || [],
+             offerte: (r[7] && r[7].data) || [] };
   _fvContrattoAperto = null;
   _fvRenderContratti();
 }
@@ -1321,7 +1325,7 @@ function _fvRenderContratti() {
 }
 
 function fvApriContratto(id) { _fvContrattoAperto = id; _fvRenderContrattoScheda(); }
-function fvChiudiContratto() { _fvContrattoAperto = null; _fvRenderContratti(); }
+function fvChiudiContratto() { _fvContrattoAperto = null; _fvConTab = 'riepilogo'; _fvRenderContratti(); }
 
 async function fvGeneraContratto(offertaId) {
   if (!_fvPuo()) { toast('Permesso negato'); return; }
@@ -1371,7 +1375,7 @@ async function fvGeneraContratto(offertaId) {
   fvApriContratto(contrattoId);
 }
 
-var _fvConTab = 'composizione';   // 'composizione' | 'contabilita' | 'mastrino' | 'incassi'
+var _fvConTab = 'riepilogo';      // 'riepilogo' | 'composizione' | 'contabilita' | 'mastrino' | 'incassi'
 var _fvConEdit = false;           // modifica sbloccata solo dopo conferma
 
 function fvContrattoTab(t) { _fvConTab = t; _fvRenderContrattoScheda(); }
@@ -1391,6 +1395,40 @@ function fvSbloccaModifica(id) {
     + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
     + '<button onclick="chiudiModal();_fvConEdit=true;_fvRenderContrattoScheda()" class="btn-primary" style="font-size:12px;padding:8px 16px">Sì, modifica</button></div></div>';
   apriModal(h);
+}
+
+// ── RIEPILOGO DELL'IMPIANTO VENDUTO (29/10): come per gli impianti nostri ──
+// numeri del contratto, potenza e produzione dall'offerta (o dalla vetrina del cliente),
+// avanzamento lavori, incassi e la barra CO₂ → alberi e case illuminate.
+function _fvDatiImpiantoContratto(c) {
+  var o = ((_fvCon && _fvCon.offerte) || []).filter(function (x) { return x.id === c.offerta_id; })[0] || {};
+  var v = _fvVetrinaCliente(c.cliente_nome) || {};
+  return { kwp: Number(o.potenza_kwp || v.kwpN || 0), kwh: Number(o.produzione_kwh_anno || v.kwhN || 0) };
+}
+function _fvRiepilogoContratto(c, totIvato) {
+  var inc = _fvIncassiContratto(c).reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
+  var d = _fvDatiImpiantoContratto(c);
+  var kpi = function (lab, val, col, sub) {
+    return '<div style="flex:1;min-width:150px;background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-radius:10px;padding:11px 13px">'
+      + '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">' + lab + '</div>'
+      + '<div style="font-family:var(--font-mono);font-size:19px;font-weight:700' + (col ? ';color:' + col : '') + '">' + val + '</div>'
+      + '<div style="font-size:10.5px;color:var(--text-muted)">' + (sub || '&nbsp;') + '</div></div>';
+  };
+  var h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + kpi('Totale contratto', _fvEuro(totIvato), '', 'IVA inclusa')
+    + kpi('Incassato', _fvEuro(inc), '#27500A')
+    + kpi('Da incassare', _fvEuro(totIvato - inc), totIvato - inc > 0.5 ? '#A32D2D' : '#27500A') + '</div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    + kpi('Potenza', d.kwp ? _fvNumDoc(d.kwp, 2) + ' kWp' : '—')
+    + kpi('Produzione stimata', d.kwh ? _fvNumDoc(d.kwh) + ' kWh/anno' : '—')
+    + kpi('Resa', d.kwh && d.kwp ? _fvNumDoc(d.kwh / d.kwp) + ' kWh/kWp' : '—')
+    + (c.sito_installazione ? kpi('Sito', '<span style="font-size:13px">' + _fvEsc(c.sito_installazione) + '</span>') : '') + '</div>';
+  h += '<div class="card" style="padding:12px 14px;margin-bottom:12px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">'
+    + '<div><div style="font-size:12px;font-weight:700;margin-bottom:6px">🔧 Avanzamento lavori</div>' + _fvBarraFasi(c, false) + '</div>'
+    + '<div><div style="font-size:12px;font-weight:700;margin-bottom:6px">💶 Incassi</div>' + _fvBarraIncassi(c, true) + '</div></div></div>';
+  if (d.kwh > 0) h += _pfCO2Html(d.kwh, 'Produzione stimata dell\'impianto di ' + _fvEsc(c.cliente_nome));
+  else h += '<div class="card" style="padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--text-muted)">🌍 Manca la produzione annua: scrivila nell\'offerta da cui è nato il contratto (o carica il PDF PVGIS) e qui compare cosa cambia per l\'ambiente.</div>';
+  return h;
 }
 
 function _fvRenderContrattoScheda() {
@@ -1432,9 +1470,10 @@ function _fvRenderContrattoScheda() {
     return '<button onclick="fvContrattoTab(\'' + k + '\')" style="font-size:12px;padding:7px 14px;border-radius:7px;cursor:pointer;border:0.5px solid ' + (att ? '#185FA5' : 'var(--border)') + ';'
       + (att ? 'background:#185FA5;color:#fff;font-weight:600' : 'background:var(--bg);color:var(--text)') + '">' + lab + '</button>';
   };
-  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' + tab('composizione', '📄 Composizione contratto') + tab('contabilita', '📊 Contabilità')
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' + tab('riepilogo', '📊 Riepilogo') + tab('composizione', '📄 Composizione contratto') + tab('contabilita', '📊 Contabilità')
     + tab('mastrino', '📒 Mastrino fornitori') + tab('incassi', '💶 Fatture e incassi cliente') + '</div>';
 
+  if (_fvConTab === 'riepilogo') { h += _fvRiepilogoContratto(c, totIvato); box.innerHTML = h; return; }
   if (_fvConTab === 'mastrino') { h += _fvMastrinoFornitori(c); box.innerHTML = h; return; }
   if (_fvConTab === 'incassi') { h += _fvFattureCliente(c, imponibile); box.innerHTML = h; return; }
   if (_fvConTab === 'contabilita') {
@@ -3211,6 +3250,7 @@ async function fvCaricaImpiantiVenduti() {
 }
 // dalla cella: apre la sotto-linguetta Contratti direttamente sulla scheda
 async function fvApriVenduto(id) {
+  _fvConTab = 'riepilogo';
   _fvMostraVTab('fv-vtab-contratti');
   await fvCaricaContratti();
   fvApriContratto(id);
@@ -3420,7 +3460,7 @@ var _FV_VETRINE = [
   // impianti venduti: la vetrina si apre dalla scheda del contratto/offerta del cliente, non sta tra quelli in sviluppo
   { id: 'ds', nome: 'DS Energy · Seminara', luogo: 'Seminara (RC) · c/da Paparone 1', cliente: /DS\s*ENERGY/i,
     tipo: 'Capannone, 3 corpi', kwp: '100,20 kWp · 167 moduli TW Solar 600 Wp', energia: '≈ 129 MWh/anno',
-    file: 'fv-vetrina-ds.html', ver: '20261029j', stato: 'Venduto' }
+    file: 'fv-vetrina-ds.html', ver: '20261029j', stato: 'Venduto', kwpN: 100.20, kwhN: 128818 }
 ];
 // vetrina dedicata a un cliente (per nome), se c'e'
 function _fvVetrinaCliente(nome) {
