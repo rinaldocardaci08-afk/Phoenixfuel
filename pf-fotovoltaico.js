@@ -1,3 +1,5 @@
+// v20261029g — CATALOGO: lettura della scheda tecnica PDF (valori proposti da scegliere), dati tecnici, caratteristiche ✓
+//   e foto (spazio fv-documenti); nel preventivo i componenti escono con foto, ✓ e dati tecnici come nel PDF DS.
 // v20261029f — ECONOMIA CALCOLATA nell'offerta (vendita totale, consumo annuo o bolletta mensile): rendimento,
 //   break-even, TIR; nel preventivo pagine Consumo di energia, Analisi Finanziaria con grafico e tabella anno per anno.
 // v20261029e — PVGIS: "📄 Carica PDF PVGIS" nella scheda offerta legge il PDF (pdf.js in lib/), salva i dati in
@@ -261,6 +263,7 @@ function _fvRenderCatalogo() {
     el.forEach(function (c) {
       h += '<tr style="border-bottom:0.5px solid var(--border)">'
         + '<td style="padding:8px 10px"><strong>' + _fvEsc(c.nome) + '</strong>'
+        + (_fvSchedaDi(c).file_path ? ' <span title="Scheda tecnica salvata">📄</span>' : '') + (c.foto_url ? ' <span title="Foto">🖼️</span>' : '')
         + (c.descrizione ? '<div style="font-size:11px;color:var(--text-muted)">' + _fvEsc(c.descrizione) + '</div>' : '') + '</td>'
         + '<td style="padding:8px 10px;color:var(--text-muted)">' + _fvEsc(c.marca || '') + '</td>'
         + '<td style="padding:8px 10px;font-family:var(--font-mono);font-size:11.5px">' + _fvEsc(c.codice || '') + '</td>'
@@ -272,39 +275,219 @@ function _fvRenderCatalogo() {
   box.innerHTML = h;
 }
 
+// ═══ CATALOGO CON SCHEDA TECNICA E FOTO (29/10) ═════════════════════════════
+// fv_catalogo.scheda (jsonb): dati tecnici + file_path del PDF; fv_catalogo.caratteristiche
+// (testo, una riga = un punto ✓ nel preventivo); fv_catalogo.foto_url = 'storage:<percorso>'
+// nello spazio file fv-documenti (o un indirizzo web). La scheda PDF si legge con pdf.js:
+// il programma propone i valori trovati come pulsantini, l'utente sceglie e conferma.
+var _FV_CAMPI_SCHEDA = [
+  ['efficienza', 'Efficienza modulo %'], ['dimensioni', 'Dimensioni'], ['peso', 'Peso kg'], ['celle', 'Celle'],
+  ['tipo_cella', 'Tipo di cella'], ['garanzia_prodotto', 'Garanzia prodotto (anni)'], ['garanzia_potenza', 'Garanzia rendimento (anni)'],
+  ['potenza_ac', 'Potenza AC kW'], ['mppt', 'MPPT'], ['rendimento', 'Rendimento max %'], ['protezione', 'Protezione IP']
+];
+function _fvSchedaDi(c) {
+  var s = c && c.scheda;
+  if (typeof s === 'string') { try { s = JSON.parse(s); } catch (e) { s = null; } }
+  return s && typeof s === 'object' ? s : {};
+}
+function _fvUnici(a) { var v = {}; return a.filter(function (x) { x = String(x); if (v[x]) return false; v[x] = 1; return true; }); }
+function _fvLeggiScheda(pz) {
+  var T = pz.join(' | ');
+  var tutti = function (re, f) { var out = [], m; re.lastIndex = 0; while ((m = re.exec(T))) out.push(f ? f(m) : m[1]); return _fvUnici(out); };
+  var n = function (t) { return parseFloat(String(t).replace(/\.(?=\d{3}\b)/g, '').replace(',', '.')); };
+  var perc = tutti(/(\d{2}[.,]\d{1,2})\s*%/g).map(n);
+  var dopoEtichetta = function (re) {   // numeri subito dopo un'etichetta (righe di tabella con piu' modelli)
+    var m = T.match(re); if (!m) return [];
+    var resto = T.slice(m.index + m[0].length).split('|').map(function (x) { return x.trim(); });
+    var out = [];
+    for (var i = 0; i < resto.length && i < 12; i++) {
+      if (/^-?\d[\d.,]*$/.test(resto[i])) out.push(resto[i]); else if (out.length || i > 1) break;
+    }
+    return out;
+  };
+  var acW = dopoEtichetta(/(Potenza nominale in uscita|Rated output power|Nominal AC (?:output )?power|Potenza nominale CA)[^|]*/i)
+    .map(function (x) { var v = n(x.replace(/,(?=\d{3}\b)/g, '')); return v >= 1000 ? v / 1000 : v; });
+  var acKw = tutti(/(\d{1,3}(?:[.,]\d)?)\s*kW\b/g).map(n).filter(function (v) { return v >= 1 && v <= 500; });
+  var punti = [];
+  pz.forEach(function (p, i) {
+    if (!/^[•✓●▪■-]\s*\S/.test(p) || p.length < 12) return;
+    var t = p.replace(/^[•✓●▪■-]\s*/, '');
+    for (var j = i + 1; j < pz.length && j < i + 4; j++) {
+      if (/^[•✓●▪■]/.test(pz[j]) || pz[j].length < 18 || /[.!]$/.test(t)) break;
+      t += ' ' + pz[j];
+    }
+    punti.push(t.trim());
+  });
+  var codiciPuliti = tutti(/\b([A-Z0-9]{2,}[A-Z0-9]*-[A-Z0-9-]{3,})\b/g).filter(function (k) { return /[A-Z]/.test(k) && /\d/.test(k); });
+  return {
+    potenza: (function () {
+      var tuttiW = tutti(/(\d{3})\s?W[p]?\b/g).map(Number).filter(function (v) { return v >= 100 && v <= 900; });
+      // prima le potenze che compaiono nei codici dei modelli (es. JKM620N → 620): sono le potenze nominali
+      var nei = [];
+      codiciPuliti.forEach(function (k) { (k.match(/\d{3}/g) || []).forEach(function (x) { x = Number(x); if (tuttiW.indexOf(x) >= 0 && nei.indexOf(x) < 0) nei.push(x); }); });
+      return nei.sort(function (a, b) { return a - b; }).concat(tuttiW.filter(function (v) { return nei.indexOf(v) < 0; }));
+    })(),
+    efficienza: perc.filter(function (v) { return v >= 15 && v <= 30; }),
+    rendimento: perc.filter(function (v) { return v >= 94 && v < 100; }),
+    dimensioni: tutti(/(\d{3,4})\s*[×xX*]\s*(\d{3,4})\s*[×xX*]\s*(\d{2,3})\s*mm/g, function (m) { return m[1] + ' × ' + m[2] + ' × ' + m[3] + ' mm'; })
+      .concat(tutti(/(\d{3,4})\s*\/\s*(\d{3,4})\s*\/\s*(\d{2,4})[\s|]*mm/g, function (m) { return m[1] + ' × ' + m[2] + ' × ' + m[3] + ' mm'; })),
+    peso: tutti(/(\d{1,3}(?:[.,]\d)?)\s*kg\b/gi).map(n),
+    celle: tutti(/(\d{2,3})\s*\(\s*\d\s*[×x]\s*\d{2,3}\s*\)/g).map(Number),
+    tipo_cella: tutti(/(N[\s-]?type[^|]{0,25}|P[\s-]?type[^|]{0,25}|Mono-?crystalline|Monocristallino[^|]{0,20})/gi).map(function (x) { return String(x).trim(); }).slice(0, 3),
+    protezione: tutti(/\bIP\s?(\d{2})\b/g).map(function (x) { return 'IP' + x; }),
+    potenza_ac: _fvUnici(acW.concat(acKw)).slice(0, 8),
+    mppt: _fvUnici(dopoEtichetta(/(Numero di MPP[^|]*|Number of MPP[^|]*|N\. di MPPT[^|]*|MPPT indipendenti[^|]*)/i).map(Number)),
+    garanzie: tutti(/(\d{1,2})\s*(?:anni|years)\b/gi).map(Number),
+    codici: codiciPuliti.slice(0, 10),
+    punti: _fvUnici(punti).slice(0, 8)
+  };
+}
+
+// ── modale della voce di catalogo ──
+var _fvCatPdf = null, _fvCatFoto = null, _fvCatTrovati = null;
 function fvModaleCatalogo(id) {
+  _fvCatPdf = null; _fvCatFoto = null; _fvCatTrovati = null;
+  _fvRenderModaleCatalogo(id);
+}
+function _fvRenderModaleCatalogo(id) {
   var c = id ? (_fvCat || []).filter(function (x) { return x.id === id; })[0] : null;
-  var inp = 'width:100%;padding:8px 10px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px';
-  var lb = 'display:block;font-size:11px;color:var(--text-muted);font-weight:500;margin-bottom:3px';
-  var h = '<div style="max-width:520px"><div style="font-size:16px;font-weight:600;margin-bottom:12px">' + (c ? 'Modifica voce' : 'Nuova voce di catalogo') + '</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  var sc = _fvSchedaDi(c);
+  var inp = 'width:100%;padding:7px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
+  var lb = 'display:block;font-size:10.5px;color:var(--text-muted);font-weight:500;margin-bottom:2px';
+  var T = _fvCatTrovati || {};
+  var chip = function (target, val, lab) {
+    return '<button type="button" onclick="fvCatUsa(\'' + target + '\',\'' + _fvEsc(String(val)).replace(/'/g, '&#39;') + '\')" style="font-size:10.5px;padding:2px 7px;margin:2px 3px 0 0;border:0.5px solid #B5CDE8;border-radius:9px;background:#EAF1F9;color:#0C447C;cursor:pointer">' + _fvEsc(lab || String(val)) + '</button>';
+  };
+  var chips = function (target, lista, suff) { return (lista && lista.length) ? '<div>' + lista.slice(0, 8).map(function (v) { return chip(target, v, v + (suff || '')); }).join('') + '</div>' : ''; };
+  var campo = function (idEl, lab, val, extra, tipo) {
+    return '<div><label style="' + lb + '">' + lab + '</label><input id="' + idEl + '"' + (tipo ? ' type="' + tipo + '" step="0.01"' : '') + ' value="' + _fvEsc(val == null ? '' : val) + '" style="' + inp + '">' + (extra || '') + '</div>';
+  };
+  var h = '<div style="width:min(860px,92vw)"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<div style="font-size:16px;font-weight:600">' + (c ? 'Modifica voce' : 'Nuova voce di catalogo') + '</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + (sc.file_path ? '<button onclick="fvCatApri(\'' + _fvEsc(sc.file_path) + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-muted);cursor:pointer">📄 Apri scheda</button>' : '')
+    + '<button onclick="fvCatScegliPdf(' + (c ? '\'' + c.id + '\'' : 'null') + ')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">📄 ' + (sc.file_path || _fvCatPdf ? 'Leggi un\'altra scheda' : 'Leggi scheda tecnica (PDF)') + '</button></div></div>';
+  if (_fvCatPdf) h += '<div style="font-size:11px;color:#0C447C;background:#EAF1F9;border-radius:6px;padding:6px 9px;margin-bottom:8px">Letta <b>' + _fvEsc(_fvCatPdf.name) + '</b>: tocca i valori azzurri per inserirli, poi controlla e salva. Il PDF si salva con la voce.</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
   h += '<div><label style="' + lb + '">Tipo</label><select id="fvk-tipo" style="' + inp + '">'
     + _FV_TIPI.map(function (t) { return '<option value="' + t[0] + '"' + (c && c.tipo === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></div>';
-  h += '<div><label style="' + lb + '">Marca</label><input id="fvk-marca" value="' + _fvEsc(c && c.marca || '') + '" style="' + inp + '"></div>';
-  h += '<div style="grid-column:1/3"><label style="' + lb + '">Nome *</label><input id="fvk-nome" value="' + _fvEsc(c && c.nome || '') + '" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">Codice</label><input id="fvk-cod" value="' + _fvEsc(c && c.codice || '') + '" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">Potenza (W)</label><input id="fvk-pot" type="number" step="0.01" value="' + (c && c.potenza_w != null ? c.potenza_w : '') + '" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">Prezzo unitario €</label><input id="fvk-prezzo" type="number" step="0.01" value="' + (c && c.prezzo_unitario != null ? c.prezzo_unitario : '') + '" style="' + inp + '"></div>';
-  h += '<div><label style="' + lb + '">Foto (URL)</label><input id="fvk-foto" value="' + _fvEsc(c && c.foto_url || '') + '" style="' + inp + '"></div>';
-  h += '<div style="grid-column:1/3"><label style="' + lb + '">Descrizione</label><input id="fvk-descr" value="' + _fvEsc(c && c.descrizione || '') + '" style="' + inp + '"></div>';
-  h += '</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">'
+  h += campo('fvk-marca', 'Marca', c && c.marca);
+  h += '<div style="grid-column:3/5">' + campo('fvk-nome', 'Nome *', c && c.nome) + '</div>';
+  h += campo('fvk-cod', 'Codice / modello', c && c.codice, chips('fvk-cod', T.codici));
+  h += campo('fvk-pot', 'Potenza (W)', c && c.potenza_w, chips('fvk-pot', T.potenza, ' W'), 'number');
+  h += campo('fvk-prezzo', 'Prezzo unitario €', c && c.prezzo_unitario, '', 'number');
+  h += campo('fvk-descr', 'Descrizione breve', c && c.descrizione);
+  h += '</div>';
+  h += '<div style="font-size:12px;font-weight:700;margin:12px 0 4px">Dati tecnici</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">';
+  var sug = { efficienza: T.efficienza, dimensioni: T.dimensioni, peso: T.peso, celle: T.celle, tipo_cella: T.tipo_cella, protezione: T.protezione, potenza_ac: T.potenza_ac, mppt: T.mppt, rendimento: T.rendimento, garanzia_prodotto: T.garanzie, garanzia_potenza: T.garanzie };
+  _FV_CAMPI_SCHEDA.forEach(function (k) { h += campo('fvk-s-' + k[0], k[1], sc[k[0]], chips('fvk-s-' + k[0], sug[k[0]])); });
+  h += '</div>';
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-top:12px">'
+    + '<div><label style="' + lb + '">Caratteristiche nel preventivo (una per riga, escono con ✓)</label><textarea id="fvk-car" rows="6" style="' + inp + ';resize:vertical;line-height:1.45">' + _fvEsc(c && c.caratteristiche || '') + '</textarea>'
+    + ((T.punti && T.punti.length) ? '<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px">Dalla scheda:</div>' + T.punti.map(function (p) { return chip('fvk-car+', p, '＋ ' + (p.length > 60 ? p.slice(0, 60) + '…' : p)); }).join('') : '') + '</div>'
+    + '<div><label style="' + lb + '">Foto del prodotto</label><div id="fvk-foto-ante" style="height:120px;border:0.5px dashed var(--border);border-radius:6px;display:flex;align-items:center;justify-content:center;background:var(--bg);overflow:hidden;font-size:11px;color:var(--text-muted)">'
+    + (_fvCatFoto ? '' : (c && c.foto_url ? 'caricamento…' : 'nessuna foto')) + '</div>'
+    + '<button onclick="fvCatScegliFoto()" style="margin-top:6px;font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;cursor:pointer">🖼️ ' + (c && c.foto_url ? 'Cambia foto' : 'Carica foto') + '</button></div></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
     + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Annulla</button>'
     + '<button onclick="fvSalvaCatalogo(' + (c ? '\'' + c.id + '\'' : 'null') + ')" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva</button></div></div>';
   apriModal(h);
+  _fvCatAnteprimaFoto(c);
 }
-
+async function _fvCatAnteprimaFoto(c) {
+  var box = document.getElementById('fvk-foto-ante');
+  if (!box) return;
+  var url = null;
+  if (_fvCatFoto) url = URL.createObjectURL(_fvCatFoto);
+  else if (c && c.foto_url) url = await _fvUrlFoto(c.foto_url);
+  box.innerHTML = url ? '<img src="' + url + '" style="max-width:100%;max-height:100%;object-fit:contain">' : 'nessuna foto';
+}
+async function _fvUrlFoto(f) {
+  if (!f) return null;
+  if (String(f).indexOf('storage:') !== 0) return f;
+  var r = await sb.storage.from('fv-documenti').createSignedUrl(String(f).slice(8), 3600);
+  return r.error ? null : r.data.signedUrl;
+}
+// conserva quanto gia' scritto nei campi prima di ridisegnare il modale
+function _fvCatLeggiCampi() {
+  var g = function (x) { var e = document.getElementById(x); return e ? e.value : null; };
+  var v = { tipo: g('fvk-tipo'), marca: g('fvk-marca'), nome: g('fvk-nome'), codice: g('fvk-cod'), potenza_w: g('fvk-pot'), prezzo_unitario: g('fvk-prezzo'), descrizione: g('fvk-descr'), caratteristiche: g('fvk-car'), scheda: {} };
+  _FV_CAMPI_SCHEDA.forEach(function (k) { v.scheda[k[0]] = g('fvk-s-' + k[0]); });
+  return v;
+}
+function fvCatUsa(target, val) {
+  if (target === 'fvk-car+') {
+    var t = document.getElementById('fvk-car');
+    if (t) t.value = (t.value.trim() ? t.value.trim() + '\n' : '') + val;
+    return;
+  }
+  var e = document.getElementById(target);
+  if (e) { e.value = val; e.style.background = '#EAF1F9'; }
+}
+function fvCatScegliPdf(id) {
+  var i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf,.pdf';
+  i.onchange = async function () {
+    var f = i.files && i.files[0]; if (!f) return;
+    var vecchi = _fvCatLeggiCampi();
+    try { _fvCatTrovati = _fvLeggiScheda(await _fvPdfPezzi(f)); }
+    catch (e) { alert('Scheda non letta: ' + e.message + (/scansion|immagine/i.test(e.message) ? '' : '.\nSe il PDF è una scansione (foto del foglio) non contiene testo da leggere.')); return; }
+    _fvCatPdf = f;
+    _fvRenderModaleCatalogo(id);
+    _fvCatRimetti(vecchi);
+    var tr = _fvCatTrovati, quanti = Object.keys(tr).reduce(function (s, k) { return s + (tr[k] || []).length; }, 0);
+    toast(quanti ? 'Scheda letta: ' + quanti + ' valori proposti' : 'Nella scheda non ho trovato valori riconoscibili');
+  };
+  i.click();
+}
+function fvCatScegliFoto() {
+  var i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*';
+  i.onchange = function () { var f = i.files && i.files[0]; if (!f) return; _fvCatFoto = f; var b = document.getElementById('fvk-foto-ante'); if (b) b.innerHTML = '<img src="' + URL.createObjectURL(f) + '" style="max-width:100%;max-height:100%;object-fit:contain">'; };
+  i.click();
+}
+function _fvCatRimetti(v) {
+  var s = function (x, val) { var e = document.getElementById(x); if (e && val != null && val !== '') e.value = val; };
+  s('fvk-tipo', v.tipo); s('fvk-marca', v.marca); s('fvk-nome', v.nome); s('fvk-cod', v.codice); s('fvk-pot', v.potenza_w);
+  s('fvk-prezzo', v.prezzo_unitario); s('fvk-descr', v.descrizione); s('fvk-car', v.caratteristiche);
+  _FV_CAMPI_SCHEDA.forEach(function (k) { s('fvk-s-' + k[0], v.scheda[k[0]]); });
+}
+async function fvCatApri(path) {
+  var w = window.open('', '_blank');
+  var r = await sb.storage.from('fv-documenti').createSignedUrl(path, 600);
+  if (r.error) { if (w) w.close(); toast('Errore: ' + r.error.message); return; }
+  if (w) w.location = r.data.signedUrl; else window.open(r.data.signedUrl, '_blank');
+}
 async function fvSalvaCatalogo(id) {
   var g = function (x) { var e = document.getElementById(x); return e ? e.value.trim() : ''; };
   if (!g('fvk-nome')) { toast('Il nome è obbligatorio'); return; }
+  var c = id ? (_fvCat || []).filter(function (x) { return x.id === id; })[0] : null;
+  var sc = Object.assign({}, _fvSchedaDi(c));
+  _FV_CAMPI_SCHEDA.forEach(function (k) { var v = g('fvk-s-' + k[0]); if (v) sc[k[0]] = v; else delete sc[k[0]]; });
   var p = {
     tipo: g('fvk-tipo') || 'altro', marca: g('fvk-marca') || null, nome: g('fvk-nome'),
     codice: g('fvk-cod') || null, potenza_w: parseFloat(g('fvk-pot')) || null,
-    prezzo_unitario: parseFloat(g('fvk-prezzo')) || 0, foto_url: g('fvk-foto') || null,
-    descrizione: g('fvk-descr') || null
+    prezzo_unitario: parseFloat(g('fvk-prezzo')) || 0,
+    descrizione: g('fvk-descr') || null, caratteristiche: g('fvk-car') || null, scheda: sc
   };
-  var r = id ? await sb.from('fv_catalogo').update(p).eq('id', id) : await sb.from('fv_catalogo').insert([p]);
-  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  var r = id ? await sb.from('fv_catalogo').update(p).eq('id', id).select('id') : await sb.from('fv_catalogo').insert([p]).select('id');
+  if (r.error) { toast('Errore: ' + r.error.message + (/scheda|caratteristiche/.test(r.error.message) ? ' — lancia prima l\'SQL delle colonne nuove' : '')); return; }
+  var nuovoId = id || (r.data && r.data[0] && r.data[0].id);
+  // file: scheda PDF e foto nello spazio fv-documenti
+  var agg = {};
+  if (nuovoId && _fvCatPdf) {
+    var pp = 'catalogo/' + nuovoId + '/scheda.pdf';
+    var u1 = await sb.storage.from('fv-documenti').upload(pp, _fvCatPdf, { upsert: true, contentType: 'application/pdf' });
+    if (u1.error) toast('Scheda PDF non salvata: ' + u1.error.message); else { sc.file_path = pp; sc.file_nome = _fvCatPdf.name; agg.scheda = sc; }
+  }
+  if (nuovoId && _fvCatFoto) {
+    var est = (String(_fvCatFoto.name).split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    var pf = 'catalogo/' + nuovoId + '/foto.' + est;
+    var u2 = await sb.storage.from('fv-documenti').upload(pf, _fvCatFoto, { upsert: true, contentType: _fvCatFoto.type || 'image/jpeg' });
+    if (u2.error) toast('Foto non salvata: ' + u2.error.message); else agg.foto_url = 'storage:' + pf;
+  }
+  if (Object.keys(agg).length) await sb.from('fv_catalogo').update(agg).eq('id', nuovoId);
+  _fvCatPdf = null; _fvCatFoto = null; _fvCatTrovati = null;
   chiudiModal();
+  toast('✓ Voce salvata');
   fvCaricaCatalogo();
 }
 
@@ -2403,6 +2586,12 @@ async function fvStampaOfferta(id) {
   var sito = o.sito_installazione || '';
   var logo = _FV_LOGO;
   var foto = new URL('img/fv-copertina.jpg', location.href).href;
+  var fotoCat = {};
+  await Promise.all(righe.map(function (r) {
+    var c = catDi(r);
+    if (!c || !c.foto_url || fotoCat[c.id]) return null;
+    return _fvUrlFoto(c.foto_url).then(function (u) { if (u) fotoCat[c.id] = u; });
+  }));
   var sez = [];   // sezioni: { cover?, blocchi: [html] }
 
   // 1) copertina
@@ -2430,8 +2619,24 @@ async function fvStampaOfferta(id) {
     b.push('<h5>COMPONENTI</h5><p class="pic">Abbiamo previsto i seguenti componenti:</p>');
     righe.forEach(function (r) {
       var c = catDi(r), m = marcaRiga(r);
-      b.push('<div class="comp"><div class="cn">' + E(nomeRiga(r)) + '</div><div class="cq">' + (m ? E(m) + ' &nbsp;|&nbsp; ' : '') + pz(r.quantita) + '</div></div>'
-        + (c && c.descrizione ? '<div class="cd">' + E(c.descrizione) + '</div>' : ''));
+      var testa = '<div class="comp"><div class="cn">' + E(nomeRiga(r)) + '</div><div class="cq">' + (m ? E(m) + ' &nbsp;|&nbsp; ' : '') + pz(r.quantita) + '</div></div>';
+      var sc = c ? _fvSchedaDi(c) : {}, car = c && c.caratteristiche ? String(c.caratteristiche).split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean) : [];
+      var dati = [];
+      if (c && c.tipo === 'modulo') {
+        if (c.potenza_w) dati.push(['Potenza', _fvNumDoc(c.potenza_w) + ' Wp']);
+        [['efficienza', 'Efficienza', ' %'], ['dimensioni', 'Dimensioni', ''], ['peso', 'Peso', ' kg'], ['celle', 'Celle', ''], ['tipo_cella', 'Tipo di cella', ''],
+         ['garanzia_prodotto', 'Garanzia prodotto', ' anni'], ['garanzia_potenza', 'Garanzia rendimento', ' anni']].forEach(function (x) { if (sc[x[0]]) dati.push([x[1], sc[x[0]] + x[2]]); });
+      } else if (c && (c.tipo === 'inverter' || c.tipo === 'accumulo')) {
+        [['potenza_ac', 'Potenza AC', ' kW'], ['mppt', 'MPPT', ''], ['rendimento', 'Rendimento massimo', ' %'], ['protezione', 'Protezione', ''],
+         ['dimensioni', 'Dimensioni', ''], ['peso', 'Peso', ' kg'], ['garanzia_prodotto', 'Garanzia prodotto', ' anni']].forEach(function (x) { if (sc[x[0]]) dati.push([x[1], sc[x[0]] + x[2]]); });
+      }
+      var fu = c ? fotoCat[c.id] : null;
+      var sx = (car.length ? '<ul class="ck">' + car.map(function (x) { return '<li>' + E(x) + '</li>'; }).join('') + '</ul>' : '')
+        + (dati.length ? '<table class="dt">' + dati.map(function (x) { return '<tr><td>' + x[0] + '</td><td>' + E(x[1]) + '</td></tr>'; }).join('') + '</table>' : '')
+        + (!car.length && !dati.length && c && c.descrizione ? '<div class="cd">' + E(c.descrizione) + '</div>' : '');
+      if (fu && !sx) b.push(testa + '<div class="cfoto1"><img src="' + fu + '"></div>');
+      else if (fu || sx) b.push(testa + '<div class="cbody"><div class="csx">' + sx + '</div>' + (fu ? '<div class="cdx"><img src="' + fu + '"></div>' : '') + '</div>');
+      else b.push(testa + (c && c.descrizione ? '<div class="cd">' + E(c.descrizione) + '</div>' : ''));
     });
     var nm = _fvTesto('note_materiali', tv.vers.note_materiali);
     if (nm) b.push('<div class="comp"><div class="cn">Informazioni sui materiali</div><div class="cq"></div></div><div class="cd">' + E(nm) + '</div>');
@@ -2503,6 +2708,10 @@ async function fvStampaOfferta(id) {
     + 'table.tt{width:100%;border-collapse:collapse}table.tt td{padding:8px 10px;border-bottom:0.5px solid #ddd;font-size:11px}table.tt td:last-child{text-align:right}table.tt tr.g td{font-size:14px;font-weight:700}'
     + '.parti{display:flex;gap:10mm;margin-bottom:6mm}.parti div{flex:1;font-size:12.5px;line-height:1.45;font-family:Arial,sans-serif}.parti span{display:block;font-size:9px;color:#555;margin-bottom:3px}.parti b{display:block;font-size:15px}.parti small{display:block;font-size:9px;color:#555;margin-top:4px}'
     + '.graf{background:#F6F6F7;padding:8px 6px;border-radius:2px}'
+    + '.cbody{display:flex;gap:8mm;align-items:center;padding:6mm 2mm 4mm}.csx{flex:1.2}.cdx{flex:1;text-align:center;height:62mm}.cdx img{width:100%;height:62mm;object-fit:contain}'
+    + '.cfoto1{text-align:center;padding:6mm 0 4mm;height:105mm}.cfoto1 img{height:95mm;width:80%;object-fit:contain}'
+    + 'ul.ck{list-style:none;margin:0 0 4mm;padding:0}ul.ck li{position:relative;padding-left:18px;margin:0 0 5px;font-size:11.5px;line-height:1.4}ul.ck li:before{content:"✓";position:absolute;left:0;color:#C8102E;font-weight:900}'
+    + 'table.dt{border-collapse:collapse;width:100%}table.dt td{padding:4px 6px;font-size:10px;border-bottom:0.5px solid #e2e2e2}table.dt td:first-child{color:#666;width:45%}'
     + 'table.anni{width:100%;border-collapse:collapse;table-layout:fixed}table.anni th{font-size:8.5px;text-transform:uppercase;color:#555;text-align:left;padding:7px 10px}'
     + 'table.anni th:first-child,table.anni td:first-child{width:22%}table.anni th:nth-child(2),table.anni td:nth-child(2){width:30%}'
     + 'table.anni td{padding:9px 10px;font-size:11px;line-height:1.45;vertical-align:middle}div:nth-child(even)>table.anni td{background:#F1F2F3}'
@@ -2523,7 +2732,9 @@ async function fvStampaOfferta(id) {
     + 'if(c.scrollHeight>c.clientHeight+1&&c.children.length>1){c.removeChild(d);c=nuova(false);c.appendChild(d);}});});'
     + 'var pp=document.querySelectorAll(".pg");pp.forEach(function(p,i){var n=p.querySelector(".pn");if(n)n.textContent=(i+1)+" / "+pp.length;});'
     + 'var imgs=[].slice.call(document.images);Promise.all(imgs.map(function(im){return im.complete?1:new Promise(function(r){im.onload=im.onerror=r;});})).then(function(){setTimeout(function(){window.focus();window.print();},300);});'
-    + '}(document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(run,run);})();<\/script>';
+    + '}var srcs=[],re=/src=\\"([^\\"]+)\\"/g,mm,js=JSON.stringify(D);while((mm=re.exec(js)))srcs.push(mm[1]);'
+    + 'var pre=Promise.all(srcs.map(function(u){return new Promise(function(r){var im=new Image();im.onload=im.onerror=r;im.src=u;});}));'
+    + 'Promise.all([pre,(document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve())]).then(run,run);})();<\/script>';
   var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Preventivo ' + E(o.cliente_nome) + ' ' + (o.data || '') + '</title>' + css + '</head><body>' + script + '</body></html>';
   w.document.open(); w.document.write(doc); w.document.close();
 }
