@@ -1,3 +1,4 @@
+// v20261029b — barra CO₂: dopo la passata resta ferma 20 secondi prima di ricominciare (prima 4).
 // v20261029a — RIEPILOGO IMPIANTO: potenza, produzione stimata, resa e la barra animata CO₂ → alberi e case
 //   illuminate (_pfCO2Html, usata anche da pf-fotovoltaico.js per gli impianti venduti).
 // v20261028c — RATE: nessuna rata predefinita (prima 30/50/20 se non salvate); si possono anche togliere tutte.
@@ -922,7 +923,7 @@ function invVaiTabImp(k) { _invTabImp = k; _invRenderImpianto(); }
 // alberi e casette che si accendono; sotto, i contatori salgono fino ai valori dell'impianto.
 // Stime: 0,25 kg CO₂ per kWh (rete italiana), 22 kg CO₂ l'anno per albero adulto,
 // 2.700 kWh l'anno per famiglia.
-var _PF_CO2 = { kgKwh: 0.25, kgAlbero: 22, kwhFamiglia: 2700, durata: 12, pausa: 4 }, _pfCo2N = 0;
+var _PF_CO2 = { kgKwh: 0.25, kgAlbero: 22, kwhFamiglia: 2700, durata: 12, pausa: 20 }, _pfCo2N = 0;
 function _pfCO2Valori(kwh) {
   kwh = Number(kwh || 0);
   return { co2: kwh * _PF_CO2.kgKwh / 1000, alberi: kwh * _PF_CO2.kgKwh / _PF_CO2.kgAlbero, famiglie: kwh / _PF_CO2.kwhFamiglia };
