@@ -1,3 +1,5 @@
+// v20261029j — VETRINA 3D DS ENERGY (fv-vetrina-ds.html): bottone "🧊 Vetrina 3D" nella scheda contratto e offerta
+//   del cliente DS; le vetrine con cliente non compaiono tra gli impianti in sviluppo.
 // v20261029i — IMMAGINI DEL PROGETTO nell'offerta (render, sopralluogo, vetrina 3D) in fv-documenti, con
 //   didascalia e ordine; nel preventivo pagina "Progetto dell'impianto fotovoltaico", 2 per pagina.
 // v20261029h — PAGAMENTI LIBERI nell'offerta: rate (% + scadenza) scritte a mano, "Parti da uno schema" e
@@ -872,6 +874,7 @@ function _fvRenderOffertaScheda() {
     + ' <span style="font-size:11px;background:' + st.bg + ';color:' + st.col + ';padding:2px 9px;border-radius:9px;vertical-align:middle">' + st.lab + '</span></div>'
     + '<div style="font-size:11.5px;color:var(--text-muted)">' + _fvEsc(o.cliente_nome) + ' · ' + _fvData(o.data) + '</div></div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + _fvBtnVetrinaCliente(o.cliente_nome)
     + '<button onclick="fvStampaOfferta(\'' + o.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa preventivo</button>'
     + (o.stato === 'accettata' ? '<button onclick="fvGeneraContratto(\'' + o.id + '\')" class="btn-primary" style="font-size:12px;padding:7px 13px">📝 Genera contratto</button>' : '')
     + (_fvPuo() ? '<button onclick="fvEliminaOfferta(\'' + o.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:#A32D2D;cursor:pointer">🗑️ Elimina</button>' : '')
@@ -1417,6 +1420,7 @@ function _fvRenderContrattoScheda() {
         ? '<button onclick="fvSbloccaModifica(\'' + c.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid ' + (ed ? '#639922' : 'var(--border)') + ';border-radius:7px;background:' + (ed ? '#EAF3DE' : 'var(--bg)') + ';color:' + (ed ? '#27500A' : 'var(--text)') + ';font-weight:600;cursor:pointer">'
           + (ed ? '🔓 Modifica attiva · blocca' : '✏️ Modifica') + '</button>'
         : '')
+    + _fvBtnVetrinaCliente(c.cliente_nome)
     + '<button onclick="fvStampaContratto(\'' + c.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa contratto</button>'
     + '<button onclick="fvChiudiContratto()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Tutti i contratti</button>'
     + '</div></div>';
@@ -3410,15 +3414,28 @@ var _FV_VETRINE = [
     file: 'fv-vetrina-polistena.html', ver: '20261029a', stato: 'In sviluppo' },
   { id: 'borgia', nome: 'Borgia', luogo: 'Borgia (CZ)',
     tipo: 'Serre fotovoltaiche est-ovest', kwp: '989,52 kWp · 1.596 moduli Jinko 620 Wp', energia: '≈ 1.423 MWh/anno',
-    file: 'fv-vetrina-borgia.html', ver: '20261029a', stato: 'In sviluppo' }
+    file: 'fv-vetrina-borgia.html', ver: '20261029a', stato: 'In sviluppo' },
+  // impianti venduti: la vetrina si apre dalla scheda del contratto/offerta del cliente, non sta tra quelli in sviluppo
+  { id: 'ds', nome: 'DS Energy · Seminara', luogo: 'Seminara (RC) · c/da Paparone 1', cliente: /DS\s*ENERGY/i,
+    tipo: 'Capannone, 3 corpi', kwp: '100,20 kWp · 167 moduli TW Solar 600 Wp', energia: '≈ 129 MWh/anno',
+    file: 'fv-vetrina-ds.html', ver: '20261029j', stato: 'Venduto' }
 ];
+// vetrina dedicata a un cliente (per nome), se c'e'
+function _fvVetrinaCliente(nome) {
+  for (var i = 0; i < _FV_VETRINE.length; i++) if (_FV_VETRINE[i].cliente && _FV_VETRINE[i].cliente.test(nome || '')) return _FV_VETRINE[i];
+  return null;
+}
+function _fvBtnVetrinaCliente(nome) {
+  var v = _fvVetrinaCliente(nome);
+  return v ? '<button onclick="fvApriVetrina(\'' + v.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #185FA5;border-radius:7px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">🧊 Vetrina 3D</button>' : '';
+}
 
 function fvCaricaSviluppo() {
   var box = document.getElementById('fvsv-content');
   if (!box) return;
   var h = '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Vetrine 3D degli impianti in sviluppo, da mostrare ai clienti. Si aprono a tutto schermo; la pagina da mandare al cliente si scarica in sola lettura.</div>';
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';
-  _FV_VETRINE.forEach(function (v) {
+  _FV_VETRINE.filter(function (v) { return !v.cliente; }).forEach(function (v) {
     h += '<div style="background:var(--bg-card,var(--bg));border:0.5px solid var(--border);border-left:4px solid #c62828;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">'
       + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><div style="font-size:17px;font-weight:600">' + esc(v.nome) + '</div>'
       + '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#FAEEDA;color:#633806">' + esc(v.stato) + '</span></div>'
@@ -3493,7 +3510,7 @@ async function fvScaricaVetrina(id) {
     var blob = new Blob([html], { type: 'text/html' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'PhoenixFuelSolar_' + v.nome.replace(/\s+/g, '_') + '_' + gg + '-' + mm + '-' + aa + '.html';
+    a.download = 'PhoenixFuelSolar_' + v.nome.replace(/[^A-Za-z0-9]+/g, '_') + '_' + gg + '-' + mm + '-' + aa + '.html';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
     toast('Pagina cliente scaricata');
