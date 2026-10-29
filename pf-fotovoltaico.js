@@ -1,3 +1,5 @@
+// v20261029h — PAGAMENTI LIBERI nell'offerta: rate (% + scadenza) scritte a mano, "Parti da uno schema" e
+//   "Salva come schema"; modalita', banca, IBAN, intestatario passano a preventivo e contratto.
 // v20261029g — CATALOGO: lettura della scheda tecnica PDF (valori proposti da scegliere), dati tecnici, caratteristiche ✓
 //   e foto (spazio fv-documenti); nel preventivo i componenti escono con foto, ✓ e dati tecnici come nel PDF DS.
 // v20261029f — ECONOMIA CALCOLATA nell'offerta (vendita totale, consumo annuo o bolletta mensile): rendimento,
@@ -599,6 +601,122 @@ async function fvEliminaOfferta(id) {
 function fvApriOfferta(id) { _fvOffertaAperta = id; _fvRenderOffertaScheda(); }
 function fvChiudiOfferta() { _fvOffertaAperta = null; _fvRenderOfferte(); }
 
+// ═══ PAGAMENTI DELL'OFFERTA, LIBERI (29/10) ══════════════════════════════════
+// Le rate si scrivono sull'offerta (fv_offerte.rate jsonb [{perc, evento}]), non sono piu'
+// legate a uno schema fisso: lo schema serve solo come punto di partenza ("Parti da…") e
+// una sequenza nuova si puo' salvare come schema. Modalita', banca, IBAN e intestatario
+// (fv_offerte.pagamento jsonb) passano al contratto insieme alle rate.
+function _fvRateOff(o) {
+  var r = o && o.rate;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { r = null; } }
+  if (Array.isArray(r)) return r;
+  var sc = (_fvSchemi || []).filter(function (s2) { return s2.id === (o && o.schema_pagamento_id); })[0];
+  if (sc && sc.quote) { var q = (typeof sc.quote === 'string') ? JSON.parse(sc.quote) : sc.quote; return q.map(function (x) { return { perc: x.perc, evento: x.evento }; }); }
+  return [];
+}
+function _fvPagOff(o) {
+  var p = o && o.pagamento;
+  if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = null; } }
+  return Object.assign({ modalita: 'Bonifico bancario, a vista fattura per ciascuna quota', banca: '', iban: '', intestatario: 'Phoenix Fuel S.r.l.' }, p || {});
+}
+async function _fvSalvaRate(o, rate) {
+  var prima = o.rate;
+  o.rate = rate;                 // subito in memoria: piu' modifiche di fila non si pestano
+  _fvRenderOffertaScheda();
+  var r = await sb.from('fv_offerte').update({ rate: rate }).eq('id', o.id);
+  if (r.error) { o.rate = prima; _fvRenderOffertaScheda(); toast('Errore: ' + r.error.message + (/rate/.test(r.error.message) ? ' — lancia prima l\'SQL delle colonne nuove' : '')); return false; }
+  return true;
+}
+function _fvOffAperta() { return (_fvOff.offerte || []).filter(function (x) { return x.id === _fvOffertaAperta; })[0]; }
+function fvRataCampo(i, campo, valore) {
+  var o = _fvOffAperta(); if (!o || !_fvPuo()) return;
+  var rate = _fvRateOff(o).map(function (x) { return Object.assign({}, x); });
+  if (!rate[i]) return;
+  rate[i][campo] = campo === 'perc' ? (parseFloat(String(valore).replace(',', '.')) || 0) : String(valore || '').trim();
+  _fvSalvaRate(o, rate);
+}
+function fvRataAggiungi() {
+  var o = _fvOffAperta(); if (!o || !_fvPuo()) return;
+  var rate = _fvRateOff(o).map(function (x) { return Object.assign({}, x); });
+  var resto = Math.max(0, 100 - rate.reduce(function (s, x) { return s + Number(x.perc || 0); }, 0));
+  rate.push({ perc: Math.round(resto * 100) / 100, evento: '' });
+  _fvSalvaRate(o, rate);
+}
+function fvRataTogli(i) {
+  var o = _fvOffAperta(); if (!o || !_fvPuo()) return;
+  var rate = _fvRateOff(o).filter(function (x, k) { return k !== i; });
+  _fvSalvaRate(o, rate);
+}
+function fvRataSposta(i, d) {
+  var o = _fvOffAperta(); if (!o || !_fvPuo()) return;
+  var rate = _fvRateOff(o).slice(), j = i + d;
+  if (j < 0 || j >= rate.length) return;
+  var t = rate[i]; rate[i] = rate[j]; rate[j] = t;
+  _fvSalvaRate(o, rate);
+}
+function fvRateDaSchema(id) {
+  var o = _fvOffAperta(); if (!o || !_fvPuo() || !id) return;
+  var sc = (_fvSchemi || []).filter(function (s2) { return s2.id === id; })[0];
+  if (!sc) return;
+  if (_fvRateOff(o).length && !confirm('Sostituire le rate attuali con lo schema "' + sc.nome + '"?')) { _fvRenderOffertaScheda(); return; }
+  var q = (typeof sc.quote === 'string') ? JSON.parse(sc.quote) : (sc.quote || []);
+  _fvSalvaRate(o, q.map(function (x) { return { perc: Number(x.perc), evento: x.evento }; }));
+}
+async function fvRateSalvaSchema() {
+  var o = _fvOffAperta(); if (!o || !_fvPuo()) return;
+  var rate = _fvRateOff(o);
+  if (!rate.length) { toast('Nessuna rata da salvare'); return; }
+  var nome = prompt('Nome del nuovo schema di pagamento:', rate.map(function (x) { return Number(x.perc); }).join('/'));
+  if (!nome) return;
+  var r = await sb.from('fv_schemi_pagamento').insert([{ nome: nome.trim(), quote: rate, attivo: true }]).select('*');
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  _fvSchemi = (_fvSchemi || []).concat(r.data || []);
+  toast('✓ Schema "' + nome + '" salvato');
+  _fvRenderOffertaScheda();
+}
+async function fvPagCampo(campo, valore) {
+  var o = _fvOffAperta(); if (!o || !_fvPuo()) return;
+  var p = _fvPagOff(o), prima = o.pagamento; p[campo] = String(valore || '').trim();
+  o.pagamento = p;
+  var r = await sb.from('fv_offerte').update({ pagamento: p }).eq('id', o.id);
+  if (r.error) { o.pagamento = prima; toast('Errore: ' + r.error.message + (/pagamento/.test(r.error.message) ? ' — lancia prima l\'SQL delle colonne nuove' : '')); return; }
+  o.pagamento = p;
+}
+function _fvBloccoPagamenti(o, totIvato) {
+  var rate = _fvRateOff(o), pag = _fvPagOff(o), puo = _fvPuo();
+  var inp = 'width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px';
+  var lb = 'display:block;font-size:10.5px;color:var(--text-muted);margin-bottom:2px';
+  var somma = rate.reduce(function (s, x) { return s + Number(x.perc || 0); }, 0);
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">💳 Pagamenti</div><div style="font-size:11px;color:var(--text-muted)">Rate libere per questa offerta: passano identiche nel preventivo e nel contratto.</div></div>'
+    + (puo ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+        + '<select onchange="fvRateDaSchema(this.value)" style="font-size:11.5px;padding:5px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)"><option value="">Parti da uno schema…</option>'
+        + (_fvSchemi || []).map(function (s2) { return '<option value="' + s2.id + '">' + _fvEsc(s2.nome) + '</option>'; }).join('') + '</select>'
+        + (rate.length ? '<button onclick="fvRateSalvaSchema()" style="font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">💾 Salva come schema</button>' : '')
+        + '</div>' : '')
+    + '</div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase">'
+    + '<th style="text-align:right;padding:4px;width:80px">%</th><th style="text-align:left;padding:4px">Quando (scadenza)</th><th style="text-align:right;padding:4px;width:130px">Importo IVA incl.</th><th style="width:90px"></th></tr>';
+  rate.forEach(function (x, i) {
+    h += '<tr><td style="padding:3px 4px"><input type="number" step="0.01" value="' + Number(x.perc || 0) + '"' + (puo ? '' : ' disabled') + ' onchange="fvRataCampo(' + i + ',\'perc\',this.value)" style="' + inp + ';text-align:right;font-family:var(--font-mono)"></td>'
+      + '<td style="padding:3px 4px"><input value="' + _fvEsc(x.evento || '') + '"' + (puo ? '' : ' disabled') + ' placeholder="es. Alla firma del contratto" onchange="fvRataCampo(' + i + ',\'evento\',this.value)" style="' + inp + '"></td>'
+      + '<td style="padding:3px 4px;text-align:right;font-family:var(--font-mono)">' + _fvEuroDoc(totIvato * Number(x.perc || 0) / 100) + '</td>'
+      + '<td style="padding:3px 4px;text-align:right;white-space:nowrap">' + (puo
+          ? '<button onclick="fvRataSposta(' + i + ',-1)" title="Su" style="border:0;background:transparent;cursor:pointer">▲</button><button onclick="fvRataSposta(' + i + ',1)" title="Giù" style="border:0;background:transparent;cursor:pointer">▼</button>'
+          + '<button onclick="fvRataTogli(' + i + ')" title="Togli" style="border:0;background:transparent;color:#A32D2D;cursor:pointer;font-size:15px">×</button>' : '') + '</td></tr>';
+  });
+  if (!rate.length) h += '<tr><td colspan="4" style="padding:6px 4px;font-size:11.5px;color:var(--text-muted)">Nessuna rata: aggiungile una per una o parti da uno schema.</td></tr>';
+  h += '<tr style="font-weight:700"><td style="padding:6px 4px;text-align:right;font-family:var(--font-mono);color:' + (Math.abs(somma - 100) > 0.01 && rate.length ? '#A32D2D' : 'inherit') + '">' + _fvNumDoc(somma, somma % 1 ? 2 : 0) + '%</td><td style="padding:6px 4px">Totale'
+    + (Math.abs(somma - 100) > 0.01 && rate.length ? ' <span style="color:#A32D2D;font-weight:400;font-size:11px">— le rate devono fare 100%</span>' : '') + '</td>'
+    + '<td style="padding:6px 4px;text-align:right;font-family:var(--font-mono)">' + _fvEuroDoc(totIvato * somma / 100) + '</td><td></td></tr></table>';
+  if (puo) h += '<button onclick="fvRataAggiungi()" style="margin-top:6px;font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Rata</button>';
+  var c2 = function (k, l, w) { return '<div style="grid-column:span ' + (w || 1) + '"><label style="' + lb + '">' + l + '</label><input value="' + _fvEsc(pag[k] || '') + '"' + (puo ? '' : ' disabled') + ' onchange="fvPagCampo(\'' + k + '\',this.value)" style="' + inp + '"></div>'; };
+  h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px">'
+    + c2('modalita', 'Modalità', 2) + c2('banca', 'Banca') + c2('intestatario', 'Intestatario') + c2('iban', 'IBAN', 4) + '</div>';
+  return h + '</div>';
+}
+
 function _fvRenderOffertaScheda() {
   var box = document.getElementById('fvo-content');
   var o = (_fvOff.offerte || []).filter(function (x) { return x.id === _fvOffertaAperta; })[0];
@@ -632,10 +750,6 @@ function _fvRenderOffertaScheda() {
   h += '<div style="grid-column:1/3"><label style="' + lb + '">Sito di installazione</label><input value="' + _fvEsc(o.sito_installazione || '') + '" onchange="fvOffertaCampo(\'sito_installazione\', this.value)" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Stato</label><select onchange="fvOffertaCampo(\'stato\', this.value)" style="' + inp + '">'
     + Object.keys(_FV_STATI_OFF).map(function (k) { return '<option value="' + k + '"' + (o.stato === k ? ' selected' : '') + '>' + _FV_STATI_OFF[k].lab + '</option>'; }).join('')
-    + '</select></div>';
-  h += '<div><label style="' + lb + '">Schema pagamento</label><select onchange="fvOffertaCampo(\'schema_pagamento_id\', this.value)" style="' + inp + '">'
-    + '<option value="">— nessuno —</option>'
-    + (_fvSchemi || []).map(function (s2) { return '<option value="' + s2.id + '"' + (o.schema_pagamento_id === s2.id ? ' selected' : '') + '>' + _fvEsc(s2.nome) + '</option>'; }).join('')
     + '</select></div>';
   h += '</div>';
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px">';
@@ -696,6 +810,8 @@ function _fvRenderOffertaScheda() {
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">IVA ' + o.aliquota_iva + '%</div><div style="font-family:var(--font-mono)">' + _fvEuro(iva) + '</div></div>'
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:15px">' + _fvEuro(imponibile + iva) + '</div></div>'
     + '</div></div>';
+
+  h += _fvBloccoPagamenti(o, imponibile + iva);
 
   h += _fvBloccoCosti(o, imponibile);
   box.innerHTML = h;
@@ -1080,8 +1196,9 @@ async function fvGeneraContratto(offertaId) {
     cliente_piva: o.cliente_piva, cliente_indirizzo: o.cliente_indirizzo,
     sito_installazione: o.sito_installazione,
     descrizione_tecnica: descr, imponibile: o.imponibile, aliquota_iva: o.aliquota_iva,
-    modalita_pagamento: 'Bonifico bancario, a vista fattura per ciascuna quota',
-    intestatario: _FV_AZIENDA.nome,
+    modalita_pagamento: _fvPagOff(o).modalita || null,
+    banca_appoggio: _fvPagOff(o).banca || null, iban: _fvPagOff(o).iban || null,
+    intestatario: _fvPagOff(o).intestatario || _FV_AZIENDA.nome,
     riferimento_offerta: 'Offerta n. ' + o.numero + '/' + o.anno + ' del ' + _fvData(o.data),
     stato: 'da_firmare'
   }]).select('id').single();
@@ -1094,11 +1211,10 @@ async function fvGeneraContratto(offertaId) {
                prezzo_unitario: r.prezzo_unitario, aliquota_iva: o.aliquota_iva, ordine: i + 1 };
     }));
   }
-  // quote dallo schema scelto nell'offerta
-  var schema = (_fvSchemi || []).filter(function (s2) { return s2.id === o.schema_pagamento_id; })[0];
+  // quote: le rate scritte sull'offerta (o lo schema scelto, per le offerte vecchie)
   var totIvato = Number(o.imponibile || 0) * (1 + Number(o.aliquota_iva || 0) / 100);
-  if (schema && schema.quote) {
-    var q = (typeof schema.quote === 'string') ? JSON.parse(schema.quote) : schema.quote;
+  var q = _fvRateOff(o);
+  if (q.length) {
     await sb.from('fv_contratti_quote').insert(q.map(function (x, i) {
       return { contratto_id: contrattoId, ordine: i + 1, percentuale: x.perc, evento: x.evento,
                importo_ivato: Math.round(totIvato * x.perc) / 100 };
@@ -2668,12 +2784,12 @@ async function fvStampaOfferta(id) {
     }).join('') + '</table>',
     '<h4>Prezzo totale</h4><table class="tt"><tr><td>Totale (netto)</td><td>' + EU(imponibile) + '</td></tr><tr><td>IVA (' + _fvNumDoc(aliq, 1) + ' % su ' + EU(imponibile) + ')</td><td>' + EU(iva) + '</td></tr>'
       + '<tr class="g"><td>Totale (lordo)</td><td>' + EU(totIvato) + '</td></tr></table>'];
-  var schema = (_fvSchemi || []).filter(function (s2) { return s2.id === o.schema_pagamento_id; })[0];
-  if (schema && schema.quote) {
-    var q = (typeof schema.quote === 'string') ? JSON.parse(schema.quote) : schema.quote;
+  var q = _fvRateOff(o), pg = _fvPagOff(o);
+  if (q.length) {
     b.push('<h4>Termini di pagamento</h4><table class="pt"><tr><th>Quota</th><th>Scadenza</th><th class="r">Importo (IVA inclusa)</th></tr>'
       + q.map(function (x) { return '<tr><td>' + _fvNumDoc(x.perc, x.perc % 1 ? 2 : 0) + '%</td><td>' + E(x.evento) + '</td><td class="r">' + EU(totIvato * x.perc / 100) + '</td></tr>'; }).join('')
-      + '</table><p class="pic">Modalità di pagamento, banca e IBAN sono riportati nel contratto definitivo.</p>');
+      + '</table>'
+      + '<p class="pic">' + [pg.modalita ? 'Modalità: ' + E(pg.modalita) : '', pg.banca ? 'Banca: ' + E(pg.banca) : '', pg.iban ? 'IBAN: ' + E(pg.iban) : '', pg.intestatario ? 'Intestatario: ' + E(pg.intestatario) : ''].filter(Boolean).join(' · ') + '</p>');
   }
   sez.push({ blocchi: b });
 
