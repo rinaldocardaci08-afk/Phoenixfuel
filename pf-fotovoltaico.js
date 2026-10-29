@@ -1,3 +1,5 @@
+// v20261029i — IMMAGINI DEL PROGETTO nell'offerta (render, sopralluogo, vetrina 3D) in fv-documenti, con
+//   didascalia e ordine; nel preventivo pagina "Progetto dell'impianto fotovoltaico", 2 per pagina.
 // v20261029h — PAGAMENTI LIBERI nell'offerta: rate (% + scadenza) scritte a mano, "Parti da uno schema" e
 //   "Salva come schema"; modalita', banca, IBAN, intestatario passano a preventivo e contratto.
 // v20261029g — CATALOGO: lettura della scheda tecnica PDF (valori proposti da scegliere), dati tecnici, caratteristiche ✓
@@ -592,6 +594,9 @@ async function fvEliminaOfferta(id) {
   if (r2.error) { toast('Errore sulle voci: ' + r2.error.message); return; }
   var r3 = await sb.from('fv_offerte').delete().eq('id', id);
   if (r3.error) { toast('Errore: ' + r3.error.message); return; }
+  var fileOff = _fvImmaginiOff(o).map(function (x) { return x.path; });
+  var pvE = _fvPvgisDi(o); if (pvE && pvE.file_path) fileOff.push(pvE.file_path);
+  if (fileOff.length) await sb.storage.from('fv-documenti').remove(fileOff);
   if (typeof _auditLog === 'function') _auditLog('fotovoltaico', 'fv_offerte', 'eliminata offerta ' + (o.numero || '') + '/' + o.anno + ' ' + (o.cliente_nome || ''));
   toast('✓ Offerta eliminata');
   _fvOffertaAperta = null;
@@ -600,6 +605,140 @@ async function fvEliminaOfferta(id) {
 
 function fvApriOfferta(id) { _fvOffertaAperta = id; _fvRenderOffertaScheda(); }
 function fvChiudiOfferta() { _fvOffertaAperta = null; _fvRenderOfferte(); }
+
+// ═══ IMMAGINI DEL PROGETTO (29/10) ═══════════════════════════════════════════
+// Render/layout dei pannelli, foto del sopralluogo, screenshot della vetrina 3D: si caricano
+// nello spazio fv-documenti (offerte/<id>/img/...) e l'elenco sta in fv_offerte.immagini
+// (jsonb [{path, didascalia}]). Nel preventivo escono dopo "Impianto e componenti", 2 per pagina.
+var _fvImgUrl = {};   // path -> indirizzo firmato (valido 1 ora)
+function _fvImmaginiOff(o) {
+  var a = o && o.immagini;
+  if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = null; } }
+  return Array.isArray(a) ? a : [];
+}
+async function _fvUrlImg(path) {
+  var x = _fvImgUrl[path];
+  if (x && x.scade > Date.now()) return x.url;
+  var r = await sb.storage.from('fv-documenti').createSignedUrl(path, 3600);
+  if (r.error) return null;
+  _fvImgUrl[path] = { url: r.data.signedUrl, scade: Date.now() + 50 * 60 * 1000 };
+  return r.data.signedUrl;
+}
+// foto del telefono ridotte a 2000 px (lato lungo), JPEG: bastano per la stampa A4
+function _fvRiduciImg(file) {
+  return new Promise(function (ok) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { ok(file); return; }
+    var u = URL.createObjectURL(file), im = new Image();
+    im.onload = function () {
+      var max = 2000, k = Math.min(1, max / Math.max(im.width, im.height));
+      if (k === 1 && file.size < 1500000) { URL.revokeObjectURL(u); ok(file); return; }
+      var cv = document.createElement('canvas');
+      cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k);
+      var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+      cx.drawImage(im, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(u);
+      cv.toBlob(function (b) { ok(b || file); }, 'image/jpeg', 0.86);
+    };
+    im.onerror = function () { URL.revokeObjectURL(u); ok(file); };
+    im.src = u;
+  });
+}
+async function _fvSalvaImmagini(o, lista) {
+  var r = await sb.from('fv_offerte').update({ immagini: lista }).eq('id', o.id);
+  if (r.error) { toast('Errore: ' + r.error.message + (/immagini/.test(r.error.message) ? ' — lancia prima l\'SQL della colonna immagini' : '')); return false; }
+  o.immagini = lista;
+  return true;
+}
+function fvImgScegli(offertaId) {
+  if (!_fvPuo()) { toast('Permesso negato'); return; }
+  var i = document.createElement('input');
+  i.type = 'file'; i.accept = 'image/*'; i.multiple = true;
+  i.onchange = function () { if (i.files && i.files.length) fvImgCarica(offertaId, [].slice.call(i.files)); };
+  i.click();
+}
+async function fvImgCarica(offertaId, files) {
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === offertaId; })[0];
+  if (!o) return;
+  var lista = _fvImmaginiOff(o).slice(), ok = 0;
+  for (var k = 0; k < files.length; k++) {
+    toast('Caricamento immagine ' + (k + 1) + ' di ' + files.length + '…');
+    var b = await _fvRiduciImg(files[k]);
+    var ext = b.type === 'image/png' ? 'png' : b.type === 'image/webp' ? 'webp' : 'jpg';
+    var path = 'offerte/' + o.id + '/img/' + Date.now() + '-' + k + '.' + ext;
+    var up = await sb.storage.from('fv-documenti').upload(path, b, { upsert: true, contentType: b.type || 'image/jpeg' });
+    if (up.error) { toast('Immagine ' + files[k].name + ' non caricata: ' + up.error.message); continue; }
+    lista.push({ path: path, didascalia: String(files[k].name || '').replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ') });
+    ok++;
+  }
+  if (!ok) return;
+  if (await _fvSalvaImmagini(o, lista)) { toast('✓ ' + ok + (ok === 1 ? ' immagine caricata' : ' immagini caricate')); _fvRenderOffertaScheda(); }
+}
+async function fvImgDidascalia(offertaId, i, testo) {
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === offertaId; })[0];
+  if (!o || !_fvPuo()) return;
+  var lista = _fvImmaginiOff(o).map(function (x) { return Object.assign({}, x); });
+  if (!lista[i]) return;
+  lista[i].didascalia = String(testo || '').trim();
+  await _fvSalvaImmagini(o, lista);
+}
+async function fvImgSposta(offertaId, i, d) {
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === offertaId; })[0];
+  if (!o || !_fvPuo()) return;
+  var lista = _fvImmaginiOff(o).slice(), j = i + d;
+  if (j < 0 || j >= lista.length) return;
+  var t = lista[i]; lista[i] = lista[j]; lista[j] = t;
+  if (await _fvSalvaImmagini(o, lista)) _fvRenderOffertaScheda();
+}
+async function fvImgTogli(offertaId, i) {
+  var o = (_fvOff.offerte || []).filter(function (y) { return y.id === offertaId; })[0];
+  if (!o || !_fvPuo()) return;
+  var lista = _fvImmaginiOff(o).slice(), x = lista[i];
+  if (!x || !confirm('Togliere questa immagine dall\'offerta?')) return;
+  lista.splice(i, 1);
+  if (!(await _fvSalvaImmagini(o, lista))) return;
+  await sb.storage.from('fv-documenti').remove([x.path]);
+  _fvRenderOffertaScheda();
+}
+async function fvImgApri(path) {
+  var w = window.open('', '_blank');
+  var u = await _fvUrlImg(path);
+  if (!u) { if (w) w.close(); toast('Immagine non trovata'); return; }
+  if (w) w.location = u; else window.open(u, '_blank');
+}
+// le miniature si riempiono dopo il disegno della scheda
+async function _fvImgMiniature(o) {
+  var lista = _fvImmaginiOff(o);
+  for (var i = 0; i < lista.length; i++) {
+    var el = document.getElementById('fvimg-' + i);
+    if (!el) continue;
+    var u = await _fvUrlImg(lista[i].path);
+    el.innerHTML = u ? '<img src="' + u + '" style="width:100%;height:100%;object-fit:cover;display:block">' : '<span style="font-size:11px;color:#A32D2D">non trovata</span>';
+  }
+}
+function _fvBloccoImmagini(o) {
+  var lista = _fvImmaginiOff(o), puo = _fvPuo();
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    + '<div><div style="font-size:13px;font-weight:700">🖼️ Immagini del progetto</div><div style="font-size:11px;color:var(--text-muted)">Render del layout, foto del sopralluogo, screenshot della vetrina 3D: nel preventivo escono 2 per pagina, nell\'ordine qui sotto.</div></div>'
+    + (puo ? '<button onclick="fvImgScegli(\'' + o.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:#185FA5;font-weight:600;cursor:pointer">+ Carica immagini</button>' : '')
+    + '</div>';
+  if (!lista.length) return h + '<div style="font-size:12px;color:var(--text-muted)">Nessuna immagine: la pagina "Progetto dell\'impianto" non esce nel preventivo.</div></div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px">';
+  lista.forEach(function (x, i) {
+    h += '<div style="border:0.5px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg)">'
+      + '<div id="fvimg-' + i + '" onclick="fvImgApri(\'' + _fvEsc(x.path) + '\')" title="Apri" style="height:120px;background:#eee;display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="font-size:11px;color:var(--text-muted)">…</span></div>'
+      + '<div style="padding:6px">'
+      + '<input value="' + _fvEsc(x.didascalia || '') + '"' + (puo ? '' : ' disabled') + ' placeholder="Didascalia" onchange="fvImgDidascalia(\'' + o.id + '\',' + i + ',this.value)" style="width:100%;padding:5px 7px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:11.5px">'
+      + (puo ? '<div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px">'
+          + '<span style="color:var(--text-muted)">' + (i + 1) + '</span><span>'
+          + '<button onclick="fvImgSposta(\'' + o.id + '\',' + i + ',-1)" title="Prima" style="border:0;background:transparent;cursor:pointer">◀</button>'
+          + '<button onclick="fvImgSposta(\'' + o.id + '\',' + i + ',1)" title="Dopo" style="border:0;background:transparent;cursor:pointer">▶</button>'
+          + '<button onclick="fvImgTogli(\'' + o.id + '\',' + i + ')" title="Togli" style="border:0;background:transparent;color:#A32D2D;cursor:pointer">🗑️</button></span></div>' : '')
+      + '</div></div>';
+  });
+  setTimeout(function () { _fvImgMiniature(o); }, 0);
+  return h + '</div></div>';
+}
 
 // ═══ PAGAMENTI DELL'OFFERTA, LIBERI (29/10) ══════════════════════════════════
 // Le rate si scrivono sull'offerta (fv_offerte.rate jsonb [{perc, evento}]), non sono piu'
@@ -810,6 +949,8 @@ function _fvRenderOffertaScheda() {
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">IVA ' + o.aliquota_iva + '%</div><div style="font-family:var(--font-mono)">' + _fvEuro(iva) + '</div></div>'
     + '<div style="text-align:right"><div style="font-size:10.5px;color:var(--text-muted)">Totale</div><div style="font-family:var(--font-mono);font-weight:700;font-size:15px">' + _fvEuro(imponibile + iva) + '</div></div>'
     + '</div></div>';
+
+  h += _fvBloccoImmagini(o);
 
   h += _fvBloccoPagamenti(o, imponibile + iva);
 
@@ -2708,6 +2849,11 @@ async function fvStampaOfferta(id) {
     if (!c || !c.foto_url || fotoCat[c.id]) return null;
     return _fvUrlFoto(c.foto_url).then(function (u) { if (u) fotoCat[c.id] = u; });
   }));
+  var imgOff = [];
+  await Promise.all(_fvImmaginiOff(o).map(function (x, i) {
+    return _fvUrlImg(x.path).then(function (u) { if (u) imgOff[i] = { url: u, didascalia: x.didascalia || '' }; });
+  }));
+  imgOff = imgOff.filter(Boolean);
   var sez = [];   // sezioni: { cover?, blocchi: [html] }
 
   // 1) copertina
@@ -2758,6 +2904,13 @@ async function fvStampaOfferta(id) {
     if (nm) b.push('<div class="comp"><div class="cn">Informazioni sui materiali</div><div class="cq"></div></div><div class="cd">' + E(nm) + '</div>');
   }
   sez.push({ blocchi: b });
+
+  // 3a) progetto dell'impianto: immagini, 2 per pagina
+  if (imgOff.length) {
+    sez.push({ blocchi: ['<h1>Progetto dell\'impianto fotovoltaico</h1>'].concat(imgOff.map(function (x, i) {
+      return '<div class="ifo' + (i === 0 ? ' ifo1' : '') + '"><img src="' + x.url + '">' + (x.didascalia ? '<div class="ifc">' + E(x.didascalia) + '</div>' : '') + '</div>';
+    })) });
+  }
 
   // 3b) produzione da PVGIS
   var pvS = _fvPvgisDi(o);
@@ -2832,6 +2985,8 @@ async function fvStampaOfferta(id) {
     + 'table.anni th:first-child,table.anni td:first-child{width:22%}table.anni th:nth-child(2),table.anni td:nth-child(2){width:30%}'
     + 'table.anni td{padding:9px 10px;font-size:11px;line-height:1.45;vertical-align:middle}div:nth-child(even)>table.anni td{background:#F1F2F3}'
     + 'table.anni small{display:block;font-size:8.5px;color:#555;margin:1px 0 3px}table.anni .tr{color:#aaa}'
+    + '.ifo{height:113mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:2mm}.ifo1{height:104mm;padding-top:0}'
+    + '.ifo img{width:100%;height:100mm;object-fit:contain;background:#F6F6F7}.ifo1 img{height:92mm}.ifc{font-size:9.5px;color:#555;margin-top:2mm;text-align:center}'
     + '.firma{margin-top:12mm;font-size:12px}.firma div{width:95mm;border-top:0.5px solid #333;margin-bottom:3mm}'
     + '.cv-top{position:absolute;left:18mm;right:18mm;top:13mm;display:flex;justify-content:space-between}.cv-logo{height:24mm}.cv-az{text-align:right;font-size:10.5px;line-height:1.5}'
     + '.cv-foto{position:absolute;left:18mm;right:18mm;top:68mm;width:174mm;height:115mm;object-fit:cover}'
