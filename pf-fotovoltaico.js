@@ -1,3 +1,5 @@
+// v20261029f — ECONOMIA CALCOLATA nell'offerta (vendita totale, consumo annuo o bolletta mensile): rendimento,
+//   break-even, TIR; nel preventivo pagine Consumo di energia, Analisi Finanziaria con grafico e tabella anno per anno.
 // v20261029e — PVGIS: "📄 Carica PDF PVGIS" nella scheda offerta legge il PDF (pdf.js in lib/), salva i dati in
 //   fv_offerte.pvgis e il PDF nello spazio file fv-documenti; la produzione annua segue la potenza kWp.
 //   Nel preventivo stampato: pagina "Produzione di energia elettrica" con grafico mensile e giornaliero.
@@ -456,13 +458,33 @@ function _fvRenderOffertaScheda() {
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px">';
   h += _fvPvgisDi(o) ? '<div><label style="' + lb + '">Produzione kWh/anno · da PVGIS</label><div style="' + inp + ';background:#EAF1F9;font-family:var(--font-mono)">' + (o.produzione_kwh_anno != null ? _fvNumDoc(o.produzione_kwh_anno) : 'scrivi la potenza kWp') + '</div></div>' : '';
   if (!_fvPvgisDi(o)) h += '<div><label style="' + lb + '">Produzione kWh/anno</label><input type="number" step="1" value="' + (o.produzione_kwh_anno != null ? o.produzione_kwh_anno : '') + '" onchange="fvOffertaCampo(\'produzione_kwh_anno\', this.value)" style="' + inp + '"></div>';
+  if (_fvEcoDi(o)) {
+    var ro = function (l, v) { return '<div><label style="' + lb + '">' + l + ' · calcolato</label><div style="' + inp + ';background:#EAF1F9;font-family:var(--font-mono)">' + v + '</div></div>'; };
+    h += ro('Rendimento totale €', o.rendimento_totale != null ? _fvEuroDoc(o.rendimento_totale, 0) : '—')
+      + ro('Break-even (anni)', o.break_even_anni != null ? _fvNumDoc(o.break_even_anni, 1) : '—')
+      + ro('TIR %', o.tir != null ? _fvNumDoc(o.tir, 2) : '—');
+  } else {
   h += '<div><label style="' + lb + '">Rendimento totale €</label><input type="number" step="0.01" value="' + (o.rendimento_totale != null ? o.rendimento_totale : '') + '" onchange="fvOffertaCampo(\'rendimento_totale\', this.value)" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">Break-even (anni)</label><input type="number" step="0.1" value="' + (o.break_even_anni != null ? o.break_even_anni : '') + '" onchange="fvOffertaCampo(\'break_even_anni\', this.value)" style="' + inp + '"></div>';
   h += '<div><label style="' + lb + '">TIR %</label><input type="number" step="0.01" value="' + (o.tir != null ? o.tir : '') + '" onchange="fvOffertaCampo(\'tir\', this.value)" style="' + inp + '"></div>';
+  }
   h += '</div></div>';
 
   // produzione da PVGIS
   h += _fvBloccoPVGIS(o);
+
+  // economia calcolata (e risultati sull'offerta tenuti allineati)
+  h += _fvBloccoEconomia(o);
+  if (_fvEcoDi(o)) {
+    var cE = _fvCalcEconomia(o, _fvImponibileOff(o));
+    if (cE && !cE.errore) {
+      var agg = { rendimento_totale: Math.round(cE.rendimento * 100) / 100, break_even_anni: cE.breakEven != null ? Math.round(cE.breakEven * 10) / 10 : null, tir: cE.tir != null ? Math.round(cE.tir * 10000) / 100 : null };
+      if (Number(o.rendimento_totale) !== agg.rendimento_totale || Number(o.break_even_anni || 0) !== Number(agg.break_even_anni || 0) || Number(o.tir || 0) !== Number(agg.tir || 0)) {
+        Object.keys(agg).forEach(function (k) { o[k] = agg[k]; });
+        sb.from('fv_offerte').update(agg).eq('id', o.id).then(function () {});
+      }
+    }
+  }
 
   // righe
   h += '<div class="card" style="padding:12px 14px;margin-bottom:12px">';
@@ -1732,9 +1754,14 @@ function _fvSvgBarre(valori, etichette, unita, divisore, opz) {
     s += '<line x1="' + ml + '" x2="' + (W - mr) + '" y1="' + y.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="#e3e3e3" stroke-width="0.8"/>'
       + '<text x="' + (ml - 6) + '" y="' + (y + 3).toFixed(1) + '" font-size="8.5" fill="#666" text-anchor="end">' + _fvNumDoc(g, g % 1 ? 1 : 0) + ' ' + unita + '</text>';
   }
+  var gap = opz.gap == null ? 0.18 : opz.gap, bww = Math.max(0.6, bw * (1 - 2 * gap));
   vs.forEach(function (v, i) {
-    var h2 = v / top * ih, x = ml + i * bw + bw * (opz.gap == null ? 0.18 : opz.gap);
-    s += '<rect x="' + x.toFixed(2) + '" y="' + (mt + ih - h2).toFixed(2) + '" width="' + Math.max(0.6, bw * (1 - 2 * (opz.gap == null ? 0.18 : opz.gap))).toFixed(2) + '" height="' + h2.toFixed(2) + '" fill="#FFA500"/>';
+    var h2 = v / top * ih, x = ml + i * bw + bw * gap;
+    s += '<rect x="' + x.toFixed(2) + '" y="' + (mt + ih - h2).toFixed(2) + '" width="' + bww.toFixed(2) + '" height="' + h2.toFixed(2) + '" fill="' + (opz.colore || '#FFA500') + '"/>';
+    if (opz.sopra && opz.sopra[i] != null) {
+      var h3 = opz.sopra[i] / divisore / top * ih;
+      s += '<rect x="' + (x + bww * 0.2).toFixed(2) + '" y="' + (mt + ih - h3).toFixed(2) + '" width="' + (bww * 0.6).toFixed(2) + '" height="' + h3.toFixed(2) + '" fill="#FFA500"/>';
+    }
   });
   (etichette || []).forEach(function (e, i) {
     if (!e) return;
@@ -1782,6 +1809,214 @@ function _fvPaginaProduzione(pv, kwp) {
     '<p class="pic" style="margin-top:8px">Fonte: PVGIS (Commissione europea)' + (pv.database ? ', database ' + _fvEsc(pv.database) : '')
       + (pv.inclinazione != null ? ' · inclinazione ' + pv.inclinazione + '°' : '') + (pv.orientamento != null ? ', orientamento ' + pv.orientamento + '°' : '')
       + (pv.perdite != null ? ' · perdite di sistema ' + pv.perdite + ' %' : '') + ' · resa ' + _fvNumDoc(pv.resa) + ' kWh/kWp.</p>'];
+}
+
+// ═══ ECONOMIA DELL'OFFERTA, CALCOLATA (29/10) ═══════════════════════════════
+// Dati in fv_offerte.economia (jsonb): modalita 'vendita' | 'annuo' | 'mensile',
+// prezzo_vendita €/kWh, degrado %/anno, anni, costi_annui €, aumento %/anno sui prezzi,
+// consumo_annuo kWh, consumi[12] kWh, profilo, prezzo_bolletta €/kWh.
+// Ogni mese: autoconsumo = min(produzione, consumo x quota diurna del profilo),
+// il resto va in rete. Anno k: produzione x (1-degrado)^(k-1); prezzi x (1+aumento)^(k-1).
+// Flusso = autoconsumo x prezzo bolletta + immissione x prezzo vendita - costi.
+// Investimento = imponibile dell'offerta, nell'anno dell'offerta insieme al primo flusso
+// (come nel preventivo DS: break-even "2029 · in 3 anni"); TIR con investimento all'anno 0.
+// I risultati si scrivono anche in rendimento_totale, break_even_anni, tir.
+var _FV_PROFILI = {
+  diurno: { lab: 'Diurno (ufficio, officina, negozio)', quota: 0.70 },
+  h24: { lab: 'Continuo 24 ore (celle frigo, impianti)', quota: 0.45 },
+  residenziale: { lab: 'Abitazione', quota: 0.35 }
+};
+// forma della produzione nell'anno quando manca il PVGIS (Calabria, quote mensili)
+var _FV_FORMA_PROD = [0.064, 0.064, 0.084, 0.090, 0.099, 0.100, 0.109, 0.106, 0.088, 0.077, 0.060, 0.059];
+function _fvEcoDi(o) {
+  var e = o && o.economia;
+  if (typeof e === 'string') { try { e = JSON.parse(e); } catch (x) { e = null; } }
+  return e && typeof e === 'object' ? e : null;
+}
+function _fvProdMensile(o) {
+  var kwp = Number(o.potenza_kwp || 0), pv = _fvPvgisDi(o);
+  if (pv && kwp) return pv.mensili.map(function (v) { return v * kwp; });
+  var tot = Number(o.produzione_kwh_anno || 0);
+  return tot ? _FV_FORMA_PROD.map(function (f) { return f * tot; }) : null;
+}
+function _fvTir(flussi) {   // flussi[0] = anno 0
+  var npv = function (r) { return flussi.reduce(function (s, f, t) { return s + f / Math.pow(1 + r, t); }, 0); };
+  var lo = -0.99, hi = 5;
+  if (npv(lo) * npv(hi) > 0) return null;
+  for (var i = 0; i < 200; i++) { var m = (lo + hi) / 2; if (npv(lo) * npv(m) <= 0) hi = m; else lo = m; }
+  return (lo + hi) / 2;
+}
+function _fvCalcEconomia(o, imponibile) {
+  var e = _fvEcoDi(o); if (!e) return null;
+  var prod = _fvProdMensile(o); if (!prod) return { errore: 'manca la produzione: carica il PVGIS o scrivi la produzione annua' };
+  var pv = Number(e.prezzo_vendita || 0), pb = Number(e.prezzo_bolletta || 0);
+  var deg = Number(e.degrado != null ? e.degrado : 0.4) / 100, aum = Number(e.aumento || 0) / 100;
+  var anni = Math.max(1, Math.min(40, Number(e.anni || 20))), costi = Number(e.costi_annui || 0);
+  var cons = null;
+  if (e.modalita === 'annuo' && Number(e.consumo_annuo) > 0) cons = _FV_GG_MESE.map(function (g) { return Number(e.consumo_annuo) * g / 365; });
+  if (e.modalita === 'mensile' && Array.isArray(e.consumi)) cons = e.consumi.map(function (v) { return Number(v || 0); });
+  var quota = (_FV_PROFILI[e.profilo] || _FV_PROFILI.diurno).quota;
+  var autoM = prod.map(function (p, m) { return cons ? Math.min(p, cons[m] * quota) : 0; });
+  var auto1 = autoM.reduce(function (s, v) { return s + v; }, 0), prod1 = prod.reduce(function (s, v) { return s + v; }, 0);
+  var cons1 = cons ? cons.reduce(function (s, v) { return s + v; }, 0) : 0;
+  var anno0 = Number(String(o.data || '').slice(0, 4)) || o.anno || new Date().getFullYear();
+  var righe = [], cum = -imponibile, be = null, flussi = [-imponibile];
+  for (var k = 1; k <= anni; k++) {
+    var fd = Math.pow(1 - deg, k - 1), fp = Math.pow(1 + aum, k - 1);
+    var pr = prod1 * fd, au = auto1 * fd, im = pr - au;
+    var pvk = pv * fp, pbk = pb * fp;
+    var f = au * pbk + im * pvk - costi;
+    var prima = cum; cum += f; flussi.push(f);
+    if (be == null && cum >= 0) be = (k - 1) + (f > 0 ? -prima / f : 0);
+    righe.push({ anno: anno0 + k - 1, prod: pr, auto: au, imm: im, pv: pvk, pb: pbk, flusso: f, cum: cum, bolletta: cons ? cons1 * pbk : 0 });
+  }
+  var tir = _fvTir(flussi);
+  var annoBE = null;
+  righe.some(function (r) { if (r.cum >= 0) { annoBE = r.anno; return true; } return false; });
+  return {
+    anno0: anno0, anni: anni, investimento: imponibile, prod1: prod1, auto1: auto1, imm1: prod1 - auto1, cons1: cons1,
+    quotaAuto: prod1 ? auto1 / prod1 : 0, coperturaConsumi: cons1 ? auto1 / cons1 : 0, consMensili: cons, prodMensili: prod, autoMensili: autoM,
+    righe: righe, rendimento: cum, breakEven: be, annoBE: annoBE, tir: tir, e: e
+  };
+}
+function _fvImponibileOff(o) {
+  return (_fvOff.righe || []).filter(function (r) { return r.offerta_id === o.id; })
+    .reduce(function (s, r) { return s + Number(r.quantita || 0) * Number(r.prezzo_unitario || 0); }, 0);
+}
+// salva un dato dell'economia e riscrive i risultati sull'offerta
+async function fvEcoCampo(campo, valore) {
+  if (!_fvPuo()) { toast('Permesso negato'); return; }
+  var o = (_fvOff.offerte || []).filter(function (x) { return x.id === _fvOffertaAperta; })[0];
+  if (!o) return;
+  var e = Object.assign({ modalita: 'vendita', degrado: 0.4, anni: 20, costi_annui: 0, aumento: 0, profilo: 'diurno' }, _fvEcoDi(o) || {});
+  if (campo === 'modalita' || campo === 'profilo') e[campo] = valore;
+  else if (/^consumo_m(\d+)$/.test(campo)) {
+    var m = Number(campo.slice(9));
+    e.consumi = Array.isArray(e.consumi) ? e.consumi.slice() : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    e.consumi[m] = valore === '' ? 0 : parseFloat(String(valore).replace(',', '.')) || 0;
+  } else e[campo] = valore === '' ? null : parseFloat(String(valore).replace(',', '.'));
+  var p = { economia: e };
+  o.economia = e;
+  var c = _fvCalcEconomia(o, _fvImponibileOff(o));
+  if (c && !c.errore) {
+    p.rendimento_totale = Math.round(c.rendimento * 100) / 100;
+    p.break_even_anni = c.breakEven != null ? Math.round(c.breakEven * 10) / 10 : null;
+    p.tir = c.tir != null ? Math.round(c.tir * 10000) / 100 : null;
+  }
+  var r = await sb.from('fv_offerte').update(p).eq('id', o.id);
+  if (r.error) { toast('Errore: ' + r.error.message + (/economia/.test(r.error.message) ? ' — lancia prima l\'SQL della colonna economia' : '')); return; }
+  Object.keys(p).forEach(function (k) { o[k] = p[k]; });
+  _fvRenderOffertaScheda();
+}
+function _fvBloccoEconomia(o) {
+  var e = Object.assign({ modalita: 'vendita', degrado: 0.4, anni: 20, costi_annui: 0, aumento: 0, profilo: 'diurno' }, _fvEcoDi(o) || {});
+  var ha = !!_fvEcoDi(o);
+  var c = ha ? _fvCalcEconomia(o, _fvImponibileOff(o)) : null;
+  var inp = 'width:100%;padding:6px 8px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;font-family:var(--font-mono)';
+  var lb = 'display:block;font-size:10.5px;color:var(--text-muted);margin-bottom:2px';
+  var dis = _fvPuo() ? '' : ' disabled';
+  var num = function (campo, lab, val, step) {
+    return '<div><label style="' + lb + '">' + lab + '</label><input type="number" step="' + (step || '0.01') + '" value="' + (val != null ? val : '') + '"' + dis
+      + ' onchange="fvEcoCampo(\'' + campo + '\', this.value)" style="' + inp + ';text-align:right"></div>';
+  };
+  var h = '<div class="card" style="padding:12px 14px;margin-bottom:12px">'
+    + '<div style="font-size:13px;font-weight:700">💶 Economia · calcolata</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Rendimento, break-even, TIR e la tabella anno per anno del preventivo si calcolano da qui.</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">'
+    + '<div><label style="' + lb + '">Consumi del cliente</label><select' + dis + ' onchange="fvEcoCampo(\'modalita\', this.value)" style="' + inp + ';font-family:inherit">'
+    + [['vendita', 'Nessuno · vendita totale'], ['annuo', 'Consumo annuo'], ['mensile', 'Bolletta mese per mese']].map(function (x) {
+        return '<option value="' + x[0] + '"' + (e.modalita === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select></div>'
+    + num('prezzo_vendita', 'Energia venduta €/kWh', e.prezzo_vendita, '0.001')
+    + num('degrado', 'Degrado annuo %', e.degrado, '0.1')
+    + num('anni', 'Anni di analisi', e.anni, '1')
+    + num('costi_annui', 'Costi annui €', e.costi_annui, '1')
+    + num('aumento', 'Aumento prezzi %/anno', e.aumento, '0.1')
+    + '</div>';
+  if (e.modalita !== 'vendita') {
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:8px">'
+      + '<div><label style="' + lb + '">Profilo di consumo</label><select' + dis + ' onchange="fvEcoCampo(\'profilo\', this.value)" style="' + inp + ';font-family:inherit">'
+      + Object.keys(_FV_PROFILI).map(function (k) { return '<option value="' + k + '"' + (e.profilo === k ? ' selected' : '') + '>' + _FV_PROFILI[k].lab + '</option>'; }).join('') + '</select></div>'
+      + num('prezzo_bolletta', 'Prezzo in bolletta €/kWh', e.prezzo_bolletta, '0.001')
+      + (e.modalita === 'annuo' ? num('consumo_annuo', 'Consumo annuo kWh', e.consumo_annuo, '1') : '')
+      + '</div>';
+    if (e.modalita === 'mensile') {
+      var M = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+      var cs = Array.isArray(e.consumi) ? e.consumi : [];
+      h += '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px">'
+        + M.map(function (n, i) { return num('consumo_m' + i, n + ' kWh', cs[i] != null ? cs[i] : '', '1'); }).join('') + '</div>';
+    }
+  }
+  if (!ha) {
+    h += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:8px">Scrivi il prezzo dell\'energia venduta per far partire il calcolo.</div>';
+  } else if (c && c.errore) {
+    h += '<div style="font-size:11.5px;color:#A32D2D;margin-top:8px">⚠ ' + c.errore + '.</div>';
+  } else if (c) {
+    var k = function (l, v, s, col) { return '<div style="flex:1;min-width:120px;background:var(--bg);border-radius:8px;padding:7px 10px"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">' + l + '</div><div style="font-family:var(--font-mono);font-size:14px;font-weight:700' + (col ? ';color:' + col : '') + '">' + v + '</div><div style="font-size:10px;color:var(--text-muted)">' + (s || '&nbsp;') + '</div></div>'; };
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
+      + k('Investimento', _fvEuroDoc(c.investimento, 0), 'imponibile dell\'offerta')
+      + k('Rendimento totale', _fvEuroDoc(c.rendimento, 0), 'in ' + c.anni + ' anni', c.rendimento >= 0 ? '#27500A' : '#A32D2D')
+      + k('Break-even', c.annoBE ? String(c.annoBE) : 'oltre ' + c.anni + ' anni', c.annoBE ? 'in ' + (c.annoBE - c.anno0) + ' anni' : '')
+      + k('TIR', c.tir != null ? _fvNumDoc(c.tir * 100, 2) + ' %' : '—', 'annuo per ' + c.anni + ' anni')
+      + (c.consMensili ? k('Autoconsumo', _fvNumDoc(c.auto1) + ' kWh', _fvNumDoc(c.quotaAuto * 100, 0) + '% della produzione') : '')
+      + '</div>';
+    if (!c.investimento) h += '<div style="font-size:11px;color:#854F0B;margin-top:6px">⚠ L\'offerta non ha ancora un prezzo: investimento a zero.</div>';
+  }
+  return h + '</div>';
+}
+
+// ── pagine del preventivo ──
+function _fvPagineEconomia(c) {
+  var out = [];
+  if (c.consMensili) {
+    var nomi = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+    out.push({ blocchi: ['<h1>Consumo di energia</h1>',
+      '<table class="kv"><tr><td>Consumo totale annuo</td><td>' + _fvNumDoc(c.cons1) + ' kWh</td></tr>'
+        + '<tr><td>Profilo di carico</td><td>' + _fvEsc((_FV_PROFILI[c.e.profilo] || _FV_PROFILI.diurno).lab) + '</td></tr>'
+        + '<tr><td>Energia autoconsumata (primo anno)</td><td>' + _fvNumDoc(c.auto1) + ' kWh · ' + _fvNumDoc(c.quotaAuto * 100, 0) + '% della produzione</td></tr>'
+        + '<tr><td>Consumi coperti dall\'impianto</td><td>' + _fvNumDoc(c.coperturaConsumi * 100, 0) + ' %</td></tr>'
+        + '<tr><td>Energia immessa in rete (primo anno)</td><td>' + _fvNumDoc(c.imm1) + ' kWh</td></tr></table>',
+      '<h4>Su base mensile</h4><p class="pic">Consumo di elettricità su base mensile (in blu) e parte coperta dall\'impianto (in arancione).</p>',
+      '<div class="graf">' + _fvSvgBarre(c.consMensili, nomi, 'kWh', 1, { h: 170, colore: '#5B8DB8', sopra: c.autoMensili }) + '</div>'] });
+  }
+  var anni = c.righe;
+  var maxAbs = Math.max.apply(null, anni.map(function (r) { return Math.abs(r.cum); }).concat([Math.abs(-c.investimento)])) || 1;
+  // grafico break-even: barre del cumulato, rosse sotto zero e verdi sopra
+  var W = 640, H = 210, ml = 70, mb = 22, mt = 8, mr = 8, iw = W - ml - mr, ih = H - mt - mb;
+  var mn = Math.min(0, Math.min.apply(null, anni.map(function (r) { return r.cum; })));
+  var mx = Math.max(0, Math.max.apply(null, anni.map(function (r) { return r.cum; })));
+  var passo = _fvScalaAsse((mx - mn) || 1), lo = Math.floor(mn / passo) * passo, hi = Math.ceil(mx / passo) * passo;
+  var Y = function (v) { return mt + ih - (v - lo) / ((hi - lo) || 1) * ih; };
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;font-family:Arial,sans-serif">';
+  for (var g = lo; g <= hi + 1e-6; g += passo) svg += '<line x1="' + ml + '" x2="' + (W - mr) + '" y1="' + Y(g).toFixed(1) + '" y2="' + Y(g).toFixed(1) + '" stroke="#e3e3e3"/><text x="' + (ml - 6) + '" y="' + (Y(g) + 3).toFixed(1) + '" font-size="8.5" fill="#666" text-anchor="end">' + _fvEuroDoc(g) + '</text>';
+  var bw = iw / anni.length;
+  anni.forEach(function (r, i) {
+    var y0 = Y(0), y1 = Y(r.cum), x = ml + i * bw + bw * 0.15;
+    svg += '<rect x="' + x.toFixed(1) + '" y="' + Math.min(y0, y1).toFixed(1) + '" width="' + (bw * 0.7).toFixed(1) + '" height="' + Math.abs(y1 - y0).toFixed(1) + '" fill="' + (r.cum < 0 ? '#EF4444' : '#22C55E') + '"/>'
+      + '<text x="' + (ml + i * bw + bw / 2).toFixed(1) + '" y="' + (H - 7) + '" font-size="8" fill="#666" text-anchor="middle">' + r.anno + '</text>';
+  });
+  svg += '<line x1="' + ml + '" x2="' + (W - mr) + '" y1="' + Y(0).toFixed(1) + '" y2="' + Y(0).toFixed(1) + '" stroke="#999"/></svg>';
+  out.push({ blocchi: ['<h1>Analisi Finanziaria</h1>', '<div class="fin">'
+      + '<div><span>Investimento totale</span><b>' + _fvEuroDoc(c.investimento, 0) + '</b><i>&nbsp;</i></div>'
+      + '<div><span>Rendimento totale</span><b>' + _fvEuroDoc(c.rendimento, 0) + '</b><i>in ' + c.anni + ' anni</i></div>'
+      + '<div><span>Break-Even</span><b>' + (c.annoBE || '—') + '</b><i>' + (c.annoBE ? 'In ' + (c.annoBE - c.anno0) + ' anni' : 'oltre ' + c.anni + ' anni') + '</i></div>'
+      + '<div><span>TIR</span><b>' + (c.tir != null ? _fvNumDoc(c.tir * 100, 2) + ' %' : '—') + '</b><i>annuo per ' + c.anni + ' anni</i></div></div>',
+    '<h4>Break-Even</h4><p class="pic">Il grafico mostra la differenza cumulativa tra i flussi di cassa annuali (= i ricavi e i risparmi generati) e l\'investimento iniziale.</p>',
+    '<div class="graf">' + svg + '</div>',
+    '<p class="pic" style="margin-top:6px">Ipotesi: degrado dei moduli ' + _fvNumDoc(c.e.degrado != null ? c.e.degrado : 0.4, 1) + ' % annuo'
+      + (Number(c.e.aumento) ? ', aumento dei prezzi ' + _fvNumDoc(c.e.aumento, 1) + ' % annuo' : ', prezzi costanti')
+      + (Number(c.e.costi_annui) ? ', costi di gestione ' + _fvEuroDoc(c.e.costi_annui, 0) + ' all\'anno' : '') + '. Importi IVA esclusa.</p>'] });
+  // tabella anno per anno
+  var t = ['<table class="anni"><tr><th>Anno</th><th>Senza impianto</th><th>Con l\'impianto</th></tr>'];
+  var righeT = anni.map(function (r, i) {
+    var con = (i === 0 ? 'Investimento iniziale: ' + _fvEuroDoc(-c.investimento, 0) + '<br>' : '');
+    if (r.auto > 0.5) con += 'Risparmio in bolletta: +' + _fvEuroDoc(r.auto * r.pb, 0) + '<small>(' + _fvNumDoc(r.auto) + ' kWh × ' + _fvNumDoc(r.pb * 100, 2) + ' ct/kWh)</small>';
+    if (r.imm > 0.5) con += 'Remunerazione per l\'immissione in rete: +' + _fvEuroDoc(r.imm * r.pv, 0) + '<small>(' + _fvNumDoc(r.imm) + ' kWh × ' + _fvNumDoc(r.pv * 100, 2) + ' ct/kWh)</small>';
+    if (Number(c.e.costi_annui)) con += 'Costi di gestione: ' + _fvEuroDoc(-Number(c.e.costi_annui), 0) + '<br>';
+    var senza = r.bolletta ? 'Bolletta: ' + _fvEuroDoc(-r.bolletta, 0) + '<small>(' + _fvNumDoc(c.cons1) + ' kWh × ' + _fvNumDoc(r.pb * 100, 2) + ' ct/kWh)</small>' : '<span class="tr">—</span>';
+    return '<table class="anni"><tr><td>' + r.anno + '</td><td>' + senza + '</td><td>' + con + '</td></tr></table>';
+  });
+  out.push({ blocchi: [t[0] + '</table>'].concat(righeT) });
+  return out;
 }
 
 // ═══ TESTI DEL PREVENTIVO, CON VERSIONI (29/10) ══════════════════════════════
@@ -2207,8 +2442,10 @@ async function fvStampaOfferta(id) {
   var pvS = _fvPvgisDi(o);
   if (pvS && kwp) sez.push({ blocchi: _fvPaginaProduzione(pvS, kwp) });
 
-  // 4) analisi finanziaria (per ora con i valori scritti nell'offerta)
-  if (o.rendimento_totale || o.break_even_anni || o.tir) {
+  // 4) consumi e analisi finanziaria calcolati, se l'offerta ha l'economia; altrimenti i valori scritti a mano
+  var cS = _fvEcoDi(o) ? _fvCalcEconomia(o, imponibile) : null;
+  if (cS && !cS.errore) { _fvPagineEconomia(cS).forEach(function (x) { sez.push(x); }); }
+  else if (o.rendimento_totale || o.break_even_anni || o.tir) {
     var anno0 = Number(String(o.data || '').slice(0, 4)) || o.anno;
     var be = o.break_even_anni ? Number(o.break_even_anni) : null;
     sez.push({ blocchi: ['<h1>Analisi Finanziaria</h1>', '<div class="fin">'
@@ -2266,6 +2503,10 @@ async function fvStampaOfferta(id) {
     + 'table.tt{width:100%;border-collapse:collapse}table.tt td{padding:8px 10px;border-bottom:0.5px solid #ddd;font-size:11px}table.tt td:last-child{text-align:right}table.tt tr.g td{font-size:14px;font-weight:700}'
     + '.parti{display:flex;gap:10mm;margin-bottom:6mm}.parti div{flex:1;font-size:12.5px;line-height:1.45;font-family:Arial,sans-serif}.parti span{display:block;font-size:9px;color:#555;margin-bottom:3px}.parti b{display:block;font-size:15px}.parti small{display:block;font-size:9px;color:#555;margin-top:4px}'
     + '.graf{background:#F6F6F7;padding:8px 6px;border-radius:2px}'
+    + 'table.anni{width:100%;border-collapse:collapse;table-layout:fixed}table.anni th{font-size:8.5px;text-transform:uppercase;color:#555;text-align:left;padding:7px 10px}'
+    + 'table.anni th:first-child,table.anni td:first-child{width:22%}table.anni th:nth-child(2),table.anni td:nth-child(2){width:30%}'
+    + 'table.anni td{padding:9px 10px;font-size:11px;line-height:1.45;vertical-align:middle}div:nth-child(even)>table.anni td{background:#F1F2F3}'
+    + 'table.anni small{display:block;font-size:8.5px;color:#555;margin:1px 0 3px}table.anni .tr{color:#aaa}'
     + '.firma{margin-top:12mm;font-size:12px}.firma div{width:95mm;border-top:0.5px solid #333;margin-bottom:3mm}'
     + '.cv-top{position:absolute;left:18mm;right:18mm;top:13mm;display:flex;justify-content:space-between}.cv-logo{height:24mm}.cv-az{text-align:right;font-size:10.5px;line-height:1.5}'
     + '.cv-foto{position:absolute;left:18mm;right:18mm;top:68mm;width:174mm;height:115mm;object-fit:cover}'
