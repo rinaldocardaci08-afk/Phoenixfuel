@@ -1,3 +1,5 @@
+// v20261029c — PREVENTIVO STANDARD (formato DS Energy 10/09/2026, impaginazione automatica) e TESTI DEL PREVENTIVO
+//   con versioni (tabella fv_testi): chi siamo, Condizioni Generali, note sui materiali, clausole del contratto.
 // v20261029b — STAMPA CONTRATTO nel formato inviato a DS Energy (carta intestata Phoenix Fuel Solar, clausole, privacy).
 // v20261029a — VETRINE senza siti esterni: three.js r128 e OrbitControls stanno nella cartella lib del progetto
 //   (stessa versione, grafica identica). "Scarica pagina cliente" mette le due librerie DENTRO il file: la copia
@@ -329,7 +331,8 @@ function _fvRenderOfferte() {
   var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">'
     + '<div><div style="font-size:16px;font-weight:700">📄 Offerte</div>'
     + '<div style="font-size:11.5px;color:var(--text-muted)">Numerazione propria per anno. Dall\'offerta accettata si genera il contratto.</div></div>'
-    + (_fvPuo() ? '<button onclick="fvNuovaOfferta()" class="btn-primary" style="font-size:12px;padding:7px 13px">+ Nuova offerta</button>' : '')
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap"><button onclick="fvModaleTesti()" style="font-size:12px;padding:7px 13px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer">✏️ Testi del preventivo</button>'
+    + (_fvPuo() ? '<button onclick="fvNuovaOfferta()" class="btn-primary" style="font-size:12px;padding:7px 13px">+ Nuova offerta</button>' : '') + '</div>'
     + '</div>';
   if (!_fvOff.offerte.length) { box.innerHTML = h + _fvVuoto('Nessuna offerta.'); return; }
   h += '<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:700px">';
@@ -1471,6 +1474,215 @@ async function _fvRicaricaContratto(contrattoId) {
   _fvRenderContrattoScheda();
 }
 
+// ═══ TESTI DEL PREVENTIVO, CON VERSIONI (29/10) ══════════════════════════════
+// Tabella fv_testi (chiave, versione, testo). Ogni salvataggio crea una versione
+// nuova; l'offerta (e il contratto) alla prima stampa si segna le versioni usate in
+// testi_versioni, cosi' un documento gia' emesso continua a stampare il suo testo.
+// Scrittura semplice: "# titolo", "## sottotitolo", "### intestazione",
+// riga intera tra *...* = corsivo, **grassetto** dentro la riga, una riga = un paragrafo.
+var _FV_TESTI_CHIAVI = [
+  ['chi_siamo', 'Chi siamo'],
+  ['condizioni_generali', 'Condizioni Generali'],
+  ['note_materiali', 'Note sui materiali'],
+  ['clausole_contratto', 'Clausole del contratto']
+];
+var _FV_TESTI_DEF = {
+  chi_siamo: [
+    '# PHOENIX FUEL',
+    '## ENERGIA PULITA E SOSTENIBILE PER LA TUA AZIENDA',
+    '*Soluzioni chiavi in mano per aiutarti a risparmiare in bolletta, valorizzare il tuo immobile e contribuire attivamente alla tutela dell\'ambiente*',
+    'Phoenix Fuel opera da anni nella distribuzione di prodotti energetici e affianca oggi i propri clienti anche nella produzione di energia da fonte rinnovabile.',
+    'Seguiamo il cliente in ogni fase: dall\'analisi tecnica alla progettazione personalizzata, dalla gestione delle pratiche burocratiche fino agli incentivi, e continuiamo ad affiancarlo anche dopo l\'installazione.',
+    'Il nostro obiettivo è offrire un\'esperienza semplice, vantaggiosa e sicura, per ridurre i costi energetici e migliorare l\'efficienza dell\'azienda.',
+    'Ci distinguiamo per l\'approccio chiavi in mano, seguendo i nostri clienti in tutte le fasi del progetto.',
+    '### LA NOSTRA FORZA',
+    '– **Soluzioni su misura:** ogni impianto nasce da un\'analisi attenta delle esigenze e degli spazi disponibili',
+    '– **Aggiornamento continuo:** ci teniamo informati su incentivi, tecnologie e normative per offrire soluzioni all\'avanguardia',
+    '– **Attenzione al territorio:** scegliamo solo soluzioni che rispettano l\'ambiente e valorizzano l\'immobile',
+    '– **Affidabilità:** lavoriamo con serietà, seguendo ogni dettaglio del progetto come se fosse il nostro',
+    '### I NOSTRI SERVIZI',
+    '· Energie rinnovabili',
+    '· Efficienza energetica',
+    '· Progettazione e sviluppo impianti',
+    '· Diagnosi e consulenze energetiche',
+    '· Incentivi e agevolazioni',
+    '· Comunità energetiche'
+  ].join('\n'),
+  condizioni_generali: [
+    '## Condizioni Generali di Preventivo – Phoenix Fuel',
+    '### Premessa.',
+    'Il presente preventivo costituisce proposta economica emessa da Phoenix Fuel, con sede in Zona Industriale Portosalvo, 89900 Vibo Valentia (VV) – P.IVA 02744150802.',
+    'Il preventivo non costituisce contratto, ma impegno precontrattuale volto alla successiva sottoscrizione del contratto definitivo. Le seguenti condizioni ne regolano validità, limiti ed effetti.',
+    '### Art. 1 – Validità del preventivo',
+    'Il presente preventivo ha validità di 30 (trenta) giorni dalla data di emissione, salvo diversa indicazione scritta.',
+    'Decorso tale termine, Phoenix Fuel potrà aggiornare prezzi, condizioni e tempi di consegna.',
+    '### Art. 2 – Oggetto e limiti del preventivo',
+    'Il preventivo riguarda esclusivamente le forniture e i servizi descritti nel documento e negli eventuali allegati tecnici.',
+    'Qualsiasi lavoro, materiale o prestazione non espressamente indicata si intende escluso e potrà essere oggetto di successiva integrazione economica.',
+    '### Art. 3 – Accettazione e obbligo di stipula',
+    '3.1. L\'accettazione scritta del presente preventivo da parte del Cliente comporta l\'impegno reciproco a stipulare il contratto definitivo predisposto da Phoenix Fuel, conforme al contenuto economico e tecnico del preventivo, entro 20 (venti) giorni dall\'accettazione, salvo diverso termine concordato per iscritto.',
+    '3.2. L\'accettazione del preventivo non autorizza automaticamente l\'avvio dei lavori, che avverrà solo dopo la sottoscrizione del contratto definitivo.',
+    '3.3. In caso di rifiuto o ritardo ingiustificato del Cliente nella stipula del contratto definitivo, Phoenix Fuel potrà considerare risolto l\'impegno e chiedere il rimborso delle spese sostenute per attività tecniche, sopralluoghi, pratiche autorizzative o prenotazioni materiali, ai sensi dell\'art. 1337 c.c. (responsabilità precontrattuale).',
+    '### Art. 4 – Prezzi e condizioni economiche',
+    'I prezzi indicati si intendono IVA esclusa, salvo diversa indicazione.',
+    'Le modalità di pagamento, le eventuali rateizzazioni o formule di noleggio operativo saranno definite esclusivamente nel contratto definitivo.',
+    'Eventuali variazioni eccezionali dei costi dei materiali o dei listini potranno comportare un adeguamento equo, da concordarsi prima della stipula.',
+    '### Art. 5 – Esecuzione dei lavori e tempistiche',
+    'Le tempistiche di realizzazione e consegna decorreranno dalla firma del contratto definitivo e dall\'avvenuto pagamento di eventuali acconti contrattuali.',
+    'Phoenix Fuel non risponde di ritardi causati da forza maggiore, indisponibilità materiali, condizioni meteorologiche avverse o ritardi imputabili a terzi o al Cliente.',
+    '### Art. 6 – Garanzie e responsabilità',
+    'I materiali e le apparecchiature fornite saranno coperti da garanzia legale di conformità e, ove previsto, da garanzia commerciale del produttore.',
+    'Phoenix Fuel non sarà responsabile di danni indiretti o mancato guadagno, né per difetti causati da uso improprio, manomissioni o interventi non autorizzati.',
+    '### Art. 7 – Proprietà degli elaborati tecnici',
+    'Tutti gli elaborati tecnici, progetti, computi, rendering o simulazioni restano di esclusiva proprietà di Phoenix Fuel fino alla sottoscrizione del contratto e al completo pagamento delle somme dovute.',
+    'È vietata la loro riproduzione o trasmissione a terzi senza autorizzazione scritta.',
+    '### Art. 8 – Privacy e riservatezza',
+    'I dati personali del Cliente saranno trattati da Phoenix Fuel nel rispetto del Regolamento UE 2016/679 (GDPR) e dell\'informativa allegata.',
+    'Le Parti si impegnano a mantenere la riservatezza sulle informazioni tecniche e commerciali acquisite durante la trattativa.',
+    '### Art. 9 – Foro competente e legge applicabile',
+    'Il presente preventivo è disciplinato dalla legge italiana.',
+    'Per ogni controversia sarà competente in via esclusiva il Foro di Vibo Valentia (VV), salvo i casi in cui il Cliente rivesta la qualifica di consumatore.',
+    '### Art. 10 – Clausole finali',
+    'Il presente preventivo non sostituisce il contratto definitivo, che disciplinerà esecuzione, tempi e pagamenti.',
+    'Eventuali modifiche o deroghe saranno valide solo se confermate per iscritto.',
+    'In caso di contrasto tra preventivo e contratto, prevale il contratto definitivo.',
+    '### Approvazione ai sensi dell\'art. 1341 c.c.',
+    'Il Cliente dichiara di aver letto e approvato espressamente le seguenti clausole:',
+    'Art. 5 (limitazione responsabilità), Art. 6 (esclusione danni indiretti), Art. 7 (proprietà elaborati), Art. 9 (foro esclusivo).'
+  ].join('\n'),
+  note_materiali: 'I prodotti indicati potranno variare in base alla disponibilità di magazzino. In tal caso, Phoenix Fuel garantirà la fornitura di materiali equipollenti per prestazioni e affidabilità.',
+  clausole_contratto: 'Il presente contratto recepisce {offerta}, le cui Condizioni Generali si intendono qui integralmente richiamate per quanto non diversamente disposto. I tempi di esecuzione decorrono dall\'incasso della quota alla firma. I materiali indicati potranno essere sostituiti con equipollenti per prestazioni e affidabilità in caso di indisponibilità. Per ogni controversia è competente in via esclusiva il Foro di Vibo Valentia. Ai sensi degli artt. 1341 e 1342 c.c. il Cliente approva specificamente le clausole su esclusione di responsabilità per danni indiretti, proprietà degli elaborati tecnici e foro esclusivo contenute nelle Condizioni Generali richiamate.'
+};
+var _fvTesti = null;   // { chiave: [ {versione, testo, creato_il, creato_da}, ... ] }  (ordine crescente)
+
+// carica i testi; se una chiave non ha ancora versioni, salva il testo di partenza come versione 1
+async function _fvTestiCarica() {
+  var r = await sb.from('fv_testi').select('*').order('versione');
+  if (r.error) throw new Error(r.error.message + (/fv_testi/.test(r.error.message) ? ' — lancia prima l\'SQL della tabella fv_testi' : ''));
+  var m = {};
+  (r.data || []).forEach(function (x) { (m[x.chiave] = m[x.chiave] || []).push(x); });
+  var nuovi = _FV_TESTI_CHIAVI.filter(function (k) { return !m[k[0]] || !m[k[0]].length; })
+    .map(function (k) { return { chiave: k[0], versione: 1, testo: _FV_TESTI_DEF[k[0]], creato_da: 'testo di partenza' }; });
+  if (nuovi.length) {
+    var ri = await sb.from('fv_testi').insert(nuovi).select('*');
+    if (ri.error) throw new Error(ri.error.message);
+    (ri.data || []).forEach(function (x) { (m[x.chiave] = m[x.chiave] || []).push(x); });
+  }
+  _fvTesti = m;
+  return m;
+}
+function _fvTestoUltimaVers(chiave) { var l = (_fvTesti && _fvTesti[chiave]) || []; return l.length ? l[l.length - 1].versione : 0; }
+function _fvTesto(chiave, versione) {
+  var l = (_fvTesti && _fvTesti[chiave]) || [];
+  var t = versione ? l.filter(function (x) { return x.versione === Number(versione); })[0] : null;
+  if (!t) t = l[l.length - 1];
+  return t ? t.testo : (_FV_TESTI_DEF[chiave] || '');
+}
+// versioni da usare per un documento: quelle gia' segnate, altrimenti le ultime (da segnare)
+function _fvTestiVersDoc(doc) {
+  var v = doc && doc.testi_versioni;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { v = null; } }
+  var out = {}, nuove = false;
+  _FV_TESTI_CHIAVI.forEach(function (k) {
+    if (v && v[k[0]]) out[k[0]] = Number(v[k[0]]);
+    else { out[k[0]] = _fvTestoUltimaVers(k[0]); nuove = true; }
+  });
+  return { vers: out, daSalvare: nuove };
+}
+// testo semplice → blocchi HTML (uno per riga, cosi' l'impaginazione puo' andare a capo pagina)
+function _fvMdInline(t) {
+  return _fvEsc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
+function _fvMdBlocchi(testo) {
+  return String(testo || '').split(/\r?\n/).map(function (r) { return r.trim(); }).filter(Boolean).map(function (r) {
+    if (/^### /.test(r)) return '<h3>' + _fvMdInline(r.slice(4)) + '</h3>';
+    if (/^## /.test(r)) return '<h2>' + _fvMdInline(r.slice(3)) + '</h2>';
+    if (/^# /.test(r)) return '<h1>' + _fvMdInline(r.slice(2)) + '</h1>';
+    if (/^\*[^*].*\*$/.test(r)) return '<p><b><i>' + _fvMdInline(r.slice(1, -1)) + '</i></b></p>';
+    return '<p>' + _fvMdInline(r) + '</p>';
+  });
+}
+
+// ── EDITOR "TESTI DEL PREVENTIVO" ──
+var _fvTestiTab = 'chi_siamo', _fvTestiVista = null;
+async function fvModaleTesti() {
+  try { await _fvTestiCarica(); } catch (e) { toast('Errore: ' + e.message); return; }
+  _fvTestiVista = null;
+  _fvRenderModaleTesti();
+}
+function fvTestiTab(k) { _fvTestiTab = k; _fvTestiVista = null; _fvRenderModaleTesti(); }
+function fvTestiVersione(v) { _fvTestiVista = v ? Number(v) : null; _fvRenderModaleTesti(); }
+function _fvRenderModaleTesti() {
+  var k = _fvTestiTab, l = _fvTesti[k] || [], ult = _fvTestoUltimaVers(k);
+  var vista = _fvTestiVista && _fvTestiVista !== ult ? _fvTestiVista : null;
+  var tab = function (kk, lab) {
+    var on = kk === k;
+    return '<button onclick="fvTestiTab(\'' + kk + '\')" style="font-size:12px;padding:7px 12px;border-radius:7px 7px 0 0;cursor:pointer;font-weight:600;margin-bottom:-1.5px;'
+      + (on ? 'background:var(--card,#fff);color:#185FA5;border:1.5px solid var(--border);border-bottom:1.5px solid var(--card,#fff)' : 'background:transparent;color:var(--text-muted);border:1.5px solid transparent') + '">' + lab + '</button>';
+  };
+  var h = '<div style="width:min(860px,92vw)"><div style="font-size:16px;font-weight:600">✏️ Testi del preventivo</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px">Ogni salvataggio crea una versione nuova. Le offerte e i contratti già stampati restano con la versione con cui sono usciti.</div>'
+    + '<div style="display:flex;gap:4px;flex-wrap:wrap;border-bottom:1.5px solid var(--border);margin-bottom:10px">' + _FV_TESTI_CHIAVI.map(function (x) { return tab(x[0], x[1]); }).join('') + '</div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    + '<div style="font-size:12px">Versione <select onchange="fvTestiVersione(this.value)" style="font-size:12px;padding:4px 6px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+    + l.slice().reverse().map(function (x) {
+        return '<option value="' + x.versione + '"' + ((vista ? vista : ult) === x.versione ? ' selected' : '') + '>' + x.versione + (x.versione === ult ? ' (in uso)' : '') + ' · ' + _fvData(String(x.creato_il || '').slice(0, 10)) + '</option>';
+      }).join('') + '</select></div>'
+    + '<div style="font-size:10.5px;color:var(--text-muted)"># titolo · ## sottotitolo · ### intestazione · *riga in corsivo* · **grassetto** · una riga = un paragrafo'
+    + (k === 'clausole_contratto' ? ' · <b>{offerta}</b> diventa "l\'offerta Phoenix Fuel del gg/mm/aaaa"' : '') + '</div></div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    + '<textarea id="fvt-testo" oninput="fvTestiAnteprima()"' + (vista ? ' readonly' : '') + ' style="width:100%;height:52vh;padding:9px;border:0.5px solid var(--border);border-radius:6px;background:' + (vista ? '#F1EFE8' : 'var(--bg)') + ';color:var(--text);font-size:12px;line-height:1.5;font-family:var(--font-mono);resize:vertical">'
+    + _fvEsc(_fvTesto(k, vista || ult)) + '</textarea>'
+    + '<div id="fvt-ante" style="height:52vh;overflow:auto;border:0.5px solid var(--border);border-radius:6px;padding:10px 14px;background:#fff;color:#1d1d1b;font-family:Lato,Calibri,Arial,sans-serif;font-size:12px;line-height:1.5"></div></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">'
+    + '<button onclick="chiudiModal()" style="font-size:12px;padding:8px 14px;background:var(--bg);border:0.5px solid var(--border);border-radius:6px;cursor:pointer">Chiudi</button>'
+    + (vista
+        ? '<button onclick="fvTestiRipristina(' + vista + ')" class="btn-primary" style="font-size:12px;padding:8px 16px">Rimetti in uso questa versione (diventa la ' + (ult + 1) + ')</button>'
+        : (_fvPuo() ? '<button onclick="fvTestiSalva()" class="btn-primary" style="font-size:12px;padding:8px 16px">Salva come versione ' + (ult + 1) + '</button>' : ''))
+    + '</div></div>';
+  apriModal(h);
+  fvTestiAnteprima();
+}
+function fvTestiAnteprima() {
+  var t = document.getElementById('fvt-testo'), a = document.getElementById('fvt-ante');
+  if (!t || !a) return;
+  a.innerHTML = '<style>#fvt-ante h1{font-size:20px;margin:4px 0 8px}#fvt-ante h2{font-size:15px;font-weight:400;margin:8px 0}#fvt-ante h3{font-size:12.5px;margin:12px 0 4px}#fvt-ante p{margin:0 0 6px}</style>'
+    + _fvMdBlocchi(t.value.replace(/\{offerta\}/g, 'l\'offerta Phoenix Fuel del 10/09/2026')).join('');
+}
+async function _fvTestiNuovaVersione(k, testo) {
+  if (!_fvPuo()) { toast('Permesso negato'); return; }
+  if (!String(testo || '').trim()) { toast('Il testo è vuoto'); return; }
+  var v = _fvTestoUltimaVers(k) + 1;
+  var chi = (typeof utenteCorrente !== 'undefined' && utenteCorrente && (utenteCorrente.nome || utenteCorrente.email)) || null;
+  var r = await sb.from('fv_testi').insert([{ chiave: k, versione: v, testo: testo, creato_da: chi }]).select('*');
+  if (r.error) { toast('Errore: ' + r.error.message); return; }
+  (_fvTesti[k] = _fvTesti[k] || []).push(r.data[0]);
+  if (typeof _auditLog === 'function') _auditLog('fotovoltaico', 'fv_testi', 'nuova versione ' + v + ' del testo ' + k);
+  _fvTestiVista = null;
+  toast('✓ Salvata la versione ' + v);
+  _fvRenderModaleTesti();
+}
+function fvTestiSalva() { var t = document.getElementById('fvt-testo'); _fvTestiNuovaVersione(_fvTestiTab, t ? t.value : ''); }
+function fvTestiRipristina(v) { _fvTestiNuovaVersione(_fvTestiTab, _fvTesto(_fvTestiTab, v)); }
+
+// euro e numeri con il punto delle migliaia anche sotto 10.000 (come nei documenti inviati)
+function _fvEuroDoc(v, dec) {
+  dec = dec == null ? 2 : dec;
+  var n = Number(v || 0), neg = n < 0, p = Math.abs(n).toFixed(dec).split('.');
+  return (neg ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dec ? ',' + p[1] : '') + ' €';
+}
+function _fvNumDoc(v, dec) {
+  dec = dec || 0;
+  var p = Math.abs(Number(v || 0)).toFixed(dec).split('.');
+  return (Number(v) < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dec ? ',' + p[1] : '');
+}
+function _fvDataLunga(iso) {
+  if (!iso) return '';
+  var m = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+  var p = String(iso).slice(0, 10).split('-');
+  return Number(p[2]) + ' ' + m[Number(p[1]) - 1] + ' ' + p[0];
+}
+
 // ═══ DOCUMENTI ═════════════════════════════════════════════════════════════
 function _fvApriStampa(doc) {
   var w = window.open('', '_blank');
@@ -1521,6 +1733,9 @@ async function fvStampaContratto(id) {
   if (c.cliente_id) {
     try { var rc = await sb.from('fv_clienti').select('*').eq('id', c.cliente_id).maybeSingle(); cli = rc && rc.data; } catch (e) { cli = null; }
   }
+  // testi: le clausole del contratto vengono dalla versione segnata sul contratto (o dall'ultima, che si segna)
+  var tvC = null;
+  try { await _fvTestiCarica(); tvC = _fvTestiVersDoc(c); if (tvC.daSalvare) { var ruc = await sb.from('fv_contratti').update({ testi_versioni: tvC.vers }).eq('id', c.id); if (!ruc.error) c.testi_versioni = tvC.vers; } } catch (e) { tvC = null; }
   var A = _FV_AZIENDA, E = _fvEsc;
   // euro con il punto delle migliaia anche sotto 10.000 (8.000,00 €), come nel contratto inviato
   var EU = function (v) {
@@ -1562,10 +1777,8 @@ async function fvStampaContratto(id) {
     return '<tr><td class="l">' + Number(q.percentuale).toLocaleString('it-IT') + '%</td><td class="l">' + E(q.evento) + '</td><td>' + EU(q.importo_ivato) + '</td></tr>';
   }).join('');
   var totQ = quote.reduce(function (s, q) { return s + Number(q.importo_ivato || 0); }, 0);
-  var clausole = 'Il presente contratto recepisce ' + (dataOff ? 'l\'offerta Phoenix Fuel del ' + dataOff : E(c.riferimento_offerta || 'l\'offerta Phoenix Fuel'))
-    + ', le cui Condizioni Generali si intendono qui integralmente richiamate per quanto non diversamente disposto. I tempi di esecuzione decorrono dall\'incasso della quota alla firma. '
-    + 'I materiali indicati potranno essere sostituiti con equipollenti per prestazioni e affidabilità in caso di indisponibilità. Per ogni controversia è competente in via esclusiva il Foro di Vibo Valentia. '
-    + 'Ai sensi degli artt. 1341 e 1342 c.c. il Cliente approva specificamente le clausole su esclusione di responsabilità per danni indiretti, proprietà degli elaborati tecnici e foro esclusivo contenute nelle Condizioni Generali richiamate.';
+  var rifOff = dataOff ? 'l\'offerta Phoenix Fuel del ' + dataOff : (c.riferimento_offerta || 'l\'offerta Phoenix Fuel');
+  var clausole = E(_fvTesto('clausole_contratto', tvC ? tvC.vers.clausole_contratto : null).split('{offerta}').join(rifOff));
 
   var css = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400;1,700&display=swap">'
     + '<style>@page{size:A4;margin:12mm 13mm}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Lato,Calibri,Arial,sans-serif;font-size:10.5px;color:#1d1d1b;margin:0}'
@@ -1609,75 +1822,154 @@ async function fvStampaContratto(id) {
   setTimeout(function () { try { w.print(); } catch (e) {} }, 900);
 }
 
-function fvStampaOfferta(id) {
+// v20261029c — STAMPA PREVENTIVO nello standard del preventivo DS Energy del 10/09/2026:
+// copertina con foto, chi siamo, impianto e componenti, analisi finanziaria (se ci sono i dati),
+// elenco delle parti con il solo prezzo totale, termini di pagamento, accettazione con le
+// Condizioni Generali. Le pagine si formano da sole (un blocco che non ci sta va alla pagina
+// dopo) con intestazione, piè di pagina e numero "n / totale". Testi dalla tabella fv_testi.
+// Arriveranno: produzione mensile da PVGIS, analisi calcolata, schede e foto dei componenti, immagini del progetto.
+async function fvStampaOfferta(id) {
   var o = (_fvOff.offerte || []).filter(function (x) { return x.id === id; })[0];
   if (!o) return;
-  var righe = (_fvOff.righe || []).filter(function (r) { return r.offerta_id === o.id; });
-  var imponibile = righe.reduce(function (s, r) { return s + Number(r.quantita || 0) * Number(r.prezzo_unitario || 0); }, 0);
-  var iva = imponibile * Number(o.aliquota_iva || 0) / 100;
-  var schema = (_fvSchemi || []).filter(function (s2) { return s2.id === o.schema_pagamento_id; })[0];
-  var totIvato = imponibile + iva;
-
-  var pagine = '';
-  // pagina 1 — copertina
-  pagine += '<div class="pg">' + _fvTestata('La vostra offerta personale', _fvData(o.data))
-    + '<div style="margin-top:40px"><div style="font-size:22px;font-weight:700;line-height:1.3">Energia pulita e sostenibile<br>per la vostra azienda</div>'
-    + '<div style="font-size:12px;color:#555;margin-top:14px">Offerta n. ' + (o.numero || '—') + '/' + o.anno + '</div></div>'
-    + '<div class="parti" style="margin-top:46px">'
-    + '<div><div class="et">Da</div><strong>' + _FV_AZIENDA.nome + '</strong><br>' + _FV_AZIENDA.indirizzo + '<br>' + _FV_AZIENDA.citta
-    + '<br>' + _FV_AZIENDA.email + '<br>' + _FV_AZIENDA.tel + '</div>'
-    + '<div><div class="et">Per</div><strong>' + _fvEsc(o.cliente_nome) + '</strong><br>' + _fvEsc(o.cliente_indirizzo || '')
-    + (o.cliente_piva ? '<br>P.IVA ' + _fvEsc(o.cliente_piva) : '')
-    + (o.sito_installazione ? '<br><br><span class="et">Sito di installazione</span><br>' + _fvEsc(o.sito_installazione) : '') + '</div></div>'
-    + (o.potenza_kwp ? '<div class="box" style="margin-top:40px;font-size:11px"><strong>Impianto fotovoltaico da ' + Number(o.potenza_kwp).toLocaleString('it-IT') + ' kWp</strong>'
-        + (o.produzione_kwh_anno ? ' · produzione stimata ' + Number(o.produzione_kwh_anno).toLocaleString('it-IT') + ' kWh/anno' : '') + '</div>' : '')
-    + '</div>';
-
-  // pagina 2 — componenti
-  pagine += '<div class="pg">' + _fvTestata('Elenco delle parti', 'Tutti i componenti previsti')
-    + '<table><tr><th class="l">Descrizione</th><th>Quantità</th><th>Prezzo unitario</th><th>Totale</th></tr>'
-    + righe.map(function (r) {
-        return '<tr><td class="l">' + _fvEsc(r.descrizione) + (r.tipo ? '<div style="font-size:8.5px;color:#777">' + _fvEsc(r.tipo) + '</div>' : '') + '</td>'
-          + '<td>' + Number(r.quantita).toLocaleString('it-IT') + '</td><td>' + _fvEuro(r.prezzo_unitario) + '</td>'
-          + '<td>' + _fvEuro(Number(r.quantita || 0) * Number(r.prezzo_unitario || 0)) + '</td></tr>';
-      }).join('')
-    + '</table>'
-    + '<table class="tot"><tr><td class="l">Totale (netto)</td><td>' + _fvEuro(imponibile) + '</td></tr>'
-    + '<tr><td class="l">IVA ' + o.aliquota_iva + '%</td><td>' + _fvEuro(iva) + '</td></tr>'
-    + '<tr class="gr"><td class="l">Totale (lordo)</td><td>' + _fvEuro(totIvato) + '</td></tr></table></div>';
-
-  // pagina 3 — analisi finanziaria + pagamenti + accettazione
-  var kpi = function (l, v) {
-    return '<div style="flex:1;border:1px solid #ddd;border-radius:6px;padding:10px 12px"><div style="font-size:8.5px;color:#777;text-transform:uppercase">' + l + '</div>'
-      + '<div style="font-size:16px;font-weight:700;font-family:Consolas,monospace">' + v + '</div></div>';
-  };
-  pagine += '<div>' + _fvTestata('Analisi finanziaria e condizioni', _fvData(o.data));
-  if (o.rendimento_totale || o.break_even_anni || o.tir) {
-    pagine += '<div style="display:flex;gap:9px;margin-bottom:14px">'
-      + kpi('Investimento', _fvEuro(imponibile))
-      + kpi('Rendimento totale', o.rendimento_totale ? _fvEuro(o.rendimento_totale) : '—')
-      + kpi('Break-even', o.break_even_anni ? Number(o.break_even_anni).toLocaleString('it-IT') + ' anni' : '—')
-      + kpi('TIR', o.tir ? Number(o.tir).toLocaleString('it-IT') + ' %' : '—')
-      + '</div>';
+  var w = window.open('', '_blank');
+  if (!w) { toast('Abilita i popup per stampare'); return; }
+  w.document.write('<p style="font-family:Arial;padding:20px">Preparazione del preventivo…</p>');
+  try { await _fvTestiCarica(); } catch (e) { w.close(); toast('Errore testi: ' + e.message); return; }
+  var tv = _fvTestiVersDoc(o);
+  if (tv.daSalvare) {
+    var ru = await sb.from('fv_offerte').update({ testi_versioni: tv.vers }).eq('id', o.id);
+    if (!ru.error) o.testi_versioni = tv.vers;
   }
+  var cli = (_fvCli || []).filter(function (c) { return c.id === o.cliente_id; })[0] || null;
+  var A = _FV_AZIENDA, E = _fvEsc, EU = _fvEuroDoc;
+  var righe = (_fvOff.righe || []).filter(function (r) { return r.offerta_id === o.id; });
+  var catDi = function (r) { return (_fvCat || []).filter(function (c) { return c.id === r.catalogo_id; })[0] || null; };
+  var imponibile = righe.reduce(function (s, r) { return s + Number(r.quantita || 0) * Number(r.prezzo_unitario || 0); }, 0);
+  var aliq = Number(o.aliquota_iva || 0), iva = Math.round(imponibile * aliq) / 100, totIvato = imponibile + iva;
+  var moduli = righe.filter(function (r) { return r.tipo === 'modulo'; }).reduce(function (s, r) { return s + Number(r.quantita || 0); }, 0);
+  var kwp = Number(o.potenza_kwp || 0), prod = Number(o.produzione_kwh_anno || 0);
+  var TIPI = { modulo: 'Modulo', inverter: 'Inverter', accumulo: 'Accumulo', struttura: 'Struttura', servizio: 'Prestazioni del servizio', altro: 'Altro' };
+  var nomeRiga = function (r) { var c = catDi(r); return c ? (c.codice || c.nome || r.descrizione) : r.descrizione; };
+  var marcaRiga = function (r) { var c = catDi(r); return c && c.marca ? c.marca : ''; };
+  var pz = function (q) { return _fvNumDoc(q, Number(q) % 1 ? 2 : 0) + (Number(q) === 1 ? ' pezzo' : ' pezzi'); };
+  var ind1 = cli ? (cli.indirizzo || '') : (o.cliente_indirizzo || '');
+  var ind2 = cli ? ([cli.cap, cli.comune].filter(Boolean).join(' ') + (cli.provincia ? ' ' + cli.provincia : '')) : '';
+  var piva = (cli && cli.piva) || o.cliente_piva || '';
+  var sito = o.sito_installazione || '';
+  var logo = _FV_LOGO;
+  var foto = new URL('img/fv-copertina.jpg', location.href).href;
+  var sez = [];   // sezioni: { cover?, blocchi: [html] }
+
+  // 1) copertina
+  sez.push({ cover: true, html: '<div class="cv-top"><img src="' + logo + '" class="cv-logo"><div class="cv-az"><b>PHOENIX FUEL</b><br>Zona Industriale Portosalvo<br>89900 Vibo Valentia (VV)<br>' + E(A.email) + '</div></div>'
+    + '<img class="cv-foto" src="' + foto + '">'
+    + '<div class="fil"><div class="n"></div><div class="r"></div></div>'
+    + '<div class="cv-tit">La vostra offerta personale</div><div class="cv-da">Da PHOENIX FUEL · Offerta n. ' + (o.numero || '—') + '/' + o.anno + ' del ' + _fvData(o.data) + '</div>'
+    + '<div class="cv-cli"><div class="sp">Spett.le</div><div class="nm">' + E(o.cliente_nome) + '</div>' + (ind1 ? '<div>' + E(ind1) + '</div>' : '') + (ind2 ? '<div>' + E(ind2) + '</div>' : '')
+    + (piva ? '<div>P.iva ' + E(piva) + '</div>' : '') + (sito ? '<div class="si"><b>Sito di installazione:</b> ' + E(sito) + '</div>' : '') + '</div>' });
+
+  // 2) chi siamo
+  sez.push({ blocchi: _fvMdBlocchi(_fvTesto('chi_siamo', tv.vers.chi_siamo)) });
+
+  // 3) impianto e componenti
+  var b = ['<h1>Impianto fotovoltaico</h1>',
+    '<p>Ringraziandola per averci contattato, le sottoponiamo la nostra migliore offerta per la realizzazione di un impianto fotovoltaico, installato e connesso in rete'
+      + (sito ? ', da eseguire presso il suo edificio sito in ' + E(sito) : '') + '.</p>'];
+  var kv = [];
+  if (kwp) kv.push(['Dimensione', _fvNumDoc(kwp, 2) + ' kWPeak']);
+  if (moduli) kv.push(['Moduli', _fvNumDoc(moduli) + ' pezzi']);
+  if (prod) kv.push(['Produzione totale annua', _fvNumDoc(prod) + ' kWh']);
+  if (prod && kwp) kv.push(['Efficienza', _fvNumDoc(prod / kwp) + ' kWh per kWPeak']);
+  if (kv.length) b.push('<h4>Impianto fotovoltaico: <span>Fotovoltaico</span></h4><table class="kv">' + kv.map(function (x) { return '<tr><td>' + x[0] + '</td><td>' + x[1] + '</td></tr>'; }).join('') + '</table>');
+  if (righe.length) {
+    b.push('<h5>COMPONENTI</h5><p class="pic">Abbiamo previsto i seguenti componenti:</p>');
+    righe.forEach(function (r) {
+      var c = catDi(r), m = marcaRiga(r);
+      b.push('<div class="comp"><div class="cn">' + E(nomeRiga(r)) + '</div><div class="cq">' + (m ? E(m) + ' &nbsp;|&nbsp; ' : '') + pz(r.quantita) + '</div></div>'
+        + (c && c.descrizione ? '<div class="cd">' + E(c.descrizione) + '</div>' : ''));
+    });
+    var nm = _fvTesto('note_materiali', tv.vers.note_materiali);
+    if (nm) b.push('<div class="comp"><div class="cn">Informazioni sui materiali</div><div class="cq"></div></div><div class="cd">' + E(nm) + '</div>');
+  }
+  sez.push({ blocchi: b });
+
+  // 4) analisi finanziaria (per ora con i valori scritti nell'offerta)
+  if (o.rendimento_totale || o.break_even_anni || o.tir) {
+    var anno0 = Number(String(o.data || '').slice(0, 4)) || o.anno;
+    var be = o.break_even_anni ? Number(o.break_even_anni) : null;
+    sez.push({ blocchi: ['<h1>Analisi Finanziaria</h1>', '<div class="fin">'
+      + '<div><span>Investimento totale</span><b>' + EU(imponibile, 0) + '</b><i>&nbsp;</i></div>'
+      + '<div><span>Rendimento totale</span><b>' + (o.rendimento_totale ? EU(o.rendimento_totale, 0) : '—') + '</b><i>&nbsp;</i></div>'
+      + '<div><span>Break-Even</span><b>' + (be ? (anno0 + Math.ceil(be)) : '—') + '</b><i>' + (be ? 'In ' + _fvNumDoc(be, be % 1 ? 1 : 0) + ' anni' : '&nbsp;') + '</i></div>'
+      + '<div><span>TIR</span><b>' + (o.tir ? _fvNumDoc(o.tir, 2) + ' %' : '—') + '</b><i>' + (o.tir ? 'annuo' : '&nbsp;') + '</i></div></div>'] });
+  }
+
+  // 5) elenco delle parti, prezzo totale, termini di pagamento
+  b = ['<h1>Elenco delle parti</h1>', '<p class="pic">Tutti i componenti pianificati per voi</p>', '<h4>Per Fotovoltaico</h4>',
+    '<table class="pt"><tr><th>Nome</th><th>Tipo</th><th class="r">Quantità</th></tr>' + righe.map(function (r) {
+      var m = marcaRiga(r);
+      return '<tr><td>' + E(nomeRiga(r)) + (m ? '<small>' + E(m) + '</small>' : '') + '</td><td>' + E(TIPI[r.tipo] || 'Altro') + '</td><td class="r">' + _fvNumDoc(r.quantita, Number(r.quantita) % 1 ? 2 : 0) + 'x</td></tr>';
+    }).join('') + '</table>',
+    '<h4>Prezzo totale</h4><table class="tt"><tr><td>Totale (netto)</td><td>' + EU(imponibile) + '</td></tr><tr><td>IVA (' + _fvNumDoc(aliq, 1) + ' % su ' + EU(imponibile) + ')</td><td>' + EU(iva) + '</td></tr>'
+      + '<tr class="g"><td>Totale (lordo)</td><td>' + EU(totIvato) + '</td></tr></table>'];
+  var schema = (_fvSchemi || []).filter(function (s2) { return s2.id === o.schema_pagamento_id; })[0];
   if (schema && schema.quote) {
     var q = (typeof schema.quote === 'string') ? JSON.parse(schema.quote) : schema.quote;
-    pagine += '<div style="font-weight:700;font-size:11px;margin:12px 0 5px">Termini di pagamento</div>'
-      + '<table><tr><th class="l">Quota</th><th class="l">Scadenza</th><th>Importo (IVA incl.)</th></tr>'
-      + q.map(function (x) {
-          return '<tr><td class="l" style="width:60px">' + x.perc + '%</td><td class="l">' + _fvEsc(x.evento) + '</td><td>'
-            + _fvEuro(totIvato * x.perc / 100) + '</td></tr>';
-        }).join('') + '</table>';
+    b.push('<h4>Termini di pagamento</h4><table class="pt"><tr><th>Quota</th><th>Scadenza</th><th class="r">Importo (IVA inclusa)</th></tr>'
+      + q.map(function (x) { return '<tr><td>' + _fvNumDoc(x.perc, x.perc % 1 ? 2 : 0) + '%</td><td>' + E(x.evento) + '</td><td class="r">' + EU(totIvato * x.perc / 100) + '</td></tr>'; }).join('')
+      + '</table><p class="pic">Modalità di pagamento, banca e IBAN sono riportati nel contratto definitivo.</p>');
   }
-  pagine += '<div class="box">I prezzi si intendono IVA esclusa, aliquota ' + o.aliquota_iva + '%. L\'offerta ha validità 30 giorni dalla data di emissione. '
-    + 'I materiali indicati potranno essere sostituiti con equipollenti per prestazioni e affidabilità in caso di indisponibilità. '
-    + 'I tempi di esecuzione decorrono dall\'incasso della prima quota.</div>';
-  pagine += '<div style="font-weight:700;font-size:12px;margin-top:22px">Accettare l\'offerta</div>'
-    + '<div class="firme"><div><div style="font-size:9px;color:#777">Il Cliente</div><strong>' + _fvEsc(o.cliente_nome) + '</strong><div class="riga"></div></div>'
-    + '<div><div style="font-size:9px;color:#777">Il Fornitore</div><strong>' + _FV_AZIENDA.nome + '</strong><div class="riga"></div></div></div>'
-    + '<div class="foot">' + _FV_AZIENDA.nome + ' · ' + _FV_AZIENDA.indirizzo + ', ' + _FV_AZIENDA.citta + ' · ' + _FV_AZIENDA.email + '</div></div>';
+  sez.push({ blocchi: b });
 
-  _fvApriStampa('<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Preventivo ' + (o.numero || '') + '-' + o.anno + '</title>' + _fvStile() + '</head><body>' + pagine + '</body></html>');
+  // 6) accettazione e Condizioni Generali
+  b = ['<h1>Accettare l\'offerta</h1>',
+    '<div class="parti"><div><span>Il Cliente</span><b>' + E(o.cliente_nome) + '</b>' + (ind1 ? E(ind1) + '<br>' : '') + (ind2 ? E(ind2) + '<br>' : '') + (piva ? 'P.IVA ' + E(piva) : '')
+      + (sito ? '<small>Sito di installazione: ' + E(sito) + '</small>' : '') + '</div>'
+      + '<div><span>Il Fornitore</span><b>PHOENIX FUEL</b>Zona Industriale Portosalvo<br>89900 Vibo Valentia (VV)<br>P.IVA ' + E(A.piva) + '</div></div>']
+    .concat(_fvMdBlocchi(_fvTesto('condizioni_generali', tv.vers.condizioni_generali)).map(function (x) { return '<div class="cg">' + x + '</div>'; }))
+    .concat(['<div class="firma"><div></div>Luogo, data, nome, firma</div>']);
+  sez.push({ blocchi: b });
+
+  var css = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400;1,700&display=swap">'
+    + '<style>@page{size:A4;margin:0}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    + 'body{margin:0;font-family:Lato,Calibri,Arial,sans-serif;color:#1d1d1b;font-size:11px;background:#888}'
+    + '.pg{width:210mm;height:297mm;position:relative;background:#fff;overflow:hidden;page-break-after:always;margin:0 auto}'
+    + '@media screen{.pg{margin:8mm auto;box-shadow:0 2px 10px rgba(0,0,0,.3)}}'
+    + '.hd{position:absolute;left:18mm;right:18mm;top:10mm;height:16mm;display:flex;align-items:center;justify-content:space-between}.hd img{height:15mm}.hd .t{font-size:12.5px}.hd .d{font-size:10px;color:#555}'
+    + '.ct{position:absolute;left:18mm;right:18mm;top:31mm;bottom:30mm;overflow:hidden}'
+    + '.ft{position:absolute;left:18mm;right:18mm;bottom:9mm}.ft .tx{display:flex;justify-content:space-between;font-size:8.5px;color:#444;line-height:1.4}.ft .pn{font-family:Georgia,serif;font-size:11px;color:#555}'
+    + '.fil .n{border-top:2.6mm solid #111}.fil .r{border-top:0.4mm solid #C8102E;margin:3.2mm 0 2.4mm}'
+    + 'h1{font-size:23px;font-weight:900;margin:0 0 10px}h2{font-size:16px;font-weight:400;margin:4px 0 10px}h3{font-size:12px;font-weight:900;margin:14px 0 6px}'
+    + 'h4{font-size:14px;font-weight:700;margin:14px 0 6px}h4 span{font-weight:400;color:#666}h5{font-size:12.5px;font-weight:900;margin:16px 0 2px}'
+    + 'p{margin:0 0 7px;line-height:1.5}.pic{font-size:9.5px;color:#555}'
+    + '.cg h2{font-size:14px;font-weight:700;margin:12px 0 6px}.cg h3{font-size:11.5px;font-weight:700;margin:10px 0 3px}.cg p{font-size:9.8px;margin:0 0 4px}'
+    + 'table.kv{width:100%;border-collapse:collapse}table.kv td{padding:8px 10px;font-size:11.5px}table.kv tr:nth-child(odd) td{background:#F1F2F3}table.kv td:last-child{text-align:right}'
+    + '.comp{display:flex;justify-content:space-between;align-items:baseline;border-bottom:0.5px solid #ccc;padding:12px 10px 8px;margin-top:6px}.comp .cn{font-size:13px;font-weight:700}.comp .cq{font-size:9.5px;color:#555}'
+    + '.cd{font-size:9.5px;color:#444;padding:5px 0 2px}'
+    + '.fin{display:flex;gap:6mm;background:#F1F2F3;padding:7mm 6mm}.fin div{flex:1}.fin span{display:block;font-weight:700;font-size:11.5px;margin-bottom:9mm}.fin b{display:block;font-size:20px;font-weight:900}.fin i{display:block;font-style:normal;font-size:9.5px;color:#555;margin-top:6mm}'
+    + 'table.pt{width:100%;border-collapse:collapse}table.pt th{font-size:8.5px;text-transform:uppercase;color:#555;text-align:left;padding:7px 10px;font-weight:700}table.pt td{padding:8px 10px;font-size:11px;border-bottom:0.5px solid #ddd}'
+    + 'table.pt tr:nth-child(even) td{background:#F1F2F3}table.pt td small{display:block;font-size:8.5px;color:#666}.r{text-align:right!important}'
+    + 'table.tt{width:100%;border-collapse:collapse}table.tt td{padding:8px 10px;border-bottom:0.5px solid #ddd;font-size:11px}table.tt td:last-child{text-align:right}table.tt tr.g td{font-size:14px;font-weight:700}'
+    + '.parti{display:flex;gap:10mm;margin-bottom:6mm}.parti div{flex:1;font-size:12.5px;line-height:1.45;font-family:Arial,sans-serif}.parti span{display:block;font-size:9px;color:#555;margin-bottom:3px}.parti b{display:block;font-size:15px}.parti small{display:block;font-size:9px;color:#555;margin-top:4px}'
+    + '.firma{margin-top:12mm;font-size:12px}.firma div{width:95mm;border-top:0.5px solid #333;margin-bottom:3mm}'
+    + '.cv-top{position:absolute;left:18mm;right:18mm;top:13mm;display:flex;justify-content:space-between}.cv-logo{height:24mm}.cv-az{text-align:right;font-size:10.5px;line-height:1.5}'
+    + '.cv-foto{position:absolute;left:18mm;right:18mm;top:68mm;width:174mm;height:115mm;object-fit:cover}'
+    + '.cv-top+.cv-foto+.fil{position:absolute;left:18mm;right:18mm;top:186mm}'
+    + '.cv-tit{position:absolute;left:18mm;top:203mm;font-size:24px;font-weight:900}.cv-da{position:absolute;left:18mm;top:214mm;font-size:11px;color:#555}'
+    + '.cv-cli{position:absolute;right:18mm;top:226mm;text-align:right;font-family:Arial,sans-serif;font-size:12.5px;line-height:1.6}.cv-cli .sp{font-size:10px}.cv-cli .nm{font-size:19px;font-weight:700;margin:2px 0 4px}.cv-cli .si{font-family:Lato,Arial,sans-serif;font-size:10px;margin-top:10px}'
+    + '</style>';
+  var hd = '<div class="hd"><img src="' + logo + '"><div class="t">La vostra offerta personale</div><div class="d">' + _fvDataLunga(o.data) + '</div></div>';
+  var ft = '<div class="ft"><div class="fil"><div class="n"></div><div class="r"></div></div><div class="tx"><div><b>PHOENIX FUEL</b><br>Zona Industriale Portosalvo, 89900 Vibo Valentia (VV) · ' + E(A.email) + '</div><div class="pn"></div></div></div>';
+  var dati = JSON.stringify({ sez: sez, hd: hd, ft: ft }).replace(/<\//g, '<\\/');
+  var script = '<script>(function(){var D=' + dati + ';var body=document.body;function run(){'
+    + 'function nuova(cover){var p=document.createElement("div");p.className="pg";if(cover){body.appendChild(p);return p;}p.innerHTML=D.hd+"<div class=\\"ct\\"></div>"+D.ft;body.appendChild(p);return p.querySelector(".ct");}'
+    + 'D.sez.forEach(function(s){if(s.cover){nuova(true).innerHTML=s.html;return;}var c=nuova(false);s.blocchi.forEach(function(h){var d=document.createElement("div");d.innerHTML=h;c.appendChild(d);'
+    + 'if(c.scrollHeight>c.clientHeight+1&&c.children.length>1){c.removeChild(d);c=nuova(false);c.appendChild(d);}});});'
+    + 'var pp=document.querySelectorAll(".pg");pp.forEach(function(p,i){var n=p.querySelector(".pn");if(n)n.textContent=(i+1)+" / "+pp.length;});'
+    + 'var imgs=[].slice.call(document.images);Promise.all(imgs.map(function(im){return im.complete?1:new Promise(function(r){im.onload=im.onerror=r;});})).then(function(){setTimeout(function(){window.focus();window.print();},300);});'
+    + '}(document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(run,run);})();<\/script>';
+  var doc = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Preventivo ' + E(o.cliente_nome) + ' ' + (o.data || '') + '</title>' + css + '</head><body>' + script + '</body></html>';
+  w.document.open(); w.document.write(doc); w.document.close();
 }
 
 // ═══ FORNITORI FV ══════════════════════════════════════════════════════════
