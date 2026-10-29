@@ -1,3 +1,4 @@
+// v20261029d — OFFERTE: ✏️ e 🗑️ nella lista, 🗑️ Elimina nella scheda (bloccato se c'e' gia' il contratto).
 // v20261029c — PREVENTIVO STANDARD (formato DS Energy 10/09/2026, impaginazione automatica) e TESTI DEL PREVENTIVO
 //   con versioni (tabella fv_testi): chi siamo, Condizioni Generali, note sui materiali, clausole del contratto.
 // v20261029b — STAMPA CONTRATTO nel formato inviato a DS Energy (carta intestata Phoenix Fuel Solar, clausole, privacy).
@@ -354,7 +355,8 @@ function _fvRenderOfferte() {
       + '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono)">' + (o.potenza_kwp ? Number(o.potenza_kwp).toLocaleString('it-IT') : '—') + '</td>'
       + '<td style="padding:9px 10px;text-align:right;font-family:var(--font-mono);font-weight:600">' + _fvEuro(o.imponibile) + '</td>'
       + '<td style="padding:9px 10px"><span style="font-size:10px;background:' + st.bg + ';color:' + st.col + ';padding:2px 9px;border-radius:9px;font-weight:600">' + st.lab + '</span></td>'
-      + '<td style="padding:9px 10px;text-align:right"><button onclick="fvApriOfferta(\'' + o.id + '\')" style="font-size:11.5px;padding:5px 11px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">Apri →</button></td></tr>';
+      + '<td style="padding:9px 10px;text-align:right;white-space:nowrap"><button onclick="fvApriOfferta(\'' + o.id + '\')" title="Apri e modifica" style="font-size:11.5px;padding:5px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer">✏️</button> '
+      + (_fvPuo() ? '<button onclick="fvEliminaOfferta(\'' + o.id + '\')" title="Elimina l\'offerta" style="font-size:11.5px;padding:5px 9px;border:0.5px solid var(--border);border-radius:6px;background:var(--bg);color:#A32D2D;cursor:pointer">🗑️</button>' : '') + '</td></tr>';
   });
   h += '</table></div>';
   box.innerHTML = h;
@@ -380,6 +382,32 @@ async function fvNuovaOfferta() {
   fvApriOfferta(r.data.id);
 }
 
+// v20261029d — ELIMINA OFFERTA (prove e bozze inutili): toglie righe, costi e l'offerta.
+// Bloccata se dall'offerta e' gia' nato un contratto: in quel caso si elimina prima il contratto.
+async function fvEliminaOfferta(id) {
+  if (!_fvPuo()) { toast('Permesso negato'); return; }
+  var o = (_fvOff.offerte || []).filter(function (x) { return x.id === id; })[0];
+  if (!o) return;
+  var rc = await sb.from('fv_contratti').select('id,numero,anno').eq('offerta_id', id);
+  if (rc.error) { toast('Errore: ' + rc.error.message); return; }
+  if ((rc.data || []).length) {
+    var k = rc.data[0];
+    alert('Da questa offerta è nato il contratto n. ' + (k.numero || '—') + '/' + k.anno + ': non si può eliminare.');
+    return;
+  }
+  if (!confirm('Eliminare l\'offerta n. ' + (o.numero || '—') + '/' + o.anno + ' di ' + (o.cliente_nome || '') + '?\nSi cancellano anche le sue voci e i suoi costi. Non si può annullare.')) return;
+  var r1 = await sb.from('fv_offerte_costi').delete().eq('offerta_id', id);
+  if (r1.error) { toast('Errore sui costi: ' + r1.error.message); return; }
+  var r2 = await sb.from('fv_offerte_righe').delete().eq('offerta_id', id);
+  if (r2.error) { toast('Errore sulle voci: ' + r2.error.message); return; }
+  var r3 = await sb.from('fv_offerte').delete().eq('id', id);
+  if (r3.error) { toast('Errore: ' + r3.error.message); return; }
+  if (typeof _auditLog === 'function') _auditLog('fotovoltaico', 'fv_offerte', 'eliminata offerta ' + (o.numero || '') + '/' + o.anno + ' ' + (o.cliente_nome || ''));
+  toast('✓ Offerta eliminata');
+  _fvOffertaAperta = null;
+  fvCaricaOfferte();
+}
+
 function fvApriOfferta(id) { _fvOffertaAperta = id; _fvRenderOffertaScheda(); }
 function fvChiudiOfferta() { _fvOffertaAperta = null; _fvRenderOfferte(); }
 
@@ -401,6 +429,7 @@ function _fvRenderOffertaScheda() {
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
     + '<button onclick="fvStampaOfferta(\'' + o.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid #A32D2D;border-radius:7px;background:var(--bg);color:#A32D2D;font-weight:600;cursor:pointer">📄 Stampa preventivo</button>'
     + (o.stato === 'accettata' ? '<button onclick="fvGeneraContratto(\'' + o.id + '\')" class="btn-primary" style="font-size:12px;padding:7px 13px">📝 Genera contratto</button>' : '')
+    + (_fvPuo() ? '<button onclick="fvEliminaOfferta(\'' + o.id + '\')" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);color:#A32D2D;cursor:pointer">🗑️ Elimina</button>' : '')
     + '<button onclick="fvChiudiOfferta()" style="font-size:12px;padding:7px 12px;border:0.5px solid var(--border);border-radius:7px;background:var(--bg);cursor:pointer">← Tutte le offerte</button>'
     + '</div></div>';
 
