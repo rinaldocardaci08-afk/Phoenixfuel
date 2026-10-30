@@ -1,3 +1,5 @@
+// v20261030a — TEMPISTICHE: fascia degli anni, mesi piu' grandi e proporzionali ai giorni, mese corrente
+//   evidenziato, linea scura al cambio d'anno su tutte le righe, anni alternati con fondo leggero.
 // v20261029b — barra CO₂: dopo la passata resta ferma 20 secondi prima di ricominciare (prima 4).
 // v20261029a — RIEPILOGO IMPIANTO: potenza, produzione stimata, resa e la barra animata CO₂ → alberi e case
 //   illuminate (_pfCO2Html, usata anche da pf-fotovoltaico.js per gli impianti venduti).
@@ -575,9 +577,38 @@ function _invGantt(impianti) {
     + '<div style="font-size:11.5px;color:var(--text-muted)">pagato <strong style="font-family:var(--font-mono);color:var(--text)">'
       + _invEuro(spesoTot) + '</strong> su <strong style="font-family:var(--font-mono);color:var(--text)">' + _invEuro(prevTot)
       + '</strong> previsti · <strong style="color:' + (pctTot > 100 ? ROSSO : 'var(--text)') + '">' + pctTot.toFixed(1) + '%</strong></div></div>';
+  // v20261030a — calendario piu' leggibile: fascia degli anni sopra i mesi, mesi piu' grandi e larghi
+  // quanto i loro giorni (allineati alle linee), mese corrente evidenziato, cambio d'anno con una
+  // linea scura che attraversa tutte le righe e anni alternati con un leggero fondo.
+  var anni = [];
+  mesi.forEach(function (d) { var y = d.getFullYear(); if (!anni.length || anni[anni.length - 1].y !== y) anni.push({ y: y, da: d }); });
+  anni.forEach(function (a, k) { a.a = k < anni.length - 1 ? anni[k + 1].da : new Date(max.getTime() + 86400000); });
+  var giorniMese = function (d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); };
+  var meseOggi = oggiD.getFullYear() * 12 + oggiD.getMonth();
+  var LINEA_ANNO = '2px solid #4a4f55';
+  var TINTE = ['rgba(24,95,165,0.07)', 'rgba(24,95,165,0.0)'];
+  // fondo comune alle righe: anni alternati, linee dei mesi, linea scura al cambio d'anno
+  var sfondo = '<div style="position:absolute;inset:0;pointer-events:none">'
+    + anni.map(function (a, k) { var l = pos(a.da), r = pos(a.a); return '<div style="position:absolute;top:0;bottom:0;left:' + l.toFixed(2) + '%;width:' + (r - l).toFixed(2) + '%;background:' + TINTE[k % 2] + '"></div>'; }).join('')
+    + mesi.map(function (d) { var l = pos(d); return l <= 0.01 ? '' : '<div style="position:absolute;top:0;bottom:0;left:' + l.toFixed(2) + '%;' + (d.getMonth() === 0 ? 'border-left:' + LINEA_ANNO : 'border-left:0.5px dashed var(--border)') + '"></div>'; }).join('')
+    + '</div>';
   h += '<div style="overflow-x:auto"><div style="min-width:720px">';
-  h += '<div style="display:grid;grid-template-columns:160px 1fr 190px;gap:12px;font-size:9.5px;color:var(--text-muted)"><div></div><div style="display:flex">'
-    + mesi.map(function (d) { return '<div style="flex:1;text-align:center;border-left:0.5px solid var(--border)">' + MM[d.getMonth()] + (d.getMonth() === 0 || mesi.length < 2 ? ' ' + String(d.getFullYear()).slice(2) : '') + '</div>'; }).join('')
+  // fascia degli anni
+  h += '<div style="display:grid;grid-template-columns:158px 1fr 206px;gap:12px"><div></div><div style="display:flex">'
+    + anni.map(function (a, k) {
+        var w = pos(a.a) - pos(a.da);
+        return '<div style="flex:0 0 ' + w.toFixed(3) + '%;text-align:center;font-size:13px;font-weight:800;letter-spacing:.5px;padding:3px 0;border-radius:6px 6px 0 0;'
+          + 'background:' + (k % 2 ? '#E3E8EE' : '#D6E4F2') + ';color:#1f3a56' + (k ? ';border-left:' + LINEA_ANNO : '') + '">' + a.y + '</div>';
+      }).join('')
+    + '</div><div></div></div>';
+  // mesi
+  h += '<div style="display:grid;grid-template-columns:158px 1fr 206px;gap:12px;margin-bottom:2px"><div></div><div style="display:flex;border-bottom:1.5px solid #4a4f55">'
+    + mesi.map(function (d) {
+        var att = d.getFullYear() * 12 + d.getMonth() === meseOggi;
+        return '<div style="flex:' + giorniMese(d) + ' 1 0;min-width:0;text-align:center;font-size:11px;font-weight:700;text-transform:uppercase;padding:4px 0;'
+          + (d.getMonth() === 0 && pos(d) > 0.01 ? 'border-left:' + LINEA_ANNO + ';' : 'border-left:0.5px solid var(--border);')
+          + (att ? 'background:#FCEBEB;color:#A32D2D' : 'color:var(--text)') + '">' + MM[d.getMonth()] + '</div>';
+      }).join('')
     + '</div><div></div></div>';
 
   conDate.forEach(function (i, idx) {
@@ -599,10 +630,13 @@ function _invGantt(impianti) {
     var pctP = prev > 0 ? sp / prev * 100 : 0;
     var res = prev - sp;
 
-    h += '<div style="display:grid;grid-template-columns:160px 1fr 190px;gap:12px;align-items:center;padding:10px 0' + (idx < conDate.length - 1 ? ';border-bottom:0.5px solid var(--border)' : '') + '">';
-    h += '<div><div style="font-weight:600;font-size:12.5px">' + _invEsc(i.nome) + '</div><div style="font-size:10.5px;color:var(--text-muted)">' + st.lab + (i.fornitore ? ' · ' + _invEsc(i.fornitore) : '') + '</div></div>';
+    // v20261030a — ogni impianto in una fascia sua: bordo, fondo alternato e barra colorata a sinistra
+    var colRiga = ['#185FA5', '#BA7517', '#27500A', '#6B3FA0', '#A32D2D'][idx % 5];
+    h += '<div style="display:grid;grid-template-columns:154px 1fr 190px;gap:12px;align-items:center;padding:10px 10px 10px 0;margin-top:8px;'
+      + 'border:1px solid var(--border);border-left:5px solid ' + colRiga + ';border-radius:8px;background:' + (idx % 2 ? 'var(--bg-card,#fff)' : 'rgba(24,95,165,0.035)') + '">';
+    h += '<div style="padding-left:10px"><div style="font-weight:700;font-size:13px;color:' + colRiga + '">' + _invEsc(i.nome) + '</div><div style="font-size:10.5px;color:var(--text-muted)">' + st.lab + (i.fornitore ? ' · ' + _invEsc(i.fornitore) : '') + '</div></div>';
     // linea dei lavori sul calendario
-    h += '<div><div style="position:relative;height:22px">'
+    h += '<div><div style="position:relative">' + sfondo + '<div style="position:relative;height:22px">'
       + '<div style="position:absolute;top:10px;left:' + pa.toFixed(2) + '%;width:' + Math.max(0.5, pb - pa).toFixed(2) + '%;height:3px;background:var(--border);border-radius:2px"></div>'
       + (pf > pa ? '<div style="position:absolute;top:9px;left:' + pa.toFixed(2) + '%;width:' + (pf - pa).toFixed(2) + '%;height:5px;background:' + BLU + ';border-radius:3px"></div>' : '')
       + (c ? '<div style="position:absolute;top:11px;left:' + pb.toFixed(2) + '%;width:' + Math.max(0, pos(c) - pb).toFixed(2) + '%;border-top:1.5px dashed ' + VERDE + '"></div>' : '')
@@ -612,7 +646,7 @@ function _invGantt(impianti) {
       + lab(pa, 'inizio ' + _invData(i.data_inizio).slice(0, 5))
       + lab(pb, 'fine ' + _invData(i.data_fine).slice(0, 5))
       + (c ? lab(pos(c), 'allaccio', VERDE) : '')
-      + '</div><div style="height:18px"></div>';
+      + '</div><div style="height:18px"></div></div>';
     // barra separata dei pagamenti
     h += '<div style="font-size:10.5px;color:var(--text-muted)">💶 Pagamenti sul costo previsto</div>'
       + '<div style="height:14px;border-radius:7px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;margin-top:4px">'
