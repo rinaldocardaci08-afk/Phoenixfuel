@@ -1,3 +1,5 @@
+// v20261105a — CONTRATTI: contano anche i pagamenti con causale investimenti imputati al contratto da
+//   Investimenti → Spese (es. il pagamento a NovaPower per DS).
 // v20261029l — RIEPILOGO come prima linguetta della scheda contratto (impianti venduti): totale, incassi,
 //   potenza e produzione dall'offerta, lavori e la barra CO₂ animata (_pfCO2Html di pf-investimenti.js).
 // v20261029k — bottone "🧊 Vetrina 3D" anche nella cella dell'impianto in Vendita a clienti → Impianti venduti.
@@ -1279,10 +1281,11 @@ async function fvCaricaContratti() {
   var movs = (r[3] && r[3].data) || [];
   var cau = {};
   ((r[4] && r[4].data) || []).forEach(function (c) { cau[c.id] = c; });
-  // solo i movimenti del ramo VENDITE: incassi dai clienti e costi di commessa
+  // solo i movimenti del ramo VENDITE: incassi dai clienti e costi di commessa; in piu' i pagamenti
+  // registrati con una causale degli investimenti ma imputati a un contratto (v20261105a)
   var delRamo = movs.filter(function (m) {
     var c = cau[m.causale_investimento_id];
-    return c && (c.ambito || 'investimenti') === 'vendite';
+    return (c && (c.ambito || 'investimenti') === 'vendite') || !!m.fv_contratto_id;
   });
   _fvCon = { noColFatt: noColFatt, contratti: r[0].data || [], righe: r[1].data || [], quote: r[2].data || [],
              incassi: delRamo.filter(function (m) { return m.tipo === 'entrata'; }),

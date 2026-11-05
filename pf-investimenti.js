@@ -1,3 +1,5 @@
+// v20261105a — SPESE DA IMPUTARE: nel menu "imputa a…" ci sono anche gli impianti venduti ai clienti (contratti):
+//   il pagamento prende fv_contratto_id, esce dagli investimenti e va nel mastrino del contratto.
 // v20261030a — TEMPISTICHE: fascia degli anni, mesi piu' grandi e proporzionali ai giorni, mese corrente
 //   evidenziato, linea scura al cambio d'anno su tutte le righe, anni alternati con fondo leggero.
 // v20261029b — barra CO₂: dopo la passata resta ferma 20 secondi prima di ricominciare (prima 4).
@@ -212,7 +214,7 @@ async function caricaInvestimenti(modo) {
     }
     if (!_invCausale || !causali.some(function (c) { return c.id === _invCausale; })) _invCausale = causali[0].id;
 
-    var _invColsMov = 'id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id,investimento_fattura';
+    var _invColsMov = 'id,data,tipo,importo,imponibile,aliquota_iva,descrizione,banca_id,metodo,note,nota_imputazione,investimento_impianto_id,investimento_voce_id,fv_contratto_id,investimento_fattura';
     var _qMov = function (cols) {
       return _invModo === 'vendita'
         ? sb.from('foglio_giornale_movimenti').select(cols).not('investimento_impianto_id', 'is', null).order('data', { ascending: false })
@@ -275,8 +277,11 @@ function _invImponibile(m) {
 }
 function _invConti() {
   var D = _invDati;
-  var usc = D.movimenti.filter(function (m) { return m.tipo === 'uscita'; });
-  var ent = D.movimenti.filter(function (m) { return m.tipo === 'entrata'; });
+  // v20261105a — i movimenti imputati a un contratto di vendita (fv_contratto_id) sono costi di
+  // commessa del cliente: escono dagli investimenti e dalle loro risorse
+  var movInv = D.movimenti.filter(function (m) { return !m.fv_contratto_id; });
+  var usc = movInv.filter(function (m) { return m.tipo === 'uscita'; });
+  var ent = movInv.filter(function (m) { return m.tipo === 'entrata'; });
   var speseImp = {}, spesoImputato = 0, spesoGenerale = 0, daImputare = [];
   // v20261023b — gli impianti costruiti per la vendita hanno le loro spese ma non
   // consumano le risorse degli investimenti (mutui e mezzi propri)
@@ -492,7 +497,12 @@ function _invPannelloSpese(D, C) {
         + '<td style="padding:7px;text-align:right;white-space:nowrap;vertical-align:top">'
         + '<select id="inv-imp-' + m.id + '" style="font-size:11.5px;padding:5px 8px;border:0.5px solid #185FA5;border-radius:6px;background:var(--bg);color:var(--text);max-width:170px">'
         + '<option value="">— imputa a… —</option>'
+        + '<optgroup label="Impianti">'
         + D.impianti.map(function (i) { return '<option value="' + i.id + '"' + (sug && sug.id === i.id ? ' selected' : '') + '>' + _invEsc(i.nome) + (_invIsVend(i) ? ' (vendita)' : '') + '</option>'; }).join('')
+        + '</optgroup>'
+        + ((D.contratti || []).length ? '<optgroup label="Impianti venduti ai clienti (contratto)">'
+            + D.contratti.map(function (c) { return '<option value="c:' + c.id + '">📝 ' + _invEsc(c.cliente_nome || '') + ' · contr. ' + (c.numero || '—') + '/' + c.anno + '</option>'; }).join('')
+            + '</optgroup>' : '')
         + '</select> '
         + _invSelForn('inv-forn-' + m.id, fornSug) + ' '
         + (D.noColFatt ? '' : _invSelFattTutte('inv-fatt-' + m.id) + ' ')
@@ -746,6 +756,18 @@ async function invImputaRiga(movId) {
     imp = fsel[0];
   }
   if (!imp) { toast('Scegli l\'impianto'); return; }
+  // impianto venduto a un cliente: il pagamento va al contratto (costo di commessa)
+  if (String(imp).indexOf('c:') === 0) {
+    if (fattId) { toast('La fattura scelta è di un impianto nostro: per un contratto lasciala vuota e collegala dalla scheda del contratto'); return; }
+    var cId = imp.slice(2), cc = (_invDati.contratti || []).filter(function (x) { return x.id === cId; })[0];
+    if (!confirm('Imputare questo pagamento al contratto ' + (cc ? (cc.numero || '—') + '/' + cc.anno + ' di ' + cc.cliente_nome : '') + '?\n\nEsce dagli investimenti e diventa un costo della vendita al cliente.')) return;
+    var rc = await sb.from('foglio_giornale_movimenti').update({ fv_contratto_id: cId, investimento_impianto_id: null, nota_imputazione: voce || null }).eq('id', movId);
+    if (rc.error) { toast('Errore: ' + rc.error.message); return; }
+    if (typeof _auditLog === 'function') _auditLog('investimenti', 'foglio_giornale_movimenti', 'spesa ' + movId + ' imputata al contratto ' + cId + (voce ? ' — ' + voce : ''));
+    toast('✓ Pagamento imputato al contratto: lo trovi nel mastrino fornitori del contratto');
+    caricaInvestimenti();
+    return;
+  }
   if (!forn) { toast('Scegli il fornitore (o Generico se non è in elenco)'); return; }
   var updI = { investimento_impianto_id: imp, nota_imputazione: voce || null };
   if (fattId) updI.investimento_fattura = fattId;
