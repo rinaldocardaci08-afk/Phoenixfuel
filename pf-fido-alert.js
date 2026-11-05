@@ -1,5 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // pf-fido-alert.js — AVVISO FUORI FIDO FORNITORE
+// v20261105a — UNA VOLTA AL GIORNO (Rinaldo, 05/11): l'avviso di un fornitore fuori fido si vede
+//               una sola volta per giorno di calendario; ricompare lo stesso giorno SOLO se si salva
+//               un ordine che lo manda ancora piu' fuori fido (e poi di nuovo una volta sola).
+//               Corretti i doppioni: il controllo ogni 30 minuti e il salvataggio ordine rimettevano
+//               in coda il fornitore gia' a video; se la lettura non si salvava in tabella l'avviso
+//               tornava ogni mezz'ora. Ora la lettura si controlla, ha un ripiego, e c'e' una copia
+//               anche nel browser.
 // v20260922b — il pulsante "Apri estratto conto" cambia davvero sezione (setSection)
 //               e poi apre la scheda del fornitore
 // v20260922a — 22/09/2026
@@ -23,10 +30,24 @@
 // visto_il, sforamento).
 // ═══════════════════════════════════════════════════════════════════════════
 
-var _FIDO_ALERT_ORE = 12;          // ogni quante ore ripresentare l'avviso
 var _fidoAlertInCorso = false;     // evita sovrapposizioni
 var _fidoAlertCoda = [];           // fornitori da mostrare uno dopo l'altro
 var _fidoAlertTimer = null;
+var _fidoAlertAttuale = null;      // id del fornitore a video
+
+// giorno di calendario locale (AAAA-MM-GG)
+function _fidoAlertGiorno(d) {
+  d = d ? new Date(d) : new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// copia locale della lettura (se la tabella non risponde, l'avviso non torna lo stesso giorno)
+function _fidoAlertLocKey(email, id) { return 'pfFidoVisto|' + email + '|' + id; }
+function _fidoAlertLocLeggi(email, id) {
+  try { var v = localStorage.getItem(_fidoAlertLocKey(email, id)); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+function _fidoAlertLocScrivi(email, id, rec) {
+  try { localStorage.setItem(_fidoAlertLocKey(email, id), JSON.stringify(rec)); } catch (e) {}
+}
 
 function _fidoAlertEuro(v) {
   return '€ ' + Number(v || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -78,18 +99,23 @@ async function pfFidoAlertControlla(fornitoreNome) {
       (res.data || []).forEach(function (r) { lett[r.fornitore_id] = r; });
     }
 
-    var ora = Date.now(), soglia = _FIDO_ALERT_ORE * 3600 * 1000;
+    var oggi = _fidoAlertGiorno();
     var daMostrare = fuori.filter(function (c) {
-      var l = lett[c.id];
-      if (!l) return true;                                        // mai visto
+      if (c.id === _fidoAlertAttuale) return false;                  // gia' a video
+      if (_fidoAlertCoda.some(function (q) { return q.id === c.id; })) return false;   // gia' in coda
+      // la lettura piu' recente tra tabella e browser
+      var l = lett[c.id], loc = _fidoAlertLocLeggi(email, c.id);
+      if (loc && (!l || new Date(loc.visto_il) > new Date(l.visto_il))) l = loc;
+      if (!l) return true;                                           // mai visto
       var sfor = Math.round((c.esp - c.fido) * 100) / 100;
-      if (Number(l.sforamento || 0) + 0.005 < sfor) return true;   // peggiorato: subito
-      return (ora - new Date(l.visto_il).getTime()) >= soglia;      // passate 12 ore
+      // salvando un ordine che lo manda PIU' fuori fido (di almeno 1 €): si rivede subito
+      if (fornitoreNome && Number(l.sforamento || 0) + 1 <= sfor) return true;
+      return _fidoAlertGiorno(l.visto_il) !== oggi;                  // altrimenti una volta al giorno
     });
     if (!daMostrare.length) return;
 
     daMostrare.sort(function (a, b) { return (b.esp - b.fido) - (a.esp - a.fido); });
-    _fidoAlertCoda = daMostrare;
+    _fidoAlertCoda = _fidoAlertCoda.concat(daMostrare);
     _fidoAlertMostraProssimo();
   } catch (e) {
     console.warn('[fido-alert] controllo non riuscito:', e && e.message);
@@ -102,6 +128,7 @@ async function _fidoAlertPulisci(cards, email) {
     var dentro = (cards || []).filter(function (c) { return c.id && c.esp <= c.fido + 0.005; })
                               .map(function (c) { return c.id; });
     if (!dentro.length) return;
+    dentro.forEach(function (id) { try { localStorage.removeItem(_fidoAlertLocKey(email, id)); } catch (e) {} });
     await sb.from('fido_alert_letture').delete().eq('utente_email', email).in('fornitore_id', dentro);
   } catch (e) { /* pulizia non critica */ }
 }
@@ -111,6 +138,7 @@ function _fidoAlertMostraProssimo() {
   var c = _fidoAlertCoda.shift();
   if (!c) return;
   _fidoAlertInCorso = true;
+  _fidoAlertAttuale = c.id;
   _fidoAlertPopup(c);
 }
 
@@ -167,7 +195,7 @@ function _fidoAlertPopup(c, giorniFuori) {
               ? ' — pagandola per intero si rientra e si libera ' + _fidoAlertEuro(Number(c.prossimaImporto) - sfor) + ' per nuovi ordini.'
               : ' — da sola non basta a rientrare.') + '</div>'
         : '')
-    + '<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">Questo avviso ricompare ogni ' + _FIDO_ALERT_ORE + ' ore finché l\'esposizione non torna sotto il fido.</div>'
+    + '<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">Questo avviso si vede una volta al giorno finché l\'esposizione non torna sotto il fido; lo stesso giorno ricompare solo se un nuovo ordine lo manda ancora più fuori.</div>'
 
     + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap">'
       + '<button onclick="fidoAlertHoCapito(\'' + c.id + '\',' + sfor + ')" style="padding:9px 14px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);cursor:pointer;font-size:12.5px">Ho capito</button>'
@@ -184,20 +212,29 @@ function _fidoAlertChiudi() {
   var ov = document.getElementById('fido-alert-ov');
   if (ov) ov.remove();
   _fidoAlertInCorso = false;
+  _fidoAlertAttuale = null;
   setTimeout(_fidoAlertMostraProssimo, 250);   // se ce n'e' un altro in coda
 }
 
-// "Ho capito": segna la lettura per QUESTO utente, così torna fra 12 ore.
+// "Ho capito": segna la lettura per QUESTO utente, così torna domani.
 async function fidoAlertHoCapito(fornitoreId, sforamento) {
   var email = _fidoAlertEmail();
   if (email && fornitoreId) {
+    var rec = { utente_email: email, fornitore_id: fornitoreId, visto_il: new Date().toISOString(), sforamento: Number(sforamento || 0) };
+    _fidoAlertLocScrivi(email, fornitoreId, rec);                    // copia nel browser, sempre
     try {
-      await sb.from('fido_alert_letture').upsert({
-        utente_email: email, fornitore_id: fornitoreId,
-        visto_il: new Date().toISOString(), sforamento: Number(sforamento || 0)
-      }, { onConflict: 'utente_email,fornitore_id' });
+      var r = await sb.from('fido_alert_letture').upsert(rec, { onConflict: 'utente_email,fornitore_id' });
+      if (r && r.error) {
+        // ripiego se manca il vincolo unico: si cancella la vecchia lettura e si scrive la nuova
+        console.warn('[fido-alert] upsert non riuscito, ripiego:', r.error.message);
+        await sb.from('fido_alert_letture').delete().eq('utente_email', email).eq('fornitore_id', fornitoreId);
+        var r2 = await sb.from('fido_alert_letture').insert([rec]);
+        if (r2 && r2.error) console.warn('[fido-alert] lettura non salvata:', r2.error.message);
+      }
     } catch (e) { console.warn('[fido-alert] lettura non salvata:', e && e.message); }
   }
+  // se lo stesso fornitore era finito in coda di nuovo, si toglie
+  _fidoAlertCoda = _fidoAlertCoda.filter(function (q) { return q.id !== fornitoreId; });
   _fidoAlertChiudi();
 }
 
@@ -234,7 +271,8 @@ async function fidoAlertRegistraBonifico(fornitoreId, sforamento) {
   if (typeof toast === 'function') toast('Registra l\'uscita da Finanze → Foglio giornale');
 }
 
-// ── Avvio: al caricamento del programma e poi ogni 12 ore ──────────────────
+// ── Avvio: al caricamento del programma e poi un controllo ogni 30 minuti ───
+// (il controllo mostra solo cio' che non e' gia' stato visto oggi)
 (function _fidoAlertBootstrap() {
   var tentativi = 0;
   var attendi = setInterval(function () {
