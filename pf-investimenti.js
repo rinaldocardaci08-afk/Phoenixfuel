@@ -1,3 +1,5 @@
+// v20261105b — MASTRINO: pagamenti sempre in ROSSO e incassi sempre in BLU (impianti nostri e venduti);
+//   fatture e pattuito in nero, residui da pagare/incassare in arancio per non confonderli coi pagamenti.
 // v20261105a — SPESE DA IMPUTARE: nel menu "imputa a…" ci sono anche gli impianti venduti ai clienti (contratti):
 //   il pagamento prende fv_contratto_id, esce dagli investimenti e va nel mastrino del contratto.
 // v20261030a — TEMPISTICHE: fascia degli anni, mesi piu' grandi e proporzionali ai giorni, mese corrente
@@ -1301,7 +1303,7 @@ function pfMastTab(btn, chiave, k) {
 function _pfMastrino(o) {
   var E = _invEsc, EU = _invEuro, D = _invData;
   var forn = o.verso === 'forn';
-  var colMov = forn ? '#185FA5' : '#27500A';
+  var colMov = forn ? '#A32D2D' : '#185FA5';   // v20261105b: pagamenti sempre rossi, incassi sempre blu
   var pattIva = Math.round(o.pattImp * (1 + o.aliq / 100) * 100) / 100;
   var ff = o.fatture || [], movs = (o.movs || []).slice().sort(function (a, b) { return String(a.data).localeCompare(String(b.data)); });
   var idx = {}; ff.forEach(function (f) { idx[f.id] = f; f.mov = []; f.pagato = 0; });
@@ -1343,9 +1345,9 @@ function _pfMastrino(o) {
   var pc = function (x) { return pattIva > 0 ? Math.round(x / pattIva * 100) : 0; };
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
     + k(L.patt, EU(pattIva), EU(o.pattImp) + ' + IVA ' + o.aliq + '%')
-    + k('Fatturato', EU(fattTot), plur(ff.length, 'fattur', 'a', 'e') + ' · ' + pc(fattTot) + '%', '#A32D2D')
+    + k('Fatturato', EU(fattTot), plur(ff.length, 'fattur', 'a', 'e') + ' · ' + pc(fattTot) + '%')
     + k(L.mov, EU(movTot), plur(movs.length, L.movS, 'o', 'i') + ' · ' + pc(movTot) + '%', colMov)
-    + k(L.aperte, EU(fattAperte), 'fatture non ancora saldate', fattAperte > 0.5 ? '#A32D2D' : '#27500A')
+    + k(L.aperte, EU(fattAperte), 'fatture non ancora saldate', fattAperte > 0.5 ? '#BA7517' : '#27500A')
     + k('Saldo', EU(saldo), L.patt.toLowerCase() + ' − ' + L.mov.toLowerCase(), saldo < -0.5 ? '#A32D2D' : '#27500A')
     + '</div>';
   var barra = function (lab, val, col, resto) {
@@ -1354,7 +1356,7 @@ function _pfMastrino(o) {
       + '<span><b style="font-family:var(--font-mono);color:var(--text)">' + EU(val) + '</b> · ' + p.toFixed(0) + '% · ' + resto + ' ' + EU(Math.max(0, pattIva - val)) + '</span></div>'
       + '<div style="height:12px;border-radius:6px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden;margin-top:2px"><div style="width:' + p.toFixed(1) + '%;height:100%;background:' + col + '"></div></div>';
   };
-  h += barra('Fatturato su ' + L.patt.toLowerCase(), fattTot, '#E8B4B4', 'da fatturare')
+  h += barra('Fatturato su ' + L.patt.toLowerCase(), fattTot, '#C9CDD2', 'da fatturare')
     + barra(L.mov + ' su ' + L.patt.toLowerCase(), movTot, colMov, forn ? 'da pagare' : 'da incassare');
 
   // linguette
@@ -1382,15 +1384,15 @@ function _pfMastrino(o) {
   ff.forEach(function (f) {
     var stato = f.pagato <= 0.005 ? pill(L.no, '#FCEBEB', '#791F1F') : (f.residuo <= 0.5 ? pill(L.ok, '#EAF3DE', '#27500A') : pill('acconto', '#FAEEDA', '#854F0B'));
     var dett = f.mov.map(function (m) { return etich[m.id] + ' ' + D(m.data) + ' <b style="font-family:var(--font-mono);color:' + colMov + '">' + EU(m.importo) + '</b>'; }).join(' · ');
-    if (f.residuo > 0.5 && f.pagato > 0) dett += ' · manca <b style="font-family:var(--font-mono);color:#A32D2D">' + EU(f.residuo) + '</b>';
+    if (f.residuo > 0.5 && f.pagato > 0) dett += ' · manca <b style="font-family:var(--font-mono);color:#BA7517">' + EU(f.residuo) + '</b>';
     if (f.residuo < -0.5) dett += ' · <b style="color:#854F0B">' + EU(-f.residuo) + ' in più</b>';
     t += '<tr><td style="' + td + ';white-space:nowrap"><strong>n. ' + E(f.num || '?') + '</strong>' + (f.data ? ' del ' + D(f.data) : '')
       + rif(EU(f.imponibile) + ' + IVA ' + f.aliq + '%' + (f.nota ? ' · ' + E(f.nota) : ''))
       + (f.legacy ? rif('<span style="color:#854F0B">scritta sulla rata: ✏️ per completarla</span>') : '') + '</td>'
       + (o.rataLab ? '<td style="' + td + '">' + (o.rataLab(f) || '<span style="color:var(--text-muted)">—</span>') + '</td>' : '')
-      + '<td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(f.totale) + '</td>'
+      + '<td style="' + td + num + ';font-weight:700">' + EU(f.totale) + '</td>'
       + '<td style="' + td + num + ';color:' + colMov + ';font-weight:700">' + (f.pagato ? EU(f.pagato) : '') + '</td>'
-      + '<td style="' + td + num + ';font-weight:700;color:' + (f.residuo > 0.5 ? '#A32D2D' : '#27500A') + '">' + EU(Math.max(0, f.residuo)) + '</td>'
+      + '<td style="' + td + num + ';font-weight:700;color:' + (f.residuo > 0.5 ? '#BA7517' : '#27500A') + '">' + EU(Math.max(0, f.residuo)) + '</td>'
       + '<td style="' + td + '">' + stato + (dett ? '<div style="font-size:10.5px;color:var(--text-muted);margin-top:3px;line-height:1.5">' + dett + '</div>' : '') + '</td>'
       + '<td style="' + td + ';white-space:nowrap;text-align:right">' + (o.azioniFatt ? o.azioniFatt(f) : '') + '</td></tr>';
   });
@@ -1401,9 +1403,9 @@ function _pfMastrino(o) {
   });
   if (ff.length) {
     t += '<tr style="font-weight:700;background:var(--bg)"><td style="padding:8px 7px">Totale fatture</td>' + (o.rataLab ? '<td></td>' : '')
-      + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + EU(fattTot) + '</td>'
+      + '<td style="padding:8px 7px' + num + '">' + EU(fattTot) + '</td>'
       + '<td style="padding:8px 7px' + num + ';color:' + colMov + '">' + EU(movTot - senza.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0)) + '</td>'
-      + '<td style="padding:8px 7px' + num + ';color:' + (fattAperte > 0.5 ? '#A32D2D' : '#27500A') + '">' + EU(fattAperte) + '</td><td></td><td></td></tr>';
+      + '<td style="padding:8px 7px' + num + ';color:' + (fattAperte > 0.5 ? '#BA7517' : '#27500A') + '">' + EU(fattAperte) + '</td><td></td><td></td></tr>';
   }
   t += '</table></div>';
   h += pane('fatt', t);
@@ -1450,7 +1452,7 @@ function _pfMastrino(o) {
     + '<th style="text-align:right;' + th + '">Dare<br>' + (forn ? 'pagamenti' : 'incassi') + '</th><th style="text-align:right;' + th + '">Avere<br>' + L.patt.toLowerCase() + '</th>'
     + '<th style="text-align:right;' + th + '">Saldo</th></tr>'
     + '<tr style="background:var(--bg)"><td style="' + td + '">' + (o.dataPatto ? D(o.dataPatto) : '—') + '</td><td style="' + td + '"><strong>' + (forn ? 'Contratto / costo pattuito' : 'Totale contratto') + '</strong>' + rif(EU(o.pattImp) + ' + IVA ' + o.aliq + '%') + '</td>'
-    + '<td style="' + td + '"></td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(pattIva) + '</td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(run) + '</td></tr>';
+    + '<td style="' + td + '"></td><td style="' + td + num + ';font-weight:700">' + EU(pattIva) + '</td><td style="' + td + num + ';color:#A32D2D;font-weight:700">' + EU(run) + '</td></tr>';
   righe.forEach(function (x) {
     if (x.tipo === 'f') {
       t += '<tr style="color:#9A988F;font-style:italic"><td style="' + td + ';white-space:nowrap">' + (x.f.data ? D(x.f.data) : '—') + '</td><td style="' + td + '">🧾 Fattura n. ' + E(x.f.num || '?') + ' · ' + EU(x.f.totale) + '</td><td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td></tr>';
@@ -1462,7 +1464,7 @@ function _pfMastrino(o) {
     }
   });
   t += '<tr style="font-weight:700;background:var(--bg)"><td></td><td style="padding:8px 7px">Totali</td><td style="padding:8px 7px' + num + ';color:' + colMov + '">' + EU(movTot) + '</td>'
-    + '<td style="padding:8px 7px' + num + ';color:#A32D2D">' + EU(pattIva) + '</td><td style="padding:8px 7px' + num + ';color:' + (run < -0.5 ? '#A32D2D' : '#27500A') + '">' + EU(run) + '</td></tr></table></div>'
+    + '<td style="padding:8px 7px' + num + '">' + EU(pattIva) + '</td><td style="padding:8px 7px' + num + ';color:' + (run < -0.5 ? '#A32D2D' : '#27500A') + '">' + EU(run) + '</td></tr></table></div>'
     + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:6px">Avere = ' + (forn ? 'contratto firmato' : 'contratto col cliente') + ', dare = ' + (forn ? 'pagamenti' : 'incassi') + ', saldo progressivo. Le fatture in grigio sono solo riferimento.</div>';
   h += pane('saldo', t);
   (o.extraTabs || []).forEach(function (x) { h += pane(x.k, x.html); });

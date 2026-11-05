@@ -1,3 +1,4 @@
+// v20261105b — incassi dei clienti sempre in BLU (riquadri Incassato e barre incassi), come nei mastrini.
 // v20261105a — CONTRATTI: contano anche i pagamenti con causale investimenti imputati al contratto da
 //   Investimenti → Spese (es. il pagamento a NovaPower per DS).
 // v20261029l — RIEPILOGO come prima linguetta della scheda contratto (impianti venduti): totale, incassi,
@@ -1419,7 +1420,7 @@ function _fvRiepilogoContratto(c, totIvato) {
   };
   var h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + kpi('Totale contratto', _fvEuro(totIvato), '', 'IVA inclusa')
-    + kpi('Incassato', _fvEuro(inc), '#27500A')
+    + kpi('Incassato', _fvEuro(inc), '#185FA5')
     + kpi('Da incassare', _fvEuro(totIvato - inc), totIvato - inc > 0.5 ? '#A32D2D' : '#27500A') + '</div>';
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + kpi('Potenza', d.kwp ? _fvNumDoc(d.kwp, 2) + ' kWp' : '—')
@@ -1629,7 +1630,7 @@ function _fvContabilitaContratto(c, imponibile, iva) {
         }).join(' · ') + '</div>';
   }
   // 3) vendita e incassi
-  h += barra('Vendita impianto e incassi', totInc, totIvato, '#639922', 'incassato', 'residuo');
+  h += barra('Vendita impianto e incassi', totInc, totIvato, '#185FA5', 'incassato', 'residuo');
 
   // numeri del margine
   var cella = function (lab, val, col, sub) {
@@ -3229,7 +3230,7 @@ async function fvCaricaImpiantiVenduti() {
   h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + kpi('Impianti', String(lista.length))
     + kpi('Venduto (IVA inclusa)', _fvEuro(tot))
-    + kpi('Incassato', _fvEuro(inc), '#27500A')
+    + kpi('Incassato', _fvEuro(inc), '#185FA5')
     + kpi('Da incassare', _fvEuro(tot - inc), tot - inc > 0.5 ? '#A32D2D' : '#27500A')
     + '</div>';
   if (!lista.length) { box.innerHTML = h + _fvVuoto('Nessun contratto. Si genera da un\'offerta accettata, in 📄 Offerte.'); return; }
@@ -3325,7 +3326,7 @@ function _fvBarraIncassi(c, compatta) {
   var ric = inc.reduce(function (s, m) { return s + Number(m.importo || 0); }, 0);
   var pct = totale > 0 ? Math.min(100, ric / totale * 100) : 0;
   var residuo = totale - ric;
-  var col = residuo <= 0.5 ? '#27500A' : '#BA7517';
+  var col = '#185FA5';   // incassi sempre in blu
   var h = '<div style="height:' + (compatta ? '10' : '16') + 'px;border-radius:8px;background:var(--bg);border:0.5px solid var(--border);overflow:hidden">'
     + '<div style="width:' + pct.toFixed(1) + '%;height:100%;background:' + col + '"></div></div>';
   if (compatta) {
