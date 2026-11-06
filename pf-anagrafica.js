@@ -1,3 +1,6 @@
+// v20261106a — CONFRONTO ANNO SU ANNO: il dettaglio (stazione) mancava da circa aprile in poi perche' letture,
+//   prezzi e costi erano letti in una sola richiesta (max 1000 righe). Ora a pagine, dal 31/12 dell'anno prima, con lo
+//   stesso calcolo del Riepilogo mensile (prezzo netto IVA e litri a prezzo diverso).
 // v20260921b — il numero fattura in Consegne e' CLICCABILE: apre "Modifica numero fattura" (numero + data)
 //   per QUELLA consegna. Se la fattura vecchia aveva altre consegne, questa viene spostata su una fattura
 //   con il numero nuovo (creata o esistente) e i totali di entrambe vengono ricalcolati. Valgono le stesse
@@ -1560,45 +1563,64 @@ let _chartConfLitri=null, _chartConfFatt=null, _chartConfMarg=null;
 let _ultimoConfronto = null;
 
 async function _caricaDatiAnno(anno) {
+  // v20261106a — il dettaglio del confronto si perdeva: letture, prezzi e costi della stazione
+  // erano letti con UNA sola richiesta, e il database ne restituisce al massimo 1000 righe
+  // (circa i primi 3-4 mesi di letture pompe). Ora tutto e' letto a pagine, si parte dalla
+  // lettura del 31/12 dell'anno prima (cosi' conta anche il 1° gennaio) e il calcolo e'
+  // IDENTICO a quello della tabella "Riepilogo vendite totali per mese": prezzo al netto
+  // di IVA e litri a prezzo diverso (cambio prezzo in giornata).
   const da = anno + '-01-01', a = anno + '-12-31';
-  // Ingrosso
-  let allIng = [], from = 0;
-  while (true) {
-    const { data: batch } = await sb.from('ordini').select('data,litri,costo_litro,trasporto_litro,margine,iva').gte('data', da).lte('data', a).neq('stato','annullato').eq('tipo_ordine','cliente').range(from, from + 999);
-    if (!batch || !batch.length) break;
-    allIng = allIng.concat(batch);
-    if (batch.length < 1000) break;
-    from += 1000;
+  const daPrev = (anno - 1) + '-12-31';
+  async function _pag(table, cols, dal, al, mods) {
+    let acc = [], from = 0;
+    while (true) {
+      let q = sb.from(table).select(cols).gte('data', dal).lte('data', al).range(from, from + 999);
+      if (mods) q = mods(q);
+      const { data: batch, error } = await q;
+      if (error) { console.warn('[confronto] ' + table + ':', error.message); break; }
+      if (!batch || !batch.length) break;
+      acc = acc.concat(batch);
+      if (batch.length < 1000) break;
+      from += 1000;
+    }
+    return acc;
   }
-  // Dettaglio
-  const { data: pompe } = await sb.from('stazione_pompe').select('id,prodotto').eq('attiva',true);
-  const { data: letture } = await sb.from('stazione_letture').select('data,pompa_id,lettura').gte('data', da).lte('data', a).order('data');
-  const { data: prezziP } = await sb.from('stazione_prezzi').select('data,prodotto,prezzo_litro').gte('data', da).lte('data', a);
-  const { data: costiP } = await sb.from('stazione_costi').select('data,prodotto,costo_litro').gte('data', da).lte('data', a);
+  const [allIng, pompeRes, letture, prezziP, costiP] = await Promise.all([
+    _pag('ordini', 'data,litri,costo_litro,trasporto_litro,margine,iva', da, a,
+      q => q.neq('stato', 'annullato').eq('tipo_ordine', 'cliente').order('data')),
+    sb.from('stazione_pompe').select('id,prodotto').eq('attiva', true),
+    _pag('stazione_letture', 'data,pompa_id,lettura,litri_prezzo_diverso,prezzo_diverso', daPrev, a, q => q.order('data')),
+    _pag('stazione_prezzi', 'data,prodotto,prezzo_litro', da, a, q => q.order('data')),
+    _pag('stazione_costi', 'data,prodotto,costo_litro', da, a, q => q.order('data'))
+  ]);
+  const pompe = pompeRes.data;
   const pompeMap = {}; (pompe||[]).forEach(p => { pompeMap[p.id] = p; });
   const prezziMap = {}; (prezziP||[]).forEach(p => { prezziMap[p.data+'_'+p.prodotto] = Number(p.prezzo_litro); });
   const costiMap = {}; (costiP||[]).forEach(c => { costiMap[c.data+'_'+c.prodotto] = Number(c.costo_litro); });
   const lettPerData = {}; (letture||[]).forEach(l => { if (!lettPerData[l.data]) lettPerData[l.data] = []; lettPerData[l.data].push(l); });
   const dateOrd = Object.keys(lettPerData).sort();
   const dettPerGiorno = {};
-  dateOrd.forEach(data => {
-    let litriG=0, incassoG=0, margineG=0;
+  for (let di = 1; di < dateOrd.length; di++) {
+    const data = dateOrd[di], prevD = dateOrd[di - 1];
+    if (data < da) continue;
+    let litriG = 0, incassoG = 0, costoG = 0;
     lettPerData[data].forEach(l => {
       const pompa = pompeMap[l.pompa_id]; if (!pompa) return;
-      const prev = dateOrd.filter(d => d < data);
-      const prevD = prev.length ? prev[prev.length-1] : null;
-      let precL = null;
-      if (prevD && lettPerData[prevD]) { const pl = lettPerData[prevD].find(x => x.pompa_id === l.pompa_id); if (pl) precL = Number(pl.lettura); }
-      if (precL === null) return;
-      const lv = Number(l.lettura) - precL; if (lv <= 0) return;
-      const prezzoNetto = (prezziMap[data+'_'+pompa.prodotto] || 0) / 1.22;
-      const costo = costiMap[data+'_'+pompa.prodotto] || 0;
+      const pl = (lettPerData[prevD] || []).find(x => x.pompa_id === l.pompa_id);
+      if (!pl) return;
+      const lv = Number(l.lettura) - Number(pl.lettura); if (lv <= 0) return;
+      const pr = (prezziMap[data + '_' + pompa.prodotto] || 0) / 1.22;
+      const co = costiMap[data + '_' + pompa.prodotto] || 0;
+      const litriPD = Number(l.litri_prezzo_diverso || 0);
+      const prezzoPD = Number(l.prezzo_diverso || 0) / 1.22;
+      const hasCambio = litriPD > 0 && prezzoPD > 0;
+      const litriStd = hasCambio ? Math.max(0, lv - litriPD) : lv;
       litriG += lv;
-      incassoG += lv * (prezziMap[data+'_'+pompa.prodotto] || 0);
-      margineG += lv * (prezzoNetto - costo);
+      incassoG += (litriStd * pr) + (hasCambio ? litriPD * prezzoPD : 0);
+      costoG += lv * co;
     });
-    dettPerGiorno[data] = { litri: litriG, incasso: incassoG, margine: margineG };
-  });
+    dettPerGiorno[data] = { litri: litriG, incasso: incassoG, margine: incassoG - costoG };
+  }
   // Aggrega per mese
   const mesi = [];
   for (let m = 0; m < 12; m++) {
